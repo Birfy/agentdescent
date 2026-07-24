@@ -1,9 +1,10 @@
 name: docs
 
-# Builds the MkDocs site on every push (validates docs) and deploys it to
-# GitHub Pages. To publish: repo Settings -> Pages -> Source: "GitHub Actions".
-# Note: GitHub Pages on a *private* repo requires a paid plan; the build job
-# still runs and validates the docs regardless.
+# On every push: build + strict-validate the MkDocs site (always green).
+# Deploy to GitHub Pages runs only on a manual trigger, so pushes never fail
+# just because Pages is off. To publish: enable Pages (Settings -> Pages ->
+# Source: "GitHub Actions"; needs a public repo or a plan that supports Pages on
+# private repos), then run this workflow from the Actions tab ("Run workflow").
 
 on:
   push:
@@ -35,6 +36,9 @@ jobs:
 
   deploy:
     needs: build
+    # only deploy on a manual run, so normal pushes stay green even when Pages
+    # is not enabled on the repo.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
