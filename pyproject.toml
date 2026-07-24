@@ -20,6 +20,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
+docs = ["mkdocs-material>=9.5"]
 
 [project.urls]
 Homepage = "https://github.com/Birfy/concordia"

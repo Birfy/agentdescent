@@ -17,6 +17,28 @@ versioned artifact library, targeting **O(N / T_iter)** improvement throughput.
 > add, diffs do not.** Aggregation is therefore not averaging but
 > **conflict resolution + statistical acceptance + transactional commit**.
 
+## 📖 Documentation
+
+Full docs live in [`docs/`](docs/) and render as a website via MkDocs Material:
+
+| Page | What's in it |
+|---|---|
+| [Home](docs/index.md) | Overview and 30-second tour |
+| [Architecture](docs/architecture.md) | Components, data-flow diagram, the two runtimes, concurrency model |
+| [Concepts](docs/concepts.md) | The training↔RSI analogy, staleness, the aggregator, the three long tails, governance |
+| [Usage & extending](docs/usage.md) | Running the demos, config reference, **plugging in your own `Evolvable` domain** |
+| [Design spec](docs/concordia_design.md) | The original research design (v0.2) |
+
+```bash
+pip install -e ".[docs]"
+mkdocs serve      # live preview at http://127.0.0.1:8000
+mkdocs build      # static HTML into ./site
+```
+
+A GitHub Actions workflow ([`.github/workflows/docs.yml`](.github/workflows/docs.yml))
+builds and deploys the site to GitHub Pages — enable it under *Settings → Pages
+→ Source: GitHub Actions*.
+
 ## The central analogy
 
 | Model training | Concordia (parallel RSI) |
