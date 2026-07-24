@@ -87,35 +87,50 @@ agent = claude_agent(model="claude-haiku-4-5")
 
 ---
 
-## Run the example (no API key needed)
+## Run the example — a real dataset, driven by real Claude
+
+[`examples/skill_evolution.py`](https://github.com/Birfy/concordia/blob/main/examples/skill_evolution.py)
+evolves a skill on a **BIG-Bench-Hard** task using a **Claude** agent to both
+solve problems and propose lessons. BBH tasks are deliberately hard for LLMs and
+scored by exact match / graded overlap, so there is genuine headroom for a
+learned skill to raise the score.
 
 ```bash
-python -m examples.skill_evolution           # deterministic mock agent
-python -m examples.skill_evolution --claude   # real Claude agent (needs ANTHROPIC_API_KEY)
+# inspect the dataset + a cost estimate, no API calls:
+python -m examples.skill_evolution --dry-run
+
+# the real thing (needs ANTHROPIC_API_KEY or `ant auth login`):
+python -m examples.skill_evolution
+python -m examples.skill_evolution --task logical_deduction_seven_objects --rounds 5
+python -m examples.skill_evolution --task word_sorting --model claude-haiku-4-5
 ```
 
-The example evolves a text-normalization skill from an empty playbook. Sample
-run (mock agent):
+`--dry-run` output:
 
 ```
-round   0  reward=0.773  rules=1  +1/-0
-round   1  reward=1.000  rules=4  +1/-0
-...
-=== evolved playbook ===
-# Skill Playbook
-- Collapse runs of whitespace into a single space.
-- Remove all punctuation characters.
-- Strip leading and trailing whitespace from the text.
-- Convert the text to lowercase.
-
-held-out reward: 0.773 -> 1.000
-rules learned: 4
+Dataset : BIG-Bench-Hard / word_sorting
+Loaded  : 250 examples; using 22 (12 train / 10 held-out)
+Scoring : graded token overlap
+Plan    : model=claude-opus-4-8, rounds=4, workers=2
+Budget  : up to ~232 Claude calls (cached repeats are free; use --model claude-haiku-4-5 to cut cost)
 ```
 
-Two things worth noting: parallel workers propose *different* missing rules, and
-the aggregator **fuses** them into one playbook (merge-over-fork); and the mock
-agent's occasional harmful proposal ("convert to UPPERCASE") is **rejected** on
-held-out reward — it never enters the playbook.
+Each round, parallel workers run *train* problems through the current playbook
+via Claude and, on a failure, ask Claude to propose one lesson. The aggregator
+dedupes, fuses complementary lessons, and **commits a lesson only if it improves
+held-out score** — so unhelpful lessons are rejected automatically, and good
+lessons from parallel workers merge into one playbook.
+
+!!! warning "Cost"
+    A real-LLM run makes many calls (rollouts + held-out scoring + the
+    aggregator's cheap-eval subsets). The defaults are small on purpose; the
+    script prints an estimate and asks before spending. Use
+    `--model claude-haiku-4-5` for cheap runs. Identical `(playbook, task)`
+    evaluations are memoized within a run.
+
+The self-contained, no-API mechanics (any-agent protocol, merge-over-fork,
+harmful-rule rejection) are exercised deterministically in the test suite
+([`tests/test_skillevo.py`](https://github.com/Birfy/concordia/blob/main/tests/test_skillevo.py)).
 
 ---
 

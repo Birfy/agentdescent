@@ -60,8 +60,10 @@ print(result.final_reward)  # held-out reward
 
 Parallel workers propose rules; the aggregator dedupes, fuses complementary
 ones, and **commits a rule only if it improves held-out reward** — bad rules are
-rejected automatically. Runs out of the box with a deterministic mock agent (no
-API key): `python -m examples.skill_evolution`. Full guide:
+rejected automatically. The example
+([`examples/skill_evolution.py`](examples/skill_evolution.py)) evolves a skill
+on a real **BIG-Bench-Hard** task with a real Claude agent; `--dry-run` shows the
+dataset and a cost estimate with no API calls. Full guide:
 [docs/skill-evolution.md](docs/skill-evolution.md).
 
 ## The central analogy
@@ -89,8 +91,8 @@ python -m examples.run_demo
 # Async stage orchestration — Full/Guarded/Reflective policies + async_ratio sweep
 python -m examples.run_async
 
-# Skill self-evolution driven by any agent (mock agent — no API key)
-python -m examples.skill_evolution
+# Skill self-evolution on a real dataset with a real LLM (--dry-run: no API key)
+python -m examples.skill_evolution --dry-run
 
 # RQ2 — staleness tolerance sweep (alpha in {0,1,5,inf})
 python -m examples.rq2_staleness
