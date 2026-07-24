@@ -39,6 +39,31 @@ A GitHub Actions workflow ([`.github/workflows/docs.yml`](.github/workflows/docs
 builds and deploys the site to GitHub Pages — enable it under *Settings → Pages
 → Source: GitHub Actions*.
 
+## Evolve a skill with any agent
+
+The convenient front door — [`concordia.skillevo`](concordia/skillevo.py). Bring
+any agent (an LLM, a tool-using loop, a rule engine — anything implementing a
+two-method protocol) and evolve a real skill playbook in a few lines:
+
+```python
+from concordia.skillevo import evolve_skill, claude_agent
+
+result = evolve_skill(
+    agent=claude_agent(model="claude-opus-4-8"),  # or your own Agent
+    tasks=tasks,                                   # [Task(id, prompt, meta), ...]
+    reward=reward,                                 # (task, output) -> [0, 1]
+    rounds=15, n_workers=4,
+)
+print(result.playbook)      # the evolved skill text
+print(result.final_reward)  # held-out reward
+```
+
+Parallel workers propose rules; the aggregator dedupes, fuses complementary
+ones, and **commits a rule only if it improves held-out reward** — bad rules are
+rejected automatically. Runs out of the box with a deterministic mock agent (no
+API key): `python -m examples.skill_evolution`. Full guide:
+[docs/skill-evolution.md](docs/skill-evolution.md).
+
 ## The central analogy
 
 | Model training | Concordia (parallel RSI) |
@@ -63,6 +88,9 @@ python -m examples.run_demo
 
 # Async stage orchestration — Full/Guarded/Reflective policies + async_ratio sweep
 python -m examples.run_async
+
+# Skill self-evolution driven by any agent (mock agent — no API key)
+python -m examples.skill_evolution
 
 # RQ2 — staleness tolerance sweep (alpha in {0,1,5,inf})
 python -m examples.rq2_staleness
@@ -95,6 +123,7 @@ Every module cites the design section it implements.
 | Layered governance by blast radius (L0/L1/L2) | [`governance.py`](concordia/governance.py) | 6 |
 | Worker: rollout + propose | [`worker.py`](concordia/worker.py) | 3.1 |
 | Orchestrator (sync DP) + fork baseline | [`orchestrator.py`](concordia/orchestrator.py) | 3.1, RQ1 |
+| **Skill evolution API — `evolve_skill`, any-agent protocol** | [`skillevo.py`](concordia/skillevo.py) | 3.2 |
 
 ## How aggregation works (the `Aggregator` pipeline)
 

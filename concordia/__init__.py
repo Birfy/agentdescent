@@ -34,6 +34,17 @@ from .staleness import (
 )
 from .worker import Worker
 from .orchestrator import Concordia, RoundStat, run_fork_baseline
+from .skillevo import (
+    Agent,
+    LLMAgent,
+    Task,
+    RuleSkill,
+    SkillEvoResult,
+    RoundInfo,
+    evolve_skill,
+    claude_agent,
+    rule_id,
+)
 from .async_runtime import AsyncConcordia, AsyncConfig, AsyncStats
 from .parallel import (
     ParallelMode,
@@ -45,7 +56,7 @@ from .parallel import (
     shard_round_robin,
 )
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     "Contract",
@@ -94,4 +105,13 @@ __all__ = [
     "assign_sections",
     "section_of",
     "shard_round_robin",
+    "Agent",
+    "LLMAgent",
+    "Task",
+    "RuleSkill",
+    "SkillEvoResult",
+    "RoundInfo",
+    "evolve_skill",
+    "claude_agent",
+    "rule_id",
 ]

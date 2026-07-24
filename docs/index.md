@@ -41,6 +41,11 @@ The one place the analogy *must* break defines the whole system:
     How to install, run the sync/async demos, tune the knobs, and plug in your
     own `Evolvable` domain.
 
+-   :material-robot: **[Skill evolution (any agent)](skill-evolution.md)**
+
+    Evolve a real skill with any agent in a few lines — `evolve_skill(agent,
+    tasks, reward)`.
+
 -   :material-file-document: **[Design spec](concordia_design.md)**
 
     The original research design document (v0.2).
