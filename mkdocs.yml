@@ -35,8 +35,10 @@ nav:
   - Architecture: architecture.md
   - Concepts: concepts.md
   - Usage & extending: usage.md
+  - Evolving anything (the engine): evolution.md
   - Connecting agents & LLMs: agents.md
-  - Skill evolution (one application): skill-evolution.md
+  - "Example: skill evolution": skill-evolution.md
+  - "Example: harness evolution": harness-evolution.md
   - Efficiency experiments: efficiency.md
   - Design spec: concordia_design.md
 

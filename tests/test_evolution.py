@@ -1,18 +1,18 @@
 """Tests for agent-driven skill evolution.
 
 Uses tiny deterministic in-process agents (no LLM) to verify the convenient
-``evolve_skill`` API: any agent implementing the two-method protocol drives it,
+``evolve`` API: any agent implementing the two-method protocol drives it,
 good rules are learned, and harmful rules are rejected on held-out reward.
 """
 
 from difflib import SequenceMatcher
 from typing import Optional
 
-from concordia.skillevo import (
+from concordia.evolution import (
     Agent,
     LLMAgent,
     Task,
-    evolve_skill,
+    evolve,
     rule_id,
 )
 
@@ -59,16 +59,16 @@ class HarmfulAgent:
 
 
 def test_any_agent_drives_evolution_and_learns_rules():
-    result = evolve_skill(GoodAgent(), _tasks(), _reward, rounds=10, n_workers=3)
+    result = evolve(_tasks(), _reward, agent=GoodAgent(), rounds=10, n_workers=3)
     assert result.history[0].held_out_reward < result.final_reward
     assert result.final_reward > 0.95
-    assert len(result.rules) >= 2  # both useful rules were learned
+    assert len(result.state) >= 2  # both useful rules were learned
 
 
 def test_harmful_rules_are_rejected():
-    result = evolve_skill(HarmfulAgent(), _tasks(), _reward, rounds=8, n_workers=3)
+    result = evolve(_tasks(), _reward, agent=HarmfulAgent(), rounds=8, n_workers=3)
     # the only proposals hurt held-out reward, so none should be committed.
-    assert len(result.rules) == 0
+    assert len(result.state) == 0
     assert sum(r.rejected for r in result.history) > 0
 
 

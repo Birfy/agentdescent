@@ -41,10 +41,15 @@ The one place the analogy *must* break defines the whole system:
     How to install, run the sync/async demos, tune the knobs, and plug in your
     own `Evolvable` domain.
 
--   :material-robot: **[Skill evolution](skill-evolution.md)**
+-   :material-dna: **[Evolving anything](evolution.md)**
 
-    One application on the framework — evolve a skill with any agent; fully
-    customizable via a `SkillStrategy`.
+    The general engine — evolve *any* artifact (skill, harness, verifier) by
+    writing its `Strategy` + `run`/`reward`/`propose`.
+
+-   :material-robot: **[Example: skill](skill-evolution.md)** · **[harness](harness-evolution.md)**
+
+    A skill evolved on a real dataset with a real LLM, and a harness (L1)
+    evolved with plain functions.
 
 -   :material-connection: **[Connecting agents & LLMs](agents.md)**
 

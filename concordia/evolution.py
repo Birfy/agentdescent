@@ -1,0 +1,404 @@
+"""The general evolution engine -- evolve *any* artifact.
+
+This is the module. It is domain-agnostic: it knows nothing about "skills" or
+"harnesses". You describe **what evolves** and **the rules of evolution**, and it
+runs the parallel, merge-based loop (ledger + aggregator + staleness +
+governance) for you.
+
+You provide four things (all customizable, none built in):
+
+* a :class:`Strategy` -- how the artifact is represented, how it renders into a
+  prompt/config, and how a proposal becomes a :class:`~concordia.evolvable.Diff`;
+* ``run(rendered, task) -> output`` -- apply the current artifact to a task;
+* ``reward(task, output) -> [0, 1]`` -- score the output;
+* ``propose(rendered, task, output, reward) -> str | None`` -- on a failure,
+  propose one improvement.
+
+Then :func:`evolve` drives it. The same engine evolves a **skill** (artifact =
+a lesson playbook, run = an LLM using it) or a **harness / verifier** (artifact =
+routing/context config, higher ``blast_radius`` -> L1 governance) -- see
+``examples/skill_evolution.py`` and ``examples/harness_evolution.py``.
+
+An :class:`Agent` (an object bundling ``solve`` + ``propose``) is a convenience
+for the common case where the same actor both runs tasks and proposes changes;
+:func:`evolve` also accepts ``run`` / ``propose`` callables directly.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import re
+import threading
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, Optional, Protocol, Sequence, runtime_checkable
+
+from .agents import Completion, claude
+from .aggregator import Aggregator, AggregatorConfig
+from .evolvable import Contract, Diff, EvidenceCard
+from .governance import assert_mutable
+from .ledger import Ledger
+from .scheduler import AuditScheduler
+from .staleness import StalenessPolicy
+
+
+# ---------------------------------------------------------------------------
+# Task + actor
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Task:
+    """One unit of work the artifact is evaluated on."""
+
+    id: str
+    prompt: str
+    meta: Dict[str, Any] = field(default_factory=dict)
+
+
+Reward = Callable[["Task", str], float]        # (task, output) -> [0, 1]
+Run = Callable[[str, "Task"], str]             # (rendered_artifact, task) -> output
+Propose = Callable[[str, "Task", str, float], Optional[str]]  # -> a proposal or None
+
+
+@runtime_checkable
+class Agent(Protocol):
+    """Convenience actor: bundles running a task and proposing an improvement."""
+
+    def solve(self, rendered: str, task: Task) -> str: ...
+
+    def propose(self, rendered: str, task: Task, output: str, reward: float) -> Optional[str]: ...
+
+
+_SOLVE_TMPL = (
+    "You are executing an artifact defined below.\n\n{artifact}\n\n"
+    "Apply it to this input and output ONLY the result, nothing else.\n\nInput:\n{prompt}"
+)
+_PROPOSE_TMPL = (
+    "The artifact just failed a task (score {reward:.2f} out of 1.0).\n\n"
+    "Artifact so far:\n{artifact}\n\nTask input:\n{prompt}\n\n"
+    "It produced:\n{output}\n\n"
+    "Propose exactly ONE concise, general rule (a single imperative sentence) to "
+    "improve the artifact for this and similar cases. Output only the rule text, "
+    "or NONE if no rule would help."
+)
+
+
+@dataclass
+class LLMAgent:
+    """Adapt a ``Completion`` (from :mod:`concordia.agents`) into an :class:`Agent`."""
+
+    complete: Completion
+    solve_template: str = _SOLVE_TMPL
+    propose_template: str = _PROPOSE_TMPL
+
+    def solve(self, rendered: str, task: Task) -> str:
+        return self.complete(
+            self.solve_template.format(artifact=rendered, prompt=task.prompt)).strip()
+
+    def propose(self, rendered: str, task: Task, output: str, reward: float) -> Optional[str]:
+        rule = self.complete(self.propose_template.format(
+            artifact=rendered, prompt=task.prompt, output=output, reward=reward)).strip()
+        return None if (not rule or rule.upper().startswith("NONE")) else rule
+
+
+def claude_agent(model: str = "claude-opus-4-8", max_tokens: int = 1024) -> LLMAgent:
+    """Convenience: ``LLMAgent(claude(model))`` (provider code lives in :mod:`concordia.agents`)."""
+    return LLMAgent(claude(model=model, max_tokens=max_tokens))
+
+
+# ---------------------------------------------------------------------------
+# Strategy: what evolves and how a proposal becomes a change
+# ---------------------------------------------------------------------------
+
+
+def rule_id(text: str) -> str:
+    """Content-address a proposal so identical proposals dedupe automatically."""
+    return "r" + hashlib.sha1(text.strip().lower().encode()).hexdigest()[:10]
+
+
+@runtime_checkable
+class Strategy(Protocol):
+    """Defines *what evolves and how* -- the representation and the merge rule.
+
+    An artifact's state is a flat ``{key: value}`` dict (the diff op-space the
+    aggregator resolves conflicts and fusion over). A strategy decides the
+    initial state, how it renders, and how a proposal becomes a :class:`Diff`."""
+
+    def initial(self) -> Dict[str, str]: ...
+
+    def render(self, state: Dict[str, str]) -> str: ...
+
+    def to_diff(self, state: Dict[str, str], proposal: str, author: str,
+                base_version: int, target: str) -> Optional[Diff]: ...
+
+
+@dataclass
+class AppendRules:
+    """Accumulate a deduped list of rules/lessons (append-only, content-addressed).
+
+    Identical proposals from different workers collapse to one; complementary
+    rules are *fused* by the aggregator."""
+
+    title: str = "# Playbook"
+
+    def initial(self) -> Dict[str, str]:
+        return {}
+
+    def render(self, state: Dict[str, str]) -> str:
+        if not state:
+            return f"{self.title}\n(empty)"
+        return "\n".join([self.title] + [f"- {state[k]}" for k in sorted(state)])
+
+    def to_diff(self, state, proposal, author, base_version, target) -> Optional[Diff]:
+        rid = rule_id(proposal)
+        if rid in state:
+            return None
+        return Diff(diff_id=f"{author}:{rid}:{base_version}", target=target,
+                    ops={rid: proposal}, author=author)
+
+
+@dataclass
+class KeyedRules:
+    """One entry per *category*: competing proposals contradict and are resolved.
+
+    Proposals look like ``"category: text"``. A new proposal for an existing
+    category **overwrites** it, so two workers proposing different text for the
+    same category produce a contradiction the aggregator resolves (keeping the
+    one that scores better). Unknown categories fall back to append behaviour."""
+
+    categories: Sequence[str]
+    title: str = "# Config (by category)"
+
+    def initial(self) -> Dict[str, str]:
+        return {}
+
+    def render(self, state: Dict[str, str]) -> str:
+        if not state:
+            return f"{self.title}\n(empty)"
+        return "\n".join([self.title] + [f"## {k}\n{state[k]}" for k in sorted(state)])
+
+    def to_diff(self, state, proposal, author, base_version, target) -> Optional[Diff]:
+        m = re.match(r"\s*([\w\- ]+?)\s*:\s*(.+)", proposal, re.DOTALL)
+        if m and m.group(1).strip().lower() in {c.lower() for c in self.categories}:
+            key, value = m.group(1).strip().lower(), m.group(2).strip()
+        else:
+            key, value = rule_id(proposal), proposal.strip()
+        if state.get(key) == value:
+            return None
+        return Diff(diff_id=f"{author}:{key}:{base_version}", target=target,
+                    ops={key: value}, author=author)
+
+
+# ---------------------------------------------------------------------------
+# Evaluation cache + the evolving artifact
+# ---------------------------------------------------------------------------
+
+
+class _EvalCache:
+    def __init__(self) -> None:
+        self._d: Dict[Any, float] = {}
+        self._lock = threading.Lock()
+
+    def get_or_eval(self, key: Any, fn: Callable[[], float]) -> float:
+        with self._lock:
+            if key in self._d:
+                return self._d[key]
+        value = fn()
+        with self._lock:
+            self._d[key] = value
+        return value
+
+
+class EvolvingArtifact:
+    """An :class:`~concordia.evolvable.Evolvable`: flat state + a strategy.
+
+    The strategy handles representation (``render``); this class handles the
+    Evolvable plumbing and evaluation (``run`` the artifact on tasks, score)."""
+
+    def __init__(self, id: str, state: Optional[Dict[str, str]] = None,
+                 version: int = 1, blast_radius: float = 0.2,
+                 runtime: Optional["_Runtime"] = None,
+                 strategy: Optional[Strategy] = None) -> None:
+        self.id = id
+        self.state: Dict[str, str] = dict(state or {})
+        self.version = version
+        self.blast_radius = blast_radius
+        self.contract = Contract(input_schema="task", output_schema="text", major=1)
+        self._rt = runtime
+        self._strategy = strategy or AppendRules()
+
+    def render(self) -> str:
+        return self._strategy.render(self.state)
+
+    def diff(self, other: "EvolvingArtifact") -> Diff:
+        ops = {k: v for k, v in other.state.items() if self.state.get(k) != v}
+        return Diff(diff_id=f"{self.id}:diff", target=self.id, ops=ops)
+
+    def apply(self, diff: Diff) -> "EvolvingArtifact":
+        new_state = dict(self.state)
+        new_state.update(diff.ops)
+        return EvolvingArtifact(self.id, new_state, self.version + 1, self.blast_radius,
+                                self._rt, self._strategy)
+
+    def _signature(self):
+        return tuple(sorted(self.state.items()))
+
+    def score(self, tasks: Sequence[Task]) -> float:
+        if not tasks or self._rt is None:
+            return 0.0
+        return sum(self._rt.eval_one(self, t) for t in tasks) / len(tasks)
+
+    def cheap_eval(self, evidence: EvidenceCard) -> float:
+        return self.score([t for t in evidence.trajectory_refs if isinstance(t, Task)])
+
+    def full_eval(self, task_set: Sequence[Task]) -> Dict[str, float]:
+        return {"reward": self.score(task_set)}
+
+
+@dataclass
+class _Runtime:
+    run: Run
+    reward: Reward
+    cache: _EvalCache
+
+    def eval_one(self, artifact: EvolvingArtifact, task: Task) -> float:
+        key = (artifact._signature(), task.id)
+        return self.cache.get_or_eval(
+            key, lambda: self.reward(task, self.run(artifact.render(), task)))
+
+
+# ---------------------------------------------------------------------------
+# Driver
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RoundInfo:
+    round: int
+    held_out_reward: float
+    n_items: int
+    committed: int
+    rejected: int
+
+
+@dataclass
+class EvolutionResult:
+    state: Dict[str, str]
+    rendered: str
+    final_reward: float
+    history: List[RoundInfo]
+    ledger_log: List[str]
+
+
+def evolve(
+    tasks: Sequence[Task],
+    reward: Reward,
+    *,
+    agent: Optional[Agent] = None,
+    run: Optional[Run] = None,
+    propose: Optional[Propose] = None,
+    strategy: Optional[Strategy] = None,
+    initial_state: Optional[Dict[str, str]] = None,
+    blast_radius: float = 0.2,
+    artifact_id: str = "artifact",
+    rounds: int = 15,
+    n_workers: int = 4,
+    held_out_frac: float = 0.4,
+    repo_path: Optional[str] = None,
+    agg_config: Optional[AggregatorConfig] = None,
+    staleness_policy: Optional[StalenessPolicy] = None,
+    oracle_budget: int = 200,
+    verbose: bool = False,
+) -> EvolutionResult:
+    """Evolve an artifact. Provide either ``agent`` (with ``solve``/``propose``)
+    or the ``run`` / ``propose`` callables directly.
+
+    ``strategy`` (default :class:`AppendRules`) is the evolution rule. The
+    aggregator dedupes, resolves contradictions, fuses complementary changes, and
+    commits a change only if it improves held-out reward.
+
+    ``blast_radius`` chooses governance: ``0.2`` is an L2 (fast, local) artifact
+    like a skill; raise it (e.g. ``0.6``) for an **L1** artifact -- a harness,
+    context policy, tool router, or learned verifier -- which the aggregator
+    treats conservatively (every merge forced through the oracle, wider staleness
+    tolerance; design spec §6)."""
+    import tempfile
+
+    if agent is not None:
+        run = run or agent.solve
+        propose = propose or agent.propose
+    if run is None or propose is None:
+        raise ValueError("provide agent=, or both run= and propose=")
+
+    strategy = strategy or AppendRules()
+    tasks = list(tasks)
+    if len(tasks) < 4:
+        raise ValueError("need at least 4 tasks to split train/held-out")
+    cut = max(1, int(len(tasks) * (1 - held_out_frac)))
+    train, held_out = tasks[:cut], tasks[cut:]
+    if not held_out:
+        train, held_out = tasks[:-1], tasks[-1:]
+
+    runtime = _Runtime(run=run, reward=reward, cache=_EvalCache())
+
+    def serialize(a: EvolvingArtifact) -> dict:
+        return {"state": a.state, "blast_radius": a.blast_radius}
+
+    def deserialize(aid: str, version: int, state: dict) -> EvolvingArtifact:
+        return EvolvingArtifact(aid, state.get("state", {}), version,
+                                state.get("blast_radius", blast_radius), runtime, strategy)
+
+    repo = repo_path or tempfile.mkdtemp(prefix="concordia-evolve-")
+    ledger = Ledger(repo, serialize, deserialize)
+    ledger.register(EvolvingArtifact(artifact_id, initial_state or strategy.initial(),
+                                     blast_radius=blast_radius, runtime=runtime,
+                                     strategy=strategy))
+
+    from .verifier import ThreeLayerVerifier, VerifierBudget
+    verifier = ThreeLayerVerifier(
+        eval_fn=lambda a, ts: a.score(ts), held_out=held_out,
+        rule_subset=min(8, len(held_out)),
+        budget=VerifierBudget(oracle_calls_remaining=oracle_budget))
+    aggregator = Aggregator(
+        ledger, verifier, AuditScheduler(),
+        agg_config or AggregatorConfig(batch_trigger=2, max_wait_rounds=1),
+        staleness_policy=staleness_policy)
+
+    history: List[RoundInfo] = []
+    for r in range(rounds):
+        snap = ledger.snapshot(Ledger.DEV)
+        artifact = snap.get(artifact_id)
+        base_v = snap.version.get(artifact_id, 0)
+        assert_mutable(artifact)
+
+        for w in range(n_workers):
+            task = train[(r * n_workers + w) % len(train)]
+            output = run(artifact.render(), task)
+            score = reward(task, output)
+            if score >= 0.999:
+                continue
+            proposal = propose(artifact.render(), task, output, score)
+            if not proposal:
+                continue
+            diff = strategy.to_diff(artifact.state, proposal, f"w{w}", base_v, artifact_id)
+            if diff is None:
+                continue
+            after = reward(task, run(artifact.apply(diff).render(), task))
+            aggregator.ingest(EvidenceCard(
+                diff=diff, base_version={artifact_id: base_v}, touched=[artifact_id],
+                before_after_delta=after - score, trajectory_refs=[task]))
+
+        reports = aggregator.step()
+        committed = sum(1 for x in reports if x.committed_version is not None)
+        rejected = sum(1 for x in reports if x.committed_version is None)
+        dev = ledger.snapshot(Ledger.DEV).get(artifact_id)
+        info = RoundInfo(r, dev.score(held_out), len(dev.state), committed, rejected)
+        history.append(info)
+        if verbose:
+            print(f"round {r:>3}  reward={info.held_out_reward:.3f}  "
+                  f"items={info.n_items}  +{committed}/-{rejected}")
+
+    final = ledger.snapshot(Ledger.DEV).get(artifact_id)
+    return EvolutionResult(state=dict(final.state), rendered=final.render(),
+                           final_reward=final.score(held_out), history=history,
+                           ledger_log=ledger.log(Ledger.DEV, limit=40))

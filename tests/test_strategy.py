@@ -4,12 +4,12 @@ from difflib import SequenceMatcher
 from typing import Optional
 
 from concordia.aggregator import diffs_contradict
-from concordia.skillevo import (
+from concordia.evolution import (
     AppendRules,
     KeyedRules,
-    SkillStrategy,
+    Strategy,
     Task,
-    evolve_skill,
+    evolve,
 )
 
 
@@ -64,7 +64,7 @@ class SingleValueStrategy:
 
 
 def test_custom_strategy_is_structural_and_runs():
-    assert isinstance(SingleValueStrategy(), SkillStrategy)
+    assert isinstance(SingleValueStrategy(), Strategy)
 
     class Agent:
         # learns to answer "lower" by proposing the literal target text
@@ -77,7 +77,7 @@ def test_custom_strategy_is_structural_and_runs():
                   meta={"expected": "GOAL"}) for i in range(12)]
     reward = lambda t, o: SequenceMatcher(None, o, t.meta["expected"]).ratio()
 
-    result = evolve_skill(Agent(), tasks, reward, strategy=SingleValueStrategy(),
-                          rounds=6, n_workers=2)
+    result = evolve(tasks, reward, agent=Agent(), strategy=SingleValueStrategy(),
+                    rounds=6, n_workers=2)
     assert result.final_reward >= result.history[0].held_out_reward
     assert result.state.get("v") == "GOAL"

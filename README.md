@@ -27,6 +27,10 @@ Full docs live in [`docs/`](docs/) and render as a website via MkDocs Material:
 | [Architecture](docs/architecture.md) | Components, data-flow diagram, the two runtimes, concurrency model |
 | [Concepts](docs/concepts.md) | The training↔RSI analogy, staleness, the aggregator, the three long tails, governance |
 | [Usage & extending](docs/usage.md) | Running the demos, config reference, **plugging in your own `Evolvable` domain** |
+| [Evolving anything](docs/evolution.md) | The general engine — evolve any artifact by writing its `Strategy` + `run`/`reward`/`propose` |
+| [Connecting agents & LLMs](docs/agents.md) | The provider-agnostic completion layer |
+| [Example: skill](docs/skill-evolution.md) · [harness](docs/harness-evolution.md) | Skill (real dataset + LLM) and harness (L1, no LLM) evolution |
+| [Efficiency experiments](docs/efficiency.md) | Measured parallel scaling and async tail-hiding |
 | [Design spec](docs/concordia_design.md) | The original research design (v0.2) |
 
 ```bash
@@ -39,39 +43,43 @@ A GitHub Actions workflow ([`.github/workflows/docs.yml`](.github/workflows/docs
 builds and deploys the site to GitHub Pages — enable it under *Settings → Pages
 → Source: GitHub Actions*.
 
-## Applications on top of the framework
+## Evolve anything — the general engine
 
-The core is the ledger + aggregator + schedulers + governance. On top of it:
-
-**Connect any agent/LLM** — [`concordia.agents`](concordia/agents.py) is the
-general provider layer; any `prompt -> text` is a completion (`claude(...)`,
-`from_callable(...)`, `echo(...)`, `with_retries(...)`).
-
-**Skill evolution** — [`concordia.skillevo`](concordia/skillevo.py) is *one
-application*. Bring any agent, any reward, and a **`SkillStrategy`** that defines
-your evolution logic:
+The core is the ledger + aggregator + schedulers + governance.
+[`concordia.evolution`](concordia/evolution.py) is the domain-agnostic engine on
+top: describe **what evolves** (a `Strategy`) and the **rules of evolution**
+(`run` / `reward` / `propose`), and it runs the parallel, merge-based loop.
 
 ```python
-from concordia.agents import claude
-from concordia.skillevo import evolve_skill, LLMAgent, AppendRules
+from concordia.evolution import evolve, AppendRules
 
-result = evolve_skill(
-    agent=LLMAgent(claude(model="claude-haiku-4-5")),  # or your own Agent
-    tasks=tasks,                                        # [Task(id, prompt, meta), ...]
-    reward=reward,                                      # (task, output) -> [0, 1]
-    strategy=AppendRules(),                             # or KeyedRules / your own
+result = evolve(
+    tasks, reward,
+    agent=my_agent,           # or run=/propose= plain functions
+    strategy=AppendRules(),   # or KeyedRules / your own
+    blast_radius=0.2,         # 0.2 = L2 skill; 0.6 = L1 harness/verifier
     rounds=15, n_workers=4,
 )
-print(result.playbook, result.final_reward)
+print(result.rendered, result.final_reward)
 ```
 
-The strategy decides how the skill is represented and how a proposal becomes a
-diff, so distinct edits **fuse** and conflicting edits are **resolved** on
-held-out score — for free. The example
-([`examples/skill_evolution.py`](examples/skill_evolution.py)) evolves a skill on
-a real **BIG-Bench-Hard** task with a real Claude agent (`--dry-run` = dataset +
-cost estimate, no API). Guides:
-[skill evolution](docs/skill-evolution.md) · [connecting agents](docs/agents.md).
+The strategy maps a proposal into diff ops, so distinct edits **fuse** and
+conflicting edits are **resolved** on held-out score — for free. `blast_radius`
+picks the governance layer (L1 harness merges are forced through the oracle).
+Skill and harness evolution are just two examples of the same `evolve` call:
+
+- **[Skill](examples/skill_evolution.py)** — a lesson playbook evolved on a real
+  **BIG-Bench-Hard** task with a real Claude agent (`--dry-run` = dataset + cost
+  estimate, no API).
+- **[Harness](examples/harness_evolution.py)** — an L1 request-processing
+  pipeline evolved with plain functions, no LLM (`python -m examples.harness_evolution`).
+
+**Connect any agent/LLM** — [`concordia.agents`](concordia/agents.py) is the
+separate provider layer; any `prompt -> text` is a completion (`claude(...)`,
+`from_callable(...)`, `echo(...)`, `with_retries(...)`).
+
+Guides: [the engine](docs/evolution.md) · [skill example](docs/skill-evolution.md)
+· [harness example](docs/harness-evolution.md) · [agents](docs/agents.md).
 
 ## Efficiency (measured)
 
@@ -106,8 +114,11 @@ python -m examples.run_demo
 # Async stage orchestration — Full/Guarded/Reflective policies + async_ratio sweep
 python -m examples.run_async
 
-# Skill self-evolution on a real dataset with a real LLM (--dry-run: no API key)
+# Evolve a skill on a real dataset with a real LLM (--dry-run: no API key)
 python -m examples.skill_evolution --dry-run
+
+# Evolve an L1 harness with plain functions (no API key)
+python -m examples.harness_evolution
 
 # Efficiency: parallel throughput scaling + async vs sync-barrier tail-hiding
 python -m examples.efficiency
@@ -144,7 +155,7 @@ Every module cites the design section it implements.
 | Worker: rollout + propose | [`worker.py`](concordia/worker.py) | 3.1 |
 | Orchestrator (sync DP) + fork baseline | [`orchestrator.py`](concordia/orchestrator.py) | 3.1, RQ1 |
 | **Agent/LLM connection layer (provider-agnostic)** | [`agents.py`](concordia/agents.py) | — |
-| **Skill-evolution application + pluggable `SkillStrategy`** | [`skillevo.py`](concordia/skillevo.py) | 3.2 |
+| **General evolution engine + pluggable `Strategy`** | [`evolution.py`](concordia/evolution.py) | 3.2 |
 
 ## How aggregation works (the `Aggregator` pipeline)
 

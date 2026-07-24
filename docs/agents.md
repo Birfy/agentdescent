@@ -1,7 +1,7 @@
 # Connecting agents & LLMs
 
 `concordia.agents` is the **general "talk to a model/agent" layer**. It is
-deliberately separate from `concordia.skillevo` — how you reach a model has
+deliberately separate from `concordia.evolution` — how you reach a model has
 nothing to do with skill evolution, and any application built on the framework
 can use it.
 
@@ -53,14 +53,14 @@ model = from_callable(openai_completion)
 
 ## Using it in skill evolution
 
-`concordia.skillevo` consumes a completion through `LLMAgent`:
+`concordia.evolution` consumes a completion through `LLMAgent`:
 
 ```python
 from concordia.agents import claude
-from concordia.skillevo import LLMAgent
+from concordia.evolution import LLMAgent
 
 agent = LLMAgent(claude(model="claude-haiku-4-5"))
 ```
 
-`claude_agent(model=...)` in skillevo is just a convenience for
+`claude_agent(model=...)` in the evolution engine is just a convenience for
 `LLMAgent(claude(model))` — the provider code lives here, in `concordia.agents`.

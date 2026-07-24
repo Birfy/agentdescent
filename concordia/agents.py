@@ -1,7 +1,7 @@
 """Provider-agnostic inference -- connect any agent or LLM to the framework.
 
 This is the general "talk to a model/agent" layer. It is deliberately kept
-**out of** :mod:`concordia.skillevo`: skill evolution is just *one* application
+**out of** :mod:`concordia.evolution`: skill evolution is just *one* application
 built on the framework, and how you reach a model has nothing to do with it.
 
 The whole contract is one type:
@@ -12,7 +12,7 @@ Anything that maps a prompt to text is a completion -- an LLM call, a
 tool-using agent loop, a canned stub for tests. The adapters below build
 completions for Claude, an arbitrary callable, or a deterministic echo, and
 :func:`with_retries` wraps any of them with backoff. Higher layers
-(skillevo's :class:`~concordia.skillevo.LLMAgent`, or your own) turn a completion
+(the evolution engine's LLMAgent, or your own) turn a completion
 into whatever task interface they need.
 """
 

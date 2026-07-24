@@ -37,7 +37,7 @@ import urllib.request
 from difflib import SequenceMatcher
 from typing import Dict, List, Optional
 
-from concordia.skillevo import Task, evolve_skill, claude_agent
+from concordia.evolution import Task, evolve, claude_agent
 
 BBH_URL = "https://raw.githubusercontent.com/suzgunmirac/BIG-Bench-Hard/main/bbh/{task}.json"
 CACHE_DIR = os.path.expanduser("~/.cache/concordia/bbh")
@@ -175,16 +175,16 @@ def main() -> None:
         return
 
     print("\nEvolving skill...\n")
-    result = evolve_skill(agent, tasks, reward, rounds=args.rounds,
-                          n_workers=args.workers,
-                          held_out_frac=args.heldout / total, verbose=True)
+    result = evolve(tasks, reward, agent=agent, rounds=args.rounds,
+                    n_workers=args.workers, artifact_id="skill",
+                    held_out_frac=args.heldout / total, verbose=True)
 
     print("\n=== evolved skill playbook ===")
-    print(result.playbook)
+    print(result.rendered)
     label = "held-out accuracy" if mc else "held-out score"
     print(f"\n{label}: {result.history[0].held_out_reward:.3f} "
           f"-> {result.final_reward:.3f}")
-    print(f"lessons learned: {len(result.rules)}")
+    print(f"lessons learned: {len(result.state)}")
 
 
 if __name__ == "__main__":

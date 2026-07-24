@@ -8,12 +8,12 @@ from typing import Optional
 
 from concordia.governance import Layer, classify
 from concordia.scheduler import AuditScheduler
-from concordia.skillevo import SkillArtifact, Task, evolve_skill
+from concordia.evolution import EvolvingArtifact, Task, evolve
 
 
 def test_blast_radius_selects_governance_layer():
-    assert classify(SkillArtifact("skill", blast_radius=0.2)) is Layer.L2_FAST      # local skill
-    assert classify(SkillArtifact("harness", blast_radius=0.6)) is Layer.L1_SLOW    # harness/verifier
+    assert classify(EvolvingArtifact("skill", blast_radius=0.2)) is Layer.L2_FAST      # local skill
+    assert classify(EvolvingArtifact("harness", blast_radius=0.6)) is Layer.L1_SLOW    # harness/verifier
 
 
 def test_high_blast_radius_forces_oracle_audit():
@@ -46,8 +46,8 @@ def test_evolve_harness_end_to_end():
                   meta={"expected": f"routed payload {i}"}) for i in range(12)]
     reward = lambda t, o: SequenceMatcher(None, o, t.meta["expected"]).ratio()
 
-    result = evolve_skill(_HarnessAgent(), tasks, reward, blast_radius=0.6,
-                          rounds=8, n_workers=2)
+    result = evolve(tasks, reward, agent=_HarnessAgent(), blast_radius=0.6,
+                    rounds=8, n_workers=2)
     # the L1 harness improved on held-out despite oracle-gated, conservative merges
     assert result.final_reward > result.history[0].held_out_reward
     assert result.final_reward > 0.9
