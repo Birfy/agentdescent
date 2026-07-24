@@ -39,32 +39,47 @@ A GitHub Actions workflow ([`.github/workflows/docs.yml`](.github/workflows/docs
 builds and deploys the site to GitHub Pages — enable it under *Settings → Pages
 → Source: GitHub Actions*.
 
-## Evolve a skill with any agent
+## Applications on top of the framework
 
-The convenient front door — [`concordia.skillevo`](concordia/skillevo.py). Bring
-any agent (an LLM, a tool-using loop, a rule engine — anything implementing a
-two-method protocol) and evolve a real skill playbook in a few lines:
+The core is the ledger + aggregator + schedulers + governance. On top of it:
+
+**Connect any agent/LLM** — [`concordia.agents`](concordia/agents.py) is the
+general provider layer; any `prompt -> text` is a completion (`claude(...)`,
+`from_callable(...)`, `echo(...)`, `with_retries(...)`).
+
+**Skill evolution** — [`concordia.skillevo`](concordia/skillevo.py) is *one
+application*. Bring any agent, any reward, and a **`SkillStrategy`** that defines
+your evolution logic:
 
 ```python
-from concordia.skillevo import evolve_skill, claude_agent
+from concordia.agents import claude
+from concordia.skillevo import evolve_skill, LLMAgent, AppendRules
 
 result = evolve_skill(
-    agent=claude_agent(model="claude-opus-4-8"),  # or your own Agent
-    tasks=tasks,                                   # [Task(id, prompt, meta), ...]
-    reward=reward,                                 # (task, output) -> [0, 1]
+    agent=LLMAgent(claude(model="claude-haiku-4-5")),  # or your own Agent
+    tasks=tasks,                                        # [Task(id, prompt, meta), ...]
+    reward=reward,                                      # (task, output) -> [0, 1]
+    strategy=AppendRules(),                             # or KeyedRules / your own
     rounds=15, n_workers=4,
 )
-print(result.playbook)      # the evolved skill text
-print(result.final_reward)  # held-out reward
+print(result.playbook, result.final_reward)
 ```
 
-Parallel workers propose rules; the aggregator dedupes, fuses complementary
-ones, and **commits a rule only if it improves held-out reward** — bad rules are
-rejected automatically. The example
-([`examples/skill_evolution.py`](examples/skill_evolution.py)) evolves a skill
-on a real **BIG-Bench-Hard** task with a real Claude agent; `--dry-run` shows the
-dataset and a cost estimate with no API calls. Full guide:
-[docs/skill-evolution.md](docs/skill-evolution.md).
+The strategy decides how the skill is represented and how a proposal becomes a
+diff, so distinct edits **fuse** and conflicting edits are **resolved** on
+held-out score — for free. The example
+([`examples/skill_evolution.py`](examples/skill_evolution.py)) evolves a skill on
+a real **BIG-Bench-Hard** task with a real Claude agent (`--dry-run` = dataset +
+cost estimate, no API). Guides:
+[skill evolution](docs/skill-evolution.md) · [connecting agents](docs/agents.md).
+
+## Efficiency (measured)
+
+[`examples/efficiency.py`](examples/efficiency.py) — **parallel scaling** is
+near-linear (efficiency ≥ 0.99 through 8 workers, 7.9× speedup), and the
+**async pipeline** is **2.5× faster than a sync barrier** under heavy-tailed
+rollout latency (100% vs 40% worker utilization). See
+[docs/efficiency.md](docs/efficiency.md).
 
 ## The central analogy
 
@@ -93,6 +108,9 @@ python -m examples.run_async
 
 # Skill self-evolution on a real dataset with a real LLM (--dry-run: no API key)
 python -m examples.skill_evolution --dry-run
+
+# Efficiency: parallel throughput scaling + async vs sync-barrier tail-hiding
+python -m examples.efficiency
 
 # RQ2 — staleness tolerance sweep (alpha in {0,1,5,inf})
 python -m examples.rq2_staleness
@@ -125,7 +143,8 @@ Every module cites the design section it implements.
 | Layered governance by blast radius (L0/L1/L2) | [`governance.py`](concordia/governance.py) | 6 |
 | Worker: rollout + propose | [`worker.py`](concordia/worker.py) | 3.1 |
 | Orchestrator (sync DP) + fork baseline | [`orchestrator.py`](concordia/orchestrator.py) | 3.1, RQ1 |
-| **Skill evolution API — `evolve_skill`, any-agent protocol** | [`skillevo.py`](concordia/skillevo.py) | 3.2 |
+| **Agent/LLM connection layer (provider-agnostic)** | [`agents.py`](concordia/agents.py) | — |
+| **Skill-evolution application + pluggable `SkillStrategy`** | [`skillevo.py`](concordia/skillevo.py) | 3.2 |
 
 ## How aggregation works (the `Aggregator` pipeline)
 

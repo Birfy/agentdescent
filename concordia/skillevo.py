@@ -1,51 +1,45 @@
-"""Agent-driven skill self-evolution -- the convenient front door.
+"""Skill self-evolution -- ONE application built on the Concordia framework.
 
-Everything else in Concordia is a *mechanism* (ledger, aggregator, staleness,
-governance). This module is the **ergonomic API** that lets you evolve a real
-skill with *any* agent in a few lines:
+This module is a convenience layer, not the framework itself. It wires the
+general pieces (ledger, aggregator, staleness, governance) into a simple loop
+for the common case: evolve a text "skill" by accumulating lessons. Everything
+about it is customizable:
 
-    from concordia.skillevo import evolve_skill
+* **the agent** -- bring any object with ``solve`` / ``propose`` (see
+  :class:`Agent`), or wrap a completion from :mod:`concordia.agents` with
+  :class:`LLMAgent`. Provider adapters (Claude, etc.) live in
+  :mod:`concordia.agents`, NOT here.
+* **the reward** -- any ``(task, output) -> [0, 1]`` function.
+* **the evolution rule/logic** -- a :class:`SkillStrategy` decides how the skill
+  is represented, how it renders into a prompt, and how an agent's proposal
+  becomes a :class:`~concordia.evolvable.Diff`. :class:`AppendRules` (the
+  default) accumulates deduped lessons; :class:`KeyedRules` keeps one lesson per
+  category so competing proposals *contradict* and are resolved by the
+  aggregator. Write your own to evolve anything.
 
-    result = evolve_skill(agent, tasks, reward, rounds=15, n_workers=4)
-    print(result.playbook)      # the evolved skill text
-    print(result.final_reward)  # held-out reward
-
-An **agent** is anything that implements the tiny :class:`Agent` protocol -- two
-methods, ``solve`` and ``propose``. Bring your own (an LLM, a tool-using loop, a
-rule engine), or wrap a completion function with :class:`LLMAgent` /
-:func:`claude_agent`.
-
-The evolving artifact is a **playbook**: an accumulating set of rules/lessons
-(the ExpeL / "lessons learned" pattern). Each round, workers run tasks through
-the current playbook, and on failure ask the agent to *propose* a new rule. The
-aggregator then does the hard part -- deduping, resolving contradictions, fusing
-complementary rules, and (crucially) **only committing a rule if it improves
-held-out reward** under the Beta-posterior test. Bad rules are rejected
-automatically; good rules from parallel workers are merged into one playbook.
-
-> Cost note: evaluation runs the agent on held-out tasks, so a real LLM agent
-> makes many calls. Keep ``held_out_frac`` / task counts modest, and rely on the
-> built-in memoization (identical (playbook, task) pairs are cached within a run).
+For full control, skip this module and drive :class:`~concordia.ledger.Ledger` +
+:class:`~concordia.aggregator.Aggregator` directly.
 """
 
 from __future__ import annotations
 
 import hashlib
+import re
 import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Protocol, Sequence, runtime_checkable
 
+from .agents import Completion, claude
 from .aggregator import Aggregator, AggregatorConfig
 from .evolvable import Contract, Diff, EvidenceCard
 from .governance import assert_mutable
 from .ledger import Ledger
 from .scheduler import AuditScheduler
-from .staleness import StalenessPolicy, get_policy
-from .verifier import ThreeLayerVerifier, VerifierBudget
+from .staleness import StalenessPolicy
 
 
 # ---------------------------------------------------------------------------
-# Task + Agent contract (what a user brings)
+# Task + Agent contract
 # ---------------------------------------------------------------------------
 
 
@@ -64,47 +58,36 @@ Reward = Callable[[Task, str], float]
 
 @runtime_checkable
 class Agent(Protocol):
-    """The whole interface an agent must implement. Two methods."""
+    """The task interface an agent implements. Two methods."""
 
     def solve(self, skill_text: str, task: Task) -> str:
-        """Run ``task`` using the skill playbook; return the agent's output."""
+        """Run ``task`` using the skill; return the agent's output."""
         ...
 
     def propose(self, skill_text: str, task: Task, output: str, reward: float) -> Optional[str]:
-        """Reflect on a failure and propose ONE new rule (or None)."""
+        """Reflect on a failure and propose ONE improvement (or None)."""
         ...
 
 
-# ---------------------------------------------------------------------------
-# LLM adapter: turn any completion function into an Agent
-# ---------------------------------------------------------------------------
-
-Completion = Callable[[str], str]
-
 _SOLVE_TMPL = (
-    "You are executing a skill defined by the playbook below.\n\n"
-    "{skill}\n\n"
-    "Apply the playbook to this input and output ONLY the result, nothing else.\n\n"
-    "Input:\n{prompt}"
+    "You are executing a skill defined below.\n\n{skill}\n\n"
+    "Apply it to this input and output ONLY the result, nothing else.\n\nInput:\n{prompt}"
 )
-
 _PROPOSE_TMPL = (
     "A skill just failed a task (score {reward:.2f} out of 1.0).\n\n"
-    "Playbook so far:\n{skill}\n\n"
-    "Task input:\n{prompt}\n\n"
+    "Skill so far:\n{skill}\n\nTask input:\n{prompt}\n\n"
     "The skill produced:\n{output}\n\n"
     "Propose exactly ONE concise, general rule (a single imperative sentence) to "
-    "add to the playbook so it handles this and similar cases. Output only the "
-    "rule text, or the word NONE if no rule would help."
+    "improve the skill for this and similar cases. Output only the rule text, or "
+    "NONE if no rule would help."
 )
 
 
 @dataclass
 class LLMAgent:
-    """Wrap a ``prompt -> completion`` function as an :class:`Agent`.
+    """Adapt a ``Completion`` (from :mod:`concordia.agents`) into an :class:`Agent`.
 
-    Works with any model. See :func:`claude_agent` for a ready-made Claude
-    adapter."""
+    Example: ``LLMAgent(claude(model="claude-haiku-4-5"))``."""
 
     complete: Completion
     solve_template: str = _SOLVE_TMPL
@@ -116,39 +99,106 @@ class LLMAgent:
         ).strip()
 
     def propose(self, skill_text: str, task: Task, output: str, reward: float) -> Optional[str]:
-        rule = self.complete(
-            self.propose_template.format(
-                skill=skill_text, prompt=task.prompt, output=output, reward=reward
-            )
-        ).strip()
-        if not rule or rule.strip().upper().startswith("NONE"):
-            return None
-        return rule
+        rule = self.complete(self.propose_template.format(
+            skill=skill_text, prompt=task.prompt, output=output, reward=reward)).strip()
+        return None if (not rule or rule.upper().startswith("NONE")) else rule
 
 
 def claude_agent(model: str = "claude-opus-4-8", max_tokens: int = 1024) -> LLMAgent:
-    """A Claude-backed :class:`Agent` (requires ``pip install anthropic`` and
-    credentials in the environment).
-
-    Swap ``model`` for a cheaper tier (e.g. ``"claude-haiku-4-5"``) when running
-    many evolution rounds, since evaluation calls the agent repeatedly."""
-    from anthropic import Anthropic  # lazy import; optional dependency
-
-    client = Anthropic()
-
-    def complete(prompt: str) -> str:
-        msg = client.messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return "".join(b.text for b in msg.content if b.type == "text")
-
-    return LLMAgent(complete)
+    """Convenience: ``LLMAgent(claude(model))``. The provider code lives in
+    :mod:`concordia.agents`; this just wires it to the skillevo task interface."""
+    return LLMAgent(claude(model=model, max_tokens=max_tokens))
 
 
 # ---------------------------------------------------------------------------
-# Evaluation cache (memoize identical (playbook, task) evaluations in a run)
+# Evolution strategy: how a proposal becomes a change (user-customizable)
+# ---------------------------------------------------------------------------
+
+
+def rule_id(text: str) -> str:
+    """Content-address a rule so identical proposals dedupe automatically."""
+    return "r" + hashlib.sha1(text.strip().lower().encode()).hexdigest()[:10]
+
+
+@runtime_checkable
+class SkillStrategy(Protocol):
+    """Defines *what evolves and how* -- the customizable core of a skill.
+
+    A skill's state is a flat ``{key: value}`` dict (the diff op-space the
+    aggregator resolves conflicts and fusion over). A strategy decides the
+    initial state, how it renders into a prompt, and how an agent proposal turns
+    into a :class:`Diff`."""
+
+    def initial(self) -> Dict[str, str]: ...
+
+    def render(self, state: Dict[str, str]) -> str: ...
+
+    def to_diff(self, state: Dict[str, str], proposal: str, author: str,
+                base_version: int, target: str) -> Optional[Diff]: ...
+
+
+@dataclass
+class AppendRules:
+    """Default strategy: accumulate a deduped playbook of lessons.
+
+    Each proposal becomes a new content-addressed rule (identical proposals from
+    different workers collapse to one; complementary rules from parallel workers
+    are *fused* by the aggregator)."""
+
+    title: str = "# Skill Playbook"
+
+    def initial(self) -> Dict[str, str]:
+        return {}
+
+    def render(self, state: Dict[str, str]) -> str:
+        if not state:
+            return f"{self.title}\n(no rules yet)"
+        return "\n".join([self.title] + [f"- {state[k]}" for k in sorted(state)])
+
+    def to_diff(self, state, proposal, author, base_version, target) -> Optional[Diff]:
+        rid = rule_id(proposal)
+        if rid in state:
+            return None  # already known
+        return Diff(diff_id=f"{author}:{rid}:{base_version}", target=target,
+                    ops={rid: proposal}, author=author)
+
+
+@dataclass
+class KeyedRules:
+    """Strategy with one lesson per *category*: competing proposals collide.
+
+    Proposals are expected to look like ``"category: text"``. A new proposal for
+    an existing category **overwrites** it -- i.e. two workers proposing
+    different text for the same category produce a *contradiction* the
+    aggregator must resolve (keeping the one that scores better). Unrecognized
+    categories fall back to append behaviour. Demonstrates user-defined logic
+    that exercises conflict resolution."""
+
+    categories: Sequence[str]
+    title: str = "# Skill (by category)"
+
+    def initial(self) -> Dict[str, str]:
+        return {}
+
+    def render(self, state: Dict[str, str]) -> str:
+        if not state:
+            return f"{self.title}\n(empty)"
+        return "\n".join([self.title] + [f"## {k}\n{state[k]}" for k in sorted(state)])
+
+    def to_diff(self, state, proposal, author, base_version, target) -> Optional[Diff]:
+        m = re.match(r"\s*([\w\- ]+?)\s*:\s*(.+)", proposal, re.DOTALL)
+        if m and m.group(1).strip().lower() in {c.lower() for c in self.categories}:
+            key, value = m.group(1).strip().lower(), m.group(2).strip()
+        else:
+            key, value = rule_id(proposal), proposal.strip()
+        if state.get(key) == value:
+            return None
+        return Diff(diff_id=f"{author}:{key}:{base_version}", target=target,
+                    ops={key: value}, author=author)
+
+
+# ---------------------------------------------------------------------------
+# Evaluation cache + the evolving artifact
 # ---------------------------------------------------------------------------
 
 
@@ -167,93 +217,66 @@ class _EvalCache:
         return value
 
 
-# ---------------------------------------------------------------------------
-# RuleSkill: the evolving playbook artifact (an Evolvable)
-# ---------------------------------------------------------------------------
+class SkillArtifact:
+    """An :class:`~concordia.evolvable.Evolvable` skill: flat state + a strategy.
 
+    The strategy handles representation (``render``) and proposal-to-diff; this
+    class handles the Evolvable plumbing and agent-based scoring."""
 
-def rule_id(text: str) -> str:
-    """Content-address a rule so identical proposals from different workers
-    dedupe automatically."""
-    return "r" + hashlib.sha1(text.strip().lower().encode()).hexdigest()[:10]
-
-
-class RuleSkill:
-    """An :class:`~concordia.evolvable.Evolvable` playbook of rules.
-
-    State is ``{rule_id: rule_text}``. Evaluation (running the agent + scoring)
-    is attached via a shared runtime so materialized skills can score
-    themselves; only the rules are serialized to the ledger."""
-
-    def __init__(
-        self,
-        id: str,
-        rules: Optional[Dict[str, str]] = None,
-        version: int = 1,
-        blast_radius: float = 0.2,
-        runtime: Optional["_SkillRuntime"] = None,
-    ) -> None:
+    def __init__(self, id: str, state: Optional[Dict[str, str]] = None,
+                 version: int = 1, blast_radius: float = 0.2,
+                 runtime: Optional["_SkillRuntime"] = None,
+                 strategy: Optional[SkillStrategy] = None) -> None:
         self.id = id
-        self.rules: Dict[str, str] = dict(rules or {})
+        self.state: Dict[str, str] = dict(state or {})
         self.version = version
         self.blast_radius = blast_radius
         self.contract = Contract(input_schema="task", output_schema="text", major=1)
         self._rt = runtime
-
-    # -- rendering -----------------------------------------------------------
+        self._strategy = strategy or AppendRules()
 
     def render(self) -> str:
-        if not self.rules:
-            return "# Skill Playbook\n(no rules yet)"
-        lines = ["# Skill Playbook"]
-        for rid in sorted(self.rules):
-            lines.append(f"- {self.rules[rid]}")
-        return "\n".join(lines)
+        return self._strategy.render(self.state)
 
-    # -- Evolvable protocol --------------------------------------------------
-
-    def diff(self, other: "RuleSkill") -> Diff:
-        ops = {k: v for k, v in other.rules.items() if self.rules.get(k) != v}
+    def diff(self, other: "SkillArtifact") -> Diff:
+        ops = {k: v for k, v in other.state.items() if self.state.get(k) != v}
         return Diff(diff_id=f"{self.id}:diff", target=self.id, ops=ops)
 
-    def apply(self, diff: Diff) -> "RuleSkill":
-        new_rules = dict(self.rules)
-        new_rules.update(diff.ops)
-        return RuleSkill(self.id, new_rules, self.version + 1, self.blast_radius, self._rt)
+    def apply(self, diff: Diff) -> "SkillArtifact":
+        new_state = dict(self.state)
+        new_state.update(diff.ops)
+        return SkillArtifact(self.id, new_state, self.version + 1, self.blast_radius,
+                             self._rt, self._strategy)
 
     def _signature(self):
-        return tuple(sorted(self.rules))
+        return tuple(sorted(self.state.items()))
 
     def score(self, tasks: Sequence[Task]) -> float:
-        """Mean reward over ``tasks`` (runs the agent; memoized)."""
         if not tasks or self._rt is None:
             return 0.0
-        total = 0.0
-        for t in tasks:
-            total += self._rt.eval_one(self, t)
-        return total / len(tasks)
+        return sum(self._rt.eval_one(self, t) for t in tasks) / len(tasks)
 
     def cheap_eval(self, evidence: EvidenceCard) -> float:
-        tasks = [t for t in evidence.trajectory_refs if isinstance(t, Task)]
-        return self.score(tasks)
+        return self.score([t for t in evidence.trajectory_refs if isinstance(t, Task)])
 
     def full_eval(self, task_set: Sequence[Task]) -> Dict[str, float]:
         return {"reward": self.score(task_set)}
 
 
+# backwards-compatible alias (the append-rules artifact was formerly RuleSkill)
+RuleSkill = SkillArtifact
+
+
 @dataclass
 class _SkillRuntime:
-    """Binds an agent + reward + cache to skills materialized from the ledger."""
-
     agent: Agent
     reward: Reward
     cache: _EvalCache
 
-    def eval_one(self, skill: RuleSkill, task: Task) -> float:
+    def eval_one(self, skill: SkillArtifact, task: Task) -> float:
         key = (skill._signature(), task.id)
         return self.cache.get_or_eval(
-            key, lambda: self.reward(task, self.agent.solve(skill.render(), task))
-        )
+            key, lambda: self.reward(task, self.agent.solve(skill.render(), task)))
 
 
 # ---------------------------------------------------------------------------
@@ -272,11 +295,15 @@ class RoundInfo:
 
 @dataclass
 class SkillEvoResult:
-    rules: Dict[str, str]
+    state: Dict[str, str]
     playbook: str
     final_reward: float
     history: List[RoundInfo]
     ledger_log: List[str]
+
+    @property
+    def rules(self) -> Dict[str, str]:  # back-compat
+        return self.state
 
 
 def evolve_skill(
@@ -284,27 +311,34 @@ def evolve_skill(
     tasks: Sequence[Task],
     reward: Reward,
     *,
-    initial_rules: Optional[Dict[str, str]] = None,
+    strategy: Optional[SkillStrategy] = None,
+    initial_state: Optional[Dict[str, str]] = None,
     rounds: int = 15,
     n_workers: int = 4,
     held_out_frac: float = 0.4,
-    skill_id: str = "playbook",
+    skill_id: str = "skill",
+    blast_radius: float = 0.2,
     repo_path: Optional[str] = None,
     agg_config: Optional[AggregatorConfig] = None,
     staleness_policy: Optional[StalenessPolicy] = None,
     oracle_budget: int = 200,
     verbose: bool = False,
 ) -> SkillEvoResult:
-    """Evolve a skill playbook using ``agent`` over ``tasks``.
+    """Evolve a skill with ``agent`` over ``tasks``, scored by ``reward``.
 
-    ``reward(task, output) -> [0,1]`` scores an agent's output. Returns the
-    evolved playbook plus a per-round history. All the heavy lifting -- dedup,
-    contradiction resolution, fusion, and held-out statistical acceptance --
-    happens in the aggregator; a proposed rule is committed only if it actually
+    ``strategy`` (default :class:`AppendRules`) decides how the skill is
+    represented and how proposals become diffs. The aggregator dedupes, resolves
+    contradictions, fuses complementary changes, and commits a change only if it
     improves held-out reward.
-    """
+
+    ``blast_radius`` controls governance: the default ``0.2`` is an L2 (fast,
+    local) skill; raise it (e.g. ``0.6``) to evolve an **L1** artifact -- a
+    harness module, context policy, tool router, or learned verifier -- which the
+    aggregator treats more conservatively (every merge is forced through the
+    oracle, and staleness tolerance widens). See the design doc, section 6."""
     import tempfile
 
+    strategy = strategy or AppendRules()
     tasks = list(tasks)
     if len(tasks) < 4:
         raise ValueError("need at least 4 tasks to split train/held-out")
@@ -313,38 +347,36 @@ def evolve_skill(
     if not held_out:
         train, held_out = tasks[:-1], tasks[-1:]
 
-    cache = _EvalCache()
-    runtime = _SkillRuntime(agent=agent, reward=reward, cache=cache)
+    runtime = _SkillRuntime(agent=agent, reward=reward, cache=_EvalCache())
 
-    def serialize(skill: RuleSkill) -> dict:
-        return {"rules": skill.rules, "blast_radius": skill.blast_radius}
+    def serialize(skill: SkillArtifact) -> dict:
+        return {"state": skill.state, "blast_radius": skill.blast_radius}
 
-    def deserialize(artifact_id: str, version: int, state: dict) -> RuleSkill:
-        return RuleSkill(artifact_id, state.get("rules", {}), version,
-                         state.get("blast_radius", 0.2), runtime)
+    def deserialize(artifact_id: str, version: int, state: dict) -> SkillArtifact:
+        return SkillArtifact(artifact_id, state.get("state", {}), version,
+                             state.get("blast_radius", blast_radius), runtime, strategy)
 
     repo = repo_path or tempfile.mkdtemp(prefix="concordia-skill-")
     ledger = Ledger(repo, serialize, deserialize)
-    ledger.register(RuleSkill(skill_id, initial_rules or {}, runtime=runtime))
+    ledger.register(SkillArtifact(skill_id, initial_state or strategy.initial(),
+                                  blast_radius=blast_radius, runtime=runtime,
+                                  strategy=strategy))
 
+    from .verifier import ThreeLayerVerifier, VerifierBudget
     verifier = ThreeLayerVerifier(
-        eval_fn=lambda skill, ts: skill.score(ts),
-        held_out=held_out,
+        eval_fn=lambda skill, ts: skill.score(ts), held_out=held_out,
         rule_subset=min(8, len(held_out)),
-        budget=VerifierBudget(oracle_calls_remaining=oracle_budget),
-    )
-    audit = AuditScheduler()
+        budget=VerifierBudget(oracle_calls_remaining=oracle_budget))
     aggregator = Aggregator(
-        ledger, verifier, audit,
+        ledger, verifier, AuditScheduler(),
         agg_config or AggregatorConfig(batch_trigger=2, max_wait_rounds=1),
-        staleness_policy=staleness_policy,
-    )
+        staleness_policy=staleness_policy)
 
     history: List[RoundInfo] = []
     for r in range(rounds):
         snap = ledger.snapshot(Ledger.DEV)
         skill = snap.get(skill_id)
-        base_version = snap.version
+        base_v = snap.version.get(skill_id, 0)
         assert_mutable(skill)
 
         for w in range(n_workers):
@@ -352,41 +384,29 @@ def evolve_skill(
             output = agent.solve(skill.render(), task)
             r_score = reward(task, output)
             if r_score >= 0.999:
-                continue  # already handled
-            rule = agent.propose(skill.render(), task, output, r_score)
-            if not rule:
                 continue
-            rid = rule_id(rule)
-            if rid in skill.rules:
-                continue  # already known
-            diff = Diff(diff_id=f"w{w}:{rid}:{base_version.get(skill_id, 0)}",
-                        target=skill_id, ops={rid: rule}, author=f"w{w}")
-            # local before/after delta on this task (the "gradient").
+            proposal = agent.propose(skill.render(), task, output, r_score)
+            if not proposal:
+                continue
+            diff = strategy.to_diff(skill.state, proposal, f"w{w}", base_v, skill_id)
+            if diff is None:
+                continue
             after = reward(task, agent.solve(skill.apply(diff).render(), task))
-            card = EvidenceCard(
-                diff=diff,
-                base_version={skill_id: base_version.get(skill_id, 0)},
-                touched=[skill_id],
-                before_after_delta=after - r_score,
-                trajectory_refs=[task],
-            )
-            aggregator.ingest(card)
+            aggregator.ingest(EvidenceCard(
+                diff=diff, base_version={skill_id: base_v}, touched=[skill_id],
+                before_after_delta=after - r_score, trajectory_refs=[task]))
 
         reports = aggregator.step()
         committed = sum(1 for x in reports if x.committed_version is not None)
         rejected = sum(1 for x in reports if x.committed_version is None)
         dev = ledger.snapshot(Ledger.DEV).get(skill_id)
-        info = RoundInfo(r, dev.score(held_out), len(dev.rules), committed, rejected)
+        info = RoundInfo(r, dev.score(held_out), len(dev.state), committed, rejected)
         history.append(info)
         if verbose:
             print(f"round {r:>3}  reward={info.held_out_reward:.3f}  "
-                  f"rules={info.n_rules}  +{committed}/-{rejected}")
+                  f"items={info.n_rules}  +{committed}/-{rejected}")
 
     final = ledger.snapshot(Ledger.DEV).get(skill_id)
-    return SkillEvoResult(
-        rules=dict(final.rules),
-        playbook=final.render(),
-        final_reward=final.score(held_out),
-        history=history,
-        ledger_log=ledger.log(Ledger.DEV, limit=40),
-    )
+    return SkillEvoResult(state=dict(final.state), playbook=final.render(),
+                          final_reward=final.score(held_out), history=history,
+                          ledger_log=ledger.log(Ledger.DEV, limit=40))

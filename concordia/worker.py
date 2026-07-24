@@ -15,8 +15,9 @@ sole "optimizer" (design doc, section 4).
 from __future__ import annotations
 
 import random
+import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence
 
 from .evolvable import Diff, EvidenceCard, VersionVector
 from .domains.router import RouterSkill, Task
@@ -29,6 +30,10 @@ class Worker:
     noise: float = 0.0          # prob. of proposing a wrong label (contradiction)
     max_ops: int = 4            # keep diffs inside the trust region
     seed: int = 0
+    # optional per-rollout latency (seconds) -- models the real cost of a
+    # rollout (tool calls, HPC queues, LLM latency). Used by the efficiency
+    # experiments to make parallelism/asynchrony observable in wall-clock.
+    rollout_latency: Optional[Callable[[], float]] = None
 
     def __post_init__(self) -> None:
         self._rng = random.Random(hash((self.worker_id, self.seed)) & 0xFFFF)
@@ -40,6 +45,8 @@ class Worker:
         tasks: Sequence[Task],
     ) -> Optional[EvidenceCard]:
         """One rollout: classify tasks, propose a corrective diff for failures."""
+        if self.rollout_latency is not None:
+            time.sleep(self.rollout_latency())  # releases the GIL -> real overlap
         failures = [t for t in tasks if skill.classify(t.text) != t.label]
         if not failures:
             return None

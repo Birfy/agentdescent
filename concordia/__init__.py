@@ -34,11 +34,16 @@ from .staleness import (
 )
 from .worker import Worker
 from .orchestrator import Concordia, RoundStat, run_fork_baseline
+from .agents import Completion, claude, echo, from_callable, with_retries
 from .skillevo import (
     Agent,
     LLMAgent,
     Task,
+    SkillArtifact,
     RuleSkill,
+    SkillStrategy,
+    AppendRules,
+    KeyedRules,
     SkillEvoResult,
     RoundInfo,
     evolve_skill,
@@ -56,7 +61,7 @@ from .parallel import (
     shard_round_robin,
 )
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 __all__ = [
     "Contract",
@@ -105,10 +110,19 @@ __all__ = [
     "assign_sections",
     "section_of",
     "shard_round_robin",
+    "Completion",
+    "claude",
+    "echo",
+    "from_callable",
+    "with_retries",
     "Agent",
     "LLMAgent",
     "Task",
+    "SkillArtifact",
     "RuleSkill",
+    "SkillStrategy",
+    "AppendRules",
+    "KeyedRules",
     "SkillEvoResult",
     "RoundInfo",
     "evolve_skill",

@@ -41,10 +41,19 @@ The one place the analogy *must* break defines the whole system:
     How to install, run the sync/async demos, tune the knobs, and plug in your
     own `Evolvable` domain.
 
--   :material-robot: **[Skill evolution (any agent)](skill-evolution.md)**
+-   :material-robot: **[Skill evolution](skill-evolution.md)**
 
-    Evolve a real skill with any agent in a few lines — `evolve_skill(agent,
-    tasks, reward)`.
+    One application on the framework — evolve a skill with any agent; fully
+    customizable via a `SkillStrategy`.
+
+-   :material-connection: **[Connecting agents & LLMs](agents.md)**
+
+    The general provider-agnostic layer — any `prompt -> text` is a completion.
+
+-   :material-speedometer: **[Efficiency experiments](efficiency.md)**
+
+    Measured parallel scaling (near-linear to 8 workers) and async tail-hiding
+    (2.5× over a sync barrier).
 
 -   :material-file-document: **[Design spec](concordia_design.md)**
 
