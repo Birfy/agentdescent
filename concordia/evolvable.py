@@ -1,0 +1,146 @@
+"""Core data model for Concordia.
+
+This module defines the *unit of evolution* (``Evolvable``) and the two
+"gradient-like" objects that flow through the system:
+
+* :class:`Diff` -- a proposed change to one or more artifacts (the "gradient").
+* :class:`EvidenceCard` -- the metadata attached to a diff (the "gradient
+  metadata"): what versions it was derived against, the trajectories that
+  justify it, and the locally-measured before/after delta.
+
+The central analogy of the framework (design doc, section 1) is:
+
+    parameter tensor θ            -> library of Evolvable artifacts
+    gradient g                    -> Diff + EvidenceCard
+    version vector on a diff      -> the base_version it was read against
+
+Everything here is provider-agnostic: an ``Evolvable`` can be a skill, a prompt
+template, a harness module, or a learned verifier.  What evolves is decided by
+*registration*, not hard-coded (design doc, section 3.2).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field, replace
+from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Tuple, runtime_checkable
+
+# A version vector maps ``artifact_id -> integer version``.  A diff only records
+# the artifacts it actually read or wrote, so most vectors are sparse.
+VersionVector = Dict[str, int]
+
+
+def vv_dominates(a: VersionVector, b: VersionVector) -> bool:
+    """Return True if ``a`` is at least as new as ``b`` on every shared key."""
+    return all(a.get(k, 0) >= v for k, v in b.items())
+
+
+def vv_staleness(head: VersionVector, base: VersionVector) -> int:
+    """Per-diff staleness ``eta`` (design doc, section 4.2).
+
+    ``eta(d) = max over touched artifacts (head_version - base_version)``.
+
+    A staleness of 0 means the diff was proposed against the current head of
+    every artifact it touched; larger values mean the world moved on underneath
+    the proposal and it must be rebased (or discarded).
+    """
+    if not base:
+        return 0
+    return max((head.get(k, 0) - v for k, v in base.items()), default=0)
+
+
+@dataclass(frozen=True)
+class Contract:
+    """The externally-visible interface of an artifact.
+
+    ``breaking`` marks a semver-major style change; the Ledger refuses diffs
+    that declare a dependency on a superseded major (design doc, section 6,
+    "contract mechanism").
+    """
+
+    input_schema: str = "any"
+    output_schema: str = "any"
+    side_effects: Tuple[str, ...] = ()
+    major: int = 1
+
+    def is_compatible_with(self, other: "Contract") -> bool:
+        return self.major == other.major
+
+
+@dataclass
+class Diff:
+    """A proposed change to an artifact's state.
+
+    ``ops`` is an opaque, artifact-specific payload.  For the reference skill
+    domain (:mod:`concordia.domains.router`) it is a mapping of key -> value
+    edits, but the aggregator never inspects it directly -- it always goes
+    through the owning :class:`Evolvable`.
+    """
+
+    diff_id: str
+    target: str  # artifact id
+    ops: Dict[str, Any] = field(default_factory=dict)
+    contract_breaking: bool = False
+    author: str = "unknown"  # which worker produced it
+
+    def size(self) -> int:
+        """A crude "number of edited lines" proxy used by the trust-region
+        cap (design doc, section 4.4)."""
+        return len(self.ops)
+
+
+@dataclass
+class EvidenceCard:
+    """The "gradient metadata" carried by every diff (design doc, section 3.3).
+
+    The lifecycle of an evidence card is *longer* than the diff it justifies:
+    when a diff is discarded for staleness the card settles back into the
+    trajectory pool for later reuse (design doc, section 3.3 / RQ2).
+    """
+
+    diff: Diff
+    base_version: VersionVector
+    touched: List[str]
+    # local before/after measurement made by the proposing worker.
+    before_after_delta: float = 0.0
+    # trajectory references / failure traces that justify the diff.
+    trajectory_refs: List[str] = field(default_factory=list)
+    # per-turn version annotations, used when the ledger hot-updates mid-rollout.
+    version_annotations: List[VersionVector] = field(default_factory=list)
+    cost_tokens: int = 0
+    cost_wallclock: float = 0.0
+
+    def rebased_onto(self, head: VersionVector) -> "EvidenceCard":
+        """Return a copy whose base is advanced to ``head`` for touched keys.
+
+        Used after a successful cheap re-verification during rebase (design
+        doc, section 4.2, the ``0 < eta <= alpha`` branch)."""
+        new_base = dict(self.base_version)
+        for k in self.touched:
+            if k in head:
+                new_base[k] = head[k]
+        return replace(self, base_version=new_base)
+
+
+@runtime_checkable
+class Evolvable(Protocol):
+    """The single interface every unit of evolution must satisfy.
+
+    Anything implementing this protocol can be registered into the evolution
+    loop.  ``blast_radius`` drives automatic layering into L0/L1/L2 (design
+    doc, section 6) -- it is *estimated*, not human-annotated.
+    """
+
+    id: str
+    version: int
+    contract: Contract
+    blast_radius: float
+
+    def diff(self, other: "Evolvable") -> Diff: ...
+    def apply(self, diff: Diff) -> "Evolvable": ...
+    def cheap_eval(self, evidence: EvidenceCard) -> float: ...
+    def full_eval(self, task_set: Any) -> Mapping[str, float]: ...
+
+
+# A convenience alias for factory functions that reconstruct an Evolvable from
+# its serialized state (used by the git-backed ledger).
+Deserializer = Callable[[str, int, str], Evolvable]

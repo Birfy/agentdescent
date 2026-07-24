@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "concordia-rsi"
+version = "0.2.0"
+description = "A parallel, self-evolving framework for accelerating recursive self-improvement (RSI)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Concordia" }]
+keywords = ["rsi", "self-evolving-agents", "parallel", "aggregation", "staleness"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Science/Research",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.urls]
+Homepage = "https://github.com/Birfy/concordia"
+
+[tool.setuptools.packages.find]
+include = ["concordia*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
