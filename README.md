@@ -36,8 +36,11 @@ versioned artifact library, targeting **O(N / T_iter)** improvement throughput.
 ```bash
 pip install -e ".[dev]"
 
-# RQ1 — merge vs fork, end to end
+# RQ1 — merge vs fork, end to end (synchronous DP)
 python -m examples.run_demo
+
+# Async stage orchestration — Full/Guarded/Reflective policies + async_ratio sweep
+python -m examples.run_async
 
 # RQ2 — staleness tolerance sweep (alpha in {0,1,5,inf})
 python -m examples.rq2_staleness
@@ -61,12 +64,15 @@ Every module cites the design section it implements.
 | `Evolvable` unit, `Diff`, `EvidenceCard`, version vectors | [`evolvable.py`](concordia/evolvable.py) | 3.2, 3.3 |
 | Git-backed Ledger: version vectors, CAS, 2PC, dual branch | [`ledger.py`](concordia/ledger.py) | 3.1, 4.5 |
 | Aggregator: staleness → conflict → fusion → Beta accept → commit | [`aggregator.py`](concordia/aggregator.py) | 4 |
+| **Staleness policies: Full / Guarded / Reflective** | [`staleness.py`](concordia/staleness.py) | 4.2 |
+| **Async stage-orchestration runtime + `async_ratio`** | [`async_runtime.py`](concordia/async_runtime.py) | 3.1 |
+| **Parallel paradigms: DP / TP / PP** | [`parallel.py`](concordia/parallel.py) | 8 |
 | Statistics: Beta posterior, `P(Δ>0)`, annealed δ, UCB | [`stats.py`](concordia/stats.py) | 4.4, 5.2 |
 | Three schedulers: UCB task / audit / resume queue | [`scheduler.py`](concordia/scheduler.py) | 5 |
 | Three-layer verifier (rule / learned / oracle) | [`verifier.py`](concordia/verifier.py) | 3.1, 5.3 |
 | Layered governance by blast radius (L0/L1/L2) | [`governance.py`](concordia/governance.py) | 6 |
 | Worker: rollout + propose | [`worker.py`](concordia/worker.py) | 3.1 |
-| Orchestrator + fork baseline | [`orchestrator.py`](concordia/orchestrator.py) | 3.1, RQ1 |
+| Orchestrator (sync DP) + fork baseline | [`orchestrator.py`](concordia/orchestrator.py) | 3.1, RQ1 |
 
 ## How aggregation works (the `Aggregator` pipeline)
 
@@ -94,6 +100,62 @@ optimizer step:
 7. **Audit (§5.3)** — the merge decision is itself submitted to the
    `AuditScheduler`; high-blast-radius / low-trust merges are forced through the
    oracle. The optimizer audits itself.
+
+## Parallelism & asynchrony
+
+Concordia ships two execution runtimes and a set of pluggable strategies, so a
+run can be moved along the sync↔async and DP↔TP↔PP axes without touching the
+merge pipeline.
+
+### Two runtimes
+
+- **Synchronous DP** ([`orchestrator.py`](concordia/orchestrator.py)) — a round
+  barrier: all workers step, then one `aggregator.step()`, then the next round.
+  Deterministic; the RQ1/RQ2 baseline.
+- **Asynchronous stage orchestration** ([`async_runtime.py`](concordia/async_runtime.py),
+  FlashEvolve-style) — **no barrier**. Worker threads keep producing evidence
+  while a dedicated aggregator thread keeps merging, connected by the
+  thread-safe `EvidenceBuffer`. The rollout/propose and aggregate/commit stages
+  overlap instead of stalling.
+
+### Staleness policies ([`staleness.py`](concordia/staleness.py), FlashEvolve Full/Guarded/Reflective)
+
+The active policy is the only thing that changes between async regimes — the
+aggregator asks it `ACCEPT / REBASE / DISCARD` from each diff's `η` and `α`:
+
+| Policy | Behaviour | Cost |
+|---|---|---|
+| **Full** | use stale diffs directly (η ignored) | max throughput, min safety |
+| **Guarded** | version-gated: accept `η=0`, rebase `η≤α`, discard beyond | AReaL bounded-staleness |
+| **Reflective** | always rebase + re-verify; discard only if the delta no longer holds | recovers otherwise-wasted proposals |
+
+### `async_ratio` — the ROLL Flash lag budget
+
+A worker refreshes its snapshot only once head has drifted more than
+`async_ratio` versions ahead of it. Small ratio → near-synchronous, few stale
+diffs; large ratio → highly asynchronous, many stale diffs the policy must
+handle. A **backpressure** signal forces a global sync if the pipeline stalls
+(evidence keeps arriving but nothing commits).
+
+`python -m examples.run_async` shows the trade-off — all three policies converge
+to 1.000, but at `async_ratio=4`:
+
+| policy | rollouts | stale discarded | wall-clock |
+|---|---|---|---|
+| Full | ~8k | 0 | ~3.2s |
+| Reflective | ~7.8k | ~0.7k | ~3.3s |
+| Guarded | ~20k | ~17k | ~5.1s |
+
+### DP / TP / PP ([`parallel.py`](concordia/parallel.py), §8)
+
+- **DP (data parallel)** — same snapshot, task-sharded, diffs merged. The default
+  the async runtime runs.
+- **TP (tensor parallel)** — split one *hot* artifact into disjoint sections;
+  each worker owns a section, so edits are conflict-free **by construction** and
+  the merge is concatenation + a consistency reviewer (`TensorParallelMerge`).
+- **PP (pipeline parallel)** — artifacts form a dependency chain; a downstream
+  failure back-propagates blame to the earliest failing upstream stage
+  (`PipelineChain.blame`, shared with the §7 counterfactual-replay attribution).
 
 ## The three long tails (§5)
 

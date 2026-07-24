@@ -16,6 +16,7 @@ mechanism:
 
 from __future__ import annotations
 
+import threading
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
@@ -41,6 +42,9 @@ class TaskScheduler:
         self.clusters: Dict[str, TaskCluster] = {cl.id: cl for cl in clusters}
         self.c = c
         self._t = 0
+        self._cursor = 0
+        # guards select/select_batch/record against concurrent worker threads.
+        self._lock = threading.Lock()
 
     def _difficulty_weight(self, cl: TaskCluster) -> float:
         """Down-weight clusters with no learning signal (GRPO zero-advantage)."""
@@ -58,7 +62,8 @@ class TaskScheduler:
         return [cl for _, _, cl in scored]
 
     def select(self) -> TaskCluster:
-        return self._ranked()[0]
+        with self._lock:
+            return self._ranked()[0]
 
     def select_batch(self, k: int) -> List[TaskCluster]:
         """Lease up to ``k`` *distinct* clusters to workers, UCB-ordered.
@@ -66,18 +71,37 @@ class TaskScheduler:
         Data-parallel sharding: distinct leases guarantee coverage across the
         task long tail while UCB still front-loads the highest-value clusters
         (design doc, sections 3.1 and 5.2)."""
-        ranked = self._ranked()
-        if not ranked:
-            return []
-        # cycle through the ranked list so k > n_clusters still fills every slot.
-        return [ranked[i % len(ranked)] for i in range(k)]
+        with self._lock:
+            ranked = self._ranked()
+            if not ranked:
+                return []
+            # cycle through the ranked list so k > n_clusters fills every slot.
+            return [ranked[i % len(ranked)] for i in range(k)]
+
+    def lease_one(self) -> TaskCluster:
+        """Atomically pick the single highest-UCB cluster (async worker pull)."""
+        with self._lock:
+            return self._ranked()[0]
+
+    def lease_round_robin(self) -> TaskCluster:
+        """Async worker pull that spreads concurrent workers across clusters.
+
+        Workers pull independently; a rotating cursor over the UCB-ranked list
+        keeps them from all hammering the single top cluster while still biasing
+        toward high-value ones."""
+        with self._lock:
+            ranked = self._ranked()
+            cl = ranked[self._cursor % len(ranked)]
+            self._cursor += 1
+            return cl
 
     def record(self, cluster_id: str, learning_value: float, passed: bool) -> None:
-        cl = self.clusters[cluster_id]
-        cl.n_evidence += 1
-        # exponential moving estimate of learning value.
-        cl.recent_value = 0.8 * cl.recent_value + 0.2 * learning_value
-        cl.pass_rate = 0.9 * cl.pass_rate + 0.1 * (1.0 if passed else 0.0)
+        with self._lock:
+            cl = self.clusters[cluster_id]
+            cl.n_evidence += 1
+            # exponential moving estimate of learning value.
+            cl.recent_value = 0.8 * cl.recent_value + 0.2 * learning_value
+            cl.pass_rate = 0.9 * cl.pass_rate + 0.1 * (1.0 if passed else 0.0)
 
 
 @dataclass(order=True)

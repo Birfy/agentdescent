@@ -19,6 +19,7 @@ The per-bucket pipeline (design doc, section 4):
 
 from __future__ import annotations
 
+import threading
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
@@ -27,6 +28,7 @@ from .evolvable import Diff, EvidenceCard, Evolvable, VersionVector, vv_stalenes
 from .governance import Layer, classify, assert_mutable
 from .ledger import CASConflict, Ledger
 from .scheduler import AuditScheduler
+from .staleness import StaleAction, StalenessPolicy, get_policy
 from .stats import BetaPosterior, annealed_delta, prob_improvement
 from .verifier import ThreeLayerVerifier
 
@@ -57,32 +59,46 @@ class MergeReport:
 
 
 class EvidenceBuffer:
-    """Cards bucketed by target artifact (design doc, section 4.1)."""
+    """Cards bucketed by target artifact (design doc, section 4.1).
+
+    Thread-safe: in the asynchronous runtime many worker threads call
+    :meth:`add` concurrently while the aggregator thread calls :meth:`ready` /
+    :meth:`drain`.  All bucket mutations are guarded by an internal lock."""
 
     def __init__(self) -> None:
         self._buckets: Dict[str, List[EvidenceCard]] = defaultdict(list)
         self._waited: Dict[str, int] = defaultdict(int)
+        self._settled: List[EvidenceCard] = []
+        self._lock = threading.Lock()
 
     def add(self, card: EvidenceCard) -> None:
-        self._buckets[card.diff.target].append(card)
+        with self._lock:
+            self._buckets[card.diff.target].append(card)
 
     def tick(self) -> None:
-        for aid in list(self._buckets):
-            self._waited[aid] += 1
+        with self._lock:
+            for aid in list(self._buckets):
+                self._waited[aid] += 1
 
     def ready(self, config: AggregatorConfig) -> List[str]:
-        out = []
-        for aid, cards in self._buckets.items():
-            if not cards:
-                continue
-            if len(cards) >= config.batch_trigger or self._waited[aid] >= config.max_wait_rounds:
-                out.append(aid)
-        return out
+        with self._lock:
+            out = []
+            for aid, cards in self._buckets.items():
+                if not cards:
+                    continue
+                if len(cards) >= config.batch_trigger or self._waited[aid] >= config.max_wait_rounds:
+                    out.append(aid)
+            return out
 
     def drain(self, artifact_id: str) -> List[EvidenceCard]:
-        cards = self._buckets.pop(artifact_id, [])
-        self._waited.pop(artifact_id, None)
-        return cards
+        with self._lock:
+            cards = self._buckets.pop(artifact_id, [])
+            self._waited.pop(artifact_id, None)
+            return cards
+
+    def pending(self) -> int:
+        with self._lock:
+            return sum(len(c) for c in self._buckets.values())
 
     def settle(self, cards: List[EvidenceCard]) -> None:
         """Return discarded-diff evidence to the pool for later reuse.
@@ -91,12 +107,13 @@ class EvidenceBuffer:
         doc, section 3.3): a stale gradient is simply lost, but a stale diff's
         evidence survives.  Here we keep the cards addressable; a fuller system
         would re-file them into the trajectory pool."""
-        self._settled = getattr(self, "_settled", [])
-        self._settled.extend(cards)
+        with self._lock:
+            self._settled.extend(cards)
 
     @property
     def settled(self) -> List[EvidenceCard]:
-        return getattr(self, "_settled", [])
+        with self._lock:
+            return list(self._settled)
 
 
 def diffs_conflict(a: Diff, b: Diff) -> bool:
@@ -136,10 +153,13 @@ class Aggregator:
         verifier: ThreeLayerVerifier,
         audit: AuditScheduler,
         config: Optional[AggregatorConfig] = None,
+        staleness_policy: Optional[StalenessPolicy] = None,
     ) -> None:
         self.ledger = ledger
         self.verifier = verifier
         self.audit = audit
+        # swap Full / Guarded / Reflective without touching the merge pipeline.
+        self.staleness_policy = staleness_policy or get_policy("guarded")
         self.config = config or AggregatorConfig()
         self.buffer = EvidenceBuffer()
         self._posteriors: Dict[str, BetaPosterior] = defaultdict(BetaPosterior)
@@ -157,22 +177,28 @@ class Aggregator:
     def _staleness_filter(
         self, artifact: Evolvable, head: VersionVector, cards: List[EvidenceCard]
     ) -> Tuple[List[EvidenceCard], List[EvidenceCard]]:
-        """Split cards into (survivors, discarded) and rebase the middle band."""
+        """Split cards into (survivors, discarded), delegating to the policy.
+
+        The active :class:`~concordia.staleness.StalenessPolicy` (Full / Guarded
+        / Reflective) decides ACCEPT / REBASE / DISCARD from ``eta`` and
+        ``alpha``; the aggregator only executes the mechanical rebase-and-
+        re-verify for the REBASE case."""
         survivors: List[EvidenceCard] = []
         discarded: List[EvidenceCard] = []
         for card in cards:
             eta = vv_staleness(head, card.base_version)
             alpha = self._alpha_for(artifact, card)
-            if eta == 0:
-                survivors.append(card)
-            elif eta <= alpha:
-                # rebase: cheaply re-verify the delta still holds on current head.
+            action = self.staleness_policy.decide(eta, alpha, card.diff.contract_breaking)
+            if action is StaleAction.ACCEPT:
+                survivors.append(card if eta == 0 else card.rebased_onto(head))
+            elif action is StaleAction.REBASE:
+                # cheaply re-verify the delta still holds on the current head.
                 candidate = artifact.apply(card.diff)
                 if artifact.cheap_eval(card) <= candidate.cheap_eval(card):
                     survivors.append(card.rebased_onto(head))
                 else:
                     discarded.append(card)
-            else:
+            else:  # DISCARD
                 discarded.append(card)
         return survivors, discarded
 

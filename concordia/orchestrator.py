@@ -64,6 +64,7 @@ class Concordia:
         config: Optional[AggregatorConfig] = None,
         oracle_budget: int = 300,
         seed: int = 0,
+        staleness_policy=None,
     ) -> None:
         self.universe = universe
         self.skill_id = skill_id
@@ -81,7 +82,8 @@ class Concordia:
         )
         self.audit = AuditScheduler()
         self.aggregator = Aggregator(self.ledger, self.verifier, self.audit,
-                                     config or AggregatorConfig())
+                                     config or AggregatorConfig(),
+                                     staleness_policy=staleness_policy)
 
         clusters = universe.clusters(n_clusters=max(2, n_workers))
         self.task_scheduler = TaskScheduler(

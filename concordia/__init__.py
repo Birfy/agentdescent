@@ -24,10 +24,28 @@ from .verifier import ThreeLayerVerifier, VerifierBudget
 from .scheduler import AuditScheduler, ResumeQueue, TaskCluster, TaskScheduler
 from .governance import Layer, classify, assert_mutable, GovernanceError, L1SerialGate
 from .aggregator import Aggregator, AggregatorConfig, MergeReport, EvidenceBuffer
+from .staleness import (
+    StaleAction,
+    StalenessPolicy,
+    FullStaleness,
+    GuardedStaleness,
+    ReflectiveStaleness,
+    get_policy,
+)
 from .worker import Worker
 from .orchestrator import Concordia, RoundStat, run_fork_baseline
+from .async_runtime import AsyncConcordia, AsyncConfig, AsyncStats
+from .parallel import (
+    ParallelMode,
+    TensorParallelMerge,
+    PipelineChain,
+    SectionViolation,
+    assign_sections,
+    section_of,
+    shard_round_robin,
+)
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "Contract",
@@ -56,8 +74,24 @@ __all__ = [
     "AggregatorConfig",
     "MergeReport",
     "EvidenceBuffer",
+    "StaleAction",
+    "StalenessPolicy",
+    "FullStaleness",
+    "GuardedStaleness",
+    "ReflectiveStaleness",
+    "get_policy",
     "Worker",
     "Concordia",
     "RoundStat",
     "run_fork_baseline",
+    "AsyncConcordia",
+    "AsyncConfig",
+    "AsyncStats",
+    "ParallelMode",
+    "TensorParallelMerge",
+    "PipelineChain",
+    "SectionViolation",
+    "assign_sections",
+    "section_of",
+    "shard_round_robin",
 ]
