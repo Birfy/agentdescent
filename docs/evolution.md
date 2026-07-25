@@ -72,6 +72,13 @@ def propose(rendered: str, task, output, reward) -> str | None: ...
 (`solve`/`propose`) — `evolve(agent=...)` accepts either. The LLM connection is
 separate: see [Connecting agents & LLMs](agents.md).
 
+### 5. A `parallel` method (optional) — *how work is partitioned across workers*
+
+The parallelism method is a first-class, pluggable argument:
+`evolve(..., parallel=DataParallel())`. Pick DP / TP / PP or write your own —
+see [Customizable parallelism](parallelism.md). It defaults to `DataParallel`,
+so you only set it when you want to change how each round's work is sharded.
+
 ---
 
 ## `blast_radius` chooses the governance layer
@@ -89,10 +96,9 @@ Nothing else in your code changes between L2 and L1 (design spec §6).
 
 ---
 
-## Example A — evolve a skill (real dataset, real LLM)
+## Same engine, different artifact
 
-Artifact = a lesson playbook; `run` = an LLM applying it. Full walkthrough on
-the [skill example](skill-evolution.md) page.
+A **skill** — artifact = a lesson playbook, `run` = an LLM applying it, L2:
 
 ```python
 from concordia.agents import claude
@@ -103,15 +109,8 @@ result = evolve(tasks, reward,
                 strategy=AppendRules(), blast_radius=0.2, artifact_id="skill")
 ```
 
-```bash
-python -m examples.skill_evolution --dry-run   # BIG-Bench-Hard, no API calls
-```
-
-## Example B — evolve a harness (L1, no LLM)
-
-Artifact = a request-processing pipeline (route / normalize / trim); driven by
-plain functions, registered at L1. Full walkthrough on the
-[harness example](harness-evolution.md) page.
+A **harness / verifier** — artifact = a pipeline config, driven by plain
+functions, registered at L1 (oracle-gated merges):
 
 ```python
 from concordia.evolution import evolve, KeyedRules
@@ -121,9 +120,7 @@ result = evolve(tasks, reward, run=run, propose=propose,
                 blast_radius=0.6, artifact_id="harness")
 ```
 
-```bash
-python -m examples.harness_evolution           # deterministic, runs anywhere
-```
-
-Same engine, same `evolve` call — only the artifact, its strategy, and its blast
-radius differ. That is the point: **write the rules of evolution, and it runs.**
+Same `evolve` call — only the artifact, its strategy, and its blast radius
+differ. That is the point: **write the rules of evolution, and it runs.** The
+complete, runnable end-to-end example (real dataset, real LLM, every module) is
+on the [skill-evolution](skill-evolution.md) page.

@@ -18,7 +18,10 @@ into whatever task interface they need.
 
 from __future__ import annotations
 
+import json
+import os
 import time
+import urllib.request
 from typing import Callable, Optional
 
 Completion = Callable[[str], str]
@@ -74,5 +77,36 @@ def claude(model: str = "claude-opus-4-8", max_tokens: int = 1024,
             messages=[{"role": "user", "content": prompt}], **create_kwargs,
         )
         return "".join(b.text for b in msg.content if b.type == "text")
+
+    return complete
+
+
+def openai_compatible(model: str, *, base_url_env: str = "OPENAI_BASE_URL",
+                      api_key_env: str = "OPENAI_API_KEY",
+                      default_base_url: str = "https://api.openai.com/v1",
+                      max_tokens: int = 1024, timeout: float = 120.0) -> Completion:
+    """A completion for any OpenAI-compatible chat endpoint (GLM/Zhipu, proxies,
+    local servers, OpenAI itself).
+
+    The base URL and API key are read from the environment at call time -- they
+    never pass through code or arguments. Point it at GLM, for example, by
+    setting ``OPENAI_BASE_URL=https://open.bigmodel.cn/api/paas/v4`` and
+    ``OPENAI_API_KEY=<your key>`` in your shell, then use ``model="glm-4.6"``."""
+    def complete(prompt: str) -> str:
+        base = os.environ.get(base_url_env, default_base_url).rstrip("/")
+        key = os.environ.get(api_key_env)
+        if not key:
+            raise RuntimeError(f"set {api_key_env} (and {base_url_env}) in your environment")
+        body = json.dumps({
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+        }).encode()
+        req = urllib.request.Request(
+            f"{base}/chat/completions", data=body,
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.load(resp)
+        return data["choices"][0]["message"]["content"]
 
     return complete

@@ -2,8 +2,7 @@
 
 **A parallel, self-evolving framework for accelerating recursive self-improvement (RSI).**
 
-Concordia is a reference implementation of the design in
-[`docs/concordia_design.md`](docs/concordia_design.md). It ports the
+Concordia is a research reference implementation. It ports the
 parallel-training playbook — data/tensor/pipeline parallelism, parameter
 servers, decoupled/asynchronous RL, partial rollout — onto RSI, where the
 "parameters" are a **library of evolvable artifacts** (skills, prompts, harness
@@ -29,11 +28,10 @@ Full docs live in [`docs/`](docs/) and render as a website via MkDocs Material:
 | [Usage & extending](docs/usage.md) | Running the demos, config reference, **plugging in your own `Evolvable` domain** |
 | [Evolving anything](docs/evolution.md) | The general engine — evolve any artifact by writing its `Strategy` + `run`/`reward`/`propose` |
 | [Connecting agents & LLMs](docs/agents.md) | The provider-agnostic completion layer |
-| [Example: skill](docs/skill-evolution.md) · [harness](docs/harness-evolution.md) | Skill (real dataset + LLM) and harness (L1, no LLM) evolution |
-| [Efficiency experiments](docs/efficiency.md) | Measured parallel scaling and async tail-hiding |
 | [Customizable parallelism](docs/parallelism.md) | Pluggable DP / TP / PP strategies — or write your own |
 | [Duration-aware scheduling](docs/duration-scheduling.md) | Estimate rollout cost from task size; LPT dispatch + straggler checkpointing |
-| [Design spec](docs/concordia_design.md) | The original research design (v0.2) |
+| [Efficiency experiments](docs/efficiency.md) | Measured parallel scaling and async tail-hiding |
+| [Example: skill evolution](docs/skill-evolution.md) | One complete run — real dataset, real LLM, every module |
 
 ```bash
 pip install -e ".[docs]"
@@ -67,21 +65,20 @@ print(result.rendered, result.final_reward)
 
 The strategy maps a proposal into diff ops, so distinct edits **fuse** and
 conflicting edits are **resolved** on held-out score — for free. `blast_radius`
-picks the governance layer (L1 harness merges are forced through the oracle).
-Skill and harness evolution are just two examples of the same `evolve` call:
-
-- **[Skill](examples/skill_evolution.py)** — a lesson playbook evolved on a real
-  **BIG-Bench-Hard** task with a real Claude agent (`--dry-run` = dataset + cost
-  estimate, no API).
-- **[Harness](examples/harness_evolution.py)** — an L1 request-processing
-  pipeline evolved with plain functions, no LLM (`python -m examples.harness_evolution`).
+picks the governance layer (a skill is L2; a harness/verifier at `0.6` is L1,
+where merges are forced through the oracle). Same `evolve` call for either —
+only the artifact, strategy, and blast radius differ.
 
 **Connect any agent/LLM** — [`concordia.agents`](concordia/agents.py) is the
 separate provider layer; any `prompt -> text` is a completion (`claude(...)`,
-`from_callable(...)`, `echo(...)`, `with_retries(...)`).
+`openai_compatible(...)` for GLM/OpenAI-style endpoints, `from_callable(...)`,
+`with_retries(...)`).
 
+The one complete end-to-end run — real dataset, real LLM, every module — is
+[`examples/skill_evolution.py`](examples/skill_evolution.py)
+(`python -m examples.skill_evolution --dry-run` for the no-API preview).
 Guides: [the engine](docs/evolution.md) · [skill example](docs/skill-evolution.md)
-· [harness example](docs/harness-evolution.md) · [agents](docs/agents.md).
+· [agents](docs/agents.md).
 
 ## Efficiency (measured)
 
@@ -116,11 +113,8 @@ python -m examples.run_demo
 # Async stage orchestration — Full/Guarded/Reflective policies + async_ratio sweep
 python -m examples.run_async
 
-# Evolve a skill on a real dataset with a real LLM (--dry-run: no API key)
+# The flagship: evolve a skill on a real dataset with a real LLM (--dry-run: no API)
 python -m examples.skill_evolution --dry-run
-
-# Evolve an L1 harness with plain functions (no API key)
-python -m examples.harness_evolution
 
 # Efficiency: parallel throughput scaling + async vs sync-barrier tail-hiding
 python -m examples.efficiency
@@ -275,10 +269,8 @@ Artifacts sort into layers automatically by `blast_radius`:
 
 This is a **research reference implementation**, not a production system. It is
 faithful to the design's *mechanisms* and runs end-to-end on a synthetic domain
-so the mechanisms are observable and testable. The design doc (§2) is explicit
-that Concordia's novelty is a **narrow, defensible engineering synthesis** —
-concurrent, staleness-bounded, conflict-resolved **diff-level merge** over a
-git-backed versioned ledger — and that its throughput premise is a *testable
-engineering hypothesis*, not community consensus. See `docs/concordia_design.md`
-for the full related-work discussion (FlashEvolve / SkillClaw / CoEvoSkills) and
-the RQ1–RQ3 experiment plan.
+so the mechanisms are observable and testable. Concordia's novelty is a
+**narrow, defensible engineering synthesis** — concurrent, staleness-bounded,
+conflict-resolved **diff-level merge** over a git-backed versioned ledger — and
+its throughput premise is a *testable engineering hypothesis*, not community
+consensus (cf. FlashEvolve / SkillClaw / CoEvoSkills).

@@ -298,6 +298,7 @@ def evolve(
     run: Optional[Run] = None,
     propose: Optional[Propose] = None,
     strategy: Optional[Strategy] = None,
+    parallel: Optional["ParallelStrategy"] = None,
     initial_state: Optional[Dict[str, str]] = None,
     blast_radius: float = 0.2,
     artifact_id: str = "artifact",
@@ -321,8 +322,14 @@ def evolve(
     like a skill; raise it (e.g. ``0.6``) for an **L1** artifact -- a harness,
     context policy, tool router, or learned verifier -- which the aggregator
     treats conservatively (every merge forced through the oracle, wider staleness
-    tolerance; design spec §6)."""
+    tolerance; design spec §6).
+
+    ``parallel`` (default :class:`~concordia.parallel.DataParallel`) is the
+    parallelism method -- how each round's tasks are partitioned across the
+    ``n_workers``. Swap in ``TensorParallel`` / ``PipelineParallel`` or your own
+    :class:`~concordia.parallel.ParallelStrategy`."""
     import tempfile
+    from .parallel import DataParallel
 
     if agent is not None:
         run = run or agent.solve
@@ -331,6 +338,7 @@ def evolve(
         raise ValueError("provide agent=, or both run= and propose=")
 
     strategy = strategy or AppendRules()
+    parallel = parallel or DataParallel()
     tasks = list(tasks)
     if len(tasks) < 4:
         raise ValueError("need at least 4 tasks to split train/held-out")
@@ -355,14 +363,23 @@ def evolve(
                                      strategy=strategy))
 
     from .verifier import ThreeLayerVerifier, VerifierBudget
+    # The eval_fn here IS ground truth (deterministic, memoized), so the cheap
+    # layers must NOT add noise or sub-sample: otherwise the tournament and the
+    # commit veto would compare candidates on a corrupted signal and reject
+    # genuine small improvements (noise > signal on hard tasks). Noise-free +
+    # full held-out makes cheap_eval == the exact held-out mean, and it's ~free
+    # because the same (skill, task) evaluations are already cached.
     verifier = ThreeLayerVerifier(
         eval_fn=lambda a, ts: a.score(ts), held_out=held_out,
-        rule_subset=min(8, len(held_out)),
+        rule_subset=len(held_out), learned_noise=0.0,
         budget=VerifierBudget(oracle_calls_remaining=oracle_budget))
     aggregator = Aggregator(
         ledger, verifier, AuditScheduler(),
         agg_config or AggregatorConfig(batch_trigger=2, max_wait_rounds=1),
         staleness_policy=staleness_policy)
+
+    train_ids = [t.id for t in train]
+    by_id = {t.id: t for t in train}
 
     history: List[RoundInfo] = []
     for r in range(rounds):
@@ -371,24 +388,34 @@ def evolve(
         base_v = snap.version.get(artifact_id, 0)
         assert_mutable(artifact)
 
-        for w in range(n_workers):
-            task = train[(r * n_workers + w) % len(train)]
-            output = run(artifact.render(), task)
-            score = reward(task, output)
-            if score >= 0.999:
-                continue
-            proposal = propose(artifact.render(), task, output, score)
-            if not proposal:
-                continue
-            diff = strategy.to_diff(artifact.state, proposal, f"w{w}", base_v, artifact_id)
-            if diff is None:
-                continue
-            after = reward(task, run(artifact.apply(diff).render(), task))
-            aggregator.ingest(EvidenceCard(
-                diff=diff, base_version={artifact_id: base_v}, touched=[artifact_id],
-                before_after_delta=after - score, trajectory_refs=[task]))
+        try:
+            # the parallel strategy assigns this round's tasks to workers.
+            for unit in parallel.plan(n_workers, r, train_ids):
+                if not unit.keys:
+                    continue
+                task = by_id[unit.keys[r % len(unit.keys)]]  # a task from this worker's shard
+                w = unit.worker
+                output = run(artifact.render(), task)
+                score = reward(task, output)
+                if score >= 0.999:
+                    continue
+                proposal = propose(artifact.render(), task, output, score)
+                if not proposal:
+                    continue
+                diff = strategy.to_diff(artifact.state, proposal, f"w{w}", base_v, artifact_id)
+                if diff is None:
+                    continue
+                after = reward(task, run(artifact.apply(diff).render(), task))
+                aggregator.ingest(EvidenceCard(
+                    diff=diff, base_version={artifact_id: base_v}, touched=[artifact_id],
+                    before_after_delta=after - score, trajectory_refs=[task]))
 
-        reports = aggregator.step()
+            reports = aggregator.step()
+        except Exception as e:  # noqa: BLE001 - a rollout backend failure (e.g. an
+            # API/credit error) shouldn't lose the run: stop and return partial results.
+            if verbose:
+                print(f"round {r:>3}  stopped early: {type(e).__name__}: {str(e)[:120]}")
+            break
         committed = sum(1 for x in reports if x.committed_version is not None)
         rejected = sum(1 for x in reports if x.committed_version is None)
         dev = ledger.snapshot(Ledger.DEV).get(artifact_id)

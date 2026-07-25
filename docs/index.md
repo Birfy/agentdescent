@@ -46,10 +46,10 @@ The one place the analogy *must* break defines the whole system:
     The general engine — evolve *any* artifact (skill, harness, verifier) by
     writing its `Strategy` + `run`/`reward`/`propose`.
 
--   :material-robot: **[Example: skill](skill-evolution.md)** · **[harness](harness-evolution.md)**
+-   :material-robot: **[Example: skill evolution](skill-evolution.md)**
 
-    A skill evolved on a real dataset with a real LLM, and a harness (L1)
-    evolved with plain functions.
+    One complete run — real dataset, real LLM, every module — evolving a skill
+    that lifts held-out accuracy.
 
 -   :material-connection: **[Connecting agents & LLMs](agents.md)**
 
@@ -68,10 +68,6 @@ The one place the analogy *must* break defines the whole system:
 
     Estimate rollout cost from task size, then dispatch (LPT) and checkpoint
     stragglers on that estimate.
-
--   :material-file-document: **[Design spec](concordia_design.md)**
-
-    The original research design document (v0.2).
 
 </div>
 

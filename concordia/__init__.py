@@ -42,7 +42,14 @@ from .staleness import (
 )
 from .worker import Worker
 from .orchestrator import Concordia, RoundStat, run_fork_baseline
-from .agents import Completion, claude, echo, from_callable, with_retries
+from .agents import (
+    Completion,
+    claude,
+    echo,
+    from_callable,
+    openai_compatible,
+    with_retries,
+)
 from .evolution import (
     Agent,
     LLMAgent,
@@ -134,6 +141,7 @@ __all__ = [
     "claude",
     "echo",
     "from_callable",
+    "openai_compatible",
     "with_retries",
     "Agent",
     "LLMAgent",

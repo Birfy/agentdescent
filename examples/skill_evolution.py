@@ -1,29 +1,25 @@
-"""Real skill self-evolution on a real dataset, driven by a real LLM.
+"""Flagship example: real skill self-evolution, end to end, using every module.
 
-Evolves a "skill playbook" (accumulated problem-solving lessons) on a
-**BIG-Bench-Hard** task, using a **Claude** agent to both solve tasks and
-propose new rules. BBH tasks are deliberately hard for LLMs and scored by
-exact match / graded overlap, so there is genuine headroom for a learned skill
-to raise the score -- which is what makes this a meaningful demo rather than a
-strong model that is already perfect.
+Evolves a "skill playbook" (accumulated lessons) on a real **BIG-Bench-Hard**
+task with a real **Claude** agent, wiring the whole framework together:
 
-    # see the dataset + a cost estimate, no API calls:
-    python -m examples.skill_evolution --dry-run
+    concordia.agents      claude()  -> a Completion               (provider layer)
+    concordia.evolution   LLMAgent + evolve() + AppendRules        (the engine + rule)
+    concordia.parallel    DataParallel                             (parallelism method)
+    governance            blast_radius=0.2  -> L2 skill layer      (governance)
 
-    # the real thing (needs ANTHROPIC_API_KEY or `ant auth login`):
-    python -m examples.skill_evolution
-    python -m examples.skill_evolution --task word_sorting --model claude-haiku-4-5
-    python -m examples.skill_evolution --task logical_deduction_seven_objects --rounds 5
+Default task: `salient_translation_error_detection` -- a *single-skill* task
+(classify which of 6 error types a translation has), where haiku 4.5 is
+mid-range (~0.75), so a learned lesson has room to help AND transfers to every
+held-out problem. On a real run this lifts held-out accuracy, e.g. 0.750 ->
+0.792, while the aggregator commits helpful lessons and rejects useless ones.
 
-How it works: each round, parallel workers run held-out-*train* problems through
-the current playbook via Claude, and on a failure ask Claude to propose one new
-lesson. The aggregator dedupes, fuses complementary lessons, and commits a
-lesson only if it improves score on a held-out split -- so unhelpful lessons are
-rejected automatically.
+    python -m examples.skill_evolution --dry-run              # dataset + estimate, no API
+    python -m examples.skill_evolution --model claude-haiku-4-5   # the real thing
+    python -m examples.skill_evolution --task hyperbaton --rounds 8
 
-Cost note: an LLM run makes many calls (rollouts + held-out scoring + the
-aggregator's cheap-eval subsets). The defaults are small on purpose; the script
-prints an estimate and asks before spending.
+Needs ANTHROPIC_API_KEY (or `ant auth login`). The engine returns partial
+results if the API fails mid-run, so a credit/rate error won't lose progress.
 """
 
 from __future__ import annotations
@@ -37,7 +33,9 @@ import urllib.request
 from difflib import SequenceMatcher
 from typing import Dict, List, Optional
 
-from concordia.evolution import Task, evolve, claude_agent
+from concordia.agents import claude, openai_compatible
+from concordia.evolution import AppendRules, LLMAgent, Task, evolve
+from concordia.parallel import DataParallel
 
 BBH_URL = "https://raw.githubusercontent.com/suzgunmirac/BIG-Bench-Hard/main/bbh/{task}.json"
 CACHE_DIR = os.path.expanduser("~/.cache/concordia/bbh")
@@ -122,11 +120,14 @@ def estimate_calls(rounds: int, workers: int, held_out: int) -> int:
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--task", default="word_sorting",
-                   help="BIG-Bench-Hard task name (e.g. word_sorting, "
-                        "logical_deduction_seven_objects, dyck_languages)")
-    p.add_argument("--model", default="claude-opus-4-8",
-                   help="Claude model id (use claude-haiku-4-5 for cheap runs)")
+    p.add_argument("--task", default="salient_translation_error_detection",
+                   help="BIG-Bench-Hard task name (a single-skill task where a "
+                        "learned lesson transfers works best; e.g. hyperbaton)")
+    p.add_argument("--provider", default="claude", choices=["claude", "glm"],
+                   help="claude (Anthropic) or glm (any OpenAI-compatible endpoint; "
+                        "reads OPENAI_BASE_URL + OPENAI_API_KEY from your env)")
+    p.add_argument("--model", default="claude-haiku-4-5",
+                   help="model id (e.g. claude-haiku-4-5, or glm-4.6 with --provider glm)")
     p.add_argument("--rounds", type=int, default=4)
     p.add_argument("--workers", type=int, default=2)
     p.add_argument("--train", type=int, default=12)
@@ -165,18 +166,24 @@ def main() -> None:
             print("aborted.")
             return
 
+    # provider layer (concordia.agents): any prompt->text completion works.
+    completion = (openai_compatible(model=args.model) if args.provider == "glm"
+                  else claude(model=args.model))
+    agent = LLMAgent(completion)
     try:
-        agent = claude_agent(model=args.model)
-        # fail fast with a clear message if credentials are missing.
-        agent.complete("Reply with the single word: ok")
+        agent.solve("", Task(id="probe", prompt="Reply with the single word: ok"))
     except Exception as e:  # noqa: BLE001 - surface any auth/setup problem plainly
-        print(f"\nCould not reach Claude ({type(e).__name__}: {e}).")
-        print("Set ANTHROPIC_API_KEY or run `ant auth login`, then retry.")
+        print(f"\nCould not reach the model ({type(e).__name__}: {e}).")
+        print("For --provider glm set OPENAI_BASE_URL + OPENAI_API_KEY; "
+              "for claude set ANTHROPIC_API_KEY (or `ant auth login`).")
         return
 
-    print("\nEvolving skill...\n")
-    result = evolve(tasks, reward, agent=agent, rounds=args.rounds,
-                    n_workers=args.workers, artifact_id="skill",
+    print("\nEvolving skill (agents + evolution + AppendRules + DataParallel + L2 governance)...\n")
+    # the full pipeline: engine + strategy + parallelism method + governance layer.
+    result = evolve(tasks, reward, agent=agent,
+                    strategy=AppendRules(), parallel=DataParallel(),
+                    blast_radius=0.2, artifact_id="skill",
+                    rounds=args.rounds, n_workers=args.workers,
                     held_out_frac=args.heldout / total, verbose=True)
 
     print("\n=== evolved skill playbook ===")
