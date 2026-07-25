@@ -290,6 +290,85 @@ class EvolutionResult:
     ledger_log: List[str]
 
 
+@dataclass
+class _Engine:
+    """Everything the sync and async drivers share: a ledger + runtime + verifier
+    + aggregator, plus the resolved actor and the train/held-out split."""
+
+    ledger: Ledger
+    runtime: _Runtime
+    verifier: Any
+    aggregator: Any
+    strategy: Strategy
+    run: Run
+    reward: Reward
+    propose: Propose
+    train: List[Task]
+    held_out: List[Task]
+    by_id: Dict[str, Task]
+    train_ids: List[str]
+    artifact_id: str
+    blast_radius: float
+
+
+def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state,
+                  blast_radius, artifact_id, held_out_frac, repo_path, agg_config,
+                  staleness_policy, aggregator_factory, oracle_budget) -> _Engine:
+    """Wire the ledger, runtime, verifier and aggregator (shared by
+    :func:`evolve` and :func:`~concordia.async_evolve.async_evolve`)."""
+    import tempfile
+    from .verifier import ThreeLayerVerifier, VerifierBudget
+
+    if agent is not None:
+        run = run or agent.solve
+        propose = propose or agent.propose
+    if run is None or propose is None:
+        raise ValueError("provide agent=, or both run= and propose=")
+
+    strategy = strategy or AppendRules()
+    tasks = list(tasks)
+    if len(tasks) < 4:
+        raise ValueError("need at least 4 tasks to split train/held-out")
+    cut = max(1, int(len(tasks) * (1 - held_out_frac)))
+    train, held_out = tasks[:cut], tasks[cut:]
+    if not held_out:
+        train, held_out = tasks[:-1], tasks[-1:]
+
+    runtime = _Runtime(run=run, reward=reward, cache=_EvalCache())
+
+    def serialize(a: EvolvingArtifact) -> dict:
+        return {"state": a.state, "blast_radius": a.blast_radius}
+
+    def deserialize(aid: str, version: int, state: dict) -> EvolvingArtifact:
+        return EvolvingArtifact(aid, state.get("state", {}), version,
+                                state.get("blast_radius", blast_radius), runtime, strategy)
+
+    repo = repo_path or tempfile.mkdtemp(prefix="concordia-evolve-")
+    ledger = Ledger(repo, serialize, deserialize)
+    ledger.register(EvolvingArtifact(artifact_id, initial_state or strategy.initial(),
+                                     blast_radius=blast_radius, runtime=runtime,
+                                     strategy=strategy))
+
+    # The eval_fn here IS ground truth (deterministic, memoized), so the cheap
+    # layers must NOT add noise or sub-sample (see the note in the original).
+    verifier = ThreeLayerVerifier(
+        eval_fn=lambda a, ts: a.score(ts), held_out=held_out,
+        rule_subset=len(held_out), learned_noise=0.0,
+        budget=VerifierBudget(oracle_calls_remaining=oracle_budget))
+
+    def _default_aggregator(ledger, verifier, audit, config, policy):
+        return Aggregator(ledger, verifier, audit, config, staleness_policy=policy)
+
+    aggregator = (aggregator_factory or _default_aggregator)(
+        ledger, verifier, AuditScheduler(),
+        agg_config or AggregatorConfig(batch_trigger=2, max_wait_rounds=1),
+        staleness_policy)
+
+    return _Engine(ledger, runtime, verifier, aggregator, strategy, run, reward,
+                   propose, train, held_out, {t.id: t for t in train},
+                   [t.id for t in train], artifact_id, blast_radius)
+
+
 def evolve(
     tasks: Sequence[Task],
     reward: Reward,
@@ -305,6 +384,9 @@ def evolve(
     rounds: int = 15,
     n_workers: int = 4,
     max_concurrency: int = 1,
+    asynchronous: bool = False,
+    async_ratio: int = 3,
+    max_seconds: float = 20.0,
     held_out_frac: float = 0.4,
     repo_path: Optional[str] = None,
     agg_config: Optional[AggregatorConfig] = None,
@@ -342,64 +424,31 @@ def evolve(
     CAS and per-diff staleness already are). For the *barrier-free* async pipeline
     (``async_ratio`` lag budget, staleness policies overlapping the aggregator),
     see :class:`~concordia.async_runtime.AsyncConcordia`."""
-    import tempfile
     from concurrent.futures import ThreadPoolExecutor
     from .parallel import DataParallel
 
-    if agent is not None:
-        run = run or agent.solve
-        propose = propose or agent.propose
-    if run is None or propose is None:
-        raise ValueError("provide agent=, or both run= and propose=")
+    if asynchronous:
+        # barrier-free mode: hand the same plug-ins to the async runtime. `rounds`
+        # becomes a worker-rollout budget (rounds x n_workers) alongside max_seconds.
+        from .async_evolve import async_evolve
+        return async_evolve(
+            tasks, reward, agent=agent, run=run, propose=propose, strategy=strategy,
+            initial_state=initial_state, blast_radius=blast_radius, artifact_id=artifact_id,
+            n_workers=n_workers, async_ratio=async_ratio, max_seconds=max_seconds,
+            max_iters=rounds * max(1, n_workers), held_out_frac=held_out_frac,
+            repo_path=repo_path, agg_config=agg_config, staleness_policy=staleness_policy,
+            aggregator_factory=aggregator_factory, oracle_budget=oracle_budget, verbose=verbose)
 
-    strategy = strategy or AppendRules()
     parallel = parallel or DataParallel()
-    tasks = list(tasks)
-    if len(tasks) < 4:
-        raise ValueError("need at least 4 tasks to split train/held-out")
-    cut = max(1, int(len(tasks) * (1 - held_out_frac)))
-    train, held_out = tasks[:cut], tasks[cut:]
-    if not held_out:
-        train, held_out = tasks[:-1], tasks[-1:]
-
-    runtime = _Runtime(run=run, reward=reward, cache=_EvalCache())
-
-    def serialize(a: EvolvingArtifact) -> dict:
-        return {"state": a.state, "blast_radius": a.blast_radius}
-
-    def deserialize(aid: str, version: int, state: dict) -> EvolvingArtifact:
-        return EvolvingArtifact(aid, state.get("state", {}), version,
-                                state.get("blast_radius", blast_radius), runtime, strategy)
-
-    repo = repo_path or tempfile.mkdtemp(prefix="concordia-evolve-")
-    ledger = Ledger(repo, serialize, deserialize)
-    ledger.register(EvolvingArtifact(artifact_id, initial_state or strategy.initial(),
-                                     blast_radius=blast_radius, runtime=runtime,
-                                     strategy=strategy))
-
-    from .verifier import ThreeLayerVerifier, VerifierBudget
-    # The eval_fn here IS ground truth (deterministic, memoized), so the cheap
-    # layers must NOT add noise or sub-sample: otherwise the tournament and the
-    # commit veto would compare candidates on a corrupted signal and reject
-    # genuine small improvements (noise > signal on hard tasks). Noise-free +
-    # full held-out makes cheap_eval == the exact held-out mean, and it's ~free
-    # because the same (skill, task) evaluations are already cached.
-    verifier = ThreeLayerVerifier(
-        eval_fn=lambda a, ts: a.score(ts), held_out=held_out,
-        rule_subset=len(held_out), learned_noise=0.0,
-        budget=VerifierBudget(oracle_calls_remaining=oracle_budget))
-    # the aggregator (the optimizer) is pluggable: pass aggregator_factory to
-    # swap in your own merge/acceptance logic (see AggregatorProtocol).
-    def _default_aggregator(ledger, verifier, audit, config, policy):
-        return Aggregator(ledger, verifier, audit, config, staleness_policy=policy)
-
-    aggregator = (aggregator_factory or _default_aggregator)(
-        ledger, verifier, AuditScheduler(),
-        agg_config or AggregatorConfig(batch_trigger=2, max_wait_rounds=1),
-        staleness_policy)
-
-    train_ids = [t.id for t in train]
-    by_id = {t.id: t for t in train}
+    eng = _build_engine(
+        tasks, reward, agent=agent, run=run, propose=propose, strategy=strategy,
+        initial_state=initial_state, blast_radius=blast_radius, artifact_id=artifact_id,
+        held_out_frac=held_out_frac, repo_path=repo_path, agg_config=agg_config,
+        staleness_policy=staleness_policy, aggregator_factory=aggregator_factory,
+        oracle_budget=oracle_budget)
+    ledger, aggregator, strategy = eng.ledger, eng.aggregator, eng.strategy
+    run, propose, reward = eng.run, eng.propose, eng.reward
+    held_out, by_id, train_ids = eng.held_out, eng.by_id, eng.train_ids
 
     history: List[RoundInfo] = []
     for r in range(rounds):

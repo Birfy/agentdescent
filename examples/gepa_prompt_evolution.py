@@ -366,6 +366,10 @@ def main() -> None:
     p.add_argument("--workers", type=int, default=3)
     p.add_argument("--fetch", type=int, default=48, help="HotpotQA rows to fetch")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--async", dest="asynchronous", action="store_true",
+                   help="run barrier-free (async_evolve): workers never wait for the merge")
+    p.add_argument("--async-ratio", type=int, default=3, help="staleness lag budget")
+    p.add_argument("--max-seconds", type=float, default=45.0, help="async wall-clock budget")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--yes", action="store_true")
     args = p.parse_args()
@@ -383,8 +387,12 @@ def main() -> None:
 
     est = estimate_calls(args.rounds, args.workers, nva) + nte
     print(f"\nPlan     : model={args.model}, rounds={args.rounds}, workers={args.workers}")
-    print(f"Parallel : {args.workers} workers run concurrently each round "
-          f"(synchronous DP; the aggregator merge is the barrier)")
+    if args.asynchronous:
+        print(f"Async    : {args.workers} workers, barrier-free (async_ratio={args.async_ratio}, "
+              f"max {args.max_seconds:.0f}s); staleness policy rebases/discards stale diffs")
+    else:
+        print(f"Parallel : {args.workers} workers run concurrently each round "
+              f"(synchronous DP; the aggregator merge is the barrier)")
     print(f"Budget   : up to ~{est} model calls (cached repeats are free)")
 
     if args.dry_run:
@@ -414,7 +422,9 @@ def main() -> None:
            strategy=InstructionSlot(), initial_state={"instruction": _SEED_INSTRUCTION},
            blast_radius=0.2, artifact_id="gepa_prompt",
            rounds=args.rounds, n_workers=args.workers, max_concurrency=args.workers,
-           held_out_frac=ds.val_frac, aggregator_factory=factory, verbose=True)
+           asynchronous=args.asynchronous, async_ratio=args.async_ratio,
+           max_seconds=args.max_seconds, held_out_frac=ds.val_frac,
+           aggregator_factory=factory, verbose=True)
 
     agg: ParetoAggregator = factory.holder["agg"]  # type: ignore[attr-defined]
     best = agg.best_state.get("instruction", _SEED_INSTRUCTION)

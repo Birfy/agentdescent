@@ -537,8 +537,9 @@ class SearchResult:
 
 
 def run_meta_agent_search(complete: Completion, val: List[Tuple[str, str]],
-                          generations: int, select: str = "adas",
-                          seed: int = 0, verbose: bool = False) -> SearchResult:
+                          generations: int, select: str = "adas", seed: int = 0,
+                          asynchronous: bool = False, async_ratio: int = 3,
+                          max_seconds: float = 45.0, verbose: bool = False) -> SearchResult:
     """Drive Meta Agent Search through `evolve()` (val split into trigger/held-out)."""
     tasks = [Task(id=f"mgsm{i}", prompt=q, meta={"answer": a})
              for i, (q, a) in enumerate(val)]
@@ -561,8 +562,9 @@ def run_meta_agent_search(complete: Completion, val: List[Tuple[str, str]],
 
     evolve(tasks, reward, run=run, propose=make_propose(ctx, complete),
            strategy=AgentDesignStrategy(), blast_radius=0.6, artifact_id="agentic_system",
-           rounds=generations, n_workers=2, max_concurrency=2, held_out_frac=0.5,
-           aggregator_factory=factory, verbose=verbose)
+           rounds=generations, n_workers=2, max_concurrency=2,
+           asynchronous=asynchronous, async_ratio=async_ratio, max_seconds=max_seconds,
+           held_out_frac=0.5, aggregator_factory=factory, verbose=verbose)
     return SearchResult(ctx.archive, ctx.best_agent or {}, ctx.seed_fitness, ctx.best_fitness)
 
 
@@ -582,6 +584,10 @@ def main() -> None:
     p.add_argument("--select", default="adas", choices=["adas", "dgm"],
                    help="archive conditioning: adas (whole archive) or dgm (sampled)")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--async", dest="asynchronous", action="store_true",
+                   help="run barrier-free (async_evolve)")
+    p.add_argument("--async-ratio", type=int, default=3, help="staleness lag budget")
+    p.add_argument("--max-seconds", type=float, default=60.0, help="async wall-clock budget")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--yes", action="store_true")
     args = p.parse_args()
@@ -602,8 +608,12 @@ def main() -> None:
 
     calls = args.generations * 3 + (len(seed_archive()) + args.generations) * (nva + nte) * 3
     print(f"\nPlan     : model={args.model}, generations={args.generations}, select={args.select}")
-    print("Parallel : 2 meta-agents propose concurrently each generation "
-          "(synchronous DP; the archive merge is the barrier)")
+    if args.asynchronous:
+        print(f"Async    : 2 meta-agents, barrier-free (async_ratio={args.async_ratio}, "
+              f"max {args.max_seconds:.0f}s); the archive rebases/discards stale designs")
+    else:
+        print("Parallel : 2 meta-agents propose concurrently each generation "
+              "(synchronous DP; the archive merge is the barrier)")
     print(f"Budget   : up to ~{calls} model calls (multi-step agents call the model many times)")
 
     if args.dry_run:
@@ -627,7 +637,9 @@ def main() -> None:
 
     print("\nSearching agentic systems (Meta Agent Search, L1 harness)...\n")
     result = run_meta_agent_search(completion, ds.trainval, args.generations,
-                                   select=args.select, seed=args.seed, verbose=True)
+                                   select=args.select, seed=args.seed,
+                                   asynchronous=args.asynchronous, async_ratio=args.async_ratio,
+                                   max_seconds=args.max_seconds, verbose=True)
 
     test_acc = evaluate(completion, result.best.get("program", {}), ds.test)
     print("\n=== best discovered agentic system ===")

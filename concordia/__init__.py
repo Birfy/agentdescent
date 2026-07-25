@@ -71,6 +71,7 @@ from .evolution import (
     claude_agent,
     rule_id,
 )
+from .async_evolve import async_evolve
 from .async_runtime import AsyncConcordia, AsyncConfig, AsyncStats
 from .parallel import (
     ParallelMode,
@@ -162,6 +163,7 @@ __all__ = [
     "EvolutionResult",
     "RoundInfo",
     "evolve",
+    "async_evolve",
     "claude_agent",
     "rule_id",
 ]

@@ -442,7 +442,8 @@ class EvoResult:
 
 def run_evoskill(complete: Completion, docs: Dict[str, str],
                  train: List[dict], val: List[dict], iterations: int = 6,
-                 max_frontier: int = 3, seed: int = 0,
+                 max_frontier: int = 3, seed: int = 0, asynchronous: bool = False,
+                 async_ratio: int = 3, max_seconds: float = 30.0,
                  verbose: bool = False) -> EvoResult:
     """Drive EvoSkill through `evolve()` (`val` is the held-out frontier metric)."""
     def to_task(i, it):
@@ -466,6 +467,7 @@ def run_evoskill(complete: Completion, docs: Dict[str, str],
                     strategy=SkillLibraryStrategy(), blast_radius=0.2,
                     artifact_id="skill_library", rounds=iterations,
                     n_workers=workers, max_concurrency=workers,
+                    asynchronous=asynchronous, async_ratio=async_ratio, max_seconds=max_seconds,
                     held_out_frac=len(val) / max(1, len(tasks)),
                     aggregator_factory=factory, verbose=verbose)
     return EvoResult(dict(result.state), ctx.seed_score, ctx.best_score, iterations)
@@ -509,6 +511,10 @@ def main() -> None:
     p.add_argument("--iterations", type=int, default=6)
     p.add_argument("--frontier", type=int, default=3)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--async", dest="asynchronous", action="store_true",
+                   help="run barrier-free (async_evolve)")
+    p.add_argument("--async-ratio", type=int, default=3, help="staleness lag budget")
+    p.add_argument("--max-seconds", type=float, default=40.0, help="async wall-clock budget")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--yes", action="store_true")
     args = p.parse_args()
@@ -529,8 +535,12 @@ def main() -> None:
 
     calls = args.iterations * (3 + 2 + nva) + nte
     print(f"\nPlan     : model={args.model}, iterations={args.iterations}, frontier={args.frontier}")
-    print(f"Parallel : {min(3, ntr)} workers run concurrently each round "
-          f"(synchronous DP; the frontier merge is the barrier)")
+    if args.asynchronous:
+        print(f"Async    : {min(3, ntr)} workers, barrier-free (async_ratio={args.async_ratio}, "
+              f"max {args.max_seconds:.0f}s); the frontier rebases/discards stale skills")
+    else:
+        print(f"Parallel : {min(3, ntr)} workers run concurrently each round "
+              f"(synchronous DP; the frontier merge is the barrier)")
     print(f"Budget   : up to ~{calls} model calls")
 
     if args.dry_run:
@@ -552,7 +562,9 @@ def main() -> None:
 
     print("\nDiscovering skills (failure analysis + top-K frontier, L2)...\n")
     result = run_evoskill(completion, docs, ds.train, ds.val, iterations=args.iterations,
-                          max_frontier=args.frontier, seed=args.seed, verbose=True)
+                          max_frontier=args.frontier, seed=args.seed,
+                          asynchronous=args.asynchronous, async_ratio=args.async_ratio,
+                          max_seconds=args.max_seconds, verbose=True)
 
     test_score = evaluate(completion, docs, result.skills, ds.test)
     print("\n=== discovered skill library ===")

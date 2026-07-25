@@ -1,0 +1,190 @@
+"""Barrier-free asynchronous evolution -- the async twin of :func:`evolve`.
+
+:func:`evolve` runs a round barrier: every worker steps, then a single
+``aggregator.step()`` fires, then the next round begins. This module removes the
+barrier while taking the **exact same plug-ins** as :func:`evolve`
+(``run`` / ``reward`` / ``propose`` / ``strategy`` / ``aggregator_factory``), so
+*any* task that runs under :func:`evolve` -- ACE, GEPA, EvoSkill, SkillOpt, ADAS,
+DGM -- also runs here, asynchronously.
+
+Two stages run as independent threads connected by a thread-safe intake buffer
+(stage orchestration, FlashEvolve):
+
+* **Workers** (``n_workers`` threads) hold a ledger snapshot and keep producing
+  evidence cards against it -- rollout -> propose -> ``to_diff`` -> push. A worker
+  refreshes its snapshot only once head has drifted more than ``async_ratio``
+  versions ahead of it (ROLL Flash's *global lag budget*), so staleness (η > 0)
+  genuinely arises: small ratio -> near-synchronous, large ratio -> highly async.
+* **One merger** drains the buffer, runs each card through the active
+  :class:`~concordia.staleness.StalenessPolicy` (ACCEPT η=0 / REBASE+re-verify /
+  DISCARD), feeds the survivors to ``aggregator.ingest`` and calls
+  ``aggregator.step()``. It is the **only** writer to the ledger, so there are no
+  CAS conflicts, and every aggregator sees only rebased (η=0) cards -- which is
+  why the custom optimizers work here unchanged.
+
+The GIL means threads are not CPU-parallel, but the pipeline *overlap* (workers
+producing while the merger merges) and the concurrency-control machinery (buffer
+lock, CAS, per-diff staleness) are real, and the same shape drives a genuinely
+parallel process/host pool. See ``examples/*`` (``--async``) and
+:func:`~concordia.evolution.evolve` (``asynchronous=True``).
+"""
+
+from __future__ import annotations
+
+import threading
+import time
+from typing import Dict, List, Optional
+
+from .evolution import (
+    Agent, EvolutionResult, Propose, Reward, RoundInfo, Run, Strategy, Task,
+    _build_engine,
+)
+from .evolvable import EvidenceCard, vv_staleness
+from .ledger import Ledger
+from .staleness import StaleAction, StalenessPolicy, get_policy
+
+
+def async_evolve(
+    tasks,
+    reward: Reward,
+    *,
+    agent: Optional[Agent] = None,
+    run: Optional[Run] = None,
+    propose: Optional[Propose] = None,
+    strategy: Optional[Strategy] = None,
+    initial_state: Optional[Dict[str, str]] = None,
+    blast_radius: float = 0.2,
+    artifact_id: str = "artifact",
+    n_workers: int = 4,
+    async_ratio: int = 3,
+    max_seconds: float = 20.0,
+    max_iters: Optional[int] = None,
+    target_reward: Optional[float] = None,
+    held_out_frac: float = 0.4,
+    repo_path: Optional[str] = None,
+    agg_config=None,
+    staleness_policy: Optional[StalenessPolicy] = None,
+    aggregator_factory=None,
+    oracle_budget: int = 200,
+    verbose: bool = False,
+) -> EvolutionResult:
+    """Evolve an artifact **without a round barrier**.
+
+    Same actor/strategy/aggregator plug-ins as :func:`~concordia.evolution.evolve`.
+    ``async_ratio`` is the lag budget: a worker keeps proposing against its
+    snapshot until head drifts past it, then refreshes -- so stale diffs (η > 0)
+    arise and the ``staleness_policy`` (default ``guarded``) rebases or discards
+    them. The run stops at ``max_seconds`` (or ``max_iters`` worker rollouts, or
+    when held-out reward reaches ``target_reward``)."""
+    eng = _build_engine(
+        tasks, reward, agent=agent, run=run, propose=propose, strategy=strategy,
+        initial_state=initial_state, blast_radius=blast_radius, artifact_id=artifact_id,
+        held_out_frac=held_out_frac, repo_path=repo_path, agg_config=agg_config,
+        staleness_policy=staleness_policy, aggregator_factory=aggregator_factory,
+        oracle_budget=oracle_budget)
+    policy = staleness_policy or get_policy("guarded")
+    alpha = 5 if eng.blast_radius > 0.5 else 1        # L1 tolerates more staleness
+
+    # data-parallel: shard the train tasks round-robin across workers.
+    shards: List[List[Task]] = [[] for _ in range(n_workers)]
+    for idx, key in enumerate(eng.train_ids):
+        shards[idx % n_workers].append(eng.by_id[key])
+
+    intake: List[EvidenceCard] = []
+    intake_lock = threading.Lock()
+    stop = threading.Event()
+    counter = [0]
+    counter_lock = threading.Lock()
+    history: List[RoundInfo] = []
+
+    def _worker(wid: int, shard: List[Task]) -> None:
+        snap = eng.ledger.snapshot(Ledger.DEV)
+        base_v = snap.version.get(eng.artifact_id, 0)
+        artifact = snap.get(eng.artifact_id)
+        i = 0
+        while not stop.is_set():
+            head_v = eng.ledger.head_version(Ledger.DEV).get(eng.artifact_id, 0)
+            if head_v - base_v > async_ratio:          # lag budget exceeded -> refresh
+                snap = eng.ledger.snapshot(Ledger.DEV)
+                base_v = snap.version.get(eng.artifact_id, 0)
+                artifact = snap.get(eng.artifact_id)
+            task = shard[i % len(shard)]
+            i += 1
+            try:
+                output = eng.run(artifact.render(), task)
+                score = eng.reward(task, output)
+                if score < 0.999:
+                    proposal = eng.propose(artifact.render(), task, output, score)
+                    if proposal:
+                        diff = eng.strategy.to_diff(artifact.state, proposal,
+                                                    f"w{wid}", base_v, eng.artifact_id)
+                        if diff is not None:
+                            after = eng.reward(task, eng.run(artifact.apply(diff).render(), task))
+                            card = EvidenceCard(
+                                diff=diff, base_version={eng.artifact_id: base_v},
+                                touched=[eng.artifact_id], before_after_delta=after - score,
+                                trajectory_refs=[task])
+                            with intake_lock:
+                                intake.append(card)
+            except Exception:  # noqa: BLE001 - a backend failure stops the pipeline
+                stop.set()
+                return
+            with counter_lock:
+                counter[0] += 1
+                if max_iters is not None and counter[0] >= max_iters:
+                    stop.set()
+
+    def _drain_and_merge() -> None:
+        with intake_lock:
+            batch, intake[:] = intake[:], []
+        if not batch:
+            time.sleep(0.005)
+            return
+        head_vv = eng.ledger.head_version(Ledger.DEV)
+        head_art = eng.ledger.snapshot(Ledger.DEV).get(eng.artifact_id)
+        # staleness gate: hand the aggregator only rebased (η=0) cards.
+        for card in batch:
+            eta = vv_staleness(head_vv, card.base_version)
+            action = policy.decide(eta, alpha, card.diff.contract_breaking)
+            if action is StaleAction.ACCEPT:
+                eng.aggregator.ingest(card if eta == 0 else card.rebased_onto(head_vv))
+            elif action is StaleAction.REBASE:
+                cand = head_art.apply(card.diff)         # cheap re-verify on current head
+                if head_art.cheap_eval(card) <= cand.cheap_eval(card):
+                    eng.aggregator.ingest(card.rebased_onto(head_vv))
+            # DISCARD -> drop the card
+        reports = eng.aggregator.step()
+        committed = sum(1 for x in reports if x.committed_version is not None)
+        dev = eng.ledger.snapshot(Ledger.DEV).get(eng.artifact_id)
+        r = dev.score(eng.held_out)
+        history.append(RoundInfo(len(history), r, len(dev.state), committed,
+                                 len(reports) - committed))
+        if verbose:
+            print(f"sweep {len(history):>3}  reward={r:.3f}  merged={len(batch)}  "
+                  f"+{committed}  pending={len(intake)}")
+        if target_reward is not None and r >= target_reward:
+            stop.set()
+
+    def _merger() -> None:
+        while not stop.is_set():
+            _drain_and_merge()
+        _drain_and_merge()               # final drain after stop
+
+    workers = [threading.Thread(target=_worker, args=(w, s), daemon=True)
+               for w, s in enumerate(shards) if s]
+    merger = threading.Thread(target=_merger, daemon=True)
+    t0 = time.time()
+    for t in workers:
+        t.start()
+    merger.start()
+    while time.time() - t0 < max_seconds and not stop.is_set():
+        time.sleep(0.02)
+    stop.set()
+    for t in workers:
+        t.join(timeout=2.0)
+    merger.join(timeout=10.0)
+
+    final = eng.ledger.snapshot(Ledger.DEV).get(eng.artifact_id)
+    return EvolutionResult(state=dict(final.state), rendered=final.render(),
+                           final_reward=final.score(eng.held_out), history=history,
+                           ledger_log=eng.ledger.log(Ledger.DEV, limit=40))

@@ -341,8 +341,9 @@ class DGMResult:
 def run_dgm(instances: List[dict], generations: int = 12,
             selfimprove_size: int = 2, archive_mode: str = "keep_all",
             evaluate_fn: Optional[Callable[[Agent, List[dict]], float]] = None,
-            complete: Optional[Callable[[str], str]] = None,
-            seed: int = 0, verbose: bool = False) -> DGMResult:
+            complete: Optional[Callable[[str], str]] = None, seed: int = 0,
+            asynchronous: bool = False, async_ratio: int = 3, max_seconds: float = 20.0,
+            verbose: bool = False) -> DGMResult:
     """Drive DGM through `evolve()` (SWE instances split into trigger/held-out)."""
     evaluate_fn = evaluate_fn or make_surrogate_evaluator()
     tasks = [Task(id=inst["instance_id"], prompt=inst["instance_id"],
@@ -367,8 +368,9 @@ def run_dgm(instances: List[dict], generations: int = 12,
 
     evolve(tasks, reward, run=run, propose=propose, strategy=HarnessStrategy(),
            blast_radius=0.6, artifact_id="coding_agent", rounds=generations,
-           n_workers=selfimprove_size, max_concurrency=selfimprove_size, held_out_frac=0.5,
-           aggregator_factory=factory, verbose=verbose)
+           n_workers=selfimprove_size, max_concurrency=selfimprove_size,
+           asynchronous=asynchronous, async_ratio=async_ratio, max_seconds=max_seconds,
+           held_out_frac=0.5, aggregator_factory=factory, verbose=verbose)
     best = max(ctx.archive, key=lambda a: a.score)
     return DGMResult(ctx.archive, best, ctx.seed_score, best.score)
 
@@ -404,6 +406,10 @@ def main() -> None:
     p.add_argument("--model", default=None,
                    help="optional: let an LLM propose self-modifications (else deterministic)")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--async", dest="asynchronous", action="store_true",
+                   help="run barrier-free (async_evolve)")
+    p.add_argument("--async-ratio", type=int, default=3, help="staleness lag budget")
+    p.add_argument("--max-seconds", type=float, default=15.0, help="async wall-clock budget")
     p.add_argument("--dry-run", action="store_true", help="load dataset + show plan only")
     args = p.parse_args()
 
@@ -417,8 +423,12 @@ def main() -> None:
     print(f"Loaded   : {len(ds)} SWE-bench Verified instances; "
           f"{ntr} train / {nva} val (staged eval) / {nte} test")
     print(f"Example  : {ds.train[0]['instance_id']} ({ds.train[0]['repo']})")
-    print(f"Parallel : {args.selfimprove_size} agents self-modify concurrently each "
-          "generation (synchronous DP; the archive merge is the barrier)")
+    if args.asynchronous:
+        print(f"Async    : {args.selfimprove_size} agents, barrier-free (async_ratio="
+              f"{args.async_ratio}, max {args.max_seconds:.0f}s); archive rebases/discards stale")
+    else:
+        print(f"Parallel : {args.selfimprove_size} agents self-modify concurrently each "
+              "generation (synchronous DP; the archive merge is the barrier)")
     print("\nObjective: SURROGATE (capability-cover) -- real DGM runs SWE-bench in "
           "Docker.\n           The archive + selection + staged escalation are faithful.")
 
@@ -440,7 +450,8 @@ def main() -> None:
           f"L1 harness)...\n")
     result = run_dgm(ds.trainval, generations=args.generations,
                      selfimprove_size=args.selfimprove_size, archive_mode=args.archive,
-                     complete=complete, seed=args.seed, verbose=True)
+                     complete=complete, seed=args.seed, asynchronous=args.asynchronous,
+                     async_ratio=args.async_ratio, max_seconds=args.max_seconds, verbose=True)
 
     test_score = make_surrogate_evaluator()(result.best, ds.test)
     print("\n=== best self-improved agent ===")

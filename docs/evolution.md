@@ -42,6 +42,7 @@ That's the minimum. Everything below is optional and swappable.
 | `staleness_policy=` | staleness (`get_policy(...)`) | how stale diffs are handled | `guarded` |
 | `rounds=`, `n_workers=` | driver | loop size, parallel worker count | `15`, `4` |
 | `max_concurrency=` | driver | run a round's workers **concurrently** (thread pool); aggregator = barrier (synchronous DP) | `1` (sequential) |
+| `asynchronous=`, `async_ratio=` | [`async_evolve`](#the-barrier-free-runtime-async_evolve) | **barrier-free** async: workers never wait for the merge; lag budget | `False`, `3` |
 | `blast_radius`, `oracle_budget` | governance + verifier | audit budget for L1 merges | `0.2`, `200` |
 
 The building blocks in detail:
@@ -279,14 +280,47 @@ so it shows up at two levels:
 evolve(tasks, reward, agent=agent, n_workers=4, max_concurrency=4)   # 4 workers overlap
 ```
 
-* **Across rounds — the async runtime.** Removing the round barrier entirely is
-  the job of `AsyncConcordia`, below.
+* **Across rounds — `asynchronous=True` (barrier-free).** Removing the round
+  barrier entirely is [`async_evolve()`](#the-barrier-free-runtime-async_evolve),
+  reachable as `evolve(asynchronous=True, async_ratio=…)`. It takes the **same**
+  plug-ins, so every example runs async with a `--async` flag.
 
-## The other execution mode: the async runtime
+```python
+evolve(tasks, reward, agent=agent, asynchronous=True, async_ratio=3, max_seconds=30)
+```
+
+## The barrier-free runtime: `async_evolve()`
 
 `evolve()`'s round barrier means the aggregator waits for all workers each round.
-For a **barrier-free** pipeline where workers never wait for each other — and
-where the staleness policies,
+[`async_evolve()`](https://github.com/Birfy/concordia/blob/main/concordia/async_evolve.py)
+removes it while accepting the identical `run`/`reward`/`propose`/`strategy`/
+`aggregator_factory` plug-ins — so **any** task that runs under `evolve()` (ACE,
+GEPA, EvoSkill, SkillOpt, ADAS, DGM) also runs async:
+
+* **Workers** (`n_workers` threads) hold a snapshot and keep producing evidence
+  against it, refreshing only once head drifts past **`async_ratio`** (the lag
+  budget) — so staleness (η > 0) genuinely arises.
+* **One merger** drains a thread-safe buffer, runs each card through the
+  **staleness policy** (`accept η=0` / `rebase`+re-verify / `discard`), then
+  `ingest` + `step`. It is the only writer, so there are no CAS conflicts and
+  every custom optimizer sees only rebased cards — async-safe unchanged.
+
+```python
+from concordia import async_evolve
+result = async_evolve(tasks, reward, agent=agent,
+                      n_workers=4, async_ratio=3, max_seconds=30,   # or max_iters / target_reward
+                      staleness_policy=get_policy("reflective"))
+```
+
+Reach it via `evolve(asynchronous=True)` or directly. Small `async_ratio` →
+near-synchronous, few stale diffs; large → highly asynchronous, many stale diffs
+the policy must rebase or discard.
+
+### The reference async orchestrator: `AsyncConcordia`
+
+For the router reference domain there is also `AsyncConcordia` — the original
+stage-orchestration runtime with duration-aware straggler checkpointing, where
+the staleness policies,
 [`async_ratio`](concepts.md#34-async_ratio-roll-flash-the-global-lag-budget), and
 [duration-aware straggler checkpointing](duration-scheduling.md) come into their
 own — use `AsyncConcordia` (same aggregator, staleness, and governance

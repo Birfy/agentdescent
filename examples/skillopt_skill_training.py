@@ -396,7 +396,8 @@ class SkillOptResult:
 
 def run_skillopt(complete: Completion, train: List[dict], val: List[dict],
                  steps: int = 8, lr: int = 4, minibatch: int = 4,
-                 lr_mode: str = "cosine", seed: int = 0,
+                 lr_mode: str = "cosine", seed: int = 0, asynchronous: bool = False,
+                 async_ratio: int = 3, max_seconds: float = 30.0,
                  verbose: bool = False) -> SkillOptResult:
     """Drive SkillOpt through `evolve()` (`val` becomes the held-out gate set)."""
     def to_task(i, ex):
@@ -423,6 +424,7 @@ def run_skillopt(complete: Completion, train: List[dict], val: List[dict],
                     strategy=SkillDocStrategy(ctx), initial_state={"skill": SEED_SKILL},
                     blast_radius=0.2, artifact_id="skill_document", rounds=steps,
                     n_workers=minibatch, max_concurrency=minibatch,
+                    asynchronous=asynchronous, async_ratio=async_ratio, max_seconds=max_seconds,
                     held_out_frac=len(val) / max(1, len(tasks)),
                     aggregator_factory=factory, verbose=verbose)
     return SkillOptResult(result.rendered, ctx.seed_em, ctx.best_em,
@@ -470,6 +472,10 @@ def main() -> None:
     p.add_argument("--train", type=int, default=40)
     p.add_argument("--val", type=int, default=20)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--async", dest="asynchronous", action="store_true",
+                   help="run barrier-free (async_evolve)")
+    p.add_argument("--async-ratio", type=int, default=3, help="staleness lag budget")
+    p.add_argument("--max-seconds", type=float, default=40.0, help="async wall-clock budget")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--yes", action="store_true")
     args = p.parse_args()
@@ -489,8 +495,12 @@ def main() -> None:
 
     calls = args.steps * (args.minibatch + 1 + nva) + nte
     print(f"\nPlan     : model={args.model}, steps={args.steps}, lr={args.lr} ({args.lr_mode})")
-    print(f"Parallel : {args.minibatch} workers run concurrently each step "
-          f"(synchronous DP; the strict-gate merge is the barrier)")
+    if args.asynchronous:
+        print(f"Async    : {args.minibatch} workers, barrier-free (async_ratio={args.async_ratio}, "
+              f"max {args.max_seconds:.0f}s); the strict gate rebases/discards stale edits")
+    else:
+        print(f"Parallel : {args.minibatch} workers run concurrently each step "
+              f"(synchronous DP; the strict-gate merge is the barrier)")
     print(f"Budget   : up to ~{calls} model calls (rollouts dominate)")
 
     if args.dry_run:
@@ -514,8 +524,9 @@ def main() -> None:
 
     print("\nTraining skill document (ReflACT: edits + strict gate + LR + buffer, L2)...\n")
     result = run_skillopt(completion, ds.train, ds.val, steps=args.steps, lr=args.lr,
-                          minibatch=args.minibatch, lr_mode=args.lr_mode,
-                          seed=args.seed, verbose=True)
+                          minibatch=args.minibatch, lr_mode=args.lr_mode, seed=args.seed,
+                          asynchronous=args.asynchronous, async_ratio=args.async_ratio,
+                          max_seconds=args.max_seconds, verbose=True)
 
     test_em = eval_hard_em(Rollout(completion), result.skill, ds.test)
     print("\n=== trained skill document ===")

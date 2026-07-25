@@ -19,11 +19,19 @@ just a custom `strategy=` (how a proposal becomes a `Diff`) and/or a custom
 the engine; they differ only in those two plug-ins and the blast radius. Each has
 a dedicated page:
 
-**All six are parallel.** Each passes `max_concurrency=n_workers`, so a round's
-workers run **concurrently** (overlapping LLM rollouts) and the aggregator merge
-is the barrier — the framework's *synchronous data-parallelism*. Their custom
-optimizers keep shared state thread-safe. The barrier-free async pipeline is
-[`AsyncConcordia`](evolution.md#the-other-execution-mode-the-async-runtime).
+**All six are parallel — and can run async.** Each passes `max_concurrency=n_workers`,
+so a round's workers run **concurrently** (overlapping LLM rollouts) with the
+aggregator merge as the barrier (*synchronous data-parallelism*). Add **`--async`**
+and the same example runs **barrier-free** through
+[`async_evolve()`](evolution.md#the-barrier-free-runtime-async_evolve) — workers
+never wait for the merge, and the staleness policy rebases/discards stale diffs.
+Their custom optimizers keep shared state thread-safe, so both modes work
+unchanged.
+
+```bash
+python -m examples.ace_context_evolution --model claude-haiku-4-5           # synchronous DP
+python -m examples.ace_context_evolution --model claude-haiku-4-5 --async   # barrier-free
+```
 
 | Algorithm | Kind | Dataset (faithful) | `evolve()` plug-ins | Page |
 |---|---|---|---|---|

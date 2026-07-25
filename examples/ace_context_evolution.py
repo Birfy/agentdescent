@@ -289,6 +289,10 @@ def main() -> None:
     p.add_argument("--pool", type=int, default=800,
                    help="FiNER validation rows to scan for single-entity sentences")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--async", dest="asynchronous", action="store_true",
+                   help="run barrier-free (async_evolve): workers never wait for the merge")
+    p.add_argument("--async-ratio", type=int, default=3, help="staleness lag budget")
+    p.add_argument("--max-seconds", type=float, default=30.0, help="async wall-clock budget")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--yes", action="store_true")
     args = p.parse_args()
@@ -311,8 +315,12 @@ def main() -> None:
 
     est = estimate_calls(args.rounds, args.workers, nva) + nte
     print(f"\nPlan     : model={args.model}, rounds={args.rounds}, workers={args.workers}")
-    print(f"Parallel : {args.workers} workers run concurrently each round "
-          f"(synchronous DP; the aggregator merge is the barrier)")
+    if args.asynchronous:
+        print(f"Async    : {args.workers} workers, barrier-free (async_ratio={args.async_ratio}, "
+              f"max {args.max_seconds:.0f}s); staleness policy rebases/discards stale diffs")
+    else:
+        print(f"Parallel : {args.workers} workers run concurrently each round "
+              f"(synchronous DP; the aggregator merge is the barrier)")
     print(f"Budget   : up to ~{est} model calls (cached repeats are free)")
 
     if args.dry_run:
@@ -335,13 +343,15 @@ def main() -> None:
               "for claude set ANTHROPIC_API_KEY (or `ant auth login`).")
         return
 
-    print("\nEvolving context (Generator + Reflector + deterministic Curator, L2)...\n")
+    mode = "async, barrier-free" if args.asynchronous else "synchronous DP"
+    print(f"\nEvolving context (Generator + Reflector + deterministic Curator, L2; {mode})...\n")
     # fit on train, gate on val (evolve's held-out); test stays fully held out.
     result = evolve(ds.trainval, reward, agent=agent,
                     strategy=ACEPlaybook(), parallel=DataParallel(),
                     blast_radius=0.2, artifact_id="ace_playbook",
                     rounds=args.rounds, n_workers=args.workers, max_concurrency=args.workers,
-                    held_out_frac=ds.val_frac, verbose=True)
+                    asynchronous=args.asynchronous, async_ratio=args.async_ratio,
+                    max_seconds=args.max_seconds, held_out_frac=ds.val_frac, verbose=True)
 
     test_acc = evaluate(agent, result.rendered, ds.test, reward)
     print("\n=== evolved ACE playbook ===")
