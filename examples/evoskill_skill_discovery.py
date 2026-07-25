@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 import re
 import sys
 import threading
@@ -443,9 +444,14 @@ class EvoResult:
 def run_evoskill(complete: Completion, docs: Dict[str, str],
                  train: List[dict], val: List[dict], iterations: int = 6,
                  max_frontier: int = 3, seed: int = 0, asynchronous: bool = False,
-                 async_ratio: int = 3, max_seconds: float = 30.0,
+                 async_ratio: int = 3, max_seconds: float = 30.0, backend=None,
                  verbose: bool = False) -> EvoResult:
-    """Drive EvoSkill through `evolve()` (`val` is the held-out frontier metric)."""
+    """Drive EvoSkill through `evolve()` (`val` is the held-out frontier metric).
+
+    ``backend`` (an :class:`~concordia.backends.AgentBackend`) replaces the passive
+    keyword-retriever base agent with a tool-using one (OpenHands / grep-loop) so
+    the agent can actually navigate the source documents; ``None`` keeps the
+    dependency-free retriever."""
     def to_task(i, it):
         return Task(id=f"oqa{i}", prompt=it["question"],
                     meta={"answer": it["answer"], "source_files": it["source_files"]})
@@ -454,6 +460,9 @@ def run_evoskill(complete: Completion, docs: Dict[str, str],
     ctx = EvoSkillContext(docs=docs, frontier=Frontier(max_size=max_frontier))
 
     def run(rendered, task):
+        if backend is not None:                    # tool-using base agent (OpenHands / grep-loop)
+            return backend.answer(task.prompt, ctx.docs.get(task.meta["source_files"], ""),
+                                  skills=rendered)
         return agent_answer(complete, ctx.docs, rendered, task)
 
     def reward(task, output):
@@ -485,7 +494,7 @@ def load_dataset(seed: int = 0, ratios=(0.5, 0.25, 0.25)) -> Dataset:
 
 
 def evaluate(complete: Completion, docs: Dict[str, str], skills: Dict[str, str],
-             items: List[dict]) -> float:
+             items: List[dict], backend=None) -> float:
     """Mean multi-tolerance score of a skill library on a held-out split."""
     if not items:
         return 0.0
@@ -494,8 +503,9 @@ def evaluate(complete: Completion, docs: Dict[str, str], skills: Dict[str, str],
     for it in items:
         task = Task(id=it["uid"], prompt=it["question"],
                     meta={"answer": it["answer"], "source_files": it["source_files"]})
-        total += score_multi_tolerance(agent_answer(complete, docs, rendered, task),
-                                       it["answer"])
+        pred = (backend.answer(it["question"], docs.get(it["source_files"], ""), skills=rendered)
+                if backend is not None else agent_answer(complete, docs, rendered, task))
+        total += score_multi_tolerance(pred, it["answer"])
     return total / len(items)
 
 
@@ -510,6 +520,10 @@ def main() -> None:
     p.add_argument("--model", default="claude-haiku-4-5")
     p.add_argument("--iterations", type=int, default=6)
     p.add_argument("--frontier", type=int, default=3)
+    p.add_argument("--backend", default="retrieval",
+                   choices=["retrieval", "toolloop", "openhands"],
+                   help="base agent: passive keyword retriever (default), a local "
+                        "grep/read ReAct loop, or a real OpenHands tool-using agent")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--async", dest="asynchronous", action="store_true",
                    help="run barrier-free (async_evolve)")
@@ -560,13 +574,27 @@ def main() -> None:
         print(f"\nCould not reach the model ({type(e).__name__}: {e}).")
         return
 
+    # base agent: passive retriever (default), a local grep/read loop, or OpenHands.
+    backend = None
+    if args.backend == "openhands":
+        from concordia.backends import openhands_backend
+        oh_model = args.model if args.model.startswith("openai/") else f"openai/{args.model}"
+        base = ("https://api.deepseek.com" if args.provider == "glm"
+                else os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"))
+        backend = openhands_backend(model=oh_model, base_url=base)
+        print(f"Backend  : real OpenHands agent (terminal + file_editor) on {oh_model}")
+    elif args.backend == "toolloop":
+        from concordia.backends import tool_loop_backend
+        backend = tool_loop_backend(completion)
+        print("Backend  : local grep/read ReAct loop")
+
     print("\nDiscovering skills (failure analysis + top-K frontier, L2)...\n")
     result = run_evoskill(completion, docs, ds.train, ds.val, iterations=args.iterations,
                           max_frontier=args.frontier, seed=args.seed,
                           asynchronous=args.asynchronous, async_ratio=args.async_ratio,
-                          max_seconds=args.max_seconds, verbose=True)
+                          max_seconds=args.max_seconds, backend=backend, verbose=True)
 
-    test_score = evaluate(completion, docs, result.skills, ds.test)
+    test_score = evaluate(completion, docs, result.skills, ds.test, backend=backend)
     print("\n=== discovered skill library ===")
     print(render_skills(result.skills))
     print(f"\nval score : {result.seed_score:.3f} -> {result.best_score:.3f}")
