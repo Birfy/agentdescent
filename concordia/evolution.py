@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Protocol, Sequence, runtime_checkable
 
 from .agents import Completion, claude
-from .aggregator import Aggregator, AggregatorConfig
+from .aggregator import Aggregator, AggregatorConfig, AggregatorFactory
 from .evolvable import Contract, Diff, EvidenceCard
 from .governance import assert_mutable
 from .ledger import Ledger
@@ -308,6 +308,7 @@ def evolve(
     repo_path: Optional[str] = None,
     agg_config: Optional[AggregatorConfig] = None,
     staleness_policy: Optional[StalenessPolicy] = None,
+    aggregator_factory: Optional[AggregatorFactory] = None,
     oracle_budget: int = 200,
     verbose: bool = False,
 ) -> EvolutionResult:
@@ -373,10 +374,15 @@ def evolve(
         eval_fn=lambda a, ts: a.score(ts), held_out=held_out,
         rule_subset=len(held_out), learned_noise=0.0,
         budget=VerifierBudget(oracle_calls_remaining=oracle_budget))
-    aggregator = Aggregator(
+    # the aggregator (the optimizer) is pluggable: pass aggregator_factory to
+    # swap in your own merge/acceptance logic (see AggregatorProtocol).
+    def _default_aggregator(ledger, verifier, audit, config, policy):
+        return Aggregator(ledger, verifier, audit, config, staleness_policy=policy)
+
+    aggregator = (aggregator_factory or _default_aggregator)(
         ledger, verifier, AuditScheduler(),
         agg_config or AggregatorConfig(batch_trigger=2, max_wait_rounds=1),
-        staleness_policy=staleness_policy)
+        staleness_policy)
 
     train_ids = [t.id for t in train]
     by_id = {t.id: t for t in train}

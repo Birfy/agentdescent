@@ -22,7 +22,7 @@ from __future__ import annotations
 import threading
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
 from .evolvable import Diff, EvidenceCard, Evolvable, VersionVector, vv_staleness
 from .governance import Layer, classify, assert_mutable
@@ -31,6 +31,28 @@ from .scheduler import AuditScheduler
 from .staleness import StaleAction, StalenessPolicy, get_policy
 from .stats import BetaPosterior, annealed_delta, prob_improvement
 from .verifier import ThreeLayerVerifier
+
+
+@runtime_checkable
+class AggregatorProtocol(Protocol):
+    """The contract a custom aggregator must satisfy to plug into ``evolve``.
+
+    An aggregator is the framework's *optimizer*: it receives evidence cards
+    (diffs + evidence) and, on ``step()``, decides what to merge into the shared
+    ledger. Implement these two methods (see :class:`Aggregator` for the
+    reference 7-stage pipeline) to swap in your own merge/acceptance logic."""
+
+    def ingest(self, card: EvidenceCard) -> None: ...
+
+    def step(self) -> List["MergeReport"]: ...
+
+
+# Builds an aggregator from the runtime deps ``evolve`` owns. The default is the
+# reference :class:`Aggregator`; pass your own to ``evolve(aggregator_factory=)``.
+AggregatorFactory = Callable[
+    [Ledger, ThreeLayerVerifier, AuditScheduler, "AggregatorConfig", StalenessPolicy],
+    AggregatorProtocol,
+]
 
 
 @dataclass

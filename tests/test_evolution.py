@@ -94,3 +94,26 @@ def test_llm_agent_wraps_a_completion_fn():
 def test_rule_id_dedupes_identical_text():
     assert rule_id("Lowercase the text.") == rule_id("  lowercase the text.  ")
     assert rule_id("A") != rule_id("B")
+
+
+# -- pluggable aggregator ----------------------------------------------------
+
+def test_custom_aggregator_factory_plugs_in():
+    from concordia.aggregator import Aggregator, AggregatorProtocol
+
+    calls = {"steps": 0}
+
+    class CountingAggregator(Aggregator):
+        def step(self):
+            calls["steps"] += 1
+            return super().step()
+
+    def factory(ledger, verifier, audit, config, policy):
+        agg = CountingAggregator(ledger, verifier, audit, config, staleness_policy=policy)
+        assert isinstance(agg, AggregatorProtocol)      # satisfies the contract
+        return agg
+
+    result = evolve(_tasks(), _reward, agent=GoodAgent(), rounds=5, n_workers=2,
+                    aggregator_factory=factory)
+    assert calls["steps"] == 5                          # one step per round, via our aggregator
+    assert result.final_reward >= result.history[0].held_out_reward

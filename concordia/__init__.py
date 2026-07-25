@@ -31,7 +31,14 @@ from .scheduler import (
     lpt_schedule,
 )
 from .governance import Layer, classify, assert_mutable, GovernanceError, L1SerialGate
-from .aggregator import Aggregator, AggregatorConfig, MergeReport, EvidenceBuffer
+from .aggregator import (
+    Aggregator,
+    AggregatorConfig,
+    AggregatorProtocol,
+    AggregatorFactory,
+    MergeReport,
+    EvidenceBuffer,
+)
 from .staleness import (
     StaleAction,
     StalenessPolicy,
@@ -110,6 +117,8 @@ __all__ = [
     "L1SerialGate",
     "Aggregator",
     "AggregatorConfig",
+    "AggregatorProtocol",
+    "AggregatorFactory",
     "MergeReport",
     "EvidenceBuffer",
     "StaleAction",

@@ -30,7 +30,8 @@ That's the minimum. Everything below is optional and swappable.
 | `strategy=` | `Strategy` (`AppendRules` / `KeyedRules` / yours) | the **evolution rule** — how a proposal becomes a diff | `AppendRules()` |
 | `parallel=` | [`concordia.parallel`](parallelism.md) | the **parallelism method** — DP / TP / PP | `DataParallel()` |
 | `blast_radius=` | governance | which layer (L2 skill vs L1 harness/verifier) | `0.2` (L2) |
-| `agg_config=` | `AggregatorConfig` | merge & acceptance tuning | sensible defaults |
+| `agg_config=` | `AggregatorConfig` | merge & acceptance **tuning** | sensible defaults |
+| `aggregator_factory=` | `AggregatorProtocol` | **swap the whole optimizer** (custom merge/acceptance) | reference `Aggregator` |
 | `staleness_policy=` | staleness (`get_policy(...)`) | how stale diffs are handled | `guarded` |
 | `rounds=`, `n_workers=` | driver | loop size, parallel worker count | `15`, `4` |
 | `blast_radius`, `oracle_budget` | governance + verifier | audit budget for L1 merges | `0.2`, `200` |
@@ -157,7 +158,7 @@ See [governance in concepts](concepts.md#6-governance-blast-radius-decides-paral
 
 ---
 
-## 5. Merge & acceptance tuning — `agg_config=`
+## 5. The aggregator — `agg_config=` (tune) / `aggregator_factory=` (replace)
 
 *What:* the aggregator's knobs — when a bucket fires, how strict acceptance is,
 the trust region, and dev→stable promotion.
@@ -178,6 +179,35 @@ evolve(tasks, reward, agent=agent, agg_config=AggregatorConfig(
 
 Acceptance is a **statistical test** (Beta posterior `P(Δ>0) > 1−δ`), not a
 threshold — the mechanism behind [§4 of concepts](concepts.md#4-the-aggregator-a-discrete-space-optimizer).
+
+### Swapping the whole optimizer — `aggregator_factory=`
+
+`agg_config` *tunes* the reference aggregator; `aggregator_factory` *replaces*
+it. The aggregator is the framework's optimizer (staleness filter → conflict
+resolution → fusion → statistical acceptance → transactional commit) — plug in
+your own by satisfying `AggregatorProtocol` (just `ingest` + `step`). The easiest
+route is subclassing `Aggregator` and overriding one decision:
+
+```python
+from concordia.aggregator import Aggregator
+
+class StrictAggregator(Aggregator):
+    def _tournament(self, artifact, diffs):
+        # e.g. never fuse — always evaluate single diffs only
+        return super()._tournament(artifact, [diffs[0]] if diffs else diffs)
+
+def factory(ledger, verifier, audit, config, staleness_policy):
+    return StrictAggregator(ledger, verifier, audit, config,
+                            staleness_policy=staleness_policy)
+
+evolve(tasks, reward, agent=agent, aggregator_factory=factory)
+```
+
+The factory receives the runtime deps `evolve` owns
+(`ledger, verifier, audit, config, staleness_policy`) and returns any
+`AggregatorProtocol`. Override points on the reference `Aggregator` include
+`_staleness_filter`, `_resolve_conflicts`, `_tournament`, and the acceptance
+block in `_process` — or write an aggregator from scratch.
 
 ---
 
