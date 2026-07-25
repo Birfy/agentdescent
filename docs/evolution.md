@@ -160,54 +160,29 @@ See [governance in concepts](concepts.md#6-governance-blast-radius-decides-paral
 
 ## 5. The aggregator — `agg_config=` (tune) / `aggregator_factory=` (replace)
 
-*What:* the aggregator's knobs — when a bucket fires, how strict acceptance is,
-the trust region, and dev→stable promotion.
+*What:* the optimizer that decides what to merge (staleness filter → conflict
+resolution → fusion → statistical acceptance → transactional commit). `agg_config`
+tunes the reference pipeline; `aggregator_factory` swaps in your own.
 
 ```python
-from concordia.aggregator import AggregatorConfig
+from concordia.aggregator import AggregatorConfig, Aggregator
 
-evolve(tasks, reward, agent=agent, agg_config=AggregatorConfig(
-    batch_trigger=2,      # fire a merge once this many proposals collect for an artifact
-    max_wait_rounds=1,    # ...or after this many rounds (so cold artifacts don't starve)
-    base_delta=0.5,       # acceptance risk: commit iff P(Δ>0) > 1-δ, annealed by version
-    alpha_head=5,         # staleness tolerance for hot artifacts
-    alpha_tail=1,         # ...and for cold ones
-    trust_region_ops=6,   # max edits per diff
-    promote_after_k=3,    # dev -> stable after K regression-free rounds (EMA)
-))
-```
+# tune: keep the pipeline, change the knobs
+evolve(tasks, reward, agent=agent,
+       agg_config=AggregatorConfig(base_delta=0.5, trust_region_ops=6))
 
-Acceptance is a **statistical test** (Beta posterior `P(Δ>0) > 1−δ`), not a
-threshold — the mechanism behind [§4 of concepts](concepts.md#4-the-aggregator-a-discrete-space-optimizer).
-
-### Swapping the whole optimizer — `aggregator_factory=`
-
-`agg_config` *tunes* the reference aggregator; `aggregator_factory` *replaces*
-it. The aggregator is the framework's optimizer (staleness filter → conflict
-resolution → fusion → statistical acceptance → transactional commit) — plug in
-your own by satisfying `AggregatorProtocol` (just `ingest` + `step`). The easiest
-route is subclassing `Aggregator` and overriding one decision:
-
-```python
-from concordia.aggregator import Aggregator
-
+# replace: subclass one decision (or satisfy AggregatorProtocol from scratch)
 class StrictAggregator(Aggregator):
     def _tournament(self, artifact, diffs):
-        # e.g. never fuse — always evaluate single diffs only
-        return super()._tournament(artifact, [diffs[0]] if diffs else diffs)
+        return super()._tournament(artifact, [diffs[0]] if diffs else diffs)  # never fuse
 
-def factory(ledger, verifier, audit, config, staleness_policy):
-    return StrictAggregator(ledger, verifier, audit, config,
-                            staleness_policy=staleness_policy)
-
-evolve(tasks, reward, agent=agent, aggregator_factory=factory)
+evolve(tasks, reward, agent=agent,
+       aggregator_factory=lambda ledger, verifier, audit, config, policy:
+           StrictAggregator(ledger, verifier, audit, config, staleness_policy=policy))
 ```
 
-The factory receives the runtime deps `evolve` owns
-(`ledger, verifier, audit, config, staleness_policy`) and returns any
-`AggregatorProtocol`. Override points on the reference `Aggregator` include
-`_staleness_filter`, `_resolve_conflicts`, `_tournament`, and the acceptance
-block in `_process` — or write an aggregator from scratch.
+Full field reference, the 7-stage pipeline, override points, and a from-scratch
+aggregator: **[the aggregator page](aggregator.md)**.
 
 ---
 

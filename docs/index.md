@@ -57,6 +57,11 @@ The one place the analogy *must* break defines the whole system:
     Any `prompt -> text` is a completion: Claude, GLM/OpenAI-compatible, a
     callable, a stub.
 
+-   :material-cog-sync: **[The aggregator](aggregator.md)** → `agg_config=` / `aggregator_factory=`
+
+    The optimizer — tune the reference merge/acceptance pipeline, or swap in your
+    own.
+
 -   :material-vector-triangle: **[Customizable parallelism](parallelism.md)** → `parallel=`
 
     Pluggable DP / TP / PP methods — or write your own `ParallelStrategy`.

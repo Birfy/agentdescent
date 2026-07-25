@@ -37,6 +37,7 @@ nav:
   - The evolve method: evolution.md
   - Building blocks (plug into evolve):
     - Connecting agents & LLMs: agents.md
+    - The aggregator (the optimizer): aggregator.md
     - Customizable parallelism (DP/TP/PP): parallelism.md
     - Duration-aware scheduling: duration-scheduling.md
     - Efficiency experiments: efficiency.md
