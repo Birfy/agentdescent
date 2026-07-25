@@ -49,6 +49,7 @@ import math
 import random
 import re
 import sys
+import threading
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Tuple
@@ -416,6 +417,7 @@ class AdasContext:
     seed_fitness: float = 0.0
     best_fitness: float = 0.0
     best_agent: dict = field(default_factory=dict)
+    lock: threading.Lock = field(default_factory=threading.Lock)   # workers run concurrently
 
 
 class AgentDesignStrategy:
@@ -448,11 +450,12 @@ def make_propose(ctx: AdasContext, complete: Completion):
     def propose(rendered, task, output, score):
         conditioning = ctx.archive or seed_archive()
         if ctx.select == "dgm" and ctx.archive:            # DGM: sample who to surface
-            weights = dgm_parent_weights([a["fitness"] for a in ctx.archive], ctx.children)
-            idxs = _weighted_sample_without_replacement(weights, min(5, len(ctx.archive)), rng)
-            conditioning = [ctx.archive[i] for i in idxs]
-            for i in idxs:                                 # "explored" -> novelty discount
-                ctx.children[i] += 1
+            with ctx.lock:                                 # concurrent workers share rng + archive
+                weights = dgm_parent_weights([a["fitness"] for a in ctx.archive], ctx.children)
+                idxs = _weighted_sample_without_replacement(weights, min(5, len(ctx.archive)), rng)
+                conditioning = [ctx.archive[i] for i in idxs]
+                for i in idxs:                             # "explored" -> novelty discount
+                    ctx.children[i] += 1
         agent = propose_agent(complete, conditioning)
         return json.dumps(agent) if agent else None
     return propose
@@ -558,7 +561,7 @@ def run_meta_agent_search(complete: Completion, val: List[Tuple[str, str]],
 
     evolve(tasks, reward, run=run, propose=make_propose(ctx, complete),
            strategy=AgentDesignStrategy(), blast_radius=0.6, artifact_id="agentic_system",
-           rounds=generations, n_workers=2, held_out_frac=0.5,
+           rounds=generations, n_workers=2, max_concurrency=2, held_out_frac=0.5,
            aggregator_factory=factory, verbose=verbose)
     return SearchResult(ctx.archive, ctx.best_agent or {}, ctx.seed_fitness, ctx.best_fitness)
 
@@ -599,6 +602,8 @@ def main() -> None:
 
     calls = args.generations * 3 + (len(seed_archive()) + args.generations) * (nva + nte) * 3
     print(f"\nPlan     : model={args.model}, generations={args.generations}, select={args.select}")
+    print("Parallel : 2 meta-agents propose concurrently each generation "
+          "(synchronous DP; the archive merge is the barrier)")
     print(f"Budget   : up to ~{calls} model calls (multi-step agents call the model many times)")
 
     if args.dry_run:

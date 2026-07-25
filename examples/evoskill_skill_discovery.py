@@ -45,6 +45,7 @@ import argparse
 import csv
 import re
 import sys
+import threading
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -325,6 +326,7 @@ class EvoSkillContext:
     recent_failures: List[Tuple[str, str, str]] = field(default_factory=list)
     seed_score: float = 0.0
     best_score: float = 0.0
+    lock: threading.Lock = field(default_factory=threading.Lock)   # workers run concurrently
 
 
 def _parse_rendered_skills(rendered: str) -> Dict[str, str]:
@@ -368,10 +370,11 @@ def make_propose(ctx: EvoSkillContext, complete: Completion):
     def propose(rendered, task, output, score):
         if score >= PASS_THRESHOLD:                        # only learn from failures
             return None
-        ctx.recent_failures.append((task.prompt, output, task.meta["answer"]))
+        with ctx.lock:                                     # concurrent workers
+            ctx.recent_failures.append((task.prompt, output, task.meta["answer"]))
+            recent = list(ctx.recent_failures[-5:])
         skills = _parse_rendered_skills(rendered)
-        proposed = propose_and_generate(complete, skills,
-                                        ctx.recent_failures[-5:], ctx.feedback)
+        proposed = propose_and_generate(complete, skills, recent, ctx.feedback)
         if not proposed:
             return None
         name, body = proposed
@@ -458,10 +461,12 @@ def run_evoskill(complete: Completion, docs: Dict[str, str],
     def factory(ledger, verifier, audit, config, policy):
         return TopKFrontierAggregator(ledger, verifier, ctx, artifact_id="skill_library")
 
+    workers = min(3, len(train))
     result = evolve(tasks, reward, run=run, propose=make_propose(ctx, complete),
                     strategy=SkillLibraryStrategy(), blast_radius=0.2,
                     artifact_id="skill_library", rounds=iterations,
-                    n_workers=min(3, len(train)), held_out_frac=len(val) / max(1, len(tasks)),
+                    n_workers=workers, max_concurrency=workers,
+                    held_out_frac=len(val) / max(1, len(tasks)),
                     aggregator_factory=factory, verbose=verbose)
     return EvoResult(dict(result.state), ctx.seed_score, ctx.best_score, iterations)
 
@@ -524,6 +529,8 @@ def main() -> None:
 
     calls = args.iterations * (3 + 2 + nva) + nte
     print(f"\nPlan     : model={args.model}, iterations={args.iterations}, frontier={args.frontier}")
+    print(f"Parallel : {min(3, ntr)} workers run concurrently each round "
+          f"(synchronous DP; the frontier merge is the barrier)")
     print(f"Budget   : up to ~{calls} model calls")
 
     if args.dry_run:

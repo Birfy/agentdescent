@@ -41,6 +41,7 @@ That's the minimum. Everything below is optional and swappable.
 | `aggregator_factory=` | `AggregatorProtocol` | **swap the whole optimizer** (custom merge/acceptance) | reference `Aggregator` |
 | `staleness_policy=` | staleness (`get_policy(...)`) | how stale diffs are handled | `guarded` |
 | `rounds=`, `n_workers=` | driver | loop size, parallel worker count | `15`, `4` |
+| `max_concurrency=` | driver | run a round's workers **concurrently** (thread pool); aggregator = barrier (synchronous DP) | `1` (sequential) |
 | `blast_radius`, `oracle_budget` | governance + verifier | audit budget for L1 merges | `0.2`, `200` |
 
 The building blocks in detail:
@@ -259,10 +260,33 @@ Walkthrough with a real result (`0.750 → 0.792`): the
 
 ---
 
+## Parallelism & async — the framework's core
+
+Parallel, merge-based evolution is the whole point (targeting **O(N / T_iter)**),
+so it shows up at two levels:
+
+* **Within a round — `max_concurrency`.** `evolve()` runs a round's `n_workers`
+  **concurrently** (a thread pool): every worker's rollout+propose overlaps, then
+  the single `aggregator.step()` is the barrier. This is *synchronous
+  data-parallelism* — real wall-clock speedup for I/O-bound LLM rollouts (Python
+  releases the GIL during network I/O). Every
+  [self-evolution example](self-evolution-examples.md) passes
+  `max_concurrency=n_workers`, so its workers genuinely run in parallel; custom
+  strategies/aggregators guard the shared state they mutate from `propose`/
+  `to_diff` with a lock.
+
+```python
+evolve(tasks, reward, agent=agent, n_workers=4, max_concurrency=4)   # 4 workers overlap
+```
+
+* **Across rounds — the async runtime.** Removing the round barrier entirely is
+  the job of `AsyncConcordia`, below.
+
 ## The other execution mode: the async runtime
 
-`evolve()` is synchronous (round barrier). For a **barrier-free** pipeline where
-workers never wait for each other — and where the staleness policies,
+`evolve()`'s round barrier means the aggregator waits for all workers each round.
+For a **barrier-free** pipeline where workers never wait for each other — and
+where the staleness policies,
 [`async_ratio`](concepts.md#34-async_ratio-roll-flash-the-global-lag-budget), and
 [duration-aware straggler checkpointing](duration-scheduling.md) come into their
 own — use `AsyncConcordia` (same aggregator, staleness, and governance

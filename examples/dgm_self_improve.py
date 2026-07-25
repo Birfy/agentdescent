@@ -367,7 +367,7 @@ def run_dgm(instances: List[dict], generations: int = 12,
 
     evolve(tasks, reward, run=run, propose=propose, strategy=HarnessStrategy(),
            blast_radius=0.6, artifact_id="coding_agent", rounds=generations,
-           n_workers=selfimprove_size, held_out_frac=0.5,
+           n_workers=selfimprove_size, max_concurrency=selfimprove_size, held_out_frac=0.5,
            aggregator_factory=factory, verbose=verbose)
     best = max(ctx.archive, key=lambda a: a.score)
     return DGMResult(ctx.archive, best, ctx.seed_score, best.score)
@@ -417,6 +417,8 @@ def main() -> None:
     print(f"Loaded   : {len(ds)} SWE-bench Verified instances; "
           f"{ntr} train / {nva} val (staged eval) / {nte} test")
     print(f"Example  : {ds.train[0]['instance_id']} ({ds.train[0]['repo']})")
+    print(f"Parallel : {args.selfimprove_size} agents self-modify concurrently each "
+          "generation (synchronous DP; the archive merge is the barrier)")
     print("\nObjective: SURROGATE (capability-cover) -- real DGM runs SWE-bench in "
           "Docker.\n           The archive + selection + staged escalation are faithful.")
 

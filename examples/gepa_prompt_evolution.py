@@ -383,6 +383,8 @@ def main() -> None:
 
     est = estimate_calls(args.rounds, args.workers, nva) + nte
     print(f"\nPlan     : model={args.model}, rounds={args.rounds}, workers={args.workers}")
+    print(f"Parallel : {args.workers} workers run concurrently each round "
+          f"(synchronous DP; the aggregator merge is the barrier)")
     print(f"Budget   : up to ~{est} model calls (cached repeats are free)")
 
     if args.dry_run:
@@ -411,8 +413,8 @@ def main() -> None:
     evolve(ds.trainval, reward, agent=agent,
            strategy=InstructionSlot(), initial_state={"instruction": _SEED_INSTRUCTION},
            blast_radius=0.2, artifact_id="gepa_prompt",
-           rounds=args.rounds, n_workers=args.workers, held_out_frac=ds.val_frac,
-           aggregator_factory=factory, verbose=True)
+           rounds=args.rounds, n_workers=args.workers, max_concurrency=args.workers,
+           held_out_frac=ds.val_frac, aggregator_factory=factory, verbose=True)
 
     agg: ParetoAggregator = factory.holder["agg"]  # type: ignore[attr-defined]
     best = agg.best_state.get("instruction", _SEED_INSTRUCTION)

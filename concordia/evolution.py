@@ -304,6 +304,7 @@ def evolve(
     artifact_id: str = "artifact",
     rounds: int = 15,
     n_workers: int = 4,
+    max_concurrency: int = 1,
     held_out_frac: float = 0.4,
     repo_path: Optional[str] = None,
     agg_config: Optional[AggregatorConfig] = None,
@@ -328,8 +329,21 @@ def evolve(
     ``parallel`` (default :class:`~concordia.parallel.DataParallel`) is the
     parallelism method -- how each round's tasks are partitioned across the
     ``n_workers``. Swap in ``TensorParallel`` / ``PipelineParallel`` or your own
-    :class:`~concordia.parallel.ParallelStrategy`."""
+    :class:`~concordia.parallel.ParallelStrategy`.
+
+    ``max_concurrency`` runs a round's ``n_workers`` **concurrently** (a thread
+    pool), then the single ``aggregator.step()`` is the round barrier -- this is
+    *synchronous data-parallelism*: the rollout+propose stage of all workers
+    overlaps (real wall-clock speedup for I/O-bound LLM rollouts, since Python
+    releases the GIL during network I/O), and the merge is the sync point.
+    ``1`` (default) keeps the loop sequential and deterministic; set it to
+    ``n_workers`` to parallelise. Custom strategies/aggregators that mutate shared
+    state from ``propose``/``to_diff`` must guard it (the async runtime's buffer,
+    CAS and per-diff staleness already are). For the *barrier-free* async pipeline
+    (``async_ratio`` lag budget, staleness policies overlapping the aggregator),
+    see :class:`~concordia.async_runtime.AsyncConcordia`."""
     import tempfile
+    from concurrent.futures import ThreadPoolExecutor
     from .parallel import DataParallel
 
     if agent is not None:
@@ -394,27 +408,36 @@ def evolve(
         base_v = snap.version.get(artifact_id, 0)
         assert_mutable(artifact)
 
+        def _run_unit(unit) -> None:
+            """One worker: rollout -> propose -> ingest evidence (against `snap`)."""
+            if not unit.keys:
+                return
+            task = by_id[unit.keys[r % len(unit.keys)]]  # a task from this worker's shard
+            output = run(artifact.render(), task)
+            score = reward(task, output)
+            if score >= 0.999:
+                return
+            proposal = propose(artifact.render(), task, output, score)
+            if not proposal:
+                return
+            diff = strategy.to_diff(artifact.state, proposal, f"w{unit.worker}", base_v, artifact_id)
+            if diff is None:
+                return
+            after = reward(task, run(artifact.apply(diff).render(), task))
+            aggregator.ingest(EvidenceCard(
+                diff=diff, base_version={artifact_id: base_v}, touched=[artifact_id],
+                before_after_delta=after - score, trajectory_refs=[task]))
+
         try:
-            # the parallel strategy assigns this round's tasks to workers.
-            for unit in parallel.plan(n_workers, r, train_ids):
-                if not unit.keys:
-                    continue
-                task = by_id[unit.keys[r % len(unit.keys)]]  # a task from this worker's shard
-                w = unit.worker
-                output = run(artifact.render(), task)
-                score = reward(task, output)
-                if score >= 0.999:
-                    continue
-                proposal = propose(artifact.render(), task, output, score)
-                if not proposal:
-                    continue
-                diff = strategy.to_diff(artifact.state, proposal, f"w{w}", base_v, artifact_id)
-                if diff is None:
-                    continue
-                after = reward(task, run(artifact.apply(diff).render(), task))
-                aggregator.ingest(EvidenceCard(
-                    diff=diff, base_version={artifact_id: base_v}, touched=[artifact_id],
-                    before_after_delta=after - score, trajectory_refs=[task]))
+            # the parallel strategy assigns this round's tasks to workers; they run
+            # concurrently (rollout+propose overlap) then the aggregator is the barrier.
+            units = list(parallel.plan(n_workers, r, train_ids))
+            if max_concurrency > 1 and len(units) > 1:
+                with ThreadPoolExecutor(max_workers=min(max_concurrency, len(units))) as pool:
+                    list(pool.map(_run_unit, units))
+            else:
+                for unit in units:
+                    _run_unit(unit)
 
             reports = aggregator.step()
         except Exception as e:  # noqa: BLE001 - a rollout backend failure (e.g. an

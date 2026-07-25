@@ -19,6 +19,12 @@ just a custom `strategy=` (how a proposal becomes a `Diff`) and/or a custom
 the engine; they differ only in those two plug-ins and the blast radius. Each has
 a dedicated page:
 
+**All six are parallel.** Each passes `max_concurrency=n_workers`, so a round's
+workers run **concurrently** (overlapping LLM rollouts) and the aggregator merge
+is the barrier — the framework's *synchronous data-parallelism*. Their custom
+optimizers keep shared state thread-safe. The barrier-free async pipeline is
+[`AsyncConcordia`](evolution.md#the-other-execution-mode-the-async-runtime).
+
 | Algorithm | Kind | Dataset (faithful) | `evolve()` plug-ins | Page |
 |---|---|---|---|---|
 | **ACE** (Agentic Context Engineering) | skill / context | FiNER-139 (XBRL tagging) | `strategy=ACEPlaybook`; Curator = default aggregator | [→](algo-ace.md) |

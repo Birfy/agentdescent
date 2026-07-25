@@ -47,6 +47,7 @@ import json
 import re
 import string
 import sys
+import threading
 from dataclasses import dataclass, field
 from typing import Callable, List, Tuple
 
@@ -287,6 +288,7 @@ class SkillOptContext:
     best_em: float = 0.0
     accepted: int = 0
     rejected: int = 0
+    lock: threading.Lock = field(default_factory=threading.Lock)   # workers run concurrently
 
 
 class SkillDocStrategy:
@@ -312,7 +314,8 @@ class SkillDocStrategy:
         if new_doc == state.get("skill"):
             return None
         did = f"{author}:{rule_id(new_doc)}:{base_version}"
-        self.ctx.edits_by_diff[did] = edits                 # for the rejected buffer
+        with self.ctx.lock:                                 # concurrent workers
+            self.ctx.edits_by_diff[did] = edits             # for the rejected buffer
         return Diff(diff_id=did, target=target, ops={"skill": new_doc}, author=author)
 
 
@@ -419,7 +422,8 @@ def run_skillopt(complete: Completion, train: List[dict], val: List[dict],
     result = evolve(tasks, reward, run=run, propose=make_propose(ctx, complete),
                     strategy=SkillDocStrategy(ctx), initial_state={"skill": SEED_SKILL},
                     blast_radius=0.2, artifact_id="skill_document", rounds=steps,
-                    n_workers=minibatch, held_out_frac=len(val) / max(1, len(tasks)),
+                    n_workers=minibatch, max_concurrency=minibatch,
+                    held_out_frac=len(val) / max(1, len(tasks)),
                     aggregator_factory=factory, verbose=verbose)
     return SkillOptResult(result.rendered, ctx.seed_em, ctx.best_em,
                           ctx.accepted, ctx.rejected,
@@ -485,6 +489,8 @@ def main() -> None:
 
     calls = args.steps * (args.minibatch + 1 + nva) + nte
     print(f"\nPlan     : model={args.model}, steps={args.steps}, lr={args.lr} ({args.lr_mode})")
+    print(f"Parallel : {args.minibatch} workers run concurrently each step "
+          f"(synchronous DP; the strict-gate merge is the barrier)")
     print(f"Budget   : up to ~{calls} model calls (rollouts dominate)")
 
     if args.dry_run:
