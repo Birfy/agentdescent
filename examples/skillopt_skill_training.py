@@ -27,8 +27,10 @@ reproduced here, faithful to the code (traced from `skillopt/engine/trainer.py`,
      fed back to the optimizer so it stops re-proposing them (`_format_step_buffer`)
      -- Concordia's "settled evidence survives" (aggregator §3.3), made explicit.
 
-This maps onto Concordia's provider layer (`concordia.agents`) and governance
-(a skill doc is an **L2** artifact -> `blast_radius=0.2`, printed via `classify`).
+It runs **through `evolve()`** exactly like ACE/GEPA: a custom `SkillDocStrategy`
+turns the analyst's edit patch into a `Diff`, and a custom `aggregator_factory`
+(`StrictGateAggregator`) is the strict-EM gate + LR budget + rejected-edit
+buffer. A skill doc is an **L2** artifact (`blast_radius=0.2`, via `classify`).
 The epoch-level *slow-update* and *meta-skill* stabilisers are optional in the
 repo and omitted from this minimal-but-faithful slice (noted, not hidden).
 
@@ -49,9 +51,12 @@ from dataclasses import dataclass, field
 from typing import Callable, List, Tuple
 
 from concordia.agents import claude, openai_compatible
-from concordia.dataloader import hf_rows
-from concordia.evolvable import Contract, Evolvable
+from concordia.aggregator import AggregatorProtocol, MergeReport
+from concordia.dataloader import Dataset, hf_rows, split_dataset
+from concordia.evolvable import Diff, EvidenceCard
+from concordia.evolution import EvolvingArtifact, Task, evolve, rule_id
 from concordia.governance import classify
+from concordia.ledger import CASConflict, Ledger
 
 SEARCHQA = ("lucadiliello/searchqa", "default")   # (dataset, config)
 Completion = Callable[[str], str]
@@ -261,27 +266,119 @@ def eval_hard_em(rollout: Rollout, skill: str, examples: List[dict]) -> float:
 
 
 # ===========================================================================
-# Governance artifact (skill doc = L2)
+# Running SkillOpt THROUGH evolve() -- strategy (edits) + strict-gate optimizer
 # ===========================================================================
+#
+# SkillOpt plugs into the framework exactly like ACE/GEPA: a custom `Strategy`
+# turns the analyst's edit patch into a `Diff` on the one-slot skill document,
+# and a custom `aggregator_factory` implements the strict held-out gate + the
+# rejected-edit buffer + the learning-rate schedule. The shared optimizer state
+# (buffer, LR budget, edit registry, stats) lives in one `SkillOptContext` that
+# both the propose step and the aggregator close over.
 
 
 @dataclass
-class SkillArtifact(Evolvable):
-    id: str = "skill_document"
-    blast_radius: float = 0.2
-    version: int = 1
-    contract: Contract = field(default_factory=lambda: Contract("task", "text", 1))
-
-    def render(self) -> str: return ""
-    def diff(self, other): ...
-    def apply(self, diff): ...
-    def cheap_eval(self, evidence): return 0.0
-    def full_eval(self, task_set): return {}
+class SkillOptContext:
+    scheduler: LRScheduler
+    budget: int
+    rejected_buffer: List[dict] = field(default_factory=list)
+    edits_by_diff: dict = field(default_factory=dict)
+    seed_em: float = 0.0
+    best_em: float = 0.0
+    accepted: int = 0
+    rejected: int = 0
 
 
-# ===========================================================================
-# The SkillOpt training loop (ReflACT, minimal faithful slice)
-# ===========================================================================
+class SkillDocStrategy:
+    """The artifact is one markdown skill doc; a proposal is an edit patch."""
+
+    def __init__(self, ctx: SkillOptContext):
+        self.ctx = ctx
+
+    def initial(self):
+        return {"skill": SEED_SKILL}
+
+    def render(self, state):
+        return state.get("skill", SEED_SKILL)
+
+    def to_diff(self, state, proposal, author, base_version, target):
+        try:
+            edits = [e for e in json.loads(proposal).get("edits", []) if valid_edit(e)]
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            return None
+        if not edits:
+            return None
+        new_doc = apply_patch(state.get("skill", SEED_SKILL), edits)
+        if new_doc == state.get("skill"):
+            return None
+        did = f"{author}:{rule_id(new_doc)}:{base_version}"
+        self.ctx.edits_by_diff[did] = edits                 # for the rejected buffer
+        return Diff(diff_id=did, target=target, ops={"skill": new_doc}, author=author)
+
+
+def make_propose(ctx: SkillOptContext, complete: Completion):
+    """The analyst: turn one failed rollout into a budget-capped edit patch."""
+    def propose(rendered, task, output, score):
+        failures = [(task.prompt, output, task.meta["answers"][0])]
+        edits = propose_patch(complete, rendered, failures, ctx.rejected_buffer, ctx.budget)
+        return json.dumps({"edits": edits}) if edits else None
+    return propose
+
+
+class StrictGateAggregator(AggregatorProtocol):
+    """SkillOpt's optimizer: strict held-out EM gate + rejected-edit buffer + LR."""
+
+    def __init__(self, ledger: Ledger, verifier, ctx: SkillOptContext,
+                 artifact_id: str = "skill_document"):
+        self.ledger = ledger
+        self.verifier = verifier
+        self.ctx = ctx
+        self.aid = artifact_id
+        self.cards: List[EvidenceCard] = []
+        self.current_em = None
+
+    def ingest(self, card: EvidenceCard) -> None:
+        self.cards.append(card)
+
+    def step(self) -> List[MergeReport]:
+        snap = self.ledger.snapshot(Ledger.DEV)
+        head = snap.get(self.aid)
+        base_vv = {self.aid: snap.version.get(self.aid, 0)}
+        if self.current_em is None:                        # gate baseline = seed doc
+            self.current_em = head.score(self.verifier.held_out)
+            self.ctx.seed_em = self.ctx.best_em = self.current_em
+
+        cards, self.cards = self.cards, []
+        best = None
+        for card in cards:                                 # pick the best strict improver
+            em = head.apply(card.diff).score(self.verifier.held_out)
+            if em > self.current_em and (best is None or em > best[1]):
+                best = (card, em)
+
+        report_diff = committed = None
+        if best is not None:
+            card, em = best
+            try:
+                _, committed = self.ledger.commit(
+                    head.apply(card.diff), base_vv, branch=Ledger.DEV,
+                    message=f"skillopt accept {card.diff.diff_id}")
+                self.current_em = em
+                self.ctx.best_em = max(self.ctx.best_em, em)
+                self.ctx.accepted += 1
+                self.ctx.rejected_buffer.clear()           # accepted -> reset buffer
+                report_diff = card.diff
+            except CASConflict:
+                committed = None
+        # every non-accepted candidate's edits are remembered in-epoch.
+        for card in cards:
+            if best is None or card is not best[0]:
+                self.ctx.rejected += 1
+                self.ctx.rejected_buffer.extend(self.ctx.edits_by_diff.get(card.diff.diff_id, []))
+
+        self.ctx.budget = self.ctx.scheduler.step()        # advance the LR schedule
+        return [MergeReport(self.aid, report_diff, False, len(cards), len(cards), 0, 0,
+                            self.current_em, committed,
+                            f"lr={self.ctx.budget} val_EM={self.current_em:.3f}")]
 
 
 @dataclass
@@ -298,58 +395,35 @@ def run_skillopt(complete: Completion, train: List[dict], val: List[dict],
                  steps: int = 8, lr: int = 4, minibatch: int = 4,
                  lr_mode: str = "cosine", seed: int = 0,
                  verbose: bool = False) -> SkillOptResult:
-    import random
-    rng = random.Random(seed)
+    """Drive SkillOpt through `evolve()` (`val` becomes the held-out gate set)."""
+    def to_task(i, ex):
+        return Task(id=f"sq{i}", prompt=ex["question"],
+                    meta={"context": ex["context"], "answers": ex["answers"]})
+
+    tasks = [to_task(i, ex) for i, ex in enumerate(list(train) + list(val))]
     rollout = Rollout(complete)
-    scheduler = LRScheduler(max_lr=lr, min_lr=max(1, lr // 2),
-                            total_steps=steps, mode=lr_mode)
+    ctx = SkillOptContext(scheduler=LRScheduler(max_lr=lr, min_lr=max(1, lr // 2),
+                                                total_steps=steps, mode=lr_mode), budget=lr)
 
-    skill = SEED_SKILL
-    current_em = eval_hard_em(rollout, skill, val)      # gate baseline
-    best_em = seed_em = current_em
-    rejected_buffer: List[dict] = []
-    history = [current_em]
-    accepted = rejected = 0
-    if verbose:
-        print(f"  seed skill: val hard-EM = {current_em:.3f}")
+    def run(rendered, task):
+        return rollout.answer(rendered, {"context": task.meta["context"],
+                                         "question": task.prompt,
+                                         "answers": task.meta["answers"]})
 
-    for t in range(steps):
-        budget = scheduler.step()
-        # rollout on a train minibatch; collect failures (hard == 0).
-        batch = rng.sample(train, min(minibatch, len(train)))
-        failures = []
-        for ex in batch:
-            pred = rollout.answer(skill, ex)
-            if em_score(pred, ex["answers"]) == 0.0:
-                failures.append((ex["question"], pred, ex["answers"][0]))
-        if not failures:
-            history.append(current_em)
-            continue
+    def reward(task, output):
+        return em_score(output, task.meta["answers"])
 
-        edits = propose_patch(complete, skill, failures, rejected_buffer, budget)
-        if not edits:
-            history.append(current_em)
-            continue
-        candidate = apply_patch(skill, edits)
+    def factory(ledger, verifier, audit, config, policy):
+        return StrictGateAggregator(ledger, verifier, ctx, artifact_id="skill_document")
 
-        # strict accept gate: candidate must beat CURRENT on held-out val EM.
-        cand_em = eval_hard_em(rollout, candidate, val)
-        if cand_em > current_em:
-            skill, current_em = candidate, cand_em
-            best_em = max(best_em, cand_em)
-            rejected_buffer.clear()
-            accepted += 1
-            tag = "accept"
-        else:
-            rejected_buffer.extend(edits)              # remembered in-epoch
-            rejected += 1
-            tag = "reject"
-        history.append(current_em)
-        if verbose:
-            print(f"  step {t}: lr={budget} edits={len(edits)} "
-                  f"cand_EM={cand_em:.3f} -> {tag} (cur={current_em:.3f})")
-
-    return SkillOptResult(skill, seed_em, best_em, accepted, rejected, history)
+    result = evolve(tasks, reward, run=run, propose=make_propose(ctx, complete),
+                    strategy=SkillDocStrategy(ctx), initial_state={"skill": SEED_SKILL},
+                    blast_radius=0.2, artifact_id="skill_document", rounds=steps,
+                    n_workers=minibatch, held_out_frac=len(val) / max(1, len(tasks)),
+                    aggregator_factory=factory, verbose=verbose)
+    return SkillOptResult(result.rendered, ctx.seed_em, ctx.best_em,
+                          ctx.accepted, ctx.rejected,
+                          [h.held_out_reward for h in result.history])
 
 
 # ===========================================================================
@@ -365,6 +439,15 @@ def download_searchqa(split: str, limit: int) -> List[dict]:
         out.append({"question": r["question"], "context": r["context"],
                     "answers": [str(a) for a in answers if a]})
     return out
+
+
+def load_dataset(n_train: int, n_val: int, seed: int = 0) -> Dataset:
+    """SearchQA using its native `train` split, and splitting `validation` into
+    the val (gate) and test halves."""
+    train = download_searchqa("train", n_train)
+    pool = split_dataset(download_searchqa("validation", n_val), ratios=(0.0, 0.5, 0.5),
+                         seed=seed, name="SearchQA")
+    return Dataset(train=train, val=pool.val, test=pool.test, name="SearchQA")
 
 
 # ===========================================================================
@@ -389,18 +472,18 @@ def main() -> None:
 
     print("Algorithm: SkillOpt / ReflACT -- skill-document self-evolution")
     print("Dataset  : SearchQA (single-turn text QA, EM/F1)")
-    train = download_searchqa("train", args.train)
-    val = download_searchqa("validation", args.val)
-    art = SkillArtifact()
+    ds = load_dataset(args.train, args.val, seed=args.seed)
+    art = EvolvingArtifact("skill_document", blast_radius=0.2)
+    ntr, nva, nte = ds.sizes()
     print(f"Governance: skill doc blast_radius={art.blast_radius} -> {classify(art).name}")
-    print(f"Loaded   : {len(train)} train / {len(val)} val")
+    print(f"Splits   : {ntr} train / {nva} val / {nte} test")
     print("\nSeed skill document:")
     print("  " + SEED_SKILL.replace("\n", "\n  "))
     print("\nExample problem:")
-    print("  Q:", train[0]["question"][:150])
-    print("  A:", train[0]["answers"])
+    print("  Q:", ds.train[0]["question"][:150])
+    print("  A:", ds.train[0]["answers"])
 
-    calls = args.steps * (args.minibatch + 1 + args.val) + args.val
+    calls = args.steps * (args.minibatch + 1 + nva) + nte
     print(f"\nPlan     : model={args.model}, steps={args.steps}, lr={args.lr} ({args.lr_mode})")
     print(f"Budget   : up to ~{calls} model calls (rollouts dominate)")
 
@@ -424,13 +507,15 @@ def main() -> None:
         return
 
     print("\nTraining skill document (ReflACT: edits + strict gate + LR + buffer, L2)...\n")
-    result = run_skillopt(completion, train, val, steps=args.steps, lr=args.lr,
+    result = run_skillopt(completion, ds.train, ds.val, steps=args.steps, lr=args.lr,
                           minibatch=args.minibatch, lr_mode=args.lr_mode,
                           seed=args.seed, verbose=True)
 
+    test_em = eval_hard_em(Rollout(completion), result.skill, ds.test)
     print("\n=== trained skill document ===")
     print(result.skill)
-    print(f"\nval hard-EM: {result.seed_em:.3f} -> {result.best_em:.3f}")
+    print(f"\nval hard-EM : {result.seed_em:.3f} -> {result.best_em:.3f}")
+    print(f"test hard-EM: {test_em:.3f}  (held out, never seen by the gate)")
     print(f"edits accepted / rejected: {result.accepted} / {result.rejected}")
 
 

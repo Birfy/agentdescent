@@ -26,15 +26,110 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import re
 import urllib.parse
 import urllib.request
-from typing import List, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Any, Callable, List, Optional, Sequence, Tuple
 
 ROWS_URL = "https://datasets-server.huggingface.co/rows"
 CACHE_ROOT = os.path.expanduser("~/.cache/concordia")
 # The datasets-server caps a single /rows request at 100 rows.
 PAGE_MAX = 100
+
+
+# ---------------------------------------------------------------------------
+# Dataset: a train / val / test partition
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class Dataset:
+    """A dataset partitioned into **train / val / test** splits.
+
+    The examples all share the same discipline: fit on ``train``, select/gate on
+    ``val`` (the held-out set `evolve()` optimises against), and report a final
+    number on ``test`` (fully held out, never seen by the optimizer). ``map``
+    shapes every split at once (e.g. raw rows -> ``Task`` objects)."""
+
+    train: List[Any] = field(default_factory=list)
+    val: List[Any] = field(default_factory=list)
+    test: List[Any] = field(default_factory=list)
+    name: str = ""
+
+    def sizes(self) -> Tuple[int, int, int]:
+        return (len(self.train), len(self.val), len(self.test))
+
+    def __len__(self) -> int:
+        return len(self.train) + len(self.val) + len(self.test)
+
+    def map(self, fn: Callable[[Any], Any]) -> "Dataset":
+        """Apply ``fn`` to every item in every split, returning a new Dataset."""
+        return Dataset([fn(x) for x in self.train], [fn(x) for x in self.val],
+                       [fn(x) for x in self.test], self.name)
+
+    @property
+    def trainval(self) -> List[Any]:
+        """``train + val`` -- what `evolve()` consumes as its ``tasks``."""
+        return list(self.train) + list(self.val)
+
+    @property
+    def val_frac(self) -> float:
+        """``|val| / |train+val|`` -- pass as `evolve(held_out_frac=...)` so the
+        engine's held-out split is exactly this Dataset's ``val``."""
+        n = len(self.train) + len(self.val)
+        return len(self.val) / n if n else 0.0
+
+
+def _cut_points(n: int, ratios: Tuple[float, float, float]) -> Tuple[int, int]:
+    tr, va, _ = ratios
+    a = min(n, max(0, int(round(n * tr))))
+    b = min(n, max(a, a + int(round(n * va))))
+    return a, b
+
+
+def split_dataset(items: Sequence[Any], *, ratios: Tuple[float, float, float] = (0.6, 0.2, 0.2),
+                  seed: int = 0, shuffle: bool = True,
+                  stratify_key: Optional[Callable[[Any], Any]] = None,
+                  name: str = "") -> Dataset:
+    """Partition ``items`` into a :class:`Dataset` by ``ratios`` (train, val, test).
+
+    Deterministic given ``seed``. With ``stratify_key`` each group (e.g. a task
+    category / difficulty) is split by the same ratios so every split stays
+    class-balanced."""
+    items = list(items)
+    rng = random.Random(seed)
+    if stratify_key is not None:
+        groups: dict = {}
+        for it in items:
+            groups.setdefault(stratify_key(it), []).append(it)
+        train: List[Any] = []
+        val: List[Any] = []
+        test: List[Any] = []
+        for key in sorted(groups, key=lambda k: str(k)):
+            g = list(groups[key])
+            if shuffle:
+                rng.shuffle(g)
+            a, b = _cut_points(len(g), ratios)
+            train += g[:a]
+            val += g[a:b] or g[a:a + 1]        # guarantee a non-empty val per class
+            test += g[b:]
+        for split in (train, val, test):
+            if shuffle:
+                rng.shuffle(split)
+        return Dataset(train, val, test, name)
+    if shuffle:
+        rng.shuffle(items)
+    a, b = _cut_points(len(items), ratios)
+    return Dataset(items[:a], items[a:b], items[b:], name)
+
+
+def dataset_from_splits(train: Sequence[Any], val: Sequence[Any],
+                        test: Sequence[Any] = (), name: str = "") -> Dataset:
+    """Build a :class:`Dataset` from splits a source already provides (e.g. HF
+    native ``train`` / ``validation`` splits)."""
+    return Dataset(list(train), list(val), list(test), name)
 
 
 # ---------------------------------------------------------------------------

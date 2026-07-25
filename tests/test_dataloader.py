@@ -100,3 +100,43 @@ def test_load_gated_hf_returns_none_without_token(monkeypatch):
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
     assert dl.load_gated_hf("some/gated", "test") is None
+
+
+# -- Dataset + split_dataset -------------------------------------------------
+
+
+def test_split_dataset_ratios_and_determinism():
+    ds = dl.split_dataset(range(100), ratios=(0.6, 0.2, 0.2), seed=1)
+    assert ds.sizes() == (60, 20, 20)
+    assert len(ds) == 100
+    # splits are disjoint and cover everything
+    assert set(ds.train) | set(ds.val) | set(ds.test) == set(range(100))
+    assert not (set(ds.train) & set(ds.val)) and not (set(ds.val) & set(ds.test))
+    # deterministic given the seed
+    again = dl.split_dataset(range(100), ratios=(0.6, 0.2, 0.2), seed=1)
+    assert (ds.train, ds.val, ds.test) == (again.train, again.val, again.test)
+
+
+def test_dataset_trainval_and_val_frac():
+    ds = dl.Dataset(train=[1, 2, 3, 4, 5, 6], val=[7, 8], test=[9, 10])
+    assert ds.trainval == [1, 2, 3, 4, 5, 6, 7, 8]
+    assert abs(ds.val_frac - 2 / 8) < 1e-9      # |val| / |train+val|
+
+
+def test_dataset_map_shapes_every_split():
+    ds = dl.Dataset(train=[1], val=[2], test=[3]).map(lambda x: x * 10)
+    assert (ds.train, ds.val, ds.test) == ([10], [20], [30])
+
+
+def test_split_dataset_stratified_keeps_classes_in_each_split():
+    items = [{"c": "a"}] * 10 + [{"c": "b"}] * 10
+    ds = dl.split_dataset(items, ratios=(0.6, 0.2, 0.2), seed=0,
+                          stratify_key=lambda x: x["c"])
+    for split in (ds.train, ds.val, ds.test):
+        classes = {x["c"] for x in split}
+        assert classes == {"a", "b"}           # both classes present in each split
+
+
+def test_dataset_from_splits():
+    ds = dl.dataset_from_splits([1, 2], [3], [4, 5], name="x")
+    assert ds.sizes() == (2, 1, 2) and ds.name == "x"

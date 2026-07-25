@@ -70,7 +70,7 @@ python -m examples.dgm_self_improve                    # DGM   / SWE-bench Verif
 ### Tests
 
 ```bash
-pytest            # 133 tests
+pytest            #  tests
 pytest -q tests/test_async.py   # just the async runtime
 ```
 

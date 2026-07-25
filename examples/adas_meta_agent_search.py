@@ -9,7 +9,10 @@ Dataset: **MGSM** (Multilingual Grade-School Math), the light math benchmark
 Where ACE/GEPA evolve a *skill* (an L2 prompt/context), ADAS evolves the
 **agentic system itself** -- the control flow that orchestrates the model. That
 is a **harness** change: high blast radius -> Concordia's **L1** governance
-layer (`classify()` below prints the layer). Meta Agent Search is the loop:
+layer (`classify()` below prints the layer). It runs **through `evolve()`** like
+ACE/GEPA: an `AgentDesignStrategy` turns a proposed agent (JSON) into a `Diff`,
+and a custom `aggregator_factory` (`MetaSearchAggregator`) is the keep-all
+archive with bootstrap-CI fitness. Meta Agent Search is the loop:
 
     1. seed an ARCHIVE with hand-designed building blocks (CoT, Self-Consistency,
        Reflexion, Debate, Step-back, Quality-Diversity, Role-Assignment);
@@ -51,9 +54,12 @@ from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Tuple
 
 from concordia.agents import claude, openai_compatible
-from concordia.dataloader import fetch_text
-from concordia.evolvable import Contract, Evolvable
+from concordia.aggregator import AggregatorProtocol, MergeReport
+from concordia.dataloader import Dataset, fetch_text, split_dataset
+from concordia.evolvable import Diff, EvidenceCard
+from concordia.evolution import EvolvingArtifact, Task, evolve, rule_id
 from concordia.governance import classify
+from concordia.ledger import CASConflict, Ledger
 
 MGSM_URL = "https://raw.githubusercontent.com/ShengranHu/ADAS/main/dataset/mgsm/mgsm_{lang}.tsv"
 # ADAS's MGSM language set (utils.ALL_LANGUAGES).
@@ -322,30 +328,6 @@ def propose_agent(complete: Completion, archive: List[dict], debug_max: int = 3
 
 
 # ===========================================================================
-# Harness artifact (for governance layer classification)
-# ===========================================================================
-
-
-@dataclass
-class HarnessArtifact(Evolvable):
-    """A minimal Evolvable so `classify()` can place the harness in a layer."""
-
-    id: str = "agentic_system"
-    blast_radius: float = 0.6           # a harness change -> L1
-    version: int = 1
-    contract: Contract = field(default_factory=lambda: Contract("task", "text", 1))
-    design: dict = field(default_factory=dict)
-
-    def render(self) -> str:
-        return json.dumps(self.design)
-
-    def diff(self, other): ...          # unused by this example
-    def apply(self, diff): ...
-    def cheap_eval(self, evidence): return 0.0
-    def full_eval(self, task_set): return {}
-
-
-# ===========================================================================
 # Dataset: MGSM (loaded dependency-free from ADAS's TSVs)
 # ===========================================================================
 
@@ -388,9 +370,159 @@ def evaluate_agent(interp: Interpreter, program: dict,
     return [1.0 if score_mgsm(a, interp.run(program, q)) else 0.0 for q, a in examples]
 
 
+def load_dataset(langs: List[str], per_lang: int, seed: int = 0,
+                 ratios=(0.5, 0.25, 0.25)) -> Dataset:
+    """MGSM (q, a) examples split into train / val (search) / test."""
+    return split_dataset(build_examples(langs, per_lang, seed=seed),
+                         ratios=ratios, seed=seed, name="MGSM")
+
+
+def evaluate(complete: Completion, program: dict,
+             examples: List[Tuple[str, str]]) -> float:
+    """Mean MGSM accuracy of an agent program on a held-out split."""
+    if not examples:
+        return 0.0
+    return sum(evaluate_agent(Interpreter(complete), program, examples)) / len(examples)
+
+
 # ===========================================================================
-# The search driver
+# Running Meta Agent Search THROUGH evolve() -- design strategy + archive optimizer
 # ===========================================================================
+#
+# Like ACE/GEPA, ADAS plugs into `evolve()`: a `Strategy` turns a proposed agent
+# (JSON) into a `Diff` on the one-slot "agentic system", and a custom
+# `aggregator_factory` is the keep-all archive that scores each candidate
+# (bootstrap-CI fitness) and keeps the best design as the dev head. The meta-agent
+# (the propose step) conditions on the *whole archive* (shared via `AdasContext`),
+# so it does not depend on the specific per-task input evolve() hands it.
+
+
+def _weighted_sample_without_replacement(weights: List[float], k: int,
+                                         rng: random.Random) -> List[int]:
+    idxs, pool, w = [], list(range(len(weights))), list(weights)
+    for _ in range(min(k, len(pool))):
+        pick = rng.choices(range(len(pool)), weights=w, k=1)[0]
+        idxs.append(pool.pop(pick))
+        w.pop(pick)
+    return idxs
+
+
+@dataclass
+class AdasContext:
+    select: str = "adas"
+    rng_seed: int = 0
+    archive: List[dict] = field(default_factory=list)
+    children: List[int] = field(default_factory=list)
+    seed_fitness: float = 0.0
+    best_fitness: float = 0.0
+    best_agent: dict = field(default_factory=dict)
+
+
+class AgentDesignStrategy:
+    """The artifact is one agentic-system design; a proposal is a new agent JSON."""
+
+    def initial(self):
+        seed = seed_archive()[0]                            # start from Chain-of-Thought
+        return {"design": json.dumps(seed["program"]),
+                "name": seed["name"], "thought": seed["thought"]}
+
+    def render(self, state):
+        return state.get("design", "{}")                   # the program, for the interpreter
+
+    def to_diff(self, state, proposal, author, base_version, target):
+        agent = _parse_agent(proposal)
+        if agent is None:
+            return None
+        design = json.dumps(agent["program"])
+        if design == state.get("design"):
+            return None
+        return Diff(diff_id=f"{author}:{rule_id(design)}:{base_version}", target=target,
+                    ops={"design": design, "name": agent["name"],
+                         "thought": agent.get("thought", "")}, author=author)
+
+
+def make_propose(ctx: AdasContext, complete: Completion):
+    """The meta-agent: conditioned on the whole archive, propose the next agent."""
+    rng = random.Random(ctx.rng_seed)
+
+    def propose(rendered, task, output, score):
+        conditioning = ctx.archive or seed_archive()
+        if ctx.select == "dgm" and ctx.archive:            # DGM: sample who to surface
+            weights = dgm_parent_weights([a["fitness"] for a in ctx.archive], ctx.children)
+            idxs = _weighted_sample_without_replacement(weights, min(5, len(ctx.archive)), rng)
+            conditioning = [ctx.archive[i] for i in idxs]
+            for i in idxs:                                 # "explored" -> novelty discount
+                ctx.children[i] += 1
+        agent = propose_agent(complete, conditioning)
+        return json.dumps(agent) if agent else None
+    return propose
+
+
+class MetaSearchAggregator(AggregatorProtocol):
+    """ADAS's optimizer: a keep-all archive with bootstrap-CI fitness."""
+
+    def __init__(self, ledger: Ledger, verifier, ctx: AdasContext,
+                 artifact_id: str = "agentic_system", boot_seed: int = 0):
+        self.ledger = ledger
+        self.verifier = verifier
+        self.ctx = ctx
+        self.aid = artifact_id
+        self.boot_seed = boot_seed
+        self.cards: List[EvidenceCard] = []
+        self._seeded = False
+
+    def _fitness(self, head, design: str) -> float:
+        art = head.apply(Diff(diff_id="eval", target=self.aid,
+                              ops={"design": design}, author="adas"))
+        correct = [art.score([t]) for t in self.verifier.held_out]   # 0/1 per instance
+        return bootstrap_ci(correct, seed=self.boot_seed)[0]
+
+    def ingest(self, card: EvidenceCard) -> None:
+        self.cards.append(card)
+
+    def _record(self, name, thought, program, fitness):
+        agent = {"name": name, "thought": thought, "program": program, "fitness": fitness}
+        self.ctx.archive.append(agent)
+        self.ctx.children.append(0)
+        if fitness > self.ctx.best_fitness or not self.ctx.best_agent:
+            self.ctx.best_fitness = fitness
+            self.ctx.best_agent = agent
+        return agent
+
+    def step(self) -> List[MergeReport]:
+        snap = self.ledger.snapshot(Ledger.DEV)
+        head = snap.get(self.aid)
+        base_vv = {self.aid: snap.version.get(self.aid, 0)}
+        if not self._seeded:                               # ADAS: seed archive first
+            for a in seed_archive():
+                self._record(a["name"], a["thought"], a["program"],
+                             self._fitness(head, json.dumps(a["program"])))
+            self.ctx.seed_fitness = self.ctx.best_fitness
+            self._seeded = True
+
+        cards, self.cards = self.cards, []
+        for card in cards:
+            design = card.diff.ops["design"]
+            self._record(card.diff.ops.get("name", "agent"),
+                         card.diff.ops.get("thought", ""),
+                         json.loads(design), self._fitness(head, design))
+
+        best_design = json.dumps(self.ctx.best_agent["program"])
+        committed = None
+        if best_design != head.state.get("design"):        # keep the best design as head
+            try:
+                _, committed = self.ledger.commit(
+                    head.apply(Diff(diff_id="best", target=self.aid,
+                                    ops={"design": best_design,
+                                         "name": self.ctx.best_agent["name"],
+                                         "thought": self.ctx.best_agent.get("thought", "")},
+                                    author="adas")),
+                    base_vv, branch=Ledger.DEV, message="adas: keep best design")
+            except CASConflict:
+                committed = None
+        return [MergeReport(self.aid, None, False, len(cards), len(cards), 0, 0,
+                            self.ctx.best_fitness, committed,
+                            f"archive={len(self.ctx.archive)} best={self.ctx.best_fitness:.3f}")]
 
 
 @dataclass
@@ -404,57 +536,31 @@ class SearchResult:
 def run_meta_agent_search(complete: Completion, val: List[Tuple[str, str]],
                           generations: int, select: str = "adas",
                           seed: int = 0, verbose: bool = False) -> SearchResult:
+    """Drive Meta Agent Search through `evolve()` (val split into trigger/held-out)."""
+    tasks = [Task(id=f"mgsm{i}", prompt=q, meta={"answer": a})
+             for i, (q, a) in enumerate(val)]
+    ctx = AdasContext(select=select, rng_seed=seed)
     interp = Interpreter(complete)
-    rng = random.Random(seed)
-    archive = seed_archive()
-    children = [0] * len(archive)
 
-    # evaluate the seeds first (ADAS: seeds get a fitness before search).
-    for a in archive:
-        a["fitness"] = bootstrap_ci(evaluate_agent(interp, a["program"], val))[0]
-    seed_fitness = max(a["fitness"] for a in archive)
-    if verbose:
-        for a in archive:
-            print(f"  seed  {a['name']:<32} fitness={a['fitness']:.3f}")
+    def run(rendered, task):
+        try:
+            program = json.loads(rendered)
+        except json.JSONDecodeError:
+            return ""
+        return interp.run(program, task.prompt) or ""
 
-    for g in range(generations):
-        conditioning = archive
-        if select == "dgm":
-            # DGM: sample which prior agents to surface to the meta-agent.
-            weights = dgm_parent_weights([a["fitness"] for a in archive], children)
-            k = min(len(archive), 5)
-            idxs = _weighted_sample_without_replacement(weights, k, rng)
-            conditioning = [archive[i] for i in idxs]
+    def reward(task, output):
+        return 1.0 if score_mgsm(task.meta["answer"], output) else 0.0
 
-        agent = propose_agent(complete, conditioning)
-        if agent is None:
-            if verbose:
-                print(f"  gen {g}: proposal invalid, skipped")
-            continue
-        correct = evaluate_agent(interp, agent["program"], val)
-        agent["fitness"], lo, hi = bootstrap_ci(correct)
-        agent["generation"] = g + 1
-        archive.append(agent)
-        children.append(0)
-        if select == "dgm":
-            for i in idxs:
-                children[i] += 1
-        if verbose:
-            print(f"  gen {g}: {agent['name']:<32} fitness={agent['fitness']:.3f} "
-                  f"[{lo:.2f},{hi:.2f}]")
+    def factory(ledger, verifier, audit, config, policy):
+        return MetaSearchAggregator(ledger, verifier, ctx,
+                                    artifact_id="agentic_system", boot_seed=seed)
 
-    best = max(archive, key=lambda a: a["fitness"])
-    return SearchResult(archive, best, seed_fitness, best["fitness"])
-
-
-def _weighted_sample_without_replacement(weights: List[float], k: int,
-                                         rng: random.Random) -> List[int]:
-    idxs, pool, w = [], list(range(len(weights))), list(weights)
-    for _ in range(min(k, len(pool))):
-        pick = rng.choices(range(len(pool)), weights=w, k=1)[0]
-        idxs.append(pool.pop(pick))
-        w.pop(pick)
-    return idxs
+    evolve(tasks, reward, run=run, propose=make_propose(ctx, complete),
+           strategy=AgentDesignStrategy(), blast_radius=0.6, artifact_id="agentic_system",
+           rounds=generations, n_workers=2, held_out_frac=0.5,
+           aggregator_factory=factory, verbose=verbose)
+    return SearchResult(ctx.archive, ctx.best_agent or {}, ctx.seed_fitness, ctx.best_fitness)
 
 
 # ===========================================================================
@@ -480,17 +586,18 @@ def main() -> None:
     langs = [l.strip() for l in args.langs.split(",") if l.strip() in ALL_LANGUAGES]
     print("Algorithm: ADAS Meta Agent Search -- harness (agentic-system) self-evolution")
     print("Dataset  : MGSM (Multilingual Grade-School Math)")
-    val = build_examples(langs, args.per_lang, seed=args.seed)
-    harness = HarnessArtifact()
+    ds = load_dataset(langs, args.per_lang, seed=args.seed)
+    harness = EvolvingArtifact("agentic_system", blast_radius=0.6)
+    ntr, nva, nte = ds.sizes()
     print(f"Governance: harness artifact blast_radius={harness.blast_radius} "
           f"-> {classify(harness).name} (harness changes are high-blast-radius)")
-    print(f"Loaded   : langs={langs}, {len(val)} validation problems")
+    print(f"Loaded   : langs={langs}; {ntr} train / {nva} val (search) / {nte} test")
     print(f"Seeds    : {', '.join(a['name'] for a in seed_archive())}")
     print("\nExample problem:")
-    print("  Q:", val[0][0][:150])
-    print("  A:", val[0][1])
+    print("  Q:", ds.train[0][0][:150])
+    print("  A:", ds.train[0][1])
 
-    calls = args.generations * 3 + (len(seed_archive()) + args.generations) * len(val) * 3
+    calls = args.generations * 3 + (len(seed_archive()) + args.generations) * (nva + nte) * 3
     print(f"\nPlan     : model={args.model}, generations={args.generations}, select={args.select}")
     print(f"Budget   : up to ~{calls} model calls (multi-step agents call the model many times)")
 
@@ -514,14 +621,16 @@ def main() -> None:
         return
 
     print("\nSearching agentic systems (Meta Agent Search, L1 harness)...\n")
-    result = run_meta_agent_search(completion, val, args.generations,
+    result = run_meta_agent_search(completion, ds.trainval, args.generations,
                                    select=args.select, seed=args.seed, verbose=True)
 
+    test_acc = evaluate(completion, result.best.get("program", {}), ds.test)
     print("\n=== best discovered agentic system ===")
-    print(f"name   : {result.best['name']}")
-    print(f"program: {json.dumps(result.best['program'], indent=2)}")
+    print(f"name   : {result.best.get('name', '?')}")
+    print(f"program: {json.dumps(result.best.get('program', {}), indent=2)}")
     print(f"\nseed fitness (best hand-designed): {result.seed_fitness:.3f}")
-    print(f"searched fitness (best found)    : {result.best_fitness:.3f}")
+    print(f"searched fitness (best on val)   : {result.best_fitness:.3f}")
+    print(f"test accuracy (held out)         : {test_acc:.3f}")
 
 
 if __name__ == "__main__":

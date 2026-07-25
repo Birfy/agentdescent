@@ -23,7 +23,10 @@ which differs from some paper-level claims -- flagged inline:
   * **Skill = a folder of Markdown files** with YAML frontmatter; the active skill
     set is injected into the agent by concatenation.
 
-Governance: a skill is an **L2** artifact -> `blast_radius=0.2` (via `classify`).
+It runs **through `evolve()`** like ACE/GEPA: a `SkillLibraryStrategy` turns a
+proposed `SKILL.md` into a `Diff`, and a custom `aggregator_factory`
+(`TopKFrontierAggregator`) is the bounded top-K frontier. A skill is an **L2**
+artifact -> `blast_radius=0.2` (via `classify`).
 
     python -m examples.evoskill_skill_discovery --dry-run     # dataset + scorer, no API
     python -m examples.evoskill_skill_discovery --model claude-haiku-4-5
@@ -46,9 +49,12 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
 from concordia.agents import claude, openai_compatible
-from concordia.dataloader import fetch_text, load_gated_hf
-from concordia.evolvable import Contract, Evolvable
+from concordia.aggregator import AggregatorProtocol, MergeReport
+from concordia.dataloader import Dataset, fetch_text, load_gated_hf, split_dataset
+from concordia.evolvable import Diff, EvidenceCard
+from concordia.evolution import EvolvingArtifact, Task, evolve
 from concordia.governance import classify
+from concordia.ledger import CASConflict, Ledger
 
 RAW = "https://raw.githubusercontent.com/sentient-agi/EvoSkill/main/examples/officeqa/data"
 Completion = Callable[[str], str]
@@ -164,20 +170,8 @@ _AGENT_TMPL = (
     "Bulletin excerpts.\n\nLearned skills:\n{skills}\n\n"
     "Document excerpt:\n{context}\n\nQuestion: {question}\n\n"
     "Reason carefully, then end with `Answer: <value>`.")
-
-
-@dataclass
-class BaseAgent:
-    complete: Completion
-    docs: Dict[str, str]
-
-    def answer(self, skills: Dict[str, str], item: dict) -> str:
-        doc = self.docs.get(item["source_files"], "")
-        context = retrieve_context(doc, item["question"]) if doc else "(document unavailable)"
-        text = self.complete(_AGENT_TMPL.format(
-            skills=render_skills(skills), context=context, question=item["question"]))
-        m = re.search(r"answer\s*[:=]\s*(.+)", text, re.IGNORECASE)
-        return (m.group(1) if m else text).strip()
+# (the base agent that consumes the skills is `agent_answer`, defined with the
+# evolve() wiring below.)
 
 
 # ===========================================================================
@@ -261,25 +255,6 @@ class Frontier:
 
 
 # ===========================================================================
-# Governance artifact (skill = L2)
-# ===========================================================================
-
-
-@dataclass
-class SkillArtifact(Evolvable):
-    id: str = "skill_library"
-    blast_radius: float = 0.2
-    version: int = 1
-    contract: Contract = field(default_factory=lambda: Contract("task", "text", 1))
-
-    def render(self) -> str: return ""
-    def diff(self, other): ...
-    def apply(self, diff): ...
-    def cheap_eval(self, evidence): return 0.0
-    def full_eval(self, task_set): return {}
-
-
-# ===========================================================================
 # Dataset: OfficeQA (real, HF-gated) with a bundled-sample fallback
 # ===========================================================================
 
@@ -332,8 +307,126 @@ def stratified_split(items: List[dict], train_ratio: float = 0.5,
 
 
 # ===========================================================================
-# The EvoSkill loop
+# Running EvoSkill THROUGH evolve() -- skill-library strategy + top-K frontier
 # ===========================================================================
+#
+# Like ACE/GEPA, EvoSkill plugs into `evolve()`: a `Strategy` turns a proposed
+# `SKILL.md` into a `Diff` on the skill library, and a custom `aggregator_factory`
+# is the bounded top-K frontier (parent = the best member, which the aggregator
+# makes the dev head so the next round extends it). Shared state (frontier,
+# feedback history, recent failures, docs) lives in one `EvoSkillContext`.
+
+
+@dataclass
+class EvoSkillContext:
+    docs: Dict[str, str]
+    frontier: Frontier
+    feedback: List[str] = field(default_factory=list)
+    recent_failures: List[Tuple[str, str, str]] = field(default_factory=list)
+    seed_score: float = 0.0
+    best_score: float = 0.0
+
+
+def _parse_rendered_skills(rendered: str) -> Dict[str, str]:
+    skills: Dict[str, str] = {}
+    for chunk in rendered.split("### skill: ")[1:]:
+        name, _, body = chunk.partition("\n")
+        skills[name.strip()] = body.strip()
+    return skills
+
+
+def agent_answer(complete: Completion, docs: Dict[str, str],
+                 rendered_skills: str, task: Task) -> str:
+    doc = docs.get(task.meta["source_files"], "")
+    context = retrieve_context(doc, task.prompt) if doc else "(document unavailable)"
+    text = complete(_AGENT_TMPL.format(skills=rendered_skills, context=context,
+                                       question=task.prompt))
+    m = re.search(r"answer\s*[:=]\s*(.+)", text, re.IGNORECASE)
+    return (m.group(1) if m else text).strip()
+
+
+class SkillLibraryStrategy:
+    """The artifact is a library of SKILL.md files; a proposal is `name :: body`."""
+
+    def initial(self):
+        return {}
+
+    def render(self, state):
+        return render_skills(state)
+
+    def to_diff(self, state, proposal, author, base_version, target):
+        name, _, body = proposal.partition(" :: ")
+        name, body = name.strip(), body.strip()
+        if not (name and body) or state.get(name) == body:
+            return None
+        return Diff(diff_id=f"{author}:{name}:{base_version}", target=target,
+                    ops={name: body}, author=author)
+
+
+def make_propose(ctx: EvoSkillContext, complete: Completion):
+    """Failure-driven skill induction: analyse recent failures -> one SKILL.md."""
+    def propose(rendered, task, output, score):
+        if score >= PASS_THRESHOLD:                        # only learn from failures
+            return None
+        ctx.recent_failures.append((task.prompt, output, task.meta["answer"]))
+        skills = _parse_rendered_skills(rendered)
+        proposed = propose_and_generate(complete, skills,
+                                        ctx.recent_failures[-5:], ctx.feedback)
+        if not proposed:
+            return None
+        name, body = proposed
+        return f"{name} :: {body}"
+    return propose
+
+
+class TopKFrontierAggregator(AggregatorProtocol):
+    """EvoSkill's optimizer: the bounded top-K aggregate frontier."""
+
+    def __init__(self, ledger: Ledger, verifier, ctx: EvoSkillContext,
+                 artifact_id: str = "skill_library"):
+        self.ledger = ledger
+        self.verifier = verifier
+        self.ctx = ctx
+        self.aid = artifact_id
+        self.cards: List[EvidenceCard] = []
+        self._seeded = False
+
+    def ingest(self, card: EvidenceCard) -> None:
+        self.cards.append(card)
+
+    def step(self) -> List[MergeReport]:
+        snap = self.ledger.snapshot(Ledger.DEV)
+        head = snap.get(self.aid)
+        base_vv = {self.aid: snap.version.get(self.aid, 0)}
+        if not self._seeded:
+            self.ctx.seed_score = head.score(self.verifier.held_out)
+            self.ctx.best_score = self.ctx.seed_score
+            self.ctx.frontier.update(dict(head.state), self.ctx.seed_score)
+            self._seeded = True
+
+        cards, self.cards = self.cards, []
+        for card in cards:
+            candidate = head.apply(card.diff)
+            score = candidate.score(self.verifier.held_out)
+            admitted = self.ctx.frontier.update(dict(candidate.state), score)
+            self.ctx.best_score = max(self.ctx.best_score, score)
+            self.ctx.feedback.append(
+                f"{list(card.diff.ops)[0]}: {'admitted' if admitted else 'discarded'} "
+                f"(val {score:.3f})")
+
+        parent_state, _ = self.ctx.frontier.select_parent()   # strategy="best"
+        report_diff = committed = None
+        if parent_state != head.state:
+            try:
+                _, committed = self.ledger.commit(
+                    head.apply(Diff(diff_id="frontier", target=self.aid,
+                                    ops=dict(parent_state), author="evoskill")),
+                    base_vv, branch=Ledger.DEV, message="evoskill: select best frontier member")
+            except CASConflict:
+                committed = None
+        return [MergeReport(self.aid, report_diff, False, len(cards), len(cards), 0, 0,
+                            self.ctx.best_score, committed,
+                            f"frontier={len(self.ctx.frontier.members)} best={self.ctx.best_score:.3f}")]
 
 
 @dataclass
@@ -344,51 +437,59 @@ class EvoResult:
     iterations: int
 
 
-def evaluate(agent: BaseAgent, skills: Dict[str, str], items: List[dict]) -> float:
-    return sum(score_multi_tolerance(agent.answer(skills, it), it["answer"])
-               for it in items) / max(1, len(items))
-
-
 def run_evoskill(complete: Completion, docs: Dict[str, str],
                  train: List[dict], val: List[dict], iterations: int = 6,
                  max_frontier: int = 3, seed: int = 0,
                  verbose: bool = False) -> EvoResult:
-    import random
-    rng = random.Random(seed)
-    agent = BaseAgent(complete, docs)
-    base_skills: Dict[str, str] = {}
-    seed_score = evaluate(agent, base_skills, val)
-    frontier = Frontier(max_size=max_frontier)
-    frontier.update(base_skills, seed_score)
-    feedback: List[str] = []
-    if verbose:
-        print(f"  seed (no skills): val score = {seed_score:.3f}")
+    """Drive EvoSkill through `evolve()` (`val` is the held-out frontier metric)."""
+    def to_task(i, it):
+        return Task(id=f"oqa{i}", prompt=it["question"],
+                    meta={"answer": it["answer"], "source_files": it["source_files"]})
 
-    for it in range(iterations):
-        parent_skills, parent_score = frontier.select_parent()
-        batch = rng.sample(train, min(3, len(train)))
-        failures = []
-        for item in batch:
-            pred = agent.answer(parent_skills, item)
-            if score_multi_tolerance(pred, item["answer"]) < PASS_THRESHOLD:
-                failures.append((item["question"], pred, item["answer"]))
-        if not failures:
-            continue
-        proposed = propose_and_generate(complete, parent_skills, failures, feedback)
-        if not proposed:
-            continue
-        name, body = proposed
-        child = dict(parent_skills)
-        child[name] = body
-        child_score = evaluate(agent, child, val)
-        admitted = frontier.update(child, child_score)
-        tag = ("improved" if child_score > parent_score else "kept") if admitted else "discarded"
-        feedback.append(f"{name}: {tag} (val {child_score:.3f})")
-        if verbose:
-            print(f"  iter {it}: +skill '{name}' val={child_score:.3f} -> {tag}")
+    tasks = [to_task(i, it) for i, it in enumerate(list(train) + list(val))]
+    ctx = EvoSkillContext(docs=docs, frontier=Frontier(max_size=max_frontier))
 
-    best_skills, best_score = frontier.select_parent()
-    return EvoResult(best_skills, seed_score, best_score, iterations)
+    def run(rendered, task):
+        return agent_answer(complete, ctx.docs, rendered, task)
+
+    def reward(task, output):
+        return score_multi_tolerance(output, task.meta["answer"])
+
+    def factory(ledger, verifier, audit, config, policy):
+        return TopKFrontierAggregator(ledger, verifier, ctx, artifact_id="skill_library")
+
+    result = evolve(tasks, reward, run=run, propose=make_propose(ctx, complete),
+                    strategy=SkillLibraryStrategy(), blast_radius=0.2,
+                    artifact_id="skill_library", rounds=iterations,
+                    n_workers=min(3, len(train)), held_out_frac=len(val) / max(1, len(tasks)),
+                    aggregator_factory=factory, verbose=verbose)
+    return EvoResult(dict(result.state), ctx.seed_score, ctx.best_score, iterations)
+
+
+# ===========================================================================
+# Dataset + test evaluation
+# ===========================================================================
+
+
+def load_dataset(seed: int = 0, ratios=(0.5, 0.25, 0.25)) -> Dataset:
+    """OfficeQA items split train/val/test, stratified by difficulty."""
+    return split_dataset(load_officeqa(), ratios=ratios, seed=seed,
+                         stratify_key=lambda it: it["difficulty"], name="OfficeQA")
+
+
+def evaluate(complete: Completion, docs: Dict[str, str], skills: Dict[str, str],
+             items: List[dict]) -> float:
+    """Mean multi-tolerance score of a skill library on a held-out split."""
+    if not items:
+        return 0.0
+    rendered = render_skills(skills)
+    total = 0.0
+    for it in items:
+        task = Task(id=it["uid"], prompt=it["question"],
+                    meta={"answer": it["answer"], "source_files": it["source_files"]})
+        total += score_multi_tolerance(agent_answer(complete, docs, rendered, task),
+                                       it["answer"])
+    return total / len(items)
 
 
 # ===========================================================================
@@ -409,19 +510,19 @@ def main() -> None:
 
     print("Algorithm: EvoSkill -- failure-driven skill discovery (top-K frontier)")
     print("Dataset  : OfficeQA (U.S. Treasury Bulletins, deterministic numeric scorer)")
-    items = load_officeqa()
-    docs = fetch_docs(items)
-    art = SkillArtifact()
-    train, val = stratified_split(items)
+    ds = load_dataset(seed=args.seed)
+    docs = fetch_docs(ds.train + ds.val + ds.test)
+    art = EvolvingArtifact("skill_library", blast_radius=0.2)
+    ntr, nva, nte = ds.sizes()
     print(f"Governance: skill library blast_radius={art.blast_radius} -> {classify(art).name}")
-    src = "full HF OfficeQA" if len(items) > 12 else "bundled 12-row sample (HF gated)"
-    print(f"Loaded   : {len(items)} items ({src}); {len(train)} train / {len(val)} val; "
+    src = "full HF OfficeQA" if len(ds) > 12 else "bundled 12-row sample (HF gated)"
+    print(f"Loaded   : {len(ds)} items ({src}); {ntr} train / {nva} val / {nte} test; "
           f"{len(docs)} docs")
     print("\nExample problem:")
-    print("  Q:", items[0]["question"][:150])
-    print("  A:", items[0]["answer"], f"(difficulty={items[0]['difficulty']})")
+    print("  Q:", ds.train[0]["question"][:150])
+    print("  A:", ds.train[0]["answer"], f"(difficulty={ds.train[0]['difficulty']})")
 
-    calls = args.iterations * (3 + 2 + len(val))
+    calls = args.iterations * (3 + 2 + nva) + nte
     print(f"\nPlan     : model={args.model}, iterations={args.iterations}, frontier={args.frontier}")
     print(f"Budget   : up to ~{calls} model calls")
 
@@ -443,12 +544,14 @@ def main() -> None:
         return
 
     print("\nDiscovering skills (failure analysis + top-K frontier, L2)...\n")
-    result = run_evoskill(completion, docs, train, val, iterations=args.iterations,
+    result = run_evoskill(completion, docs, ds.train, ds.val, iterations=args.iterations,
                           max_frontier=args.frontier, seed=args.seed, verbose=True)
 
+    test_score = evaluate(completion, docs, result.skills, ds.test)
     print("\n=== discovered skill library ===")
     print(render_skills(result.skills))
-    print(f"\nval score: {result.seed_score:.3f} -> {result.best_score:.3f}")
+    print(f"\nval score : {result.seed_score:.3f} -> {result.best_score:.3f}")
+    print(f"test score: {test_score:.3f}  (held out, never seen by the frontier)")
     print(f"skills discovered: {len(result.skills)}")
 
 

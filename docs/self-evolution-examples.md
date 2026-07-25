@@ -13,14 +13,20 @@ Two categories, mirroring the two governance layers:
 * **Harness self-evolution** — evolve the *agentic system / coding agent itself*
   (an **L1** artifact, `blast_radius=0.6`, oracle-gated): ADAS, DGM.
 
-| Algorithm | Kind | Example | Dataset (faithful) | Framework mapping |
+**All six run through the one entry point, [`evolve()`](evolution.md)** — each is
+just a custom `strategy=` (how a proposal becomes a `Diff`) and/or a custom
+`aggregator_factory=` (the selection/acceptance optimizer). No example bypasses
+the engine; they differ only in those two plug-ins and the blast radius. Each has
+a dedicated page:
+
+| Algorithm | Kind | Dataset (faithful) | `evolve()` plug-ins | Page |
 |---|---|---|---|---|
-| **ACE** (Agentic Context Engineering) | skill / context | [`ace_context_evolution.py`](https://github.com/Birfy/concordia/blob/main/examples/ace_context_evolution.py) | FiNER-139 (XBRL tagging) | `evolve()` + custom `ACEPlaybook` strategy; Curator = the aggregator |
-| **GEPA** (Reflective Prompt Evolution) | skill / prompt | [`gepa_prompt_evolution.py`](https://github.com/Birfy/concordia/blob/main/examples/gepa_prompt_evolution.py) | HotpotQA (EM) | `evolve()` + `aggregator_factory=` Pareto optimizer |
-| **EvoSkill** (Automated Skill Discovery) | skill library | [`evoskill_skill_discovery.py`](https://github.com/Birfy/concordia/blob/main/examples/evoskill_skill_discovery.py) | OfficeQA (Treasury) | failure-driven induction + bounded top-K frontier |
-| **SkillOpt** (ReflACT) | skill document | [`skillopt_skill_training.py`](https://github.com/Birfy/concordia/blob/main/examples/skillopt_skill_training.py) | SearchQA (EM/F1) | bounded edits + strict gate + LR budget + rejected buffer |
-| **ADAS** (Meta Agent Search) | harness | [`adas_meta_agent_search.py`](https://github.com/Birfy/concordia/blob/main/examples/adas_meta_agent_search.py) | MGSM | archive-conditioned meta-search; L1 governance |
-| **DGM** (Darwin Gödel Machine) | harness | [`dgm_self_improve.py`](https://github.com/Birfy/concordia/blob/main/examples/dgm_self_improve.py) | SWE-bench Verified | keep-all archive + sigmoid×novelty selection; L1 |
+| **ACE** (Agentic Context Engineering) | skill / context | FiNER-139 (XBRL tagging) | `strategy=ACEPlaybook`; Curator = default aggregator | [→](algo-ace.md) |
+| **GEPA** (Reflective Prompt Evolution) | skill / prompt | HotpotQA (EM) | `aggregator_factory=` Pareto optimizer | [→](algo-gepa.md) |
+| **EvoSkill** (Automated Skill Discovery) | skill library | OfficeQA (Treasury) | `strategy` + `aggregator_factory=` top-K frontier | [→](algo-evoskill.md) |
+| **SkillOpt** (ReflACT) | skill document | SearchQA (EM/F1) | `strategy` (edits) + `aggregator_factory=` strict gate | [→](algo-skillopt.md) |
+| **ADAS** (Meta Agent Search) | harness (L1) | MGSM | `strategy` + `aggregator_factory=` keep-all archive | [→](algo-adas.md) |
+| **DGM** (Darwin Gödel Machine) | harness (L1) | SWE-bench Verified | `strategy` + `aggregator_factory=` archive + selection | [→](algo-dgm.md) |
 
 Every example takes `--dry-run` (load the dataset, print the plan, **no API
 calls**) and has an offline test suite (`tests/test_<name>_example.py`) exercising

@@ -43,7 +43,14 @@ nav:
     - Duration-aware scheduling: duration-scheduling.md
     - Efficiency experiments: efficiency.md
   - Complete example — skill evolution: skill-evolution.md
-  - Self-evolution algorithms (faithful ports): self-evolution-examples.md
+  - Self-evolution algorithms (faithful ports):
+    - Overview: self-evolution-examples.md
+    - ACE — context evolution: algo-ace.md
+    - GEPA — prompt evolution: algo-gepa.md
+    - EvoSkill — skill discovery: algo-evoskill.md
+    - SkillOpt — skill-document training: algo-skillopt.md
+    - ADAS — meta agent search (harness): algo-adas.md
+    - DGM — Darwin Gödel Machine (harness): algo-dgm.md
   - Usage & extending: usage.md
 
 markdown_extensions:

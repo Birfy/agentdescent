@@ -51,7 +51,7 @@ from collections import Counter
 from typing import Dict, List, Optional, Tuple
 
 from concordia.agents import claude, openai_compatible
-from concordia.dataloader import hf_feature_names, hf_rows
+from concordia.dataloader import Dataset, hf_feature_names, hf_rows, split_dataset
 from concordia.evolvable import Diff
 from concordia.evolution import LLMAgent, Task, evolve, rule_id
 from concordia.parallel import DataParallel
@@ -258,6 +258,21 @@ def estimate_calls(rounds: int, workers: int, held_out: int) -> int:
     return rounds * per_round
 
 
+def load_dataset(pool: int, top_k: int, ratios=(0.5, 0.25, 0.25), seed: int = 0) -> Dataset:
+    """FiNER single-entity tasks, split train/val/test (stratified by concept)."""
+    rows, names = download_finer(pool)
+    tasks = build_tasks(rows, names, limit=10 ** 9, top_k=top_k, seed=seed)
+    return split_dataset(tasks, ratios=ratios, seed=seed,
+                         stratify_key=lambda t: t.meta["target"], name="FiNER-139")
+
+
+def evaluate(agent, rendered: str, tasks: List[Task], reward) -> float:
+    """Score a rendered playbook on a held-out split (the reported test metric)."""
+    if not tasks:
+        return 0.0
+    return sum(reward(t, agent.solve(rendered, t)) for t in tasks) / len(tasks)
+
+
 # ===========================================================================
 # main
 # ===========================================================================
@@ -269,34 +284,32 @@ def main() -> None:
     p.add_argument("--model", default="claude-haiku-4-5")
     p.add_argument("--rounds", type=int, default=6)
     p.add_argument("--workers", type=int, default=2)
-    p.add_argument("--train", type=int, default=14)
-    p.add_argument("--heldout", type=int, default=12)
     p.add_argument("--top-k", type=int, default=10,
                    help="restrict to the k most frequent XBRL concepts")
     p.add_argument("--pool", type=int, default=800,
                    help="FiNER validation rows to scan for single-entity sentences")
+    p.add_argument("--seed", type=int, default=0)
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--yes", action="store_true")
     args = p.parse_args()
 
     print("Algorithm: ACE (Agentic Context Engineering) -- skill/context self-evolution")
     print("Dataset  : FiNER-139 (financial XBRL tagging)")
-    rows, names = download_finer(args.pool)
-    total = args.train + args.heldout
-    tasks = build_tasks(rows, names, limit=total, top_k=args.top_k)
-    if len(tasks) < 4:
-        print(f"Only {len(tasks)} single-entity tasks in the pool; raise --pool.")
+    ds = load_dataset(args.pool, args.top_k, seed=args.seed)
+    if len(ds) < 4:
+        print(f"Only {len(ds)} single-entity tasks in the pool; raise --pool.")
         return
     reward = make_reward()
 
-    print(f"Loaded   : {len(rows)} rows scanned, {len(tasks)} single-entity tasks, "
-          f"top-{args.top_k} concepts")
-    print(f"Concepts : {', '.join(tasks[0].meta['candidates'])}")
+    ntr, nva, nte = ds.sizes()
+    print(f"Loaded   : {len(ds)} single-entity tasks, top-{args.top_k} concepts")
+    print(f"Splits   : {ntr} train / {nva} val / {nte} test")
+    print(f"Concepts : {', '.join(ds.train[0].meta['candidates'])}")
     print("\nExample problem:")
-    print("  Q:", tasks[0].prompt[-200:])
-    print("  A:", tasks[0].meta["target"])
+    print("  Q:", ds.train[0].prompt[-200:])
+    print("  A:", ds.train[0].meta["target"])
 
-    est = estimate_calls(args.rounds, args.workers, args.heldout)
+    est = estimate_calls(args.rounds, args.workers, nva) + nte
     print(f"\nPlan     : model={args.model}, rounds={args.rounds}, workers={args.workers}")
     print(f"Budget   : up to ~{est} model calls (cached repeats are free)")
 
@@ -321,16 +334,19 @@ def main() -> None:
         return
 
     print("\nEvolving context (Generator + Reflector + deterministic Curator, L2)...\n")
-    result = evolve(tasks, reward, agent=agent,
+    # fit on train, gate on val (evolve's held-out); test stays fully held out.
+    result = evolve(ds.trainval, reward, agent=agent,
                     strategy=ACEPlaybook(), parallel=DataParallel(),
                     blast_radius=0.2, artifact_id="ace_playbook",
                     rounds=args.rounds, n_workers=args.workers,
-                    held_out_frac=args.heldout / total, verbose=True)
+                    held_out_frac=ds.val_frac, verbose=True)
 
+    test_acc = evaluate(agent, result.rendered, ds.test, reward)
     print("\n=== evolved ACE playbook ===")
     print(result.rendered)
-    print(f"\nheld-out accuracy: {result.history[0].held_out_reward:.3f} "
+    print(f"\nval accuracy : {result.history[0].held_out_reward:.3f} "
           f"-> {result.final_reward:.3f}")
+    print(f"test accuracy: {test_acc:.3f}  (held out, never seen by the Curator)")
     print(f"bullets curated: {len(result.state)}")
 
 

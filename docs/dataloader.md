@@ -15,18 +15,47 @@ on-disk caching in every file, that boilerplate lives here — dependency-free
 
 ```python
 from concordia.dataloader import (
-    hf_rows, hf_feature_names, fetch_text, fetch_bytes, load_gated_hf)
+    Dataset, split_dataset, dataset_from_splits,          # the train/val/test layer
+    hf_rows, hf_feature_names, fetch_text, fetch_bytes, load_gated_hf)   # loaders
 ```
 
 | Function | What it does |
 |---|---|
+| `Dataset` | a **train / val / test** partition, with `.trainval`, `.val_frac`, `.map`, `.sizes()` |
+| `split_dataset(items, *, ratios, seed, stratify_key)` | partition items into a `Dataset` (optionally class-stratified) |
+| `dataset_from_splits(train, val, test)` | build a `Dataset` from splits a source already provides |
 | `hf_rows(dataset, split, *, config, limit)` | rows of any **public** dataset via the HF **datasets-server** `/rows` API — paged (≤100/req) and cached |
 | `hf_feature_names(dataset, split, feature, *, config)` | the label vocabulary of a `ClassLabel` (or nested `Sequence[ClassLabel]`) feature |
 | `fetch_text(url, *, cache_subdir, filename)` / `fetch_bytes(...)` | a cached raw-URL fetch (data hosted as plain files, e.g. on GitHub) |
 | `load_gated_hf(dataset, split)` | best-effort load of a **gated** dataset via a lazy `datasets` import + `HF_TOKEN`; returns `None` if unavailable |
 
-`rows_url(...)` and `page_offsets(...)` are pure helpers (no network), unit-tested
-in `tests/test_dataloader.py`.
+`rows_url(...)`, `page_offsets(...)`, `split_dataset(...)` are pure (no network),
+unit-tested in `tests/test_dataloader.py`.
+
+## `Dataset` — a train / val / test partition
+
+Every self-evolution example follows the same discipline: **fit on `train`, gate
+/ select on `val`** (the held-out set `evolve()` optimises against), and **report
+a final number on `test`** (fully held out, never seen by the optimizer).
+
+```python
+from concordia.dataloader import split_dataset
+
+ds = split_dataset(tasks, ratios=(0.5, 0.25, 0.25), seed=0,
+                   stratify_key=lambda t: t.meta["target"])   # optional class balance
+ds.sizes()          # (n_train, n_val, n_test)
+
+# run the optimizer on train+val so evolve()'s held-out split IS ds.val:
+result = evolve(ds.trainval, reward, agent=agent, held_out_frac=ds.val_frac, ...)
+
+# then score the evolved artifact on the untouched test split:
+test_metric = evaluate(agent, result.rendered, ds.test, reward)
+```
+
+`ds.val_frac` is `|val| / |train+val|`, so passing it as `held_out_frac` makes the
+engine's internal held-out split exactly `ds.val`. When a source ships native
+splits (e.g. SearchQA's `train` / `validation`), build the `Dataset` with
+`dataset_from_splits(...)` instead of re-splitting.
 
 ## Examples
 

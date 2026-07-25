@@ -109,7 +109,7 @@ pip install -e ".[dev]"
 python -m examples.run_demo      # RQ1: merge vs fork (synchronous DP)
 python -m examples.run_async     # FlashEvolve-style async + staleness policies
 python -m examples.rq2_staleness # RQ2: staleness tolerance sweep
-pytest                           # 133 tests, no external services
+pytest                           #  tests, no external services
 ```
 
 No LLM or external service is required: the reference domain is a fully

@@ -49,7 +49,7 @@ from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 from concordia.agents import claude, openai_compatible
 from concordia.aggregator import AggregatorProtocol, MergeReport
-from concordia.dataloader import hf_rows
+from concordia.dataloader import Dataset, hf_rows, split_dataset
 from concordia.evolvable import Diff, EvidenceCard
 from concordia.evolution import LLMAgent, Task, evolve, rule_id
 from concordia.ledger import CASConflict, Ledger
@@ -340,6 +340,19 @@ def estimate_calls(rounds: int, workers: int, held_out: int) -> int:
     return rounds * (workers * 3 + held_out)
 
 
+def load_dataset(fetch: int, ratios=(0.5, 0.25, 0.25), seed: int = 0) -> Dataset:
+    """HotpotQA tasks split into train / val (D_pareto) / test."""
+    tasks = build_tasks(download_hotpotqa(fetch), limit=fetch, seed=seed)
+    return split_dataset(tasks, ratios=ratios, seed=seed, name="HotpotQA")
+
+
+def evaluate(agent, instruction: str, tasks: List[Task], reward) -> float:
+    """Score an instruction on a held-out split (the reported test metric)."""
+    if not tasks:
+        return 0.0
+    return sum(reward(t, agent.solve(instruction, t)) for t in tasks) / len(tasks)
+
+
 # ===========================================================================
 # main
 # ===========================================================================
@@ -351,9 +364,7 @@ def main() -> None:
     p.add_argument("--model", default="claude-haiku-4-5")
     p.add_argument("--rounds", type=int, default=10)
     p.add_argument("--workers", type=int, default=3)
-    p.add_argument("--train", type=int, default=16)
-    p.add_argument("--heldout", type=int, default=12)
-    p.add_argument("--fetch", type=int, default=200, help="HotpotQA rows to fetch")
+    p.add_argument("--fetch", type=int, default=48, help="HotpotQA rows to fetch")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--yes", action="store_true")
@@ -361,18 +372,16 @@ def main() -> None:
 
     print("Algorithm: GEPA (Reflective Prompt Evolution) -- skill/prompt self-evolution")
     print("Dataset  : HotpotQA (multi-hop QA, distractor), exact-match")
-    rows = download_hotpotqa(args.fetch)
-    total = args.train + args.heldout
-    tasks = build_tasks(rows, limit=total, seed=args.seed)
+    ds = load_dataset(args.fetch, seed=args.seed)
     reward = make_reward()
 
-    print(f"Loaded   : {len(rows)} rows; using {len(tasks)} "
-          f"({args.train} train / {args.heldout} D_pareto)")
+    ntr, nva, nte = ds.sizes()
+    print(f"Loaded   : {len(ds)} tasks -> {ntr} train / {nva} val (D_pareto) / {nte} test")
     print("\nExample problem:")
-    print("  Q:", tasks[0].prompt.split('Question: ')[-1][:160])
-    print("  A:", tasks[0].meta["target"])
+    print("  Q:", ds.train[0].prompt.split('Question: ')[-1][:160])
+    print("  A:", ds.train[0].meta["target"])
 
-    est = estimate_calls(args.rounds, args.workers, args.heldout)
+    est = estimate_calls(args.rounds, args.workers, nva) + nte
     print(f"\nPlan     : model={args.model}, rounds={args.rounds}, workers={args.workers}")
     print(f"Budget   : up to ~{est} model calls (cached repeats are free)")
 
@@ -398,20 +407,22 @@ def main() -> None:
 
     factory = pareto_aggregator_factory(artifact_id="gepa_prompt", seed=args.seed)
     print("\nEvolving instruction (reflective mutation + Pareto selection, L2)...\n")
-    result = evolve(tasks, reward, agent=agent,
-                    strategy=InstructionSlot(), initial_state={"instruction": _SEED_INSTRUCTION},
-                    blast_radius=0.2, artifact_id="gepa_prompt",
-                    rounds=args.rounds, n_workers=args.workers,
-                    held_out_frac=args.heldout / total,
-                    aggregator_factory=factory, verbose=True)
+    # fit on train, Pareto-select on val (D_pareto); test stays fully held out.
+    evolve(ds.trainval, reward, agent=agent,
+           strategy=InstructionSlot(), initial_state={"instruction": _SEED_INSTRUCTION},
+           blast_radius=0.2, artifact_id="gepa_prompt",
+           rounds=args.rounds, n_workers=args.workers, held_out_frac=ds.val_frac,
+           aggregator_factory=factory, verbose=True)
 
     agg: ParetoAggregator = factory.holder["agg"]  # type: ignore[attr-defined]
+    best = agg.best_state.get("instruction", _SEED_INSTRUCTION)
+    test_em = evaluate(agent, best, ds.test, reward)
     print("\n=== GEPA-optimised instruction (best average on D_pareto) ===")
-    print(agg.best_state.get("instruction", _SEED_INSTRUCTION))
-    print(f"\nrounds run         : {len(result.history)}")
-    print(f"candidates explored: {len(agg.states)}")
+    print(best)
+    print(f"\ncandidates explored: {len(agg.states)}")
     print(f"seed D_pareto EM   : {agg.scores[0] and sum(agg.scores[0]) / len(agg.scores[0]):.3f}")
     print(f"best D_pareto EM   : {agg.best_avg:.3f}")
+    print(f"test EM            : {test_em:.3f}  (held out, never seen by the optimizer)")
 
 
 if __name__ == "__main__":

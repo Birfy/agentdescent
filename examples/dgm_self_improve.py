@@ -23,7 +23,10 @@ an open-ended **archive**. This port reproduces the DGM_outer.py loop faithfully
   * **Staged empirical validation** (`swe_bench/subsets/`): small=10, escalate to
     medium=50 iff score > `test_more_threshold=0.4`, then big=140 for top agents.
 
-The agent artifact is a **harness** -> Concordia's **L1** governance layer
+It runs **through `evolve()`** like ACE/GEPA: a `HarnessStrategy` turns a proposed
+capability into a `Diff`, and a custom `aggregator_factory`
+(`DGMArchiveAggregator`) is the keep-all archive + parent selection. The agent
+artifact is a **harness** -> Concordia's **L1** governance layer
 (`blast_radius=0.6`, printed via `classify`): harness changes are high-blast-
 radius and, in the full system, oracle-gated.
 
@@ -53,9 +56,12 @@ from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Tuple
 
 from concordia.agents import claude, openai_compatible
-from concordia.dataloader import hf_rows
-from concordia.evolvable import Contract, Evolvable
+from concordia.aggregator import AggregatorProtocol, MergeReport
+from concordia.dataloader import Dataset, hf_rows, split_dataset
+from concordia.evolvable import Diff, EvidenceCard
+from concordia.evolution import EvolvingArtifact, Task, evolve
 from concordia.governance import classify
+from concordia.ledger import CASConflict, Ledger
 
 SWEBENCH = ("princeton-nlp/SWE-bench_Verified", "test", "default")   # (dataset, split, config)
 
@@ -207,27 +213,121 @@ def staged_evaluate(agent: Agent, evaluate_fn: Callable[[Agent, List[dict]], flo
 
 
 # ===========================================================================
-# Governance artifact (the coding-agent harness = L1)
+# Running DGM THROUGH evolve() -- harness strategy + keep-all archive optimizer
 # ===========================================================================
+#
+# Like ACE/GEPA, DGM plugs into `evolve()`: a `Strategy` turns a proposed
+# capability into a `Diff` on the coding-agent harness, and a custom
+# `aggregator_factory` is the keep-all archive with DGM's parent selection --
+# it sets the dev head to the sampled parent, so `evolve()`'s next round mutates
+# *that* open-endedly (not the greedy best). The objective (`run`) is the
+# transparent surrogate; swap in a real Docker harness via `evaluate_fn`.
+
+
+def _caps_of(rendered: str) -> set:
+    return {c for c in rendered.split(",") if c}
+
+
+class HarnessStrategy:
+    """The artifact is the harness's capability set; a proposal adds one capability."""
+
+    def initial(self):
+        return {"capabilities": ",".join(sorted(initial_agent().capabilities))}
+
+    def render(self, state):
+        return state.get("capabilities", "")
+
+    def to_diff(self, state, proposal, author, base_version, target):
+        cap = proposal.strip()
+        current = _caps_of(state.get("capabilities", ""))
+        if not cap or cap in current:
+            return None
+        new = ",".join(sorted(current | {cap}))
+        return Diff(diff_id=f"{author}:{cap}:{base_version}", target=target,
+                    ops={"capabilities": new}, author=author)
 
 
 @dataclass
-class HarnessArtifact(Evolvable):
-    id: str = "coding_agent"
-    blast_radius: float = 0.6           # a self-modifying harness -> L1
-    version: int = 1
-    contract: Contract = field(default_factory=lambda: Contract("task", "patch", 1))
-
-    def render(self) -> str: return ""
-    def diff(self, other): ...
-    def apply(self, diff): ...
-    def cheap_eval(self, evidence): return 0.0
-    def full_eval(self, task_set): return {}
+class DGMContext:
+    rng: random.Random
+    evaluate_fn: Callable[[Agent, List[dict]], float]
+    archive_mode: str = "keep_all"
+    archive: List[Agent] = field(default_factory=list)
+    seen: set = field(default_factory=set)
+    seed_score: float = 0.0
+    best_score: float = 0.0
 
 
-# ===========================================================================
-# The DGM outer loop (DGM_outer.py:main)
-# ===========================================================================
+class DGMArchiveAggregator(AggregatorProtocol):
+    """DGM's optimizer: keep-all archive + staged eval + sigmoid×novelty selection."""
+
+    def __init__(self, ledger: Ledger, verifier, ctx: DGMContext,
+                 artifact_id: str = "coding_agent"):
+        self.ledger = ledger
+        self.verifier = verifier
+        self.ctx = ctx
+        self.aid = artifact_id
+        self.cards: List[EvidenceCard] = []
+        self.head_index = 0
+        self._seeded = False
+
+    def _instances(self) -> List[dict]:
+        return [{"instance_id": t.meta["instance_id"]} for t in self.verifier.held_out]
+
+    def _staged(self, caps: set) -> float:
+        insts = self._instances()
+        return staged_evaluate(Agent(tuple(sorted(caps))), self.ctx.evaluate_fn,
+                               insts[:STAGE_SMALL], insts[:STAGE_MEDIUM], insts[:STAGE_BIG])
+
+    def ingest(self, card: EvidenceCard) -> None:
+        self.cards.append(card)
+
+    def step(self) -> List[MergeReport]:
+        snap = self.ledger.snapshot(Ledger.DEV)
+        head = snap.get(self.aid)
+        base_vv = {self.aid: snap.version.get(self.aid, 0)}
+        if not self._seeded:
+            seed_caps = _caps_of(head.state.get("capabilities", ""))
+            seed_agent = Agent(tuple(sorted(seed_caps)), parent=None, generation=0)
+            seed_agent.score = self._staged(seed_caps)
+            self.ctx.archive.append(seed_agent)
+            self.ctx.seen.add(seed_agent.key())
+            self.ctx.seed_score = self.ctx.best_score = seed_agent.score
+            self.head_index = 0
+            self._seeded = True
+
+        parent_idx = self.head_index
+        parent = self.ctx.archive[parent_idx]
+        cards, self.cards = self.cards, []
+        for card in cards:                                 # each card = a self-modification
+            child_caps = _caps_of(card.diff.ops["capabilities"])
+            child = Agent(tuple(sorted(child_caps)), parent=parent_idx,
+                          generation=parent.generation + 1)
+            if child.key() in self.ctx.seen:
+                continue
+            child.score = self._staged(child_caps)
+            if self.ctx.archive_mode == "keep_better" and child.score <= parent.score:
+                continue
+            self.ctx.archive.append(child)                 # keep-all: stepping stones stay
+            self.ctx.seen.add(child.key())
+            self.ctx.best_score = max(self.ctx.best_score, child.score)
+        parent.children += 1                               # this parent was explored
+
+        # DGM parent selection: sample the next head ~ sigmoid(perf) x 1/(1+children).
+        self.head_index = choose_selfimproves(self.ctx.archive, 1, self.ctx.rng)[0]
+        target = ",".join(sorted(self.ctx.archive[self.head_index].capabilities))
+        committed = None
+        if target != head.state.get("capabilities"):
+            try:
+                _, committed = self.ledger.commit(
+                    head.apply(Diff(diff_id="dgm-select", target=self.aid,
+                                    ops={"capabilities": target}, author="dgm")),
+                    base_vv, branch=Ledger.DEV, message="dgm: select parent")
+            except CASConflict:
+                committed = None
+        return [MergeReport(self.aid, None, False, len(cards), len(cards), 0, 0,
+                            self.ctx.best_score, committed,
+                            f"archive={len(self.ctx.archive)} best={self.ctx.best_score:.3f}")]
 
 
 @dataclass
@@ -243,43 +343,34 @@ def run_dgm(instances: List[dict], generations: int = 12,
             evaluate_fn: Optional[Callable[[Agent, List[dict]], float]] = None,
             complete: Optional[Callable[[str], str]] = None,
             seed: int = 0, verbose: bool = False) -> DGMResult:
-    rng = random.Random(seed)
+    """Drive DGM through `evolve()` (SWE instances split into trigger/held-out)."""
     evaluate_fn = evaluate_fn or make_surrogate_evaluator()
-    small = instances[:STAGE_SMALL]
-    medium = instances[:STAGE_MEDIUM]
-    big = instances[:STAGE_BIG]
+    tasks = [Task(id=inst["instance_id"], prompt=inst["instance_id"],
+                  meta={"instance_id": inst["instance_id"]}) for inst in instances]
+    ctx = DGMContext(rng=random.Random(seed), evaluate_fn=evaluate_fn,
+                     archive_mode=archive_mode)
 
-    seed_agent = initial_agent()
-    seed_agent.score = staged_evaluate(seed_agent, evaluate_fn, small, medium, big)
-    archive: List[Agent] = [seed_agent]
-    seen = {seed_agent.key()}
-    if verbose:
-        print(f"  seed agent {list(seed_agent.capabilities)} score={seed_agent.score:.3f}")
+    def run(rendered, task):
+        return ("resolved" if required_capabilities(task.meta["instance_id"]) <= _caps_of(rendered)
+                else "unresolved")
 
-    for g in range(generations):
-        parents = choose_selfimproves(archive, selfimprove_size, rng)
-        for pi in parents:
-            parent = archive[pi]
-            parent.children += 1                       # bookkeeping on the parent
-            new_cap = propose_modification(parent, small, rng, complete)
-            if new_cap is None:
-                continue
-            child = Agent(capabilities=tuple(sorted(set(parent.capabilities) | {new_cap})),
-                          parent=pi, generation=g + 1)
-            # DGM validity gate: a child must still be a functioning code editor.
-            if child.key() in seen:
-                continue
-            child.score = staged_evaluate(child, evaluate_fn, small, medium, big)
-            if archive_mode == "keep_better" and child.score <= parent.score:
-                continue
-            archive.append(child)
-            seen.add(child.key())
-            if verbose:
-                print(f"  gen {g}: parent#{pi}{list(parent.capabilities)} +{new_cap} "
-                      f"-> score={child.score:.3f}")
+    def reward(task, output):
+        return 1.0 if output == "resolved" else 0.0
 
-    best = max(archive, key=lambda a: a.score)
-    return DGMResult(archive, best, seed_agent.score, best.score)
+    def propose(rendered, task, output, score):
+        agent = Agent(tuple(sorted(_caps_of(rendered))))
+        return propose_modification(agent, [{"instance_id": task.meta["instance_id"]}],
+                                    ctx.rng, complete)
+
+    def factory(ledger, verifier, audit, config, policy):
+        return DGMArchiveAggregator(ledger, verifier, ctx, artifact_id="coding_agent")
+
+    evolve(tasks, reward, run=run, propose=propose, strategy=HarnessStrategy(),
+           blast_radius=0.6, artifact_id="coding_agent", rounds=generations,
+           n_workers=selfimprove_size, held_out_frac=0.5,
+           aggregator_factory=factory, verbose=verbose)
+    best = max(ctx.archive, key=lambda a: a.score)
+    return DGMResult(ctx.archive, best, ctx.seed_score, best.score)
 
 
 # ===========================================================================
@@ -291,6 +382,12 @@ def download_swebench(limit: int) -> List[dict]:
     dataset, split, config = SWEBENCH
     return [{"instance_id": r["instance_id"], "repo": r["repo"]}
             for r in hf_rows(dataset, split, config=config, limit=limit)]
+
+
+def load_dataset(limit: int, seed: int = 0, ratios=(0.5, 0.25, 0.25)) -> Dataset:
+    """SWE-bench Verified instances split into train / val (staged eval) / test."""
+    return split_dataset(download_swebench(limit), ratios=ratios, seed=seed,
+                         name="SWE-bench Verified")
 
 
 # ===========================================================================
@@ -312,13 +409,14 @@ def main() -> None:
 
     print("Algorithm: Darwin Godel Machine (DGM) -- harness self-evolution")
     print("Dataset  : SWE-bench Verified (real instance ids; surrogate objective)")
-    instances = download_swebench(STAGE_BIG)
-    art = HarnessArtifact()
+    ds = load_dataset(STAGE_BIG, seed=args.seed)
+    art = EvolvingArtifact("coding_agent", blast_radius=0.6)
+    ntr, nva, nte = ds.sizes()
     print(f"Governance: coding-agent harness blast_radius={art.blast_radius} "
           f"-> {classify(art).name} (harness changes are high-blast-radius)")
-    print(f"Loaded   : {len(instances)} SWE-bench Verified instances "
-          f"(stages {STAGE_SMALL}/{STAGE_MEDIUM}/{STAGE_BIG})")
-    print(f"Example  : {instances[0]['instance_id']} ({instances[0]['repo']})")
+    print(f"Loaded   : {len(ds)} SWE-bench Verified instances; "
+          f"{ntr} train / {nva} val (staged eval) / {nte} test")
+    print(f"Example  : {ds.train[0]['instance_id']} ({ds.train[0]['repo']})")
     print("\nObjective: SURROGATE (capability-cover) -- real DGM runs SWE-bench in "
           "Docker.\n           The archive + selection + staged escalation are faithful.")
 
@@ -338,14 +436,16 @@ def main() -> None:
 
     print(f"\nRunning DGM ({args.archive}, selfimprove_size={args.selfimprove_size}, "
           f"L1 harness)...\n")
-    result = run_dgm(instances, generations=args.generations,
+    result = run_dgm(ds.trainval, generations=args.generations,
                      selfimprove_size=args.selfimprove_size, archive_mode=args.archive,
                      complete=complete, seed=args.seed, verbose=True)
 
+    test_score = make_surrogate_evaluator()(result.best, ds.test)
     print("\n=== best self-improved agent ===")
     print(f"capabilities: {list(result.best.capabilities)}")
     print(f"lineage     : generation {result.best.generation}")
-    print(f"\nsurrogate resolve-rate: {result.seed_score:.3f} -> {result.best_score:.3f}")
+    print(f"\nval resolve-rate : {result.seed_score:.3f} -> {result.best_score:.3f}")
+    print(f"test resolve-rate: {test_score:.3f}  (held out, never seen by selection)")
     print(f"archive size (keep-all): {len(result.archive)} agents")
 
 
