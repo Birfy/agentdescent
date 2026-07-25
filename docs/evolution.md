@@ -20,6 +20,13 @@ print(result.final_reward)    # held-out reward
 
 That's the minimum. Everything below is optional and swappable.
 
+!!! tip "Where do `tasks` come from?"
+    The `tasks` and `reward` are yours to define. To pull them from a public
+    benchmark without writing HuggingFace paging/caching boilerplate, use the
+    [`concordia.dataloader`](dataloader.md) data layer (`hf_rows`, `fetch_text`,
+    `load_gated_hf`) — it is how every
+    [self-evolution example](self-evolution-examples.md) loads its dataset.
+
 ---
 
 ## Every knob is a module

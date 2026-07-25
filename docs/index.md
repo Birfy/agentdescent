@@ -57,6 +57,11 @@ The one place the analogy *must* break defines the whole system:
     Any `prompt -> text` is a completion: Claude, GLM/OpenAI-compatible, a
     callable, a stub.
 
+-   :material-database-arrow-down: **[Loading datasets](dataloader.md)** → the data layer
+
+    `concordia.dataloader` — pull any benchmark (HF datasets-server + raw files),
+    cached, dependency-free. Feeds `tasks` to `evolve`.
+
 -   :material-cog-sync: **[The aggregator](aggregator.md)** → `agg_config=` / `aggregator_factory=`
 
     The optimizer — tune the reference merge/acceptance pipeline, or swap in your
@@ -104,7 +109,7 @@ pip install -e ".[dev]"
 python -m examples.run_demo      # RQ1: merge vs fork (synchronous DP)
 python -m examples.run_async     # FlashEvolve-style async + staleness policies
 python -m examples.rq2_staleness # RQ2: staleness tolerance sweep
-pytest                           # 36 tests, no external services
+pytest                           # 133 tests, no external services
 ```
 
 No LLM or external service is required: the reference domain is a fully

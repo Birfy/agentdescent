@@ -63,6 +63,10 @@ examples that converge fully (router merge-vs-fork, etc.); there the agent can
 
 ## Run it
 
+The dataset is fetched through the [`concordia.dataloader`](dataloader.md) data
+layer (cached, dependency-free), so the first `--dry-run` downloads it and every
+later run is offline.
+
 ```bash
 python -m examples.skill_evolution --dry-run                 # dataset + estimate, no API
 python -m examples.skill_evolution --model claude-haiku-4-5   # real run (Anthropic)

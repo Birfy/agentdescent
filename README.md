@@ -28,10 +28,12 @@ Full docs live in [`docs/`](docs/) and render as a website via MkDocs Material:
 | [Usage & extending](docs/usage.md) | Running the demos, config reference, **plugging in your own `Evolvable` domain** |
 | [Evolving anything](docs/evolution.md) | The general engine — evolve any artifact by writing its `Strategy` + `run`/`reward`/`propose` |
 | [Connecting agents & LLMs](docs/agents.md) | The provider-agnostic completion layer |
+| [Loading datasets](docs/dataloader.md) | The `concordia.dataloader` data layer — HF datasets-server + raw-file fetch, cached, dependency-free |
 | [Customizable parallelism](docs/parallelism.md) | Pluggable DP / TP / PP strategies — or write your own |
 | [Duration-aware scheduling](docs/duration-scheduling.md) | Estimate rollout cost from task size; LPT dispatch + straggler checkpointing |
 | [Efficiency experiments](docs/efficiency.md) | Measured parallel scaling and async tail-hiding |
 | [Example: skill evolution](docs/skill-evolution.md) | One complete run — real dataset, real LLM, every module |
+| [Self-evolution algorithms](docs/self-evolution-examples.md) | Faithful ports of ACE, GEPA, EvoSkill, SkillOpt, ADAS, DGM |
 
 ```bash
 pip install -e ".[docs]"
@@ -79,6 +81,35 @@ The one complete end-to-end run — real dataset, real LLM, every module — is
 (`python -m examples.skill_evolution --dry-run` for the no-API preview).
 Guides: [the engine](docs/evolution.md) · [skill example](docs/skill-evolution.md)
 · [agents](docs/agents.md).
+
+## Faithful ports of the latest self-evolution algorithms
+
+To show the engine is faithful to the field, Concordia ships one runnable example
+per representative **skill** and **harness** self-evolution algorithm — each
+faithful to the original repo's *algorithm* and *dataset choice*, each with a
+`--dry-run` (no-API) mode and an offline test suite. Every one loads its benchmark
+through the shared [`concordia.dataloader`](docs/dataloader.md) data layer
+(HF datasets-server + raw files, cached, dependency-free). Full guide:
+[docs/self-evolution-examples.md](docs/self-evolution-examples.md).
+
+| Algorithm | Kind | Dataset | Example |
+|---|---|---|---|
+| **ACE** (Agentic Context Engineering) | skill / context | FiNER-139 | [`ace_context_evolution.py`](examples/ace_context_evolution.py) |
+| **GEPA** (Reflective Prompt Evolution) | skill / prompt | HotpotQA | [`gepa_prompt_evolution.py`](examples/gepa_prompt_evolution.py) |
+| **EvoSkill** (Automated Skill Discovery) | skill library | OfficeQA | [`evoskill_skill_discovery.py`](examples/evoskill_skill_discovery.py) |
+| **SkillOpt** (ReflACT) | skill document | SearchQA | [`skillopt_skill_training.py`](examples/skillopt_skill_training.py) |
+| **ADAS** (Meta Agent Search) | harness | MGSM | [`adas_meta_agent_search.py`](examples/adas_meta_agent_search.py) |
+| **DGM** (Darwin Gödel Machine) | harness | SWE-bench Verified | [`dgm_self_improve.py`](examples/dgm_self_improve.py) |
+
+```bash
+python -m examples.ace_context_evolution --dry-run     # skill/context self-evolution (ACE)
+python -m examples.dgm_self_improve                    # harness self-evolution (DGM), offline
+```
+
+Fidelity is to the **released code**, not just the paper (e.g. EvoSkill's frontier
+is top-K aggregate, not per-instance Pareto — the example follows the code and
+says so); where a full setup needs heavy infra (SWE-bench Docker, gated data), the
+boundary is documented, never hidden.
 
 ## Efficiency (measured)
 

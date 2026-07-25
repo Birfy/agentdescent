@@ -53,10 +53,24 @@ Compares the three staleness policies and sweeps the `async_ratio` lag budget.
 python -m examples.rq2_staleness
 ```
 
+### Self-evolution algorithm ports (real datasets)
+
+Faithful ports of the latest skill- and harness-self-evolution algorithms — ACE,
+GEPA, EvoSkill, SkillOpt, ADAS, DGM (see
+[the catalog](self-evolution-examples.md)). Each loads a real benchmark through
+the [`concordia.dataloader`](dataloader.md) data layer and runs offline with
+`--dry-run`:
+
+```bash
+python -m examples.ace_context_evolution --dry-run     # ACE   / FiNER-139
+python -m examples.gepa_prompt_evolution --dry-run     # GEPA  / HotpotQA
+python -m examples.dgm_self_improve                    # DGM   / SWE-bench Verified (offline surrogate)
+```
+
 ### Tests
 
 ```bash
-pytest            # 36 tests
+pytest            # 133 tests
 pytest -q tests/test_async.py   # just the async runtime
 ```
 
