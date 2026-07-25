@@ -34,15 +34,14 @@ nav:
   - Home: index.md
   - Architecture: architecture.md
   - Concepts: concepts.md
-  - Usage & extending: usage.md
-  - Capabilities:
-    - Evolving anything (the engine): evolution.md
+  - The evolve method: evolution.md
+  - Building blocks (plug into evolve):
     - Connecting agents & LLMs: agents.md
     - Customizable parallelism (DP/TP/PP): parallelism.md
     - Duration-aware scheduling: duration-scheduling.md
     - Efficiency experiments: efficiency.md
-  - Examples:
-    - "Skill evolution (real API, all modules)": skill-evolution.md
+  - Complete example — skill evolution: skill-evolution.md
+  - Usage & extending: usage.md
 
 markdown_extensions:
   - admonition

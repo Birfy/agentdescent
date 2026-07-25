@@ -1,5 +1,8 @@
 # Customizable parallelism (DP / TP / PP)
 
+> **Plugs into [`evolve`](evolution.md) via** `parallel=DataParallel()` (or
+> `TensorParallel` / `PipelineParallel` / your own).
+
 The parallelism *method* — how a round of work is partitioned across workers — is
 **pluggable**. Pick one of the three classic paradigms, or implement the
 `ParallelStrategy` protocol yourself. This is the design's DP/TP/PP mapping

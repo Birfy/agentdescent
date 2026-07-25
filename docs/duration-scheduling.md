@@ -1,5 +1,9 @@
 # Duration-aware scheduling
 
+> **Belongs to the async runtime**, not synchronous [`evolve`](evolution.md):
+> pass a `DurationEstimator` to `AsyncConcordia` for straggler checkpointing. The
+> `DurationEstimator` / `lpt_schedule` primitives are usable on their own too.
+
 Agentic rollouts are heavy-tailed and their cost correlates with task size. This
 module **estimates a rollout's duration from the task's length**, then uses that
 estimate for asynchronous scheduling — dispatching to minimize makespan and

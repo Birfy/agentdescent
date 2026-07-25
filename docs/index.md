@@ -26,6 +26,16 @@ The one place the analogy *must* break defines the whole system:
 
 <div class="grid cards" markdown>
 
+-   :material-star-four-points: **[The `evolve` method](evolution.md)** — start here
+
+    The one entry point. Each capability is a plug-in to one `evolve()`
+    parameter — this is the map, with an example per module.
+
+-   :material-robot: **[Complete example](skill-evolution.md)**
+
+    One end-to-end run — real dataset, real LLM, every module — evolving a skill
+    that lifts held-out accuracy.
+
 -   :material-sitemap: **[Architecture](architecture.md)**
 
     How the components fit together and how a diff travels from a worker to a
@@ -36,38 +46,30 @@ The one place the analogy *must* break defines the whole system:
     The *why*: the training↔RSI analogy, staleness, the aggregator as a
     discrete-space optimizer, the three long tails, governance.
 
--   :material-rocket-launch: **[Usage & extending](usage.md)**
+</div>
 
-    How to install, run the sync/async demos, tune the knobs, and plug in your
-    own `Evolvable` domain.
+**Building blocks** (each plugs into `evolve`):
 
--   :material-dna: **[Evolving anything](evolution.md)**
+<div class="grid cards" markdown>
 
-    The general engine — evolve *any* artifact (skill, harness, verifier) by
-    writing its `Strategy` + `run`/`reward`/`propose`.
+-   :material-connection: **[Connecting agents & LLMs](agents.md)** → `agent=`
 
--   :material-robot: **[Example: skill evolution](skill-evolution.md)**
+    Any `prompt -> text` is a completion: Claude, GLM/OpenAI-compatible, a
+    callable, a stub.
 
-    One complete run — real dataset, real LLM, every module — evolving a skill
-    that lifts held-out accuracy.
-
--   :material-connection: **[Connecting agents & LLMs](agents.md)**
-
-    The general provider-agnostic layer — any `prompt -> text` is a completion.
-
--   :material-speedometer: **[Efficiency experiments](efficiency.md)**
-
-    Measured parallel scaling (near-linear to 8 workers) and async tail-hiding
-    (2.5× over a sync barrier).
-
--   :material-vector-triangle: **[Customizable parallelism](parallelism.md)**
+-   :material-vector-triangle: **[Customizable parallelism](parallelism.md)** → `parallel=`
 
     Pluggable DP / TP / PP methods — or write your own `ParallelStrategy`.
 
 -   :material-timer-sand: **[Duration-aware scheduling](duration-scheduling.md)**
 
     Estimate rollout cost from task size, then dispatch (LPT) and checkpoint
-    stragglers on that estimate.
+    stragglers (async runtime).
+
+-   :material-speedometer: **[Efficiency experiments](efficiency.md)**
+
+    Measured parallel scaling (near-linear to 8 workers) and async tail-hiding
+    (2.5× over a sync barrier).
 
 </div>
 

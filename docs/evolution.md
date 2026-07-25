@@ -1,126 +1,257 @@
-# Evolving anything
+# The `evolve` method
 
-`concordia.evolution` is **the module** — a domain-agnostic engine that evolves
-*any* artifact. It knows nothing about "skills" or "harnesses". You describe
-**what evolves** and **the rules of evolution**, and it runs the parallel,
-merge-based loop (ledger + aggregator + staleness + governance) for you.
-
-Skill evolution and harness evolution are just two *examples* of using it
-(below). For total control you can also skip the engine and drive
-[`Ledger`](architecture.md) + [`Aggregator`](concepts.md#4-the-aggregator-a-discrete-space-optimizer)
-directly.
+`evolve()` is the **one entry point** to the framework. You describe *what
+evolves* and *the rules of evolution*, and it runs the parallel, merge-based loop
+(ledger → workers → aggregator → commit) for you. Every capability in Concordia
+is a **plug-in to a single `evolve()` parameter** — this page is the map.
 
 ```python
-from concordia.evolution import evolve
+from concordia.agents import claude
+from concordia.evolution import evolve, LLMAgent
 
-result = evolve(tasks, reward, agent=my_agent, strategy=AppendRules(),
-                blast_radius=0.2, rounds=15, n_workers=4)
-print(result.rendered)      # the evolved artifact
-print(result.final_reward)  # held-out reward
+result = evolve(
+    tasks,                                   # what to work on
+    reward,                                  # how to score an output
+    agent=LLMAgent(claude(model="claude-haiku-4-5")),
+)
+print(result.rendered)        # the evolved artifact
+print(result.final_reward)    # held-out reward
+```
+
+That's the minimum. Everything below is optional and swappable.
+
+---
+
+## Every knob is a module
+
+| `evolve(...)` parameter | Module | What it plugs in | Default |
+|---|---|---|---|
+| `agent=` / `run=`+`propose=` | [`concordia.agents`](agents.md) + `LLMAgent` | the actor: solve a task, propose a change | — (required) |
+| `strategy=` | `Strategy` (`AppendRules` / `KeyedRules` / yours) | the **evolution rule** — how a proposal becomes a diff | `AppendRules()` |
+| `parallel=` | [`concordia.parallel`](parallelism.md) | the **parallelism method** — DP / TP / PP | `DataParallel()` |
+| `blast_radius=` | governance | which layer (L2 skill vs L1 harness/verifier) | `0.2` (L2) |
+| `agg_config=` | `AggregatorConfig` | merge & acceptance tuning | sensible defaults |
+| `staleness_policy=` | staleness (`get_policy(...)`) | how stale diffs are handled | `guarded` |
+| `rounds=`, `n_workers=` | driver | loop size, parallel worker count | `15`, `4` |
+| `blast_radius`, `oracle_budget` | governance + verifier | audit budget for L1 merges | `0.2`, `200` |
+
+The building blocks in detail:
+
+---
+
+## 1. The actor — `agent=` (or `run=` + `propose=`)
+
+*What:* the thing that runs a task against the current artifact and, on a
+failure, proposes an improvement. *Module:* [`concordia.agents`](agents.md)
+provides the provider-agnostic **completion** (`prompt -> text`); `LLMAgent`
+adapts a completion into the two-method actor.
+
+```python
+from concordia.agents import claude, openai_compatible, from_callable
+from concordia.evolution import LLMAgent
+
+evolve(tasks, reward, agent=LLMAgent(claude(model="claude-haiku-4-5")))        # Claude
+evolve(tasks, reward, agent=LLMAgent(openai_compatible(model="glm-4.6")))      # GLM / OpenAI-style
+evolve(tasks, reward, agent=LLMAgent(from_callable(my_llm)))                   # any prompt->text fn
+```
+
+Or skip `LLMAgent` and pass two plain functions — no LLM needed:
+
+```python
+evolve(tasks, reward,
+       run=lambda rendered, task: my_solver(rendered, task),
+       propose=lambda rendered, task, out, score: my_lesson(task, out))
 ```
 
 ---
 
-## What you provide
+## 2. The evolution rule — `strategy=`
 
-Four things — everything else (the parallel loop, merging, statistical
-acceptance) is the engine's job.
-
-### 1. A `Strategy` — *what the artifact is, and how a proposal becomes a change*
-
-An artifact's state is a flat `{key: value}` dict (the diff op-space the
-aggregator resolves conflicts and fusion over). A strategy decides the initial
-state, how it renders (into a prompt or config), and how a proposal becomes a
-`Diff`:
+*What:* how the artifact is represented and **how an agent's proposal becomes a
+`Diff`**. The artifact's state is a flat `{key: value}` dict — the op-space the
+aggregator resolves conflicts and fusion over.
 
 ```python
-from typing import Protocol, Optional
-from concordia.evolvable import Diff
+from concordia.evolution import AppendRules, KeyedRules
 
-class Strategy(Protocol):
-    def initial(self) -> dict: ...
-    def render(self, state: dict) -> str: ...
-    def to_diff(self, state, proposal, author, base_version, target) -> Optional[Diff]: ...
+evolve(tasks, reward, agent=agent, strategy=AppendRules())                       # default
+evolve(tasks, reward, agent=agent, strategy=KeyedRules(categories=["route","fmt"]))
 ```
-
-Two ship built in:
 
 | Strategy | Rule |
 |---|---|
-| **`AppendRules`** | each proposal → a content-addressed rule; identical proposals dedupe, complementary ones **fuse** (append-only) |
-| **`KeyedRules(categories)`** | one entry per category; competing proposals for the same category **contradict** and are resolved on held-out score |
+| `AppendRules` | each proposal → a content-addressed rule; identical ones dedupe, complementary ones **fuse** (append-only) |
+| `KeyedRules(categories)` | one entry per category; competing proposals for the same category **contradict** and are resolved on held-out score |
 
-The key idea: `to_diff` maps a proposal into `Diff.ops`. Distinct keys →
-complementary → **fused**; same key, different value → contradiction →
-**resolved**. That is how *your* logic composes with the framework's merge
-machinery for free.
-
-### 2–3. `run` and `reward` — *apply the artifact, and score it*
+Write your own by implementing three methods (`initial` / `render` / `to_diff`):
 
 ```python
-def run(rendered: str, task) -> str: ...     # apply the artifact to a task
-def reward(task, output) -> float: ...        # score in [0, 1]
+from concordia.evolvable import Diff
+
+class SingleSlot:                     # the artifact is one value each proposal replaces
+    def initial(self): return {}
+    def render(self, state): return state.get("v", "(none)")
+    def to_diff(self, state, proposal, author, base_version, target):
+        if state.get("v") == proposal: return None
+        return Diff(diff_id=f"{author}:{base_version}", target=target,
+                    ops={"v": proposal}, author=author)
+
+evolve(tasks, reward, agent=agent, strategy=SingleSlot())
 ```
 
-### 4. `propose` — *turn a failure into an improvement*
-
-```python
-def propose(rendered: str, task, output, reward) -> str | None: ...
-```
-
-`run` + `propose` can be plain functions, or bundled into an `Agent`
-(`solve`/`propose`) — `evolve(agent=...)` accepts either. The LLM connection is
-separate: see [Connecting agents & LLMs](agents.md).
-
-### 5. A `parallel` method (optional) — *how work is partitioned across workers*
-
-The parallelism method is a first-class, pluggable argument:
-`evolve(..., parallel=DataParallel())`. Pick DP / TP / PP or write your own —
-see [Customizable parallelism](parallelism.md). It defaults to `DataParallel`,
-so you only set it when you want to change how each round's work is sharded.
+Distinct `Diff.ops` keys → **fused**; same key, different value → **resolved** on
+held-out. That's how your logic composes with the merge machinery for free.
+Full detail: [strategies on the concepts page](concepts.md).
 
 ---
 
-## `blast_radius` chooses the governance layer
+## 3. The parallelism method — `parallel=`
 
-The *same* engine evolves a fast local artifact or a high-impact one — you just
-set how much blast radius it has:
+*What:* how each round's tasks are partitioned across the `n_workers`. *Module:*
+[`concordia.parallel`](parallelism.md).
+
+```python
+from concordia.parallel import DataParallel, TensorParallel, PipelineParallel
+
+evolve(tasks, reward, agent=agent, parallel=DataParallel())                # default (shard tasks)
+evolve(tasks, reward, agent=agent, parallel=TensorParallel(n_sections=4))  # disjoint sections
+evolve(tasks, reward, agent=agent, parallel=PipelineParallel(stages=[...]))# per-stage workers
+```
+
+Or your own — implement `plan(n_workers, round_index, keys) -> [WorkUnit]`:
+
+```python
+from concordia.parallel import WorkUnit
+
+class Blocks:
+    name = "block"
+    def plan(self, n_workers, round_index, keys):
+        keys = list(keys); size = (len(keys)+n_workers-1)//n_workers
+        return [WorkUnit(worker=i, keys=keys[i*size:(i+1)*size]) for i in range(n_workers)]
+
+evolve(tasks, reward, agent=agent, parallel=Blocks())
+```
+
+Details + the DP/TP/PP semantics: [Customizable parallelism](parallelism.md).
+
+---
+
+## 4. Governance — `blast_radius=`
+
+*What:* which governance layer the artifact lives in — the aggregator treats
+high-impact artifacts more conservatively, automatically.
+
+```python
+evolve(tasks, reward, agent=agent, blast_radius=0.2)   # L2: a local skill/prompt
+evolve(tasks, reward, agent=agent, blast_radius=0.6)   # L1: a harness / verifier
+```
 
 | `blast_radius` | Layer | Treatment |
 |---|---|---|
 | `≤ 0.30` | **L2** (skill, prompt, few-shot) | full async merge; cheap layers may pass a merge |
-| `0.30–0.85` | **L1** (harness, context policy, tool router, verifier) | conservative; **every merge forced through the oracle**; wider staleness tolerance |
-| frozen | **L0** (oracle, audit budget, permissions, safety) | read-only — the loop rejects mutations |
+| `0.30–0.85` | **L1** (harness, context policy, tool router, verifier) | **every merge forced through the oracle**; wider staleness tolerance |
+| frozen ids | **L0** (oracle, audit budget, permissions, safety) | read-only — the loop rejects mutations |
 
-Nothing else in your code changes between L2 and L1 (design spec §6).
+`oracle_budget=` caps how many ground-truth oracle checks the L1 audit may spend.
+See [governance in concepts](concepts.md#6-governance-blast-radius-decides-parallelism).
 
 ---
 
-## Same engine, different artifact
+## 5. Merge & acceptance tuning — `agg_config=`
 
-A **skill** — artifact = a lesson playbook, `run` = an LLM applying it, L2:
+*What:* the aggregator's knobs — when a bucket fires, how strict acceptance is,
+the trust region, and dev→stable promotion.
+
+```python
+from concordia.aggregator import AggregatorConfig
+
+evolve(tasks, reward, agent=agent, agg_config=AggregatorConfig(
+    batch_trigger=2,      # fire a merge once this many proposals collect for an artifact
+    max_wait_rounds=1,    # ...or after this many rounds (so cold artifacts don't starve)
+    base_delta=0.5,       # acceptance risk: commit iff P(Δ>0) > 1-δ, annealed by version
+    alpha_head=5,         # staleness tolerance for hot artifacts
+    alpha_tail=1,         # ...and for cold ones
+    trust_region_ops=6,   # max edits per diff
+    promote_after_k=3,    # dev -> stable after K regression-free rounds (EMA)
+))
+```
+
+Acceptance is a **statistical test** (Beta posterior `P(Δ>0) > 1−δ`), not a
+threshold — the mechanism behind [§4 of concepts](concepts.md#4-the-aggregator-a-discrete-space-optimizer).
+
+---
+
+## 6. Staleness — `staleness_policy=`
+
+*What:* what to do with a diff proposed against an out-of-date artifact version.
+*Module:* the Full / Guarded / Reflective policies.
+
+```python
+from concordia.staleness import get_policy
+
+evolve(tasks, reward, agent=agent, staleness_policy=get_policy("reflective"))
+```
+
+| Policy | Behaviour |
+|---|---|
+| `full` | use stale diffs as-is (max throughput) |
+| `guarded` | version-gated: accept `η=0`, rebase `η≤α`, discard beyond (default) |
+| `reflective` | always rebase + re-verify; discard only if the gain no longer holds |
+
+Staleness bites when workers lag head — which is most visible in the **async
+runtime** (`async_ratio`), below. In synchronous `evolve()` each round proposes
+against the current head, so η is usually 0. Deep dive:
+[staleness in concepts](concepts.md#3-staleness).
+
+---
+
+## What `evolve` returns
+
+```python
+result = evolve(tasks, reward, agent=agent, rounds=6, verbose=True)
+
+result.rendered       # the evolved artifact, rendered to text
+result.state          # its {key: value} state
+result.final_reward   # held-out reward of the final artifact
+result.history        # per-round: RoundInfo(round, held_out_reward, n_items, committed, rejected)
+result.ledger_log     # the git commit log of accepted merges
+```
+
+The engine returns **partial results** if the model backend fails mid-run (rate
+limit, credit exhaustion) — progress isn't lost.
+
+---
+
+## Putting it all together
+
+The one complete, runnable example threads every block above on a real dataset
+with a real LLM:
 
 ```python
 from concordia.agents import claude
 from concordia.evolution import evolve, LLMAgent, AppendRules
+from concordia.parallel import DataParallel
 
-result = evolve(tasks, reward,
-                agent=LLMAgent(claude(model="claude-haiku-4-5")),
-                strategy=AppendRules(), blast_radius=0.2, artifact_id="skill")
+result = evolve(
+    tasks, reward,
+    agent=LLMAgent(claude(model="claude-haiku-4-5")),   # 1. actor       (agents)
+    strategy=AppendRules(),                              # 2. rule        (strategy)
+    parallel=DataParallel(),                             # 3. parallelism (parallel)
+    blast_radius=0.2,                                    # 4. governance  (L2)
+    rounds=6, n_workers=4,
+)
 ```
 
-A **harness / verifier** — artifact = a pipeline config, driven by plain
-functions, registered at L1 (oracle-gated merges):
+Walkthrough with a real result (`0.750 → 0.792`): the
+[skill-evolution example](skill-evolution.md).
 
-```python
-from concordia.evolution import evolve, KeyedRules
+---
 
-result = evolve(tasks, reward, run=run, propose=propose,
-                strategy=KeyedRules(categories=["route", "normalize", "trim"]),
-                blast_radius=0.6, artifact_id="harness")
-```
+## The other execution mode: the async runtime
 
-Same `evolve` call — only the artifact, its strategy, and its blast radius
-differ. That is the point: **write the rules of evolution, and it runs.** The
-complete, runnable end-to-end example (real dataset, real LLM, every module) is
-on the [skill-evolution](skill-evolution.md) page.
+`evolve()` is synchronous (round barrier). For a **barrier-free** pipeline where
+workers never wait for each other — and where the staleness policies,
+[`async_ratio`](concepts.md#34-async_ratio-roll-flash-the-global-lag-budget), and
+[duration-aware straggler checkpointing](duration-scheduling.md) come into their
+own — use `AsyncConcordia` (same aggregator, staleness, and governance
+underneath). Measured trade-offs: [efficiency experiments](efficiency.md).

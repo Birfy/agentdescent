@@ -1,5 +1,8 @@
 # Connecting agents & LLMs
 
+> **Plugs into [`evolve`](evolution.md) via** `agent=LLMAgent(<completion>)` (or
+> `run=`/`propose=`). This page is the completion layer that `LLMAgent` wraps.
+
 `concordia.agents` is the **general "talk to a model/agent" layer**. It is
 deliberately separate from `concordia.evolution` — how you reach a model has
 nothing to do with skill evolution, and any application built on the framework
