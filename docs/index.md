@@ -60,6 +60,15 @@ The one place the analogy *must* break defines the whole system:
     Measured parallel scaling (near-linear to 8 workers) and async tail-hiding
     (2.5× over a sync barrier).
 
+-   :material-vector-triangle: **[Customizable parallelism](parallelism.md)**
+
+    Pluggable DP / TP / PP methods — or write your own `ParallelStrategy`.
+
+-   :material-timer-sand: **[Duration-aware scheduling](duration-scheduling.md)**
+
+    Estimate rollout cost from task size, then dispatch (LPT) and checkpoint
+    stragglers on that estimate.
+
 -   :material-file-document: **[Design spec](concordia_design.md)**
 
     The original research design document (v0.2).

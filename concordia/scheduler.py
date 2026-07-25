@@ -189,3 +189,90 @@ class ResumeQueue:
 
     def __len__(self) -> int:
         return len(self._items)
+
+
+# ---------------------------------------------------------------------------
+# Duration-aware scheduling (L-traj): estimate rollout cost from task size,
+# then schedule asynchronously on that estimate.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class DurationEstimator:
+    """Predicts a rollout's wall-clock cost from a task's *size* (e.g. prompt
+    length), calibrated online from observed rollouts.
+
+    Agentic rollout time correlates with input size / complexity, but the
+    constant isn't known a priori -- so this fits ``seconds ≈ intercept +
+    slope * cost`` incrementally by least squares as real durations come in.
+    Falls back to a running mean (then a prior) until it has enough samples."""
+
+    prior: float = 0.05      # seconds, before any data
+    min_samples: int = 3
+    _n: int = 0
+    _sx: float = 0.0
+    _sy: float = 0.0
+    _sxx: float = 0.0
+    _sxy: float = 0.0
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    def observe(self, cost: float, seconds: float) -> None:
+        with self._lock:
+            self._n += 1
+            self._sx += cost
+            self._sy += seconds
+            self._sxx += cost * cost
+            self._sxy += cost * seconds
+
+    def estimate(self, cost: float) -> float:
+        with self._lock:
+            if self._n == 0:
+                return self.prior
+            if self._n < self.min_samples:
+                return self._sy / self._n           # running mean
+            denom = self._n * self._sxx - self._sx * self._sx
+            if denom <= 1e-12:
+                return self._sy / self._n           # no spread in cost -> mean
+            slope = (self._n * self._sxy - self._sx * self._sy) / denom
+            intercept = (self._sy - slope * self._sx) / self._n
+            return max(0.0, intercept + slope * cost)
+
+    @property
+    def params(self) -> Tuple[float, float]:
+        """Return (intercept, slope) of the current fit, or (mean, 0)."""
+        with self._lock:
+            if self._n < self.min_samples:
+                return (self._sy / self._n if self._n else self.prior, 0.0)
+            denom = self._n * self._sxx - self._sx * self._sx
+            if denom <= 1e-12:
+                return (self._sy / self._n, 0.0)
+            slope = (self._n * self._sxy - self._sx * self._sy) / denom
+            return ((self._sy - slope * self._sx) / self._n, slope)
+
+
+def lpt_schedule(weights: List[float], n_workers: int) -> Tuple[List[int], float]:
+    """Longest-Processing-Time-first assignment of items to workers.
+
+    Assigns each item (heaviest estimated duration first) to the currently
+    least-loaded worker -- the classic greedy that minimizes makespan (within
+    4/3 of optimal). Returns ``(assignment, makespan)`` where ``assignment[i]``
+    is the worker index for item ``i`` and ``makespan`` is the max worker load.
+    Dispatching the tail *early* is what keeps one long rollout from defining
+    the whole batch's wall-clock."""
+    n = max(1, n_workers)
+    loads = [0.0] * n
+    assignment = [0] * len(weights)
+    for i in sorted(range(len(weights)), key=lambda k: weights[k], reverse=True):
+        j = min(range(n), key=lambda k: loads[k])
+        assignment[i] = j
+        loads[j] += weights[i]
+    return assignment, max(loads) if loads else 0.0
+
+
+def fifo_makespan(weights: List[float], n_workers: int) -> float:
+    """Makespan of naive round-robin dispatch (the baseline LPT improves on)."""
+    n = max(1, n_workers)
+    loads = [0.0] * n
+    for i, w in enumerate(weights):
+        loads[i % n] += w
+    return max(loads) if loads else 0.0

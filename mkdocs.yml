@@ -40,6 +40,8 @@ nav:
   - "Example: skill evolution": skill-evolution.md
   - "Example: harness evolution": harness-evolution.md
   - Efficiency experiments: efficiency.md
+  - Customizable parallelism (DP/TP/PP): parallelism.md
+  - Duration-aware scheduling: duration-scheduling.md
   - Design spec: concordia_design.md
 
 markdown_extensions:

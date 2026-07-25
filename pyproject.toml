@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "concordia-rsi"
-version = "0.6.0"
+version = "0.7.0"
 description = "A parallel, self-evolving framework for accelerating recursive self-improvement (RSI)"
 readme = "README.md"
 requires-python = ">=3.9"

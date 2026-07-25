@@ -76,3 +76,61 @@ def test_pp_upstream_lookup():
     chain = PipelineChain(["a", "b", "c"])
     assert chain.upstream_of("c") == ["a", "b"]
     assert chain.upstream_of("a") == []
+
+
+# -- pluggable parallel strategies (DP / TP / PP + custom) -------------------
+
+from concordia.parallel import (
+    DataParallel,
+    TensorParallel,
+    PipelineParallel,
+    ParallelStrategy,
+    WorkUnit,
+)
+
+KEYS = [f"kw{i:02d}" for i in range(24)]
+
+
+def test_data_parallel_partitions_keys_disjointly():
+    plan = DataParallel().plan(4, round_index=0, keys=KEYS)
+    assert len(plan) == 4
+    seen = [k for u in plan for k in u.keys]
+    assert sorted(seen) == sorted(KEYS)          # a partition: covers all, no dup
+    assert len(seen) == len(set(seen))
+
+
+def test_data_parallel_rotates_ownership_across_rounds():
+    a = {u.worker: set(u.keys) for u in DataParallel().plan(4, 0, KEYS)}
+    b = {u.worker: set(u.keys) for u in DataParallel().plan(4, 1, KEYS)}
+    assert a != b                                # ownership rotates by round
+
+
+def test_tensor_parallel_keys_stay_in_their_section():
+    plan = TensorParallel(n_sections=4).plan(4, 0, KEYS)
+    for u in plan:
+        assert all(section_of(k, 4) == u.section for k in u.keys)
+    # union covers every key exactly once (disjoint sections)
+    seen = [k for u in plan for k in u.keys]
+    assert sorted(seen) == sorted(KEYS) and len(seen) == len(set(seen))
+
+
+def test_pipeline_parallel_assigns_stages():
+    pp = PipelineParallel(stages=["a", "b", "c"])
+    plan = pp.plan(3, 0, KEYS)
+    assert [u.stage for u in plan] == [0, 1, 2]
+    assert all(u.keys == KEYS for u in plan)     # every stage sees all keys
+    assert pp.chain().stages == ["a", "b", "c"]
+
+
+def test_custom_strategy_is_structural():
+    class Blocks:
+        name = "blocks"
+        def plan(self, n_workers, round_index, keys):
+            keys = list(keys)
+            size = (len(keys) + n_workers - 1) // n_workers
+            return [WorkUnit(worker=i, keys=keys[i * size:(i + 1) * size])
+                    for i in range(n_workers)]
+
+    assert isinstance(Blocks(), ParallelStrategy)
+    plan = Blocks().plan(3, 0, KEYS)
+    assert sorted(k for u in plan for k in u.keys) == sorted(KEYS)

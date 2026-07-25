@@ -21,7 +21,15 @@ from .evolvable import (
 )
 from .ledger import Ledger, Snapshot, CASConflict, ContractRejected
 from .verifier import ThreeLayerVerifier, VerifierBudget
-from .scheduler import AuditScheduler, ResumeQueue, TaskCluster, TaskScheduler
+from .scheduler import (
+    AuditScheduler,
+    DurationEstimator,
+    ResumeQueue,
+    TaskCluster,
+    TaskScheduler,
+    fifo_makespan,
+    lpt_schedule,
+)
 from .governance import Layer, classify, assert_mutable, GovernanceError, L1SerialGate
 from .aggregator import Aggregator, AggregatorConfig, MergeReport, EvidenceBuffer
 from .staleness import (
@@ -52,6 +60,11 @@ from .evolution import (
 from .async_runtime import AsyncConcordia, AsyncConfig, AsyncStats
 from .parallel import (
     ParallelMode,
+    ParallelStrategy,
+    WorkUnit,
+    DataParallel,
+    TensorParallel,
+    PipelineParallel,
     TensorParallelMerge,
     PipelineChain,
     SectionViolation,
@@ -60,7 +73,7 @@ from .parallel import (
     shard_round_robin,
 )
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 __all__ = [
     "Contract",
@@ -78,6 +91,9 @@ __all__ = [
     "VerifierBudget",
     "AuditScheduler",
     "ResumeQueue",
+    "DurationEstimator",
+    "lpt_schedule",
+    "fifo_makespan",
     "TaskCluster",
     "TaskScheduler",
     "Layer",
@@ -103,6 +119,11 @@ __all__ = [
     "AsyncConfig",
     "AsyncStats",
     "ParallelMode",
+    "ParallelStrategy",
+    "WorkUnit",
+    "DataParallel",
+    "TensorParallel",
+    "PipelineParallel",
     "TensorParallelMerge",
     "PipelineChain",
     "SectionViolation",

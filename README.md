@@ -31,6 +31,8 @@ Full docs live in [`docs/`](docs/) and render as a website via MkDocs Material:
 | [Connecting agents & LLMs](docs/agents.md) | The provider-agnostic completion layer |
 | [Example: skill](docs/skill-evolution.md) · [harness](docs/harness-evolution.md) | Skill (real dataset + LLM) and harness (L1, no LLM) evolution |
 | [Efficiency experiments](docs/efficiency.md) | Measured parallel scaling and async tail-hiding |
+| [Customizable parallelism](docs/parallelism.md) | Pluggable DP / TP / PP strategies — or write your own |
+| [Duration-aware scheduling](docs/duration-scheduling.md) | Estimate rollout cost from task size; LPT dispatch + straggler checkpointing |
 | [Design spec](docs/concordia_design.md) | The original research design (v0.2) |
 
 ```bash
@@ -122,6 +124,12 @@ python -m examples.harness_evolution
 
 # Efficiency: parallel throughput scaling + async vs sync-barrier tail-hiding
 python -m examples.efficiency
+
+# Customizable parallelism: DP / TP / PP (+ a custom strategy)
+python -m examples.parallelism
+
+# Duration-aware scheduling: online estimator + LPT dispatch + straggler checkpointing
+python -m examples.duration_scheduling
 
 # RQ2 — staleness tolerance sweep (alpha in {0,1,5,inf})
 python -m examples.rq2_staleness

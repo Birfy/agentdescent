@@ -40,7 +40,14 @@ from .domains.router import (
     serialize_router,
 )
 from .ledger import Ledger
-from .scheduler import AuditScheduler, TaskCluster, TaskScheduler
+from .scheduler import (
+    AuditScheduler,
+    DurationEstimator,
+    ResumeItem,
+    ResumeQueue,
+    TaskCluster,
+    TaskScheduler,
+)
 from .staleness import StalenessPolicy, get_policy
 from .verifier import ThreeLayerVerifier, VerifierBudget
 from .worker import Worker
@@ -57,6 +64,10 @@ class AsyncConfig:
     worker_pause: float = 0.001   # sleep between worker rollouts
     oracle_budget: int = 400
     stall_patience: int = 150     # no-commit sweeps before backpressure sync
+    # duration-aware straggler control: a rollout that runs longer than
+    # duration_timeout_factor x its *estimated* cost is checkpointed to the
+    # ResumeQueue (partial rollout) instead of blocking a worker.
+    duration_timeout_factor: float = 3.0
     seed: int = 0
 
 
@@ -70,6 +81,7 @@ class AsyncStats:
     discarded_stale: int = 0
     conflicts_dropped: int = 0
     forced_refreshes: int = 0
+    stragglers_checkpointed: int = 0
     oracle_used: int = 0
     final_dev_accuracy: float = 0.0
     final_stable_accuracy: float = 0.0
@@ -87,11 +99,16 @@ class AsyncConcordia:
         config: Optional[AsyncConfig] = None,
         agg_config: Optional[AggregatorConfig] = None,
         staleness_policy: Optional[StalenessPolicy] = None,
+        estimator: Optional[DurationEstimator] = None,
         skill_id: str = "mol-router",
     ) -> None:
         self.cfg = config or AsyncConfig()
         self.universe = universe
         self.skill_id = skill_id
+        # duration-aware scheduling: predict rollout cost from task size and
+        # checkpoint stragglers to the resume queue (design doc, section 5.1).
+        self.estimator = estimator
+        self.resume_queue = ResumeQueue()
         self.train, self.held_out = universe.split()
 
         self.ledger = Ledger(repo_path, serialize_router, deserialize_router)
@@ -175,7 +192,22 @@ class AsyncConcordia:
                     self.stats.forced_refreshes += 1
 
             cluster = self.scheduler.lease_round_robin()
+            # estimate this rollout's cost from task size, time it, and calibrate.
+            cost = float(sum(len(t.text) for t in cluster.tasks))
+            predicted = self.estimator.estimate(cost) if self.estimator else 0.0
+            t0 = time.time()
             card = worker.run(local, {self.skill_id: local_v}, cluster.tasks)
+            elapsed = time.time() - t0
+            if self.estimator is not None:
+                self.estimator.observe(cost, elapsed)
+                # a rollout that overran its estimate is a straggler: checkpoint it
+                # (partial rollout) rather than letting it define the wall-clock.
+                if predicted > 0 and elapsed > self.cfg.duration_timeout_factor * predicted:
+                    self.resume_queue.push(ResumeItem(
+                        task_id=cluster.id, turn=0, conversation=[],
+                        external_handle=None, version_at_checkpoint={self.skill_id: local_v}))
+                    with self._stats_lock:
+                        self.stats.stragglers_checkpointed += 1
             with self._stats_lock:
                 self.stats.rollouts += 1
             if card is not None:

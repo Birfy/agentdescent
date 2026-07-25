@@ -135,3 +135,83 @@ def shard_round_robin(items: Sequence, n_shards: int) -> List[List]:
     for i, item in enumerate(items):
         shards[i % len(shards)].append(item)
     return shards
+
+
+# ---------------------------------------------------------------------------
+# Pluggable parallelism: choose (or write) how work is partitioned across workers
+# ---------------------------------------------------------------------------
+
+from typing import Protocol, runtime_checkable  # noqa: E402
+
+
+@dataclass
+class WorkUnit:
+    """What one worker is responsible for in one round of a parallel plan."""
+
+    worker: int
+    keys: List[str]                 # the artifact keys / tasks this worker owns
+    stage: int = 0                  # PP: which pipeline stage/artifact
+    section: Optional[int] = None   # TP: which section of the artifact
+
+
+@runtime_checkable
+class ParallelStrategy(Protocol):
+    """How a round of work is partitioned across ``n_workers``.
+
+    This is the customization point: implement ``plan`` to define your own
+    parallelism method. The three classic paradigms are provided below."""
+
+    name: str
+
+    def plan(self, n_workers: int, round_index: int, keys: Sequence[str]) -> List[WorkUnit]: ...
+
+
+@dataclass
+class DataParallel:
+    """DP -- every worker holds the same artifact; the *tasks* (keys) are sharded
+    across workers and their diffs are merged. Coverage rotates each round."""
+
+    name: str = "DP"
+
+    def plan(self, n_workers, round_index, keys) -> List[WorkUnit]:
+        shards = shard_round_robin(list(keys), n_workers)
+        m = len(shards)
+        return [WorkUnit(worker=i, keys=shards[(i + round_index) % m]) for i in range(n_workers)]
+
+
+@dataclass
+class TensorParallel:
+    """TP -- one hot artifact is split into ``n_sections`` disjoint sections; each
+    worker owns a section, so edits are conflict-free *by construction* and the
+    merge is a union (concatenation + a consistency check)."""
+
+    n_sections: int
+    name: str = "TP"
+
+    def plan(self, n_workers, round_index, keys) -> List[WorkUnit]:
+        units = []
+        for i in range(n_workers):
+            sec = i % self.n_sections
+            owned = [k for k in keys if section_of(k, self.n_sections) == sec]
+            units.append(WorkUnit(worker=i, keys=owned, section=sec))
+        return units
+
+
+@dataclass
+class PipelineParallel:
+    """PP -- artifacts form a dependency chain; each worker drives one stage, and
+    a downstream failure back-propagates blame to the earliest failing stage
+    (via :class:`PipelineChain`)."""
+
+    stages: Sequence[str]
+    name: str = "PP"
+
+    def plan(self, n_workers, round_index, keys) -> List[WorkUnit]:
+        ns = len(self.stages)
+        return [WorkUnit(worker=i, keys=list(keys), stage=i % ns) for i in range(n_workers)]
+
+    def chain(self) -> "PipelineChain":
+        return PipelineChain(list(self.stages))
+
+
+STRATEGIES = {"DP": DataParallel, "TP": TensorParallel, "PP": PipelineParallel}
