@@ -107,21 +107,10 @@ skill (re-check the multi-step computation before answering). It does **not** re
 keyword-retriever cannot: it `grep`s the tables, `view`s the right rows, and
 **computes** (e.g. summing the monthly "national defense" rows for 1940 → **2,602**).
 
-**Parallel + async.** EvoSkill evaluates `val` via `asyncio.Semaphore(concurrency)`
-+ `gather` — set `concurrency=8` and the 29 val questions evaluated in **~7 min**
-(vs ~40–60 min serial). This mirrors the framework's own
-[parallel/async execution](evolution.md#parallelism-async-the-frameworks-core).
-
-**Two portability gotchas** (documented, not hidden):
-
-* *Structured output.* DeepSeek's API rejects OpenAI strict
-  `response_format:{type:"json_schema", strict:true}` (HTTP 400 *"response_format
-  type is unavailable"*); the answer-extraction re-ask must use `{type:"json_object"}`
-  with the schema in the prompt. The official `claude` harness uses native
-  structured output and needs no shim.
-* *Environment.* The real OpenHands SDK needs **Python ≥ 3.12** (a `uv`-managed
-  venv works, no Docker/admin); the OpenAI-compatible base URL routes DeepSeek
-  through LiteLLM.
+Evaluation was **parallel + async** (`concurrency=8` → the 29 val questions in
+~7 min vs ~40–60 min serial). The OpenHands backend's setup, the DeepSeek
+structured-output shim, and the Python ≥ 3.12 requirement are documented once in
+[Connecting agents & LLMs → Tool-using agent backends](agents.md#running-the-openhands-backend).
 
 ## Dataset caveat
 

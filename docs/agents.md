@@ -94,6 +94,27 @@ backend = tool_loop_backend(claude(model="claude-haiku-4-5"))
 answer = backend.answer(question, document_text, skills=learned_skills)
 ```
 
-EvoSkill selects one with `--backend openhands|toolloop|retrieval`. Measured lift
-with the OpenHands backend + DeepSeek on OfficeQA (66.7% → 79.7%), plus the
-DeepSeek structured-output gotcha, are on the [EvoSkill page](algo-evoskill.md#empirical-results-real-openhands-agent-deepseek-on-officeqa).
+EvoSkill selects one with `--backend openhands|toolloop|retrieval`; the measured
+lift with the OpenHands backend + DeepSeek on OfficeQA (**66.7% → 79.7%**) is on
+the [EvoSkill page](algo-evoskill.md#empirical-results-real-openhands-agent-deepseek-on-officeqa).
+
+### Running the OpenHands backend
+
+* **Model / provider.** The LLM is any LiteLLM model. `openai/<name>` + `base_url`
+  targets an OpenAI-compatible endpoint — e.g. DeepSeek with
+  `model="openai/deepseek-v4-pro"` + `base_url="https://api.deepseek.com"` (the
+  key comes from `OPENAI_API_KEY`). Native tool-calling drives the `terminal` /
+  `file_editor` tools; the agent `grep`s the document, `view`s the right rows, and
+  **computes** the answer.
+* **Environment.** The real OpenHands SDK needs **Python ≥ 3.12** (a `uv`-managed
+  venv works — no Docker, no admin): `pip install openhands-ai`.
+* **Structured-output gotcha.** OpenHands has no native structured output, so it
+  re-asks the model to reformat the answer as JSON. Its default uses OpenAI strict
+  `response_format:{type:"json_schema"}`, which **DeepSeek rejects** (HTTP 400
+  *"response_format type is unavailable"*) — use `{type:"json_object"}` with the
+  schema in the prompt instead. (Providers with native structured output — Claude,
+  OpenAI, Codex — need no shim.)
+* **Parallel + async.** Backends are plain callables, so a harness can fan out
+  agent runs concurrently; EvoSkill evaluates its held-out split with an
+  `asyncio.Semaphore(concurrency)` — `concurrency=8` cut 29 OfficeQA questions
+  from ~40–60 min to ~7 min.
