@@ -211,9 +211,9 @@ def propose_and_generate(complete: Completion, skills: Dict[str, str],
                          failures: List[Tuple[str, str, str]],
                          feedback: List[str]) -> Optional[Tuple[str, str]]:
     """Returns (skill_name, skill_md) or None. Two LLM calls (proposer, generator)."""
-    fail_block = "\n".join(
+    fail_block = "\n".join(                       # analyse the whole failure BATCH's shared pattern
         f"[{i}] Q: {q[:160]}\n    agent: {p[:100]}\n    gold: {g}"
-        for i, (q, p, g) in enumerate(failures[:5]))
+        for i, (q, p, g) in enumerate(failures))
     fb = ("\nPreviously DISCARDED proposals (do not repeat):\n" +
           "\n".join(f"- {x}" for x in feedback[-5:]) + "\n") if feedback else ""
     decision = complete(_PROPOSER_TMPL.format(
@@ -327,6 +327,10 @@ class EvoSkillContext:
     recent_failures: List[Tuple[str, str, str]] = field(default_factory=list)
     seed_score: float = 0.0
     best_score: float = 0.0
+    eval_concurrency: int = 8     # parallelise the aggregator's held-out (val) re-eval
+    batch_size: int = 4           # failures per induction BATCH (repo is batch-level, not per-trajectory)
+    val_every: int = 3            # async SGD: validate the head every N applied skill updates (else roll back)
+    last_propose_at: int = 0      # index into recent_failures at the last emitted skill
     lock: threading.Lock = field(default_factory=threading.Lock)   # workers run concurrently
 
 
@@ -367,15 +371,26 @@ class SkillLibraryStrategy:
 
 
 def make_propose(ctx: EvoSkillContext, complete: Completion):
-    """Failure-driven skill induction: analyse recent failures -> one SKILL.md."""
+    """Failure-driven skill induction -- BATCH-level, faithful to the repo.
+
+    The repo induces one SKILL.md **per iteration from a batch of failures**
+    (the Proposer analyses their shared *pattern*), not one skill per failed
+    trajectory.  So we accumulate a batch of ``batch_size`` failures (shared
+    across the concurrent workers) and only then emit a single skill -- keeping
+    the top-K frontier validating a handful of skills, not dozens.  The
+    parallelism (concurrent workers + concurrent val eval) is the *acceleration*;
+    the batch->one-skill->validate->frontier flow stays the repo's."""
     def propose(rendered, task, output, score):
-        if score >= PASS_THRESHOLD:                        # only learn from failures
+        if score >= PASS_THRESHOLD:                        # only learn from genuine failures (<0.8)
             return None
-        with ctx.lock:                                     # concurrent workers
+        with ctx.lock:                                     # workers share one growing batch
             ctx.recent_failures.append((task.prompt, output, task.meta["answer"]))
-            recent = list(ctx.recent_failures[-5:])
-        skills = _parse_rendered_skills(rendered)
-        proposed = propose_and_generate(complete, skills, recent, ctx.feedback)
+            if len(ctx.recent_failures) - ctx.last_propose_at < ctx.batch_size:
+                return None                                # batch not full yet -> keep collecting
+            ctx.last_propose_at = len(ctx.recent_failures)
+            batch = list(ctx.recent_failures[-ctx.batch_size:])
+        skills = _parse_rendered_skills(rendered)          # Proposer + Generator over the batch
+        proposed = propose_and_generate(complete, skills, batch, ctx.feedback)
         if not proposed:
             return None
         name, body = proposed
@@ -398,12 +413,27 @@ class TopKFrontierAggregator(AggregatorProtocol):
     def ingest(self, card: EvidenceCard) -> None:
         self.cards.append(card)
 
+    def _eval(self, artifact) -> float:
+        """Score an artifact on the held-out (val) set -- **concurrently**, so the
+        acceptance check parallelises like the workers (agent-based rewards are the
+        bottleneck otherwise). The runtime cache is thread-safe."""
+        tasks = self.verifier.held_out
+        if not tasks:
+            return 0.0
+        n = min(self.ctx.eval_concurrency, len(tasks))
+        if n <= 1:
+            return artifact.score(tasks)
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=n) as pool:
+            scores = list(pool.map(lambda t: artifact.score([t]), tasks))
+        return sum(scores) / len(scores)
+
     def step(self) -> List[MergeReport]:
         snap = self.ledger.snapshot(Ledger.DEV)
         head = snap.get(self.aid)
         base_vv = {self.aid: snap.version.get(self.aid, 0)}
         if not self._seeded:
-            self.ctx.seed_score = head.score(self.verifier.held_out)
+            self.ctx.seed_score = self._eval(head)
             self.ctx.best_score = self.ctx.seed_score
             self.ctx.frontier.update(dict(head.state), self.ctx.seed_score)
             self._seeded = True
@@ -411,7 +441,7 @@ class TopKFrontierAggregator(AggregatorProtocol):
         cards, self.cards = self.cards, []
         for card in cards:
             candidate = head.apply(card.diff)
-            score = candidate.score(self.verifier.held_out)
+            score = self._eval(candidate)
             admitted = self.ctx.frontier.update(dict(candidate.state), score)
             self.ctx.best_score = max(self.ctx.best_score, score)
             self.ctx.feedback.append(
@@ -433,6 +463,108 @@ class TopKFrontierAggregator(AggregatorProtocol):
                             f"frontier={len(self.ctx.frontier.members)} best={self.ctx.best_score:.3f}")]
 
 
+class SgdSkillAggregator(AggregatorProtocol):
+    """Async SGD-style skill descent -- the *reasonable* async acceleration.
+
+    The merger's job is only to **apply** each proposed skill as an update step
+    (cheap, no val), so the head keeps moving and the workers build on it -- like
+    taking gradient steps.  Held-out validation is **amortised**: only every
+    ``val_every`` applied updates does it score the accumulated head; it keeps the
+    mini-batch of updates iff val improved, otherwise it **rolls back** to the
+    last validated checkpoint.  This costs ~``val_every``x fewer held-out evals
+    than validating every candidate (the frontier), while keeping the faithful
+    failure-driven skill-induction flow.  Used on the async path; the sync path
+    keeps the strict per-candidate :class:`TopKFrontierAggregator` (the repo)."""
+
+    def __init__(self, ledger: Ledger, verifier, ctx: EvoSkillContext,
+                 artifact_id: str = "skill_library"):
+        self.ledger = ledger
+        self.verifier = verifier
+        self.ctx = ctx
+        self.aid = artifact_id
+        self.cards: List[EvidenceCard] = []
+        self._seeded = False
+        self.checkpoint: Dict[str, str] = {}   # last val-confirmed skill library
+        self.ckpt_score = 0.0
+        self.steps = 0                          # applied updates since last validation
+
+    def ingest(self, card: EvidenceCard) -> None:
+        self.cards.append(card)
+
+    def _eval(self, artifact) -> float:
+        tasks = self.verifier.held_out
+        if not tasks:
+            return 0.0
+        n = min(self.ctx.eval_concurrency, len(tasks))
+        if n <= 1:
+            return artifact.score(tasks)
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=n) as pool:
+            scores = list(pool.map(lambda t: artifact.score([t]), tasks))
+        return sum(scores) / len(scores)
+
+    def _commit_state(self, state: Dict[str, str], msg: str) -> Optional[int]:
+        """Set the DEV head to *exactly* ``state`` (apply() only merges, so a
+        rollback that drops skills needs a full replacement artifact)."""
+        snap = self.ledger.snapshot(Ledger.DEV)
+        head = snap.get(self.aid)
+        base_vv = {self.aid: snap.version.get(self.aid, 0)}
+        art = EvolvingArtifact(self.aid, dict(state), head.version + 1,
+                               head.blast_radius, head._rt, head._strategy)
+        try:
+            _, v = self.ledger.commit(art, base_vv, branch=Ledger.DEV, message=msg)
+            return v
+        except CASConflict:
+            return None
+
+    def step(self) -> List[MergeReport]:
+        head = self.ledger.snapshot(Ledger.DEV).get(self.aid)
+        if not self._seeded:
+            self.ckpt_score = self._eval(head)              # base agent, no skills
+            self.ctx.seed_score = self.ckpt_score
+            self.ctx.best_score = self.ckpt_score
+            self.checkpoint = dict(head.state)
+            self._seeded = True
+
+        cards, self.cards = self.cards, []
+        if not cards:
+            # Always report ckpt_score so the async runtime never falls back to a
+            # full held-out re-eval (which would defeat eval-at-end / val_every).
+            return [MergeReport(self.aid, None, False, 0, 0, 0, 0, self.ckpt_score, None, "idle")]
+
+        # 1) APPLY the skill updates as SGD steps -- cheap, NO val. Commit so the
+        #    workers immediately build on the moved head.
+        working = head
+        for card in cards:
+            working = working.apply(card.diff)
+            self.steps += 1
+        committed = self._commit_state(dict(working.state), f"sgd: apply {len(cards)} skill update(s)")
+
+        # 2) Validate only every ``val_every`` steps -> keep the batch or ROLL BACK.
+        did_val = False
+        score = None
+        if self.steps >= self.ctx.val_every:
+            did_val = True
+            n_updates = self.steps
+            score = self._eval(working)
+            kept = score > self.ckpt_score
+            if kept:                                        # improved -> new checkpoint
+                self.checkpoint = dict(working.state)
+                self.ckpt_score = score
+            else:                                           # no gain -> roll back to checkpoint
+                committed = self._commit_state(dict(self.checkpoint), "sgd: rollback (no val gain)")
+            self.ctx.best_score = self.ckpt_score
+            self.ctx.feedback.append(
+                f"+{n_updates} update(s) {'kept' if kept else 'rolled back'} "
+                f"(val {score:.3f} vs ckpt {self.ckpt_score:.3f})")
+            self.steps = 0
+
+        reason = (f"val {score:.3f} ckpt={self.ckpt_score:.3f}" if did_val
+                  else f"applied {len(cards)} (val in {max(0, self.ctx.val_every - self.steps)} steps)")
+        return [MergeReport(self.aid, None, False, len(cards), len(cards), 0, 0,
+                            self.ckpt_score, committed, reason)]
+
+
 @dataclass
 class EvoResult:
     skills: Dict[str, str]
@@ -445,7 +577,8 @@ def run_evoskill(complete: Completion, docs: Dict[str, str],
                  train: List[dict], val: List[dict], iterations: int = 6,
                  max_frontier: int = 3, seed: int = 0, asynchronous: bool = False,
                  async_ratio: int = 3, max_seconds: float = 30.0, backend=None,
-                 verbose: bool = False) -> EvoResult:
+                 eval_concurrency: int = 8, batch_size: int = 4, val_every: int = 3,
+                 eval_at_end: bool = False, verbose: bool = False) -> EvoResult:
     """Drive EvoSkill through `evolve()` (`val` is the held-out frontier metric).
 
     ``backend`` (an :class:`~concordia.backends.AgentBackend`) replaces the passive
@@ -457,7 +590,13 @@ def run_evoskill(complete: Completion, docs: Dict[str, str],
                     meta={"answer": it["answer"], "source_files": it["source_files"]})
 
     tasks = [to_task(i, it) for i, it in enumerate(list(train) + list(val))]
-    ctx = EvoSkillContext(docs=docs, frontier=Frontier(max_size=max_frontier))
+    # eval-at-end: apply every skill update during the run (no mid-run val or
+    # roll back) and score the accumulated library on held-out once, at the end.
+    if eval_at_end:
+        val_every = 10 ** 9        # SGD merger never validates mid-run -> pure apply
+    ctx = EvoSkillContext(docs=docs, frontier=Frontier(max_size=max_frontier),
+                          eval_concurrency=eval_concurrency, batch_size=batch_size,
+                          val_every=val_every)
 
     def run(rendered, task):
         if backend is not None:                    # tool-using base agent (OpenHands / grep-loop)
@@ -469,7 +608,11 @@ def run_evoskill(complete: Completion, docs: Dict[str, str],
         return score_multi_tolerance(output, task.meta["answer"])
 
     def factory(ledger, verifier, audit, config, policy):
-        return TopKFrontierAggregator(ledger, verifier, ctx, artifact_id="skill_library")
+        # Async path -> SGD-style skill descent (apply updates, validate every
+        # val_every steps, roll back on no gain).  Sync path -> the strict
+        # per-candidate top-K frontier (faithful to registry/manager.py).
+        cls = SgdSkillAggregator if asynchronous else TopKFrontierAggregator
+        return cls(ledger, verifier, ctx, artifact_id="skill_library")
 
     workers = min(3, len(train))
     result = evolve(tasks, reward, run=run, propose=make_propose(ctx, complete),
@@ -478,8 +621,22 @@ def run_evoskill(complete: Completion, docs: Dict[str, str],
                     n_workers=workers, max_concurrency=workers,
                     asynchronous=asynchronous, async_ratio=async_ratio, max_seconds=max_seconds,
                     held_out_frac=len(val) / max(1, len(tasks)),
+                    self_verify=False,   # repo evaluates the child on val only -- no per-trajectory re-run
                     aggregator_factory=factory, verbose=verbose)
-    return EvoResult(dict(result.state), ctx.seed_score, ctx.best_score, iterations)
+
+    best = ctx.best_score
+    if eval_at_end and val:
+        # single held-out eval of the FINAL accumulated skill library (concurrent).
+        val_tasks = tasks[len(train):]
+        rendered = SkillLibraryStrategy().render(dict(result.state))
+        from concurrent.futures import ThreadPoolExecutor
+        n = max(1, min(eval_concurrency, len(val_tasks)))
+        with ThreadPoolExecutor(max_workers=n) as pool:
+            scores = list(pool.map(lambda t: reward(t, run(rendered, t)), val_tasks))
+        best = sum(scores) / len(scores)
+        if verbose:
+            print(f"\n[eval-at-end] final held-out score over {len(val_tasks)} items: {best:.3f}")
+    return EvoResult(dict(result.state), ctx.seed_score, best, iterations)
 
 
 # ===========================================================================

@@ -95,8 +95,8 @@ answer = backend.answer(question, document_text, skills=learned_skills)
 ```
 
 EvoSkill selects one with `--backend openhands|toolloop|retrieval`; the measured
-lift with the OpenHands backend + DeepSeek on OfficeQA (**66.7% → 79.7%**) is on
-the [EvoSkill page](algo-evoskill.md#empirical-results-real-openhands-agent-deepseek-on-officeqa).
+gated lift with the OpenHands backend + DeepSeek on OfficeQA (**58.0% → 65.7%**) is
+on the [EvoSkill page](algo-evoskill.md#empirical-results-real-openhands-agent-deepseek-on-officeqa).
 
 ### Running the OpenHands backend
 
@@ -114,7 +114,9 @@ the [EvoSkill page](algo-evoskill.md#empirical-results-real-openhands-agent-deep
   *"response_format type is unavailable"*) — use `{type:"json_object"}` with the
   schema in the prompt instead. (Providers with native structured output — Claude,
   OpenAI, Codex — need no shim.)
-* **Parallel + async.** Backends are plain callables, so a harness can fan out
-  agent runs concurrently; EvoSkill evaluates its held-out split with an
-  `asyncio.Semaphore(concurrency)` — `concurrency=8` cut 29 OfficeQA questions
-  from ~40–60 min to ~7 min.
+* **Concurrent eval.** Backends are plain callables, so the aggregator fans out
+  its held-out eval concurrently (`eval_concurrency`) — this is where the
+  parallelism pays, since each OfficeQA question is an OpenHands rollout of
+  ~3–6 min. (When every candidate must be gated on the full held-out set,
+  barrier-free async adds nothing — the run is val-bound — so EvoSkill uses the
+  synchronous `evolve()` path; see the [EvoSkill results](algo-evoskill.md#empirical-results-real-openhands-agent-deepseek-on-officeqa).)

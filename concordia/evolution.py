@@ -387,6 +387,7 @@ def evolve(
     asynchronous: bool = False,
     async_ratio: int = 3,
     max_seconds: float = 20.0,
+    self_verify: bool = True,
     held_out_frac: float = 0.4,
     repo_path: Optional[str] = None,
     agg_config: Optional[AggregatorConfig] = None,
@@ -437,7 +438,8 @@ def evolve(
             n_workers=n_workers, async_ratio=async_ratio, max_seconds=max_seconds,
             max_iters=rounds * max(1, n_workers), held_out_frac=held_out_frac,
             repo_path=repo_path, agg_config=agg_config, staleness_policy=staleness_policy,
-            aggregator_factory=aggregator_factory, oracle_budget=oracle_budget, verbose=verbose)
+            aggregator_factory=aggregator_factory, oracle_budget=oracle_budget,
+            self_verify=self_verify, verbose=verbose)
 
     parallel = parallel or DataParallel()
     eng = _build_engine(

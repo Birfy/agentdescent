@@ -66,6 +66,7 @@ def async_evolve(
     staleness_policy: Optional[StalenessPolicy] = None,
     aggregator_factory=None,
     oracle_budget: int = 200,
+    self_verify: bool = True,
     verbose: bool = False,
 ) -> EvolutionResult:
     """Evolve an artifact **without a round barrier**.
@@ -103,6 +104,18 @@ def async_evolve(
         artifact = snap.get(eng.artifact_id)
         i = 0
         while not stop.is_set():
+            # Lag budget bounds *un-merged* work too, not just committed drift.
+            # Before head first advances (no commit yet) the version check can't
+            # engage, so gate on pending intake: don't pile up more than
+            # ``async_ratio`` candidates ahead of the merger (prevents the
+            # cold-start flood where workers race while the merger is busy on the
+            # first slow held-out eval).
+            while not stop.is_set():
+                with intake_lock:
+                    pending = len(intake)
+                if pending <= async_ratio:
+                    break
+                time.sleep(0.05)
             head_v = eng.ledger.head_version(Ledger.DEV).get(eng.artifact_id, 0)
             if head_v - base_v > async_ratio:          # lag budget exceeded -> refresh
                 snap = eng.ledger.snapshot(Ledger.DEV)
@@ -119,10 +132,18 @@ def async_evolve(
                         diff = eng.strategy.to_diff(artifact.state, proposal,
                                                     f"w{wid}", base_v, eng.artifact_id)
                         if diff is not None:
-                            after = eng.reward(task, eng.run(artifact.apply(diff).render(), task))
+                            # Optional local self-verify: re-run the trajectory with the
+                            # diff applied for a before/after signal. Faithful repos that
+                            # only score the candidate on held-out (e.g. EvoSkill) pass
+                            # self_verify=False to skip this extra rollout.
+                            if self_verify:
+                                after = eng.reward(task, eng.run(artifact.apply(diff).render(), task))
+                                delta = after - score
+                            else:
+                                delta = 0.0
                             card = EvidenceCard(
                                 diff=diff, base_version={eng.artifact_id: base_v},
-                                touched=[eng.artifact_id], before_after_delta=after - score,
+                                touched=[eng.artifact_id], before_after_delta=delta,
                                 trajectory_refs=[task])
                             with intake_lock:
                                 intake.append(card)
@@ -155,8 +176,12 @@ def async_evolve(
             # DISCARD -> drop the card
         reports = eng.aggregator.step()
         committed = sum(1 for x in reports if x.committed_version is not None)
-        dev = eng.ledger.snapshot(Ledger.DEV).get(eng.artifact_id)
-        r = dev.score(eng.held_out)
+        dev = eng.ledger.snapshot(Ledger.DEV).get(eng.artifact_id)   # cheap read (no scoring)
+        # Reuse the aggregator's own post-merge score (it already evaluated the
+        # candidate on held_out inside step()); only re-score if it reported none.
+        # Avoids a redundant full held-out re-eval every sweep.
+        reported = [x.prob_improve for x in reports]
+        r = max(reported) if reported else dev.score(eng.held_out)
         history.append(RoundInfo(len(history), r, len(dev.state), committed,
                                  len(reports) - committed))
         if verbose:

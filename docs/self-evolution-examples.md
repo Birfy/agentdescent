@@ -37,7 +37,7 @@ python -m examples.ace_context_evolution --model claude-haiku-4-5 --async   # ba
 |---|---|---|---|---|
 | **ACE** (Agentic Context Engineering) | skill / context | FiNER-139 (XBRL tagging) | `strategy=ACEPlaybook`; Curator = default aggregator | [→](algo-ace.md) |
 | **GEPA** (Reflective Prompt Evolution) | skill / prompt | HotpotQA (EM) | `aggregator_factory=` Pareto optimizer | [→](algo-gepa.md) |
-| **EvoSkill** (Automated Skill Discovery) | skill library | OfficeQA (Treasury) | `strategy` + `aggregator_factory=` top-K frontier | [→](algo-evoskill.md) |
+| **EvoSkill** (Automated Skill Discovery) | skill library | OfficeQA (Treasury) | `strategy` + `aggregator_factory=` top-K frontier (sync) / SGD descent (async) | [→](algo-evoskill.md) |
 | **SkillOpt** (ReflACT) | skill document | SearchQA (EM/F1) | `strategy` (edits) + `aggregator_factory=` strict gate | [→](algo-skillopt.md) |
 | **ADAS** (Meta Agent Search) | harness (L1) | MGSM | `strategy` + `aggregator_factory=` keep-all archive | [→](algo-adas.md) |
 | **DGM** (Darwin Gödel Machine) | harness (L1) | SWE-bench Verified | `strategy` + `aggregator_factory=` archive + selection | [→](algo-dgm.md) |
@@ -102,12 +102,17 @@ python -m examples.gepa_prompt_evolution --model claude-haiku-4-5
 *Paper* arXiv:2603.02766 · *repo* `sentient-agi/EvoSkill` · *dataset* OfficeQA.
 
 Faithful to what the **repo code** does (which differs from some paper claims):
-**failure-driven skill induction** (collect items scored `< 0.8`, a Skill
-Proposer analyses failure *patterns* → a Skill Generator writes one `SKILL.md`)
-governed by a **bounded top-K aggregate frontier** — *not* a per-instance Pareto
-frontier (`registry/manager.py:update_frontier` is a leaderboard on mean
-validation accuracy). The unit-aware numeric scorer and the exact tolerance
-ladder (`[0.05, 0.01, 0.1, 0.0, 0.025]`, weight `1/(1+20·tol)`) are ported.
+**batch-level failure-driven skill induction** (collect items scored `< 0.8`, a
+Skill Proposer analyses a *batch* of failure patterns → a Skill Generator writes
+one `SKILL.md`) governed by a **bounded top-K aggregate frontier** — *not* a
+per-instance Pareto frontier (`registry/manager.py:update_frontier` is a
+leaderboard on mean validation accuracy). The unit-aware numeric scorer and the
+exact tolerance ladder (`[0.05, 0.01, 0.1, 0.0, 0.025]`, weight `1/(1+20·tol)`)
+are ported. On the **sync** path this strict per-candidate frontier
+(`TopKFrontierAggregator`) runs verbatim; on the **async** path it switches to
+`SgdSkillAggregator` — SGD-style skill descent that validates every `val_every`
+steps and rolls back on no gain, amortising the held-out eval
+([why](aggregator.md#the-async-optimizer-variant-sgd-style-descent)).
 
 *Dataset note:* the full OfficeQA is HF-**gated** (`databricks/officeqa`, set
 `HF_TOKEN`); absent that the example loads the repo's **bundled 12-row sample**.

@@ -86,3 +86,18 @@ TP additionally provides [`TensorParallelMerge`](https://github.com/Birfy/concor
 (union + a consistency reviewer that rejects out-of-section edits), and PP
 provides [`PipelineChain`](https://github.com/Birfy/concordia/blob/main/concordia/parallel.py)
 (`blame` + counterfactual-replay pairs) — see [Concepts §7](concepts.md#7-parallel-paradigms-dp-tp-pp).
+
+## `parallel=` vs the async runtime
+
+`parallel=` decides **how one round's tasks are split** across workers; it is
+orthogonal to **whether rounds have a barrier**:
+
+* **Within a round** — `max_concurrency=n_workers` runs the split's workers
+  *concurrently* (synchronous DP; the aggregator is the barrier).
+* **Across rounds** — `evolve(asynchronous=True)` / [`async_evolve`](evolution.md#the-barrier-free-runtime-async_evolve)
+  removes the barrier: workers keep producing under a lag budget while one merger
+  aggregates. The `parallel=` strategy still shards the task pool.
+
+So a run picks *both* a partition (`parallel=`) and a schedule (sync
+`max_concurrency` vs barrier-free `asynchronous`). See
+[Parallelism & async](evolution.md#parallelism-async-the-frameworks-core).

@@ -43,6 +43,7 @@ That's the minimum. Everything below is optional and swappable.
 | `rounds=`, `n_workers=` | driver | loop size, parallel worker count | `15`, `4` |
 | `max_concurrency=` | driver | run a round's workers **concurrently** (thread pool); aggregator = barrier (synchronous DP) | `1` (sequential) |
 | `asynchronous=`, `async_ratio=` | [`async_evolve`](#the-barrier-free-runtime-async_evolve) | **barrier-free** async: workers never wait for the merge; lag budget | `False`, `3` |
+| `self_verify=` | [`async_evolve`](#the-barrier-free-runtime-async_evolve) | async only: a worker re-runs its trajectory with the diff applied for a local before/after signal; faithful ports that score the candidate on held-out only pass `False` | `True` |
 | `blast_radius`, `oracle_budget` | governance + verifier | audit budget for L1 merges | `0.2`, `200` |
 
 The building blocks in detail:
@@ -311,11 +312,22 @@ GEPA, EvoSkill, SkillOpt, ADAS, DGM) also runs async:
 
 * **Workers** (`n_workers` threads) hold a snapshot and keep producing evidence
   against it, refreshing only once head drifts past **`async_ratio`** (the lag
-  budget) — so staleness (η > 0) genuinely arises.
+  budget) — so staleness (η > 0) genuinely arises. The lag budget bounds
+  **un-merged** work too: a worker won't pile up more than `async_ratio`
+  candidates ahead of the merger. This matters at **cold start** — before the
+  first commit, head hasn't advanced, so a version-only budget can't engage and
+  workers would flood the buffer while the merger is busy on the first slow
+  held-out eval; gating on pending intake prevents that.
 * **One merger** drains a thread-safe buffer, runs each card through the
   **staleness policy** (`accept η=0` / `rebase`+re-verify / `discard`), then
   `ingest` + `step`. It is the only writer, so there are no CAS conflicts and
   every custom optimizer sees only rebased cards — async-safe unchanged.
+* **`self_verify`** controls whether a worker, after producing a diff, re-runs
+  its own trajectory with the diff applied to record a local before/after signal
+  (`before_after_delta`, used by the staleness gate's cheap re-verify). Ports
+  that only score the *candidate* on held-out — e.g. [EvoSkill](algo-evoskill.md),
+  whose repo evaluates the child on the validation set and never re-runs the
+  sampled task — pass `self_verify=False` to skip that extra rollout.
 
 ```python
 from concordia import async_evolve
@@ -327,6 +339,37 @@ result = async_evolve(tasks, reward, agent=agent,
 Reach it via `evolve(asynchronous=True)` or directly. Small `async_ratio` →
 near-synchronous, few stale diffs; large → highly asynchronous, many stale diffs
 the policy must rebase or discard.
+
+### More async / parallel recipes
+
+The two levers compose; pick per workload:
+
+```python
+# 1. Synchronous data-parallel: a round's workers overlap, aggregator is the barrier.
+evolve(tasks, reward, agent=agent, n_workers=8, max_concurrency=8, rounds=10)
+
+# 2. Barrier-free async, time-bounded: run for 20 min, keep the best head so far.
+evolve(tasks, reward, agent=agent, asynchronous=True, async_ratio=3, max_seconds=1200)
+
+# 3. Async to a target: stop as soon as held-out reward crosses a bar.
+async_evolve(tasks, reward, agent=agent, n_workers=6, target_reward=0.85)
+
+# 4. Async, rollout-bounded: cap total worker rollouts (budget), not wall-clock.
+async_evolve(tasks, reward, agent=agent, n_workers=4, max_iters=200)
+
+# 5. Faithful port on the async path: skip the per-trajectory re-run, score the
+#    candidate on held-out only (see EvoSkill), with concurrent held-out eval.
+evolve(tasks, reward, run=run, propose=propose, strategy=strat,
+       aggregator_factory=factory, asynchronous=True, self_verify=False)
+
+# 6. Highly-async, staleness-heavy: large lag budget + reflective rebase-and-verify.
+async_evolve(tasks, reward, agent=agent, n_workers=8, async_ratio=8,
+             staleness_policy=get_policy("reflective"))
+```
+
+An aggregator can amortise the expensive held-out eval on the async path — apply
+each diff as a cheap step and only validate every *N* steps, rolling back on no
+gain (SGD-style). See [the async optimizer variant](aggregator.md#the-async-optimizer-variant-sgd-style-descent).
 
 ### The reference async orchestrator: `AsyncConcordia`
 

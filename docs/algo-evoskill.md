@@ -35,11 +35,22 @@ Traced from the repo (`src/loop/runner.py`, `src/registry/manager.py`,
 ## How it plugs into `evolve()`
 
 * `strategy=SkillLibraryStrategy()` — a proposed `name :: body` becomes a `Diff`
-  that appends a skill to the library.
-* `propose` — failure-driven Proposer + Generator (two LLM calls).
-* `aggregator_factory` → `TopKFrontierAggregator` — the bounded top-K frontier;
-  it scores candidates on held-out and commits the **best frontier member** as
-  the dev head, so the next round extends it (`selection_strategy="best"`).
+  that appends (or edits) a skill in the library.
+* `propose` — **batch-level** failure-driven Proposer + Generator: it accumulates
+  a batch of `batch_size` failures (shared across the concurrent workers) and then
+  induces **one** `SKILL.md` from their shared pattern (two LLM calls) — matching
+  the repo's per-iteration induction, not one skill per trajectory.
+* `aggregator_factory` — **two optimizers, picked by path**:
+    * **sync** (`asynchronous=False`) → `TopKFrontierAggregator`: the strict
+      bounded top-K frontier faithful to `registry/manager.py` — scores **every**
+      candidate on held-out, commits the best frontier member as the dev head.
+    * **async** (`asynchronous=True`) → `SgdSkillAggregator`: SGD-style skill
+      descent — apply each skill update, validate on held-out only every
+      `val_every` steps, **roll back** the mini-batch on no gain. Amortises the
+      held-out eval ~`val_every`× (the [async optimizer variant](aggregator.md#the-async-optimizer-variant-sgd-style-descent)).
+* `self_verify=False` — the repo scores the *child* on the validation set and
+  never re-runs the sampled task, so the async worker skips its per-trajectory
+  re-run rollout.
 
 ## Plug-ins implemented
 
@@ -49,8 +60,10 @@ In [`examples/evoskill_skill_discovery.py`](https://github.com/Birfy/concordia/b
 | Plug-in | `evolve()` slot | What it does |
 |---|---|---|
 | **`SkillLibraryStrategy`** | `strategy=` | a proposed `SKILL.md` (`name :: body`) becomes a `Diff` on the skill library |
-| **`TopKFrontierAggregator`** + **`Frontier`** | `aggregator_factory=` | the bounded top-K aggregate frontier; commits the best member as the dev head |
-| `make_propose(...)` | `propose=` | failure-driven Skill Proposer + Skill Generator (writes one `SKILL.md`) |
+| **`TopKFrontierAggregator`** + **`Frontier`** | `aggregator_factory=` (**sync**) | the bounded top-K aggregate frontier; scores every candidate on held-out, commits the best member as the dev head |
+| **`SgdSkillAggregator`** | `aggregator_factory=` (**async**) | SGD-style skill descent: apply updates, validate every `val_every` steps, checkpoint + roll back on no held-out gain |
+| `make_propose(...)` | `propose=` | **batch-level** failure-driven Skill Proposer + Generator — one `SKILL.md` per `batch_size` failures (shared across workers) |
+| `self_verify=False` | async runtime | skip the per-trajectory re-run — the repo scores the child on val only |
 | **`openhands_backend` / `tool_loop_backend`** (`concordia.backends`) | the base agent | real OpenHands tool agent, a grep/read ReAct loop, or the default keyword retriever — selected by `--backend` |
 
 ## The base agent — `--backend` (this is what makes it work)
@@ -87,30 +100,40 @@ answer = backend.answer(question, document_text, skills=rendered_skills)
 
 ## Empirical results — real OpenHands agent + DeepSeek on OfficeQA
 
-To validate the tool-using base agent, we ran EvoSkill's skill-discovery loop on
-OfficeQA (the [official `sentient-agi/EvoSkill`](https://github.com/sentient-agi/EvoSkill),
-`skill_only`, iterations=3, `multi_tolerance` scorer) with a **real OpenHands
-agent** (terminal + file_editor tools) driven by **DeepSeek** (`deepseek-v4-flash`,
-OpenAI-compatible endpoint via LiteLLM: `model="openai/deepseek-v4-flash"` +
-`OPENAI_BASE_URL=https://api.deepseek.com`). Base agent = the model; the accuracy
-is the held-out `val` multi-tolerance score.
+We ran this example through `evolve()` on **100 OfficeQA questions** (70 train /
+30 held-out val) with a **real OpenHands agent** (terminal + file_editor tools)
+driven by **DeepSeek** (`deepseek-v4-flash`, OpenAI-compatible via LiteLLM:
+`model="openai/deepseek-v4-flash"` + `OPENAI_BASE_URL=https://api.deepseek.com`).
+Accuracy is the held-out `val` multi-tolerance score.
 
-| Questions | train / val | Baseline (no skills) | After discovery | Skill learned |
-|---|---|---|---|---|
-| **100** | **40 / 29** | **66.7%** | **79.7% (+13.0)** | **`answer-verification-and-final-validation`** |
+| Questions | train / val | Baseline (no skills) | After discovery | Gate | Skills |
+|---|---|---|---|---|---|
+| **100** | **70 / 30** | **58.0%** | **65.7% (+7.7)** | 2 admitted / 15 tried | `dataextractionandanalysis`, `financial-and-statistical-analysis` |
 
-On 29 held-out val questions of genuinely hard multi-step financial math (VaR,
-Macaulay duration, moving averages, dispersion indices), the baseline is **66.7%**
-and EvoSkill lifts it **+13 points to 79.7%** by discovering an *answer-verification*
-skill (re-check the multi-step computation before answering). It does **not** reach
-100% because several questions are genuinely hard. The agent does work the passive
+On 30 held-out questions of genuinely hard multi-step financial math (VaR,
+Macaulay duration, moving averages, dispersion indices), the baseline is **58.0%**
+and EvoSkill lifts it **+7.7 points to 65.7%**. The agent does what the passive
 keyword-retriever cannot: it `grep`s the tables, `view`s the right rows, and
 **computes** (e.g. summing the monthly "national defense" rows for 1940 → **2,602**).
 
-Evaluation was **parallel + async** (`concurrency=8` → the 29 val questions in
-~7 min vs ~40–60 min serial). The OpenHands backend's setup, the DeepSeek
-structured-output shim, and the Python ≥ 3.12 requirement are documented once in
-[Connecting agents & LLMs → Tool-using agent backends](agents.md#running-the-openhands-backend).
+**The gate is what makes it work — and is the whole point of the aggregator.**
+Every proposed skill is validated on held-out and admitted only if it improves
+(`TopKFrontierAggregator`); across 15 candidates the gate **rejected 13** and kept
+2, so the best never regresses. The contrast is stark: with the **same base agent
+and skills but no gate** — apply every skill and score once at the end — the
+prescriptive skills *degrade* the already-strong agent to **55.7% (−9.3)**. The
+per-candidate validation is not overhead; it is the mechanism that turns "skills
+the model wrote" into "skills that actually help".
+
+**Async is not needed here — the run is val-bound.** When every candidate must be
+validated on the full held-out set and validations run one at a time, the
+barrier-free async runtime gives no speedup (workers just queue behind the
+merger's held-out eval). So this uses the **synchronous** path; parallelism stays
+where it pays — the held-out eval runs concurrently (`eval_concurrency`) and a
+round's workers run concurrently (`max_concurrency`). Wall-clock was ~3 h,
+essentially `15 candidates × 30-item val`. The OpenHands backend's setup, the
+DeepSeek structured-output shim, and the Python ≥ 3.12 requirement are documented
+in [Connecting agents & LLMs → Tool-using agent backends](agents.md#running-the-openhands-backend).
 
 ## Dataset caveat
 

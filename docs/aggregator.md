@@ -125,6 +125,58 @@ Use this to A/B your own merge/acceptance policy against the reference optimizer
 while keeping the rest of the loop (agents, strategy, parallelism, governance)
 unchanged.
 
+## The async optimizer variant — SGD-style descent
+
+On the [barrier-free async path](evolution.md#the-barrier-free-runtime-async_evolve)
+the expensive step is usually the **held-out eval** (an agent rollout per
+validation item). Validating *every* candidate — the reference greedy hill-climb
+and most frontier optimizers — makes held-out the wall-clock bottleneck when
+workers propose faster than one full eval completes.
+
+An aggregator can **amortise** it, exactly like mini-batch SGD amortises the
+validation pass over many gradient steps:
+
+1. **Apply** each incoming diff as a cheap *update step* (`ingest` accumulates,
+   `step` commits the moved head so workers immediately build on it) — **no eval**.
+2. **Validate every `N` steps.** Score the accumulated head on held-out once per
+   *N* applied updates, not once per update.
+3. **Keep or roll back.** If the mini-batch improved held-out, checkpoint it;
+   otherwise **roll back** the head to the last validated checkpoint.
+
+This costs ~`N`× fewer held-out evals. It is a *different* acceptance rule from
+the per-candidate frontier — a deliberate async acceleration — so a faithful port
+keeps the strict per-candidate optimizer on the **sync** path and switches to the
+SGD variant only when `asynchronous=True`. [EvoSkill](algo-evoskill.md)'s
+`SgdSkillAggregator` is the worked example (`val_every=N`, checkpoint + rollback);
+its sync path keeps the strict `TopKFrontierAggregator`.
+
+```python
+class SgdMerger:                       # apply-then-periodically-validate, roll back on no gain
+    def __init__(self, ledger, verifier, ctx, artifact_id):
+        self.ledger, self.verifier, self.ctx, self.aid = ledger, verifier, ctx, artifact_id
+        self.cards, self.checkpoint, self.ckpt_score, self.steps = [], {}, 0.0, 0
+    def ingest(self, card): self.cards.append(card)
+    def step(self):
+        head = self.ledger.snapshot(Ledger.DEV).get(self.aid)
+        cards, self.cards = self.cards, []
+        for c in cards:                                    # 1. apply updates, no eval
+            head = head.apply(c.diff); self.steps += 1
+        self._commit(head.state)                           #    move the head; workers build on it
+        if self.steps >= self.ctx.val_every:               # 2. validate every N steps
+            score = self._eval(head)
+            if score > self.ckpt_score:                    # 3. keep ...
+                self.checkpoint, self.ckpt_score = dict(head.state), score
+            else:                                          #    ... or roll back to checkpoint
+                self._commit(self.checkpoint)
+            self.steps = 0
+        return [...]
+```
+
+Because `apply()` only *merges* ops, a rollback that must **drop** skills added
+since the checkpoint commits a full replacement artifact (exact state), not a
+diff. The pending-intake [lag budget](evolution.md#the-barrier-free-runtime-async_evolve)
+keeps the mini-batch bounded so one `step()` never faces an unbounded pile.
+
 ## Example optimizers (from the algorithm ports)
 
 The [self-evolution examples](self-evolution-examples.md) are, at heart, custom
@@ -135,7 +187,8 @@ implementations you can read and reuse:
 | Aggregator | Example | Selection / acceptance rule |
 |---|---|---|
 | `ParetoAggregator` | [GEPA](algo-gepa.md) | per-instance **Pareto frontier** sampling (Algorithm 2); commits the sampled Pareto parent as the dev head |
-| `TopKFrontierAggregator` | [EvoSkill](algo-evoskill.md) | bounded **top-K aggregate frontier**; commits the best member as the head |
+| `TopKFrontierAggregator` | [EvoSkill](algo-evoskill.md) | bounded **top-K aggregate frontier** (sync path); commits the best member as the head |
+| `SgdSkillAggregator` | [EvoSkill](algo-evoskill.md) | **async SGD-style descent**: apply skill updates, validate every `val_every` steps, roll back on no held-out gain |
 | `StrictGateAggregator` | [SkillOpt](algo-skillopt.md) | **strict held-out-EM gate** + rejected-edit buffer + integer LR budget |
 | `MetaSearchAggregator` | [ADAS](algo-adas.md) | **keep-all archive** with bootstrap-CI fitness (L1 harness) |
 | `DGMArchiveAggregator` | [DGM](algo-dgm.md) | **keep-all archive** + staged eval + `sigmoid(perf)×1/(1+children)` parent selection (L1) |
