@@ -4,6 +4,7 @@
 > framework for self-evolving agents (skills, prompts, harnesses) where **diffs
 > are the gradients** and **the aggregator is the optimizer**.
 
+[![PyPI](https://img.shields.io/pypi/v/agentdescent)](https://pypi.org/project/agentdescent/)
 [![docs](https://img.shields.io/badge/docs-mkdocs--material-1f6feb)](https://birfy.github.io/agentdescent/)
 [![CI](https://github.com/Birfy/agentdescent/actions/workflows/docs.yml/badge.svg)](https://github.com/Birfy/agentdescent/actions/workflows/docs.yml)
 [![python](https://img.shields.io/badge/python-%E2%89%A53.9-1f6feb)](https://www.python.org/)
@@ -44,11 +45,16 @@ improvement throughput, where serial self-improvement is bounded at 1 diff / T_i
 ## Install
 
 ```bash
-pip install -e ".[dev]"          # from source · PyPI name: agentdescent · Python ≥ 3.9
+pip install agentdescent
 ```
 
-The core engine has **zero required dependencies**; `[dev]` adds pytest, `[docs]`
-adds MkDocs Material.
+The core engine has **zero required dependencies** and needs only Python ≥ 3.9.
+For development, install from source with the extras (`[dev]` adds pytest,
+`[docs]` adds MkDocs Material):
+
+```bash
+pip install -e ".[dev]"
+```
 
 ## Quickstart
 

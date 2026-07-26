@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agentdescent"
 version = "0.1.0"
-description = "A parallel, self-evolving framework for accelerating recursive self-improvement (RSI)"
+description = "Gradient descent, but the parameters are agents — a parallel, asynchronous framework for self-evolving agents (skills, prompts, harnesses)"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
