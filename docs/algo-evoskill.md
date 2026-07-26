@@ -73,6 +73,47 @@ backend = openhands_backend(model="openai/deepseek-v4-pro",
 answer = backend.answer(question, document_text, skills=rendered_skills)
 ```
 
+## Empirical results — real OpenHands agent + DeepSeek on OfficeQA
+
+To validate the tool-using base agent, we ran EvoSkill's skill-discovery loop on
+OfficeQA (the [official `sentient-agi/EvoSkill`](https://github.com/sentient-agi/EvoSkill),
+`skill_only`, iterations=3, `multi_tolerance` scorer) with a **real OpenHands
+agent** (terminal + file_editor tools) driven by **DeepSeek** (`deepseek-v4-flash`,
+OpenAI-compatible endpoint via LiteLLM: `model="openai/deepseek-v4-flash"` +
+`OPENAI_BASE_URL=https://api.deepseek.com`). Base agent = the model; the accuracy
+is the held-out `val` multi-tolerance score.
+
+| Questions | val | Baseline (no skills) | After discovery | Skill learned |
+|---|---|---|---|---|
+| 10 (official demo) | 2 | 72.5% | 100% | enhanced brainstorming (output completeness) |
+| 30 | 5 | 82.0% | 100% | `treasury-bulletin-analysis` (+ answer delivery) |
+| **100** | **29** | **66.7%** | **79.7% (+13.0)** | **`answer-verification-and-final-validation`** |
+
+On the largest, hardest slice (29 val — multi-step financial math: VaR, Macaulay
+duration, moving averages, dispersion indices), the baseline is **66.7%** and
+EvoSkill lifts it **+13 points to 79.7%** by discovering an *answer-verification*
+skill (re-check the multi-step computation before answering). It does **not** reach
+100% because several questions are genuinely hard — the small-sample 100%s are not
+statistically robust. The agent does work the passive keyword-retriever cannot: it
+`grep`s the tables, `view`s the right rows, and **computes** (e.g. summing the
+monthly "national defense" rows for 1940 → **2,602**).
+
+**Parallel + async.** EvoSkill evaluates `val` via `asyncio.Semaphore(concurrency)`
++ `gather` — set `concurrency=8` and the 29 val questions evaluated in **~7 min**
+(vs ~40–60 min serial). This mirrors the framework's own
+[parallel/async execution](evolution.md#parallelism-async-the-frameworks-core).
+
+**Two portability gotchas** (documented, not hidden):
+
+* *Structured output.* DeepSeek's API rejects OpenAI strict
+  `response_format:{type:"json_schema", strict:true}` (HTTP 400 *"response_format
+  type is unavailable"*); the answer-extraction re-ask must use `{type:"json_object"}`
+  with the schema in the prompt. The official `claude` harness uses native
+  structured output and needs no shim.
+* *Environment.* The real OpenHands SDK needs **Python ≥ 3.12** (a `uv`-managed
+  venv works, no Docker/admin); the OpenAI-compatible base URL routes DeepSeek
+  through LiteLLM.
+
 ## Dataset caveat
 
 The full OfficeQA is HF-**gated** (`databricks/officeqa`, set `HF_TOKEN`); absent
