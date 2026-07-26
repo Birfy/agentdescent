@@ -7,7 +7,7 @@
 [![docs](https://img.shields.io/badge/docs-mkdocs--material-1f6feb)](https://birfy.github.io/agentdescent/)
 [![CI](https://github.com/Birfy/agentdescent/actions/workflows/docs.yml/badge.svg)](https://github.com/Birfy/agentdescent/actions/workflows/docs.yml)
 [![python](https://img.shields.io/badge/python-%E2%89%A53.9-1f6feb)](https://www.python.org/)
-[![license](https://img.shields.io/badge/license-MIT-3fb950)](LICENSE)
+[![license](https://img.shields.io/badge/license-MIT-3fb950)](https://github.com/Birfy/agentdescent/blob/main/LICENSE)
 
 AgentDescent puts the deep-learning **training stack** on top of agents. The
 "parameters" are a **library of evolvable artifacts** (skills, prompts, harness
@@ -68,22 +68,22 @@ print(result.final_reward)    # held-out reward
 
 ## 📖 Documentation
 
-Full docs live in [`docs/`](docs/) and render as a website via MkDocs Material:
+Full docs live in [`docs/`](https://github.com/Birfy/agentdescent/tree/main/docs/) and render as a website via MkDocs Material:
 
 | Page | What's in it |
 |---|---|
-| [Home](docs/index.md) | Overview and 30-second tour |
-| [Architecture](docs/architecture.md) | Components, data-flow diagram, the two runtimes, concurrency model |
-| [Concepts](docs/concepts.md) | The training↔RSI analogy, staleness, the aggregator, the three long tails, governance |
-| [Usage & extending](docs/usage.md) | Running the demos, config reference, **plugging in your own `Evolvable` domain** |
-| [Evolving anything](docs/evolution.md) | The general engine — evolve any artifact by writing its `Strategy` + `run`/`reward`/`propose` |
-| [Connecting agents & LLMs](docs/agents.md) | The provider-agnostic completion layer |
-| [Loading datasets](docs/dataloader.md) | The `agentdescent.dataloader` data layer — HF datasets-server + raw-file fetch, cached, dependency-free |
-| [Customizable parallelism](docs/parallelism.md) | Pluggable DP / TP / PP strategies — or write your own |
-| [Duration-aware scheduling](docs/duration-scheduling.md) | Estimate rollout cost from task size; LPT dispatch + straggler checkpointing |
-| [Efficiency experiments](docs/efficiency.md) | Measured parallel scaling and async tail-hiding |
-| [Example: skill evolution](docs/skill-evolution.md) | One complete run — real dataset, real LLM, every module |
-| [Self-evolution algorithms](docs/self-evolution-examples.md) | Faithful ports of ACE, GEPA, EvoSkill, SkillOpt, ADAS, DGM |
+| [Home](https://github.com/Birfy/agentdescent/blob/main/docs/index.md) | Overview and 30-second tour |
+| [Architecture](https://github.com/Birfy/agentdescent/blob/main/docs/architecture.md) | Components, data-flow diagram, the two runtimes, concurrency model |
+| [Concepts](https://github.com/Birfy/agentdescent/blob/main/docs/concepts.md) | The training↔RSI analogy, staleness, the aggregator, the three long tails, governance |
+| [Usage & extending](https://github.com/Birfy/agentdescent/blob/main/docs/usage.md) | Running the demos, config reference, **plugging in your own `Evolvable` domain** |
+| [Evolving anything](https://github.com/Birfy/agentdescent/blob/main/docs/evolution.md) | The general engine — evolve any artifact by writing its `Strategy` + `run`/`reward`/`propose` |
+| [Connecting agents & LLMs](https://github.com/Birfy/agentdescent/blob/main/docs/agents.md) | The provider-agnostic completion layer |
+| [Loading datasets](https://github.com/Birfy/agentdescent/blob/main/docs/dataloader.md) | The `agentdescent.dataloader` data layer — HF datasets-server + raw-file fetch, cached, dependency-free |
+| [Customizable parallelism](https://github.com/Birfy/agentdescent/blob/main/docs/parallelism.md) | Pluggable DP / TP / PP strategies — or write your own |
+| [Duration-aware scheduling](https://github.com/Birfy/agentdescent/blob/main/docs/duration-scheduling.md) | Estimate rollout cost from task size; LPT dispatch + straggler checkpointing |
+| [Efficiency experiments](https://github.com/Birfy/agentdescent/blob/main/docs/efficiency.md) | Measured parallel scaling and async tail-hiding |
+| [Example: skill evolution](https://github.com/Birfy/agentdescent/blob/main/docs/skill-evolution.md) | One complete run — real dataset, real LLM, every module |
+| [Self-evolution algorithms](https://github.com/Birfy/agentdescent/blob/main/docs/self-evolution-examples.md) | Faithful ports of ACE, GEPA, EvoSkill, SkillOpt, ADAS, DGM |
 
 ```bash
 pip install -e ".[docs]"
@@ -91,14 +91,14 @@ mkdocs serve      # live preview at http://127.0.0.1:8000
 mkdocs build      # static HTML into ./site
 ```
 
-A GitHub Actions workflow ([`.github/workflows/docs.yml`](.github/workflows/docs.yml))
+A GitHub Actions workflow ([`.github/workflows/docs.yml`](https://github.com/Birfy/agentdescent/blob/main/.github/workflows/docs.yml))
 builds and deploys the site to GitHub Pages — enable it under *Settings → Pages
 → Source: GitHub Actions*.
 
 ## Evolve anything — the general engine
 
 The core is the ledger + aggregator + schedulers + governance.
-[`agentdescent.evolution`](agentdescent/evolution.py) is the domain-agnostic engine on
+[`agentdescent.evolution`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/evolution.py) is the domain-agnostic engine on
 top: describe **what evolves** (a `Strategy`) and the **rules of evolution**
 (`run` / `reward` / `propose`), and it runs the parallel, merge-based loop.
 
@@ -121,16 +121,16 @@ picks the governance layer (a skill is L2; a harness/verifier at `0.6` is L1,
 where merges are forced through the oracle). Same `evolve` call for either —
 only the artifact, strategy, and blast radius differ.
 
-**Connect any agent/LLM** — [`agentdescent.agents`](agentdescent/agents.py) is the
+**Connect any agent/LLM** — [`agentdescent.agents`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/agents.py) is the
 separate provider layer; any `prompt -> text` is a completion (`claude(...)`,
 `openai_compatible(...)` for GLM/OpenAI-style endpoints, `from_callable(...)`,
 `with_retries(...)`).
 
 The one complete end-to-end run — real dataset, real LLM, every module — is
-[`examples/skill_evolution.py`](examples/skill_evolution.py)
+[`examples/skill_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/skill_evolution.py)
 (`python -m examples.skill_evolution --dry-run` for the no-API preview).
-Guides: [the engine](docs/evolution.md) · [skill example](docs/skill-evolution.md)
-· [agents](docs/agents.md).
+Guides: [the engine](https://github.com/Birfy/agentdescent/blob/main/docs/evolution.md) · [skill example](https://github.com/Birfy/agentdescent/blob/main/docs/skill-evolution.md)
+· [agents](https://github.com/Birfy/agentdescent/blob/main/docs/agents.md).
 
 ## Faithful ports of the latest self-evolution algorithms
 
@@ -138,18 +138,18 @@ To show the engine is faithful to the field, AgentDescent ships one runnable exa
 per representative **skill** and **harness** self-evolution algorithm — each
 faithful to the original repo's *algorithm* and *dataset choice*, each with a
 `--dry-run` (no-API) mode and an offline test suite. Every one loads its benchmark
-through the shared [`agentdescent.dataloader`](docs/dataloader.md) data layer
+through the shared [`agentdescent.dataloader`](https://github.com/Birfy/agentdescent/blob/main/docs/dataloader.md) data layer
 (HF datasets-server + raw files, cached, dependency-free). Full guide:
-[docs/self-evolution-examples.md](docs/self-evolution-examples.md).
+[docs/self-evolution-examples.md](https://github.com/Birfy/agentdescent/blob/main/docs/self-evolution-examples.md).
 
 | Algorithm | Kind | Dataset | Example |
 |---|---|---|---|
-| **ACE** (Agentic Context Engineering) | skill / context | FiNER-139 | [`ace_context_evolution.py`](examples/ace_context_evolution.py) |
-| **GEPA** (Reflective Prompt Evolution) | skill / prompt | HotpotQA | [`gepa_prompt_evolution.py`](examples/gepa_prompt_evolution.py) |
-| **EvoSkill** (Automated Skill Discovery) | skill library | OfficeQA | [`evoskill_skill_discovery.py`](examples/evoskill_skill_discovery.py) |
-| **SkillOpt** (ReflACT) | skill document | SearchQA | [`skillopt_skill_training.py`](examples/skillopt_skill_training.py) |
-| **ADAS** (Meta Agent Search) | harness | MGSM | [`adas_meta_agent_search.py`](examples/adas_meta_agent_search.py) |
-| **DGM** (Darwin Gödel Machine) | harness | SWE-bench Verified | [`dgm_self_improve.py`](examples/dgm_self_improve.py) |
+| **ACE** (Agentic Context Engineering) | skill / context | FiNER-139 | [`ace_context_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/ace_context_evolution.py) |
+| **GEPA** (Reflective Prompt Evolution) | skill / prompt | HotpotQA | [`gepa_prompt_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/gepa_prompt_evolution.py) |
+| **EvoSkill** (Automated Skill Discovery) | skill library | OfficeQA | [`evoskill_skill_discovery.py`](https://github.com/Birfy/agentdescent/blob/main/examples/evoskill_skill_discovery.py) |
+| **SkillOpt** (ReflACT) | skill document | SearchQA | [`skillopt_skill_training.py`](https://github.com/Birfy/agentdescent/blob/main/examples/skillopt_skill_training.py) |
+| **ADAS** (Meta Agent Search) | harness | MGSM | [`adas_meta_agent_search.py`](https://github.com/Birfy/agentdescent/blob/main/examples/adas_meta_agent_search.py) |
+| **DGM** (Darwin Gödel Machine) | harness | SWE-bench Verified | [`dgm_self_improve.py`](https://github.com/Birfy/agentdescent/blob/main/examples/dgm_self_improve.py) |
 
 ```bash
 python -m examples.ace_context_evolution --dry-run     # skill/context self-evolution (ACE)
@@ -163,11 +163,11 @@ boundary is documented, never hidden.
 
 ## Efficiency (measured)
 
-[`examples/efficiency.py`](examples/efficiency.py) — **parallel scaling** is
+[`examples/efficiency.py`](https://github.com/Birfy/agentdescent/blob/main/examples/efficiency.py) — **parallel scaling** is
 near-linear (efficiency ≥ 0.99 through 8 workers, 7.9× speedup), and the
 **async pipeline** is **2.5× faster than a sync barrier** under heavy-tailed
 rollout latency (100% vs 40% worker utilization). See
-[docs/efficiency.md](docs/efficiency.md).
+[docs/efficiency.md](https://github.com/Birfy/agentdescent/blob/main/docs/efficiency.md).
 
 ## The central analogy
 
@@ -212,7 +212,7 @@ pytest
 ```
 
 No external services or model APIs are required: the reference domain
-([`agentdescent/domains/router.py`](agentdescent/domains/router.py)) is a fully
+([`agentdescent/domains/router.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/domains/router.py)) is a fully
 deterministic keyword-router skill, so the entire parallel loop runs in-process
 and is unit-tested — while still producing genuine diffs that measurably improve
 a held-out metric.
@@ -223,20 +223,20 @@ Every module cites the design section it implements.
 
 | Component | Module | Design § |
 |---|---|---|
-| `Evolvable` unit, `Diff`, `EvidenceCard`, version vectors | [`evolvable.py`](agentdescent/evolvable.py) | 3.2, 3.3 |
-| Git-backed Ledger: version vectors, CAS, 2PC, dual branch | [`ledger.py`](agentdescent/ledger.py) | 3.1, 4.5 |
-| Aggregator: staleness → conflict → fusion → Beta accept → commit | [`aggregator.py`](agentdescent/aggregator.py) | 4 |
-| **Staleness policies: Full / Guarded / Reflective** | [`staleness.py`](agentdescent/staleness.py) | 4.2 |
-| **Async stage-orchestration runtime + `async_ratio`** | [`async_runtime.py`](agentdescent/async_runtime.py) | 3.1 |
-| **Parallel paradigms: DP / TP / PP** | [`parallel.py`](agentdescent/parallel.py) | 8 |
-| Statistics: Beta posterior, `P(Δ>0)`, annealed δ, UCB | [`stats.py`](agentdescent/stats.py) | 4.4, 5.2 |
-| Three schedulers: UCB task / audit / resume queue | [`scheduler.py`](agentdescent/scheduler.py) | 5 |
-| Three-layer verifier (rule / learned / oracle) | [`verifier.py`](agentdescent/verifier.py) | 3.1, 5.3 |
-| Layered governance by blast radius (L0/L1/L2) | [`governance.py`](agentdescent/governance.py) | 6 |
-| Worker: rollout + propose | [`worker.py`](agentdescent/worker.py) | 3.1 |
-| Orchestrator (sync DP) + fork baseline | [`orchestrator.py`](agentdescent/orchestrator.py) | 3.1, RQ1 |
-| **Agent/LLM connection layer (provider-agnostic)** | [`agents.py`](agentdescent/agents.py) | — |
-| **General evolution engine + pluggable `Strategy`** | [`evolution.py`](agentdescent/evolution.py) | 3.2 |
+| `Evolvable` unit, `Diff`, `EvidenceCard`, version vectors | [`evolvable.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/evolvable.py) | 3.2, 3.3 |
+| Git-backed Ledger: version vectors, CAS, 2PC, dual branch | [`ledger.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/ledger.py) | 3.1, 4.5 |
+| Aggregator: staleness → conflict → fusion → Beta accept → commit | [`aggregator.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/aggregator.py) | 4 |
+| **Staleness policies: Full / Guarded / Reflective** | [`staleness.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/staleness.py) | 4.2 |
+| **Async stage-orchestration runtime + `async_ratio`** | [`async_runtime.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/async_runtime.py) | 3.1 |
+| **Parallel paradigms: DP / TP / PP** | [`parallel.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/parallel.py) | 8 |
+| Statistics: Beta posterior, `P(Δ>0)`, annealed δ, UCB | [`stats.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/stats.py) | 4.4, 5.2 |
+| Three schedulers: UCB task / audit / resume queue | [`scheduler.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/scheduler.py) | 5 |
+| Three-layer verifier (rule / learned / oracle) | [`verifier.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/verifier.py) | 3.1, 5.3 |
+| Layered governance by blast radius (L0/L1/L2) | [`governance.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/governance.py) | 6 |
+| Worker: rollout + propose | [`worker.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/worker.py) | 3.1 |
+| Orchestrator (sync DP) + fork baseline | [`orchestrator.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/orchestrator.py) | 3.1, RQ1 |
+| **Agent/LLM connection layer (provider-agnostic)** | [`agents.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/agents.py) | — |
+| **General evolution engine + pluggable `Strategy`** | [`evolution.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/evolution.py) | 3.2 |
 
 ## How aggregation works (the `Aggregator` pipeline)
 
@@ -273,16 +273,16 @@ merge pipeline.
 
 ### Two runtimes
 
-- **Synchronous DP** ([`orchestrator.py`](agentdescent/orchestrator.py)) — a round
+- **Synchronous DP** ([`orchestrator.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/orchestrator.py)) — a round
   barrier: all workers step, then one `aggregator.step()`, then the next round.
   Deterministic; the RQ1/RQ2 baseline.
-- **Asynchronous stage orchestration** ([`async_runtime.py`](agentdescent/async_runtime.py),
+- **Asynchronous stage orchestration** ([`async_runtime.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/async_runtime.py),
   FlashEvolve-style) — **no barrier**. Worker threads keep producing evidence
   while a dedicated aggregator thread keeps merging, connected by the
   thread-safe `EvidenceBuffer`. The rollout/propose and aggregate/commit stages
   overlap instead of stalling.
 
-### Staleness policies ([`staleness.py`](agentdescent/staleness.py), FlashEvolve Full/Guarded/Reflective)
+### Staleness policies ([`staleness.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/staleness.py), FlashEvolve Full/Guarded/Reflective)
 
 The active policy is the only thing that changes between async regimes — the
 aggregator asks it `ACCEPT / REBASE / DISCARD` from each diff's `η` and `α`:
@@ -310,7 +310,7 @@ to 1.000, but at `async_ratio=4`:
 | Reflective | ~7.8k | ~0.7k | ~3.3s |
 | Guarded | ~20k | ~17k | ~5.1s |
 
-### DP / TP / PP ([`parallel.py`](agentdescent/parallel.py), §8)
+### DP / TP / PP ([`parallel.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/parallel.py), §8)
 
 - **DP (data parallel)** — same snapshot, task-sharded, diffs merged. The default
   the async runtime runs.

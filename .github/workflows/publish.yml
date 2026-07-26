@@ -1,0 +1,44 @@
+name: publish
+
+# Publish to PyPI via Trusted Publishing (OIDC) — no API token stored.
+# Setup (once): on PyPI add a "pending publisher" for this repo with
+#   owner/repo = Birfy/agentdescent, workflow = publish.yml, environment = pypi
+#   (https://pypi.org/manage/account/publishing/).
+# Then publishing = creating a GitHub Release (or running this workflow manually).
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install build
+      - run: python -m build
+      - run: pip install twine && twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write        # OIDC token for Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
