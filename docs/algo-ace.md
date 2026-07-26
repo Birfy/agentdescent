@@ -53,6 +53,17 @@ restricted to the `--top-k` most frequent concepts so a learned lesson transfers
 ACE's full setup also runs AppWorld (a heavy simulator) — out of scope here and
 documented in the module docstring.
 
+## Plug-ins implemented
+
+The example provides these plug-ins to `evolve()` (in
+[`examples/ace_context_evolution.py`](https://github.com/Birfy/concordia/blob/main/examples/ace_context_evolution.py)):
+
+| Plug-in | `evolve()` slot | What it does |
+|---|---|---|
+| **`ACEPlaybook`** | `strategy=` | the itemised, incremental-delta playbook — `to_diff` appends one content-addressed bullet with grow-and-refine de-dup; never rewrites (so context collapse can't happen) |
+| default `Aggregator` | (the Curator) | dedup + Beta-posterior acceptance — a bullet commits only if it raises held-out reward; **no custom aggregator needed** |
+| `ace_agent()` | `agent=` | Generator (`solve`) + Reflector (`propose`) over a completion |
+
 ## Run it
 
 ```bash

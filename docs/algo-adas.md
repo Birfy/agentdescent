@@ -45,6 +45,18 @@ validated DSL (`AGENT_BLOCKS`) run by a safe interpreter. The Meta Agent Search
 *loop*, the seed archive, MGSM scoring, and the keep-all archive are faithful;
 only the agent *substrate* is a safe DSL instead of raw `exec`.
 
+## Plug-ins implemented
+
+In [`examples/adas_meta_agent_search.py`](https://github.com/Birfy/concordia/blob/main/examples/adas_meta_agent_search.py):
+
+| Plug-in | `evolve()` slot | What it does |
+|---|---|---|
+| **`AgentDesignStrategy`** | `strategy=` | a proposed agent (JSON) becomes a `Diff` on the one-slot agentic system; `render` returns the program for the interpreter |
+| **`MetaSearchAggregator`** | `aggregator_factory=` | ADAS's keep-all archive with bootstrap-CI fitness |
+| `make_propose(...)` | `propose=` | the meta-agent, conditioned on the whole archive (+ two Reflexion rounds) |
+| **`Interpreter`** + **`seed_archive`** | (agent substrate) | the safe control-flow DSL (`cot`/`cot_sc`/`reflexion`/`debate`/`step_back`/`role_assignment`/`ensemble`) and the seven MGSM seeds |
+| **`dgm_parent_weights`** | `--select dgm` | DGM's sigmoid×novelty rule as an alternative archive-conditioning strategy |
+
 ## Run it
 
 ```bash

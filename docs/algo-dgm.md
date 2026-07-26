@@ -46,6 +46,17 @@ must cover), so the DGM *algorithm* runs and is tested offline while the *scores
 are simulated, not SWE-bench results. Pass a real `evaluate_fn` to `run_dgm` to
 plug in the actual Docker harness.
 
+## Plug-ins implemented
+
+In [`examples/dgm_self_improve.py`](https://github.com/Birfy/concordia/blob/main/examples/dgm_self_improve.py):
+
+| Plug-in | `evolve()` slot | What it does |
+|---|---|---|
+| **`HarnessStrategy`** | `strategy=` | a proposed capability becomes a `Diff` on the harness capability set |
+| **`DGMArchiveAggregator`** | `aggregator_factory=` | keep-all archive + staged eval (10→50→140) + sigmoid×novelty parent selection; sets the sampled parent as the dev head |
+| **`dgm_parent_weights` / `choose_selfimproves`** | (selection) | the exact DGM rule `p_i ∝ sigmoid(10·(score−0.5)) · 1/(1+children_i)` |
+| `propose` + `make_surrogate_evaluator` | `propose=` / objective | add the most-needed capability; the transparent surrogate objective (swap in a real Docker harness via `evaluate_fn`) |
+
 ## Run it
 
 ```bash

@@ -41,6 +41,18 @@ Traced from the repo (`src/loop/runner.py`, `src/registry/manager.py`,
   it scores candidates on held-out and commits the **best frontier member** as
   the dev head, so the next round extends it (`selection_strategy="best"`).
 
+## Plug-ins implemented
+
+In [`examples/evoskill_skill_discovery.py`](https://github.com/Birfy/concordia/blob/main/examples/evoskill_skill_discovery.py)
+(+ [`concordia/backends.py`](https://github.com/Birfy/concordia/blob/main/concordia/backends.py)):
+
+| Plug-in | `evolve()` slot | What it does |
+|---|---|---|
+| **`SkillLibraryStrategy`** | `strategy=` | a proposed `SKILL.md` (`name :: body`) becomes a `Diff` on the skill library |
+| **`TopKFrontierAggregator`** + **`Frontier`** | `aggregator_factory=` | the bounded top-K aggregate frontier; commits the best member as the dev head |
+| `make_propose(...)` | `propose=` | failure-driven Skill Proposer + Skill Generator (writes one `SKILL.md`) |
+| **`openhands_backend` / `tool_loop_backend`** (`concordia.backends`) | the base agent | real OpenHands tool agent, a grep/read ReAct loop, or the default keyword retriever — selected by `--backend` |
+
 ## The base agent — `--backend` (this is what makes it work)
 
 OfficeQA answers are figures buried in **200 KB – 1.2 MB financial tables**, often
@@ -83,20 +95,17 @@ OpenAI-compatible endpoint via LiteLLM: `model="openai/deepseek-v4-flash"` +
 `OPENAI_BASE_URL=https://api.deepseek.com`). Base agent = the model; the accuracy
 is the held-out `val` multi-tolerance score.
 
-| Questions | val | Baseline (no skills) | After discovery | Skill learned |
+| Questions | train / val | Baseline (no skills) | After discovery | Skill learned |
 |---|---|---|---|---|
-| 10 (official demo) | 2 | 72.5% | 100% | enhanced brainstorming (output completeness) |
-| 30 | 5 | 82.0% | 100% | `treasury-bulletin-analysis` (+ answer delivery) |
-| **100** | **29** | **66.7%** | **79.7% (+13.0)** | **`answer-verification-and-final-validation`** |
+| **100** | **40 / 29** | **66.7%** | **79.7% (+13.0)** | **`answer-verification-and-final-validation`** |
 
-On the largest, hardest slice (29 val — multi-step financial math: VaR, Macaulay
-duration, moving averages, dispersion indices), the baseline is **66.7%** and
-EvoSkill lifts it **+13 points to 79.7%** by discovering an *answer-verification*
+On 29 held-out val questions of genuinely hard multi-step financial math (VaR,
+Macaulay duration, moving averages, dispersion indices), the baseline is **66.7%**
+and EvoSkill lifts it **+13 points to 79.7%** by discovering an *answer-verification*
 skill (re-check the multi-step computation before answering). It does **not** reach
-100% because several questions are genuinely hard — the small-sample 100%s are not
-statistically robust. The agent does work the passive keyword-retriever cannot: it
-`grep`s the tables, `view`s the right rows, and **computes** (e.g. summing the
-monthly "national defense" rows for 1940 → **2,602**).
+100% because several questions are genuinely hard. The agent does work the passive
+keyword-retriever cannot: it `grep`s the tables, `view`s the right rows, and
+**computes** (e.g. summing the monthly "national defense" rows for 1940 → **2,602**).
 
 **Parallel + async.** EvoSkill evaluates `val` via `asyncio.Semaphore(concurrency)`
 + `gather` — set `concurrency=8` and the 29 val questions evaluated in **~7 min**

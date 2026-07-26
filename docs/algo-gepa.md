@@ -50,6 +50,17 @@ GEPA optimises a multi-module compound system with a rollout budget; here the
 system is a single instruction module and the minibatch is the per-round worker
 sample (raise `--workers`). The Pareto set is the held-out split.
 
+## Plug-ins implemented
+
+In [`examples/gepa_prompt_evolution.py`](https://github.com/Birfy/concordia/blob/main/examples/gepa_prompt_evolution.py):
+
+| Plug-in | `evolve()` slot | What it does |
+|---|---|---|
+| **`InstructionSlot`** | `strategy=` | a single evolvable instruction module; each proposal replaces it (content-addressed) |
+| **`ParetoAggregator`** / `pareto_aggregator_factory` | `aggregator_factory=` | GEPA's per-instance Pareto candidate selection; commits the sampled Pareto parent as the dev head |
+| **`pareto_frontier` / `pareto_select`** | (pure, unit-tested) | Algorithm 2: per-instance best → union of winners → dominance pruning → frequency-weighted sampling |
+| `gepa_agent()` | `agent=` | Generator + reflective-mutation actor (rewrites the instruction from trace + NL feedback) |
+
 ## Run it
 
 ```bash

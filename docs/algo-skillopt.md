@@ -43,6 +43,17 @@ over by both the propose step and the aggregator.
 The epoch-level *slow-update* and *meta-skill* stabilisers are optional in the
 repo and omitted from this minimal-but-faithful slice.
 
+## Plug-ins implemented
+
+In [`examples/skillopt_skill_training.py`](https://github.com/Birfy/concordia/blob/main/examples/skillopt_skill_training.py):
+
+| Plug-in | `evolve()` slot | What it does |
+|---|---|---|
+| **`SkillDocStrategy`** | `strategy=` | turns the analyst's bounded edit patch (`append/insert_after/replace/delete`) into a `Diff` on the one-slot skill document |
+| **`StrictGateAggregator`** | `aggregator_factory=` | strict held-out-EM accept gate + the rejected-edit buffer (remembered in-epoch) |
+| **`LRScheduler`** | (edit budget) | the integer "learning-rate" cap on edits per step (`constant`/`linear`/`cosine`) |
+| `make_propose(...)` | `propose=` | the analyst — one failed rollout → a budget-capped edit patch |
+
 ## Run it
 
 ```bash
