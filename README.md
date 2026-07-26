@@ -1,20 +1,70 @@
-# Concordia
+# AgentDescent
 
-**A parallel, self-evolving framework for accelerating recursive self-improvement (RSI).**
+> **Gradient descent — but the parameters are agents.** A parallel, asynchronous
+> framework for self-evolving agents (skills, prompts, harnesses) where **diffs
+> are the gradients** and **the aggregator is the optimizer**.
 
-Concordia is a research reference implementation. It ports the
-parallel-training playbook — data/tensor/pipeline parallelism, parameter
-servers, decoupled/asynchronous RL, partial rollout — onto RSI, where the
+[![docs](https://img.shields.io/badge/docs-mkdocs--material-1f6feb)](https://birfy.github.io/agentdescent/)
+[![CI](https://github.com/Birfy/agentdescent/actions/workflows/docs.yml/badge.svg)](https://github.com/Birfy/agentdescent/actions/workflows/docs.yml)
+[![python](https://img.shields.io/badge/python-%E2%89%A53.9-1f6feb)](https://www.python.org/)
+[![license](https://img.shields.io/badge/license-MIT-3fb950)](LICENSE)
+
+AgentDescent puts the deep-learning **training stack** on top of agents. The
 "parameters" are a **library of evolvable artifacts** (skills, prompts, harness
-modules, verifiers) and the "gradients" are **diffs carrying evidence cards**.
-
-The core observation (design §1): serial RSI is bounded at **1 diff / T_iter**.
-Concordia runs *N* workers in parallel and merges their diffs into a shared,
-versioned artifact library, targeting **O(N / T_iter)** improvement throughput.
+modules, verifiers); the "gradients" are **diffs carrying evidence cards**; the
+"optimizer step" is a **merge decision**. *N* workers propose diffs **in
+parallel**, and a **barrier-free asynchronous** merger aggregates them into a
+shared, version-controlled artifact library — targeting **O(N / T_iter)**
+improvement throughput, where serial self-improvement is bounded at 1 diff / T_iter.
 
 > The one place the analogy *must* break defines the whole system: **gradients
-> add, diffs do not.** Aggregation is therefore not averaging but
-> **conflict resolution + statistical acceptance + transactional commit**.
+> add, diffs do not.** Aggregation is therefore not averaging but **conflict
+> resolution + statistical acceptance + transactional commit**.
+
+## Highlights
+
+- **One entry point — `evolve()`.** Describe *what evolves* (a `Strategy`) and the
+  *rules of evolution* (`run` / `reward` / `propose`); the parallel, merge-based
+  loop (ledger → workers → aggregator → commit) runs for you.
+- **Parallel *and* asynchronous.** Concurrent workers within a round
+  (`max_concurrency`) and a **barrier-free** async runtime across rounds
+  (`asynchronous=True`) — a ROLL-Flash-style lag budget plus Full / Guarded /
+  Reflective staleness policies keep stale diffs safe.
+- **The aggregator is a discrete-space optimizer.** Staleness filter → conflict
+  resolution → fusion tournament → Beta-posterior acceptance → transactional
+  commit — and fully swappable via `aggregator_factory`.
+- **Governed by blast radius.** Skills (L2) merge freely; harnesses/verifiers (L1)
+  are forced through an oracle; safety/permissions (L0) are frozen.
+- **Provider-agnostic.** Any `prompt -> text` is a completion — Claude,
+  OpenAI-compatible endpoints (GLM / DeepSeek), or a tool-using agent (OpenHands).
+- **Faithful algorithm ports.** Runnable, offline-tested examples of ACE, GEPA,
+  EvoSkill, SkillOpt, ADAS, and DGM — faithful to each repo's algorithm *and*
+  dataset choice.
+
+## Install
+
+```bash
+pip install -e ".[dev]"          # from source · PyPI name: agentdescent · Python ≥ 3.9
+```
+
+The core engine has **zero required dependencies**; `[dev]` adds pytest, `[docs]`
+adds MkDocs Material.
+
+## Quickstart
+
+```python
+from agentdescent.evolution import evolve, LLMAgent
+from agentdescent.agents import claude
+
+result = evolve(
+    tasks, reward,                                 # your task set + scorer
+    agent=LLMAgent(claude(model="claude-haiku-4-5")),
+    rounds=15, n_workers=4, max_concurrency=4,     # parallel workers
+    # asynchronous=True, async_ratio=3,            # ...or barrier-free async
+)
+print(result.rendered)        # the evolved artifact
+print(result.final_reward)    # held-out reward
+```
 
 ## 📖 Documentation
 
@@ -28,7 +78,7 @@ Full docs live in [`docs/`](docs/) and render as a website via MkDocs Material:
 | [Usage & extending](docs/usage.md) | Running the demos, config reference, **plugging in your own `Evolvable` domain** |
 | [Evolving anything](docs/evolution.md) | The general engine — evolve any artifact by writing its `Strategy` + `run`/`reward`/`propose` |
 | [Connecting agents & LLMs](docs/agents.md) | The provider-agnostic completion layer |
-| [Loading datasets](docs/dataloader.md) | The `concordia.dataloader` data layer — HF datasets-server + raw-file fetch, cached, dependency-free |
+| [Loading datasets](docs/dataloader.md) | The `agentdescent.dataloader` data layer — HF datasets-server + raw-file fetch, cached, dependency-free |
 | [Customizable parallelism](docs/parallelism.md) | Pluggable DP / TP / PP strategies — or write your own |
 | [Duration-aware scheduling](docs/duration-scheduling.md) | Estimate rollout cost from task size; LPT dispatch + straggler checkpointing |
 | [Efficiency experiments](docs/efficiency.md) | Measured parallel scaling and async tail-hiding |
@@ -48,12 +98,12 @@ builds and deploys the site to GitHub Pages — enable it under *Settings → Pa
 ## Evolve anything — the general engine
 
 The core is the ledger + aggregator + schedulers + governance.
-[`concordia.evolution`](concordia/evolution.py) is the domain-agnostic engine on
+[`agentdescent.evolution`](agentdescent/evolution.py) is the domain-agnostic engine on
 top: describe **what evolves** (a `Strategy`) and the **rules of evolution**
 (`run` / `reward` / `propose`), and it runs the parallel, merge-based loop.
 
 ```python
-from concordia.evolution import evolve, AppendRules
+from agentdescent.evolution import evolve, AppendRules
 
 result = evolve(
     tasks, reward,
@@ -71,7 +121,7 @@ picks the governance layer (a skill is L2; a harness/verifier at `0.6` is L1,
 where merges are forced through the oracle). Same `evolve` call for either —
 only the artifact, strategy, and blast radius differ.
 
-**Connect any agent/LLM** — [`concordia.agents`](concordia/agents.py) is the
+**Connect any agent/LLM** — [`agentdescent.agents`](agentdescent/agents.py) is the
 separate provider layer; any `prompt -> text` is a completion (`claude(...)`,
 `openai_compatible(...)` for GLM/OpenAI-style endpoints, `from_callable(...)`,
 `with_retries(...)`).
@@ -84,11 +134,11 @@ Guides: [the engine](docs/evolution.md) · [skill example](docs/skill-evolution.
 
 ## Faithful ports of the latest self-evolution algorithms
 
-To show the engine is faithful to the field, Concordia ships one runnable example
+To show the engine is faithful to the field, AgentDescent ships one runnable example
 per representative **skill** and **harness** self-evolution algorithm — each
 faithful to the original repo's *algorithm* and *dataset choice*, each with a
 `--dry-run` (no-API) mode and an offline test suite. Every one loads its benchmark
-through the shared [`concordia.dataloader`](docs/dataloader.md) data layer
+through the shared [`agentdescent.dataloader`](docs/dataloader.md) data layer
 (HF datasets-server + raw files, cached, dependency-free). Full guide:
 [docs/self-evolution-examples.md](docs/self-evolution-examples.md).
 
@@ -121,7 +171,7 @@ rollout latency (100% vs 40% worker utilization). See
 
 ## The central analogy
 
-| Model training | Concordia (parallel RSI) |
+| Model training | AgentDescent (parallel RSI) |
 |---|---|
 | parameter tensor θ | library of `Evolvable` artifacts |
 | gradient *g* | `Diff` + `EvidenceCard` |
@@ -133,11 +183,9 @@ rollout latency (100% vs 40% worker utilization). See
 | EMA (weight averaging) | stable/dev dual branch |
 | training code (not self-modifiable) | L0 frozen layer |
 
-## Install & run
+## Running the examples
 
 ```bash
-pip install -e ".[dev]"
-
 # RQ1 — merge vs fork, end to end (synchronous DP)
 python -m examples.run_demo
 
@@ -164,7 +212,7 @@ pytest
 ```
 
 No external services or model APIs are required: the reference domain
-([`concordia/domains/router.py`](concordia/domains/router.py)) is a fully
+([`agentdescent/domains/router.py`](agentdescent/domains/router.py)) is a fully
 deterministic keyword-router skill, so the entire parallel loop runs in-process
 and is unit-tested — while still producing genuine diffs that measurably improve
 a held-out metric.
@@ -175,20 +223,20 @@ Every module cites the design section it implements.
 
 | Component | Module | Design § |
 |---|---|---|
-| `Evolvable` unit, `Diff`, `EvidenceCard`, version vectors | [`evolvable.py`](concordia/evolvable.py) | 3.2, 3.3 |
-| Git-backed Ledger: version vectors, CAS, 2PC, dual branch | [`ledger.py`](concordia/ledger.py) | 3.1, 4.5 |
-| Aggregator: staleness → conflict → fusion → Beta accept → commit | [`aggregator.py`](concordia/aggregator.py) | 4 |
-| **Staleness policies: Full / Guarded / Reflective** | [`staleness.py`](concordia/staleness.py) | 4.2 |
-| **Async stage-orchestration runtime + `async_ratio`** | [`async_runtime.py`](concordia/async_runtime.py) | 3.1 |
-| **Parallel paradigms: DP / TP / PP** | [`parallel.py`](concordia/parallel.py) | 8 |
-| Statistics: Beta posterior, `P(Δ>0)`, annealed δ, UCB | [`stats.py`](concordia/stats.py) | 4.4, 5.2 |
-| Three schedulers: UCB task / audit / resume queue | [`scheduler.py`](concordia/scheduler.py) | 5 |
-| Three-layer verifier (rule / learned / oracle) | [`verifier.py`](concordia/verifier.py) | 3.1, 5.3 |
-| Layered governance by blast radius (L0/L1/L2) | [`governance.py`](concordia/governance.py) | 6 |
-| Worker: rollout + propose | [`worker.py`](concordia/worker.py) | 3.1 |
-| Orchestrator (sync DP) + fork baseline | [`orchestrator.py`](concordia/orchestrator.py) | 3.1, RQ1 |
-| **Agent/LLM connection layer (provider-agnostic)** | [`agents.py`](concordia/agents.py) | — |
-| **General evolution engine + pluggable `Strategy`** | [`evolution.py`](concordia/evolution.py) | 3.2 |
+| `Evolvable` unit, `Diff`, `EvidenceCard`, version vectors | [`evolvable.py`](agentdescent/evolvable.py) | 3.2, 3.3 |
+| Git-backed Ledger: version vectors, CAS, 2PC, dual branch | [`ledger.py`](agentdescent/ledger.py) | 3.1, 4.5 |
+| Aggregator: staleness → conflict → fusion → Beta accept → commit | [`aggregator.py`](agentdescent/aggregator.py) | 4 |
+| **Staleness policies: Full / Guarded / Reflective** | [`staleness.py`](agentdescent/staleness.py) | 4.2 |
+| **Async stage-orchestration runtime + `async_ratio`** | [`async_runtime.py`](agentdescent/async_runtime.py) | 3.1 |
+| **Parallel paradigms: DP / TP / PP** | [`parallel.py`](agentdescent/parallel.py) | 8 |
+| Statistics: Beta posterior, `P(Δ>0)`, annealed δ, UCB | [`stats.py`](agentdescent/stats.py) | 4.4, 5.2 |
+| Three schedulers: UCB task / audit / resume queue | [`scheduler.py`](agentdescent/scheduler.py) | 5 |
+| Three-layer verifier (rule / learned / oracle) | [`verifier.py`](agentdescent/verifier.py) | 3.1, 5.3 |
+| Layered governance by blast radius (L0/L1/L2) | [`governance.py`](agentdescent/governance.py) | 6 |
+| Worker: rollout + propose | [`worker.py`](agentdescent/worker.py) | 3.1 |
+| Orchestrator (sync DP) + fork baseline | [`orchestrator.py`](agentdescent/orchestrator.py) | 3.1, RQ1 |
+| **Agent/LLM connection layer (provider-agnostic)** | [`agents.py`](agentdescent/agents.py) | — |
+| **General evolution engine + pluggable `Strategy`** | [`evolution.py`](agentdescent/evolution.py) | 3.2 |
 
 ## How aggregation works (the `Aggregator` pipeline)
 
@@ -219,22 +267,22 @@ optimizer step:
 
 ## Parallelism & asynchrony
 
-Concordia ships two execution runtimes and a set of pluggable strategies, so a
+AgentDescent ships two execution runtimes and a set of pluggable strategies, so a
 run can be moved along the sync↔async and DP↔TP↔PP axes without touching the
 merge pipeline.
 
 ### Two runtimes
 
-- **Synchronous DP** ([`orchestrator.py`](concordia/orchestrator.py)) — a round
+- **Synchronous DP** ([`orchestrator.py`](agentdescent/orchestrator.py)) — a round
   barrier: all workers step, then one `aggregator.step()`, then the next round.
   Deterministic; the RQ1/RQ2 baseline.
-- **Asynchronous stage orchestration** ([`async_runtime.py`](concordia/async_runtime.py),
+- **Asynchronous stage orchestration** ([`async_runtime.py`](agentdescent/async_runtime.py),
   FlashEvolve-style) — **no barrier**. Worker threads keep producing evidence
   while a dedicated aggregator thread keeps merging, connected by the
   thread-safe `EvidenceBuffer`. The rollout/propose and aggregate/commit stages
   overlap instead of stalling.
 
-### Staleness policies ([`staleness.py`](concordia/staleness.py), FlashEvolve Full/Guarded/Reflective)
+### Staleness policies ([`staleness.py`](agentdescent/staleness.py), FlashEvolve Full/Guarded/Reflective)
 
 The active policy is the only thing that changes between async regimes — the
 aggregator asks it `ACCEPT / REBASE / DISCARD` from each diff's `η` and `α`:
@@ -262,7 +310,7 @@ to 1.000, but at `async_ratio=4`:
 | Reflective | ~7.8k | ~0.7k | ~3.3s |
 | Guarded | ~20k | ~17k | ~5.1s |
 
-### DP / TP / PP ([`parallel.py`](concordia/parallel.py), §8)
+### DP / TP / PP ([`parallel.py`](agentdescent/parallel.py), §8)
 
 - **DP (data parallel)** — same snapshot, task-sharded, diffs merged. The default
   the async runtime runs.
@@ -275,7 +323,7 @@ to 1.000, but at `async_ratio=4`:
 
 ## The three long tails (§5)
 
-Concordia treats "the long tail" as three separate problems:
+AgentDescent treats "the long tail" as three separate problems:
 
 - **L-traj** (system): heavy-tailed rollout durations → turn-level checkpoint +
   `ResumeQueue`, resumed against the latest ledger (a free cross-version A/B
@@ -300,7 +348,7 @@ Artifacts sort into layers automatically by `blast_radius`:
 
 This is a **research reference implementation**, not a production system. It is
 faithful to the design's *mechanisms* and runs end-to-end on a synthetic domain
-so the mechanisms are observable and testable. Concordia's novelty is a
+so the mechanisms are observable and testable. AgentDescent's novelty is a
 **narrow, defensible engineering synthesis** — concurrent, staleness-bounded,
 conflict-resolved **diff-level merge** over a git-backed versioned ledger — and
 its throughput premise is a *testable engineering hypothesis*, not community

@@ -9,7 +9,7 @@ Ties the components together:
 The loop is deliberately in-process and deterministic so it can be run and
 tested without external models.  Two entry points are provided:
 
-* :meth:`Concordia.run` -- the merge-based system (this framework).
+* :meth:`AgentDescent.run` -- the merge-based system (this framework).
 * :func:`run_fork_baseline` -- the archive/fork baseline (DGM-style: parallel but
   never merged), used as the RQ1 control.
 
@@ -50,7 +50,7 @@ class RoundStat:
     oracle_used: int
 
 
-class Concordia:
+class AgentDescent:
     """The merge-based parallel self-evolution system."""
 
     def __init__(

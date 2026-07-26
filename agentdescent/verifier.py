@@ -5,7 +5,7 @@ The aggregator uses verification at two very different price points:
 * **cheap_eval** (rule + learned) -- run constantly, on every rebase check and
   every candidate in a fusion tournament.  Fast, noisy, no budget.
 * **full_eval / oracle** -- ground truth, expensive, and *budgeted* by the
-  :class:`~concordia.scheduler.AuditScheduler` (design doc, section 5.3).
+  :class:`~agentdescent.scheduler.AuditScheduler` (design doc, section 5.3).
 
 The learned layer also exposes an *uncertainty*, which feeds the audit priority
 ``blast_radius * uncertainty / trust``.  The oracle is the only source of truth

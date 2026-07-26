@@ -3,8 +3,8 @@
 > **Plugs into [`evolve`](evolution.md) via** `agent=LLMAgent(<completion>)` (or
 > `run=`/`propose=`). This page is the completion layer that `LLMAgent` wraps.
 
-`concordia.agents` is the **general "talk to a model/agent" layer**. It is
-deliberately separate from `concordia.evolution` — how you reach a model has
+`agentdescent.agents` is the **general "talk to a model/agent" layer**. It is
+deliberately separate from `agentdescent.evolution` — how you reach a model has
 nothing to do with skill evolution, and any application built on the framework
 can use it.
 
@@ -21,7 +21,7 @@ completion into whatever task interface they need.
 ## Adapters
 
 ```python
-from concordia.agents import claude, from_callable, echo, with_retries
+from agentdescent.agents import claude, from_callable, echo, with_retries
 
 # Claude (needs: pip install anthropic + credentials / `ant auth login`)
 model = claude(model="claude-opus-4-8")           # or claude-haiku-4-5 for cheap runs
@@ -50,31 +50,31 @@ def openai_completion(prompt: str) -> str:
         model="gpt-...", messages=[{"role": "user", "content": prompt}])
     return resp.choices[0].message.content
 
-from concordia.agents import from_callable
+from agentdescent.agents import from_callable
 model = from_callable(openai_completion)
 ```
 
 ## Using it in skill evolution
 
-`concordia.evolution` consumes a completion through `LLMAgent`:
+`agentdescent.evolution` consumes a completion through `LLMAgent`:
 
 ```python
-from concordia.agents import claude
-from concordia.evolution import LLMAgent
+from agentdescent.agents import claude
+from agentdescent.evolution import LLMAgent
 
 agent = LLMAgent(claude(model="claude-haiku-4-5"))
 ```
 
 `claude_agent(model=...)` in the evolution engine is just a convenience for
-`LLMAgent(claude(model))` — the provider code lives here, in `concordia.agents`.
+`LLMAgent(claude(model))` — the provider code lives here, in `agentdescent.agents`.
 
-## Tool-using agent backends (`concordia.backends`)
+## Tool-using agent backends (`agentdescent.backends`)
 
 A `Completion` maps a prompt to text — enough for most examples. But some tasks
 need the base agent to **navigate documents with tools**, not consume a fixed
 excerpt: [EvoSkill's OfficeQA](algo-evoskill.md) answer is a figure buried in a
 1 MB financial table that must be found by `grep` and then *computed*.
-[`concordia.backends`](https://github.com/Birfy/concordia/blob/main/concordia/backends.py)
+[`agentdescent.backends`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/backends.py)
 adds that layer — one contract, `AgentBackend.answer(question, document, skills="")`:
 
 | Backend | What it is | Runs where |
@@ -83,7 +83,7 @@ adds that layer — one contract, `AgentBackend.answer(question, document, skill
 | **`tool_loop_backend(complete, …)`** | a dependency-free **grep/read ReAct loop** over the document using any `Completion` | anywhere |
 
 ```python
-from concordia.backends import openhands_backend, tool_loop_backend
+from agentdescent.backends import openhands_backend, tool_loop_backend
 
 # a real OpenHands agent on DeepSeek (openai/<model> + base_url routes via LiteLLM):
 backend = openhands_backend(model="openai/deepseek-v4-pro",

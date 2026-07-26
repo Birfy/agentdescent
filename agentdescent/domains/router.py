@@ -36,7 +36,7 @@ class Task:
 
 
 class RouterSkill:
-    """An :class:`~concordia.evolvable.Evolvable` keyword->label classifier."""
+    """An :class:`~agentdescent.evolvable.Evolvable` keyword->label classifier."""
 
     def __init__(
         self,

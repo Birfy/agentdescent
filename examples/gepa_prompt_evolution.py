@@ -47,12 +47,12 @@ import string
 import sys
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
-from concordia.agents import claude, openai_compatible
-from concordia.aggregator import AggregatorProtocol, MergeReport
-from concordia.dataloader import Dataset, hf_rows, split_dataset
-from concordia.evolvable import Diff, EvidenceCard
-from concordia.evolution import LLMAgent, Task, evolve, rule_id
-from concordia.ledger import CASConflict, Ledger
+from agentdescent.agents import claude, openai_compatible
+from agentdescent.aggregator import AggregatorProtocol, MergeReport
+from agentdescent.dataloader import Dataset, hf_rows, split_dataset
+from agentdescent.evolvable import Diff, EvidenceCard
+from agentdescent.evolution import LLMAgent, Task, evolve, rule_id
+from agentdescent.ledger import CASConflict, Ledger
 
 HOTPOTQA = ("hotpotqa/hotpot_qa", "validation", "distractor")   # (dataset, split, config)
 

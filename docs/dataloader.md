@@ -1,7 +1,7 @@
 # Loading datasets
 
-> **The data layer.** Just as [`concordia.agents`](agents.md) is the "talk to a
-> model" layer, `concordia.dataloader` is the "load a dataset" layer. It is
+> **The data layer.** Just as [`agentdescent.agents`](agents.md) is the "talk to a
+> model" layer, `agentdescent.dataloader` is the "load a dataset" layer. It is
 > deliberately separate from the evolution engine — *which* benchmark you evolve
 > against has nothing to do with the framework — and every
 > [self-evolution example](self-evolution-examples.md) loads its data through it.
@@ -9,12 +9,12 @@
 The examples each need a public benchmark (FiNER, HotpotQA, SearchQA, MGSM,
 SWE-bench Verified, OfficeQA). Rather than re-implement HuggingFace paging and
 on-disk caching in every file, that boilerplate lives here — dependency-free
-(`urllib` only), cached under `~/.cache/concordia/`.
+(`urllib` only), cached under `~/.cache/agentdescent/`.
 
 ## The surface
 
 ```python
-from concordia.dataloader import (
+from agentdescent.dataloader import (
     Dataset, split_dataset, dataset_from_splits,          # the train/val/test layer
     hf_rows, hf_feature_names, fetch_text, fetch_bytes, load_gated_hf)   # loaders
 ```
@@ -39,7 +39,7 @@ Every self-evolution example follows the same discipline: **fit on `train`, gate
 a final number on `test`** (fully held out, never seen by the optimizer).
 
 ```python
-from concordia.dataloader import split_dataset
+from agentdescent.dataloader import split_dataset
 
 ds = split_dataset(tasks, ratios=(0.5, 0.25, 0.25), seed=0,
                    stratify_key=lambda t: t.meta["target"])   # optional class balance
@@ -60,7 +60,7 @@ splits (e.g. SearchQA's `train` / `validation`), build the `Dataset` with
 ## Examples
 
 ```python
-from concordia.dataloader import hf_rows, hf_feature_names, fetch_text, load_gated_hf
+from agentdescent.dataloader import hf_rows, hf_feature_names, fetch_text, load_gated_hf
 
 # Public dataset via the datasets-server (paged + cached), any split/config:
 rows = hf_rows("hotpotqa/hotpot_qa", "validation", config="distractor", limit=200)
@@ -83,7 +83,7 @@ Each example keeps only its **dataset-specific shaping** (turning rows into
 
 ```python
 # examples/gepa_prompt_evolution.py
-from concordia.dataloader import hf_rows
+from agentdescent.dataloader import hf_rows
 
 HOTPOTQA = ("hotpotqa/hotpot_qa", "validation", "distractor")
 
@@ -106,8 +106,8 @@ def download_hotpotqa(limit):
 * **Dependency-free public path.** `hf_rows` / `fetch_text` use only `urllib`, so
   the examples install nothing extra. The `datasets` library is imported lazily,
   and *only* inside `load_gated_hf`, for gated datasets that need auth.
-* **Cache-first.** Every page and file is cached under `~/.cache/concordia/`;
+* **Cache-first.** Every page and file is cached under `~/.cache/agentdescent/`;
   re-runs and `--dry-run` are offline after the first fetch.
-* **Not in the engine.** Nothing in `concordia.evolution` / `concordia.aggregator`
+* **Not in the engine.** Nothing in `agentdescent.evolution` / `agentdescent.aggregator`
   imports this — it is a convenience for examples and experiments, exactly like
-  `concordia.agents`.
+  `agentdescent.agents`.

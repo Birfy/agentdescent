@@ -4,7 +4,7 @@
 > keeping every variant in an open-ended archive. Runs through
 > [`evolve()`](evolution.md) with a custom `Strategy` + `aggregator_factory` at
 > **L1** governance. Example:
-> [`examples/dgm_self_improve.py`](https://github.com/Birfy/concordia/blob/main/examples/dgm_self_improve.py).
+> [`examples/dgm_self_improve.py`](https://github.com/Birfy/agentdescent/blob/main/examples/dgm_self_improve.py).
 
 | | |
 |---|---|
@@ -48,7 +48,7 @@ plug in the actual Docker harness.
 
 ## Plug-ins implemented
 
-In [`examples/dgm_self_improve.py`](https://github.com/Birfy/concordia/blob/main/examples/dgm_self_improve.py):
+In [`examples/dgm_self_improve.py`](https://github.com/Birfy/agentdescent/blob/main/examples/dgm_self_improve.py):
 
 | Plug-in | `evolve()` slot | What it does |
 |---|---|---|

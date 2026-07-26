@@ -20,12 +20,12 @@ reproduced here, faithful to the code (traced from `skillopt/engine/trainer.py`,
   2. **Strict held-out accept gate.** A candidate is accepted only if it
      *strictly improves* the held-out validation hard-EM over the **current**
      skill (`evaluation/gate.py`, default `gate_metric=hard`). This is greedy
-     hill-climbing -- the same acceptance shape as Concordia's `evolve()`.
+     hill-climbing -- the same acceptance shape as AgentDescent's `evolve()`.
   3. **Textual learning-rate budget.** An integer cap on edits per step
-     (`optimizer/scheduler.py`) -- Concordia's `trust_region_ops` analogue.
+     (`optimizer/scheduler.py`) -- AgentDescent's `trust_region_ops` analogue.
   4. **Rejected-edit buffer.** Rejected edits are remembered within the epoch and
      fed back to the optimizer so it stops re-proposing them (`_format_step_buffer`)
-     -- Concordia's "settled evidence survives" (aggregator §3.3), made explicit.
+     -- AgentDescent's "settled evidence survives" (aggregator §3.3), made explicit.
 
 It runs **through `evolve()`** exactly like ACE/GEPA: a custom `SkillDocStrategy`
 turns the analyst's edit patch into a `Diff`, and a custom `aggregator_factory`
@@ -51,13 +51,13 @@ import threading
 from dataclasses import dataclass, field
 from typing import Callable, List, Tuple
 
-from concordia.agents import claude, openai_compatible
-from concordia.aggregator import AggregatorProtocol, MergeReport
-from concordia.dataloader import Dataset, hf_rows, split_dataset
-from concordia.evolvable import Diff, EvidenceCard
-from concordia.evolution import EvolvingArtifact, Task, evolve, rule_id
-from concordia.governance import classify
-from concordia.ledger import CASConflict, Ledger
+from agentdescent.agents import claude, openai_compatible
+from agentdescent.aggregator import AggregatorProtocol, MergeReport
+from agentdescent.dataloader import Dataset, hf_rows, split_dataset
+from agentdescent.evolvable import Diff, EvidenceCard
+from agentdescent.evolution import EvolvingArtifact, Task, evolve, rule_id
+from agentdescent.governance import classify
+from agentdescent.ledger import CASConflict, Ledger
 
 SEARCHQA = ("lucadiliello/searchqa", "default")   # (dataset, config)
 Completion = Callable[[str], str]

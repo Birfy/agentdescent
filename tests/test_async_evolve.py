@@ -1,12 +1,12 @@
-"""Tests for the barrier-free async runtime (concordia.async_evolve).
+"""Tests for the barrier-free async runtime (agentdescent.async_evolve).
 
 Deterministic no-network stub agents; assertions avoid brittle timing by checking
 monotonicity (the aggregator never regresses the head) and that the pipeline runs
 and commits, rather than exact wall-clock outcomes.
 """
 
-from concordia.async_evolve import async_evolve
-from concordia.evolution import AppendRules, Task, evolve
+from agentdescent.async_evolve import async_evolve
+from agentdescent.evolution import AppendRules, Task, evolve
 
 
 class _Composer:

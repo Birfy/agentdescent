@@ -20,7 +20,7 @@ Concretely:
   contract-breaking diffs commit atomically (2PC-style: stage all, then a single
   git commit).
 
-Because Concordia's reference implementation runs the workers in-process, the
+Because AgentDescent's reference implementation runs the workers in-process, the
 git operations are serialized through a single lock; the CAS check is what makes
 the *logical* concurrency safe.
 """
@@ -83,7 +83,7 @@ class Ledger:
         repo_path: str,
         serialize: Serializer,
         deserialize: Deserializer,
-        author: str = "concordia <bot@concordia.local>",
+        author: str = "agentdescent <bot@agentdescent.local>",
     ) -> None:
         self.repo_path = repo_path
         self._serialize = serialize
@@ -98,8 +98,8 @@ class Ledger:
         os.makedirs(self.repo_path, exist_ok=True)
         if not os.path.isdir(os.path.join(self.repo_path, ".git")):
             _git(self.repo_path, "init", "-q")
-            _git(self.repo_path, "config", "user.name", "concordia")
-            _git(self.repo_path, "config", "user.email", "bot@concordia.local")
+            _git(self.repo_path, "config", "user.name", "agentdescent")
+            _git(self.repo_path, "config", "user.email", "bot@agentdescent.local")
             os.makedirs(os.path.join(self.repo_path, "artifacts"), exist_ok=True)
             self._write_versions({})
             _git(self.repo_path, "add", "-A")

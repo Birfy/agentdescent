@@ -1,20 +1,20 @@
-from concordia.aggregator import (
+from agentdescent.aggregator import (
     Aggregator,
     AggregatorConfig,
     diffs_contradict,
     fuse_diffs,
 )
-from concordia.domains.router import (
+from agentdescent.domains.router import (
     RouterSkill,
     Task,
     deserialize_router,
     router_eval,
     serialize_router,
 )
-from concordia.evolvable import Diff, EvidenceCard
-from concordia.ledger import Ledger
-from concordia.scheduler import AuditScheduler
-from concordia.verifier import ThreeLayerVerifier, VerifierBudget
+from agentdescent.evolvable import Diff, EvidenceCard
+from agentdescent.ledger import Ledger
+from agentdescent.scheduler import AuditScheduler
+from agentdescent.verifier import ThreeLayerVerifier, VerifierBudget
 
 
 def _card(target, ops, base_v, tasks, delta, author="w"):

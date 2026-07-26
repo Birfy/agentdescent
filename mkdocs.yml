@@ -1,7 +1,7 @@
-site_name: Concordia
+site_name: AgentDescent
 site_description: A parallel, self-evolving framework for accelerating RSI
-repo_url: https://github.com/Birfy/concordia
-repo_name: Birfy/concordia
+repo_url: https://github.com/Birfy/agentdescent
+repo_name: Birfy/agentdescent
 docs_dir: docs
 site_dir: site
 
@@ -74,4 +74,4 @@ markdown_extensions:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/Birfy/concordia
+      link: https://github.com/Birfy/agentdescent

@@ -50,13 +50,13 @@ import threading
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
-from concordia.agents import claude, openai_compatible
-from concordia.aggregator import AggregatorProtocol, MergeReport
-from concordia.dataloader import Dataset, fetch_text, load_gated_hf, split_dataset
-from concordia.evolvable import Diff, EvidenceCard
-from concordia.evolution import EvolvingArtifact, Task, evolve
-from concordia.governance import classify
-from concordia.ledger import CASConflict, Ledger
+from agentdescent.agents import claude, openai_compatible
+from agentdescent.aggregator import AggregatorProtocol, MergeReport
+from agentdescent.dataloader import Dataset, fetch_text, load_gated_hf, split_dataset
+from agentdescent.evolvable import Diff, EvidenceCard
+from agentdescent.evolution import EvolvingArtifact, Task, evolve
+from agentdescent.governance import classify
+from agentdescent.ledger import CASConflict, Ledger
 
 RAW = "https://raw.githubusercontent.com/sentient-agi/EvoSkill/main/examples/officeqa/data"
 Completion = Callable[[str], str]
@@ -581,7 +581,7 @@ def run_evoskill(complete: Completion, docs: Dict[str, str],
                  eval_at_end: bool = False, verbose: bool = False) -> EvoResult:
     """Drive EvoSkill through `evolve()` (`val` is the held-out frontier metric).
 
-    ``backend`` (an :class:`~concordia.backends.AgentBackend`) replaces the passive
+    ``backend`` (an :class:`~agentdescent.backends.AgentBackend`) replaces the passive
     keyword-retriever base agent with a tool-using one (OpenHands / grep-loop) so
     the agent can actually navigate the source documents; ``None`` keeps the
     dependency-free retriever."""
@@ -734,14 +734,14 @@ def main() -> None:
     # base agent: passive retriever (default), a local grep/read loop, or OpenHands.
     backend = None
     if args.backend == "openhands":
-        from concordia.backends import openhands_backend
+        from agentdescent.backends import openhands_backend
         oh_model = args.model if args.model.startswith("openai/") else f"openai/{args.model}"
         base = ("https://api.deepseek.com" if args.provider == "glm"
                 else os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"))
         backend = openhands_backend(model=oh_model, base_url=base)
         print(f"Backend  : real OpenHands agent (terminal + file_editor) on {oh_model}")
     elif args.backend == "toolloop":
-        from concordia.backends import tool_loop_backend
+        from agentdescent.backends import tool_loop_backend
         backend = tool_loop_backend(completion)
         print("Backend  : local grep/read ReAct loop")
 

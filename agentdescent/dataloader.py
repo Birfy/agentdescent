@@ -1,6 +1,6 @@
 """Dependency-free dataset loading -- the *data layer* for examples/experiments.
 
-Just as :mod:`concordia.agents` is the provider-agnostic "talk to a model" layer,
+Just as :mod:`agentdescent.agents` is the provider-agnostic "talk to a model" layer,
 this is the "load a dataset" layer. It is deliberately kept **out of** the
 evolution engine: which benchmark you evolve against has nothing to do with the
 framework. The examples used to each re-implement the same HuggingFace
@@ -18,7 +18,7 @@ The whole surface is small:
 * :func:`load_gated_hf` -- a best-effort loader for **gated** datasets via a lazy
   ``datasets`` import + an ``HF_TOKEN``; returns ``None`` if unavailable.
 
-Everything caches under ``~/.cache/concordia/<subdir>``. The URL/paging helpers
+Everything caches under ``~/.cache/agentdescent/<subdir>``. The URL/paging helpers
 are pure so they can be unit-tested without a network.
 """
 
@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, List, Optional, Sequence, Tuple
 
 ROWS_URL = "https://datasets-server.huggingface.co/rows"
-CACHE_ROOT = os.path.expanduser("~/.cache/concordia")
+CACHE_ROOT = os.path.expanduser("~/.cache/agentdescent")
 # The datasets-server caps a single /rows request at 100 rows.
 PAGE_MAX = 100
 

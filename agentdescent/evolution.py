@@ -8,7 +8,7 @@ governance) for you.
 You provide four things (all customizable, none built in):
 
 * a :class:`Strategy` -- how the artifact is represented, how it renders into a
-  prompt/config, and how a proposal becomes a :class:`~concordia.evolvable.Diff`;
+  prompt/config, and how a proposal becomes a :class:`~agentdescent.evolvable.Diff`;
 * ``run(rendered, task) -> output`` -- apply the current artifact to a task;
 * ``reward(task, output) -> [0, 1]`` -- score the output;
 * ``propose(rendered, task, output, reward) -> str | None`` -- on a failure,
@@ -85,7 +85,7 @@ _PROPOSE_TMPL = (
 
 @dataclass
 class LLMAgent:
-    """Adapt a ``Completion`` (from :mod:`concordia.agents`) into an :class:`Agent`."""
+    """Adapt a ``Completion`` (from :mod:`agentdescent.agents`) into an :class:`Agent`."""
 
     complete: Completion
     solve_template: str = _SOLVE_TMPL
@@ -102,7 +102,7 @@ class LLMAgent:
 
 
 def claude_agent(model: str = "claude-opus-4-8", max_tokens: int = 1024) -> LLMAgent:
-    """Convenience: ``LLMAgent(claude(model))`` (provider code lives in :mod:`concordia.agents`)."""
+    """Convenience: ``LLMAgent(claude(model))`` (provider code lives in :mod:`agentdescent.agents`)."""
     return LLMAgent(claude(model=model, max_tokens=max_tokens))
 
 
@@ -210,7 +210,7 @@ class _EvalCache:
 
 
 class EvolvingArtifact:
-    """An :class:`~concordia.evolvable.Evolvable`: flat state + a strategy.
+    """An :class:`~agentdescent.evolvable.Evolvable`: flat state + a strategy.
 
     The strategy handles representation (``render``); this class handles the
     Evolvable plumbing and evaluation (``run`` the artifact on tasks, score)."""
@@ -315,7 +315,7 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
                   blast_radius, artifact_id, held_out_frac, repo_path, agg_config,
                   staleness_policy, aggregator_factory, oracle_budget) -> _Engine:
     """Wire the ledger, runtime, verifier and aggregator (shared by
-    :func:`evolve` and :func:`~concordia.async_evolve.async_evolve`)."""
+    :func:`evolve` and :func:`~agentdescent.async_evolve.async_evolve`)."""
     import tempfile
     from .verifier import ThreeLayerVerifier, VerifierBudget
 
@@ -343,7 +343,7 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
         return EvolvingArtifact(aid, state.get("state", {}), version,
                                 state.get("blast_radius", blast_radius), runtime, strategy)
 
-    repo = repo_path or tempfile.mkdtemp(prefix="concordia-evolve-")
+    repo = repo_path or tempfile.mkdtemp(prefix="agentdescent-evolve-")
     ledger = Ledger(repo, serialize, deserialize)
     ledger.register(EvolvingArtifact(artifact_id, initial_state or strategy.initial(),
                                      blast_radius=blast_radius, runtime=runtime,
@@ -409,10 +409,10 @@ def evolve(
     treats conservatively (every merge forced through the oracle, wider staleness
     tolerance; design spec §6).
 
-    ``parallel`` (default :class:`~concordia.parallel.DataParallel`) is the
+    ``parallel`` (default :class:`~agentdescent.parallel.DataParallel`) is the
     parallelism method -- how each round's tasks are partitioned across the
     ``n_workers``. Swap in ``TensorParallel`` / ``PipelineParallel`` or your own
-    :class:`~concordia.parallel.ParallelStrategy`.
+    :class:`~agentdescent.parallel.ParallelStrategy`.
 
     ``max_concurrency`` runs a round's ``n_workers`` **concurrently** (a thread
     pool), then the single ``aggregator.step()`` is the round barrier -- this is
@@ -424,7 +424,7 @@ def evolve(
     state from ``propose``/``to_diff`` must guard it (the async runtime's buffer,
     CAS and per-diff staleness already are). For the *barrier-free* async pipeline
     (``async_ratio`` lag budget, staleness policies overlapping the aggregator),
-    see :class:`~concordia.async_runtime.AsyncConcordia`."""
+    see :class:`~agentdescent.async_runtime.AsyncAgentDescent`."""
     from concurrent.futures import ThreadPoolExecutor
     from .parallel import DataParallel
 

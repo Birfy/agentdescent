@@ -3,7 +3,7 @@
 > **Harness self-evolution.** Evolve the *agentic system itself* — the control
 > flow that orchestrates the model. Runs through [`evolve()`](evolution.md) with a
 > custom `Strategy` + `aggregator_factory` at **L1** governance. Example:
-> [`examples/adas_meta_agent_search.py`](https://github.com/Birfy/concordia/blob/main/examples/adas_meta_agent_search.py).
+> [`examples/adas_meta_agent_search.py`](https://github.com/Birfy/agentdescent/blob/main/examples/adas_meta_agent_search.py).
 
 | | |
 |---|---|
@@ -47,7 +47,7 @@ only the agent *substrate* is a safe DSL instead of raw `exec`.
 
 ## Plug-ins implemented
 
-In [`examples/adas_meta_agent_search.py`](https://github.com/Birfy/concordia/blob/main/examples/adas_meta_agent_search.py):
+In [`examples/adas_meta_agent_search.py`](https://github.com/Birfy/agentdescent/blob/main/examples/adas_meta_agent_search.py):
 
 | Plug-in | `evolve()` slot | What it does |
 |---|---|---|

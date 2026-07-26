@@ -1,4 +1,4 @@
-"""Concordia: a parallel, self-evolving framework for accelerating RSI.
+"""AgentDescent: a parallel, self-evolving framework for accelerating RSI.
 
 A systematic port of the parallel-training playbook (data/tensor/pipeline
 parallelism, parameter servers, decoupled/async RL, partial rollout) onto
@@ -6,7 +6,7 @@ recursive self-improvement, where the "parameters" are a library of evolvable
 artifacts (skills, prompts, harness modules, verifiers) and the "gradients" are
 diffs carrying evidence cards.
 
-See ``concordia_design.md`` for the full design; each module cites the section
+See ``agentdescent_design.md`` for the full design; each module cites the section
 it implements.
 """
 
@@ -48,7 +48,7 @@ from .staleness import (
     get_policy,
 )
 from .worker import Worker
-from .orchestrator import Concordia, RoundStat, run_fork_baseline
+from .orchestrator import AgentDescent, RoundStat, run_fork_baseline
 from .agents import (
     Completion,
     claude,
@@ -72,7 +72,7 @@ from .evolution import (
     rule_id,
 )
 from .async_evolve import async_evolve
-from .async_runtime import AsyncConcordia, AsyncConfig, AsyncStats
+from .async_runtime import AsyncAgentDescent, AsyncConfig, AsyncStats
 from .parallel import (
     ParallelMode,
     ParallelStrategy,
@@ -129,10 +129,10 @@ __all__ = [
     "ReflectiveStaleness",
     "get_policy",
     "Worker",
-    "Concordia",
+    "AgentDescent",
     "RoundStat",
     "run_fork_baseline",
-    "AsyncConcordia",
+    "AsyncAgentDescent",
     "AsyncConfig",
     "AsyncStats",
     "ParallelMode",

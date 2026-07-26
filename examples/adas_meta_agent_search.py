@@ -8,7 +8,7 @@ Dataset: **MGSM** (Multilingual Grade-School Math), the light math benchmark
 
 Where ACE/GEPA evolve a *skill* (an L2 prompt/context), ADAS evolves the
 **agentic system itself** -- the control flow that orchestrates the model. That
-is a **harness** change: high blast radius -> Concordia's **L1** governance
+is a **harness** change: high blast radius -> AgentDescent's **L1** governance
 layer (`classify()` below prints the layer). It runs **through `evolve()`** like
 ACE/GEPA: an `AgentDesignStrategy` turns a proposed agent (JSON) into a `Diff`,
 and a custom `aggregator_factory` (`MetaSearchAggregator`) is the keep-all
@@ -54,13 +54,13 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Tuple
 
-from concordia.agents import claude, openai_compatible
-from concordia.aggregator import AggregatorProtocol, MergeReport
-from concordia.dataloader import Dataset, fetch_text, split_dataset
-from concordia.evolvable import Diff, EvidenceCard
-from concordia.evolution import EvolvingArtifact, Task, evolve, rule_id
-from concordia.governance import classify
-from concordia.ledger import CASConflict, Ledger
+from agentdescent.agents import claude, openai_compatible
+from agentdescent.aggregator import AggregatorProtocol, MergeReport
+from agentdescent.dataloader import Dataset, fetch_text, split_dataset
+from agentdescent.evolvable import Diff, EvidenceCard
+from agentdescent.evolution import EvolvingArtifact, Task, evolve, rule_id
+from agentdescent.governance import classify
+from agentdescent.ledger import CASConflict, Ledger
 
 MGSM_URL = "https://raw.githubusercontent.com/ShengranHu/ADAS/main/dataset/mgsm/mgsm_{lang}.tsv"
 # ADAS's MGSM language set (utils.ALL_LANGUAGES).

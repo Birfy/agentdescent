@@ -11,7 +11,7 @@ processes or hosts would.
 python -m examples.efficiency
 ```
 
-Source: [`examples/efficiency.py`](https://github.com/Birfy/concordia/blob/main/examples/efficiency.py).
+Source: [`examples/efficiency.py`](https://github.com/Birfy/agentdescent/blob/main/examples/efficiency.py).
 
 ---
 

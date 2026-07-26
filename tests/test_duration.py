@@ -2,7 +2,7 @@
 
 import random
 
-from concordia.scheduler import DurationEstimator, fifo_makespan, lpt_schedule
+from agentdescent.scheduler import DurationEstimator, fifo_makespan, lpt_schedule
 
 
 def test_estimator_returns_prior_then_mean_before_calibration():

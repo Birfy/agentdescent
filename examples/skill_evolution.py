@@ -3,9 +3,9 @@
 Evolves a "skill playbook" (accumulated lessons) on a real **BIG-Bench-Hard**
 task with a real **Claude** agent, wiring the whole framework together:
 
-    concordia.agents      claude()  -> a Completion               (provider layer)
-    concordia.evolution   LLMAgent + evolve() + AppendRules        (the engine + rule)
-    concordia.parallel    DataParallel                             (parallelism method)
+    agentdescent.agents      claude()  -> a Completion               (provider layer)
+    agentdescent.evolution   LLMAgent + evolve() + AppendRules        (the engine + rule)
+    agentdescent.parallel    DataParallel                             (parallelism method)
     governance            blast_radius=0.2  -> L2 skill layer      (governance)
 
 Default task: `salient_translation_error_detection` -- a *single-skill* task
@@ -33,12 +33,12 @@ import urllib.request
 from difflib import SequenceMatcher
 from typing import Dict, List, Optional
 
-from concordia.agents import claude, openai_compatible
-from concordia.evolution import AppendRules, LLMAgent, Task, evolve
-from concordia.parallel import DataParallel
+from agentdescent.agents import claude, openai_compatible
+from agentdescent.evolution import AppendRules, LLMAgent, Task, evolve
+from agentdescent.parallel import DataParallel
 
 BBH_URL = "https://raw.githubusercontent.com/suzgunmirac/BIG-Bench-Hard/main/bbh/{task}.json"
-CACHE_DIR = os.path.expanduser("~/.cache/concordia/bbh")
+CACHE_DIR = os.path.expanduser("~/.cache/agentdescent/bbh")
 
 
 # -- dataset loading ---------------------------------------------------------
@@ -59,7 +59,7 @@ def download_bbh(task: str) -> List[dict]:
 
 
 def build_tasks(examples: List[dict], limit: int, seed: int = 0) -> List[Task]:
-    """Turn raw BBH examples into Concordia Tasks (deterministic shuffle)."""
+    """Turn raw BBH examples into AgentDescent Tasks (deterministic shuffle)."""
     import random
     rng = random.Random(seed)
     idx = list(range(len(examples)))
@@ -166,7 +166,7 @@ def main() -> None:
             print("aborted.")
             return
 
-    # provider layer (concordia.agents): any prompt->text completion works.
+    # provider layer (agentdescent.agents): any prompt->text completion works.
     completion = (openai_compatible(model=args.model) if args.provider == "glm"
                   else claude(model=args.model))
     agent = LLMAgent(completion)

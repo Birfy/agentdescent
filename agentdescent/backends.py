@@ -1,7 +1,7 @@
 """Agentic backends -- a base agent that *navigates documents with tools*, not
 just maps a prompt to text.
 
-:data:`concordia.agents.Completion` is ``prompt -> text``. That is enough for
+:data:`agentdescent.agents.Completion` is ``prompt -> text``. That is enough for
 ACE/GEPA/SkillOpt (fixed prompt in, answer out), but not for EvoSkill's OfficeQA:
 the answer is a figure buried in a 200 KB - 1.2 MB financial table that often has
 to be **found by grep and then computed** (e.g. summing the monthly "national
@@ -20,7 +20,7 @@ with two implementations:
   and ``base_url="https://api.deepseek.com"``. Requires ``pip install openhands-ai``
   (Python >= 3.12). No Docker needed (local runtime).
 * :func:`tool_loop_backend` -- a dependency-free ``grep``/``read`` ReAct loop over
-  the document using any :data:`~concordia.agents.Completion`. A lighter local
+  the document using any :data:`~agentdescent.agents.Completion`. A lighter local
   stand-in that mirrors what OpenHands does; runs anywhere.
 
 Both return a plain answer string, so they slot in wherever a base agent is
@@ -103,7 +103,7 @@ def openhands_backend(
         "compute it. Then reply with ONLY the final answer value.\n\nQuestion: {q}")
 
     def answer(question: str, document: str, *, skills: str = "") -> str:
-        workdir = tempfile.mkdtemp(prefix="concordia-oh-")
+        workdir = tempfile.mkdtemp(prefix="agentdescent-oh-")
         with open(os.path.join(workdir, doc_filename), "w", encoding="utf-8") as f:
             f.write(document)
         agent = Agent(llm=llm, tools=[Tool(name="terminal"), Tool(name="file_editor")])
@@ -169,7 +169,7 @@ def tool_loop_backend(complete: Completion, *, max_steps: int = 5,
 
     Mirrors what the OpenHands agent does -- iteratively search the document, read
     the matching table region (with headers), then answer/compute -- but using a
-    plain :data:`~concordia.agents.Completion`, so it runs on any Python. A lighter
+    plain :data:`~agentdescent.agents.Completion`, so it runs on any Python. A lighter
     local stand-in for :func:`openhands_backend`."""
 
     def answer(question: str, document: str, *, skills: str = "") -> str:

@@ -9,9 +9,9 @@ import tempfile
 
 import pytest
 
-from concordia.async_runtime import AsyncConcordia, AsyncConfig
-from concordia.domains.router import make_task_universe
-from concordia.staleness import get_policy
+from agentdescent.async_runtime import AsyncAgentDescent, AsyncConfig
+from agentdescent.domains.router import make_task_universe
+from agentdescent.staleness import get_policy
 
 
 def _run(policy_name, async_ratio=4, seconds=15.0, noise=0.12, seed=1):
@@ -19,7 +19,7 @@ def _run(policy_name, async_ratio=4, seconds=15.0, noise=0.12, seed=1):
     cfg = AsyncConfig(n_workers=6, async_ratio=async_ratio, noise=noise,
                       target_accuracy=0.95, max_seconds=seconds, seed=seed)
     with tempfile.TemporaryDirectory() as repo:
-        sys = AsyncConcordia(repo, universe, config=cfg,
+        sys = AsyncAgentDescent(repo, universe, config=cfg,
                              staleness_policy=get_policy(policy_name))
         return sys.run()
 

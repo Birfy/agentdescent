@@ -1,15 +1,17 @@
-# Concordia
+# AgentDescent
 
-**A parallel, self-evolving framework for accelerating recursive self-improvement (RSI).**
+**Gradient descent — but the parameters are agents.** A parallel, asynchronous
+framework for self-evolving agents (skills, prompts, harnesses) where **diffs are
+the gradients** and **the aggregator is the optimizer**.
 
-Concordia ports the *parallel-training playbook* — data/tensor/pipeline
-parallelism, parameter servers, decoupled/asynchronous RL, partial rollout —
-onto recursive self-improvement, where the "parameters" are a **library of
-evolvable artifacts** (skills, prompts, harness modules, verifiers) and the
-"gradients" are **diffs carrying evidence cards**.
+AgentDescent puts the *deep-learning training stack* on top of agents — data /
+tensor / pipeline parallelism, parameter servers, decoupled/asynchronous RL,
+partial rollout — applied to recursive self-improvement, where the "parameters"
+are a **library of evolvable artifacts** (skills, prompts, harness modules,
+verifiers) and the "gradients" are **diffs carrying evidence cards**.
 
 !!! quote "The core observation"
-    Serial RSI is bounded at **1 diff / T_iter**. Concordia runs *N* workers in
+    Serial RSI is bounded at **1 diff / T_iter**. AgentDescent runs *N* workers in
     parallel and merges their diffs into a shared, versioned artifact library,
     targeting **O(N / T_iter)** improvement throughput.
 
@@ -59,7 +61,7 @@ The one place the analogy *must* break defines the whole system:
 
 -   :material-database-arrow-down: **[Loading datasets](dataloader.md)** → the data layer
 
-    `concordia.dataloader` — pull any benchmark (HF datasets-server + raw files),
+    `agentdescent.dataloader` — pull any benchmark (HF datasets-server + raw files),
     cached, dependency-free. Feeds `tasks` to `evolve`.
 
 -   :material-cog-sync: **[The aggregator](aggregator.md)** → `agg_config=` / `aggregator_factory=`
@@ -87,7 +89,7 @@ The one place the analogy *must* break defines the whole system:
 
 ## The central analogy
 
-| Model training | Concordia (parallel RSI) |
+| Model training | AgentDescent (parallel RSI) |
 |---|---|
 | parameter tensor θ | library of `Evolvable` artifacts |
 | gradient *g* | `Diff` + `EvidenceCard` |

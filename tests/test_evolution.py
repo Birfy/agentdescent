@@ -8,7 +8,7 @@ good rules are learned, and harmful rules are rejected on held-out reward.
 from difflib import SequenceMatcher
 from typing import Optional
 
-from concordia.evolution import (
+from agentdescent.evolution import (
     Agent,
     LLMAgent,
     Task,
@@ -99,7 +99,7 @@ def test_rule_id_dedupes_identical_text():
 # -- pluggable aggregator ----------------------------------------------------
 
 def test_custom_aggregator_factory_plugs_in():
-    from concordia.aggregator import Aggregator, AggregatorProtocol
+    from agentdescent.aggregator import Aggregator, AggregatorProtocol
 
     calls = {"steps": 0}
 

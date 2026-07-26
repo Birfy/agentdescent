@@ -2,7 +2,7 @@
 
 The parallelism *method* -- how a round of work is partitioned across workers --
 is pluggable. Pick one of the three classic paradigms, or implement the
-:class:`~concordia.parallel.ParallelStrategy` protocol yourself.
+:class:`~agentdescent.parallel.ParallelStrategy` protocol yourself.
 
     python -m examples.parallelism
 
@@ -12,7 +12,7 @@ correctly; workers fix the keys they are assigned each round.
 
 from __future__ import annotations
 
-from concordia.parallel import (
+from agentdescent.parallel import (
     DataParallel,
     PipelineParallel,
     TensorParallel,

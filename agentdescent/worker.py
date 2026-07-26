@@ -8,7 +8,7 @@ exercise the aggregator's conflict resolution (a noisy worker proposes a wrong
 label) and fusion (different workers fix different keywords).
 
 Workers never mutate the ledger directly -- they only emit evidence cards.  All
-mutation goes through the :class:`~concordia.aggregator.Aggregator`, which is the
+mutation goes through the :class:`~agentdescent.aggregator.Aggregator`, which is the
 sole "optimizer" (design doc, section 4).
 """
 

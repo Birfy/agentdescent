@@ -1,7 +1,7 @@
 import pytest
 
-from concordia.domains.router import RouterSkill
-from concordia.governance import (
+from agentdescent.domains.router import RouterSkill
+from agentdescent.governance import (
     GovernanceError,
     L1SerialGate,
     Layer,

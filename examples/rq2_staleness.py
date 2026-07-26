@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import tempfile
 
-from concordia.aggregator import AggregatorConfig
-from concordia.domains.router import make_task_universe
-from concordia.orchestrator import Concordia
+from agentdescent.aggregator import AggregatorConfig
+from agentdescent.domains.router import make_task_universe
+from agentdescent.orchestrator import AgentDescent
 
 
 def main() -> None:
@@ -24,7 +24,7 @@ def main() -> None:
     for alpha in [0, 1, 5, 10**6]:
         cfg = AggregatorConfig(alpha_head=alpha, alpha_tail=min(alpha, 1))
         with tempfile.TemporaryDirectory() as repo:
-            system = Concordia(repo, universe, n_workers=6, noise=0.1,
+            system = AgentDescent(repo, universe, n_workers=6, noise=0.1,
                                refresh_interval=3, config=cfg, seed=2)
             history = system.run(rounds=40)
             total_stale = sum(h.discarded_stale for h in history)

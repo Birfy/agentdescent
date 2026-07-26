@@ -1,6 +1,6 @@
 """RQ1 (merge vs fork) end-to-end demo.
 
-Runs the merge-based Concordia loop and the fork/archive baseline on the same
+Runs the merge-based AgentDescent loop and the fork/archive baseline on the same
 synthetic universe and prints the learning curve plus the final comparison.
 
     python -m examples.run_demo
@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import tempfile
 
-from concordia.domains.router import make_task_universe
-from concordia.orchestrator import Concordia, run_fork_baseline
+from agentdescent.domains.router import make_task_universe
+from agentdescent.orchestrator import AgentDescent, run_fork_baseline
 
 
 def main() -> None:
@@ -19,7 +19,7 @@ def main() -> None:
     rounds = 40
 
     with tempfile.TemporaryDirectory() as repo:
-        system = Concordia(repo, universe, n_workers=6, noise=0.15,
+        system = AgentDescent(repo, universe, n_workers=6, noise=0.15,
                            refresh_interval=2, seed=1)
         history = system.run(rounds=rounds)
 
@@ -36,7 +36,7 @@ def main() -> None:
     fork_acc = run_fork_baseline(universe, n_workers=6, noise=0.15, rounds=rounds, seed=1)
 
     print("\n=== RQ1: merge vs fork (same worker budget) ===")
-    print(f"Concordia (merge) held-out accuracy : {merge_acc:.3f}")
+    print(f"AgentDescent (merge) held-out accuracy : {merge_acc:.3f}")
     print(f"Fork/archive best-fork accuracy     : {fork_acc:.3f}")
     print(f"merge advantage                     : {merge_acc - fork_acc:+.3f}")
 

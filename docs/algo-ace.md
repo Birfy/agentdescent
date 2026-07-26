@@ -2,7 +2,7 @@
 
 > **Skill / context self-evolution.** Evolve a *playbook of lessons* (the model's
 > context), not the weights. Runs through [`evolve()`](evolution.md) with a custom
-> `Strategy`. Example: [`examples/ace_context_evolution.py`](https://github.com/Birfy/concordia/blob/main/examples/ace_context_evolution.py).
+> `Strategy`. Example: [`examples/ace_context_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/ace_context_evolution.py).
 
 | | |
 |---|---|
@@ -16,7 +16,7 @@
 ACE evolves a **context playbook** through three roles, which map one-to-one onto
 `evolve()`:
 
-| ACE role | Concordia piece | Job |
+| ACE role | AgentDescent piece | Job |
 |---|---|---|
 | **Generator** | `LLMAgent.solve` (the `run`) | solve a task using the playbook |
 | **Reflector** | `LLMAgent.propose` (ACE template) | distil ONE *delta bullet* from a failure |
@@ -56,7 +56,7 @@ documented in the module docstring.
 ## Plug-ins implemented
 
 The example provides these plug-ins to `evolve()` (in
-[`examples/ace_context_evolution.py`](https://github.com/Birfy/concordia/blob/main/examples/ace_context_evolution.py)):
+[`examples/ace_context_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/ace_context_evolution.py)):
 
 | Plug-in | `evolve()` slot | What it does |
 |---|---|---|

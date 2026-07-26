@@ -11,9 +11,9 @@ what to do with a diff that was proposed against an out-of-date head:
                    of the evidence on the current head), discarding only if the
                    improvement no longer holds.
 
-Concordia additionally borrows ROLL Flash's **asynchronous ratio** -- a *global*
+AgentDescent additionally borrows ROLL Flash's **asynchronous ratio** -- a *global*
 lag budget that decides how far any worker's snapshot may drift from head before
-it is force-refreshed (see :class:`~concordia.async_runtime.AsyncConfig`).
+it is force-refreshed (see :class:`~agentdescent.async_runtime.AsyncConfig`).
 
 The aggregator computes ``eta`` and ``alpha`` and asks the policy for one of the
 three actions below; the policy is the only thing that changes between async
@@ -58,7 +58,7 @@ class FullStaleness:
 
 
 class GuardedStaleness:
-    """Version-gated with rebase in the middle band (Concordia's default).
+    """Version-gated with rebase in the middle band (AgentDescent's default).
 
     ``eta == 0`` accepts; ``0 < eta <= alpha`` rebases and re-verifies; beyond
     ``alpha`` discards.  This is the AReaL bounded-staleness discipline expressed

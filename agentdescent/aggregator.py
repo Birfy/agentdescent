@@ -201,7 +201,7 @@ class Aggregator:
     ) -> Tuple[List[EvidenceCard], List[EvidenceCard]]:
         """Split cards into (survivors, discarded), delegating to the policy.
 
-        The active :class:`~concordia.staleness.StalenessPolicy` (Full / Guarded
+        The active :class:`~agentdescent.staleness.StalenessPolicy` (Full / Guarded
         / Reflective) decides ACCEPT / REBASE / DISCARD from ``eta`` and
         ``alpha``; the aggregator only executes the mechanical rebase-and-
         re-verify for the REBASE case."""

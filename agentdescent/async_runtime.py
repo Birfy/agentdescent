@@ -1,13 +1,13 @@
 """Asynchronous stage-orchestration runtime (design doc, section 3.1;
 FlashEvolve 2605.08520; ROLL Flash 2510.11345).
 
-The synchronous :class:`~concordia.orchestrator.Concordia` runs a round barrier:
+The synchronous :class:`~agentdescent.orchestrator.AgentDescent` runs a round barrier:
 every worker steps, then a single ``aggregator.step()`` fires, then the next
 round begins.  That is "synchronous DP".  This module removes the barrier.
 
 **Stage orchestration (FlashEvolve).**  The stages -- *rollout+propose* (workers)
 and *aggregate+commit* (aggregator) -- run as independent threads connected by
-the thread-safe :class:`~concordia.aggregator.EvidenceBuffer`.  A worker keeps
+the thread-safe :class:`~agentdescent.aggregator.EvidenceBuffer`.  A worker keeps
 producing evidence while the aggregator is still merging the previous batch, so
 the pipeline overlaps instead of stalling on a barrier.
 
@@ -15,7 +15,7 @@ the pipeline overlaps instead of stalling on a barrier.
 a worker refreshes its ledger snapshot only once head has drifted more than
 ``async_ratio`` versions ahead of it.  Small ratio -> near-synchronous, few stale
 diffs; large ratio -> highly asynchronous, many stale diffs that the active
-:class:`~concordia.staleness.StalenessPolicy` (Full / Guarded / Reflective) must
+:class:`~agentdescent.staleness.StalenessPolicy` (Full / Guarded / Reflective) must
 rebase or discard.  This is the knob that trades throughput against staleness.
 
 The GIL means Python threads do not give true CPU parallelism, but the *pipeline
@@ -89,7 +89,7 @@ class AsyncStats:
     timeline: List[Tuple[int, float]] = field(default_factory=list)
 
 
-class AsyncConcordia:
+class AsyncAgentDescent:
     """Barrier-free, thread-per-worker parallel self-evolution runtime."""
 
     def __init__(

@@ -7,9 +7,9 @@ Dataset: **FiNER-139** (financial XBRL tagging), the light finance benchmark
         ACE evaluates on (Loukas et al., ACL 2022; HF `nlpaueb/finer-139`).
 
 ACE evolves the *context* (a "playbook" of lessons) instead of the weights, via
-three roles that map exactly onto Concordia's `evolve()` loop:
+three roles that map exactly onto AgentDescent's `evolve()` loop:
 
-    ACE role     Concordia piece                     what it does
+    ACE role     AgentDescent piece                     what it does
     ---------    --------------------------------    ------------------------------
     Generator    LLMAgent.solve (the run)            solves a task with the playbook
     Reflector    LLMAgent.propose (ACE template)     distils ONE delta bullet from a
@@ -50,11 +50,11 @@ import sys
 from collections import Counter
 from typing import Dict, List, Optional, Tuple
 
-from concordia.agents import claude, openai_compatible
-from concordia.dataloader import Dataset, hf_feature_names, hf_rows, split_dataset
-from concordia.evolvable import Diff
-from concordia.evolution import LLMAgent, Task, evolve, rule_id
-from concordia.parallel import DataParallel
+from agentdescent.agents import claude, openai_compatible
+from agentdescent.dataloader import Dataset, hf_feature_names, hf_rows, split_dataset
+from agentdescent.evolvable import Diff
+from agentdescent.evolution import LLMAgent, Task, evolve, rule_id
+from agentdescent.parallel import DataParallel
 
 FINER = ("nlpaueb/finer-139", "validation", "finer-139")   # (dataset, split, config)
 

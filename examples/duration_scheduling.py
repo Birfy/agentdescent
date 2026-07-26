@@ -20,9 +20,9 @@ from __future__ import annotations
 import random
 import tempfile
 
-from concordia.async_runtime import AsyncConcordia, AsyncConfig
-from concordia.domains.router import make_task_universe
-from concordia.scheduler import DurationEstimator, fifo_makespan, lpt_schedule
+from agentdescent.async_runtime import AsyncAgentDescent, AsyncConfig
+from agentdescent.domains.router import make_task_universe
+from agentdescent.scheduler import DurationEstimator, fifo_makespan, lpt_schedule
 
 
 def heavy_tailed_lengths(n, seed):
@@ -89,7 +89,7 @@ def experiment_stragglers(seed=3):
     cfg = AsyncConfig(n_workers=4, noise=0.1, worker_pause=0.0, async_ratio=10_000,
                       target_accuracy=2.0, max_seconds=2.0, duration_timeout_factor=3.0)
     with tempfile.TemporaryDirectory() as repo:
-        sys = AsyncConcordia(repo, universe, config=cfg, estimator=DurationEstimator())
+        sys = AsyncAgentDescent(repo, universe, config=cfg, estimator=DurationEstimator())
         for w in sys.workers:
             w.rollout_latency = latency
         stats = sys.run()

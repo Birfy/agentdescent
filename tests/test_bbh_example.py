@@ -28,7 +28,7 @@ def test_extract_choice():
 
 def test_mc_reward_is_exact_match():
     reward = make_reward(mc=True)
-    from concordia.evolution import Task
+    from agentdescent.evolution import Task
     task = Task(id="t", prompt="q", meta={"target": "(B)", "mc": True})
     assert reward(task, "I think the answer is (B).") == 1.0
     assert reward(task, "The answer is (C).") == 0.0
@@ -36,7 +36,7 @@ def test_mc_reward_is_exact_match():
 
 def test_freeform_reward_is_graded():
     reward = make_reward(mc=False)
-    from concordia.evolution import Task
+    from agentdescent.evolution import Task
     task = Task(id="t", prompt="q", meta={"target": "barn damp delmarva", "mc": False})
     assert reward(task, "barn damp delmarva") == 1.0
     partial = reward(task, "barn damp")

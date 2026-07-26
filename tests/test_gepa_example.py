@@ -6,7 +6,7 @@ answer normalisation, and scoring -- no network or LLM calls.
 
 import random
 
-from concordia.evolution import Task, evolve
+from agentdescent.evolution import Task, evolve
 from examples.gepa_prompt_evolution import (
     InstructionSlot,
     _extract_answer,

@@ -6,18 +6,18 @@ module wired together. It evolves a **skill playbook** (accumulated lessons) on 
 
 | Module | Used for |
 |---|---|
-| [`concordia.agents`](agents.md) | `claude(...)` / `openai_compatible(...)` → a `Completion` (provider layer) |
-| [`concordia.evolution`](evolution.md) | `LLMAgent` + `evolve()` + `AppendRules` strategy (the engine + rule) |
-| [`concordia.parallel`](parallelism.md) | `DataParallel` — the parallelism method |
+| [`agentdescent.agents`](agents.md) | `claude(...)` / `openai_compatible(...)` → a `Completion` (provider layer) |
+| [`agentdescent.evolution`](evolution.md) | `LLMAgent` + `evolve()` + `AppendRules` strategy (the engine + rule) |
+| [`agentdescent.parallel`](parallelism.md) | `DataParallel` — the parallelism method |
 | governance | `blast_radius=0.2` → the L2 skill layer |
 
 Source:
-[`examples/skill_evolution.py`](https://github.com/Birfy/concordia/blob/main/examples/skill_evolution.py).
+[`examples/skill_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/skill_evolution.py).
 
 ```python
-from concordia.agents import claude
-from concordia.evolution import evolve, LLMAgent, AppendRules
-from concordia.parallel import DataParallel
+from agentdescent.agents import claude
+from agentdescent.evolution import evolve, LLMAgent, AppendRules
+from agentdescent.parallel import DataParallel
 
 result = evolve(
     tasks, reward,                                   # your dataset + scorer
@@ -63,7 +63,7 @@ examples that converge fully (router merge-vs-fork, etc.); there the agent can
 
 ## Run it
 
-The dataset is fetched through the [`concordia.dataloader`](dataloader.md) data
+The dataset is fetched through the [`agentdescent.dataloader`](dataloader.md) data
 layer (cached, dependency-free), so the first `--dry-run` downloads it and every
 later run is offline.
 

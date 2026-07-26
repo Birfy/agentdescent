@@ -13,8 +13,8 @@ python -m examples.parallelism
 ```
 
 Source:
-[`examples/parallelism.py`](https://github.com/Birfy/concordia/blob/main/examples/parallelism.py)
-· [`concordia/parallel.py`](https://github.com/Birfy/concordia/blob/main/concordia/parallel.py).
+[`examples/parallelism.py`](https://github.com/Birfy/agentdescent/blob/main/examples/parallelism.py)
+· [`agentdescent/parallel.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/parallel.py).
 
 ---
 
@@ -25,7 +25,7 @@ what?
 
 ```python
 from typing import Protocol, Sequence, List
-from concordia.parallel import WorkUnit
+from agentdescent.parallel import WorkUnit
 
 class ParallelStrategy(Protocol):
     name: str
@@ -44,7 +44,7 @@ PP/TP, which stage/section) a worker owns that round.
 | **`PipelineParallel(stages)`** (PP) | artifacts form a **dependency chain**; each worker drives one stage | downstream failure blames the earliest failing stage |
 
 ```python
-from concordia.parallel import DataParallel, TensorParallel, PipelineParallel
+from agentdescent.parallel import DataParallel, TensorParallel, PipelineParallel
 
 strategy = TensorParallel(n_sections=4)            # or DataParallel(), or ...
 plan = strategy.plan(n_workers=4, round_index=0, keys=my_keys)
@@ -68,7 +68,7 @@ PP (PipelineParallel): pipeline complete=1.000, 3 stages,
 Implement `plan` and you have a new parallelism method — no other change:
 
 ```python
-from concordia.parallel import WorkUnit
+from agentdescent.parallel import WorkUnit
 
 class BlockParallel:
     """Give each worker a contiguous block of the key-space (good locality)."""
@@ -82,9 +82,9 @@ class BlockParallel:
 `isinstance(BlockParallel(), ParallelStrategy)` is `True` structurally — pass it
 anywhere a strategy is accepted.
 
-TP additionally provides [`TensorParallelMerge`](https://github.com/Birfy/concordia/blob/main/concordia/parallel.py)
+TP additionally provides [`TensorParallelMerge`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/parallel.py)
 (union + a consistency reviewer that rejects out-of-section edits), and PP
-provides [`PipelineChain`](https://github.com/Birfy/concordia/blob/main/concordia/parallel.py)
+provides [`PipelineChain`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/parallel.py)
 (`blame` + counterfactual-replay pairs) — see [Concepts §7](concepts.md#7-parallel-paradigms-dp-tp-pp).
 
 ## `parallel=` vs the async runtime

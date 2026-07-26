@@ -26,7 +26,7 @@ an open-ended **archive**. This port reproduces the DGM_outer.py loop faithfully
 It runs **through `evolve()`** like ACE/GEPA: a `HarnessStrategy` turns a proposed
 capability into a `Diff`, and a custom `aggregator_factory`
 (`DGMArchiveAggregator`) is the keep-all archive + parent selection. The agent
-artifact is a **harness** -> Concordia's **L1** governance layer
+artifact is a **harness** -> AgentDescent's **L1** governance layer
 (`blast_radius=0.6`, printed via `classify`): harness changes are high-blast-
 radius and, in the full system, oracle-gated.
 
@@ -55,13 +55,13 @@ import random
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Tuple
 
-from concordia.agents import claude, openai_compatible
-from concordia.aggregator import AggregatorProtocol, MergeReport
-from concordia.dataloader import Dataset, hf_rows, split_dataset
-from concordia.evolvable import Diff, EvidenceCard
-from concordia.evolution import EvolvingArtifact, Task, evolve
-from concordia.governance import classify
-from concordia.ledger import CASConflict, Ledger
+from agentdescent.agents import claude, openai_compatible
+from agentdescent.aggregator import AggregatorProtocol, MergeReport
+from agentdescent.dataloader import Dataset, hf_rows, split_dataset
+from agentdescent.evolvable import Diff, EvidenceCard
+from agentdescent.evolution import EvolvingArtifact, Task, evolve
+from agentdescent.governance import classify
+from agentdescent.ledger import CASConflict, Ledger
 
 SWEBENCH = ("princeton-nlp/SWE-bench_Verified", "test", "default")   # (dataset, split, config)
 

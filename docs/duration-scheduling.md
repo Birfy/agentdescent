@@ -1,7 +1,7 @@
 # Duration-aware scheduling
 
 > **Belongs to the async runtime**, not synchronous [`evolve`](evolution.md):
-> pass a `DurationEstimator` to `AsyncConcordia` for straggler checkpointing. The
+> pass a `DurationEstimator` to `AsyncAgentDescent` for straggler checkpointing. The
 > `DurationEstimator` / `lpt_schedule` primitives are usable on their own too.
 
 Agentic rollouts are heavy-tailed and their cost correlates with task size. This
@@ -14,7 +14,7 @@ checkpointing stragglers. It's the concrete machinery behind the design's
 python -m examples.duration_scheduling
 ```
 
-Source: [`examples/duration_scheduling.py`](https://github.com/Birfy/concordia/blob/main/examples/duration_scheduling.py).
+Source: [`examples/duration_scheduling.py`](https://github.com/Birfy/agentdescent/blob/main/examples/duration_scheduling.py).
 
 ---
 
@@ -25,7 +25,7 @@ least squares, as real rollout durations arrive — the constant isn't known a
 priori, so it calibrates itself:
 
 ```python
-from concordia.scheduler import DurationEstimator
+from agentdescent.scheduler import DurationEstimator
 
 est = DurationEstimator()
 est.observe(cost=len(task.prompt), seconds=measured)   # after each rollout
@@ -52,7 +52,7 @@ Given a batch of tasks with estimated durations, dispatch the **longest first**
 *early* keeps one long rollout from defining the whole batch's wall-clock:
 
 ```python
-from concordia.scheduler import lpt_schedule, fifo_makespan
+from agentdescent.scheduler import lpt_schedule, fifo_makespan
 
 weights = [est.estimate(len(t.prompt)) for t in tasks]
 assignment, makespan = lpt_schedule(weights, n_workers)   # near-optimal
@@ -77,16 +77,16 @@ guarantee is 4/3); round-robin is 28% over.
 
 ## 3. Straggler checkpointing in the async runtime
 
-Pass a `DurationEstimator` to `AsyncConcordia` and it becomes duration-aware: it
+Pass a `DurationEstimator` to `AsyncAgentDescent` and it becomes duration-aware: it
 times every rollout, calibrates the estimator, and **checkpoints any rollout
 that overruns `duration_timeout_factor × its estimate`** to the `ResumeQueue`
 (partial rollout) instead of letting it block a worker.
 
 ```python
-from concordia.async_runtime import AsyncConcordia, AsyncConfig
-from concordia.scheduler import DurationEstimator
+from agentdescent.async_runtime import AsyncAgentDescent, AsyncConfig
+from agentdescent.scheduler import DurationEstimator
 
-sys = AsyncConcordia(repo, universe,
+sys = AsyncAgentDescent(repo, universe,
                      config=AsyncConfig(duration_timeout_factor=3.0),
                      estimator=DurationEstimator())
 stats = sys.run()

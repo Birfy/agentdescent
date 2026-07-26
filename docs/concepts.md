@@ -1,6 +1,6 @@
 # Concepts
 
-The ideas behind Concordia, in the order you need them. This is the *why*; for
+The ideas behind AgentDescent, in the order you need them. This is the *why*; for
 the *what fits where* see [architecture.md](architecture.md), and for the *how
 to run* see [usage.md](usage.md).
 
@@ -20,12 +20,12 @@ while True:
 
 For agentic tasks, `rollout` and `evaluate` are expensive (tool calls, HPC
 queues, eval suites). The improvement rate is capped at **one diff per
-iteration**. Concordia's bet: the binding constraint is often *throughput*, not
+iteration**. AgentDescent's bet: the binding constraint is often *throughput*, not
 proposal quality — so parallelize.
 
 !!! note "This premise is a hypothesis, not consensus"
     Some RSI surveys argue the real bottleneck is verifier reliability and human
-    direction, not parallel throughput. Concordia treats throughput as a
+    direction, not parallel throughput. AgentDescent treats throughput as a
     *testable engineering assumption*: the win only materializes if (a) high-value
     diffs are genuinely being wasted in a serial queue, and (b) verifier
     reliability doesn't collapse first — which is what the L0 frozen layer and the
@@ -38,9 +38,9 @@ proposal quality — so parallelize.
 Model training solved the identical "single-GPU SGD is too slow" problem a
 decade ago, not with a better single-step optimizer but with **parallelism +
 asynchrony + a theory of the staleness / long-tail / scheduling problems that
-creates**. Concordia transplants that theory:
+creates**. AgentDescent transplants that theory:
 
-| Model training | Concordia |
+| Model training | AgentDescent |
 |---|---|
 | parameter tensor θ | library of `Evolvable` artifacts |
 | gradient *g* | `Diff` + `EvidenceCard` |
@@ -63,7 +63,7 @@ framework's core technical problem:
 ### Three precision boundaries (don't over-claim the isomorphism)
 
 - **Parameter server → Ledger.** A classic parameter server is mutable shared
-  state with *no commit history*. Concordia's git-backed Ledger adds version
+  state with *no commit history*. AgentDescent's git-backed Ledger adds version
   vectors and history — and that "extra" is precisely what makes rebase /
   staleness handling possible. It's a feature, claimed as a *difference*, not an
   equivalence.
@@ -213,7 +213,7 @@ system):
   time* (the serial gate), plus offline counterfactual replay → canary → full.
 - **L0** must be frozen: without it, the self-referential loop eventually
   pollutes itself (a verifier that learns to pass itself is undetectable).
-  Concordia minimizes the frozen set to "audit + permissions", leaving the
+  AgentDescent minimizes the frozen set to "audit + permissions", leaving the
   verifier's learnable part in L1 under audit.
 
 ---

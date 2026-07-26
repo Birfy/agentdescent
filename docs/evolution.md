@@ -2,12 +2,12 @@
 
 `evolve()` is the **one entry point** to the framework. You describe *what
 evolves* and *the rules of evolution*, and it runs the parallel, merge-based loop
-(ledger → workers → aggregator → commit) for you. Every capability in Concordia
+(ledger → workers → aggregator → commit) for you. Every capability in AgentDescent
 is a **plug-in to a single `evolve()` parameter** — this page is the map.
 
 ```python
-from concordia.agents import claude
-from concordia.evolution import evolve, LLMAgent
+from agentdescent.agents import claude
+from agentdescent.evolution import evolve, LLMAgent
 
 result = evolve(
     tasks,                                   # what to work on
@@ -23,7 +23,7 @@ That's the minimum. Everything below is optional and swappable.
 !!! tip "Where do `tasks` come from?"
     The `tasks` and `reward` are yours to define. To pull them from a public
     benchmark without writing HuggingFace paging/caching boilerplate, use the
-    [`concordia.dataloader`](dataloader.md) data layer (`hf_rows`, `fetch_text`,
+    [`agentdescent.dataloader`](dataloader.md) data layer (`hf_rows`, `fetch_text`,
     `load_gated_hf`) — it is how every
     [self-evolution example](self-evolution-examples.md) loads its dataset.
 
@@ -33,9 +33,9 @@ That's the minimum. Everything below is optional and swappable.
 
 | `evolve(...)` parameter | Module | What it plugs in | Default |
 |---|---|---|---|
-| `agent=` / `run=`+`propose=` | [`concordia.agents`](agents.md) + `LLMAgent` | the actor: solve a task, propose a change | — (required) |
+| `agent=` / `run=`+`propose=` | [`agentdescent.agents`](agents.md) + `LLMAgent` | the actor: solve a task, propose a change | — (required) |
 | `strategy=` | `Strategy` (`AppendRules` / `KeyedRules` / yours) | the **evolution rule** — how a proposal becomes a diff | `AppendRules()` |
-| `parallel=` | [`concordia.parallel`](parallelism.md) | the **parallelism method** — DP / TP / PP | `DataParallel()` |
+| `parallel=` | [`agentdescent.parallel`](parallelism.md) | the **parallelism method** — DP / TP / PP | `DataParallel()` |
 | `blast_radius=` | governance | which layer (L2 skill vs L1 harness/verifier) | `0.2` (L2) |
 | `agg_config=` | `AggregatorConfig` | merge & acceptance **tuning** | sensible defaults |
 | `aggregator_factory=` | `AggregatorProtocol` | **swap the whole optimizer** (custom merge/acceptance) | reference `Aggregator` |
@@ -53,13 +53,13 @@ The building blocks in detail:
 ## 1. The actor — `agent=` (or `run=` + `propose=`)
 
 *What:* the thing that runs a task against the current artifact and, on a
-failure, proposes an improvement. *Module:* [`concordia.agents`](agents.md)
+failure, proposes an improvement. *Module:* [`agentdescent.agents`](agents.md)
 provides the provider-agnostic **completion** (`prompt -> text`); `LLMAgent`
 adapts a completion into the two-method actor.
 
 ```python
-from concordia.agents import claude, openai_compatible, from_callable
-from concordia.evolution import LLMAgent
+from agentdescent.agents import claude, openai_compatible, from_callable
+from agentdescent.evolution import LLMAgent
 
 evolve(tasks, reward, agent=LLMAgent(claude(model="claude-haiku-4-5")))        # Claude
 evolve(tasks, reward, agent=LLMAgent(openai_compatible(model="glm-4.6")))      # GLM / OpenAI-style
@@ -83,7 +83,7 @@ evolve(tasks, reward,
 aggregator resolves conflicts and fusion over.
 
 ```python
-from concordia.evolution import AppendRules, KeyedRules
+from agentdescent.evolution import AppendRules, KeyedRules
 
 evolve(tasks, reward, agent=agent, strategy=AppendRules())                       # default
 evolve(tasks, reward, agent=agent, strategy=KeyedRules(categories=["route","fmt"]))
@@ -97,7 +97,7 @@ evolve(tasks, reward, agent=agent, strategy=KeyedRules(categories=["route","fmt"
 Write your own by implementing three methods (`initial` / `render` / `to_diff`):
 
 ```python
-from concordia.evolvable import Diff
+from agentdescent.evolvable import Diff
 
 class SingleSlot:                     # the artifact is one value each proposal replaces
     def initial(self): return {}
@@ -131,10 +131,10 @@ each is a real `Strategy` you can read and reuse:
 ## 3. The parallelism method — `parallel=`
 
 *What:* how each round's tasks are partitioned across the `n_workers`. *Module:*
-[`concordia.parallel`](parallelism.md).
+[`agentdescent.parallel`](parallelism.md).
 
 ```python
-from concordia.parallel import DataParallel, TensorParallel, PipelineParallel
+from agentdescent.parallel import DataParallel, TensorParallel, PipelineParallel
 
 evolve(tasks, reward, agent=agent, parallel=DataParallel())                # default (shard tasks)
 evolve(tasks, reward, agent=agent, parallel=TensorParallel(n_sections=4))  # disjoint sections
@@ -144,7 +144,7 @@ evolve(tasks, reward, agent=agent, parallel=PipelineParallel(stages=[...]))# per
 Or your own — implement `plan(n_workers, round_index, keys) -> [WorkUnit]`:
 
 ```python
-from concordia.parallel import WorkUnit
+from agentdescent.parallel import WorkUnit
 
 class Blocks:
     name = "block"
@@ -187,7 +187,7 @@ resolution → fusion → statistical acceptance → transactional commit). `agg
 tunes the reference pipeline; `aggregator_factory` swaps in your own.
 
 ```python
-from concordia.aggregator import AggregatorConfig, Aggregator
+from agentdescent.aggregator import AggregatorConfig, Aggregator
 
 # tune: keep the pipeline, change the knobs
 evolve(tasks, reward, agent=agent,
@@ -214,7 +214,7 @@ aggregator: **[the aggregator page](aggregator.md)**.
 *Module:* the Full / Guarded / Reflective policies.
 
 ```python
-from concordia.staleness import get_policy
+from agentdescent.staleness import get_policy
 
 evolve(tasks, reward, agent=agent, staleness_policy=get_policy("reflective"))
 ```
@@ -255,9 +255,9 @@ The one complete, runnable example threads every block above on a real dataset
 with a real LLM:
 
 ```python
-from concordia.agents import claude
-from concordia.evolution import evolve, LLMAgent, AppendRules
-from concordia.parallel import DataParallel
+from agentdescent.agents import claude
+from agentdescent.evolution import evolve, LLMAgent, AppendRules
+from agentdescent.parallel import DataParallel
 
 result = evolve(
     tasks, reward,
@@ -305,7 +305,7 @@ evolve(tasks, reward, agent=agent, asynchronous=True, async_ratio=3, max_seconds
 ## The barrier-free runtime: `async_evolve()`
 
 `evolve()`'s round barrier means the aggregator waits for all workers each round.
-[`async_evolve()`](https://github.com/Birfy/concordia/blob/main/concordia/async_evolve.py)
+[`async_evolve()`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/async_evolve.py)
 removes it while accepting the identical `run`/`reward`/`propose`/`strategy`/
 `aggregator_factory` plug-ins — so **any** task that runs under `evolve()` (ACE,
 GEPA, EvoSkill, SkillOpt, ADAS, DGM) also runs async:
@@ -330,7 +330,7 @@ GEPA, EvoSkill, SkillOpt, ADAS, DGM) also runs async:
   sampled task — pass `self_verify=False` to skip that extra rollout.
 
 ```python
-from concordia import async_evolve
+from agentdescent import async_evolve
 result = async_evolve(tasks, reward, agent=agent,
                       n_workers=4, async_ratio=3, max_seconds=30,   # or max_iters / target_reward
                       staleness_policy=get_policy("reflective"))
@@ -371,12 +371,12 @@ An aggregator can amortise the expensive held-out eval on the async path — app
 each diff as a cheap step and only validate every *N* steps, rolling back on no
 gain (SGD-style). See [the async optimizer variant](aggregator.md#the-async-optimizer-variant-sgd-style-descent).
 
-### The reference async orchestrator: `AsyncConcordia`
+### The reference async orchestrator: `AsyncAgentDescent`
 
-For the router reference domain there is also `AsyncConcordia` — the original
+For the router reference domain there is also `AsyncAgentDescent` — the original
 stage-orchestration runtime with duration-aware straggler checkpointing, where
 the staleness policies,
 [`async_ratio`](concepts.md#34-async_ratio-roll-flash-the-global-lag-budget), and
 [duration-aware straggler checkpointing](duration-scheduling.md) come into their
-own — use `AsyncConcordia` (same aggregator, staleness, and governance
+own — use `AsyncAgentDescent` (same aggregator, staleness, and governance
 underneath). Measured trade-offs: [efficiency experiments](efficiency.md).

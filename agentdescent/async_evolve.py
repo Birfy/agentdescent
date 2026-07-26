@@ -16,7 +16,7 @@ Two stages run as independent threads connected by a thread-safe intake buffer
   versions ahead of it (ROLL Flash's *global lag budget*), so staleness (η > 0)
   genuinely arises: small ratio -> near-synchronous, large ratio -> highly async.
 * **One merger** drains the buffer, runs each card through the active
-  :class:`~concordia.staleness.StalenessPolicy` (ACCEPT η=0 / REBASE+re-verify /
+  :class:`~agentdescent.staleness.StalenessPolicy` (ACCEPT η=0 / REBASE+re-verify /
   DISCARD), feeds the survivors to ``aggregator.ingest`` and calls
   ``aggregator.step()``. It is the **only** writer to the ledger, so there are no
   CAS conflicts, and every aggregator sees only rebased (η=0) cards -- which is
@@ -26,7 +26,7 @@ The GIL means threads are not CPU-parallel, but the pipeline *overlap* (workers
 producing while the merger merges) and the concurrency-control machinery (buffer
 lock, CAS, per-diff staleness) are real, and the same shape drives a genuinely
 parallel process/host pool. See ``examples/*`` (``--async``) and
-:func:`~concordia.evolution.evolve` (``asynchronous=True``).
+:func:`~agentdescent.evolution.evolve` (``asynchronous=True``).
 """
 
 from __future__ import annotations
@@ -71,7 +71,7 @@ def async_evolve(
 ) -> EvolutionResult:
     """Evolve an artifact **without a round barrier**.
 
-    Same actor/strategy/aggregator plug-ins as :func:`~concordia.evolution.evolve`.
+    Same actor/strategy/aggregator plug-ins as :func:`~agentdescent.evolution.evolve`.
     ``async_ratio`` is the lag budget: a worker keeps proposing against its
     snapshot until head drifts past it, then refreshes -- so stale diffs (η > 0)
     arise and the ``staleness_policy`` (default ``guarded``) rebases or discards

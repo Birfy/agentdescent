@@ -1,1 +1,1 @@
-"""Runnable Concordia examples."""
+"""Runnable AgentDescent examples."""

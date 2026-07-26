@@ -3,7 +3,7 @@
 > **Skill / prompt self-evolution.** Evolve an instruction prompt with a genetic,
 > reflective loop whose parent selection is a **per-instance Pareto frontier**.
 > Runs through [`evolve()`](evolution.md) with a custom `aggregator_factory`.
-> Example: [`examples/gepa_prompt_evolution.py`](https://github.com/Birfy/concordia/blob/main/examples/gepa_prompt_evolution.py).
+> Example: [`examples/gepa_prompt_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/gepa_prompt_evolution.py).
 
 | | |
 |---|---|
@@ -52,7 +52,7 @@ sample (raise `--workers`). The Pareto set is the held-out split.
 
 ## Plug-ins implemented
 
-In [`examples/gepa_prompt_evolution.py`](https://github.com/Birfy/concordia/blob/main/examples/gepa_prompt_evolution.py):
+In [`examples/gepa_prompt_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/gepa_prompt_evolution.py):
 
 | Plug-in | `evolve()` slot | What it does |
 |---|---|---|

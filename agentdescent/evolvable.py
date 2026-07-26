@@ -1,4 +1,4 @@
-"""Core data model for Concordia.
+"""Core data model for AgentDescent.
 
 This module defines the *unit of evolution* (``Evolvable``) and the two
 "gradient-like" objects that flow through the system:
@@ -71,7 +71,7 @@ class Diff:
     """A proposed change to an artifact's state.
 
     ``ops`` is an opaque, artifact-specific payload.  For the reference skill
-    domain (:mod:`concordia.domains.router`) it is a mapping of key -> value
+    domain (:mod:`agentdescent.domains.router`) it is a mapping of key -> value
     edits, but the aggregator never inspects it directly -- it always goes
     through the owning :class:`Evolvable`.
     """

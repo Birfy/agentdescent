@@ -1,6 +1,6 @@
 # Self-evolution algorithms — faithful ports
 
-Concordia is a *general* engine for parallel, merge-based evolution. To show it
+AgentDescent is a *general* engine for parallel, merge-based evolution. To show it
 is faithful to the field — not a toy — this page ports a set of the most
 representative **skill self-evolution** and **harness self-evolution** algorithms
 from the literature, each as one runnable example, each faithful to the original
@@ -45,8 +45,8 @@ python -m examples.ace_context_evolution --model claude-haiku-4-5 --async   # ba
 Every example takes `--dry-run` (load the dataset, print the plan, **no API
 calls**) and has an offline test suite (`tests/test_<name>_example.py`) exercising
 its pure logic. Datasets load through the shared
-[**`concordia.dataloader`**](dataloader.md) data layer — dependency-free
-(`urllib` only), cached under `~/.cache/concordia/`, from each benchmark's
+[**`agentdescent.dataloader`**](dataloader.md) data layer — dependency-free
+(`urllib` only), cached under `~/.cache/agentdescent/`, from each benchmark's
 canonical source. Where a paper's full setup needs heavy infrastructure, the
 boundary is documented in the example's module docstring — never hidden.
 
@@ -136,10 +136,10 @@ load-bearing invariants are reproduced faithfully from the repo:
 2. **strict held-out accept gate** — a candidate is accepted only if it strictly
    improves the validation hard-EM over the *current* skill (greedy, like
    `evolve()`);
-3. **textual learning-rate budget** — an integer edit cap per step (Concordia's
+3. **textual learning-rate budget** — an integer edit cap per step (AgentDescent's
    `trust_region_ops` analogue);
 4. **rejected-edit buffer** — rejected edits are remembered in-epoch and fed back
-   to the optimizer (Concordia's "settled evidence survives").
+   to the optimizer (AgentDescent's "settled evidence survives").
 
 ```bash
 python -m examples.skillopt_skill_training --dry-run
@@ -203,7 +203,7 @@ python -m examples.dgm_self_improve --generations 12 --archive keep_all
 
 * **CoEvoSkills** (arXiv:2604.01687, "Self-Evolving Agent Skills via
   Co-Evolutionary Verification") — the Skill Generator + co-evolving Surrogate
-  Verifier + opaque pass/fail oracle is a compelling fit for Concordia's
+  Verifier + opaque pass/fail oracle is a compelling fit for AgentDescent's
   aggregator, but the **official code is unreleased** ("coming soon") and its
   benchmark (SkillsBench) requires a Claude Code / Codex agent harness. With no
   original repo to be faithful to, it is intentionally deferred until the authors

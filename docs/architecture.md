@@ -1,6 +1,6 @@
 # Architecture
 
-This document explains how Concordia's components fit together and how a diff
+This document explains how AgentDescent's components fit together and how a diff
 travels from a worker to a committed change in the shared artifact library.
 
 For the *why* behind each mechanism see [concepts.md](concepts.md); for how to
@@ -10,7 +10,7 @@ run and extend the system see [usage.md](usage.md).
 
 ## 1. The one-paragraph model
 
-Concordia runs **N workers in parallel**. Each worker takes a snapshot of a
+AgentDescent runs **N workers in parallel**. Each worker takes a snapshot of a
 shared, versioned **artifact library** (the `Ledger`), runs tasks against it,
 and emits a **diff + evidence card** (a "gradient"). A single **Aggregator**
 (the "optimizer") collects these diffs per-artifact, resolves conflicts, fuses
@@ -97,27 +97,27 @@ the Aggregator calls at steps 1–4 (cheap) and step 7 (oracle, budgeted).
 
 | Component | Module | Responsibility |
 |---|---|---|
-| **Evolvable** | [`evolvable.py`](https://github.com/Birfy/concordia/blob/main/concordia/evolvable.py) | The interface every unit of evolution implements (`diff`/`apply`/`cheap_eval`/`full_eval`). Also `Diff`, `EvidenceCard`, version-vector math. |
-| **Ledger** | [`ledger.py`](https://github.com/Birfy/concordia/blob/main/concordia/ledger.py) | Git-backed store. Per-artifact integer versions form the version vector. CAS commits, 2PC atomic multi-artifact commits, `dev`/`stable` branches. |
-| **Aggregator** | [`aggregator.py`](https://github.com/Birfy/concordia/blob/main/concordia/aggregator.py) | The optimizer. Buckets evidence by artifact and runs the 7-step merge pipeline. Owns the per-artifact Beta posteriors. |
-| **StalenessPolicy** | [`staleness.py`](https://github.com/Birfy/concordia/blob/main/concordia/staleness.py) | Full / Guarded / Reflective. Decides `ACCEPT/REBASE/DISCARD` for a stale diff. Swappable without touching the pipeline. |
-| **Verifier** | [`verifier.py`](https://github.com/Birfy/concordia/blob/main/concordia/verifier.py) | rule (cheap subset), learned (noisy + uncertainty), oracle (ground truth, budgeted). |
-| **Schedulers** | [`scheduler.py`](https://github.com/Birfy/concordia/blob/main/concordia/scheduler.py) | `TaskScheduler` (UCB task leasing), `AuditScheduler` (oracle-budget allocation + trust), `ResumeQueue` (partial-rollout checkpoints). |
-| **Governance** | [`governance.py`](https://github.com/Birfy/concordia/blob/main/concordia/governance.py) | Sorts artifacts into L0/L1/L2 by blast radius; L0 is read-only to the loop; L1 serial gate. |
-| **Worker** | [`worker.py`](https://github.com/Birfy/concordia/blob/main/concordia/worker.py) | rollout + propose. Emits evidence cards; never mutates the Ledger directly. |
-| **Sync runtime** | [`orchestrator.py`](https://github.com/Birfy/concordia/blob/main/concordia/orchestrator.py) | `Concordia`: round-barrier DP loop + fork baseline. |
-| **Async runtime** | [`async_runtime.py`](https://github.com/Birfy/concordia/blob/main/concordia/async_runtime.py) | `AsyncConcordia`: barrier-free thread pipeline + `async_ratio` + backpressure. |
-| **Parallel paradigms** | [`parallel.py`](https://github.com/Birfy/concordia/blob/main/concordia/parallel.py) | DP / TP / PP partition & recombine primitives. |
-| **Reference domain** | [`domains/router.py`](https://github.com/Birfy/concordia/blob/main/concordia/domains/router.py) | A deterministic keyword-router skill so the whole loop runs with no LLM. |
+| **Evolvable** | [`evolvable.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/evolvable.py) | The interface every unit of evolution implements (`diff`/`apply`/`cheap_eval`/`full_eval`). Also `Diff`, `EvidenceCard`, version-vector math. |
+| **Ledger** | [`ledger.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/ledger.py) | Git-backed store. Per-artifact integer versions form the version vector. CAS commits, 2PC atomic multi-artifact commits, `dev`/`stable` branches. |
+| **Aggregator** | [`aggregator.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/aggregator.py) | The optimizer. Buckets evidence by artifact and runs the 7-step merge pipeline. Owns the per-artifact Beta posteriors. |
+| **StalenessPolicy** | [`staleness.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/staleness.py) | Full / Guarded / Reflective. Decides `ACCEPT/REBASE/DISCARD` for a stale diff. Swappable without touching the pipeline. |
+| **Verifier** | [`verifier.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/verifier.py) | rule (cheap subset), learned (noisy + uncertainty), oracle (ground truth, budgeted). |
+| **Schedulers** | [`scheduler.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/scheduler.py) | `TaskScheduler` (UCB task leasing), `AuditScheduler` (oracle-budget allocation + trust), `ResumeQueue` (partial-rollout checkpoints). |
+| **Governance** | [`governance.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/governance.py) | Sorts artifacts into L0/L1/L2 by blast radius; L0 is read-only to the loop; L1 serial gate. |
+| **Worker** | [`worker.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/worker.py) | rollout + propose. Emits evidence cards; never mutates the Ledger directly. |
+| **Sync runtime** | [`orchestrator.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/orchestrator.py) | `AgentDescent`: round-barrier DP loop + fork baseline. |
+| **Async runtime** | [`async_runtime.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/async_runtime.py) | `AsyncAgentDescent`: barrier-free thread pipeline + `async_ratio` + backpressure. |
+| **Parallel paradigms** | [`parallel.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/parallel.py) | DP / TP / PP partition & recombine primitives. |
+| **Reference domain** | [`domains/router.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/domains/router.py) | A deterministic keyword-router skill so the whole loop runs with no LLM. |
 
 ---
 
 ## 4. The two runtimes
 
-Concordia separates *what to merge* (the Aggregator, identical in both) from
+AgentDescent separates *what to merge* (the Aggregator, identical in both) from
 *when workers and the aggregator run relative to each other* (the runtime).
 
-### 4.1 Synchronous DP — `Concordia` (orchestrator.py)
+### 4.1 Synchronous DP — `AgentDescent` (orchestrator.py)
 
 A round barrier:
 
@@ -133,7 +133,7 @@ for round in range(R):
 Deterministic and easy to reason about. Used for the RQ1 (merge-vs-fork) and
 RQ2 (staleness sweep) experiments.
 
-### 4.2 Asynchronous stage orchestration — `AsyncConcordia` (async_runtime.py)
+### 4.2 Asynchronous stage orchestration — `AsyncAgentDescent` (async_runtime.py)
 
 No barrier. Threads run independently:
 

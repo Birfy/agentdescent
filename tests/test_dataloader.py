@@ -1,4 +1,4 @@
-"""Offline tests for the concordia.dataloader data layer.
+"""Offline tests for the agentdescent.dataloader data layer.
 
 The URL/paging helpers are pure; the HTTP fetch is monkeypatched so hf_rows /
 fetch_text are exercised without a network.
@@ -7,7 +7,7 @@ fetch_text are exercised without a network.
 import json
 import os
 
-from concordia import dataloader as dl
+from agentdescent import dataloader as dl
 
 
 def test_page_offsets_splits_into_capped_pages():

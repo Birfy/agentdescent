@@ -1,12 +1,12 @@
 import pytest
 
-from concordia.domains.router import (
+from agentdescent.domains.router import (
     RouterSkill,
     deserialize_router,
     serialize_router,
 )
-from concordia.evolvable import Diff
-from concordia.ledger import CASConflict, Ledger
+from agentdescent.evolvable import Diff
+from agentdescent.ledger import CASConflict, Ledger
 
 
 def make_ledger(tmp_path):

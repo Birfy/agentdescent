@@ -33,7 +33,7 @@ Deep dive on the *why*: [concepts §4](concepts.md#4-the-aggregator-a-discrete-s
 Keep the reference pipeline, change its knobs:
 
 ```python
-from concordia.aggregator import AggregatorConfig
+from agentdescent.aggregator import AggregatorConfig
 
 evolve(tasks, reward, agent=agent, agg_config=AggregatorConfig(
     batch_trigger=2,      # fire a merge once this many proposals collect for an artifact
@@ -63,8 +63,8 @@ contract is two methods:
 
 ```python
 from typing import Protocol, List
-from concordia.evolvable import EvidenceCard
-from concordia.aggregator import MergeReport
+from agentdescent.evolvable import EvidenceCard
+from agentdescent.aggregator import MergeReport
 
 class AggregatorProtocol(Protocol):
     def ingest(self, card: EvidenceCard) -> None: ...     # a worker's diff + evidence
@@ -76,7 +76,7 @@ deps it owns — `(ledger, verifier, audit, config, staleness_policy)` — and
 returns any `AggregatorProtocol`:
 
 ```python
-from concordia.aggregator import Aggregator
+from agentdescent.aggregator import Aggregator
 
 class StrictAggregator(Aggregator):
     def _tournament(self, artifact, diffs):

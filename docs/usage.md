@@ -8,8 +8,8 @@ your own `Evolvable` domain.
 ## 1. Install
 
 ```bash
-git clone https://github.com/Birfy/concordia
-cd concordia
+git clone https://github.com/Birfy/agentdescent
+cd agentdescent
 pip install -e ".[dev]"
 ```
 
@@ -25,7 +25,7 @@ No external services or model APIs are needed. Requires Python ≥ 3.9.
 python -m examples.run_demo
 ```
 
-Runs the merge-based `Concordia` loop and a DGM-style fork baseline on the same
+Runs the merge-based `AgentDescent` loop and a DGM-style fork baseline on the same
 budget, then prints the learning curve and the comparison:
 
 ```
@@ -34,7 +34,7 @@ round  dev_acc   stable  commit  fused  stale  confl  oracle
     2    0.983    0.000       1      1      0      1       0     ← a contradiction dropped
     8    1.000    1.000       1      0      0      0       0     ← stable branch catches up
 
-Concordia (merge) held-out accuracy : 1.000
+AgentDescent (merge) held-out accuracy : 1.000
 Fork/archive best-fork accuracy     : 0.353
 merge advantage                     : +0.647
 ```
@@ -58,7 +58,7 @@ python -m examples.rq2_staleness
 Faithful ports of the latest skill- and harness-self-evolution algorithms — ACE,
 GEPA, EvoSkill, SkillOpt, ADAS, DGM (see
 [the catalog](self-evolution-examples.md)). Each loads a real benchmark through
-the [`concordia.dataloader`](dataloader.md) data layer and runs offline with
+the [`agentdescent.dataloader`](dataloader.md) data layer and runs offline with
 `--dry-run`:
 
 ```bash
@@ -82,12 +82,12 @@ pytest -q tests/test_async.py   # just the async runtime
 
 ```python
 import tempfile
-from concordia.domains.router import make_task_universe
-from concordia.orchestrator import Concordia
+from agentdescent.domains.router import make_task_universe
+from agentdescent.orchestrator import AgentDescent
 
 universe = make_task_universe(seed=7)
 with tempfile.TemporaryDirectory() as repo:
-    system = Concordia(repo, universe, n_workers=6, noise=0.15, seed=1)
+    system = AgentDescent(repo, universe, n_workers=6, noise=0.15, seed=1)
     history = system.run(rounds=40)
     print(system.final_accuracy())      # held-out accuracy on the dev branch
 ```
@@ -96,14 +96,14 @@ with tempfile.TemporaryDirectory() as repo:
 
 ```python
 import tempfile
-from concordia.async_runtime import AsyncConcordia, AsyncConfig
-from concordia.domains.router import make_task_universe
-from concordia.staleness import get_policy
+from agentdescent.async_runtime import AsyncAgentDescent, AsyncConfig
+from agentdescent.domains.router import make_task_universe
+from agentdescent.staleness import get_policy
 
 universe = make_task_universe(seed=7)
 cfg = AsyncConfig(n_workers=6, async_ratio=4, target_accuracy=0.98, max_seconds=15.0)
 with tempfile.TemporaryDirectory() as repo:
-    system = AsyncConcordia(repo, universe, config=cfg,
+    system = AsyncAgentDescent(repo, universe, config=cfg,
                             staleness_policy=get_policy("reflective"))
     stats = system.run()
     print(stats.final_dev_accuracy, stats.commits, stats.discarded_stale)
@@ -113,7 +113,7 @@ with tempfile.TemporaryDirectory() as repo:
 
 ## 4. Configuration reference
 
-### `AggregatorConfig` (concordia/aggregator.py)
+### `AggregatorConfig` (agentdescent/aggregator.py)
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -125,7 +125,7 @@ with tempfile.TemporaryDirectory() as repo:
 | `trust_region_ops` | 6 | max edits per diff (trust region) |
 | `promote_after_k` | 3 | dev→stable survival rounds (EMA) |
 
-### `AsyncConfig` (concordia/async_runtime.py)
+### `AsyncConfig` (agentdescent/async_runtime.py)
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -142,7 +142,7 @@ with tempfile.TemporaryDirectory() as repo:
 ### Staleness policy
 
 ```python
-from concordia.staleness import get_policy
+from agentdescent.staleness import get_policy
 get_policy("full")        # accept stale diffs directly
 get_policy("guarded")     # version-gated (default)
 get_policy("reflective")  # always rebase + re-verify
@@ -157,11 +157,11 @@ registration, not hard-coded.** To evolve something new, provide four things.
 
 ### 5.1 An `Evolvable`
 
-Implement the protocol from `concordia/evolvable.py`
-([reference: `RouterSkill`](https://github.com/Birfy/concordia/blob/main/concordia/domains/router.py)):
+Implement the protocol from `agentdescent/evolvable.py`
+([reference: `RouterSkill`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/domains/router.py)):
 
 ```python
-from concordia.evolvable import Contract, Diff, EvidenceCard
+from agentdescent.evolvable import Contract, Diff, EvidenceCard
 
 class MyArtifact:
     def __init__(self, id, state, version=1, blast_radius=0.2):
@@ -215,7 +215,7 @@ verifier = ThreeLayerVerifier(eval_fn=my_eval, held_out=held_out_tasks)
 ### 5.4 A worker that proposes diffs
 
 Workers turn observed failures into a `Diff` + `EvidenceCard`. The reference
-`Worker` (concordia/worker.py) is a deterministic corrector; in a real system
+`Worker` (agentdescent/worker.py) is a deterministic corrector; in a real system
 this is where an LLM reflects on a trajectory and proposes an edit. Emit a card
 with the `base_version` you read, the `touched` artifacts, and a local
 `before_after_delta`, then `aggregator.ingest(card)`.

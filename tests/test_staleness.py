@@ -1,4 +1,4 @@
-from concordia.staleness import (
+from agentdescent.staleness import (
     FullStaleness,
     GuardedStaleness,
     ReflectiveStaleness,

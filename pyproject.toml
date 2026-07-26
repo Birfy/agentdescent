@@ -3,13 +3,13 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "concordia-rsi"
+name = "agentdescent"
 version = "0.7.0"
 description = "A parallel, self-evolving framework for accelerating recursive self-improvement (RSI)"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
-authors = [{ name = "Concordia" }]
+authors = [{ name = "AgentDescent" }]
 keywords = ["rsi", "self-evolving-agents", "parallel", "aggregation", "staleness"]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -23,10 +23,10 @@ dev = ["pytest>=7.0"]
 docs = ["mkdocs-material>=9.5"]
 
 [project.urls]
-Homepage = "https://github.com/Birfy/concordia"
+Homepage = "https://github.com/Birfy/agentdescent"
 
 [tool.setuptools.packages.find]
-include = ["concordia*"]
+include = ["agentdescent*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

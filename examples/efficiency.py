@@ -29,9 +29,9 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from concordia.async_runtime import AsyncConcordia, AsyncConfig
-from concordia.domains.router import make_task_universe
-from concordia.ledger import Ledger
+from agentdescent.async_runtime import AsyncAgentDescent, AsyncConfig
+from agentdescent.domains.router import make_task_universe
+from agentdescent.ledger import Ledger
 
 
 def constant_latency(seconds: float):
@@ -52,8 +52,8 @@ def heavy_tailed_latency(base: float, spike: float, p_spike: float, seed: int):
 def _build(universe, n_workers, latency, seed, **cfg_kw):
     cfg = AsyncConfig(n_workers=n_workers, noise=0.1, worker_pause=0.0,
                       aggregator_interval=0.001, seed=seed, **cfg_kw)
-    repo = tempfile.mkdtemp(prefix="concordia-eff-")
-    sys = AsyncConcordia(repo, universe, config=cfg)
+    repo = tempfile.mkdtemp(prefix="agentdescent-eff-")
+    sys = AsyncAgentDescent(repo, universe, config=cfg)
     for w in sys.workers:
         w.rollout_latency = latency
     return sys

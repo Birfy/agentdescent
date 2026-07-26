@@ -1,8 +1,8 @@
 import pytest
 
-from concordia.domains.router import RouterSkill
-from concordia.evolvable import Diff
-from concordia.parallel import (
+from agentdescent.domains.router import RouterSkill
+from agentdescent.evolvable import Diff
+from agentdescent.parallel import (
     PipelineChain,
     SectionViolation,
     TensorParallelMerge,
@@ -80,7 +80,7 @@ def test_pp_upstream_lookup():
 
 # -- pluggable parallel strategies (DP / TP / PP + custom) -------------------
 
-from concordia.parallel import (
+from agentdescent.parallel import (
     DataParallel,
     TensorParallel,
     PipelineParallel,

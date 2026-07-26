@@ -1,6 +1,6 @@
 """The three-in-one scheduler (design doc, sections 3.1 and 5).
 
-Concordia treats the long tail as *three* distinct problems, each with its own
+AgentDescent treats the long tail as *three* distinct problems, each with its own
 mechanism:
 
 * :class:`TaskScheduler` -- L-task (data layer): UCB over (task-cluster x

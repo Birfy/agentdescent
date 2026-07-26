@@ -1,5 +1,5 @@
-from concordia.evolvable import vv_dominates, vv_staleness
-from concordia.stats import (
+from agentdescent.evolvable import vv_dominates, vv_staleness
+from agentdescent.stats import (
     BetaPosterior,
     annealed_delta,
     prob_improvement,

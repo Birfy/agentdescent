@@ -3,7 +3,7 @@
 > **Skill-document self-evolution.** Train a single markdown skill doc as the
 > external state of a frozen agent, with optimizer discipline. Runs through
 > [`evolve()`](evolution.md) with a custom `Strategy` + `aggregator_factory`.
-> Example: [`examples/skillopt_skill_training.py`](https://github.com/Birfy/concordia/blob/main/examples/skillopt_skill_training.py).
+> Example: [`examples/skillopt_skill_training.py`](https://github.com/Birfy/agentdescent/blob/main/examples/skillopt_skill_training.py).
 
 | | |
 |---|---|
@@ -24,7 +24,7 @@ Four load-bearing invariants, reproduced from the repo (`engine/trainer.py`,
    improves* the held-out validation hard-EM over the **current** skill (default
    `gate_metric=hard`). Greedy hill-climbing — the same shape as `evolve()`.
 3. **Textual learning-rate budget** — an integer cap on edits per step
-   (`optimizer/scheduler.py`); Concordia's `trust_region_ops` analogue.
+   (`optimizer/scheduler.py`); AgentDescent's `trust_region_ops` analogue.
 4. **Rejected-edit buffer** — rejected edits are remembered in-epoch and fed back
    to the optimizer so it stops re-proposing them.
 
@@ -45,7 +45,7 @@ repo and omitted from this minimal-but-faithful slice.
 
 ## Plug-ins implemented
 
-In [`examples/skillopt_skill_training.py`](https://github.com/Birfy/concordia/blob/main/examples/skillopt_skill_training.py):
+In [`examples/skillopt_skill_training.py`](https://github.com/Birfy/agentdescent/blob/main/examples/skillopt_skill_training.py):
 
 | Plug-in | `evolve()` slot | What it does |
 |---|---|---|

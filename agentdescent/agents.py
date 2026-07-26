@@ -1,7 +1,7 @@
 """Provider-agnostic inference -- connect any agent or LLM to the framework.
 
 This is the general "talk to a model/agent" layer. It is deliberately kept
-**out of** :mod:`concordia.evolution`: skill evolution is just *one* application
+**out of** :mod:`agentdescent.evolution`: skill evolution is just *one* application
 built on the framework, and how you reach a model has nothing to do with it.
 
 The whole contract is one type:

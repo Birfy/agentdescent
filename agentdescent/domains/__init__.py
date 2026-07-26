@@ -1,4 +1,4 @@
-"""Reference domains for exercising the Concordia loop end to end."""
+"""Reference domains for exercising the AgentDescent loop end to end."""
 
 from .router import (
     RouterSkill,

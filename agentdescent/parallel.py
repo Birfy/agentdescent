@@ -6,7 +6,7 @@ in *how work is partitioned and recombined*.
 
 * **DP (data parallel)** -- the default.  Every worker holds the same snapshot;
   tasks are sharded across workers; diffs flow back and are merged.  This is what
-  :class:`~concordia.async_runtime.AsyncConcordia` runs.
+  :class:`~agentdescent.async_runtime.AsyncAgentDescent` runs.
 * **TP (tensor parallel)** -- a single *hot* artifact is split along its internal
   structure into disjoint sections; each worker is authorized for one section, so
   edits are conflict-free *by construction* and the merge degrades to

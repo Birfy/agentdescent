@@ -6,9 +6,9 @@ that evolves a skill evolves a harness -- just under stricter L1 governance."""
 from difflib import SequenceMatcher
 from typing import Optional
 
-from concordia.governance import Layer, classify
-from concordia.scheduler import AuditScheduler
-from concordia.evolution import EvolvingArtifact, Task, evolve
+from agentdescent.governance import Layer, classify
+from agentdescent.scheduler import AuditScheduler
+from agentdescent.evolution import EvolvingArtifact, Task, evolve
 
 
 def test_blast_radius_selects_governance_layer():

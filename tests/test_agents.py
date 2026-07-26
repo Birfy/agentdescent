@@ -2,7 +2,7 @@
 
 import pytest
 
-from concordia.agents import claude, echo, from_callable, with_retries
+from agentdescent.agents import claude, echo, from_callable, with_retries
 
 
 def test_echo_returns_prompt_or_transform():

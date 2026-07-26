@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import tempfile
 
-from concordia.async_runtime import AsyncConcordia, AsyncConfig
-from concordia.domains.router import make_task_universe
-from concordia.staleness import get_policy
+from agentdescent.async_runtime import AsyncAgentDescent, AsyncConfig
+from agentdescent.domains.router import make_task_universe
+from agentdescent.staleness import get_policy
 
 
 def main() -> None:
@@ -27,7 +27,7 @@ def main() -> None:
         with tempfile.TemporaryDirectory() as repo:
             cfg = AsyncConfig(n_workers=6, async_ratio=4, noise=0.15,
                               target_accuracy=0.98, max_seconds=15.0, seed=1)
-            sys = AsyncConcordia(repo, universe, config=cfg,
+            sys = AsyncAgentDescent(repo, universe, config=cfg,
                                  staleness_policy=get_policy(policy_name))
             s = sys.run()
             print(f"{policy_name:>11} {s.final_dev_accuracy:>8.3f} {s.commits:>8} "
@@ -40,7 +40,7 @@ def main() -> None:
         with tempfile.TemporaryDirectory() as repo:
             cfg = AsyncConfig(n_workers=6, async_ratio=ratio, noise=0.1,
                               target_accuracy=0.98, max_seconds=15.0, seed=2)
-            sys = AsyncConcordia(repo, universe, config=cfg,
+            sys = AsyncAgentDescent(repo, universe, config=cfg,
                                  staleness_policy=get_policy("guarded"))
             s = sys.run()
             print(f"{ratio:>12} {s.final_dev_accuracy:>8.3f} {s.discarded_stale:>6} "
