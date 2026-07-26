@@ -67,3 +67,33 @@ agent = LLMAgent(claude(model="claude-haiku-4-5"))
 
 `claude_agent(model=...)` in the evolution engine is just a convenience for
 `LLMAgent(claude(model))` — the provider code lives here, in `concordia.agents`.
+
+## Tool-using agent backends (`concordia.backends`)
+
+A `Completion` maps a prompt to text — enough for most examples. But some tasks
+need the base agent to **navigate documents with tools**, not consume a fixed
+excerpt: [EvoSkill's OfficeQA](algo-evoskill.md) answer is a figure buried in a
+1 MB financial table that must be found by `grep` and then *computed*.
+[`concordia.backends`](https://github.com/Birfy/concordia/blob/main/concordia/backends.py)
+adds that layer — one contract, `AgentBackend.answer(question, document, skills="")`:
+
+| Backend | What it is | Runs where |
+|---|---|---|
+| **`openhands_backend(model, base_url, …)`** | a **real OpenHands agent** (SDK v1.x, `terminal` + `file_editor` tools) driven by any LiteLLM model | Python ≥ 3.12 + `pip install openhands-ai` |
+| **`tool_loop_backend(complete, …)`** | a dependency-free **grep/read ReAct loop** over the document using any `Completion` | anywhere |
+
+```python
+from concordia.backends import openhands_backend, tool_loop_backend
+
+# a real OpenHands agent on DeepSeek (openai/<model> + base_url routes via LiteLLM):
+backend = openhands_backend(model="openai/deepseek-v4-pro",
+                            base_url="https://api.deepseek.com")
+# or a portable local stand-in:
+backend = tool_loop_backend(claude(model="claude-haiku-4-5"))
+
+answer = backend.answer(question, document_text, skills=learned_skills)
+```
+
+EvoSkill selects one with `--backend openhands|toolloop|retrieval`. Measured lift
+with the OpenHands backend + DeepSeek on OfficeQA (66.7% → 79.7%), plus the
+DeepSeek structured-output gotcha, are on the [EvoSkill page](algo-evoskill.md#empirical-results-real-openhands-agent-deepseek-on-officeqa).

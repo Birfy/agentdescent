@@ -113,6 +113,18 @@ Distinct `Diff.ops` keys → **fused**; same key, different value → **resolved
 held-out. That's how your logic composes with the merge machinery for free.
 Full detail: [strategies on the concepts page](concepts.md).
 
+**Strategies implemented in the [algorithm ports](self-evolution-examples.md)** —
+each is a real `Strategy` you can read and reuse:
+
+| Strategy | Example | What the artifact is |
+|---|---|---|
+| `ACEPlaybook` | [ACE](algo-ace.md) | an itemised, incremental-delta context playbook (append-only + grow-and-refine de-dup) |
+| `InstructionSlot` | [GEPA](algo-gepa.md) | one instruction prompt each proposal replaces |
+| `SkillLibraryStrategy` | [EvoSkill](algo-evoskill.md) | a library of `SKILL.md` skills (a proposal appends one) |
+| `SkillDocStrategy` | [SkillOpt](algo-skillopt.md) | one markdown skill doc mutated by bounded `append/insert_after/replace/delete` edits |
+| `AgentDesignStrategy` | [ADAS](algo-adas.md) | one agentic-system design (a control-flow program) each proposal replaces |
+| `HarnessStrategy` | [DGM](algo-dgm.md) | a coding-agent harness's capability set (a proposal adds one) |
+
 ---
 
 ## 3. The parallelism method — `parallel=`

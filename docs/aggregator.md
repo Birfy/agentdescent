@@ -124,3 +124,22 @@ evolve(tasks, reward, agent=agent, aggregator_factory=NaiveAggregator)
 Use this to A/B your own merge/acceptance policy against the reference optimizer
 while keeping the rest of the loop (agents, strategy, parallelism, governance)
 unchanged.
+
+## Example optimizers (from the algorithm ports)
+
+The [self-evolution examples](self-evolution-examples.md) are, at heart, custom
+`aggregator_factory=` optimizers — each swaps the reference greedy hill-climb for
+a paper's own selection/acceptance rule. They are all `AggregatorProtocol`
+implementations you can read and reuse:
+
+| Aggregator | Example | Selection / acceptance rule |
+|---|---|---|
+| `ParetoAggregator` | [GEPA](algo-gepa.md) | per-instance **Pareto frontier** sampling (Algorithm 2); commits the sampled Pareto parent as the dev head |
+| `TopKFrontierAggregator` | [EvoSkill](algo-evoskill.md) | bounded **top-K aggregate frontier**; commits the best member as the head |
+| `StrictGateAggregator` | [SkillOpt](algo-skillopt.md) | **strict held-out-EM gate** + rejected-edit buffer + integer LR budget |
+| `MetaSearchAggregator` | [ADAS](algo-adas.md) | **keep-all archive** with bootstrap-CI fitness (L1 harness) |
+| `DGMArchiveAggregator` | [DGM](algo-dgm.md) | **keep-all archive** + staged eval + `sigmoid(perf)×1/(1+children)` parent selection (L1) |
+
+They share one trick: the archive/frontier/gate sets the dev head to the
+*selected* parent each `step()`, so `evolve()`'s next round mutates it — that is
+how non-greedy selection rides the greedy loop.
