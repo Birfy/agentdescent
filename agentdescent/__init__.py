@@ -53,15 +53,20 @@ from .staleness import (
 from .worker import Worker
 from .orchestrator import AgentDescent, RoundStat, run_fork_baseline
 from .agents import (
+    AgentError,
     Completion,
     Usage,
     claude,
     echo,
     from_callable,
+    claude_code,
+    cli_agent,
+    codex,
     metered,
     openai_compatible,
     with_retries,
 )
+from .agents import WorkspaceAgent
 from .evolution import (
     Agent,
     LLMAgent,
@@ -71,6 +76,7 @@ from .evolution import (
     AppendRules,
     KeyedRules,
     EvolutionResult,
+    RewardContractError,
     RoundInfo,
     evolve,
     claude_agent,
@@ -160,6 +166,11 @@ __all__ = [
     "section_of",
     "shard_round_robin",
     "Completion",
+    "codex",
+    "claude_code",
+    "cli_agent",
+    "WorkspaceAgent",
+    "AgentError",
     "Usage",
     "metered",
     "claude",
@@ -175,6 +186,7 @@ __all__ = [
     "AppendRules",
     "KeyedRules",
     "EvolutionResult",
+    "RewardContractError",
     "RoundInfo",
     "evolve",
     "async_evolve",

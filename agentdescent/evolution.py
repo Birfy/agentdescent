@@ -208,6 +208,36 @@ class KeyedRules:
 # ---------------------------------------------------------------------------
 
 
+# The engine treats a reward of >= 0.999 as a pass and never asks for a proposal,
+# so a scorer on the wrong scale (0-100, say) silently means "everything already
+# passes": nothing is ever learned, while the reported final_reward looks large and
+# healthy. Catch that at the boundary instead.
+_REWARD_TOL = 1e-6
+
+
+class RewardContractError(ValueError):
+    """The caller's ``reward`` returned something outside the documented contract.
+
+    A distinct type so the engine can tell a *caller* mistake (fail fast, the run
+    is meaningless) from a *backend* failure (stop, keep partial results)."""
+
+
+def _checked_reward(value, task: "Task") -> float:
+    try:
+        r = float(value)
+    except (TypeError, ValueError):
+        raise RewardContractError(
+            f"reward(task={task.id!r}, ...) returned {value!r}; it must return a "
+            "number in [0, 1] (1.0 = solved)") from None
+    if not (0.0 - _REWARD_TOL) <= r <= (1.0 + _REWARD_TOL):
+        raise RewardContractError(
+            f"reward(task={task.id!r}, ...) returned {r}, outside [0, 1]. The engine "
+            "treats >= 0.999 as solved, so an out-of-range scorer makes every task "
+            "look solved and nothing is ever learned. Normalise your score "
+            "(e.g. accuracy/100) before returning it.")
+    return min(1.0, max(0.0, r))
+
+
 class _EvalCache:
     def __init__(self) -> None:
         self._d: Dict[Any, float] = {}
@@ -278,7 +308,8 @@ class _Runtime:
     def eval_one(self, artifact: EvolvingArtifact, task: Task) -> float:
         key = (artifact._signature(), task.id)
         return self.cache.get_or_eval(
-            key, lambda: self.reward(task, self.run(artifact.render(), task)))
+            key, lambda: _checked_reward(self.reward(task, self.run(artifact.render(), task)),
+                                        task))
 
 
 # ---------------------------------------------------------------------------
@@ -688,7 +719,7 @@ def evolve(
                 return
             task = by_id[sampler.pick(unit.keys, r)]     # a task from this worker's shard
             output = run(artifact.render(), task)
-            score = reward(task, output)
+            score = _checked_reward(reward(task, output), task)
             sampler.record(task.id, score)               # learn which tasks carry signal
             if score >= 0.999:
                 return
@@ -701,7 +732,8 @@ def evolve(
             # The self-verify rollout doubles the cost of every proposal, so it is
             # opt-out here exactly as it is on the async path.
             if self_verify:
-                after = reward(task, run(artifact.apply(diff).render(), task))
+                after = _checked_reward(
+                    reward(task, run(artifact.apply(diff).render(), task)), task)
                 delta = after - score
             else:
                 delta = 0.0
@@ -738,6 +770,8 @@ def evolve(
                     _run_unit(unit)
 
             reports = aggregator.step()
+        except RewardContractError:
+            raise            # a caller-contract violation: the run is meaningless
         except Exception as e:  # noqa: BLE001 - a rollout backend failure (e.g. an
             # API/credit error) shouldn't lose the run: stop and return partial results.
             run_error = f"{type(e).__name__}: {str(e)[:200]}"
@@ -765,6 +799,8 @@ def evolve(
     # and discard everything already committed.
     try:
         final_reward = final.score(held_out)
+    except RewardContractError:
+        raise
     except Exception as e:  # noqa: BLE001 - report, keep the partial result
         run_error = run_error or f"{type(e).__name__}: {str(e)[:200]}"
         final_reward = history[-1].held_out_reward if history else 0.0

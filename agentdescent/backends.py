@@ -34,7 +34,7 @@ import re
 import tempfile
 from typing import Callable, Protocol, runtime_checkable
 
-from .agents import Completion
+from .agents import Completion, WorkspaceAgent
 
 
 @runtime_checkable
@@ -59,57 +59,102 @@ class _FnBackend:
 # ---------------------------------------------------------------------------
 
 
-def openhands_backend(
-    model: str = "openai/deepseek-v4-pro",
-    *,
-    base_url: str = "https://api.deepseek.com",
-    api_key_env: str = "OPENAI_API_KEY",
-    temperature: float = 0.0,
-    max_iterations: int = 40,
-    doc_filename: str = "document.txt",
-) -> AgentBackend:
-    """A base agent backed by a **real OpenHands agent** (OpenHands SDK v1.x).
+# ---------------------------------------------------------------------------
+# The domain adapter: a document task, on top of ANY agent
+# ---------------------------------------------------------------------------
 
-    The document is written into a scratch workspace and the agent is given the
-    ``terminal`` and ``file_editor`` tools, so it can ``grep`` for the relevant
-    rows, ``view`` the surrounding table, and compute the answer. The LLM is any
-    LiteLLM model; ``openai/<name>`` + ``base_url`` targets an OpenAI-compatible
-    endpoint such as DeepSeek.
 
-    Needs ``pip install openhands-ai`` (Python >= 3.12); the import is lazy so the
-    rest of the framework runs without it. ``api_key_env`` names the env var
-    holding the key (default ``OPENAI_API_KEY``)."""
-    try:
-        from pydantic import SecretStr
-        from openhands.sdk import LLM, Agent, Conversation, Tool
-        from openhands.tools import register_default_tools
-    except Exception as e:  # noqa: BLE001 - surface the missing optional dependency
-        raise RuntimeError(
-            "openhands_backend needs `pip install openhands-ai` on Python >= 3.12. "
-            f"Import failed: {type(e).__name__}: {e}") from e
+_DOC_INSTR = (
+    "{skills}The file {fname} in this directory is a document (often large "
+    "financial tables). Use grep/find to locate the relevant rows and read them; "
+    "if the answer spans several rows (e.g. monthly values for a calendar year), "
+    "compute it. Reply with ONLY the final answer value.\n\nQuestion: {q}"
+)
+_DOC_INSTR_INLINE = (
+    "{skills}Below is a document (often large financial tables). Find the relevant "
+    "rows; if the answer spans several rows, compute it. Reply with ONLY the final "
+    "answer value.\n\nDocument:\n{doc}\n\nQuestion: {q}"
+)
 
-    os.environ.setdefault("OPENHANDS_SUPPRESS_BANNER", "1")
-    register_default_tools(enable_browser=False)   # registers terminal / file_editor
-    key = os.environ.get(api_key_env)
-    if not key:
-        raise RuntimeError(f"set {api_key_env} for openhands_backend")
-    llm = LLM(model=model, base_url=base_url, api_key=SecretStr(key), usage_id="backend",
-              drop_params=True, temperature=temperature, native_tool_calling=True)
 
-    _INSTR = (
-        "{skills}The file {fname} is a document (often large financial tables). "
-        "Use grep/find to locate the relevant rows and `view` to read them; if the "
-        "answer spans multiple rows (e.g. monthly values for a calendar year), "
-        "compute it. Then reply with ONLY the final answer value.\n\nQuestion: {q}")
+def document_agent(completion: Completion, *, doc_filename: str = "document.txt",
+                   inline_chars: int = 200_000) -> AgentBackend:
+    """Turn **any** :data:`~agentdescent.agents.Completion` into an
+    :class:`AgentBackend` for document questions.
 
+    This is the *domain* shape -- ``answer(question, document, skills)`` -- kept
+    deliberately separate from the general contract. Give it whatever agent you
+    have and it does the right thing for that agent:
+
+    * a :class:`~agentdescent.agents.WorkspaceAgent` (OpenHands, Claude Code,
+      Codex, ...) gets a scratch directory with the document written into it, so
+      it can genuinely ``grep`` a 1 MB table;
+    * a plain completion (an API model) gets the document inline in the prompt,
+      truncated to ``inline_chars``.
+
+    ::
+
+        document_agent(openhands(model="openai/deepseek-v4-flash"))
+        document_agent(claude_code())          # same task, different agent
+        document_agent(claude(model="claude-haiku-4-5"))   # no tools: inline
+    """
     def answer(question: str, document: str, *, skills: str = "") -> str:
-        workdir = tempfile.mkdtemp(prefix="agentdescent-oh-")
-        with open(os.path.join(workdir, doc_filename), "w", encoding="utf-8") as f:
-            f.write(document)
-        agent = Agent(llm=llm, tools=[Tool(name="terminal"), Tool(name="file_editor")])
-        conv = Conversation(agent=agent, workspace=workdir, max_iteration_per_run=max_iterations)
         skill_block = f"Learned skills you should apply:\n{skills}\n\n" if skills.strip() else ""
-        conv.send_message(_INSTR.format(skills=skill_block, fname=doc_filename, q=question))
+        if isinstance(completion, WorkspaceAgent):
+            workdir = tempfile.mkdtemp(prefix="agentdescent-doc-")
+            with open(os.path.join(workdir, doc_filename), "w", encoding="utf-8") as f:
+                f.write(document)
+            prompt = _DOC_INSTR.format(skills=skill_block, fname=doc_filename, q=question)
+            return completion.in_workspace(workdir)(prompt).strip()
+        prompt = _DOC_INSTR_INLINE.format(
+            skills=skill_block, doc=document[:inline_chars], q=question)
+        return completion(prompt).strip()
+
+    return _FnBackend(answer)
+
+
+class _OpenHandsAgent:
+    """A real OpenHands agent as a workspace-bindable :data:`Completion`."""
+
+    def __init__(self, model, base_url, api_key_env, temperature, max_iterations,
+                 workspace=None) -> None:
+        self._cfg = (model, base_url, api_key_env, temperature, max_iterations)
+        self.workspace = workspace
+        self._sdk = None
+
+    def in_workspace(self, path: str) -> Completion:
+        return _OpenHandsAgent(*self._cfg, workspace=path)
+
+    def _load(self):
+        if self._sdk is not None:
+            return self._sdk
+        model, base_url, api_key_env, temperature, max_iterations = self._cfg
+        try:
+            from pydantic import SecretStr
+            from openhands.sdk import LLM, Agent, Conversation, Tool
+            from openhands.tools import register_default_tools
+        except Exception as e:  # noqa: BLE001 - surface the optional dependency
+            raise RuntimeError(
+                "openhands() needs `pip install openhands-ai` on Python >= 3.12. "
+                f"Import failed: {type(e).__name__}: {e}") from e
+        os.environ.setdefault("OPENHANDS_SUPPRESS_BANNER", "1")
+        register_default_tools(enable_browser=False)   # terminal / file_editor
+        key = os.environ.get(api_key_env)
+        if not key:
+            raise RuntimeError(f"set {api_key_env} for openhands()")
+        llm = LLM(model=model, base_url=base_url, api_key=SecretStr(key),
+                  usage_id="backend", drop_params=True, temperature=temperature,
+                  native_tool_calling=True)
+        self._sdk = (llm, Agent, Conversation, Tool, max_iterations)
+        return self._sdk
+
+    def __call__(self, prompt: str) -> str:
+        llm, Agent, Conversation, Tool, max_iterations = self._load()
+        workdir = self.workspace or tempfile.mkdtemp(prefix="agentdescent-oh-")
+        agent = Agent(llm=llm, tools=[Tool(name="terminal"), Tool(name="file_editor")])
+        conv = Conversation(agent=agent, workspace=workdir,
+                           max_iteration_per_run=max_iterations)
+        conv.send_message(prompt)
         conv.run()
         texts = []
         for ev in conv.state.events:
@@ -121,7 +166,36 @@ def openhands_backend(
                         texts.append(t)
         return texts[-1].strip() if texts else ""
 
-    return _FnBackend(answer)
+
+def openhands(model: str = "openai/deepseek-v4-pro", *,
+              base_url: str = "https://api.deepseek.com",
+              api_key_env: str = "OPENAI_API_KEY", temperature: float = 0.0,
+              max_iterations: int = 40) -> "_OpenHandsAgent":
+    """A **real OpenHands agent** (SDK v1.x) as a workspace-bindable Completion.
+
+    Same contract as every other agent -- prompt in, text out -- so it drops into
+    ``LLMAgent`` / ``evolve`` like an API model, and ``.in_workspace(path)`` lets a
+    caller stage files for it to work on. The LLM is any LiteLLM model;
+    ``openai/<name>`` + ``base_url`` targets an OpenAI-compatible endpoint such as
+    DeepSeek. Needs ``pip install openhands-ai`` (Python >= 3.12); the import is
+    lazy, so the rest of the framework runs without it.
+    """
+    return _OpenHandsAgent(model, base_url, api_key_env, temperature, max_iterations)
+
+
+def openhands_backend(model: str = "openai/deepseek-v4-pro", *,
+                      base_url: str = "https://api.deepseek.com",
+                      api_key_env: str = "OPENAI_API_KEY", temperature: float = 0.0,
+                      max_iterations: int = 40,
+                      doc_filename: str = "document.txt") -> AgentBackend:
+    """``document_agent(openhands(...))`` -- the document task on OpenHands.
+
+    Kept for the EvoSkill example and existing callers; new code can compose the
+    two directly and swap in any other agent."""
+    return document_agent(openhands(model, base_url=base_url, api_key_env=api_key_env,
+                                    temperature=temperature,
+                                    max_iterations=max_iterations),
+                          doc_filename=doc_filename)
 
 
 # ---------------------------------------------------------------------------

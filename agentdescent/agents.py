@@ -22,9 +22,10 @@ import json
 import os
 import threading
 import time
+import subprocess
 import urllib.request
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Callable, Dict, Optional, Protocol, Sequence, runtime_checkable
 
 Completion = Callable[[str], str]
 
@@ -90,6 +91,118 @@ def metered(completion: Completion, usage: Usage) -> Completion:
         usage.record(seconds=time.time() - t0)
         return out
     return complete
+
+
+# ---------------------------------------------------------------------------
+# Tool-using agents -- still just a Completion
+# ---------------------------------------------------------------------------
+#
+# A coding agent (Claude Code, Codex, OpenHands, aider, ...) differs from an API
+# model in that it *acts* -- runs commands, reads and edits files -- before it
+# answers. But its call contract is the same one: text in, text out. Keeping it a
+# ``Completion`` means every consumer (``LLMAgent``, ``evolve``, the examples)
+# accepts all of them with no special-casing.
+
+
+class AgentError(RuntimeError):
+    """A tool-using agent failed; the message carries its stderr / exit status."""
+
+
+@runtime_checkable
+class WorkspaceAgent(Protocol):
+    """A :data:`Completion` that can additionally be bound to a directory.
+
+    ``Completion`` deliberately stays ``prompt -> text`` for everything. But an
+    agent that *acts* often needs a place to act in, and a caller that stages
+    files (a document to grep, a repo to patch) needs to say where. This is that
+    one extra capability, kept optional so plain API models never implement it::
+
+        agent = claude_code()
+        answer = agent.in_workspace("/tmp/task-17")("summarise report.txt")
+
+    Consumers should feature-detect it (``isinstance(x, WorkspaceAgent)``) and
+    fall back to putting the material in the prompt.
+    """
+
+    def __call__(self, prompt: str) -> str: ...
+
+    def in_workspace(self, path: str) -> Completion: ...
+
+
+class _CliAgent:
+    """A command-line agent: a Completion that can be rebound to a workspace."""
+
+    def __init__(self, command, *, workspace=None, via_stdin=False,
+                 timeout=600.0, env=None, usage=None) -> None:
+        if not command:
+            raise ValueError("cli_agent needs a non-empty command")
+        self.command, self.workspace, self.via_stdin = list(command), workspace, via_stdin
+        self.timeout, self.env, self.usage = timeout, env, usage
+
+    def in_workspace(self, path: str) -> "Completion":
+        return _CliAgent(self.command, workspace=path, via_stdin=self.via_stdin,
+                         timeout=self.timeout, env=self.env, usage=self.usage)
+
+    def __call__(self, prompt: str) -> str:
+        argv = list(self.command) if self.via_stdin else [*self.command, prompt]
+        t0 = time.time()
+        try:
+            proc = subprocess.run(
+                argv, input=prompt if self.via_stdin else None,
+                capture_output=True, text=True, timeout=self.timeout,
+                cwd=self.workspace,
+                env={**os.environ, **self.env} if self.env else None,
+            )
+        except FileNotFoundError as e:
+            raise AgentError(
+                f"{self.command[0]!r} is not installed or not on PATH") from e
+        except subprocess.TimeoutExpired as e:
+            if self.usage is not None:
+                self.usage.record(seconds=time.time() - t0, failed=True)
+            raise AgentError(f"{self.command[0]} exceeded timeout={self.timeout}s") from e
+        if self.usage is not None:
+            self.usage.record(seconds=time.time() - t0, failed=proc.returncode != 0)
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout or "").strip()[:400] or "no output"
+            raise AgentError(f"{self.command[0]} exited {proc.returncode}: {detail}")
+        return proc.stdout.strip()
+
+
+def cli_agent(command: Sequence[str], *, workspace: Optional[str] = None,
+              via_stdin: bool = False, timeout: float = 600.0,
+              env: Optional[Dict[str, str]] = None,
+              usage: Optional[Usage] = None) -> "WorkspaceAgent":
+    """Run any **command-line** coding agent as a :data:`Completion`.
+
+    ``command`` is the argv prefix; the prompt is appended as the final argument,
+    or written to stdin when ``via_stdin`` is set. Whatever the agent writes to
+    stdout is the answer.
+
+    ::
+
+        cli_agent(["claude", "-p"])                        # Claude Code, print mode
+        cli_agent(["codex", "exec"])                       # Codex CLI
+        cli_agent(["claude", "-p"]).in_workspace("/tmp/w") # act inside a directory
+
+    ``timeout`` is not optional in spirit: an agent that hangs would otherwise
+    stall the round it belongs to (see ``evolve(round_timeout=)``). Failures raise
+    :class:`AgentError` carrying the agent's own stderr rather than a bare exit
+    code.
+    """
+    return _CliAgent(command, workspace=workspace, via_stdin=via_stdin,
+                     timeout=timeout, env=env, usage=usage)
+
+
+def claude_code(*, workspace: Optional[str] = None, extra_args: Sequence[str] = (),
+                **kwargs) -> Completion:
+    """Claude Code in non-interactive print mode, as a :data:`Completion`."""
+    return cli_agent(["claude", "-p", *extra_args], workspace=workspace, **kwargs)
+
+
+def codex(*, workspace: Optional[str] = None, extra_args: Sequence[str] = (),
+          **kwargs) -> Completion:
+    """OpenAI Codex CLI in non-interactive exec mode, as a :data:`Completion`."""
+    return cli_agent(["codex", "exec", *extra_args], workspace=workspace, **kwargs)
 
 
 def from_callable(fn: Completion) -> Completion:

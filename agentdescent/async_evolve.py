@@ -38,7 +38,7 @@ from typing import Callable, Dict, List, Optional
 
 from .evolution import (
     Agent, EvolutionResult, Propose, Reward, RoundInfo, Run, Strategy, Task,
-    _build_engine,
+    _build_engine, _checked_reward, RewardContractError,
 )
 from .aggregator import AggregatorConfig
 from .evolvable import EvidenceCard, vv_staleness
@@ -167,6 +167,7 @@ def async_evolve(
     history: List[RoundInfo] = []
     errors: List[Optional[str]] = [None]      # first backend failure seen (diagnostic)
     died = [False]                            # True only if the run ENDED on failure
+    contract_error: List[Optional[BaseException]] = [None]   # caller bug -> re-raise
     n_live = sum(1 for s in shards if s)      # workers that will actually start
     live = [n_live]                           # workers still running
     max_worker_errors = 3                     # consecutive failures before retiring one
@@ -201,7 +202,7 @@ def async_evolve(
             i += 1
             try:
                 output = eng.run(artifact.render(), task)
-                score = eng.reward(task, output)
+                score = _checked_reward(eng.reward(task, output), task)
                 sampler.record(task.id, score)     # learn which tasks carry signal
                 if score < 0.999:
                     proposal = eng.propose(artifact.render(), task, output, score)
@@ -214,7 +215,8 @@ def async_evolve(
                             # only score the candidate on held-out (e.g. EvoSkill) pass
                             # self_verify=False to skip this extra rollout.
                             if self_verify:
-                                after = eng.reward(task, eng.run(artifact.apply(diff).render(), task))
+                                after = _checked_reward(
+                                    eng.reward(task, eng.run(artifact.apply(diff).render(), task)), task)
                                 delta = after - score
                             else:
                                 delta = 0.0
@@ -224,6 +226,15 @@ def async_evolve(
                                 trajectory_refs=[task])
                             with intake_lock:
                                 intake.append(card)
+            except RewardContractError as e:
+                # a caller-contract violation, not a flaky backend: stop at once.
+                with counter_lock:
+                    if errors[0] is None:
+                        errors[0] = f"{type(e).__name__}: {e}"
+                    died[0] = True
+                    contract_error[0] = e
+                stop.set()
+                return
             except Exception as e:  # noqa: BLE001 - a backend failure (API error,
                 # rate limit, credit exhaustion) must not silently kill the run.
                 # Record it, tolerate transient ones, and retire only this worker
@@ -335,6 +346,8 @@ def async_evolve(
             "rollouts are abandoned (results already merged are kept)",
             RuntimeWarning, stacklevel=2)
 
+    if contract_error[0] is not None:
+        raise contract_error[0]
     final = eng.ledger.snapshot(Ledger.DEV).get(eng.artifact_id)
     # Scoring the final artifact runs the agent too, so a dead backend must not
     # raise out of the driver -- that would discard the work already committed.

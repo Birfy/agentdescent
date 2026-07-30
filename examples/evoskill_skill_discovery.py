@@ -680,9 +680,12 @@ def main() -> None:
     p.add_argument("--iterations", type=int, default=6)
     p.add_argument("--frontier", type=int, default=3)
     p.add_argument("--backend", default="retrieval",
-                   choices=["retrieval", "toolloop", "openhands"],
+                   choices=["retrieval", "toolloop", "openhands", "claude-code", "codex"],
                    help="base agent: passive keyword retriever (default), a local "
-                        "grep/read ReAct loop, or a real OpenHands tool-using agent")
+                        "grep/read ReAct loop, or a real tool-using agent "
+                        "(OpenHands SDK, Claude Code CLI, Codex CLI) -- all of which "
+                        "are the same Completion contract, staged into a workspace "
+                        "by backends.document_agent")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--async", dest="asynchronous", action="store_true",
                    help="run barrier-free (async_evolve)")
@@ -742,6 +745,15 @@ def main() -> None:
                 else os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"))
         backend = openhands_backend(model=oh_model, base_url=base)
         print(f"Backend  : real OpenHands agent (terminal + file_editor) on {oh_model}")
+    elif args.backend in ("claude-code", "codex"):
+        # Same document task, a different tool-using agent -- possible because every
+        # backend is a Completion and document_agent stages a workspace for any of
+        # them (see docs/agents.md).
+        from agentdescent.agents import claude_code, codex as codex_agent
+        from agentdescent.backends import document_agent
+        cli = claude_code() if args.backend == "claude-code" else codex_agent()
+        backend = document_agent(cli)
+        print(f"Backend  : {args.backend} CLI agent (workspace-staged document)")
     elif args.backend == "toolloop":
         from agentdescent.backends import tool_loop_backend
         backend = tool_loop_backend(completion)

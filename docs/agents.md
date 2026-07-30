@@ -97,35 +97,83 @@ agent = LLMAgent(claude(model="claude-haiku-4-5"))
 `claude_agent(model=...)` in the evolution engine is just a convenience for
 `LLMAgent(claude(model))` — the provider code lives here, in `agentdescent.agents`.
 
-## Tool-using agent backends (`agentdescent.backends`)
+## Tool-using agents — the same contract
 
-A `Completion` maps a prompt to text — enough for most examples. But some tasks
-need the base agent to **navigate documents with tools**, not consume a fixed
-excerpt: [EvoSkill's OfficeQA](algo-evoskill.md) answer is a figure buried in a
-1 MB financial table that must be found by `grep` and then *computed*.
-[`agentdescent.backends`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/backends.py)
-adds that layer — one contract, `AgentBackend.answer(question, document, skills="")`:
-
-| Backend | What it is | Runs where |
-|---|---|---|
-| **`openhands_backend(model, base_url, …)`** | a **real OpenHands agent** (SDK v1.x, `terminal` + `file_editor` tools) driven by any LiteLLM model | Python ≥ 3.12 + `pip install openhands-ai` |
-| **`tool_loop_backend(complete, …)`** | a dependency-free **grep/read ReAct loop** over the document using any `Completion` | anywhere |
+An agent that *acts* (Claude Code, Codex, OpenHands, aider, …) differs from an API
+model in that it runs commands and edits files before answering. Its **call
+contract is identical**: text in, text out. So they are all `Completion`s, and
+everything that takes a completion takes all of them with no special-casing:
 
 ```python
-from agentdescent.backends import openhands_backend, tool_loop_backend
+from agentdescent.agents import claude, openai_compatible, claude_code, codex, cli_agent
+from agentdescent.backends import openhands
 
-# a real OpenHands agent on DeepSeek (openai/<model> + base_url routes via LiteLLM):
-backend = openhands_backend(model="openai/deepseek-v4-pro",
-                            base_url="https://api.deepseek.com")
-# or a portable local stand-in:
-backend = tool_loop_backend(claude(model="claude-haiku-4-5"))
+claude(model="claude-haiku-4-5")                    # API model
+openai_compatible(model="deepseek-v4-flash")        # any OpenAI-compatible endpoint
+claude_code()                                        # Claude Code, print mode
+codex()                                              # Codex CLI
+openhands(model="openai/deepseek-v4-flash")          # OpenHands SDK
+cli_agent(["my-agent", "--json"])                    # anything with a CLI
+```
 
+| Factory | What it runs | Needs |
+|---|---|---|
+| `claude(...)` / `openai_compatible(...)` | one model call | `anthropic` / nothing |
+| **`cli_agent(command, ...)`** | **any command-line agent** — prompt on argv or stdin, stdout is the answer | that CLI on `PATH` |
+| `claude_code()` / `codex()` | thin presets over `cli_agent` | `claude` / `codex` CLI |
+| `openhands(...)` | a real OpenHands agent (terminal + file_editor) | `openhands-ai`, Python ≥ 3.12 |
+
+Failures raise **`AgentError`** carrying the agent's own stderr, not a bare exit
+code, and every CLI agent takes a `timeout` — an agent that hangs would otherwise
+stall the round it belongs to (see [`round_timeout`](evolution.md#every-knob-is-a-module)).
+
+### Giving an agent somewhere to work — `WorkspaceAgent`
+
+`Completion` stays `prompt -> text` for everything. An acting agent often needs a
+*place* to act, and a caller that stages files needs to say where, so tool-using
+agents add exactly one optional capability:
+
+```python
+agent = claude_code()
+agent.in_workspace("/tmp/task-17")("summarise report.txt")   # runs with that cwd
+```
+
+Feature-detect it rather than assuming — plain API models deliberately do not
+implement it:
+
+```python
+from agentdescent.agents import WorkspaceAgent
+
+if isinstance(agent, WorkspaceAgent):
+    answer = agent.in_workspace(staged_dir)(prompt)   # it can grep real files
+else:
+    answer = agent(prompt_with_material_inlined)      # fall back to the prompt
+```
+
+### Domain adapters, kept separate — `document_agent`
+
+Some tasks need a *shape*, not just a prompt: [EvoSkill's OfficeQA](algo-evoskill.md)
+answer is a figure inside a 1 MB table that must be found by `grep` and then
+computed. That shape — `answer(question, document, skills)` — is a **domain
+adapter** built on the general contract, not the contract itself:
+
+```python
+from agentdescent.backends import document_agent
+
+backend = document_agent(openhands(model="openai/deepseek-v4-flash"))
+backend = document_agent(claude_code())                       # same task, other agent
+backend = document_agent(claude(model="claude-haiku-4-5"))    # no tools -> inline
 answer = backend.answer(question, document_text, skills=learned_skills)
 ```
 
+It adapts to what it is given: a `WorkspaceAgent` gets a scratch directory with the
+document written into it (so it can genuinely grep a huge table), while a plain
+completion gets the document inline, truncated. That is why the same OfficeQA
+example runs on OpenHands, Claude Code, or a bare API model.
+
 EvoSkill selects one with `--backend openhands|toolloop|retrieval`; the measured
-gated lift with the OpenHands backend + DeepSeek on OfficeQA (**58.0% → 65.7%**) is
-on the [EvoSkill page](algo-evoskill.md#empirical-results-real-openhands-agent-deepseek-on-officeqa).
+gated lift with OpenHands + DeepSeek (**58.0% → 65.7%**) is on the
+[EvoSkill page](algo-evoskill.md#empirical-results-real-openhands-agent-deepseek-on-officeqa).
 
 ### Running the OpenHands backend
 

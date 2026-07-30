@@ -7,6 +7,31 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **One contract for every backend.** The framework had two unrelated agent
+  interfaces: `Completion` (`prompt -> text`) for API models and
+  `AgentBackend.answer(question, document, skills)` for tool-using ones — a
+  signature with three *domain* concepts baked into what should be the general
+  interface. Now every backend is a `Completion`:
+  `cli_agent(command)` runs **any** command-line agent (prompt on argv or stdin,
+  stdout is the answer), with `claude_code()` and `codex()` as presets and
+  `openhands()` as the SDK equivalent. Failures raise `AgentError` carrying the
+  agent's own stderr, and each takes a `timeout`.
+- **`WorkspaceAgent`** — the one optional capability an *acting* agent needs:
+  `agent.in_workspace(path)` returns a completion bound to that directory. Plain
+  API models deliberately do not implement it, so consumers feature-detect.
+- **`backends.document_agent(completion)`** — the OfficeQA shape is now an explicit
+  *domain adapter* over the general contract, and it adapts to what it is given: a
+  workspace agent gets a scratch directory with the document staged (so it can
+  really grep a 1 MB table), a plain completion gets it inline and truncated. The
+  same example therefore runs on OpenHands, Claude Code, Codex, or a bare API
+  model — `evoskill --backend claude-code|codex` are now available.
+- **The reward contract is enforced.** `reward` must return `[0, 1]`; the engine
+  treats `>= 0.999` as solved, so a scorer on a 0-100 scale silently made *every*
+  task look solved — `propose()` was never called, nothing was learned, and
+  `final_reward` came back as a healthy-looking `85.0`. Out-of-range or
+  non-numeric returns now raise `RewardContractError` naming the offending task
+  and what to do, on both engine paths, and it propagates rather than being
+  reported as a backend failure (it is a caller bug, so the run is meaningless).
 - **`evolve(round_timeout=...)`** — cap how long a round waits for its concurrent
   workers. The aggregator *is* the barrier, so one hung rollout previously stalled
   the run indefinitely; stragglers are now abandoned (their work continues in the
