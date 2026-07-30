@@ -25,6 +25,14 @@ All notable changes to AgentDescent are documented here. The format follows
   really grep a 1 MB table), a plain completion gets it inline and truncated. The
   same example therefore runs on OpenHands, Claude Code, Codex, or a bare API
   model — `evoskill --backend claude-code|codex` are now available.
+- **Acceptance decisions in a round were correlated by a shared Monte-Carlo seed.**
+  `prob_improvement` is an MC estimate (sd ~0.003 at 4000 samples) and was seeded
+  from the artifact version alone, so every candidate in a round drew the *same*
+  stream. On a knife-edge case (measured: true P = 0.748 against a 0.750 threshold,
+  where 26 of 60 seeds accept) that meant one draw accepted every marginal diff and
+  another rejected all of them, instead of deciding them independently. The seed now
+  includes the candidate's diff id via `stable_hash`, so draws decorrelate while
+  runs stay reproducible across processes.
 - **`document_agent` no longer truncates in silence.** Validating the inline path
   on real OfficeQA documents (266–390 KB) gave 1/3 correct with two *empty*
   answers: at the default `inline_chars` about half of each document never reached

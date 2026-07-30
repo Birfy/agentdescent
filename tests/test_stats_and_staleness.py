@@ -41,3 +41,45 @@ def test_ucb_prioritizes_unexplored():
     unexplored = ucb_score(value=0.5, n_s=1, total=1000)
     assert unexplored > explored
     assert ucb_score(0.5, 0, 1000) == float("inf")
+
+
+def test_acceptance_mc_seed_varies_per_candidate_but_stays_reproducible():
+    """A shared MC seed decided a round's marginal candidates as a block.
+
+    prob_improvement is a Monte-Carlo estimate (sd ~0.003 at 4000 samples). Seeding
+    it from the artifact version alone gave every candidate in the round the *same*
+    stream, so on knife-edge cases one draw accepted them all and another rejected
+    them all. Seeding from (version, diff_id) decorrelates the draws while keeping
+    the run reproducible.
+    """
+    from agentdescent.evolvable import stable_hash
+    from agentdescent.stats import BetaPosterior, prob_improvement
+
+    def knife():
+        c, b = BetaPosterior(), BetaPosterior()
+        for _ in range(6):
+            c.update(True)
+        for _ in range(4):
+            b.update(True)
+        for _ in range(3):
+            b.update(False)
+        return c, b
+
+    c, b = knife()
+    seeds = [stable_hash((64, f"w{i}:rule")) & 0x7FFFFFFF for i in range(5)]
+    ests = [prob_improvement(c, b, seed=s) for s in seeds]
+    assert len(set(ests)) > 1, "per-candidate seeds must give independent draws"
+
+    # ...and the same candidate always gets the same estimate
+    again = [prob_improvement(c, b, seed=s) for s in seeds]
+    assert ests == again
+
+
+def test_aggregator_seeds_acceptance_from_the_candidate():
+    import inspect
+
+    from agentdescent.aggregator import Aggregator
+
+    src = inspect.getsource(Aggregator._process)
+    assert "stable_hash" in src, "the MC seed must include the candidate identity"
+    assert "seed=artifact.version)" not in src

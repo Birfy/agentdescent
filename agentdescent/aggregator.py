@@ -24,7 +24,9 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
-from .evolvable import Diff, EvidenceCard, Evolvable, VersionVector, vv_staleness
+from .evolvable import (
+    Diff, EvidenceCard, Evolvable, VersionVector, stable_hash, vv_staleness,
+)
 from .governance import Layer, classify, assert_mutable
 from .ledger import CASConflict, Ledger
 from .scheduler import AuditScheduler
@@ -343,7 +345,14 @@ class Aggregator:
                 candidate_post.observe_delta(card.before_after_delta)
 
         delta = annealed_delta(self.config.base_delta, artifact.version)
-        p_improve = prob_improvement(candidate_post, baseline_post, seed=artifact.version)
+        # Seed from (version, candidate) rather than the version alone. A shared
+        # seed made the ~0.003 Monte-Carlo error identical for every candidate in
+        # the round, so on knife-edge cases the draw decided them as a block --
+        # one stream accepted every marginal diff, another rejected all of them.
+        # stable_hash keeps this reproducible across processes.
+        p_improve = prob_improvement(
+            candidate_post, baseline_post,
+            seed=stable_hash((artifact.version, best_diff.diff_id)) & 0x7FFFFFFF)
 
         # -- audit (section 5.3): the optimizer audits its own decision ------
         _, uncertainty = self.verifier.learned_eval(best_state)
