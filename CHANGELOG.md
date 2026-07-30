@@ -58,6 +58,12 @@ All notable changes to AgentDescent are documented here. The format follows
   ever mutated — but `async_evolve` burned its whole `max_seconds` budget first and
   then reported the violation through the *backend failure* channel. Both paths now
   check governance before the first rollout and raise `GovernanceError` at once.
+- **The quoted efficiency numbers were stale.** The tables cited a specific older
+  run (7.92x at 8 workers, 2.53x async); after the ledger read optimisation the
+  measured figures are ~8.1x and 2.57–2.93x. Updated, and the pages now say to read
+  scaling efficiency as "≈1.0 within noise" rather than as a precise constant —
+  values slightly above 1.0 come from the single-worker baseline absorbing the same
+  fixed start-up inside its timed window, not from a superlinear effect.
 - **`--provider glm` was misleading** — it means "any OpenAI-compatible endpoint",
   and every real run in these docs used it to reach *DeepSeek*. Examples now accept
   `--provider openai` with `glm` kept as an alias, and the help text says so.

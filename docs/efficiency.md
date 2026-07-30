@@ -23,16 +23,26 @@ and count rollouts. Throughput (rollouts/sec) should scale with N; **efficiency
 
 ```
  workers  rollouts  rollouts/s  speedup  efficiency
-       1       262         131     1.00        1.00
-       2       525         262     2.00        1.00
-       4      1050         518     3.96        0.99
-       8      2088        1035     7.92        0.99
+       1       230         115     1.00        1.00
+       2       465         231     2.02        1.01
+       4       940         466     4.07        1.02
+       8      1880         935     8.09        1.01
 ```
 
-**Near-linear scaling** (efficiency ≥ 0.99 through 8 workers). The rollout stage
-holds no global lock, so workers overlap freely; contention only appears when
-they hit the ledger (kept rare here via a large `async_ratio`). This is the
-`O(N / T_iter)` throughput the design targets versus serial RSI's `O(1 / T_iter)`.
+**Near-linear scaling through 8 workers.** The rollout stage holds no global lock,
+so workers overlap freely; contention only appears when they hit the ledger (rare
+here via a large `async_ratio`, and much cheaper since ledger reads stopped
+forking a `git checkout`). This is the `O(N / T_iter)` throughput the design
+targets versus serial RSI's `O(1 / T_iter)`.
+
+!!! note "Read efficiency as ≈1.0, not as a precise constant"
+    Across repeated runs the 8-worker figure lands between **8.05x and 8.16x**
+    (efficiency 1.01–1.02), and the 4-worker one between 3.96x and 4.13x. Values
+    slightly *above* 1.0 are not a superlinear effect: the single-worker baseline
+    absorbs the same fixed start-up inside its timed window, which depresses the
+    denominator by a percent or two. The honest reading is "linear to within
+    measurement noise at this scale", and the absolute rollout counts depend on the
+    machine — rerun it rather than quoting these.
 
 ---
 
@@ -49,14 +59,14 @@ ways:
 
 ```
             mode  wall-clock  rollouts/s  utilization
-    sync barrier       1.45s         111         40%
-async (no barrier)       0.57s         280         100%
+    sync barrier       1.41s         114         36%
+async (no barrier)       0.51s         316        100%
 
-async speedup: 2.53x  (the barrier idles fast workers waiting for the tail every round)
+async speedup: 2.78x  (the barrier idles fast workers waiting for the tail every round)
 ```
 
-The barrier runs at **40% utilization** — 60% of worker-time is spent idling for
-the tail — while the async pipeline stays at **100%**, a **2.5× wall-clock
+The barrier runs at **~36–40% utilization** — most worker-time is spent idling for
+the tail — while the async pipeline stays at **100%**, a **~2.6–2.9× wall-clock
 speedup**. This is the async-RL *partial-rollout / no-barrier* result ported to
 RSI: with heavy-tailed agentic rollouts, the synchronous barrier is dominated by
 its slowest worker every single round.
@@ -68,5 +78,6 @@ rebase machinery and the Full / Guarded / Reflective policies; see
 
 !!! note
     Experiment 2 uses random latencies, so exact numbers vary run to run, but the
-    effect is robust (~2–2.5× and ~40% barrier utilization). The ratio tracks
+    effect is robust (measured 2.57–2.93x across runs, ~36–40% barrier
+    utilization). The ratio tracks
     `E[max of N] / E[latency]` — the heavier the tail, the larger the async win.

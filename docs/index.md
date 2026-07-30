@@ -81,7 +81,7 @@ The one place the analogy *must* break defines the whole system:
 -   :material-speedometer: **[Efficiency experiments](efficiency.md)**
 
     Measured parallel scaling (near-linear to 8 workers) and async tail-hiding
-    (2.5× over a sync barrier).
+    (~2.6-2.9× over a sync barrier).
 
 </div>
 

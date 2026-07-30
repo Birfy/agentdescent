@@ -171,8 +171,8 @@ boundary is documented, never hidden.
 ## Efficiency (measured)
 
 [`examples/efficiency.py`](https://github.com/Birfy/agentdescent/blob/main/examples/efficiency.py) — **parallel scaling** is
-near-linear (efficiency ≥ 0.99 through 8 workers, 7.9× speedup), and the
-**async pipeline** is **2.5× faster than a sync barrier** under heavy-tailed
+near-linear through 8 workers (~8.1x, efficiency ≈1.0), and the
+**async pipeline** is **~2.6-2.9× faster than a sync barrier** under heavy-tailed
 rollout latency (100% vs 40% worker utilization). See
 [docs/efficiency.md](https://github.com/Birfy/agentdescent/blob/main/docs/efficiency.md).
 
