@@ -5,6 +5,7 @@
 > are the gradients** and **the aggregator is the optimizer**.
 
 [![PyPI](https://img.shields.io/pypi/v/agentdescent)](https://pypi.org/project/agentdescent/)
+[![tests](https://github.com/Birfy/agentdescent/actions/workflows/tests.yml/badge.svg)](https://github.com/Birfy/agentdescent/actions/workflows/tests.yml)
 [![docs](https://img.shields.io/badge/docs-mkdocs--material-1f6feb)](https://birfy.github.io/agentdescent/)
 [![CI](https://github.com/Birfy/agentdescent/actions/workflows/docs.yml/badge.svg)](https://github.com/Birfy/agentdescent/actions/workflows/docs.yml)
 [![python](https://img.shields.io/badge/python-%E2%89%A53.9-1f6feb)](https://www.python.org/)
