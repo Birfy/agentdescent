@@ -288,6 +288,10 @@ class EvolutionResult:
     final_reward: float
     history: List[RoundInfo]
     ledger_log: List[str]
+    #: ``None`` on a clean run; otherwise ``"<ExcType>: <message>"`` describing the
+    #: backend failure that ended the run early. The artifact evolved so far is
+    #: still returned -- check this to tell "converged" from "died".
+    error: Optional[str] = None
 
 
 @dataclass
@@ -453,6 +457,7 @@ def evolve(
     held_out, by_id, train_ids = eng.held_out, eng.by_id, eng.train_ids
 
     history: List[RoundInfo] = []
+    run_error: Optional[str] = None
     for r in range(rounds):
         snap = ledger.snapshot(Ledger.DEV)
         artifact = snap.get(artifact_id)
@@ -493,8 +498,9 @@ def evolve(
             reports = aggregator.step()
         except Exception as e:  # noqa: BLE001 - a rollout backend failure (e.g. an
             # API/credit error) shouldn't lose the run: stop and return partial results.
+            run_error = f"{type(e).__name__}: {str(e)[:200]}"
             if verbose:
-                print(f"round {r:>3}  stopped early: {type(e).__name__}: {str(e)[:120]}")
+                print(f"round {r:>3}  stopped early: {run_error[:140]}")
             break
         committed = sum(1 for x in reports if x.committed_version is not None)
         rejected = sum(1 for x in reports if x.committed_version is None)
@@ -508,4 +514,4 @@ def evolve(
     final = ledger.snapshot(Ledger.DEV).get(artifact_id)
     return EvolutionResult(state=dict(final.state), rendered=final.render(),
                            final_reward=final.score(held_out), history=history,
-                           ledger_log=ledger.log(Ledger.DEV, limit=40))
+                           ledger_log=ledger.log(Ledger.DEV, limit=40), error=run_error)

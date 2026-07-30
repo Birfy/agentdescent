@@ -242,10 +242,28 @@ result.state          # its {key: value} state
 result.final_reward   # held-out reward of the final artifact
 result.history        # per-round: RoundInfo(round, held_out_reward, n_items, committed, rejected)
 result.ledger_log     # the git commit log of accepted merges
+result.error          # None on a clean run; "<ExcType>: <msg>" if a backend failure ended it
 ```
 
 The engine returns **partial results** if the model backend fails mid-run (rate
 limit, credit exhaustion) — progress isn't lost.
+
+!!! warning "Always check `result.error`"
+    A run that dies after two rounds and a run that converges both return an
+    `EvolutionResult`. `error` is what distinguishes them — it is `None` only on a
+    clean run. Treating a failed run as a converged one is the easiest way to
+    misread an experiment:
+
+    ```python
+    if result.error:
+        print(f"incomplete: {result.error}")   # partial artifact still usable
+    ```
+
+**Backend failures are tolerated, not fatal.** In the async runtime a transient
+error (a rate limit, a flaky endpoint) is retried with exponential backoff; a
+worker retires only after `3` *consecutive* failures, and the run ends when every
+worker has retired — so one hiccup in one worker no longer kills a long run. The
+first failure seen is always reported through `result.error`.
 
 ---
 

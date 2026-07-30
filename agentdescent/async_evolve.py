@@ -97,12 +97,17 @@ def async_evolve(
     counter = [0]
     counter_lock = threading.Lock()
     history: List[RoundInfo] = []
+    errors: List[Optional[str]] = [None]      # first backend failure seen (reported)
+    n_live = sum(1 for s in shards if s)      # workers that will actually start
+    live = [n_live]                           # workers still running
+    max_worker_errors = 3                     # consecutive failures before retiring one
 
     def _worker(wid: int, shard: List[Task]) -> None:
         snap = eng.ledger.snapshot(Ledger.DEV)
         base_v = snap.version.get(eng.artifact_id, 0)
         artifact = snap.get(eng.artifact_id)
         i = 0
+        consecutive = 0            # consecutive backend failures for this worker
         while not stop.is_set():
             # Lag budget bounds *un-merged* work too, not just committed drift.
             # Before head first advances (no commit yet) the version check can't
@@ -147,9 +152,26 @@ def async_evolve(
                                 trajectory_refs=[task])
                             with intake_lock:
                                 intake.append(card)
-            except Exception:  # noqa: BLE001 - a backend failure stops the pipeline
-                stop.set()
-                return
+            except Exception as e:  # noqa: BLE001 - a backend failure (API error,
+                # rate limit, credit exhaustion) must not silently kill the run.
+                # Record it, tolerate transient ones, and retire only this worker
+                # once they persist; the run ends when every worker has retired.
+                with counter_lock:
+                    if errors[0] is None:
+                        errors[0] = f"{type(e).__name__}: {str(e)[:200]}"
+                consecutive += 1
+                if verbose:
+                    print(f"worker {wid}  error {consecutive}/{max_worker_errors}: "
+                          f"{type(e).__name__}: {str(e)[:100]}")
+                if consecutive >= max_worker_errors:
+                    with counter_lock:
+                        live[0] -= 1
+                        if live[0] <= 0:          # every worker retired -> end the run
+                            stop.set()
+                    return
+                time.sleep(min(2.0 ** consecutive, 10.0))    # backoff, then retry
+                continue
+            consecutive = 0                                   # a clean rollout resets
             with counter_lock:
                 counter[0] += 1
                 if max_iters is not None and counter[0] >= max_iters:
@@ -191,9 +213,20 @@ def async_evolve(
             stop.set()
 
     def _merger() -> None:
-        while not stop.is_set():
-            _drain_and_merge()
-        _drain_and_merge()               # final drain after stop
+        # The merger is the only writer; if it dies the workers would keep filling a
+        # buffer nobody drains and the run would spin to max_seconds with no reason
+        # given. Record the failure and stop the run instead.
+        try:
+            while not stop.is_set():
+                _drain_and_merge()
+            _drain_and_merge()           # final drain after stop
+        except Exception as e:  # noqa: BLE001 - surface, don't hang
+            with counter_lock:
+                if errors[0] is None:
+                    errors[0] = f"{type(e).__name__}: {str(e)[:200]}"
+            if verbose:
+                print(f"merger stopped: {type(e).__name__}: {str(e)[:120]}")
+            stop.set()
 
     workers = [threading.Thread(target=_worker, args=(w, s), daemon=True)
                for w, s in enumerate(shards) if s]
@@ -209,7 +242,18 @@ def async_evolve(
         t.join(timeout=2.0)
     merger.join(timeout=10.0)
 
+    if verbose and errors[0]:
+        print(f"async run ended with a backend failure: {errors[0][:140]}")
     final = eng.ledger.snapshot(Ledger.DEV).get(eng.artifact_id)
+    # Scoring the final artifact runs the agent too, so a dead backend must not
+    # raise out of the driver -- that would discard the work already committed.
+    try:
+        final_reward = final.score(eng.held_out)
+    except Exception as e:  # noqa: BLE001 - report, keep the partial result
+        if errors[0] is None:
+            errors[0] = f"{type(e).__name__}: {str(e)[:200]}"
+        final_reward = history[-1].held_out_reward if history else 0.0
     return EvolutionResult(state=dict(final.state), rendered=final.render(),
-                           final_reward=final.score(eng.held_out), history=history,
-                           ledger_log=eng.ledger.log(Ledger.DEV, limit=40))
+                           final_reward=final_reward, history=history,
+                           ledger_log=eng.ledger.log(Ledger.DEV, limit=40),
+                           error=errors[0])

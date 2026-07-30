@@ -11,8 +11,16 @@ All notable changes to AgentDescent are documented here. The format follows
 - Test coverage for the async SGD path: `SgdSkillAggregator` keep/rollback,
   `eval_at_end`, batch-level propose, and the sync frontier gate.
 - PyPI Trusted-Publishing workflow (`publish.yml`): OIDC release, no stored token.
+- `EvolutionResult.error` — `None` on a clean run, otherwise the backend failure
+  that ended it early, so callers can tell "converged" from "died".
 
 ### Fixed
+- **Async backend failures were silent and fatal.** One exception in one worker
+  called `stop.set()` and ended the whole run with no message, and the final
+  held-out scoring (plus the merger loop) could raise straight out of the driver,
+  discarding committed work. Failures are now retried with backoff, a worker
+  retires only after 3 consecutive errors, the run ends when all workers retire,
+  and the cause is reported via the new `EvolutionResult.error`.
 - Bare `pytest` (fresh clone / CI) failed with `ModuleNotFoundError` because the
   repo root was not on `sys.path`; set `pythonpath = ["."]` in the pytest config.
 
