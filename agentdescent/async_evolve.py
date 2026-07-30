@@ -34,7 +34,7 @@ from __future__ import annotations
 import threading
 import time
 import warnings
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from .evolution import (
     Agent, EvolutionResult, Propose, Reward, RoundInfo, Run, Strategy, Task,
@@ -70,6 +70,7 @@ def async_evolve(
     oracle_budget: int = 200,
     self_verify: bool = True,
     task_sampler: Optional["TaskSampler"] = None,
+    on_round: Optional[Callable[[RoundInfo], None]] = None,
     verbose: bool = False,
 ) -> EvolutionResult:
     """Evolve an artifact **without a round barrier**.
@@ -111,6 +112,10 @@ def async_evolve(
         which is what ports that judge candidates only on held-out want.
     task_sampler:
         Which task a worker takes next from its shard.
+    on_round:
+        Called with each :class:`~agentdescent.evolution.RoundInfo` as a merger
+        sweep completes -- progress for a long run. It runs on the merger thread
+        and must be cheap and thread-safe; an exception is reported, not fatal.
     verbose:
         Print one line per merger sweep.
 
@@ -261,6 +266,12 @@ def async_evolve(
         if verbose:
             print(f"sweep {len(history):>3}  reward={r:.3f}  merged={len(batch)}  "
                   f"+{committed}  pending={len(intake)}")
+        if on_round is not None:
+            try:                       # a reporting callback must not kill the merger
+                on_round(history[-1])
+            except Exception as e:  # noqa: BLE001
+                warnings.warn(f"on_round callback raised: {type(e).__name__}: {e}",
+                              RuntimeWarning, stacklevel=2)
         if target_reward is not None and r >= target_reward:
             stop.set()
 

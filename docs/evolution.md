@@ -45,6 +45,7 @@ That's the minimum. Everything below is optional and swappable.
 | `max_concurrency=` | driver | run a round's workers **concurrently** (thread pool); aggregator = barrier (synchronous DP) | `1` (sequential) |
 | `asynchronous=`, `async_ratio=` | [`async_evolve`](#the-barrier-free-runtime-async_evolve) | **barrier-free** async: workers never wait for the merge; lag budget | `False`, `3` |
 | `self_verify=` | [`async_evolve`](#the-barrier-free-runtime-async_evolve) | async only: a worker re-runs its trajectory with the diff applied for a local before/after signal; faithful ports that score the candidate on held-out only pass `False` | `True` |
+| `on_round=` | driver | **progress callback** — fires per round / merger sweep | `None` |
 | `blast_radius`, `oracle_budget` | governance + verifier | audit budget for L1 merges | `0.2`, `200` |
 
 The building blocks in detail:
@@ -292,6 +293,18 @@ result.history        # per-round: RoundInfo(round, held_out_reward, n_items, co
 result.ledger_log     # the git commit log of accepted merges
 result.error          # None on a clean run; "<ExcType>: <msg>" if a backend failure ended it
 ```
+
+Watch a long run as it happens — an LLM run can take hours, and `history` is only
+available once it returns:
+
+```python
+evolve(tasks, reward, agent=agent, rounds=20,
+       on_round=lambda info: print(info.round, info.held_out_reward))
+```
+
+`on_round` fires per round (per merger sweep on the async path, where it runs on
+the merger thread and so must be cheap and thread-safe). An exception inside it is
+reported as a warning and never aborts the run.
 
 Keep the artifact a run produced:
 

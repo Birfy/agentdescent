@@ -12,6 +12,9 @@ All notable changes to AgentDescent are documented here. The format follows
   teaches nothing. `DifficultyWeighted` prefers tasks whose pass rate sits away from
   the all-pass / all-fail extremes (the zero-advantage filter), landing ~1.6-2.2x
   more rollouts on informative tasks than the `RoundRobin` default in measurement.
+- `evolve(on_round=...)` / `async_evolve(on_round=...)` — a progress callback per
+  round (per merger sweep when async). A long LLM run previously reported nothing
+  until it returned; a callback that raises is warned about, never fatal.
 - `EvolutionResult.save(path)` / `.load(path)` — persist the evolved artifact and
   its run summary as JSON instead of hand-rolling the same serialisation.
 - `agentdescent.dataloader` / `agentdescent.backends` are now importable from the

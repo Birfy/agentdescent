@@ -484,6 +484,7 @@ def evolve(
     staleness_policy: Optional[StalenessPolicy] = None,
     aggregator_factory: Optional[AggregatorFactory] = None,
     oracle_budget: int = 200,
+    on_round: Optional[Callable[["RoundInfo"], None]] = None,
     verbose: bool = False,
 ) -> EvolutionResult:
     """Evolve an artifact. Provide either ``agent`` (with ``solve``/``propose``)
@@ -581,6 +582,10 @@ def evolve(
     oracle_budget:
         Hard cap on full held-out oracle evaluations during L1 audits. Once
         spent, the verifier falls back to its cheap layer.
+    on_round:
+        Called with each :class:`RoundInfo` as the round completes -- progress
+        for a long run, which otherwise reports nothing until it returns. An
+        exception raised here is reported but does not abort the run.
     verbose:
         Print a line per round. Independent of the ``RuntimeWarning`` emitted
         when a run ends early -- that always fires.
@@ -607,7 +612,8 @@ def evolve(
             max_iters=rounds * max(1, n_workers), held_out_frac=held_out_frac,
             repo_path=repo_path, agg_config=agg_config, staleness_policy=staleness_policy,
             aggregator_factory=aggregator_factory, oracle_budget=oracle_budget,
-            self_verify=self_verify, verbose=verbose)
+            self_verify=self_verify, task_sampler=task_sampler,
+            on_round=on_round, verbose=verbose)
 
     if n_workers < 1:
         raise ValueError(f"n_workers must be >= 1, got {n_workers}")
@@ -693,6 +699,13 @@ def evolve(
         if verbose:
             print(f"round {r:>3}  reward={info.held_out_reward:.3f}  "
                   f"items={info.n_items}  +{committed}/-{rejected}")
+        if on_round is not None:
+            # A reporting callback must never take the run down with it.
+            try:
+                on_round(info)
+            except Exception as e:  # noqa: BLE001
+                warnings.warn(f"on_round callback raised: {type(e).__name__}: {e}",
+                              RuntimeWarning, stacklevel=2)
 
     final = ledger.snapshot(Ledger.DEV).get(artifact_id)
     # Scoring runs the agent, so a dead backend must not raise out of the driver
