@@ -143,3 +143,22 @@ def test_result_save_load_round_trip(tmp_path):
     assert back.final_reward == res.final_reward
     assert back.error == res.error
     assert [h.round for h in back.history] == [h.round for h in res.history]
+
+
+def test_task_is_hashable_and_keyed_by_id():
+    """`frozen=True` but the auto __hash__ hit the mutable meta dict.
+
+    `set(tasks)` and `{task: ...}` raised TypeError, which is surprising for a
+    frozen dataclass and blocks the obvious ways of tracking tasks.
+    """
+    from agentdescent.evolution import Task
+
+    a = Task(id="a", prompt="p", meta={"x": 1})
+    b = Task(id="a", prompt="p", meta={"y": 2})    # same id, different meta
+    c = Task(id="c", prompt="p")
+
+    assert hash(a) == hash(b)
+    assert a == b                                   # meta is not part of identity
+    assert a != c
+    assert len({a, b, c}) == 2
+    assert {a: "v"}[b] == "v"

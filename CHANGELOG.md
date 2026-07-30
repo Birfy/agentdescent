@@ -39,6 +39,10 @@ All notable changes to AgentDescent are documented here. The format follows
   instead of 4.7 s with byte-identical results.
 
 ### Fixed
+- **`Task` was unhashable** despite being a frozen dataclass — the generated
+  `__hash__` hit the mutable `meta` dict, so `set(tasks)` and `{task: ...}` raised
+  `TypeError`. It now hashes and compares on `id`, which the engine already
+  requires to be unique.
 - **Conflict resolution could leave contradicting diffs in the accepted set,
   silently disabling fusion.** Resolution stopped at the first conflict, so a diff
   that displaced one survivor was never re-checked against the rest; two

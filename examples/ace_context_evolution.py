@@ -55,6 +55,7 @@ from agentdescent.dataloader import Dataset, hf_feature_names, hf_rows, split_da
 from agentdescent.evolvable import Diff
 from agentdescent.evolution import LLMAgent, Task, evolve, rule_id
 from agentdescent.parallel import DataParallel
+from agentdescent.sampling import DifficultyWeighted, RoundRobin
 
 FINER = ("nlpaueb/finer-139", "validation", "finer-139")   # (dataset, split, config)
 
@@ -289,6 +290,9 @@ def main() -> None:
     p.add_argument("--pool", type=int, default=800,
                    help="FiNER validation rows to scan for single-entity sentences")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--sampler", choices=["round-robin", "difficulty"],
+                   default="round-robin",
+                   help="which task a worker rolls out next (agentdescent.sampling)")
     p.add_argument("--async", dest="asynchronous", action="store_true",
                    help="run barrier-free (async_evolve): workers never wait for the merge")
     p.add_argument("--async-ratio", type=int, default=3, help="staleness lag budget")
@@ -350,6 +354,8 @@ def main() -> None:
                     strategy=ACEPlaybook(), parallel=DataParallel(),
                     blast_radius=0.2, artifact_id="ace_playbook",
                     rounds=args.rounds, n_workers=args.workers, max_concurrency=args.workers,
+                    task_sampler=(DifficultyWeighted() if args.sampler == "difficulty"
+                                  else RoundRobin()),
                     asynchronous=args.asynchronous, async_ratio=args.async_ratio,
                     max_seconds=args.max_seconds if args.asynchronous else None,
                     held_out_frac=ds.val_frac, verbose=True)

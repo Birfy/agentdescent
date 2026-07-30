@@ -53,11 +53,20 @@ from .staleness import StalenessPolicy
 
 @dataclass(frozen=True)
 class Task:
-    """One unit of work the artifact is evaluated on."""
+    """One unit of work the artifact is evaluated on.
+
+    ``frozen=True`` but the auto-generated ``__hash__`` hit the mutable ``meta``
+    dict, so ``set(tasks)`` and ``{task: ...}`` raised ``TypeError``. Identity is
+    the ``id`` (which the engine already requires to be unique), so hash and
+    compare on that and leave ``meta`` out of both.
+    """
 
     id: str
     prompt: str
-    meta: Dict[str, Any] = field(default_factory=dict)
+    meta: Dict[str, Any] = field(default_factory=dict, compare=False)
+
+    def __hash__(self) -> int:
+        return hash(self.id)
 
 
 Reward = Callable[["Task", str], float]        # (task, output) -> [0, 1]
