@@ -11,6 +11,12 @@ All notable changes to AgentDescent are documented here. The format follows
   and each accepted proposal replaces it. The most common thing anyone evolves, and
   until now every caller wrote it themselves: three of the six shipped ports each
   rolled their own variant, and the docs offered it as copy-paste.
+- **Early stopping — `evolve(target_reward=..., patience=...)`.** A run spent all
+  `rounds` regardless of whether the artifact was still changing. Measured on a
+  workload that converges in two rounds: 20 rounds cost 141 model calls for a
+  result reached at 69, so **51% of the budget bought nothing**. `target_reward`
+  stops at a held-out score, `patience` after N rounds without improvement; both
+  default to off, so existing runs are unchanged.
 - **`reflector(completion)`** — turn any model into the thing that looks at a
   failure and says what to change, so you can keep your own agent as `run=`.
   Evolving an agent you already have is now three lines: adapt it, pick a

@@ -78,6 +78,7 @@ nothing else in the call changes.
 | `asynchronous=`, `async_ratio=` | [`async_evolve`](#the-barrier-free-runtime-async_evolve) | **barrier-free** async: workers never wait for the merge; lag budget | `False`, `3` |
 | `self_verify=` | [`async_evolve`](#the-barrier-free-runtime-async_evolve) | async only: a worker re-runs its trajectory with the diff applied for a local before/after signal; faithful ports that score the candidate on held-out only pass `False` | `True` |
 | `on_round=` | driver | **progress callback** — fires per round / merger sweep | `None` |
+| `target_reward=`, `patience=` | driver | **early stopping** — stop at a reward, or after N rounds without improvement | `None`, `None` |
 | `blast_radius`, `oracle_budget` | governance + verifier | audit budget for L1 merges | `0.2`, `200` |
 
 The building blocks in detail:
@@ -460,6 +461,17 @@ so it shows up at two levels:
 ```python
 evolve(tasks, reward, agent=agent, n_workers=4, max_concurrency=4)   # 4 workers overlap
 ```
+
+!!! tip "Stop paying once it has converged — `target_reward` / `patience`"
+    A run spends all `rounds` by default, including after the artifact stops
+    changing. On a workload that converges in two rounds, 20 rounds cost 141 model
+    calls for a result reached at 69 — **51% of the budget bought nothing**.
+
+    ```python
+    evolve(tasks, reward, agent=agent, rounds=50,
+           target_reward=0.95,   # stop as soon as held-out reaches this
+           patience=5)           # ...or after 5 rounds with no improvement
+    ```
 
 !!! tip "Bound the barrier — `round_timeout`"
     Because the aggregator *is* the barrier, a round waits for its slowest worker
