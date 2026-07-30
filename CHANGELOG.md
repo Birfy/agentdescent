@@ -92,6 +92,15 @@ All notable changes to AgentDescent are documented here. The format follows
   instead of 4.7 s with byte-identical results.
 
 ### Fixed
+- **The README Quickstart did not run.** It used undefined names (`tasks`,
+  `reward`), so copy-pasting it — the first thing a new user does — raised
+  `NameError` immediately, and it also required API credentials. It is now
+  complete, runnable with no key and no dependencies, and a test executes both it
+  and the usage guide's entry-point example so they cannot rot again.
+- **The usage guide's "Programmatic use" section showed only the reference stack**
+  (`AgentDescent` / `AsyncAgentDescent`), not `evolve()` — the documented entry
+  point every algorithm port actually uses. It now leads with `evolve()` and labels
+  the reference stack as the experiment-reproduction runtime it is.
 - **A governance violation was slow and misreported on the async path.** Only the
   reference aggregator's per-merge guard caught an L0-frozen target, so nothing was
   ever mutated — but `async_evolve` burned its whole `max_seconds` budget first and

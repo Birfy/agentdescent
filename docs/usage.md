@@ -78,7 +78,57 @@ pytest -q tests/test_async.py   # just the async runtime
 
 ## 3. Programmatic use
 
-### Synchronous
+### The entry point — `evolve()`
+
+This is what you want in almost every case, and what every
+[algorithm port](self-evolution-examples.md) uses. Nothing here needs an API key:
+
+```python
+from agentdescent.evolution import Task, evolve
+
+tasks = [Task(id=f"t{i}", prompt=f"say the year for item {i}") for i in range(12)]
+
+def reward(task, output):                 # must return [0, 1]
+    return 1.0 if "2026" in output else 0.0
+
+def run(rendered, task):                  # your solver -- an LLM, a script, anything
+    return "answer" + (" 2026" if "year" in rendered else "")
+
+def propose(rendered, task, output, reward):
+    return "always state the year"        # what to add on a failure
+
+result = evolve(tasks, reward, run=run, propose=propose, rounds=6, n_workers=3)
+print(result.final_reward, result.state)
+if result.error:                          # always check: died vs converged
+    print("incomplete:", result.error)
+```
+
+Swap `run`/`propose` for a model by passing `agent=` instead — any backend works,
+including a tool-using one:
+
+```python
+from agentdescent.agents import LLMAgent, claude, openai_compatible, claude_code
+from agentdescent.evolution import evolve
+
+evolve(tasks, reward, agent=LLMAgent(claude(model="claude-haiku-4-5")))
+evolve(tasks, reward, agent=LLMAgent(openai_compatible(model="deepseek-v4-flash")))
+evolve(tasks, reward, agent=LLMAgent(claude_code()))          # Claude Code CLI
+```
+
+They are all the same `Completion` contract — see
+[Connecting agents & LLMs](agents.md#tool-using-agents-the-same-contract). Run it
+without a barrier by adding `asynchronous=True`, watch progress with
+`on_round=...`, keep the artifact with `result.save(path)`, and resume an
+interrupted run by re-using the same `repo_path`
+([details](evolution.md#resuming-a-run)).
+
+### The reference stack — `AgentDescent` / `AsyncAgentDescent`
+
+A **separate** runtime used by the RQ1/RQ2 and efficiency experiments on the
+built-in synthetic router domain. It has the `TaskScheduler` / `EvidenceBuffer` /
+duration-estimator machinery that `evolve()` does not — see the
+[two-stack note](architecture.md#4-the-two-runtimes). Reach for it to reproduce
+those experiments, not to evolve your own artifact.
 
 ```python
 import tempfile
@@ -91,8 +141,6 @@ with tempfile.TemporaryDirectory() as repo:
     history = system.run(rounds=40)
     print(system.final_accuracy())      # held-out accuracy on the dev branch
 ```
-
-### Asynchronous
 
 ```python
 import tempfile

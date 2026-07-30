@@ -59,18 +59,39 @@ pip install -e ".[dev]"
 
 ## Quickstart
 
-```python
-from agentdescent.evolution import evolve, LLMAgent
-from agentdescent.agents import claude
+Runnable as-is — no API key, no dependencies:
 
-result = evolve(
-    tasks, reward,                                 # your task set + scorer
-    agent=LLMAgent(claude(model="claude-haiku-4-5")),
-    rounds=15, n_workers=4, max_concurrency=4,     # parallel workers
-    # asynchronous=True, async_ratio=3,            # ...or barrier-free async
-)
+```python
+from agentdescent.evolution import Task, evolve
+
+tasks = [Task(id=f"t{i}", prompt=f"item {i}") for i in range(12)]
+
+def reward(task, output):                  # must return [0, 1]
+    return 1.0 if "2026" in output else 0.0
+
+def run(rendered, task):                   # your solver
+    return "answer" + (" 2026" if "year" in rendered else "")
+
+def propose(rendered, task, output, reward):   # what to add on a failure
+    return "always state the year"
+
+result = evolve(tasks, reward, run=run, propose=propose,
+                rounds=6, n_workers=3, max_concurrency=3)
 print(result.rendered)        # the evolved artifact
-print(result.final_reward)    # held-out reward
+print(result.final_reward)    # held-out reward -> 1.0
+print(result.error)           # None on a clean run; check this!
+```
+
+Swap in a real model or agent by passing `agent=` instead of `run`/`propose` —
+they are all the same contract:
+
+```python
+from agentdescent.agents import LLMAgent, claude, openai_compatible, claude_code
+
+evolve(tasks, reward, agent=LLMAgent(claude(model="claude-haiku-4-5")))
+evolve(tasks, reward, agent=LLMAgent(openai_compatible(model="deepseek-v4-flash")))
+evolve(tasks, reward, agent=LLMAgent(claude_code()))     # Claude Code CLI
+# ...or run barrier-free: evolve(..., asynchronous=True, async_ratio=3)
 ```
 
 ## 📖 Documentation
