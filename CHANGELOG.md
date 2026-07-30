@@ -23,6 +23,14 @@ All notable changes to AgentDescent are documented here. The format follows
 - `EvolutionResult.error` — `None` on a clean run, otherwise the backend failure
   that ended it early, so callers can tell "converged" from "died".
 
+### Performance
+- **Ledger reads no longer fork a `git checkout` per call.** Every `snapshot()` /
+  `head_version()` switched branches unconditionally — ~19 ms each, serialised on
+  the ledger lock, capping the pipeline at ~50 ledger ops/sec regardless of
+  `n_workers`. The current branch is now tracked, so a read on the branch already
+  checked out costs 0.02 ms (900x), and `run_demo` runs end-to-end in 2.2 s
+  instead of 4.7 s with byte-identical results.
+
 ### Fixed
 - **Conflict resolution could leave contradicting diffs in the accepted set,
   silently disabling fusion.** Resolution stopped at the first conflict, so a diff

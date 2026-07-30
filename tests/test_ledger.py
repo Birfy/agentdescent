@@ -112,3 +112,43 @@ def test_commit_atomic_also_requires_declared_bases(tmp_path):
     except CASConflict:
         return
     raise AssertionError("commit_atomic should reject an undeclared artifact base")
+
+
+def test_reads_do_not_fork_git_when_branch_is_current(tmp_path):
+    """Reads used to fork `git checkout` even when already on the branch.
+
+    At ~19 ms a call, serialised on the ledger lock, that capped the whole
+    pipeline at ~50 ledger ops/sec no matter how many workers ran.
+    """
+    import time
+
+    from agentdescent.evolution import EvolvingArtifact
+    from agentdescent.ledger import Ledger
+
+    lg = Ledger(str(tmp_path), lambda a: {"state": dict(a.state)},
+                lambda aid, v, s: EvolvingArtifact(aid, s.get("state", {}), v))
+    lg.register(EvolvingArtifact("a", {"n": "1"}))
+
+    lg.head_version(Ledger.DEV)                 # prime the branch tracker
+    t0 = time.time()
+    for _ in range(100):
+        lg.head_version(Ledger.DEV)
+    per_call_ms = (time.time() - t0) / 100 * 1000
+    assert per_call_ms < 5.0, f"repeat reads still fork git: {per_call_ms:.1f} ms/call"
+
+
+def test_branch_switching_still_works_with_the_cached_branch(tmp_path):
+    """The tracker must not break dual-branch reads or dev->stable promotion."""
+    from agentdescent.evolution import EvolvingArtifact
+    from agentdescent.ledger import Ledger
+
+    lg = Ledger(str(tmp_path), lambda a: {"state": dict(a.state)},
+                lambda aid, v, s: EvolvingArtifact(aid, s.get("state", {}), v))
+    lg.register(EvolvingArtifact("a", {"n": "1"}))
+    lg.commit(EvolvingArtifact("a", {"n": "dev2"}), {"a": 1})
+
+    assert lg.snapshot(Ledger.DEV).get("a").state == {"n": "dev2"}
+    assert lg.snapshot(Ledger.STABLE).get("a").state == {"n": "1"}   # not yet promoted
+    lg.promote_to_stable("a")
+    assert lg.snapshot(Ledger.STABLE).get("a").state == {"n": "dev2"}
+    assert lg.snapshot(Ledger.DEV).get("a").state == {"n": "dev2"}   # dev intact

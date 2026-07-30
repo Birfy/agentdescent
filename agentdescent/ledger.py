@@ -90,6 +90,7 @@ class Ledger:
         self._deserialize = deserialize
         self._author = author
         self._lock = threading.RLock()
+        self._current_branch: Optional[str] = None   # see _checkout()
         self._init_repo()
 
     # -- repository bootstrap -------------------------------------------------
@@ -128,7 +129,22 @@ class Ledger:
         return os.path.join(self.repo_path, "artifacts", f"{artifact_id}.json")
 
     def _checkout(self, branch: str) -> None:
+        """Switch branches, skipping the subprocess when already there.
+
+        Every read (`snapshot`, `head_version`) used to fork a ``git checkout``
+        even when the branch was already current -- ~19 ms each, serialised on
+        ``self._lock``, which capped the whole pipeline at ~50 ledger ops/sec no
+        matter how many workers were running. All callers hold the lock, so this
+        instance is the only writer of the working tree and can track it.
+
+        The cached branch assumes this ``Ledger`` owns ``repo_path``; two
+        instances sharing one path already race over the working tree (use one
+        ``Ledger`` per repo).
+        """
+        if self._current_branch == branch:
+            return
         _git(self.repo_path, "checkout", "-q", branch)
+        self._current_branch = branch
 
     # -- public API -----------------------------------------------------------
 
