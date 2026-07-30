@@ -137,6 +137,12 @@ def async_evolve(
     EvolutionResult
         ``error`` is set only when the run **ended** because of a failure -- a
         transient error the workers retried past leaves it ``None``.
+
+        ``history`` holds one entry per **merger sweep** that had cards to merge,
+        not per round: its length tracks how fast the workers produced and is not
+        bounded by any argument (a 3s run with a fast reward produced 221).
+        ``RoundInfo.round`` is the sweep index. Compare ``final_reward`` across the
+        sync and async paths, not ``len(history)``.
     """
     eng = _build_engine(
         tasks, reward, agent=agent, run=run, propose=propose, strategy=strategy,

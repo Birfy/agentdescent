@@ -92,6 +92,11 @@ All notable changes to AgentDescent are documented here. The format follows
   instead of 4.7 s with byte-identical results.
 
 ### Fixed
+- **`result.history` means different things on the two paths.** Synchronous
+  `evolve(rounds=5)` yields exactly 5 entries; `async_evolve` appends one per
+  non-empty merger *sweep* — 221 in a 3-second run — and the count is bounded by no
+  argument. The docs described only the former. Now stated in both the guide and
+  the docstring, with a test pinning each.
 - **`TensorParallel` was not tensor parallelism.** `evolve()` read only
   `WorkUnit.keys` and `WorkUnit.worker` and ignored `WorkUnit.section`, so TP's
   defining guarantee — each worker owns a disjoint section, which is what makes the

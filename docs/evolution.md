@@ -301,7 +301,7 @@ result = evolve(tasks, reward, agent=agent, rounds=6, verbose=True)
 result.rendered       # the evolved artifact, rendered to text
 result.state          # its {key: value} state
 result.final_reward   # held-out reward of the final artifact
-result.history        # per-round: RoundInfo(round, held_out_reward, n_items, committed, rejected)
+result.history        # RoundInfo(round, held_out_reward, n_items, committed, rejected)
 result.ledger_log     # the git commit log of accepted merges
 result.error          # None on a clean run; "<ExcType>: <msg>" if a backend failure ended it
 ```
@@ -317,6 +317,14 @@ evolve(tasks, reward, agent=agent, rounds=20,
 `on_round` fires per round (per merger sweep on the async path, where it runs on
 the merger thread and so must be cheap and thread-safe). An exception inside it is
 reported as a warning and never aborts the run.
+
+!!! note "`history` counts rounds on the sync path, merger sweeps on the async one"
+    Same field, different unit. Synchronous `evolve(rounds=5)` yields exactly 5
+    entries. `async_evolve` appends one per **non-empty merge**, so the count
+    depends on how fast the workers produce — a 3-second run with a fast reward
+    produced 221 — and it is not bounded by any parameter. `RoundInfo.round` is the
+    sweep index there, not a round number. Compare `final_reward` across paths, not
+    `len(history)`.
 
 Keep the artifact a run produced:
 
