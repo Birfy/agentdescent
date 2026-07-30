@@ -1424,7 +1424,10 @@ load-bearing invariants are reproduced faithfully from the repo:</p>
 <li><strong>textual learning-rate budget</strong> — an integer edit cap per step (AgentDescent's
    <code>trust_region_ops</code> analogue);</li>
 <li><strong>rejected-edit buffer</strong> — rejected edits are remembered in-epoch and fed back
-   to the optimizer (AgentDescent's "settled evidence survives").</li>
+   into the reflection prompt, so the optimizer stops re-proposing them. The
+   example implements this itself: the core <code>settle()</code> pool retains discarded
+   evidence but <a href="../concepts/#33-staleness-policies-flashevolve-full-guarded-reflective">nothing reads it back</a>, so this
+   is the worked example of what that pool is <em>for</em>.</li>
 </ol>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.skillopt_skill_training<span class="w"> </span>--dry-run
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.skillopt_skill_training<span class="w"> </span>--model<span class="w"> </span>claude-haiku-4-5

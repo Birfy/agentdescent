@@ -1451,6 +1451,34 @@ there cannot blow up the prompt, and the template tells the reflector to state
 its rule in general terms rather than naming this task's answer. Withhold it
 with <code>reflector(model, show_meta=False)</code> if your meta holds something you would
 rather the reflector not see.</p>
+<p>Measured on a real two-step <code>deepseek-v4-flash</code> agent over 12 money word
+problems whose scorer demands <strong>integer cents</strong> — a convention stated nowhere
+in the prompt:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>held-out</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>initial prompt (<code>"You are a helpful assistant."</code>)</td>
+<td>3/12 = <strong>0.250</strong></td>
+</tr>
+<tr>
+<td>reflector blind to <code>meta</code>, 8 rounds</td>
+<td>0.500 (plateau)</td>
+</tr>
+<tr>
+<td>reflector reading <code>meta</code></td>
+<td>12/12 = <strong>1.000</strong>, in one round (141 s, 63 calls)</td>
+</tr>
+</tbody>
+</table>
+<p>And it generalised rather than memorising — the rule it wrote was
+<em>"Express all monetary amounts as integers representing cents, without dollar
+signs or decimal points."</em>, not this task's answer.</p>
 </div>
 <div class="admonition tip">
 <p class="admonition-title">Where do <code>tasks</code> come from?</p>

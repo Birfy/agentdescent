@@ -1458,9 +1458,20 @@ onto the current policy, then reused."</p>
 <div class="admonition tip">
 <p class="admonition-title">Why artifacts tolerate staleness better than parameters</p>
 <p>A stale gradient is simply lost. A stale <em>diff</em> can be rebased and its
-evidence card re-verified — and if discarded, the evidence settles back into
-the pool for reuse. That structural difference is the framework's claimed
-advantage over parameter-space RL (design spec, RQ2).</p>
+evidence card re-verified. That structural difference is the framework's
+claimed advantage over parameter-space RL (design spec, RQ2), and the rebase
+half of it is what <code>evolve()</code> actually implements.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Settled evidence is retained, not yet reused</p>
+<p>A discarded card is <code>settle()</code>d rather than dropped, and the design calls for
+re-filing it into the trajectory pool. <strong>Nothing in the library reads the pool
+back</strong> — so treat it as a diagnostic ring of recent rejections, not a queue
+that feeds later rounds.</p>
+<p>It is also <em>bounded</em> (<code>SETTLED_MAX_CARDS=256</code>, <code>SETTLED_MAX_CHARS=2M</code>, oldest
+evicted). It used to be unbounded, which leaked exactly the payloads the trust
+region exists to reject: 500 oversized diffs from a runaway reflector retained
+<strong>250 MB</strong> that no code path could ever read.</p>
 </div>
 <h3 id="34-async_ratio-roll-flash-the-global-lag-budget">3.4 async_ratio (ROLL Flash) — the global lag budget<a class="headerlink" href="#34-async_ratio-roll-flash-the-global-lag-budget" title="Permanent link">&para;</a></h3>
 <p>In the async runtime, a worker refreshes its snapshot only once head has drifted
