@@ -6,6 +6,18 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-07-30
+
+A correctness and honesty pass over 0.1.0. Most of what changed was not a crash
+but a **silent** wrong: flags the engine accepted and ignored, budgets that
+counted without capping, a probability reported as a reward, seeded runs that were
+not reproducible, and several mechanisms the documentation described as working
+that no code path actually reached. Where a claim could be made true it was made
+true; where it could not, the docs now say so.
+
+Also: one contract for every backend (API model, CLI agent, OpenHands), real cost
+accounting, and the advertised examples now run.
+
 ### Added
 - **One contract for every backend.** The framework had two unrelated agent
   interfaces: `Completion` (`prompt -> text`) for API models and
@@ -289,5 +301,6 @@ First public release on PyPI as **`agentdescent`**.
   discrete-space `Aggregator`, staleness policies, DP/TP/PP parallelism, layered
   governance, and the provider-agnostic `agentdescent.agents` completion layer.
 
-[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Birfy/agentdescent/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Birfy/agentdescent/releases/tag/v0.1.0
