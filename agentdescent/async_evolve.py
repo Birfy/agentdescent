@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import threading
 import time
+import warnings
 from typing import Dict, List, Optional
 
 from .evolution import (
@@ -102,7 +103,8 @@ def async_evolve(
     counter = [0]
     counter_lock = threading.Lock()
     history: List[RoundInfo] = []
-    errors: List[Optional[str]] = [None]      # first backend failure seen (reported)
+    errors: List[Optional[str]] = [None]      # first backend failure seen (diagnostic)
+    died = [False]                            # True only if the run ENDED on failure
     n_live = sum(1 for s in shards if s)      # workers that will actually start
     live = [n_live]                           # workers still running
     max_worker_errors = 3                     # consecutive failures before retiring one
@@ -175,6 +177,7 @@ def async_evolve(
                     with counter_lock:
                         live[0] -= 1
                         if live[0] <= 0:          # every worker retired -> end the run
+                            died[0] = True
                             stop.set()
                     return
                 time.sleep(min(2.0 ** consecutive, 10.0))    # backoff, then retry
@@ -233,6 +236,7 @@ def async_evolve(
             with counter_lock:
                 if errors[0] is None:
                     errors[0] = f"{type(e).__name__}: {str(e)[:200]}"
+                died[0] = True
             if verbose:
                 print(f"merger stopped: {type(e).__name__}: {str(e)[:120]}")
             stop.set()
@@ -251,8 +255,6 @@ def async_evolve(
         t.join(timeout=2.0)
     merger.join(timeout=10.0)
 
-    if verbose and errors[0]:
-        print(f"async run ended with a backend failure: {errors[0][:140]}")
     final = eng.ledger.snapshot(Ledger.DEV).get(eng.artifact_id)
     # Scoring the final artifact runs the agent too, so a dead backend must not
     # raise out of the driver -- that would discard the work already committed.
@@ -261,8 +263,18 @@ def async_evolve(
     except Exception as e:  # noqa: BLE001 - report, keep the partial result
         if errors[0] is None:
             errors[0] = f"{type(e).__name__}: {str(e)[:200]}"
+        died[0] = True
         final_reward = history[-1].held_out_reward if history else 0.0
+
+    # `error` means "the run ended because of a failure", not "a failure happened":
+    # transient errors that the workers retried past leave a clean result.
+    run_error = errors[0] if died[0] else None
+    if run_error:
+        if verbose:
+            print(f"async run ended with a backend failure: {run_error[:140]}")
+        warnings.warn(f"async_evolve() ended with a backend failure: {run_error}",
+                      RuntimeWarning, stacklevel=2)
     return EvolutionResult(state=dict(final.state), rendered=final.render(),
                            final_reward=final_reward, history=history,
                            ledger_log=eng.ledger.log(Ledger.DEV, limit=40),
-                           error=errors[0])
+                           error=run_error)

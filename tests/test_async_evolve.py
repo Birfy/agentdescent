@@ -5,6 +5,8 @@ monotonicity (the aggregator never regresses the head) and that the pipeline run
 and commits, rather than exact wall-clock outcomes.
 """
 
+import pytest
+
 from agentdescent.async_evolve import async_evolve
 from agentdescent.evolution import AppendRules, Task, evolve
 
@@ -115,12 +117,15 @@ def test_async_survives_transient_backend_errors():
                      max_seconds=8.0, target_reward=1.0, held_out_frac=0.5)
     assert r.final_reward > 0.0            # recovered and still made progress
     assert len(r.history) >= 1
+    # a survived blip is not a failed run: `error` means "ended because of it"
+    assert r.error is None
 
 
 def test_async_reports_persistent_backend_failure():
     """A dead backend ends the run, but the reason is reported, not swallowed."""
-    r = async_evolve(_tasks(), REWARD, agent=_DeadAgent(), strategy=AppendRules(),
-                     n_workers=2, async_ratio=3, max_seconds=20.0, held_out_frac=0.5)
+    with pytest.warns(RuntimeWarning, match="backend is down"):
+        r = async_evolve(_tasks(), REWARD, agent=_DeadAgent(), strategy=AppendRules(),
+                         n_workers=2, async_ratio=3, max_seconds=20.0, held_out_frac=0.5)
     assert r.error is not None                  # the failure is surfaced ...
     assert "backend is down" in r.error         # ... with the real cause
     assert r.state == {}                        # nothing bogus was committed

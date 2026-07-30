@@ -32,6 +32,7 @@ import re
 import shutil
 import threading
 import time
+import warnings
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Protocol, Sequence, runtime_checkable
 
@@ -319,6 +320,25 @@ class _Engine:
     blast_radius: float
 
 
+def _check_callable(fn: Callable, n_args: int, sig_hint: str) -> None:
+    """Fail fast if ``fn`` cannot accept ``n_args`` positional arguments.
+
+    Signatures we cannot introspect (builtins, C callables, some partials) are
+    left alone -- the check is a courtesy, never a restriction."""
+    import inspect
+    if not callable(fn):
+        raise TypeError(f"expected a callable for {sig_hint}, got {type(fn).__name__}")
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return
+    try:
+        sig.bind(*(None,) * n_args)
+    except TypeError as e:
+        raise TypeError(
+            f"{getattr(fn, '__name__', fn)!r} does not match {sig_hint}: {e}") from None
+
+
 def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state,
                   blast_radius, artifact_id, held_out_frac, repo_path, agg_config,
                   staleness_policy, aggregator_factory, oracle_budget) -> _Engine:
@@ -332,6 +352,12 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
         propose = propose or agent.propose
     if run is None or propose is None:
         raise ValueError("provide agent=, or both run= and propose=")
+    # Check the actor's signatures once, before any rollout. Otherwise a plain
+    # typo (a `propose` missing the reward parameter, say) surfaces as a
+    # TypeError inside the round body, where the backend-failure handler turns it
+    # into an empty, clean-looking result with zero rounds run.
+    _check_callable(run, 2, "run(rendered, task)")
+    _check_callable(propose, 4, "propose(rendered, task, output, reward)")
 
     strategy = strategy or AppendRules()
     tasks = list(tasks)
@@ -556,6 +582,18 @@ def evolve(
                   f"items={info.n_items}  +{committed}/-{rejected}")
 
     final = ledger.snapshot(Ledger.DEV).get(artifact_id)
+    # Scoring runs the agent, so a dead backend must not raise out of the driver
+    # and discard everything already committed.
+    try:
+        final_reward = final.score(held_out)
+    except Exception as e:  # noqa: BLE001 - report, keep the partial result
+        run_error = run_error or f"{type(e).__name__}: {str(e)[:200]}"
+        final_reward = history[-1].held_out_reward if history else 0.0
+    if run_error:
+        # Never end a run silently: verbose=False is the default, so a partial
+        # result is otherwise indistinguishable from a converged one.
+        warnings.warn(f"evolve() stopped early after {len(history)} round(s): "
+                      f"{run_error}", RuntimeWarning, stacklevel=2)
     return EvolutionResult(state=dict(final.state), rendered=final.render(),
-                           final_reward=final.score(held_out), history=history,
+                           final_reward=final_reward, history=history,
                            ledger_log=ledger.log(Ledger.DEV, limit=40), error=run_error)

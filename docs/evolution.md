@@ -307,6 +307,15 @@ limit, credit exhaustion) — progress isn't lost.
         print(f"incomplete: {result.error}")   # partial artifact still usable
     ```
 
+    `error` means *the run ended because of this failure* — a transient error the
+    workers retried past leaves it `None`. A `RuntimeWarning` is also emitted, so
+    a failed run is never completely silent even at the default `verbose=False`.
+
+**Actor signatures are checked before the first rollout.** `run` and `propose` are
+bound-tested up front, so a plain typo (a `propose` missing its `reward`
+parameter) raises `TypeError` immediately instead of surfacing as a
+backend-shaped failure with zero rounds run and an empty artifact.
+
 **Backend failures are tolerated, not fatal.** In the async runtime a transient
 error (a rate limit, a flaky endpoint) is retried with exponential backoff; a
 worker retires only after `3` *consecutive* failures, and the run ends when every

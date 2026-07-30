@@ -22,6 +22,13 @@ All notable changes to AgentDescent are documented here. The format follows
   that ended it early, so callers can tell "converged" from "died".
 
 ### Fixed
+- **A typo in the caller's `run`/`propose` produced a clean-looking empty result.**
+  The round body's catch-all treated programming errors as backend failures, so a
+  signature mistake returned `final_reward=0.0` with zero rounds and no output at
+  the default `verbose=False`. Actor signatures are now bound-checked before the
+  first rollout, and any run that ends early emits a `RuntimeWarning`.
+- **A dead backend could still raise out of synchronous `evolve()`** during the
+  final held-out scoring, discarding everything already committed.
 - **`Ledger` CAS could be bypassed.** `base_version.get(aid, head)` defaulted a
   missing entry to the current head, so a writer that declared no base version
   (or an unrelated one) always committed — the exact lost update the
