@@ -71,6 +71,19 @@ class AggregatorProtocol(Protocol):
     def step(self) -> List[MergeReport]: ...              # decide what to merge now
 ```
 
+!!! note "Your aggregator is checked, and its mistakes are not hidden"
+    The factory's result must have callable `ingest` and `step` — missing either
+    raises before the first rollout, naming what is absent. `step()` must return a
+    list of `MergeReport`; returning `None` or a list of something else raises
+    `AggregatorContractError` naming your class, instead of surfacing as
+    `'NoneType' object is not iterable` from inside the driver.
+
+    That error, `RewardContractError` and `ProposalContractError` all derive from
+    **`ContractError`**, and both engines let it propagate. A *backend* failure (a
+    rate limit, a dead endpoint) is absorbed and reported through `result.error` so
+    a long run keeps its partial results — a broken contract in your own code is
+    not, because the run is meaningless either way and hiding it wastes the budget.
+
 `evolve` builds the aggregator through a **factory** that receives the runtime
 deps it owns — `(ledger, verifier, audit, config, staleness_policy)` — and
 returns any `AggregatorProtocol`:

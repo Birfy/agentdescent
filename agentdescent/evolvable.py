@@ -26,6 +26,14 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Tuple, runtime_checkable
 
 
+class ContractError(Exception):
+    """The caller's own code broke a documented contract.
+
+    Distinct from a *backend* failure (a rate limit, a dead endpoint), which the
+    engine absorbs and reports so partial results survive. A contract violation
+    makes the run meaningless, so the engines let it propagate."""
+
+
 def stable_hash(key: Any) -> int:
     """A process-independent hash for seeding and partitioning.
 

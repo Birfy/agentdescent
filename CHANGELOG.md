@@ -23,6 +23,17 @@ All notable changes to AgentDescent are documented here. The format follows
   reflector, say what evolves — and switching parallel↔async is one argument.
 
 ### Fixed
+- **A custom aggregator's mistakes surfaced as cryptic crashes.** `aggregator_factory`
+  is the main extension point and all six shipped ports use it, yet a class missing
+  `ingest` failed with an `AttributeError` mid-run, `step()` returning `None` gave
+  `'NoneType' object is not iterable`, and a wrong element type gave
+  `'str' object has no attribute 'committed_version'` — none naming the aggregator.
+  The protocol is now checked at construction and `step()`'s return is validated.
+- **Caller mistakes were reported like provider outages.** `RewardContractError`,
+  `ProposalContractError` and the new `AggregatorContractError` now share a
+  `ContractError` base that both engines let propagate, while backend failures stay
+  absorbed into `result.error`. A broken contract makes the run meaningless, so
+  hiding it just spends the budget.
 - **The trust region bounded op *count* but not op *size*.** A runaway proposal —
   a reflector echoing its input, say — committed a 500 KB value that then rendered
   into every later prompt, exploding cost and context silently. `AggregatorConfig`

@@ -37,8 +37,11 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Protocol, Sequence, runtime_checkable
 
 from .agents import Completion, claude
-from .aggregator import Aggregator, AggregatorConfig, AggregatorFactory
-from .evolvable import Contract, Diff, EvidenceCard
+from .aggregator import (
+    Aggregator, AggregatorConfig, AggregatorFactory, AggregatorContractError,
+    check_reports,
+)
+from .evolvable import Contract, ContractError, Diff, EvidenceCard
 from .governance import assert_mutable
 from .ledger import Ledger
 from .sampling import RoundRobin, TaskSampler
@@ -269,7 +272,7 @@ class KeyedRules:
 _REWARD_TOL = 1e-6
 
 
-class ProposalContractError(TypeError):
+class ProposalContractError(ContractError, TypeError):
     """``propose`` returned something that is not text (or ``None``).
 
     A strategy then fails deep inside ``to_diff`` with something like
@@ -277,7 +280,7 @@ class ProposalContractError(TypeError):
     rather than a caller one."""
 
 
-class RewardContractError(ValueError):
+class RewardContractError(ContractError, ValueError):
     """The caller's ``reward`` returned something outside the documented contract.
 
     A distinct type so the engine can tell a *caller* mistake (fail fast, the run
@@ -580,6 +583,15 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
         ledger, verifier, AuditScheduler(),
         agg_config or AggregatorConfig(batch_trigger=2, max_wait_rounds=1),
         staleness_policy)
+    # A custom aggregator is the main extension point and is user code. Check the
+    # contract here rather than letting it fail three frames deep in the driver
+    # with something like "'MissingMethods' object has no attribute 'ingest'".
+    for method in ("ingest", "step"):
+        if not callable(getattr(aggregator, method, None)):
+            raise TypeError(
+                f"aggregator_factory returned {type(aggregator).__name__}, which has "
+                f"no callable {method}(). An aggregator needs ingest(card) and "
+                "step() -> list[MergeReport] (see AggregatorProtocol).")
 
     return _Engine(ledger, runtime, verifier, aggregator, strategy, run, reward,
                    propose, train, held_out, {t.id: t for t in train},
@@ -871,8 +883,8 @@ def evolve(
                 for unit in units:
                     _run_unit(unit)
 
-            reports = aggregator.step()
-        except (RewardContractError, ProposalContractError):
+            reports = check_reports(aggregator.step(), aggregator)
+        except ContractError:
             raise            # a caller-contract violation: the run is meaningless
         except Exception as e:  # noqa: BLE001 - a rollout backend failure (e.g. an
             # API/credit error) shouldn't lose the run: stop and return partial results.
@@ -920,7 +932,7 @@ def evolve(
     # and discard everything already committed.
     try:
         final_reward = final.score(held_out)
-    except RewardContractError:
+    except ContractError:
         raise
     except Exception as e:  # noqa: BLE001 - report, keep the partial result
         run_error = run_error or f"{type(e).__name__}: {str(e)[:200]}"

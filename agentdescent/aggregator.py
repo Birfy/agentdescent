@@ -25,7 +25,8 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
 from .evolvable import (
-    Diff, EvidenceCard, Evolvable, VersionVector, stable_hash, vv_staleness,
+    ContractError, Diff, EvidenceCard, Evolvable, VersionVector, stable_hash,
+    vv_staleness,
 )
 from .governance import Layer, classify, assert_mutable
 from .ledger import CASConflict, Ledger
@@ -71,6 +72,36 @@ class AggregatorConfig:
     #: Real ops in the shipped ports are ~2.5k chars, so this is ~12x headroom.
     trust_region_chars: int = 32_000
     promote_after_k: int = 3        # dev->stable survival rounds (EMA)
+
+
+class AggregatorContractError(ContractError, TypeError):
+    """A custom aggregator returned something ``step()`` may not return."""
+
+
+def check_reports(reports, aggregator) -> List["MergeReport"]:
+    """Validate what a custom ``step()`` handed back.
+
+    Returning ``None`` or a list of the wrong thing otherwise surfaces as
+    ``'NoneType' object is not iterable`` or ``'str' object has no attribute
+    'committed_version'`` from inside the driver, with nothing naming the
+    aggregator that caused it."""
+    name = type(aggregator).__name__
+    if reports is None:
+        raise AggregatorContractError(
+            f"{name}.step() returned None; it must return a list of MergeReport "
+            "(return [] when nothing merged)")
+    try:
+        reports = list(reports)
+    except TypeError:
+        raise AggregatorContractError(
+            f"{name}.step() returned {type(reports).__name__}, which is not "
+            "iterable; it must return a list of MergeReport") from None
+    for r in reports:
+        if not hasattr(r, "committed_version"):
+            raise AggregatorContractError(
+                f"{name}.step() returned a {type(r).__name__} where a MergeReport "
+                "was expected")
+    return reports
 
 
 @dataclass

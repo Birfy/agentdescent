@@ -39,10 +39,9 @@ from typing import Callable, Dict, List, Optional
 from .evolution import (
     Agent, EvolutionResult, Propose, Reward, RoundInfo, Run, Strategy, Task,
     _build_engine, _checked_proposal, _checked_reward,
-    ProposalContractError, RewardContractError,
 )
-from .aggregator import AggregatorConfig
-from .evolvable import EvidenceCard, vv_staleness
+from .aggregator import AggregatorConfig, check_reports
+from .evolvable import ContractError, EvidenceCard, vv_staleness
 from .ledger import Ledger
 from .sampling import RoundRobin, TaskSampler
 from .staleness import StaleAction, StalenessPolicy, get_policy
@@ -234,7 +233,7 @@ def async_evolve(
                                 trajectory_refs=[task])
                             with intake_lock:
                                 intake.append(card)
-            except (RewardContractError, ProposalContractError) as e:
+            except ContractError as e:
                 # a caller-contract violation, not a flaky backend: stop at once.
                 with counter_lock:
                     if errors[0] is None:
@@ -288,7 +287,7 @@ def async_evolve(
                 if head_art.cheap_eval(card) <= cand.cheap_eval(card):
                     eng.aggregator.ingest(card.rebased_onto(head_vv))
             # DISCARD -> drop the card
-        reports = eng.aggregator.step()
+        reports = check_reports(eng.aggregator.step(), eng.aggregator)
         committed = sum(1 for x in reports if x.committed_version is not None)
         dev = eng.ledger.snapshot(Ledger.DEV).get(eng.artifact_id)
         # Must be the real held-out reward: MergeReport.prob_improve is P(Δ>0)
