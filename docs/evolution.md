@@ -36,6 +36,7 @@ That's the minimum. Everything below is optional and swappable.
 | `agent=` / `run=`+`propose=` | [`agentdescent.agents`](agents.md) + `LLMAgent` | the actor: solve a task, propose a change | — (required) |
 | `strategy=` | `Strategy` (`AppendRules` / `KeyedRules` / yours) | the **evolution rule** — how a proposal becomes a diff | `AppendRules()` |
 | `parallel=` | [`agentdescent.parallel`](parallelism.md) | the **parallelism method** — DP / TP / PP | `DataParallel()` |
+| `task_sampler=` | [`agentdescent.sampling`](#task-selection-which-rollout-to-spend) | **which task** a worker rolls out next | `RoundRobin()` |
 | `blast_radius=` | governance | which layer (L2 skill vs L1 harness/verifier) | `0.2` (L2) |
 | `agg_config=` | `AggregatorConfig` | merge & acceptance **tuning** | sensible defaults |
 | `aggregator_factory=` | `AggregatorProtocol` | **swap the whole optimizer** (custom merge/acceptance) | reference `Aggregator` |
@@ -156,6 +157,53 @@ evolve(tasks, reward, agent=agent, parallel=Blocks())
 ```
 
 Details + the DP/TP/PP semantics: [Customizable parallelism](parallelism.md).
+
+---
+
+## Task selection — which rollout to spend
+
+*What:* which task a worker rolls out next. *Module:*
+[`agentdescent.sampling`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/sampling.py).
+
+A rollout is the expensive unit of work — one LLM call, or an entire tool-using
+agent trajectory that can run for minutes. Spending it on a task the agent
+**already solves** teaches the system nothing: there is no failure, so no
+proposal, so no diff. The same is true of a task it can *never* solve. Only tasks
+somewhere in between carry a usable gradient (the GRPO zero-advantage argument).
+
+```python
+from agentdescent.sampling import DifficultyWeighted, RoundRobin
+
+evolve(tasks, reward, agent=agent, task_sampler=RoundRobin())          # default
+evolve(tasks, reward, agent=agent, task_sampler=DifficultyWeighted())  # focus the budget
+```
+
+| Sampler | Rule |
+|---|---|
+| **`RoundRobin`** (default) | cycle through the shard — deterministic, but spends rollouts uniformly |
+| **`DifficultyWeighted`** | track each task's pass rate; prefer those away from the all-pass / all-fail extremes, with a UCB bonus so untried tasks are still explored |
+
+Measured on a 40-task workload where only 6 tasks carry signal — the share of
+rollouts that landed on an informative task:
+
+| | round-robin | difficulty-weighted |
+|---|---|---|
+| clean reward | 14.5% | **23.4%** |
+| 15% reward noise | 7.3% | **16.3%** |
+
+This matters most exactly where it hurts: a *strong* base agent solves most of the
+train set, so failures are sparse and round-robin burns most of its budget
+re-solving solved tasks. Write your own by implementing `pick` + `record`:
+
+```python
+class PreferRecentFailures:
+    def pick(self, keys, round_index): ...      # -> one task id
+    def record(self, task_id, score): ...       # learn from the outcome
+```
+
+!!! note "Default stays deterministic"
+    `RoundRobin` remains the default so existing runs and the RQ experiments stay
+    bit-reproducible. `DifficultyWeighted` is opt-in.
 
 ---
 

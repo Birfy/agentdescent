@@ -22,6 +22,14 @@ All notable changes to AgentDescent are documented here. The format follows
   that ended it early, so callers can tell "converged" from "died".
 
 ### Fixed
+- **`async_evolve` reported a probability as the held-out reward.** A caching
+  optimisation put `MergeReport.prob_improve` (a Beta-posterior P(delta>0)) into
+  `RoundInfo.held_out_reward`, so `history` was fiction and `target_reward` could
+  fire on a probability. Re-scoring is memoised, so the optimisation saved nothing.
+- **Seeded runs were not reproducible across processes.** Builtin `hash()` of
+  `str` is randomised per process, and it seeded worker RNGs, assigned tensor
+  sections, bucketed clusters and staggered refreshes — so `seed=` was meaningless
+  even in the deterministic synchronous orchestrator. Added `stable_hash`.
 - **Async backend failures were silent and fatal.** One exception in one worker
   called `stop.set()` and ended the whole run with no message, and the final
   held-out scoring (plus the merger loop) could raise straight out of the driver,

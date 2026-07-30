@@ -114,6 +114,27 @@ the Aggregator calls at steps 1–4 (cheap) and step 7 (oracle, budgeted).
 
 ## 4. The two runtimes
 
+!!! warning "Two stacks — know which one you are reading about"
+    The data-flow diagram above (`TaskScheduler` → `Worker` → `EvidenceBuffer`)
+    describes the **reference stage-orchestration stack**:
+    [`AgentDescent`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/orchestrator.py)
+    and [`AsyncAgentDescent`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/async_runtime.py),
+    used by `run_demo`, `run_async`, `efficiency`, `duration_scheduling` and
+    `rq2_staleness`.
+
+    The **general engine** — [`evolve()` / `async_evolve()`](evolution.md), the
+    documented entry point that every algorithm port uses — shares the `Ledger`,
+    `Aggregator`, staleness policies, governance and `AuditScheduler`, but **not**
+    the `TaskScheduler`, `EvidenceBuffer`, `ResumeQueue` or `DurationEstimator`.
+    It does its own sharding, keeps its own intake buffer, and selects tasks via a
+    [`task_sampler`](evolution.md#task-selection-which-rollout-to-spend).
+
+    So two capabilities described below are, today, reachable **only** through the
+    reference stack: UCB task-cluster leasing (§5.2 / L-task) and partial-rollout
+    resume (§5.1 / L-traj). `evolve()`'s `task_sampler` covers the L-task idea at
+    task granularity; there is no `evolve()`-level resume yet. This split is a
+    known wart, not a design intent — it is tracked for consolidation.
+
 AgentDescent separates *what to merge* (the Aggregator, identical in both) from
 *when workers and the aggregator run relative to each other* (the runtime).
 
