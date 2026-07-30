@@ -53,6 +53,14 @@ All notable changes to AgentDescent are documented here. The format follows
   instead of 4.7 s with byte-identical results.
 
 ### Fixed
+- **The async staleness gate ignored `agg_config`.** It hardcoded `alpha = 5/1`
+  while the aggregator behind it read `alpha_head`/`alpha_tail`, so a tightened
+  staleness tolerance was honoured in one place and not the other.
+- **Conflict detection was described as "syntactic and semantic"** but only
+  semantic contradiction gates resolution — correctly so, since two diffs
+  proposing the *same* value for a key are duplicates rather than a conflict. The
+  docs now say that, and `diffs_conflict` documents itself as an unused primitive
+  for custom aggregators.
 - **`ResumeQueue` / "partial rollout" was documented as implemented but is not.**
   The README, concepts page and analogy table promised "turn-level checkpoint +
   `ResumeQueue`, resumed against the latest ledger (a free cross-version A/B

@@ -150,9 +150,12 @@ a bucket fires when it reaches batch size `B` or a `T_max` timeout (so cold
 artifacts don't starve). Then, in order:
 
 1. **Staleness filter** (§3) — split cards into survivors / discarded.
-2. **Conflict resolution** — syntactic (hunk overlap) and semantic
-   (contradictory edits) detection. Contradictions are projected out
-   PCGrad-style: keep the better of the pair on a shared verification subset.
+2. **Conflict resolution** — detect *semantic contradiction* (same key, different
+   proposed value). Mere key overlap is not a conflict: two workers proposing the
+   same value are duplicates, and collapsing them is what content-addressing is
+   for. Contradictions are projected out PCGrad-style — keep the better of the
+   pair on a shared verification subset — iterating until no surviving pair
+   contradicts.
 3. **Fusion tournament** — complementary diffs are fused (model-soup analogy)
    and run against the individual candidates on held-out data; the best wins.
 4. **Statistical acceptance** — commit only if `P(Δ > 0) > 1 − δ` under a Beta

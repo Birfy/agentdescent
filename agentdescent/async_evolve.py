@@ -40,6 +40,7 @@ from .evolution import (
     Agent, EvolutionResult, Propose, Reward, RoundInfo, Run, Strategy, Task,
     _build_engine,
 )
+from .aggregator import AggregatorConfig
 from .evolvable import EvidenceCard, vv_staleness
 from .ledger import Ledger
 from .sampling import RoundRobin, TaskSampler
@@ -147,7 +148,11 @@ def async_evolve(
         raise ValueError(f"n_workers must be >= 1, got {n_workers}")
     policy = staleness_policy or get_policy("guarded")
     sampler = task_sampler or RoundRobin()
-    alpha = 5 if eng.blast_radius > 0.5 else 1        # L1 tolerates more staleness
+    # Staleness tolerance must come from the same config the aggregator uses --
+    # hardcoding 5/1 here silently ignored agg_config.alpha_head/alpha_tail, so a
+    # tightened tolerance was honoured by the aggregator but not by this gate.
+    _cfg = agg_config or AggregatorConfig()
+    alpha = _cfg.alpha_head if eng.blast_radius > 0.5 else _cfg.alpha_tail
 
     # data-parallel: shard the train tasks round-robin across workers.
     shards: List[List[Task]] = [[] for _ in range(n_workers)]

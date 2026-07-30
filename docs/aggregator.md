@@ -17,7 +17,7 @@ Evidence cards are bucketed by artifact; a bucket fires on batch size `B` or a
 `T_max` timeout. Then, in order:
 
 1. **Staleness filter** — per-diff `η` vs `α`; the [staleness policy](evolution.md#6-staleness-staleness_policy) decides `ACCEPT / REBASE / DISCARD`.
-2. **Conflict resolution** — contradictory diffs (same key, different value) are projected out PCGrad-style; keep the better of the pair.
+2. **Conflict resolution** — contradictory diffs (same key, different value) are projected out PCGrad-style; keep the better of the pair, iterating until no surviving pair contradicts. Key *overlap* alone is not a conflict — identical proposals are duplicates and dedupe.
 3. **Fusion tournament** — complementary diffs are fused (model-soup style) and run against the singles on held-out; the best wins.
 4. **Statistical acceptance** — commit only if `P(Δ > 0) > 1 − δ` under a Beta posterior (not a point threshold); `δ` anneals with version.
 5. **Commit** — compare-and-swap on `dev` (2PC for contract-breaking multi-artifact diffs).

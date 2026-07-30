@@ -215,3 +215,24 @@ def test_shutdown_grace_is_respected_and_warns():
                      held_out_frac=0.5, shutdown_grace=0.2)
     assert any("still" in str(x.message) for x in w), \
         "abandoning in-flight rollouts must be reported, not silent"
+
+
+def test_async_staleness_alpha_comes_from_agg_config():
+    """The merger's staleness gate hardcoded 5/1, ignoring agg_config.
+
+    The aggregator honoured alpha_head/alpha_tail while the async gate in front of
+    it did not, so a tightened tolerance was applied in one place only.
+    """
+    import inspect
+
+    from agentdescent.aggregator import AggregatorConfig
+    from agentdescent.async_evolve import async_evolve as fn
+
+    src = inspect.getsource(fn)
+    assert "alpha_head" in src and "alpha = 5 if" not in src
+
+    # and it still runs with a strict configuration
+    r = async_evolve(_tasks(), REWARD, agent=_Composer(), strategy=AppendRules(),
+                     n_workers=2, max_seconds=3.0, held_out_frac=0.5,
+                     agg_config=AggregatorConfig(alpha_head=0, alpha_tail=0))
+    assert r.error is None

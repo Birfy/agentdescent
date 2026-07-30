@@ -9,7 +9,7 @@ The per-bucket pipeline (design doc, section 4):
     1. trigger + bucket        (section 4.1)
     2. staleness filter        (section 4.2)  per-diff eta, three-way split
        + rebase & cheap re-verify
-    3. conflict resolution     (section 4.3)  syntactic / semantic / PCGrad-drop
+    3. conflict resolution     (section 4.3)  semantic contradiction / PCGrad-drop
        + candidate fusion tournament          (model-soup style)
     4. Beta-posterior accept   (section 4.4)  P(delta > 0) > 1 - delta
     5. CAS / 2PC commit        (section 4.1)
@@ -139,7 +139,13 @@ class EvidenceBuffer:
 
 
 def diffs_conflict(a: Diff, b: Diff) -> bool:
-    """Syntactic overlap: do two diffs edit an overlapping set of keys?"""
+    """Syntactic overlap: do two diffs edit an overlapping set of keys?
+
+    A primitive for custom aggregators; the reference pipeline deliberately does
+    **not** gate on this. Overlap alone is not a conflict -- two workers proposing
+    the *same* value for a key are duplicates, and collapsing them is the point of
+    content-addressing. Resolution keys on :func:`diffs_contradict` instead.
+    """
     return bool(set(a.ops) & set(b.ops))
 
 
