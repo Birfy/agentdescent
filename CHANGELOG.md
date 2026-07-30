@@ -23,6 +23,15 @@ All notable changes to AgentDescent are documented here. The format follows
   reflector, say what evolves — and switching parallel↔async is one argument.
 
 ### Fixed
+- **The default `max_tokens` silently halved reflection with a reasoning model.**
+  Such a model spends its budget reasoning before emitting anything, so too small
+  a cap returns an *empty* completion, which the engine reads as "nothing worth
+  changing" — a run then looks incapable of learning while the reflector never
+  spoke. Measured on `deepseek-v4-flash`: at the old default of 1024, **4 of 8**
+  reflection prompts came back empty; at 3000, none did. Both adapters now default
+  to 4096 (billing is per token generated, not per cap), and an empty reflection
+  emits a `RuntimeWarning` naming the likely cause. Found by evolving a real
+  multi-step agent end to end, where it presented as "evolution does not work".
 - **A custom aggregator's mistakes surfaced as cryptic crashes.** `aggregator_factory`
   is the main extension point and all six shipped ports use it, yet a class missing
   `ingest` failed with an `AttributeError` mid-run, `step()` returning `None` gave

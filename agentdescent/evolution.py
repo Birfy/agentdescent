@@ -107,15 +107,32 @@ class LLMAgent:
     complete: Completion
     solve_template: str = _SOLVE_TMPL
     propose_template: str = _PROPOSE_TMPL
+    _empty_replies: int = field(default=0, repr=False)
 
     def solve(self, rendered: str, task: Task) -> str:
         return self.complete(
             self.solve_template.format(artifact=rendered, prompt=task.prompt)).strip()
 
     def propose(self, rendered: str, task: Task, output: str, reward: float) -> Optional[str]:
-        rule = self.complete(self.propose_template.format(
-            artifact=rendered, prompt=task.prompt, output=output, reward=reward)).strip()
-        return None if (not rule or rule.upper().startswith("NONE")) else rule
+        raw = self.complete(self.propose_template.format(
+            artifact=rendered, prompt=task.prompt, output=output, reward=reward))
+        rule = raw.strip()
+        if not rule:
+            # An empty completion is almost never "no rule would help" -- that answer
+            # is the literal string NONE. It is nearly always a starved reasoning
+            # model: the token budget went to internal reasoning and no visible
+            # content came back. Silently treating it as "no proposal" makes the run
+            # look like the framework cannot learn, when the reflector never spoke.
+            self._empty_replies += 1
+            if self._empty_replies in (1, 10, 100):
+                warnings.warn(
+                    f"the reflector returned an empty completion "
+                    f"({self._empty_replies} so far), so no improvement was proposed. "
+                    "A reasoning model given too small a max_tokens spends it all on "
+                    "reasoning and returns no visible text -- try raising max_tokens.",
+                    RuntimeWarning, stacklevel=2)
+            return None
+        return None if rule.upper().startswith("NONE") else rule
 
 
 def reflector(complete: Completion, template: str = _PROPOSE_TMPL) -> Propose:

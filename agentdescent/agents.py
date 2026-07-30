@@ -235,7 +235,7 @@ def with_retries(completion: Completion, attempts: int = 3,
     return complete
 
 
-def claude(model: str = "claude-opus-4-8", max_tokens: int = 1024,
+def claude(model: str = "claude-opus-4-8", max_tokens: int = 4096,
            client: Optional[object] = None, usage: Optional[Usage] = None,
            **create_kwargs) -> Completion:
     """A Claude-backed completion (requires ``pip install anthropic`` + creds).
@@ -244,7 +244,13 @@ def claude(model: str = "claude-opus-4-8", max_tokens: int = 1024,
     otherwise a default one is constructed lazily (resolving credentials from
     the environment / an ``ant auth login`` profile). Use a cheaper ``model``
     (e.g. ``"claude-haiku-4-5"``) for call-heavy loops. Pass ``usage=Usage()`` to
-    accumulate the exact token counts the API reports."""
+    accumulate the exact token counts the API reports.
+
+    ``max_tokens`` defaults high on purpose: a reasoning model spends the budget
+    on internal reasoning first, so too small a cap returns **empty visible
+    content** rather than a short answer. Measured on ``deepseek-v4-flash``, a
+    1024 cap returned nothing at all for 4 of 8 reflection prompts. You are billed
+    for tokens generated, not for the cap, so a generous limit costs nothing."""
     _client = client
 
     def complete(prompt: str) -> str:
@@ -275,7 +281,7 @@ def claude(model: str = "claude-opus-4-8", max_tokens: int = 1024,
 def openai_compatible(model: str, *, base_url_env: str = "OPENAI_BASE_URL",
                       api_key_env: str = "OPENAI_API_KEY",
                       default_base_url: str = "https://api.openai.com/v1",
-                      max_tokens: int = 1024, timeout: float = 120.0,
+                      max_tokens: int = 4096, timeout: float = 120.0,
                       usage: Optional[Usage] = None) -> Completion:
     """A completion for any OpenAI-compatible chat endpoint (GLM/Zhipu, proxies,
     local servers, OpenAI itself).
@@ -283,7 +289,11 @@ def openai_compatible(model: str, *, base_url_env: str = "OPENAI_BASE_URL",
     The base URL and API key are read from the environment at call time -- they
     never pass through code or arguments. Point it at GLM, for example, by
     setting ``OPENAI_BASE_URL=https://open.bigmodel.cn/api/paas/v4`` and
-    ``OPENAI_API_KEY=<your key>`` in your shell, then use ``model="glm-4.6"``."""
+    ``OPENAI_API_KEY=<your key>`` in your shell, then use ``model="glm-4.6"``.
+
+    ``max_tokens`` defaults high on purpose -- see :func:`claude`: a reasoning
+    model starved of budget returns empty content, and at 1024 that happened for
+    half of one measured batch of reflection prompts."""
     def complete(prompt: str) -> str:
         base = os.environ.get(base_url_env, default_base_url).rstrip("/")
         key = os.environ.get(api_key_env)

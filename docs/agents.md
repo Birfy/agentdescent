@@ -40,6 +40,23 @@ robust = with_retries(claude(model="claude-haiku-4-5"), attempts=3)
 `claude()` accepts a `client=` to reuse an existing `anthropic.Anthropic`
 instance, and forwards extra kwargs to `messages.create`.
 
+!!! warning "Give a reasoning model room, or it returns nothing"
+    A reasoning model spends its budget on internal reasoning *before* emitting
+    visible text, so too small a `max_tokens` yields an **empty completion**, not a
+    short answer. The engine reads an empty proposal as "nothing worth changing",
+    so the run looks like it cannot learn while the reflector never actually spoke.
+
+    Measured on `deepseek-v4-flash` with the standard reflection prompt:
+
+    | `max_tokens` | empty replies |
+    |---|---|
+    | 1024 | **4 of 8** |
+    | 3000 | 0 of 8 |
+
+    Both adapters therefore default to **4096**. You are billed for tokens
+    *generated*, not for the cap, so a generous limit costs nothing — and an empty
+    reflection now emits a `RuntimeWarning` naming this as the likely cause.
+
 ## What did the run cost? — `Usage`
 
 A `Completion` is `prompt -> text`, so the token counts the providers *do* return
