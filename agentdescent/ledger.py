@@ -62,13 +62,25 @@ class Snapshot:
         return self.artifacts.get(artifact_id)
 
 
+class GitError(RuntimeError):
+    """A git command failed; the message carries git's own stderr."""
+
+
 def _git(repo: str, *args: str) -> str:
+    """Run a git command, surfacing *why* it failed.
+
+    ``capture_output=True`` swallows stderr, so a failure used to read only
+    "returned non-zero exit status 128" -- the actual cause (a missing repo, an
+    index lock held by another process) was discarded.
+    """
     out = subprocess.run(
         ["git", "-C", repo, *args],
-        check=True,
         capture_output=True,
         text=True,
     )
+    if out.returncode != 0:
+        detail = (out.stderr or out.stdout or "").strip() or "no output"
+        raise GitError(f"git {' '.join(args)} failed in {repo}: {detail}")
     return out.stdout.strip()
 
 

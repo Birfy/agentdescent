@@ -203,15 +203,20 @@ class ResumeQueue:
     def __init__(self, p90_multiplier: float = 2.0) -> None:
         self.p90_multiplier = p90_multiplier
         self._items: List[ResumeItem] = []
+        # every async worker thread pushes here; list.append happens to be
+        # GIL-atomic but pop() + the emptiness check are not.
+        self._lock = threading.Lock()
 
     def should_checkpoint(self, elapsed: float, p90: float) -> bool:
         return elapsed > self.p90_multiplier * p90
 
     def push(self, item: ResumeItem) -> None:
-        self._items.append(item)
+        with self._lock:
+            self._items.append(item)
 
     def pop(self) -> Optional[ResumeItem]:
-        return self._items.pop(0) if self._items else None
+        with self._lock:
+            return self._items.pop(0) if self._items else None
 
     def __len__(self) -> int:
         return len(self._items)

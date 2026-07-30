@@ -48,6 +48,17 @@ All notable changes to AgentDescent are documented here. The format follows
   instead of 4.7 s with byte-identical results.
 
 ### Fixed
+- **Git failures were opaque.** `capture_output=True` swallowed stderr, so any
+  git problem read only "returned non-zero exit status 128"; a new `GitError`
+  carries git's own message (missing repo, held index lock, ...).
+- **Trust-region rejects vanished.** Over-large diffs were filtered out before
+  `considered` was computed and were never settled back into the evidence pool,
+  so a diff dropped for size left no trace in the report or the pool.
+- **Two documented locks were not locks.** `L1SerialGate.try_acquire` — described
+  as "a global L1 lock" — was a check-then-act on a plain dict, so under
+  contention several threads could each believe they held it (a 16-thread race
+  now confirms exactly one winner); `ResumeQueue.push/pop` was unguarded while
+  every async worker pushes into it.
 - **Resuming a run silently discarded `initial_state`.** Re-using `repo_path`
   continues an interrupted run (the ledger is a real git repo) — useful when a
   multi-hour run dies — but a supplied `initial_state` was dropped without a

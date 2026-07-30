@@ -70,21 +70,33 @@ Run through `evolve()` (synchronous DP, 4 workers, 8 rounds) with
 `deepseek-v4-flash` on the real FiNER-139 validation split, 57 single-entity
 sentences over the 40 most frequent XBRL concepts, split train / val / test:
 
-| Concepts | Tasks | Baseline (empty playbook) | After curation | Held-out test | Bullets curated |
+**Three runs, so the spread is visible.** The model is not deterministic, so a
+single run is a sample, not a result:
+
+| Run | Sampler | Baseline | Final val | Held-out test | Bullets |
 |---|---|---|---|---|---|
-| top-40 | 57 | **87.0%** | **95.7% (+8.7)** | **90.5%** | 2 |
+| A | round-robin | 87.0% | **95.7%** | **90.5%** | 2 |
+| B | difficulty | — | 91.3% | 85.7% | 2 |
+| C | round-robin | 90.9% | 90.9% | 85.7% | 2 |
 
-A second run, identical except for `--sampler difficulty`
-([task selection](evolution.md#task-selection-which-rollout-to-spend)), reached a
-lesson sooner — admitting one in round 0 rather than round 2 — but finished
-**0.913 val / 0.857 test**, below round-robin. On ~23 val items a single item is
-worth ~4 points, so this is a small sample rather than a verdict; it is recorded
-because it is the honest outcome, and because "more rollouts on failing tasks"
-plainly did not translate into a better playbook here.
+Two runs of the *identical* configuration (A and C, same `--seed 1`) landed 4.8
+val points apart and reported different baselines, because `deepseek-v4-flash`
+does not return identical text for identical prompts. On ~23 val / ~21 test items
+one item is worth 4–5 points, so **differences of this size are noise**. What
+reproduces across all three is the shape, not the number: the Curator admits
+about two bullets and rejects the rest, and the playbook never regresses below
+baseline — which is the acceptance gate doing its job.
 
-The Curator admitted **2 of the bullets** the Reflector proposed; the rest were
-rejected by the Beta-posterior acceptance test, which is the point — a lesson
-only lands if it demonstrably raises held-out accuracy.
+!!! warning "Do not read +8.7 as the effect size"
+    An earlier version of this page reported run A alone as "87.0% → 95.7%
+    (+8.7)". With n≈23 held-out items and a non-deterministic model, that is
+    within run-to-run variance. Reporting a single LLM run as a point estimate is
+    the easiest way to fool yourself; if you need an effect size, run it several
+    times and report the spread.
+
+**What it cost** (run C, instrumented with [`Usage`](agents.md#what-did-the-run-cost-usage)):
+125 model calls, 48,724 prompt + 27,313 completion tokens, 295 s inside the model
+for 8 rounds over 57 tasks — well under a cent at `deepseek-v4-flash` prices.
 
 !!! warning "Pick a configuration that isn't saturated"
     With the default `--top-k 10` (the ten *most frequent* tags) a strong model

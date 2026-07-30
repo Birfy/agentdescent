@@ -16,7 +16,8 @@ a harness patch that only touches one task cluster may ride the fast layer
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import threading
+from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Dict
 
@@ -63,24 +64,31 @@ class L1SerialGate:
     tractable."""
 
     _in_flight: Dict[str, str] = None  # artifact_id -> diff_id
+    #: try_acquire is a check-then-act, so calling it from several threads could
+    #: hand the "global L1 lock" to two of them at once -- exactly what this gate
+    #: exists to prevent. Guard it for real.
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def __post_init__(self) -> None:
         if self._in_flight is None:
             self._in_flight = {}
 
     def try_acquire(self, artifact_id: str, diff_id: str) -> bool:
-        if self._in_flight:
-            # a global L1 lock: at most one L1 diff evaluated anywhere.
-            return False
-        self._in_flight[artifact_id] = diff_id
-        return True
+        with self._lock:
+            if self._in_flight:
+                # a global L1 lock: at most one L1 diff evaluated anywhere.
+                return False
+            self._in_flight[artifact_id] = diff_id
+            return True
 
     def release(self, artifact_id: str) -> None:
-        self._in_flight.pop(artifact_id, None)
+        with self._lock:
+            self._in_flight.pop(artifact_id, None)
 
     @property
     def busy(self) -> bool:
-        return bool(self._in_flight)
+        with self._lock:
+            return bool(self._in_flight)
 
 
 class GovernanceError(Exception):

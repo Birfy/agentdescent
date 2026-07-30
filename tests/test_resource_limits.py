@@ -97,3 +97,47 @@ def test_async_runtime_threads_are_daemon():
 
     src = inspect.getsource(async_runtime.AsyncAgentDescent.run)
     assert src.count("daemon=True") >= 2, "worker and aggregator threads must be daemon"
+
+
+def test_l1_serial_gate_admits_exactly_one_under_contention():
+    """The gate is documented as a global L1 lock but was a check-then-act on a
+    plain dict, so two threads could both believe they hold it."""
+    from agentdescent.governance import L1SerialGate
+
+    for _ in range(20):
+        gate = L1SerialGate()
+        winners = []
+
+        def contend(i):
+            if gate.try_acquire(f"a{i}", f"d{i}"):
+                winners.append(i)
+
+        threads = [threading.Thread(target=contend, args=(i,)) for i in range(16)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert len(winners) == 1, f"{len(winners)} threads acquired the L1 lock"
+
+
+def test_resume_queue_is_thread_safe():
+    """Async workers push checkpoints concurrently; pop is a check-then-act."""
+    from agentdescent.scheduler import ResumeItem, ResumeQueue
+
+    q = ResumeQueue()
+
+    def push_many(n):
+        for i in range(200):
+            q.push(ResumeItem(task_id=f"t{n}-{i}", turn=i, conversation=[],
+                              external_handle=None, version_at_checkpoint={}))
+
+    threads = [threading.Thread(target=push_many, args=(n,)) for n in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    drained = 0
+    while q.pop() is not None:
+        drained += 1
+    assert drained == 800

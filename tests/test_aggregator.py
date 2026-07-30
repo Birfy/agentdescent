@@ -144,3 +144,41 @@ def test_conflict_resolution_keeps_complementary_cards():
     kept, dropped = Aggregator._resolve_conflicts(
         agg, art, [card("A", {"k1": "x"}), card("B", {"k2": "y"})])
     assert len(kept) == 2 and dropped == 0
+
+
+def test_oversized_diffs_are_counted_and_settled(tmp_path):
+    """Trust-region rejects used to vanish from both the report and the pool.
+
+    They were filtered out before `considered` was computed and never settled, so
+    a diff dropped for being too large left no trace anywhere.
+    """
+    from agentdescent.aggregator import Aggregator, AggregatorConfig
+    from agentdescent.evolvable import Diff, EvidenceCard
+    from agentdescent.evolution import AppendRules, EvolvingArtifact
+    from agentdescent.ledger import Ledger
+    from agentdescent.scheduler import AuditScheduler
+    from agentdescent.verifier import ThreeLayerVerifier, VerifierBudget
+
+    lg = Ledger(str(tmp_path), lambda a: {"state": dict(a.state)},
+                lambda aid, v, s: EvolvingArtifact(aid, s.get("state", {}), v,
+                                                   0.2, None, AppendRules()))
+    lg.register(EvolvingArtifact("a", {}, 1, 0.2, None, AppendRules()))
+    verifier = ThreeLayerVerifier(eval_fn=lambda art, tasks: 0.5, held_out=[1, 2, 3],
+                                  budget=VerifierBudget())
+    agg = Aggregator(lg, verifier, AuditScheduler(),
+                     AggregatorConfig(batch_trigger=1, trust_region_ops=2))
+
+    # one diff inside the trust region, one far outside it
+    small = Diff(diff_id="small", target="a", ops={"k1": "v"}, author="w0")
+    huge = Diff(diff_id="huge", target="a",
+                ops={f"k{i}": "v" for i in range(10)}, author="w1")
+    for d in (small, huge):
+        agg.ingest(EvidenceCard(diff=d, base_version={"a": 1}, touched=["a"],
+                                before_after_delta=0.1, trajectory_refs=[]))
+
+    reports = agg.step()
+    assert reports, "expected a merge report"
+    assert reports[0].considered == 2, (
+        f"the oversized diff should still be counted, got {reports[0].considered}")
+    assert any(c.diff.diff_id == "huge" for c in agg.buffer.settled), \
+        "the oversized diff's evidence should be settled back into the pool"

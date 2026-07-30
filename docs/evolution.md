@@ -194,15 +194,14 @@ rollouts that landed on an informative task:
 
 !!! warning "That is a targeting measurement, not an accuracy claim"
     Landing more rollouts on failing tasks does **not** automatically produce a
-    better artifact. On a real [ACE / FiNER-139 run](algo-ace.md#empirical-results-finer-139-with-deepseek)
-    the difficulty-weighted sampler found failures sooner (it admitted a lesson in
-    round 0 versus round 2) yet finished *lower* — 0.913 val / 0.857 test against
-    round-robin's 0.957 / 0.905, on ~23 val and ~21 test items where one item is
-    worth 4–5 points, so the gap is small but the direction is not encouraging.
-    Concentrating on the hardest tasks can yield lessons that fit those tasks and
-    generalise worse. Treat this sampler as **worth trying and worth measuring**,
-    not as a free win, and keep `RoundRobin` unless your own held-out score says
-    otherwise.
+    better artifact. On real [ACE / FiNER-139 runs](algo-ace.md#empirical-results-finer-139-with-deepseek)
+    the difficulty-weighted sampler reached a lesson sooner (round 0 versus round
+    2) but did not score better — and two runs of the *same* round-robin
+    configuration differed by 4.8 points, so at that sample size neither sampler
+    is distinguishable from the other. Concentrating on the hardest tasks can also
+    yield lessons that fit those tasks and generalise worse. Treat this sampler as
+    **worth trying and worth measuring on your own data**, not as a free win;
+    `RoundRobin` stays the default.
 
 Where it should help most is a *strong* base agent on a large task pool: failures
 are sparse, so round-robin spends most of its budget re-solving solved tasks.

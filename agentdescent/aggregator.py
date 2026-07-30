@@ -295,15 +295,22 @@ class Aggregator:
                                "unknown artifact")
         assert_mutable(artifact)  # L0 guard
 
-        # trust-region: reject over-large diffs up front.
+        # trust-region: reject over-large diffs up front. They were previously
+        # dropped *before* `considered` was computed and never settled, so they
+        # vanished from both the report and the evidence pool -- silently.
+        n_considered = len(cards)
+        oversized = [c for c in cards if c.diff.size() > self.config.trust_region_ops]
         cards = [c for c in cards if c.diff.size() <= self.config.trust_region_ops]
+        if oversized:
+            self.buffer.settle(oversized)
 
         head = snap.version
         survivors, discarded = self._staleness_filter(artifact, head, cards)
         self.buffer.settle(discarded)
         if not survivors:
-            return MergeReport(artifact_id, None, False, len(cards), 0, len(discarded),
-                               0, 0.0, None, "all stale / rejected")
+            return MergeReport(artifact_id, None, False, n_considered, 0,
+                               len(discarded) + len(oversized), 0, 0.0, None,
+                               "all stale / rejected")
 
         kept_cards, conflicts = self._resolve_conflicts(artifact, survivors)
         kept_diffs = [c.diff for c in kept_cards]
@@ -343,13 +350,13 @@ class Aggregator:
             self.audit.update_trust(artifact_id, agreed)
             if oracle_cand <= oracle_base:
                 prior.observe_delta(oracle_cand - oracle_base)
-                return MergeReport(artifact_id, None, fused, len(cards), len(survivors),
+                return MergeReport(artifact_id, None, fused, n_considered, len(survivors),
                                    len(discarded), conflicts, p_improve, None,
                                    "oracle rejected")
 
         if p_improve <= 1.0 - delta or cand_score < base_score:
             prior.observe_delta(cand_score - base_score)
-            return MergeReport(artifact_id, None, fused, len(cards), len(survivors),
+            return MergeReport(artifact_id, None, fused, n_considered, len(survivors),
                                len(discarded), conflicts, p_improve, None,
                                f"P(delta>0)={p_improve:.2f} <= {1-delta:.2f}")
 
@@ -362,7 +369,7 @@ class Aggregator:
             )
         except CASConflict:
             self.buffer.settle(survivors)
-            return MergeReport(artifact_id, None, fused, len(cards), len(survivors),
+            return MergeReport(artifact_id, None, fused, n_considered, len(survivors),
                                len(discarded), conflicts, p_improve, None, "CAS conflict")
 
         prior.update(True, weight=2.0)  # a committed improvement is strong evidence.
@@ -373,6 +380,6 @@ class Aggregator:
             self.ledger.promote_to_stable(artifact_id)
             self._survival[artifact_id] = 0
 
-        return MergeReport(artifact_id, best_diff, fused, len(cards), len(survivors),
+        return MergeReport(artifact_id, best_diff, fused, n_considered, len(survivors),
                            len(discarded), conflicts, p_improve, new_version,
                            "committed")
