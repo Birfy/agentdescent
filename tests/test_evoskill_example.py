@@ -60,20 +60,82 @@ def test_retrieve_context_picks_relevant_lines():
     assert "defense" in ctx
 
 
-def test_loop_discovers_a_helpful_skill():
+def _skill_helps_stub():
+    """Base agent fails (no skill) but succeeds once any skill is in context."""
     class Stub:
         def __call__(self, prompt):
             if "Skill Proposer" in prompt:
                 return "create defense-lookup\nLook up defense totals."
             if "Skill Generator" in prompt:
-                return "Defense lookup\n- Find the national defense row and report millions."
+                return "Defense lookup\n- Find the national defense row, report millions."
             return "Answer: 2602" if "skill:" in prompt else "Answer: 0"
+    return Stub()
 
+
+def _skill_useless_stub():
+    """Base agent always fails; no skill ever helps (drives rollback / no-gain)."""
+    class Stub:
+        def __call__(self, prompt):
+            if "Skill Proposer" in prompt:
+                return "create noop\nTry harder."
+            if "Skill Generator" in prompt:
+                return "No-op\n- does not help."
+            return "Answer: 0"
+    return Stub()
+
+
+def _tasks(n_train=4, n_val=3):
     train = [{"question": "defense 1940?", "answer": "2602",
-              "source_files": "", "difficulty": "hard"} for _ in range(4)]
+              "source_files": "", "difficulty": "hard"} for _ in range(n_train)]
     val = [{"question": "defense?", "answer": "2602",
-            "source_files": "", "difficulty": "hard"} for _ in range(3)]
-    res = run_evoskill(Stub(), {}, train, val, iterations=3, seed=0)
+            "source_files": "", "difficulty": "hard"} for _ in range(n_val)]
+    return train, val
+
+
+def test_loop_discovers_a_helpful_skill():
+    train, val = _tasks()
+    res = run_evoskill(_skill_helps_stub(), {}, train, val, iterations=3, seed=0)
     assert res.seed_score == 0.0
     assert res.best_score > res.seed_score
+    assert len(res.skills) >= 1
+
+
+def test_sync_gate_no_false_improvement():
+    """Sync frontier: a skill that never helps must not raise the best score."""
+    train, val = _tasks()
+    res = run_evoskill(_skill_useless_stub(), {}, train, val, iterations=3, seed=0)
+    assert res.seed_score == 0.0
+    assert res.best_score == res.seed_score          # gate reports no false gain
+
+
+def test_async_sgd_keeps_helpful_skill():
+    """Async SGD path (SgdSkillAggregator): a helpful skill is validated and kept."""
+    train, val = _tasks()
+    res = run_evoskill(_skill_helps_stub(), {}, train, val, iterations=6, seed=0,
+                       asynchronous=True, async_ratio=2, max_seconds=20,
+                       eval_concurrency=1, batch_size=2, val_every=1)
+    assert res.seed_score == 0.0
+    assert res.best_score > res.seed_score
+    assert len(res.skills) >= 1
+
+
+def test_async_sgd_rolls_back_useless_skill():
+    """Async SGD path: skills with no held-out gain are rolled back to checkpoint."""
+    train, val = _tasks()
+    res = run_evoskill(_skill_useless_stub(), {}, train, val, iterations=6, seed=0,
+                       asynchronous=True, async_ratio=2, max_seconds=20,
+                       eval_concurrency=1, batch_size=2, val_every=1)
+    assert res.seed_score == 0.0
+    assert res.best_score == 0.0                      # never improved
+    assert res.skills == {}                           # rolled back to empty checkpoint
+
+
+def test_eval_at_end_scores_final_library():
+    """eval_at_end: apply skills during the run, score the final library once."""
+    train, val = _tasks()
+    res = run_evoskill(_skill_helps_stub(), {}, train, val, iterations=6, seed=0,
+                       asynchronous=True, async_ratio=2, max_seconds=20,
+                       eval_concurrency=1, batch_size=2, eval_at_end=True)
+    assert res.seed_score == 0.0
+    assert res.best_score > 0.0                       # final eval sees the applied skills
     assert len(res.skills) >= 1
