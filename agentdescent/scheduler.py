@@ -16,6 +16,7 @@ mechanism:
 
 from __future__ import annotations
 
+import heapq
 import threading
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -120,9 +121,17 @@ class AuditScheduler:
     audit loop over the optimizer itself.
     """
 
-    def __init__(self) -> None:
-        self._items: List[_AuditItem] = []
+    #: Cap on queued audits. Nothing in the engines drains this queue, so an
+    #: unbounded list would grow for the whole run; keep the highest-priority
+    #: items and drop the tail, which is the lowest-value work anyway.
+    MAX_QUEUED = 4096
+
+    def __init__(self, max_queued: int = MAX_QUEUED) -> None:
+        self._items: List[_AuditItem] = []          # a heap (see submit)
         self._trust: Dict[str, float] = defaultdict(lambda: 1.0)
+        self._max_queued = max_queued
+        self._dropped = 0
+        self._lock = threading.Lock()               # submitted from worker threads
 
     def trust(self, artifact_id: str) -> float:
         return self._trust[artifact_id]
@@ -143,20 +152,37 @@ class AuditScheduler:
         uncertainty: float,
         payload: Any = None,
     ) -> float:
-        priority = blast_radius * uncertainty / max(0.25, self._trust[artifact_id])
-        # heapq is a min-heap; negate so the highest priority pops first.
-        self._items.append(_AuditItem(-priority, diff_id, payload))
-        self._items.sort()
-        return priority
+        with self._lock:
+            priority = blast_radius * uncertainty / max(0.25, self._trust[artifact_id])
+            # heapq is a min-heap; negate so the highest priority pops first.
+            # heappush is O(log n) -- a full sort per submit was O(n log n), which
+            # made a long run quadratic overall.
+            heapq.heappush(self._items, _AuditItem(-priority, diff_id, payload))
+            # The lowest-priority items sit at the heap's leaves, so shedding them
+            # costs a rebuild. Amortise it: let the queue grow to 2x the cap, then
+            # rebuild once, keeping the best half -- O(1) per submit on average
+            # instead of a rebuild on every submit past the cap.
+            if len(self._items) > 2 * self._max_queued:
+                kept = heapq.nsmallest(self._max_queued, self._items)
+                self._dropped += len(self._items) - len(kept)
+                self._items = kept
+                heapq.heapify(self._items)
+            return priority
 
     def force_oracle(self, blast_radius: float, artifact_id: str) -> bool:
         """High-impact or low-trust changes are forced through the oracle."""
         return blast_radius >= 0.5 or self._trust[artifact_id] < 0.75
 
     def pop(self) -> Optional[_AuditItem]:
-        if not self._items:
-            return None
-        return self._items.pop(0)
+        with self._lock:
+            if not self._items:
+                return None
+            return heapq.heappop(self._items)
+
+    @property
+    def dropped(self) -> int:
+        """How many low-priority audits were shed to stay under the cap."""
+        return self._dropped
 
     def __len__(self) -> int:
         return len(self._items)

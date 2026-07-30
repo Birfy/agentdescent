@@ -98,7 +98,13 @@ class ThreeLayerVerifier:
         return acc * n, (1.0 - acc) * n
 
     def oracle_eval(self, artifact: Evolvable) -> float:
-        """Ground truth on the full held-out set. Consumes audit budget."""
-        if self.budget.can_spend():
-            self.budget.spend()
+        """Ground truth on the full held-out set. Consumes audit budget.
+
+        The budget is a real cap, not a counter: ``eval_fn`` is the caller's
+        scorer, so on an LLM workload every oracle call is a full held-out sweep
+        of real model calls. Once the budget is exhausted this falls back to the
+        cheap layer rather than spending money it was told not to spend."""
+        if not self.budget.can_spend():
+            return self.rule_eval(artifact)
+        self.budget.spend()
         return self.eval_fn(artifact, self.held_out)

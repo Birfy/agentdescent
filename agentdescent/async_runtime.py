@@ -273,9 +273,12 @@ class AsyncAgentDescent:
 
     def run(self) -> AsyncStats:
         start = time.time()
-        agg_thread = threading.Thread(target=self._aggregator_loop, name="aggregator")
+        # daemon: a run that overruns max_seconds must not block interpreter exit.
+        agg_thread = threading.Thread(target=self._aggregator_loop, name="aggregator",
+                                      daemon=True)
         worker_threads = [
-            threading.Thread(target=self._worker_loop, args=(w,), name=w.worker_id)
+            threading.Thread(target=self._worker_loop, args=(w,), name=w.worker_id,
+                             daemon=True)
             for w in self.workers
         ]
         agg_thread.start()

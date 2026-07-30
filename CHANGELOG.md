@@ -22,6 +22,16 @@ All notable changes to AgentDescent are documented here. The format follows
   that ended it early, so callers can tell "converged" from "died".
 
 ### Fixed
+- **`oracle_budget` capped nothing.** The budget was decremented but the oracle
+  evaluation ran regardless, so a cost-control knob controlled no cost — on an LLM
+  workload each call is a full held-out sweep. It now falls back to the cheap
+  verifier layer once exhausted.
+- **The audit queue was unbounded and quadratic.** `submit()` re-sorted the whole
+  list every call and nothing drains the queue; 28k submits now take 0.1s instead
+  of growing without limit, the queue is capped, and it is lock-guarded because
+  worker threads submit into it.
+- **`AsyncAgentDescent`'s threads were non-daemon**, so a run that overran
+  `max_seconds` blocked interpreter exit until the rollouts finished.
 - **A typo in the caller's `run`/`propose` produced a clean-looking empty result.**
   The round body's catch-all treated programming errors as backend failures, so a
   signature mistake returned `final_reward=0.0` with zero rounds and no output at
