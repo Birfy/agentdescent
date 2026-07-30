@@ -51,7 +51,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Callable, List, Tuple
 
-from agentdescent.agents import claude, openai_compatible
+from agentdescent.agents import Usage, claude, openai_compatible
 from agentdescent.aggregator import AggregatorProtocol, MergeReport
 from agentdescent.dataloader import Dataset, hf_rows, split_dataset
 from agentdescent.evolvable import Diff, EvidenceCard
@@ -513,8 +513,9 @@ def main() -> None:
             print("aborted.")
             return
 
-    completion = (openai_compatible(model=args.model) if args.provider == "glm"
-                  else claude(model=args.model))
+    usage = Usage()                       # what the run actually costs
+    completion = (openai_compatible(model=args.model, usage=usage) if args.provider == "glm"
+                  else claude(model=args.model, usage=usage))
     try:
         completion("Reply with the single word: ok")
     except Exception as e:  # noqa: BLE001
@@ -535,6 +536,7 @@ def main() -> None:
     print(f"\nval hard-EM : {result.seed_em:.3f} -> {result.best_em:.3f}")
     print(f"test hard-EM: {test_em:.3f}  (held out, never seen by the gate)")
     print(f"edits accepted / rejected: {result.accepted} / {result.rejected}")
+    print(f"model usage: {usage.summary()}")
 
 
 if __name__ == "__main__":

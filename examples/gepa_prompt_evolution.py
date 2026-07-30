@@ -47,7 +47,7 @@ import string
 import sys
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
-from agentdescent.agents import claude, openai_compatible
+from agentdescent.agents import Usage, claude, openai_compatible
 from agentdescent.aggregator import AggregatorProtocol, MergeReport
 from agentdescent.dataloader import Dataset, hf_rows, split_dataset
 from agentdescent.evolvable import Diff, EvidenceCard
@@ -404,8 +404,9 @@ def main() -> None:
             print("aborted.")
             return
 
-    completion = (openai_compatible(model=args.model) if args.provider == "glm"
-                  else claude(model=args.model))
+    usage = Usage()                       # what the run actually costs
+    completion = (openai_compatible(model=args.model, usage=usage) if args.provider == "glm"
+                  else claude(model=args.model, usage=usage))
     agent = gepa_agent(completion)
     try:
         agent.solve("", Task(id="probe", prompt="Reply with the single word: ok"))
@@ -436,6 +437,7 @@ def main() -> None:
     print(f"seed D_pareto EM   : {agg.scores[0] and sum(agg.scores[0]) / len(agg.scores[0]):.3f}")
     print(f"best D_pareto EM   : {agg.best_avg:.3f}")
     print(f"test EM            : {test_em:.3f}  (held out, never seen by the optimizer)")
+    print(f"model usage: {usage.summary()}")
 
 
 if __name__ == "__main__":

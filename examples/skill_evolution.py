@@ -33,7 +33,7 @@ import urllib.request
 from difflib import SequenceMatcher
 from typing import Dict, List, Optional
 
-from agentdescent.agents import claude, openai_compatible
+from agentdescent.agents import Usage, claude, openai_compatible
 from agentdescent.evolution import AppendRules, LLMAgent, Task, evolve
 from agentdescent.parallel import DataParallel
 
@@ -167,8 +167,9 @@ def main() -> None:
             return
 
     # provider layer (agentdescent.agents): any prompt->text completion works.
-    completion = (openai_compatible(model=args.model) if args.provider == "glm"
-                  else claude(model=args.model))
+    usage = Usage()                       # what the run actually costs
+    completion = (openai_compatible(model=args.model, usage=usage) if args.provider == "glm"
+                  else claude(model=args.model, usage=usage))
     agent = LLMAgent(completion)
     try:
         agent.solve("", Task(id="probe", prompt="Reply with the single word: ok"))
@@ -192,6 +193,7 @@ def main() -> None:
     print(f"\n{label}: {result.history[0].held_out_reward:.3f} "
           f"-> {result.final_reward:.3f}")
     print(f"lessons learned: {len(result.state)}")
+    print(f"model usage: {usage.summary()}")
 
 
 if __name__ == "__main__":

@@ -54,7 +54,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Tuple
 
-from agentdescent.agents import claude, openai_compatible
+from agentdescent.agents import Usage, claude, openai_compatible
 from agentdescent.aggregator import AggregatorProtocol, MergeReport
 from agentdescent.dataloader import Dataset, fetch_text, split_dataset
 from agentdescent.evolvable import Diff, EvidenceCard
@@ -626,8 +626,9 @@ def main() -> None:
             print("aborted.")
             return
 
-    completion = (openai_compatible(model=args.model) if args.provider == "glm"
-                  else claude(model=args.model))
+    usage = Usage()                       # what the run actually costs
+    completion = (openai_compatible(model=args.model, usage=usage) if args.provider == "glm"
+                  else claude(model=args.model, usage=usage))
     try:
         completion("Reply with the single word: ok")
     except Exception as e:  # noqa: BLE001
@@ -649,6 +650,7 @@ def main() -> None:
     print(f"\nseed fitness (best hand-designed): {result.seed_fitness:.3f}")
     print(f"searched fitness (best on val)   : {result.best_fitness:.3f}")
     print(f"test accuracy (held out)         : {test_acc:.3f}")
+    print(f"model usage: {usage.summary()}")
 
 
 if __name__ == "__main__":
