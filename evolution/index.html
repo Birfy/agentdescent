@@ -510,6 +510,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#why-did-nothing-commit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why did nothing commit?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#resuming-a-run" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1298,6 +1309,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#why-did-nothing-commit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why did nothing commit?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#resuming-a-run" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1907,10 +1929,60 @@ against the current head, so η is usually 0. Deep dive:
 <a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="n">result</span><span class="o">.</span><span class="n">rendered</span>       <span class="c1"># the evolved artifact, rendered to text</span>
 <a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="n">result</span><span class="o">.</span><span class="n">state</span>          <span class="c1"># its {key: value} state</span>
 <a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="n">result</span><span class="o">.</span><span class="n">final_reward</span>   <span class="c1"># held-out reward of the final artifact</span>
-<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="n">result</span><span class="o">.</span><span class="n">history</span>        <span class="c1"># RoundInfo(round, held_out_reward, n_items, committed, rejected)</span>
-<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="n">result</span><span class="o">.</span><span class="n">ledger_log</span>     <span class="c1"># the git commit log of accepted merges</span>
-<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="n">result</span><span class="o">.</span><span class="n">error</span>          <span class="c1"># None on a clean run; &quot;&lt;ExcType&gt;: &lt;msg&gt;&quot; if a backend failure ended it</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="n">result</span><span class="o">.</span><span class="n">history</span>        <span class="c1"># RoundInfo(round, held_out_reward, n_items, committed, rejected, reasons)</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="n">result</span><span class="o">.</span><span class="n">outcomes</span><span class="p">()</span>     <span class="c1"># {&#39;below-threshold&#39;: 7, &#39;committed&#39;: 2} — why the run went as it did</span>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="n">result</span><span class="o">.</span><span class="n">ledger_log</span>     <span class="c1"># the git commit log of accepted merges</span>
+<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="n">result</span><span class="o">.</span><span class="n">error</span>          <span class="c1"># None on a clean run; &quot;&lt;ExcType&gt;: &lt;msg&gt;&quot; if a backend failure ended it</span>
 </code></pre></div>
+<h3 id="why-did-nothing-commit">Why did nothing commit?<a class="headerlink" href="#why-did-nothing-commit" title="Permanent link">&para;</a></h3>
+<p>The first question about a disappointing run, and <code>committed</code>/<code>rejected</code> cannot
+answer it — the fixes are opposite. <code>outcomes()</code> tallies the merge outcome of
+every round by a stable category:</p>
+<table>
+<thead>
+<tr>
+<th>category</th>
+<th>what happened</th>
+<th>where to look</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>committed</code></td>
+<td>accepted and written to the dev branch</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>below-threshold</code></td>
+<td>reached the acceptance gate and failed to beat the baseline</td>
+<td>the <strong>reflector</strong> — its proposals do not help. Check it can see enough (<code>Task.meta</code>), and that it is not returning empty (<code>max_tokens</code>)</td>
+</tr>
+<tr>
+<td><code>all-stale</code></td>
+<td>never reached the gate; the world moved on first</td>
+<td>the <strong>lag budget</strong> — lower <code>async_ratio</code>, or use the sync path</td>
+</tr>
+<tr>
+<td><code>cas-conflict</code></td>
+<td>lost a commit race; the evidence is re-filed for retry</td>
+<td>usually self-correcting; persistent means too many workers on one artifact</td>
+</tr>
+<tr>
+<td><code>oracle-rejected</code></td>
+<td>the audit's oracle disagreed with the cheap evaluator</td>
+<td>the <strong>cheap evaluator</strong> is miscalibrated</td>
+</tr>
+<tr>
+<td><code>unknown-artifact</code></td>
+<td>diffs targeted an id the ledger does not hold</td>
+<td>a caller bug in <code>artifact_id</code>/strategy</td>
+</tr>
+</tbody>
+</table>
+<p><code>RoundInfo.reasons</code> is the same tally per round. A custom aggregator sees the
+underlying <code>MergeReport</code>, which carries both <code>category</code> and a human-readable
+<code>reason</code> with the measured values (<code>"P(delta&gt;0)=0.42 &lt;= 0.75"</code>) — good for a log
+line, but it interpolates numbers, so count on <code>category</code>.</p>
 <p>Watch a long run as it happens — an LLM run can take hours, and <code>history</code> is only
 available once it returns:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">,</span> <span class="n">rounds</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>
