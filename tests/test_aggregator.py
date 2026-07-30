@@ -81,3 +81,66 @@ def test_contradictory_diff_is_dropped(tmp_path):
     committed = led.snapshot(Ledger.DEV).get("s")
     # the correct label wins.
     assert committed.table.get("kw00") == "acidbase"
+
+
+def test_conflict_resolution_leaves_no_contradictions():
+    """A card that displaces one survivor may contradict another.
+
+    Resolution stopped at the first conflict, so a replacement was never
+    re-checked against the rest of `kept`. Mutually contradicting cards then
+    survived together, which made the tournament's "no contradictions" guard
+    false and silently skipped building the fused candidate -- losing the
+    model-soup benefit the aggregator is built around.
+    """
+    from agentdescent.aggregator import Aggregator, diffs_contradict
+    from agentdescent.evolvable import Diff, EvidenceCard
+    from agentdescent.evolution import EvolvingArtifact, KeyedRules
+
+    art = EvolvingArtifact("a", {}, 1, 0.2, None, KeyedRules(categories=["k1", "k2"]))
+
+    def card(did, ops):
+        return EvidenceCard(diff=Diff(diff_id=did, target="a", ops=ops, author=did),
+                            base_version={"a": 1}, touched=["a"],
+                            before_after_delta=0.1, trajectory_refs=[])
+
+    class _Stub:                       # 'z' wins, so C displaces A
+        def cheap_eval(self, artifact):
+            return 0.9 if artifact.state.get("k1") == "z" else 0.1
+
+    agg = Aggregator.__new__(Aggregator)
+    agg.verifier = _Stub()
+
+    # A and B are complementary (different keys); C contradicts BOTH.
+    cards = [card("A", {"k1": "x"}), card("B", {"k2": "y"}),
+             card("C", {"k1": "z", "k2": "w"})]
+    kept, dropped = Aggregator._resolve_conflicts(agg, art, cards)
+
+    residual = [(a.diff.diff_id, b.diff.diff_id)
+                for i, a in enumerate(kept) for b in kept[i + 1:]
+                if diffs_contradict(a.diff, b.diff)]
+    assert not residual, f"contradicting cards survived together: {residual}"
+    assert dropped == 2
+
+
+def test_conflict_resolution_keeps_complementary_cards():
+    """Cards touching different keys must both survive -- that is what fusion needs."""
+    from agentdescent.aggregator import Aggregator
+    from agentdescent.evolvable import Diff, EvidenceCard
+    from agentdescent.evolution import EvolvingArtifact, KeyedRules
+
+    art = EvolvingArtifact("a", {}, 1, 0.2, None, KeyedRules(categories=["k1", "k2"]))
+
+    def card(did, ops):
+        return EvidenceCard(diff=Diff(diff_id=did, target="a", ops=ops, author=did),
+                            base_version={"a": 1}, touched=["a"],
+                            before_after_delta=0.1, trajectory_refs=[])
+
+    class _Stub:
+        def cheap_eval(self, artifact):
+            return 0.5
+
+    agg = Aggregator.__new__(Aggregator)
+    agg.verifier = _Stub()
+    kept, dropped = Aggregator._resolve_conflicts(
+        agg, art, [card("A", {"k1": "x"}), card("B", {"k2": "y"})])
+    assert len(kept) == 2 and dropped == 0

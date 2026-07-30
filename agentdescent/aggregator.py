@@ -233,19 +233,27 @@ class Aggregator:
         dropped = 0
         kept: List[EvidenceCard] = []
         for card in cards:
-            conflict = False
-            for i, k in enumerate(kept):
-                if diffs_contradict(card.diff, k.diff):
-                    # project out the worse of the two on the held-out subset.
-                    d_score = self.verifier.cheap_eval(artifact.apply(card.diff))
-                    k_score = self.verifier.cheap_eval(artifact.apply(k.diff))
-                    if d_score > k_score:
-                        kept[i] = card
-                    dropped += 1
-                    conflict = True
+            # Resolve against everything already kept, and keep going after a win:
+            # a card that displaces one survivor may contradict another (it can
+            # touch several keys). Stopping at the first conflict left mutually
+            # contradicting cards in `kept`, which then made the tournament's
+            # "no contradictions" guard false and silently skipped the fusion.
+            survivor: Optional[EvidenceCard] = card
+            while survivor is not None:
+                idx = next((i for i, k in enumerate(kept)
+                            if diffs_contradict(survivor.diff, k.diff)), None)
+                if idx is None:
                     break
-            if not conflict:
-                kept.append(card)
+                # project out the worse of the two on the held-out subset.
+                d_score = self.verifier.cheap_eval(artifact.apply(survivor.diff))
+                k_score = self.verifier.cheap_eval(artifact.apply(kept[idx].diff))
+                dropped += 1
+                if d_score > k_score:
+                    kept.pop(idx)          # the newcomer wins; re-check the rest
+                else:
+                    survivor = None        # the newcomer loses; drop it
+            if survivor is not None:
+                kept.append(survivor)
         return kept, dropped
 
     # -- fusion tournament (section 4.3) -------------------------------------

@@ -293,6 +293,13 @@ result.ledger_log     # the git commit log of accepted merges
 result.error          # None on a clean run; "<ExcType>: <msg>" if a backend failure ended it
 ```
 
+Keep the artifact a run produced:
+
+```python
+result.save("playbook.json")                     # state + rendered + history + error
+restored = EvolutionResult.load("playbook.json")
+```
+
 The engine returns **partial results** if the model backend fails mid-run (rate
 limit, credit exhaustion) — progress isn't lost.
 

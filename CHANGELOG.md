@@ -12,6 +12,8 @@ All notable changes to AgentDescent are documented here. The format follows
   teaches nothing. `DifficultyWeighted` prefers tasks whose pass rate sits away from
   the all-pass / all-fail extremes (the zero-advantage filter), landing ~1.6-2.2x
   more rollouts on informative tasks than the `RoundRobin` default in measurement.
+- `EvolutionResult.save(path)` / `.load(path)` — persist the evolved artifact and
+  its run summary as JSON instead of hand-rolling the same serialisation.
 - `agentdescent.dataloader` / `agentdescent.backends` are now importable from the
   package namespace (`Dataset` and `split_dataset` are re-exported).
 - `tests` CI workflow — runs the offline suite on push/PR across Python 3.9 / 3.11 / 3.12.
@@ -22,6 +24,13 @@ All notable changes to AgentDescent are documented here. The format follows
   that ended it early, so callers can tell "converged" from "died".
 
 ### Fixed
+- **Conflict resolution could leave contradicting diffs in the accepted set,
+  silently disabling fusion.** Resolution stopped at the first conflict, so a diff
+  that displaced one survivor was never re-checked against the rest; two
+  contradicting cards then survived together, which made the tournament's
+  "no contradictions" guard false and skipped building the fused candidate —
+  losing the model-soup benefit the aggregator exists for. It now resolves to a
+  fixed point.
 - **`oracle_budget` capped nothing.** The budget was decremented but the oracle
   evaluation ran regardless, so a cost-control knob controlled no cost — on an LLM
   workload each call is a full held-out sweep. It now falls back to the cheap

@@ -298,6 +298,42 @@ class EvolutionResult:
     #: still returned -- check this to tell "converged" from "died".
     error: Optional[str] = None
 
+    def save(self, path: str) -> None:
+        """Write the evolved artifact and its run summary to a JSON file.
+
+        The point of a run is the artifact it produced; without this every caller
+        hand-rolls the same serialisation to keep it."""
+        import json
+
+        payload = {
+            "state": self.state,
+            "rendered": self.rendered,
+            "final_reward": self.final_reward,
+            "error": self.error,
+            "history": [
+                {"round": h.round, "held_out_reward": h.held_out_reward,
+                 "n_items": h.n_items, "committed": h.committed, "rejected": h.rejected}
+                for h in self.history
+            ],
+            "ledger_log": list(self.ledger_log),
+        }
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2, ensure_ascii=False)
+
+    @classmethod
+    def load(cls, path: str) -> "EvolutionResult":
+        """Read back a result written by :meth:`save`."""
+        import json
+
+        with open(path, encoding="utf-8") as fh:
+            d = json.load(fh)
+        return cls(
+            state=d["state"], rendered=d["rendered"],
+            final_reward=d["final_reward"],
+            history=[RoundInfo(**h) for h in d.get("history", [])],
+            ledger_log=d.get("ledger_log", []), error=d.get("error"),
+        )
+
 
 @dataclass
 class _Engine:

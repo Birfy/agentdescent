@@ -117,3 +117,29 @@ def test_custom_aggregator_factory_plugs_in():
                     aggregator_factory=factory)
     assert calls["steps"] == 5                          # one step per round, via our aggregator
     assert result.final_reward >= result.history[0].held_out_reward
+
+
+def test_result_save_load_round_trip(tmp_path):
+    """The artifact is the point of a run -- it must be persistable directly."""
+    from agentdescent.evolution import AppendRules, EvolutionResult, Task, evolve
+
+    class _Agent:
+        def solve(self, rendered, task):
+            return "yes" if task.meta["h"] in rendered else "no"
+
+        def propose(self, rendered, task, output, reward):
+            return task.meta["h"]
+
+    tasks = [Task(id=f"t{i}", prompt="q", meta={"h": f"H{i % 3}"}) for i in range(12)]
+    res = evolve(tasks, lambda t, o: 1.0 if o == "yes" else 0.0,
+                 agent=_Agent(), strategy=AppendRules(), rounds=5)
+
+    path = tmp_path / "artifact.json"
+    res.save(str(path))
+    back = EvolutionResult.load(str(path))
+
+    assert back.state == res.state
+    assert back.rendered == res.rendered
+    assert back.final_reward == res.final_reward
+    assert back.error == res.error
+    assert [h.round for h in back.history] == [h.round for h in res.history]
