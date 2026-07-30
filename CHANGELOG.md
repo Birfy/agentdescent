@@ -48,6 +48,11 @@ All notable changes to AgentDescent are documented here. The format follows
   instead of 4.7 s with byte-identical results.
 
 ### Fixed
+- **Resuming a run silently discarded `initial_state`.** Re-using `repo_path`
+  continues an interrupted run (the ledger is a real git repo) — useful when a
+  multi-hour run dies — but a supplied `initial_state` was dropped without a
+  word. It now warns, and resume is documented and tested rather than being an
+  undocumented side effect.
 - **Async shutdown overshot the budget in proportion to `n_workers`** — each
   worker was joined for 2s and the merger for 10s, so a 1s budget could return
   16s later. The joins now share one bounded `shutdown_grace`, and abandoning an

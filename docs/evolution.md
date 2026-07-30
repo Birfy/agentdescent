@@ -325,6 +325,27 @@ result.save("playbook.json")                     # state + rendered + history + 
 restored = EvolutionResult.load("playbook.json")
 ```
 
+### Resuming a run
+
+The ledger is a real git repo, so **passing the same `repo_path` again continues
+where the last run stopped** — which is what you want when a multi-hour run dies
+to a rate limit or a dropped connection:
+
+```python
+evolve(tasks, reward, agent=agent, rounds=10, repo_path="runs/finer")   # dies at round 6
+evolve(tasks, reward, agent=agent, rounds=10, repo_path="runs/finer")   # picks up the artifact
+```
+
+The second call starts from the artifact the first one committed, not from
+`strategy.initial()`. Two consequences worth knowing:
+
+* `rounds` is **not** remaining work — the second call runs its own `rounds`
+  rounds on top of the existing artifact.
+* `initial_state=` is ignored when the artifact already exists (a `RuntimeWarning`
+  says so). Use a fresh `repo_path` to start over.
+
+Omit `repo_path` and the ledger is a scratch directory, cleaned up at exit.
+
 The engine returns **partial results** if the model backend fails mid-run (rate
 limit, credit exhaustion) — progress isn't lost.
 

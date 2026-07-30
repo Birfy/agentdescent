@@ -446,6 +446,15 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
         repo = tempfile.mkdtemp(prefix="agentdescent-evolve-")
         atexit.register(shutil.rmtree, repo, True)
     ledger = Ledger(repo, serialize, deserialize)
+    # `register` is a no-op when the artifact already exists, which is what makes
+    # re-using a repo_path resume the run -- but it also means a supplied
+    # initial_state would be discarded without a word. Say so.
+    resuming = artifact_id in ledger.head_version(Ledger.DEV)
+    if resuming and initial_state:
+        warnings.warn(
+            f"resuming the existing ledger at {repo!r}: artifact {artifact_id!r} "
+            "already has state, so initial_state is ignored. Use a fresh repo_path "
+            "to start over.", RuntimeWarning, stacklevel=3)
     ledger.register(EvolvingArtifact(artifact_id, initial_state or strategy.initial(),
                                      blast_radius=blast_radius, runtime=runtime,
                                      strategy=strategy))
