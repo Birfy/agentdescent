@@ -514,7 +514,84 @@ def evolve(
     state from ``propose``/``to_diff`` must guard it (the async runtime's buffer,
     CAS and per-diff staleness already are). For the *barrier-free* async pipeline
     (``async_ratio`` lag budget, staleness policies overlapping the aggregator),
-    see :class:`~agentdescent.async_runtime.AsyncAgentDescent`."""
+    see :class:`~agentdescent.async_runtime.AsyncAgentDescent`.
+
+    Parameters
+    ----------
+    tasks:
+        The work the artifact is evaluated on. Split into train / held-out by
+        ``held_out_frac``; at least 4 are required and ids must be unique.
+    reward:
+        ``(task, output) -> [0, 1]``. Scores in ``[0, 1]``; the engine treats
+        ``>= 0.999`` as a pass (no proposal is requested).
+    agent:
+        An object with ``solve`` + ``propose``. Provide this **or** ``run`` and
+        ``propose``; both signatures are checked before the first rollout.
+    run, propose:
+        ``run(rendered, task) -> output`` and
+        ``propose(rendered, task, output, reward) -> str | None``.
+    strategy:
+        How the artifact is represented and how a proposal becomes a ``Diff``.
+    parallel:
+        How a round's tasks are partitioned across workers (DP / TP / PP).
+    task_sampler:
+        **Which** task a worker rolls out next, from its shard. Defaults to
+        :class:`~agentdescent.sampling.RoundRobin`; use
+        :class:`~agentdescent.sampling.DifficultyWeighted` to spend rollouts on
+        tasks that still carry a learning signal.
+    initial_state:
+        Seed the artifact instead of starting from ``strategy.initial()``.
+        Ignored when resuming an existing ``repo_path``.
+    blast_radius:
+        Governance layer, in ``[0, 1]`` (see above).
+    artifact_id:
+        Name of the evolving artifact; becomes a filename, so it must match
+        ``[A-Za-z0-9_.-]+``.
+    rounds:
+        Number of round barriers to run. Under ``asynchronous=True`` this becomes
+        a worker-rollout budget of ``rounds * n_workers`` instead.
+    n_workers:
+        Workers per round (``>= 1``).
+    max_concurrency:
+        How many of them actually run at once (see above).
+    asynchronous, async_ratio:
+        Delegate to :func:`~agentdescent.async_evolve.async_evolve` -- no round
+        barrier, with ``async_ratio`` as the staleness lag budget.
+    max_seconds:
+        Wall-clock budget. ``None`` (default) means unbounded; the async path
+        uses ``20.0`` when unset.
+    self_verify:
+        Re-run the trajectory with the diff applied to record a local
+        before/after delta. Doubles the rollouts spent per proposal; ports that
+        score candidates only on held-out should pass ``False``.
+    held_out_frac:
+        Fraction of ``tasks`` reserved for held-out scoring, in ``(0, 1)``.
+    repo_path:
+        Where the git-backed ledger lives. Omit for a scratch repo that is
+        cleaned up at exit; **passing the same path again resumes** that ledger.
+    agg_config:
+        Tuning for the reference aggregator (batching, acceptance risk, trust
+        region, staleness tolerance).
+    staleness_policy:
+        What to do with a diff proposed against an out-of-date version --
+        ``full`` / ``guarded`` (default) / ``reflective``.
+    aggregator_factory:
+        Replace the optimizer entirely; receives
+        ``(ledger, verifier, audit, config, staleness_policy)``.
+    oracle_budget:
+        Hard cap on full held-out oracle evaluations during L1 audits. Once
+        spent, the verifier falls back to its cheap layer.
+    verbose:
+        Print a line per round. Independent of the ``RuntimeWarning`` emitted
+        when a run ends early -- that always fires.
+
+    Returns
+    -------
+    EvolutionResult
+        The evolved artifact plus ``history`` and ``error``. **Check ``error``**:
+        it is ``None`` only on a clean run, and a run that died still returns a
+        (partial) result rather than raising.
+    """
     from concurrent.futures import ThreadPoolExecutor
     from .parallel import DataParallel
 

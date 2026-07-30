@@ -16,6 +16,10 @@ All notable changes to AgentDescent are documented here. The format follows
   its run summary as JSON instead of hand-rolling the same serialisation.
 - `agentdescent.dataloader` / `agentdescent.backends` are now importable from the
   package namespace (`Dataset` and `split_dataset` are re-exported).
+- Full parameter documentation for `evolve()` (25) and `async_evolve()` (23) —
+  previously 9 and 5 were described, including knobs that silently change cost
+  (`self_verify`) or bound the run (`max_seconds`, `max_iters`). A test keeps the
+  docstrings in step with the signatures.
 - `tests` CI workflow — runs the offline suite on push/PR across Python 3.9 / 3.11 / 3.12.
 - Test coverage for the async SGD path: `SgdSkillAggregator` keep/rollback,
   `eval_at_end`, batch-level propose, and the sync frontier gate.

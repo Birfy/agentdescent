@@ -79,7 +79,47 @@ def async_evolve(
     snapshot until head drifts past it, then refreshes -- so stale diffs (η > 0)
     arise and the ``staleness_policy`` (default ``guarded``) rebases or discards
     them. The run stops at ``max_seconds`` (or ``max_iters`` worker rollouts, or
-    when held-out reward reaches ``target_reward``)."""
+    when held-out reward reaches ``target_reward``).
+
+    ``tasks``, ``reward``, ``agent``, ``run``, ``propose``, ``strategy``,
+    ``initial_state``, ``blast_radius``, ``artifact_id``, ``held_out_frac``,
+    ``repo_path``, ``agg_config``, ``staleness_policy``, ``aggregator_factory``
+    and ``oracle_budget`` mean exactly what they do in
+    :func:`~agentdescent.evolution.evolve`, which documents them. The parameters
+    below are the ones specific to running without a barrier.
+
+    Parameters
+    ----------
+    n_workers:
+        Producer threads (``>= 1``). The train tasks are sharded round-robin
+        across them; a worker with an empty shard is not started.
+    async_ratio:
+        The lag budget, in two senses: a worker refreshes its snapshot once head
+        drifts more than this far ahead, **and** it stops producing while more
+        than this many cards sit un-merged. The second bound matters at cold
+        start, before any commit has moved head.
+    max_seconds:
+        Wall-clock budget for the production phase. Thread joins and the final
+        held-out scoring happen after it, so the call can return somewhat later.
+    max_iters:
+        Stop after this many worker rollouts in total (a budget, not a barrier).
+    target_reward:
+        Stop as soon as a sweep's held-out reward reaches this. Compared against
+        the real reward, never against an acceptance probability.
+    self_verify:
+        As in :func:`evolve`. ``False`` skips the extra per-trajectory rollout,
+        which is what ports that judge candidates only on held-out want.
+    task_sampler:
+        Which task a worker takes next from its shard.
+    verbose:
+        Print one line per merger sweep.
+
+    Returns
+    -------
+    EvolutionResult
+        ``error`` is set only when the run **ended** because of a failure -- a
+        transient error the workers retried past leaves it ``None``.
+    """
     eng = _build_engine(
         tasks, reward, agent=agent, run=run, propose=propose, strategy=strategy,
         initial_state=initial_state, blast_radius=blast_radius, artifact_id=artifact_id,
