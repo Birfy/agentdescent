@@ -87,6 +87,31 @@ TP additionally provides [`TensorParallelMerge`](https://github.com/Birfy/agentd
 provides [`PipelineChain`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/parallel.py)
 (`blame` + counterfactual-replay pairs) — see [Concepts §7](concepts.md#7-parallel-paradigms-dp-tp-pp).
 
+## What each paradigm actually enforces in `evolve()`
+
+`WorkUnit` carries three things — `keys` (which tasks), `section` (TP) and `stage`
+(PP) — and the engine has to *honour* them for the paradigm to mean anything:
+
+| | Enforced by `evolve()` | What that means |
+|---|---|---|
+| **DP** | ✅ `keys` | workers take disjoint task shards; diffs merge |
+| **TP** | ✅ `section` | a worker's diff is **rejected if it touches a key outside its section**, which is what makes the union conflict-free. Without that check TP was only differently-sharded DP: every worker could edit the same hot key |
+| **PP** | ❌ `stage` | ignored. `evolve()` evolves **one** `artifact_id`, so there is no artifact chain for stages to walk; `PipelineParallel` there only changes task sharding |
+
+So `parallel=TensorParallel(n_sections=4)` genuinely gives tensor parallelism
+through `evolve()`. Pipeline parallelism does not: its `blame` /
+counterfactual-replay machinery lives in
+[`PipelineChain`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/parallel.py)
+and is exercised by `examples/parallelism.py` and the tests, not by the engine.
+Evolving a genuine dependency chain would need `evolve()` to take several
+artifacts, which it does not.
+
+!!! note "Out-of-section edits are dropped, not merged"
+    A rejected TP proposal is simply not turned into evidence — the worker moves
+    on. That is the intended semantics (the section owner will propose it), but it
+    does mean a strategy whose proposals ignore sections will appear to make no
+    progress under TP. Have `propose` target the keys the worker owns.
+
 ## `parallel=` vs the async runtime
 
 `parallel=` decides **how one round's tasks are split** across workers; it is
@@ -96,7 +121,14 @@ orthogonal to **whether rounds have a barrier**:
   *concurrently* (synchronous DP; the aggregator is the barrier).
 * **Across rounds** — `evolve(asynchronous=True)` / [`async_evolve`](evolution.md#the-barrier-free-runtime-async_evolve)
   removes the barrier: workers keep producing under a lag budget while one merger
-  aggregates. The `parallel=` strategy still shards the task pool.
+  aggregates.
+
+!!! warning "The async path does its own sharding"
+    `async_evolve` shards the train tasks round-robin across its worker threads and
+    **ignores `parallel=`** — so DP is what you get, and `TensorParallel` /
+    `PipelineParallel` have no effect there. `max_concurrency` is likewise a
+    sync-path knob (async concurrency is `n_workers`). Use the synchronous path
+    when you want a specific partitioning.
 
 So a run picks *both* a partition (`parallel=`) and a schedule (sync
 `max_concurrency` vs barrier-free `asynchronous`). See

@@ -689,6 +689,10 @@ def evolve(
         raise ValueError(f"max_concurrency must be >= 1, got {max_concurrency}")
     parallel = parallel or DataParallel()
     sampler = task_sampler or RoundRobin()
+    # TP section enforcement (see _run_unit): n_sections comes from the strategy.
+    n_sections = getattr(parallel, "n_sections", 0) or 1
+    tp_rejected: List[tuple] = []
+    tp_lock = threading.Lock()
     eng = _build_engine(
         tasks, reward, agent=agent, run=run, propose=propose, strategy=strategy,
         initial_state=initial_state, blast_radius=blast_radius, artifact_id=artifact_id,
@@ -729,6 +733,19 @@ def evolve(
             diff = strategy.to_diff(artifact.state, proposal, f"w{unit.worker}", base_v, artifact_id)
             if diff is None:
                 return
+            # Tensor parallelism means each worker owns a disjoint *section* of the
+            # artifact, which is what makes the merge a conflict-free union. The
+            # plan assigns the section; enforce it here, or the guarantee is only a
+            # comment: without this every worker could edit the same hot key and TP
+            # degenerated into differently-sharded DP.
+            if unit.section is not None:
+                from .parallel import section_of
+                outside = [k for k in diff.ops
+                           if section_of(k, n_sections) != unit.section]
+                if outside:
+                    with tp_lock:
+                        tp_rejected.append((f"w{unit.worker}", outside[0]))
+                    return
             # The self-verify rollout doubles the cost of every proposal, so it is
             # opt-out here exactly as it is on the async path.
             if self_verify:

@@ -92,6 +92,16 @@ All notable changes to AgentDescent are documented here. The format follows
   instead of 4.7 s with byte-identical results.
 
 ### Fixed
+- **`TensorParallel` was not tensor parallelism.** `evolve()` read only
+  `WorkUnit.keys` and `WorkUnit.worker` and ignored `WorkUnit.section`, so TP's
+  defining guarantee — each worker owns a disjoint section, which is what makes the
+  merge a conflict-free union — was never enforced: with four workers all proposing
+  an edit to the same hot key, **all four landed**. A worker's diff is now rejected
+  if it touches a key outside its assigned section, so only the section owner can
+  edit it. Pipeline parallelism remains unenforced (`evolve()` evolves a single
+  artifact, so there is no chain for stages to walk) and the docs now say which of
+  the three paradigms the engine actually honours — and that `async_evolve` shards
+  round-robin itself, ignoring `parallel=` entirely.
 - **`pip install agentdescent` could not run any documented example.** README and
   docs contain ~30 `python -m examples.…` commands, but `examples/` ships with the
   repository, not the wheel (a top-level `examples` package would squat the name).
