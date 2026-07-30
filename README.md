@@ -50,11 +50,17 @@ pip install agentdescent
 ```
 
 The core engine has **zero required dependencies** and needs only Python ≥ 3.9.
-For development, install from source with the extras (`[dev]` adds pytest,
-`[docs]` adds MkDocs Material):
+That gives you the library — `evolve()`, the aggregator, the agent layer, the
+dataloader.
+
+**To run the examples, clone the repo.** They are research artifacts kept outside
+the installed package (they would otherwise squat the top-level `examples` name),
+so every `python -m examples.…` command below needs a checkout:
 
 ```bash
-pip install -e ".[dev]"
+git clone https://github.com/Birfy/agentdescent && cd agentdescent
+pip install -e ".[dev]"          # [dev] adds pytest, [docs] adds MkDocs Material
+python -m examples.run_demo      # no API key needed
 ```
 
 ## Quickstart

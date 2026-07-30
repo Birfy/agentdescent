@@ -92,6 +92,13 @@ All notable changes to AgentDescent are documented here. The format follows
   instead of 4.7 s with byte-identical results.
 
 ### Fixed
+- **`pip install agentdescent` could not run any documented example.** README and
+  docs contain ~30 `python -m examples.…` commands, but `examples/` ships with the
+  repository, not the wheel (a top-level `examples` package would squat the name).
+  Verified by installing the built wheel into a fresh venv outside the repo: the
+  library and dataloader work fine there, the examples are simply absent. The
+  install instructions now say a checkout is needed, right where they say `pip
+  install`, and tests pin both the packaging decision and the caveat's placement.
 - **The README Quickstart did not run.** It used undefined names (`tasks`,
   `reward`), so copy-pasting it — the first thing a new user does — raised
   `NameError` immediately, and it also required API credentials. It is now

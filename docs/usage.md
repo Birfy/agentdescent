@@ -19,6 +19,12 @@ No external services or model APIs are needed. Requires Python ≥ 3.9.
 
 ## 2. Run the demos
 
+!!! note "The demos need a checkout, not just `pip install`"
+    The `examples/` directory ships with the **repository**, not the wheel, so
+    `python -m examples.…` requires `git clone`. `pip install agentdescent` gives
+    you the library only.
+
+
 ### RQ1 — merge vs fork (synchronous DP)
 
 ```bash
