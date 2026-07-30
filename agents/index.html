@@ -1,0 +1,1532 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A parallel, self-evolving framework for accelerating RSI">
+      
+      
+      
+      
+        <link rel="prev" href="../evolution/">
+      
+      
+        <link rel="next" href="../dataloader/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Connecting agents & LLMs - AgentDescent</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#connecting-agents-llms" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="AgentDescent" class="md-header__button md-logo" aria-label="AgentDescent" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            AgentDescent
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Connecting agents & LLMs
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Birfy/agentdescent" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Birfy/agentdescent
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="AgentDescent" class="md-nav__button md-logo" aria-label="AgentDescent" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    AgentDescent
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Birfy/agentdescent" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Birfy/agentdescent
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../evolution/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The evolve method
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building blocks (plug into evolve)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Building blocks (plug into evolve)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connecting agents & LLMs
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connecting agents & LLMs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#adapters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adapters
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-did-the-run-cost-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What did the run cost? — Usage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bringing-another-provider" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bringing another provider
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#using-it-in-skill-evolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Using it in skill evolution
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tool-using-agents-the-same-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tool-using agents — the same contract
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tool-using agents — the same contract">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#giving-an-agent-somewhere-to-work-workspaceagent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Giving an agent somewhere to work — WorkspaceAgent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#domain-adapters-kept-separate-document_agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Domain adapters, kept separate — document_agent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#running-the-openhands-backend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running the OpenHands backend
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dataloader/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Loading datasets (the data layer)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../aggregator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The aggregator (the optimizer)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../parallelism/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Customizable parallelism (DP/TP/PP)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../duration-scheduling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Duration-aware scheduling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../efficiency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Efficiency experiments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../skill-evolution/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Complete example — skill evolution
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Self-evolution algorithms (faithful ports)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Self-evolution algorithms (faithful ports)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../self-evolution-examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../algo-ace/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ACE — context evolution
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../algo-gepa/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GEPA — prompt evolution
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../algo-evoskill/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    EvoSkill — skill discovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../algo-skillopt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SkillOpt — skill-document training
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../algo-adas/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADAS — meta agent search (harness)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../algo-dgm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    DGM — Darwin Gödel Machine (harness)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage & extending
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#adapters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adapters
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-did-the-run-cost-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What did the run cost? — Usage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bringing-another-provider" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bringing another provider
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#using-it-in-skill-evolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Using it in skill evolution
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tool-using-agents-the-same-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tool-using agents — the same contract
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tool-using agents — the same contract">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#giving-an-agent-somewhere-to-work-workspaceagent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Giving an agent somewhere to work — WorkspaceAgent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#domain-adapters-kept-separate-document_agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Domain adapters, kept separate — document_agent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#running-the-openhands-backend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running the OpenHands backend
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="connecting-agents-llms">Connecting agents &amp; LLMs<a class="headerlink" href="#connecting-agents-llms" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p><strong>Plugs into <a href="../evolution/"><code>evolve</code></a> via</strong> <code>agent=LLMAgent(&lt;completion&gt;)</code> (or
+<code>run=</code>/<code>propose=</code>). This page is the completion layer that <code>LLMAgent</code> wraps.</p>
+</blockquote>
+<p><code>agentdescent.agents</code> is the <strong>general "talk to a model/agent" layer</strong>. It is
+deliberately separate from <code>agentdescent.evolution</code> — how you reach a model has
+nothing to do with skill evolution, and any application built on the framework
+can use it.</p>
+<p>The whole contract is one type:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">Completion</span> <span class="o">=</span> <span class="n">Callable</span><span class="p">[[</span><span class="nb">str</span><span class="p">],</span> <span class="nb">str</span><span class="p">]</span>      <span class="c1"># prompt -&gt; text</span>
+</code></pre></div>
+<p>Anything that maps a prompt to text is a completion — an LLM call, a tool-using
+agent loop, a canned stub. Adapters build completions; higher layers turn a
+completion into whatever task interface they need.</p>
+<h2 id="adapters">Adapters<a class="headerlink" href="#adapters" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.agents</span><span class="w"> </span><span class="kn">import</span> <span class="n">claude</span><span class="p">,</span> <span class="n">from_callable</span><span class="p">,</span> <span class="n">echo</span><span class="p">,</span> <span class="n">with_retries</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="c1"># Claude (needs: pip install anthropic + credentials / `ant auth login`)</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">model</span> <span class="o">=</span> <span class="n">claude</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">&quot;claude-opus-4-8&quot;</span><span class="p">)</span>           <span class="c1"># or claude-haiku-4-5 for cheap runs</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="n">text</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="s2">&quot;What is 2+2?&quot;</span><span class="p">)</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># Any callable you already have</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="n">model</span> <span class="o">=</span> <span class="n">from_callable</span><span class="p">(</span><span class="k">lambda</span> <span class="n">prompt</span><span class="p">:</span> <span class="n">my_llm</span><span class="o">.</span><span class="n">generate</span><span class="p">(</span><span class="n">prompt</span><span class="p">))</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="c1"># Deterministic, no-network stub for tests / dry runs</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="n">stub</span> <span class="o">=</span> <span class="n">echo</span><span class="p">(</span><span class="nb">str</span><span class="o">.</span><span class="n">upper</span><span class="p">)</span>          <span class="c1"># returns transform(prompt), or the prompt itself</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="c1"># Wrap any completion with exponential-backoff retries</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="n">robust</span> <span class="o">=</span> <span class="n">with_retries</span><span class="p">(</span><span class="n">claude</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">&quot;claude-haiku-4-5&quot;</span><span class="p">),</span> <span class="n">attempts</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>
+</code></pre></div>
+<p><code>claude()</code> accepts a <code>client=</code> to reuse an existing <code>anthropic.Anthropic</code>
+instance, and forwards extra kwargs to <code>messages.create</code>.</p>
+<div class="admonition warning">
+<p class="admonition-title">Give a reasoning model room, or it returns nothing</p>
+<p>A reasoning model spends its budget on internal reasoning <em>before</em> emitting
+visible text, so too small a <code>max_tokens</code> yields an <strong>empty completion</strong>, not a
+short answer. The engine reads an empty proposal as "nothing worth changing",
+so the run looks like it cannot learn while the reflector never actually spoke.</p>
+<p>Measured on <code>deepseek-v4-flash</code> with the standard reflection prompt:</p>
+<table>
+<thead>
+<tr>
+<th><code>max_tokens</code></th>
+<th>empty replies</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1024</td>
+<td><strong>4 of 8</strong></td>
+</tr>
+<tr>
+<td>3000</td>
+<td>0 of 8</td>
+</tr>
+</tbody>
+</table>
+<p>Both adapters therefore default to <strong>4096</strong>. You are billed for tokens
+<em>generated</em>, not for the cap, so a generous limit costs nothing — and an empty
+reflection now emits a <code>RuntimeWarning</code> naming this as the likely cause.</p>
+</div>
+<h2 id="what-did-the-run-cost-usage">What did the run cost? — <code>Usage</code><a class="headerlink" href="#what-did-the-run-cost-usage" title="Permanent link">&para;</a></h2>
+<p>A <code>Completion</code> is <code>prompt -&gt; text</code>, so the token counts the providers <em>do</em> return
+would be thrown away at the adapter boundary. Pass a <code>Usage</code> and they are kept:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.agents</span><span class="w"> </span><span class="kn">import</span> <span class="n">Usage</span><span class="p">,</span> <span class="n">openai_compatible</span><span class="p">,</span> <span class="n">metered</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">usage</span> <span class="o">=</span> <span class="n">Usage</span><span class="p">()</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">model</span> <span class="o">=</span> <span class="n">openai_compatible</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">&quot;deepseek-v4-flash&quot;</span><span class="p">,</span> <span class="n">usage</span><span class="o">=</span><span class="n">usage</span><span class="p">)</span>   <span class="c1"># or claude(usage=usage)</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">LLMAgent</span><span class="p">(</span><span class="n">model</span><span class="p">),</span> <span class="n">rounds</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="nb">print</span><span class="p">(</span><span class="n">usage</span><span class="o">.</span><span class="n">summary</span><span class="p">())</span>          <span class="c1"># 412 calls, 1,204,881 prompt + 96,004 completion tokens, 903.2s in the model</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="nb">print</span><span class="p">(</span><span class="n">usage</span><span class="o">.</span><span class="n">estimated_cost</span><span class="p">(</span><span class="n">per_1m_prompt</span><span class="o">=</span><span class="mf">0.28</span><span class="p">,</span> <span class="n">per_1m_completion</span><span class="o">=</span><span class="mf">0.42</span><span class="p">))</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>calls</code>, <code>failures</code></td>
+<td>attempts made, and how many raised (retries count individually — they cost money)</td>
+</tr>
+<tr>
+<td><code>prompt_tokens</code>, <code>completion_tokens</code>, <code>total_tokens</code></td>
+<td><strong>real</strong> counts from the API response</td>
+</tr>
+<tr>
+<td><code>seconds</code></td>
+<td>wall-clock spent inside the model</td>
+</tr>
+<tr>
+<td><code>estimated_cost(...)</code></td>
+<td>you supply the per-million prices; the library ships no price table it would have to keep current</td>
+</tr>
+</tbody>
+</table>
+<p><code>Usage</code> is safe to share across worker threads. For a backend that is not one of
+the built-in providers — a tool-using agent loop, say — wrap it in
+<code>metered(completion, usage)</code>, which counts calls, failures and time (tokens are
+not observable through a plain <code>Completion</code>).</p>
+<h2 id="bringing-another-provider">Bringing another provider<a class="headerlink" href="#bringing-another-provider" title="Permanent link">&para;</a></h2>
+<p>There is no provider lock-in — any <code>prompt -&gt; text</code> function is a completion:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">openai_completion</span><span class="p">(</span><span class="n">prompt</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="n">resp</span> <span class="o">=</span> <span class="n">openai_client</span><span class="o">.</span><span class="n">chat</span><span class="o">.</span><span class="n">completions</span><span class="o">.</span><span class="n">create</span><span class="p">(</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>        <span class="n">model</span><span class="o">=</span><span class="s2">&quot;gpt-...&quot;</span><span class="p">,</span> <span class="n">messages</span><span class="o">=</span><span class="p">[{</span><span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;user&quot;</span><span class="p">,</span> <span class="s2">&quot;content&quot;</span><span class="p">:</span> <span class="n">prompt</span><span class="p">}])</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="k">return</span> <span class="n">resp</span><span class="o">.</span><span class="n">choices</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">message</span><span class="o">.</span><span class="n">content</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.agents</span><span class="w"> </span><span class="kn">import</span> <span class="n">from_callable</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="n">model</span> <span class="o">=</span> <span class="n">from_callable</span><span class="p">(</span><span class="n">openai_completion</span><span class="p">)</span>
+</code></pre></div>
+<h2 id="using-it-in-skill-evolution">Using it in skill evolution<a class="headerlink" href="#using-it-in-skill-evolution" title="Permanent link">&para;</a></h2>
+<p><code>agentdescent.evolution</code> consumes a completion through <code>LLMAgent</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.agents</span><span class="w"> </span><span class="kn">import</span> <span class="n">claude</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.evolution</span><span class="w"> </span><span class="kn">import</span> <span class="n">LLMAgent</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">agent</span> <span class="o">=</span> <span class="n">LLMAgent</span><span class="p">(</span><span class="n">claude</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">&quot;claude-haiku-4-5&quot;</span><span class="p">))</span>
+</code></pre></div>
+<p><code>claude_agent(model=...)</code> in the evolution engine is just a convenience for
+<code>LLMAgent(claude(model))</code> — the provider code lives here, in <code>agentdescent.agents</code>.</p>
+<h2 id="tool-using-agents-the-same-contract">Tool-using agents — the same contract<a class="headerlink" href="#tool-using-agents-the-same-contract" title="Permanent link">&para;</a></h2>
+<p>An agent that <em>acts</em> (Claude Code, Codex, OpenHands, aider, …) differs from an API
+model in that it runs commands and edits files before answering. Its <strong>call
+contract is identical</strong>: text in, text out. So they are all <code>Completion</code>s, and
+everything that takes a completion takes all of them with no special-casing:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.agents</span><span class="w"> </span><span class="kn">import</span> <span class="n">claude</span><span class="p">,</span> <span class="n">openai_compatible</span><span class="p">,</span> <span class="n">claude_code</span><span class="p">,</span> <span class="n">codex</span><span class="p">,</span> <span class="n">cli_agent</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.backends</span><span class="w"> </span><span class="kn">import</span> <span class="n">openhands</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">claude</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">&quot;claude-haiku-4-5&quot;</span><span class="p">)</span>                    <span class="c1"># API model</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="n">openai_compatible</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">&quot;deepseek-v4-flash&quot;</span><span class="p">)</span>        <span class="c1"># any OpenAI-compatible endpoint</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="n">claude_code</span><span class="p">()</span>                                        <span class="c1"># Claude Code, print mode</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="n">codex</span><span class="p">()</span>                                              <span class="c1"># Codex CLI</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="n">openhands</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">&quot;openai/deepseek-v4-flash&quot;</span><span class="p">)</span>          <span class="c1"># OpenHands SDK</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="n">cli_agent</span><span class="p">([</span><span class="s2">&quot;my-agent&quot;</span><span class="p">,</span> <span class="s2">&quot;--json&quot;</span><span class="p">])</span>                    <span class="c1"># anything with a CLI</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Factory</th>
+<th>What it runs</th>
+<th>Needs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>claude(...)</code> / <code>openai_compatible(...)</code></td>
+<td>one model call</td>
+<td><code>anthropic</code> / nothing</td>
+</tr>
+<tr>
+<td><strong><code>cli_agent(command, ...)</code></strong></td>
+<td><strong>any command-line agent</strong> — prompt on argv or stdin, stdout is the answer</td>
+<td>that CLI on <code>PATH</code></td>
+</tr>
+<tr>
+<td><code>claude_code()</code> / <code>codex()</code></td>
+<td>thin presets over <code>cli_agent</code></td>
+<td><code>claude</code> / <code>codex</code> CLI</td>
+</tr>
+<tr>
+<td><code>openhands(...)</code></td>
+<td>a real OpenHands agent (terminal + file_editor)</td>
+<td><code>openhands-ai</code>, Python ≥ 3.12</td>
+</tr>
+</tbody>
+</table>
+<p>Failures raise <strong><code>AgentError</code></strong> carrying the agent's own stderr, not a bare exit
+code, and every CLI agent takes a <code>timeout</code> — an agent that hangs would otherwise
+stall the round it belongs to (see <a href="../evolution/#every-knob-is-a-module"><code>round_timeout</code></a>).</p>
+<h3 id="giving-an-agent-somewhere-to-work-workspaceagent">Giving an agent somewhere to work — <code>WorkspaceAgent</code><a class="headerlink" href="#giving-an-agent-somewhere-to-work-workspaceagent" title="Permanent link">&para;</a></h3>
+<p><code>Completion</code> stays <code>prompt -&gt; text</code> for everything. An acting agent often needs a
+<em>place</em> to act, and a caller that stages files needs to say where, so tool-using
+agents add exactly one optional capability:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">agent</span> <span class="o">=</span> <span class="n">claude_code</span><span class="p">()</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">agent</span><span class="o">.</span><span class="n">in_workspace</span><span class="p">(</span><span class="s2">&quot;/tmp/task-17&quot;</span><span class="p">)(</span><span class="s2">&quot;summarise report.txt&quot;</span><span class="p">)</span>   <span class="c1"># runs with that cwd</span>
+</code></pre></div>
+<p>Feature-detect it rather than assuming — plain API models deliberately do not
+implement it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.agents</span><span class="w"> </span><span class="kn">import</span> <span class="n">WorkspaceAgent</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">agent</span><span class="p">,</span> <span class="n">WorkspaceAgent</span><span class="p">):</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    <span class="n">answer</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">in_workspace</span><span class="p">(</span><span class="n">staged_dir</span><span class="p">)(</span><span class="n">prompt</span><span class="p">)</span>   <span class="c1"># it can grep real files</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    <span class="n">answer</span> <span class="o">=</span> <span class="n">agent</span><span class="p">(</span><span class="n">prompt_with_material_inlined</span><span class="p">)</span>      <span class="c1"># fall back to the prompt</span>
+</code></pre></div>
+<h3 id="domain-adapters-kept-separate-document_agent">Domain adapters, kept separate — <code>document_agent</code><a class="headerlink" href="#domain-adapters-kept-separate-document_agent" title="Permanent link">&para;</a></h3>
+<p>Some tasks need a <em>shape</em>, not just a prompt: <a href="../algo-evoskill/">EvoSkill's OfficeQA</a>
+answer is a figure inside a 1 MB table that must be found by <code>grep</code> and then
+computed. That shape — <code>answer(question, document, skills)</code> — is a <strong>domain
+adapter</strong> built on the general contract, not the contract itself:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.backends</span><span class="w"> </span><span class="kn">import</span> <span class="n">document_agent</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">backend</span> <span class="o">=</span> <span class="n">document_agent</span><span class="p">(</span><span class="n">openhands</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">&quot;openai/deepseek-v4-flash&quot;</span><span class="p">))</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">backend</span> <span class="o">=</span> <span class="n">document_agent</span><span class="p">(</span><span class="n">claude_code</span><span class="p">())</span>                       <span class="c1"># same task, other agent</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="n">backend</span> <span class="o">=</span> <span class="n">document_agent</span><span class="p">(</span><span class="n">claude</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">&quot;claude-haiku-4-5&quot;</span><span class="p">))</span>    <span class="c1"># no tools -&gt; inline</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="n">answer</span> <span class="o">=</span> <span class="n">backend</span><span class="o">.</span><span class="n">answer</span><span class="p">(</span><span class="n">question</span><span class="p">,</span> <span class="n">document_text</span><span class="p">,</span> <span class="n">skills</span><span class="o">=</span><span class="n">learned_skills</span><span class="p">)</span>
+</code></pre></div>
+<p>It adapts to what it is given: a <code>WorkspaceAgent</code> gets a scratch directory with the
+document written into it (so it can genuinely grep a huge table), while a plain
+completion gets the document inline, truncated at <code>inline_chars</code>. That is why the
+same OfficeQA example runs on OpenHands, Claude Code, or a bare API model.</p>
+<div class="admonition warning">
+<p class="admonition-title">The inline path is a fallback, not an equivalent</p>
+<p>Measured on three real OfficeQA items (documents of 266–390 KB) with
+<code>document_agent(openai_compatible(model="deepseek-v4-flash"))</code>: <strong>1 of 3
+correct</strong>, 249k prompt tokens, and two answers came back <em>empty</em> — because at
+the default <code>inline_chars=200_000</code> roughly half of each document never reached
+the model, and the figure sometimes lived in the half that was dropped. A
+<code>RuntimeWarning</code> now says so whenever truncation happens, since an empty answer
+otherwise looks like a model failure rather than a missing input.</p>
+<p>If the material is bigger than a comfortable prompt, give the adapter a
+workspace agent — it reads the file itself and nothing is dropped.</p>
+</div>
+<p>EvoSkill selects one with <code>--backend openhands|toolloop|retrieval</code>; the measured
+gated lift with OpenHands + DeepSeek (<strong>58.0% → 65.7%</strong>) is on the
+<a href="../algo-evoskill/#empirical-results-real-openhands-agent-deepseek-on-officeqa">EvoSkill page</a>.</p>
+<h3 id="running-the-openhands-backend">Running the OpenHands backend<a class="headerlink" href="#running-the-openhands-backend" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Model / provider.</strong> The LLM is any LiteLLM model. <code>openai/&lt;name&gt;</code> + <code>base_url</code>
+  targets an OpenAI-compatible endpoint — e.g. DeepSeek with
+  <code>model="openai/deepseek-v4-pro"</code> + <code>base_url="https://api.deepseek.com"</code> (the
+  key comes from <code>OPENAI_API_KEY</code>). Native tool-calling drives the <code>terminal</code> /
+  <code>file_editor</code> tools; the agent <code>grep</code>s the document, <code>view</code>s the right rows, and
+  <strong>computes</strong> the answer.</li>
+<li><strong>Environment.</strong> The real OpenHands SDK needs <strong>Python ≥ 3.12</strong> (a <code>uv</code>-managed
+  venv works — no Docker, no admin): <code>pip install openhands-ai</code>.</li>
+<li><strong>Structured-output gotcha.</strong> OpenHands has no native structured output, so it
+  re-asks the model to reformat the answer as JSON. Its default uses OpenAI strict
+  <code>response_format:{type:"json_schema"}</code>, which <strong>DeepSeek rejects</strong> (HTTP 400
+  <em>"response_format type is unavailable"</em>) — use <code>{type:"json_object"}</code> with the
+  schema in the prompt instead. (Providers with native structured output — Claude,
+  OpenAI, Codex — need no shim.)</li>
+<li><strong>Concurrent eval.</strong> Backends are plain callables, so the aggregator fans out
+  its held-out eval concurrently (<code>eval_concurrency</code>) — this is where the
+  parallelism pays, since each OfficeQA question is an OpenHands rollout of
+  ~3–6 min. (When every candidate must be gated on the full held-out set,
+  barrier-free async adds nothing — the run is val-bound — so EvoSkill uses the
+  synchronous <code>evolve()</code> path; see the <a href="../algo-evoskill/#empirical-results-real-openhands-agent-deepseek-on-officeqa">EvoSkill results</a>.)</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/Birfy/agentdescent" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "navigation.tracking", "navigation.indexes", "content.code.copy", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

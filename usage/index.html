@@ -1,0 +1,1884 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A parallel, self-evolving framework for accelerating RSI">
+      
+      
+      
+      
+        <link rel="prev" href="../algo-dgm/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Usage & extending - AgentDescent</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#usage-extending" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="AgentDescent" class="md-header__button md-logo" aria-label="AgentDescent" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            AgentDescent
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Usage & extending
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Birfy/agentdescent" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Birfy/agentdescent
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="AgentDescent" class="md-nav__button md-logo" aria-label="AgentDescent" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    AgentDescent
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Birfy/agentdescent" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Birfy/agentdescent
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../evolution/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The evolve method
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building blocks (plug into evolve)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Building blocks (plug into evolve)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connecting agents & LLMs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dataloader/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Loading datasets (the data layer)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../aggregator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The aggregator (the optimizer)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../parallelism/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Customizable parallelism (DP/TP/PP)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../duration-scheduling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Duration-aware scheduling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../efficiency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Efficiency experiments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../skill-evolution/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Complete example — skill evolution
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Self-evolution algorithms (faithful ports)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Self-evolution algorithms (faithful ports)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../self-evolution-examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../algo-ace/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ACE — context evolution
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../algo-gepa/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GEPA — prompt evolution
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../algo-evoskill/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    EvoSkill — skill discovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../algo-skillopt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SkillOpt — skill-document training
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../algo-adas/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADAS — meta agent search (harness)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../algo-dgm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    DGM — Darwin Gödel Machine (harness)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage & extending
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage & extending
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-install" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Install
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-run-the-demos" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Run the demos
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Run the demos">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rq1-merge-vs-fork-synchronous-dp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RQ1 — merge vs fork (synchronous DP)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#async-stage-orchestration-flashevolve-style" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Async stage orchestration (FlashEvolve-style)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rq2-staleness-tolerance-sweep" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RQ2 — staleness tolerance sweep
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#self-evolution-algorithm-ports-real-datasets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Self-evolution algorithm ports (real datasets)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tests
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-programmatic-use" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Programmatic use
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Programmatic use">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-entry-point-evolve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The entry point — evolve()
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-reference-stack-agentdescent-asyncagentdescent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The reference stack — AgentDescent / AsyncAgentDescent
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-configuration-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Configuration reference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Configuration reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#aggregatorconfig-agentdescentaggregatorpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AggregatorConfig (agentdescent/aggregator.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#asyncconfig-agentdescentasync_runtimepy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AsyncConfig (agentdescent/async_runtime.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#staleness-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Staleness policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-plug-in-your-own-domain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Plug in your own domain
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Plug in your own domain">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-an-evolvable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 An Evolvable
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-serialize-deserialize-for-the-ledger" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 Serialize / deserialize for the Ledger
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-an-eval-function-for-the-verifier" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 An eval function for the verifier
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-a-worker-that-proposes-diffs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 A worker that proposes diffs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-building-the-documentation-site" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Building the documentation site
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-install" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Install
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-run-the-demos" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Run the demos
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Run the demos">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rq1-merge-vs-fork-synchronous-dp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RQ1 — merge vs fork (synchronous DP)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#async-stage-orchestration-flashevolve-style" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Async stage orchestration (FlashEvolve-style)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rq2-staleness-tolerance-sweep" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RQ2 — staleness tolerance sweep
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#self-evolution-algorithm-ports-real-datasets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Self-evolution algorithm ports (real datasets)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tests
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-programmatic-use" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Programmatic use
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Programmatic use">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-entry-point-evolve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The entry point — evolve()
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-reference-stack-agentdescent-asyncagentdescent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The reference stack — AgentDescent / AsyncAgentDescent
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-configuration-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Configuration reference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Configuration reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#aggregatorconfig-agentdescentaggregatorpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AggregatorConfig (agentdescent/aggregator.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#asyncconfig-agentdescentasync_runtimepy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AsyncConfig (agentdescent/async_runtime.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#staleness-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Staleness policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-plug-in-your-own-domain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Plug in your own domain
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Plug in your own domain">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-an-evolvable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 An Evolvable
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-serialize-deserialize-for-the-ledger" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 Serialize / deserialize for the Ledger
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-an-eval-function-for-the-verifier" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 An eval function for the verifier
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-a-worker-that-proposes-diffs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 A worker that proposes diffs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-building-the-documentation-site" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Building the documentation site
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="usage-extending">Usage &amp; extending<a class="headerlink" href="#usage-extending" title="Permanent link">&para;</a></h1>
+<p>How to install, run the demos, tune the knobs, and — most importantly — plug in
+your own <code>Evolvable</code> domain.</p>
+<hr />
+<h2 id="1-install">1. Install<a class="headerlink" href="#1-install" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/Birfy/agentdescent
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nb">cd</span><span class="w"> </span>agentdescent
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s2">&quot;.[dev]&quot;</span>
+</code></pre></div>
+<p>No external services or model APIs are needed. Requires Python ≥ 3.9.</p>
+<hr />
+<h2 id="2-run-the-demos">2. Run the demos<a class="headerlink" href="#2-run-the-demos" title="Permanent link">&para;</a></h2>
+<div class="admonition note">
+<p class="admonition-title">The demos need a checkout, not just <code>pip install</code></p>
+<p>The <code>examples/</code> directory ships with the <strong>repository</strong>, not the wheel, so
+<code>python -m examples.…</code> requires <code>git clone</code>. <code>pip install agentdescent</code> gives
+you the library only.</p>
+</div>
+<h3 id="rq1-merge-vs-fork-synchronous-dp">RQ1 — merge vs fork (synchronous DP)<a class="headerlink" href="#rq1-merge-vs-fork-synchronous-dp" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.run_demo
+</code></pre></div>
+<p>Runs the merge-based <code>AgentDescent</code> loop and a DGM-style fork baseline on the same
+budget, then prints the learning curve and the comparison:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>round  dev_acc   stable  commit  fused  stale  confl  oracle
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    0    0.853    0.000       1      1      0      0       0
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    2    0.983    0.000       1      1      0      1       0     ← a contradiction dropped
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    8    1.000    1.000       1      0      0      0       0     ← stable branch catches up
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>AgentDescent (merge) held-out accuracy : 1.000
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>Fork/archive best-fork accuracy     : 0.353
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>merge advantage                     : +0.647
+</code></pre></div>
+<h3 id="async-stage-orchestration-flashevolve-style">Async stage orchestration (FlashEvolve-style)<a class="headerlink" href="#async-stage-orchestration-flashevolve-style" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.run_async
+</code></pre></div>
+<p>Compares the three staleness policies and sweeps the <code>async_ratio</code> lag budget.</p>
+<h3 id="rq2-staleness-tolerance-sweep">RQ2 — staleness tolerance sweep<a class="headerlink" href="#rq2-staleness-tolerance-sweep" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.rq2_staleness
+</code></pre></div>
+<h3 id="self-evolution-algorithm-ports-real-datasets">Self-evolution algorithm ports (real datasets)<a class="headerlink" href="#self-evolution-algorithm-ports-real-datasets" title="Permanent link">&para;</a></h3>
+<p>Faithful ports of the latest skill- and harness-self-evolution algorithms — ACE,
+GEPA, EvoSkill, SkillOpt, ADAS, DGM (see
+<a href="../self-evolution-examples/">the catalog</a>). Each loads a real benchmark through
+the <a href="../dataloader/"><code>agentdescent.dataloader</code></a> data layer and runs offline with
+<code>--dry-run</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.ace_context_evolution<span class="w"> </span>--dry-run<span class="w">     </span><span class="c1"># ACE   / FiNER-139</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.gepa_prompt_evolution<span class="w"> </span>--dry-run<span class="w">     </span><span class="c1"># GEPA  / HotpotQA</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.dgm_self_improve<span class="w">                    </span><span class="c1"># DGM   / SWE-bench Verified (offline surrogate)</span>
+</code></pre></div>
+<h3 id="tests">Tests<a class="headerlink" href="#tests" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>pytest<span class="w">            </span><span class="c1">#  tests</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>pytest<span class="w"> </span>-q<span class="w"> </span>tests/test_async.py<span class="w">   </span><span class="c1"># just the async runtime</span>
+</code></pre></div>
+<hr />
+<h2 id="3-programmatic-use">3. Programmatic use<a class="headerlink" href="#3-programmatic-use" title="Permanent link">&para;</a></h2>
+<h3 id="the-entry-point-evolve">The entry point — <code>evolve()</code><a class="headerlink" href="#the-entry-point-evolve" title="Permanent link">&para;</a></h3>
+<p>This is what you want in almost every case, and what every
+<a href="../self-evolution-examples/">algorithm port</a> uses. Nothing here needs an API key:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.evolution</span><span class="w"> </span><span class="kn">import</span> <span class="n">Task</span><span class="p">,</span> <span class="n">evolve</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="n">tasks</span> <span class="o">=</span> <span class="p">[</span><span class="n">Task</span><span class="p">(</span><span class="nb">id</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;t</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">prompt</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;say the year for item </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">12</span><span class="p">)]</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="k">def</span><span class="w"> </span><span class="nf">reward</span><span class="p">(</span><span class="n">task</span><span class="p">,</span> <span class="n">output</span><span class="p">):</span>                 <span class="c1"># must return [0, 1]</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    <span class="k">return</span> <span class="mf">1.0</span> <span class="k">if</span> <span class="s2">&quot;2026&quot;</span> <span class="ow">in</span> <span class="n">output</span> <span class="k">else</span> <span class="mf">0.0</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="n">rendered</span><span class="p">,</span> <span class="n">task</span><span class="p">):</span>                  <span class="c1"># your solver -- an LLM, a script, anything</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>    <span class="k">return</span> <span class="s2">&quot;answer&quot;</span> <span class="o">+</span> <span class="p">(</span><span class="s2">&quot; 2026&quot;</span> <span class="k">if</span> <span class="s2">&quot;year&quot;</span> <span class="ow">in</span> <span class="n">rendered</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="k">def</span><span class="w"> </span><span class="nf">propose</span><span class="p">(</span><span class="n">rendered</span><span class="p">,</span> <span class="n">task</span><span class="p">,</span> <span class="n">output</span><span class="p">,</span> <span class="n">reward</span><span class="p">):</span>
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>    <span class="k">return</span> <span class="s2">&quot;always state the year&quot;</span>        <span class="c1"># what to add on a failure</span>
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="n">result</span> <span class="o">=</span> <span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">run</span><span class="o">=</span><span class="n">run</span><span class="p">,</span> <span class="n">propose</span><span class="o">=</span><span class="n">propose</span><span class="p">,</span> <span class="n">rounds</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span> <span class="n">n_workers</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">final_reward</span><span class="p">,</span> <span class="n">result</span><span class="o">.</span><span class="n">state</span><span class="p">)</span>
+<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="k">if</span> <span class="n">result</span><span class="o">.</span><span class="n">error</span><span class="p">:</span>                          <span class="c1"># always check: died vs converged</span>
+<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a>    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;incomplete:&quot;</span><span class="p">,</span> <span class="n">result</span><span class="o">.</span><span class="n">error</span><span class="p">)</span>
+</code></pre></div>
+<p>Swap <code>run</code>/<code>propose</code> for a model by passing <code>agent=</code> instead — any backend works,
+including a tool-using one:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.agents</span><span class="w"> </span><span class="kn">import</span> <span class="n">LLMAgent</span><span class="p">,</span> <span class="n">claude</span><span class="p">,</span> <span class="n">openai_compatible</span><span class="p">,</span> <span class="n">claude_code</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.evolution</span><span class="w"> </span><span class="kn">import</span> <span class="n">evolve</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">LLMAgent</span><span class="p">(</span><span class="n">claude</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">&quot;claude-haiku-4-5&quot;</span><span class="p">)))</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">LLMAgent</span><span class="p">(</span><span class="n">openai_compatible</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">&quot;deepseek-v4-flash&quot;</span><span class="p">)))</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">LLMAgent</span><span class="p">(</span><span class="n">claude_code</span><span class="p">()))</span>          <span class="c1"># Claude Code CLI</span>
+</code></pre></div>
+<p>They are all the same <code>Completion</code> contract — see
+<a href="../agents/#tool-using-agents-the-same-contract">Connecting agents &amp; LLMs</a>. Run it
+without a barrier by adding <code>asynchronous=True</code>, watch progress with
+<code>on_round=...</code>, keep the artifact with <code>result.save(path)</code>, and resume an
+interrupted run by re-using the same <code>repo_path</code>
+(<a href="../evolution/#resuming-a-run">details</a>).</p>
+<h3 id="the-reference-stack-agentdescent-asyncagentdescent">The reference stack — <code>AgentDescent</code> / <code>AsyncAgentDescent</code><a class="headerlink" href="#the-reference-stack-agentdescent-asyncagentdescent" title="Permanent link">&para;</a></h3>
+<p>A <strong>separate</strong> runtime used by the RQ1/RQ2 and efficiency experiments on the
+built-in synthetic router domain. It has the <code>TaskScheduler</code> / <code>EvidenceBuffer</code> /
+duration-estimator machinery that <code>evolve()</code> does not — see the
+<a href="../architecture/#4-the-two-runtimes">two-stack note</a>. Reach for it to reproduce
+those experiments, not to evolve your own artifact.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">tempfile</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.domains.router</span><span class="w"> </span><span class="kn">import</span> <span class="n">make_task_universe</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.orchestrator</span><span class="w"> </span><span class="kn">import</span> <span class="n">AgentDescent</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="n">universe</span> <span class="o">=</span> <span class="n">make_task_universe</span><span class="p">(</span><span class="n">seed</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="k">with</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">TemporaryDirectory</span><span class="p">()</span> <span class="k">as</span> <span class="n">repo</span><span class="p">:</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>    <span class="n">system</span> <span class="o">=</span> <span class="n">AgentDescent</span><span class="p">(</span><span class="n">repo</span><span class="p">,</span> <span class="n">universe</span><span class="p">,</span> <span class="n">n_workers</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span> <span class="n">noise</span><span class="o">=</span><span class="mf">0.15</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>    <span class="n">history</span> <span class="o">=</span> <span class="n">system</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">rounds</span><span class="o">=</span><span class="mi">40</span><span class="p">)</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>    <span class="nb">print</span><span class="p">(</span><span class="n">system</span><span class="o">.</span><span class="n">final_accuracy</span><span class="p">())</span>      <span class="c1"># held-out accuracy on the dev branch</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">tempfile</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.async_runtime</span><span class="w"> </span><span class="kn">import</span> <span class="n">AsyncAgentDescent</span><span class="p">,</span> <span class="n">AsyncConfig</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.domains.router</span><span class="w"> </span><span class="kn">import</span> <span class="n">make_task_universe</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.staleness</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_policy</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="n">universe</span> <span class="o">=</span> <span class="n">make_task_universe</span><span class="p">(</span><span class="n">seed</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="n">cfg</span> <span class="o">=</span> <span class="n">AsyncConfig</span><span class="p">(</span><span class="n">n_workers</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span> <span class="n">async_ratio</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">target_accuracy</span><span class="o">=</span><span class="mf">0.98</span><span class="p">,</span> <span class="n">max_seconds</span><span class="o">=</span><span class="mf">15.0</span><span class="p">)</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="k">with</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">TemporaryDirectory</span><span class="p">()</span> <span class="k">as</span> <span class="n">repo</span><span class="p">:</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>    <span class="n">system</span> <span class="o">=</span> <span class="n">AsyncAgentDescent</span><span class="p">(</span><span class="n">repo</span><span class="p">,</span> <span class="n">universe</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="n">cfg</span><span class="p">,</span>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>                            <span class="n">staleness_policy</span><span class="o">=</span><span class="n">get_policy</span><span class="p">(</span><span class="s2">&quot;reflective&quot;</span><span class="p">))</span>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>    <span class="n">stats</span> <span class="o">=</span> <span class="n">system</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>    <span class="nb">print</span><span class="p">(</span><span class="n">stats</span><span class="o">.</span><span class="n">final_dev_accuracy</span><span class="p">,</span> <span class="n">stats</span><span class="o">.</span><span class="n">commits</span><span class="p">,</span> <span class="n">stats</span><span class="o">.</span><span class="n">discarded_stale</span><span class="p">)</span>
+</code></pre></div>
+<hr />
+<h2 id="4-configuration-reference">4. Configuration reference<a class="headerlink" href="#4-configuration-reference" title="Permanent link">&para;</a></h2>
+<h3 id="aggregatorconfig-agentdescentaggregatorpy"><code>AggregatorConfig</code> (agentdescent/aggregator.py)<a class="headerlink" href="#aggregatorconfig-agentdescentaggregatorpy" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>batch_trigger</code></td>
+<td>4</td>
+<td><code>B</code>: fire a bucket once it holds this many cards</td>
+</tr>
+<tr>
+<td><code>max_wait_rounds</code></td>
+<td>3</td>
+<td><code>T_max</code>: fire a cold bucket after this many sweeps</td>
+</tr>
+<tr>
+<td><code>base_delta</code></td>
+<td>0.5</td>
+<td>acceptance risk; threshold is <code>1 − δ</code>, annealed by version</td>
+</tr>
+<tr>
+<td><code>alpha_head</code></td>
+<td>5</td>
+<td>staleness tolerance α for hot artifacts</td>
+</tr>
+<tr>
+<td><code>alpha_tail</code></td>
+<td>1</td>
+<td>staleness tolerance α for cold artifacts</td>
+</tr>
+<tr>
+<td><code>trust_region_ops</code></td>
+<td>6</td>
+<td>max edits per diff (trust region)</td>
+</tr>
+<tr>
+<td><code>promote_after_k</code></td>
+<td>3</td>
+<td>dev→stable survival rounds (EMA)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="asyncconfig-agentdescentasync_runtimepy"><code>AsyncConfig</code> (agentdescent/async_runtime.py)<a class="headerlink" href="#asyncconfig-agentdescentasync_runtimepy" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>n_workers</code></td>
+<td>6</td>
+<td>worker threads</td>
+</tr>
+<tr>
+<td><code>async_ratio</code></td>
+<td>3</td>
+<td>ROLL Flash lag budget: max head-drift before a worker refreshes</td>
+</tr>
+<tr>
+<td><code>noise</code></td>
+<td>0.15</td>
+<td>fraction of workers that inject contradictory proposals</td>
+</tr>
+<tr>
+<td><code>target_accuracy</code></td>
+<td>0.98</td>
+<td>stop early when the dev branch reaches this</td>
+</tr>
+<tr>
+<td><code>max_seconds</code></td>
+<td>20.0</td>
+<td>wall-clock safety bound</td>
+</tr>
+<tr>
+<td><code>aggregator_interval</code></td>
+<td>0.002</td>
+<td>sleep between aggregator sweeps</td>
+</tr>
+<tr>
+<td><code>worker_pause</code></td>
+<td>0.001</td>
+<td>sleep between worker rollouts</td>
+</tr>
+<tr>
+<td><code>oracle_budget</code></td>
+<td>400</td>
+<td>oracle calls the AuditScheduler may spend</td>
+</tr>
+<tr>
+<td><code>stall_patience</code></td>
+<td>150</td>
+<td>no-commit sweeps before a backpressure sync</td>
+</tr>
+</tbody>
+</table>
+<p><code>AsyncStats.error</code> is <code>None</code> on a clean run and carries the backend failure that ended it otherwise — check it, since a run whose workers all died otherwise returns normal-looking zeros.</p>
+<h3 id="staleness-policy">Staleness policy<a class="headerlink" href="#staleness-policy" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.staleness</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_policy</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">get_policy</span><span class="p">(</span><span class="s2">&quot;full&quot;</span><span class="p">)</span>        <span class="c1"># accept stale diffs directly</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">get_policy</span><span class="p">(</span><span class="s2">&quot;guarded&quot;</span><span class="p">)</span>     <span class="c1"># version-gated (default)</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="n">get_policy</span><span class="p">(</span><span class="s2">&quot;reflective&quot;</span><span class="p">)</span>  <span class="c1"># always rebase + re-verify</span>
+</code></pre></div>
+<hr />
+<h2 id="5-plug-in-your-own-domain">5. Plug in your own domain<a class="headerlink" href="#5-plug-in-your-own-domain" title="Permanent link">&para;</a></h2>
+<p>The whole framework is domain-agnostic: <strong>what evolves is decided by
+registration, not hard-coded.</strong> To evolve something new, provide four things.</p>
+<h3 id="51-an-evolvable">5.1 An <code>Evolvable</code><a class="headerlink" href="#51-an-evolvable" title="Permanent link">&para;</a></h3>
+<p>Implement the protocol from <code>agentdescent/evolvable.py</code>
+(<a href="https://github.com/Birfy/agentdescent/blob/main/agentdescent/domains/router.py">reference: <code>RouterSkill</code></a>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.evolvable</span><span class="w"> </span><span class="kn">import</span> <span class="n">Contract</span><span class="p">,</span> <span class="n">Diff</span><span class="p">,</span> <span class="n">EvidenceCard</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="k">class</span><span class="w"> </span><span class="nc">MyArtifact</span><span class="p">:</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">id</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">version</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">blast_radius</span><span class="o">=</span><span class="mf">0.2</span><span class="p">):</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">id</span> <span class="o">=</span> <span class="nb">id</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">version</span> <span class="o">=</span> <span class="n">version</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">blast_radius</span> <span class="o">=</span> <span class="n">blast_radius</span>            <span class="c1"># → auto L0/L1/L2 layering</span>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">contract</span> <span class="o">=</span> <span class="n">Contract</span><span class="p">(</span><span class="n">major</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">state</span> <span class="o">=</span> <span class="n">state</span>
+<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>
+<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">diff</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Diff</span><span class="p">:</span> <span class="o">...</span>              <span class="c1"># difference to another instance</span>
+<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">apply</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">diff</span><span class="p">:</span> <span class="n">Diff</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;MyArtifact&quot;</span><span class="p">:</span>    <span class="c1"># return a NEW instance, version+1</span>
+<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a>        <span class="o">...</span>
+<a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">cheap_eval</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">evidence</span><span class="p">:</span> <span class="n">EvidenceCard</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a>        <span class="c1"># score on the tasks the evidence card carries (used by rebase re-verify)</span>
+<a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a>        <span class="o">...</span>
+<a id="__codelineno-12-17" name="__codelineno-12-17" href="#__codelineno-12-17"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">full_eval</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_set</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>          <span class="c1"># ground-truth metrics</span>
+<a id="__codelineno-12-18" name="__codelineno-12-18" href="#__codelineno-12-18"></a>        <span class="o">...</span>
+</code></pre></div>
+<div class="admonition important">
+<p class="admonition-title"><code>apply</code> must be pure</p>
+<p><code>apply</code> returns a <strong>new</strong> instance with <code>version + 1</code>; it never mutates
+<code>self</code>. The aggregator relies on this to test candidates without side
+effects.</p>
+</div>
+<h3 id="52-serialize-deserialize-for-the-ledger">5.2 Serialize / deserialize for the Ledger<a class="headerlink" href="#52-serialize-deserialize-for-the-ledger" title="Permanent link">&para;</a></h3>
+<p>The Ledger stores artifacts as JSON blobs in git, so give it two functions:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">serialize_mine</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>            <span class="c1"># → JSON-friendly dict</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;state&quot;</span><span class="p">:</span> <span class="n">a</span><span class="o">.</span><span class="n">state</span><span class="p">,</span> <span class="s2">&quot;blast_radius&quot;</span><span class="p">:</span> <span class="n">a</span><span class="o">.</span><span class="n">blast_radius</span><span class="p">}</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="k">def</span><span class="w"> </span><span class="nf">deserialize_mine</span><span class="p">(</span><span class="n">artifact_id</span><span class="p">,</span> <span class="n">version</span><span class="p">,</span> <span class="n">state</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">MyArtifact</span><span class="p">:</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>    <span class="k">return</span> <span class="n">MyArtifact</span><span class="p">(</span><span class="n">artifact_id</span><span class="p">,</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;state&quot;</span><span class="p">],</span> <span class="n">version</span><span class="p">,</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;blast_radius&quot;</span><span class="p">])</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="n">ledger</span> <span class="o">=</span> <span class="n">Ledger</span><span class="p">(</span><span class="n">repo_path</span><span class="p">,</span> <span class="n">serialize_mine</span><span class="p">,</span> <span class="n">deserialize_mine</span><span class="p">)</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="n">ledger</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">MyArtifact</span><span class="p">(</span><span class="s2">&quot;my-art&quot;</span><span class="p">,</span> <span class="n">initial_state</span><span class="p">))</span>
+</code></pre></div>
+<h3 id="53-an-eval-function-for-the-verifier">5.3 An eval function for the verifier<a class="headerlink" href="#53-an-eval-function-for-the-verifier" title="Permanent link">&para;</a></h3>
+<p>Ground-truth scorer over a held-out task set:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">my_eval</span><span class="p">(</span><span class="n">artifact</span><span class="p">,</span> <span class="n">tasks</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>    <span class="c1"># accuracy / reward in [0, 1]</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>    <span class="o">...</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="n">verifier</span> <span class="o">=</span> <span class="n">ThreeLayerVerifier</span><span class="p">(</span><span class="n">eval_fn</span><span class="o">=</span><span class="n">my_eval</span><span class="p">,</span> <span class="n">held_out</span><span class="o">=</span><span class="n">held_out_tasks</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="54-a-worker-that-proposes-diffs">5.4 A worker that proposes diffs<a class="headerlink" href="#54-a-worker-that-proposes-diffs" title="Permanent link">&para;</a></h3>
+<p>Workers turn observed failures into a <code>Diff</code> + <code>EvidenceCard</code>. The reference
+<code>Worker</code> (agentdescent/worker.py) is a deterministic corrector; in a real system
+this is where an LLM reflects on a trajectory and proposes an edit. Emit a card
+with the <code>base_version</code> you read, the <code>touched</code> artifacts, and a local
+<code>before_after_delta</code>, then <code>aggregator.ingest(card)</code>.</p>
+<p>Once these four pieces exist, everything else — the Ledger, the aggregator, the
+schedulers, the governance layers, both runtimes, and all three parallel
+paradigms — works unchanged.</p>
+<hr />
+<h2 id="6-building-the-documentation-site">6. Building the documentation site<a class="headerlink" href="#6-building-the-documentation-site" title="Permanent link">&para;</a></h2>
+<p>These docs render as a website via <a href="https://www.mkdocs.org/">MkDocs</a>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s2">&quot;.[docs]&quot;</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>mkdocs<span class="w"> </span>serve<span class="w">      </span><span class="c1"># live preview at http://127.0.0.1:8000</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>mkdocs<span class="w"> </span>build<span class="w">      </span><span class="c1"># static HTML into ./site</span>
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/Birfy/agentdescent" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "navigation.tracking", "navigation.indexes", "content.code.copy", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
