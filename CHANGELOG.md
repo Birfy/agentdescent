@@ -92,6 +92,13 @@ All notable changes to AgentDescent are documented here. The format follows
   instead of 4.7 s with byte-identical results.
 
 ### Fixed
+- **A wall-clock-dependent test was flaky in CI.**
+  `test_guarded_discards_more_than_reflective` asserted an absolute accuracy
+  (`>= 0.95`) from a run bounded by 12 seconds, so how far it converged depended on
+  how many rollouts the machine fitted into that budget — it passed locally and on
+  the 3.11/3.12 runners and failed on the slower 3.9 one at 0.83. It now asserts the
+  relationship it is named for (Guarded discards more, Reflective wastes fewer
+  rollouts and is never behind), which holds at any machine speed.
 - **`result.history` means different things on the two paths.** Synchronous
   `evolve(rounds=5)` yields exactly 5 entries; `async_evolve` appends one per
   non-empty merger *sweep* — 221 in a 3-second run — and the count is bounded by no
