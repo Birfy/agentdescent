@@ -116,7 +116,11 @@ class MergeReport:
     conflicts_dropped: int
     prob_improve: float
     committed_version: Optional[int]
+    #: Human-readable, may embed measured numbers -- good for a log line.
     reason: str = ""
+    #: Stable bucket for the same outcome, safe to count across rounds. ``reason``
+    #: interpolates values ("P(delta>0)=0.42 <= 0.75"), so it makes a useless key.
+    category: str = ""
 
 
 class EvidenceBuffer:
@@ -370,7 +374,7 @@ class Aggregator:
         artifact = snap.get(artifact_id)
         if artifact is None:
             return MergeReport(artifact_id, None, False, len(cards), 0, 0, 0, 0.0, None,
-                               "unknown artifact")
+                               "unknown artifact", "unknown-artifact")
         assert_mutable(artifact)  # L0 guard
 
         # trust-region: reject over-large diffs up front. They were previously
@@ -394,7 +398,7 @@ class Aggregator:
         if not survivors:
             return MergeReport(artifact_id, None, False, n_considered, 0,
                                len(discarded) + len(oversized), 0, 0.0, None,
-                               "all stale / rejected")
+                               "all stale / rejected", "all-stale")
 
         kept_cards, conflicts = self._resolve_conflicts(artifact, survivors)
         kept_diffs = [c.diff for c in kept_cards]
@@ -443,13 +447,19 @@ class Aggregator:
                 prior.observe_delta(oracle_cand - oracle_base)
                 return MergeReport(artifact_id, None, fused, n_considered, len(survivors),
                                    len(discarded), conflicts, p_improve, None,
-                                   "oracle rejected")
+                                   "oracle rejected", "oracle-rejected")
 
+        # Not settled, unlike the CAS-conflict path below -- and the asymmetry is
+        # deliberate. A CAS-conflicted diff lost a race and was never judged against
+        # the new head, so it deserves another look; one rejected here was judged and
+        # lost, and its tournament rivals scored below it on the same held-out set.
+        # Re-filing them would just buy the same rejection again.
         if p_improve <= 1.0 - delta or cand_score < base_score:
             prior.observe_delta(cand_score - base_score)
             return MergeReport(artifact_id, None, fused, n_considered, len(survivors),
                                len(discarded), conflicts, p_improve, None,
-                               f"P(delta>0)={p_improve:.2f} <= {1-delta:.2f}")
+                               f"P(delta>0)={p_improve:.2f} <= {1-delta:.2f}",
+                               "below-threshold")
 
         # -- commit (section 4.1): CAS on dev --------------------------------
         base_vv = {artifact_id: head.get(artifact_id, 0)}
@@ -461,7 +471,8 @@ class Aggregator:
         except CASConflict:
             self.buffer.settle(survivors)
             return MergeReport(artifact_id, None, fused, n_considered, len(survivors),
-                               len(discarded), conflicts, p_improve, None, "CAS conflict")
+                               len(discarded), conflicts, p_improve, None,
+                               "CAS conflict", "cas-conflict")
 
         prior.update(True, weight=2.0)  # a committed improvement is strong evidence.
 
@@ -473,4 +484,4 @@ class Aggregator:
 
         return MergeReport(artifact_id, best_diff, fused, n_considered, len(survivors),
                            len(discarded), conflicts, p_improve, new_version,
-                           "committed")
+                           "committed", "committed")

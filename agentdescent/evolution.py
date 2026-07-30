@@ -430,6 +430,15 @@ class _Runtime:
 # ---------------------------------------------------------------------------
 
 
+def _tally(reports) -> Dict[str, int]:
+    """Count merge outcomes by stable category (see ``MergeReport.category``)."""
+    out: Dict[str, int] = {}
+    for rep in reports:
+        key = getattr(rep, "category", "") or "unknown"
+        out[key] = out.get(key, 0) + 1
+    return out
+
+
 @dataclass
 class RoundInfo:
     round: int
@@ -437,6 +446,11 @@ class RoundInfo:
     n_items: int
     committed: int
     rejected: int
+    #: ``MergeReport.category -> count`` for this round. A run that commits
+    #: nothing otherwise reports only ``rejected: 3``, leaving the caller with no
+    #: way to tell "the gate says my proposals do not help" from "they never
+    #: reached the gate" -- which need opposite fixes.
+    reasons: Dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -450,6 +464,24 @@ class EvolutionResult:
     #: backend failure that ended the run early. The artifact evolved so far is
     #: still returned -- check this to tell "converged" from "died".
     error: Optional[str] = None
+
+    def outcomes(self) -> Dict[str, int]:
+        """Merge outcomes for the whole run, by category -- *why* it went as it did.
+
+        The first question about a disappointing run is always "why did nothing
+        commit?", and `committed`/`rejected` counts cannot answer it: the fixes are
+        opposite. ``below-threshold`` means proposals reached the gate and failed to
+        beat the baseline (the reflector is the problem). ``all-stale`` means they
+        never reached it (the lag budget is). ``cas-conflict`` means workers raced.
+
+        >>> result.outcomes()
+        {'below-threshold': 7, 'committed': 2, 'all-stale': 1}
+        """
+        out: Dict[str, int] = {}
+        for h in self.history:
+            for k, v in h.reasons.items():
+                out[k] = out.get(k, 0) + v
+        return out
 
     def save(self, path: str) -> None:
         """Write the evolved artifact and its run summary to a JSON file.
@@ -465,7 +497,8 @@ class EvolutionResult:
             "error": self.error,
             "history": [
                 {"round": h.round, "held_out_reward": h.held_out_reward,
-                 "n_items": h.n_items, "committed": h.committed, "rejected": h.rejected}
+                 "n_items": h.n_items, "committed": h.committed,
+                 "rejected": h.rejected, "reasons": h.reasons}
                 for h in self.history
             ],
             "ledger_log": list(self.ledger_log),
@@ -954,7 +987,8 @@ def evolve(
         committed = sum(1 for x in reports if x.committed_version is not None)
         rejected = sum(1 for x in reports if x.committed_version is None)
         dev = ledger.snapshot(Ledger.DEV).get(artifact_id)
-        info = RoundInfo(r, dev.score(held_out), len(dev.state), committed, rejected)
+        info = RoundInfo(r, dev.score(held_out), len(dev.state), committed, rejected,
+                         _tally(reports))
         history.append(info)
         # Early stopping: an LLM rollout costs money, so do not keep buying them
         # once the artifact has converged or clearly stalled.

@@ -6,6 +6,18 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **`result.outcomes()` — why the run went as it did.** A run that committed
+  nothing reported `rejected: 3` and no more, though the aggregator had computed
+  the reason and thrown it away. Merge outcomes are now tallied by a stable
+  category on `RoundInfo.reasons` and across the run via `outcomes()`, on both
+  the sync and async paths, and they survive `save()`/`load()`. The distinction
+  matters because the fixes are opposite: `below-threshold` means proposals
+  reached the acceptance gate and lost (the reflector is the problem),
+  `all-stale` means they never reached it (the lag budget is). `MergeReport`
+  gains `category` alongside `reason`, which interpolates measured values and so
+  makes a useless tally key.
+
 ### Fixed
 - **The settled-evidence pool grew without bound.** Every discarded card — stale,
   oversized, CAS-conflicted — is `settle()`d, and **nothing in the library reads

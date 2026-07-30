@@ -37,7 +37,7 @@ import warnings
 from typing import Callable, Dict, List, Optional
 
 from .evolution import (
-    Agent, EvolutionResult, Propose, Reward, RoundInfo, Run, Strategy, Task,
+    Agent, EvolutionResult, Propose, Reward, RoundInfo, Run, Strategy, Task, _tally,
     _build_engine, _checked_proposal, _checked_reward,
 )
 from .aggregator import AggregatorConfig, check_reports
@@ -311,7 +311,7 @@ def async_evolve(
         else:
             best[1] += 1
         history.append(RoundInfo(len(history), r, len(dev.state), committed,
-                                 len(reports) - committed))
+                                 len(reports) - committed, _tally(reports)))
         if verbose:
             print(f"sweep {len(history):>3}  reward={r:.3f}  merged={len(batch)}  "
                   f"+{committed}  pending={len(intake)}")

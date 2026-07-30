@@ -365,10 +365,31 @@ result = evolve(tasks, reward, agent=agent, rounds=6, verbose=True)
 result.rendered       # the evolved artifact, rendered to text
 result.state          # its {key: value} state
 result.final_reward   # held-out reward of the final artifact
-result.history        # RoundInfo(round, held_out_reward, n_items, committed, rejected)
+result.history        # RoundInfo(round, held_out_reward, n_items, committed, rejected, reasons)
+result.outcomes()     # {'below-threshold': 7, 'committed': 2} — why the run went as it did
 result.ledger_log     # the git commit log of accepted merges
 result.error          # None on a clean run; "<ExcType>: <msg>" if a backend failure ended it
 ```
+
+### Why did nothing commit?
+
+The first question about a disappointing run, and `committed`/`rejected` cannot
+answer it — the fixes are opposite. `outcomes()` tallies the merge outcome of
+every round by a stable category:
+
+| category | what happened | where to look |
+|---|---|---|
+| `committed` | accepted and written to the dev branch | — |
+| `below-threshold` | reached the acceptance gate and failed to beat the baseline | the **reflector** — its proposals do not help. Check it can see enough (`Task.meta`), and that it is not returning empty (`max_tokens`) |
+| `all-stale` | never reached the gate; the world moved on first | the **lag budget** — lower `async_ratio`, or use the sync path |
+| `cas-conflict` | lost a commit race; the evidence is re-filed for retry | usually self-correcting; persistent means too many workers on one artifact |
+| `oracle-rejected` | the audit's oracle disagreed with the cheap evaluator | the **cheap evaluator** is miscalibrated |
+| `unknown-artifact` | diffs targeted an id the ledger does not hold | a caller bug in `artifact_id`/strategy |
+
+`RoundInfo.reasons` is the same tally per round. A custom aggregator sees the
+underlying `MergeReport`, which carries both `category` and a human-readable
+`reason` with the measured values (`"P(delta>0)=0.42 <= 0.75"`) — good for a log
+line, but it interpolates numbers, so count on `category`.
 
 Watch a long run as it happens — an LLM run can take hours, and `history` is only
 available once it returns:
