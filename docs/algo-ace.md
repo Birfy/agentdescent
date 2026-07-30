@@ -74,6 +74,14 @@ sentences over the 40 most frequent XBRL concepts, split train / val / test:
 |---|---|---|---|---|---|
 | top-40 | 57 | **87.0%** | **95.7% (+8.7)** | **90.5%** | 2 |
 
+A second run, identical except for `--sampler difficulty`
+([task selection](evolution.md#task-selection-which-rollout-to-spend)), reached a
+lesson sooner — admitting one in round 0 rather than round 2 — but finished
+**0.913 val / 0.857 test**, below round-robin. On ~23 val items a single item is
+worth ~4 points, so this is a small sample rather than a verdict; it is recorded
+because it is the honest outcome, and because "more rollouts on failing tasks"
+plainly did not translate into a better playbook here.
+
 The Curator admitted **2 of the bullets** the Reflector proposed; the rest were
 rejected by the Beta-posterior acceptance test, which is the point — a lesson
 only lands if it demonstrably raises held-out accuracy.

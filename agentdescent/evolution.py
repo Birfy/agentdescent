@@ -421,7 +421,10 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     if not re.fullmatch(r"[A-Za-z0-9_.\-]+", artifact_id):
         raise ValueError("artifact_id must match [A-Za-z0-9_.-]+ (it becomes a filename), "
                          f"got {artifact_id!r}")
-    cut = max(1, int(len(tasks) * (1 - held_out_frac)))
+    # round, not truncate: Dataset.val_frac promises "the engine's held-out split
+    # is exactly this Dataset's val", and float truncation (13.9999 -> 13) quietly
+    # pushed one train item into held-out for many dataset sizes.
+    cut = max(1, round(len(tasks) * (1 - held_out_frac)))
     train, held_out = tasks[:cut], tasks[cut:]
     if not held_out:
         train, held_out = tasks[:-1], tasks[-1:]

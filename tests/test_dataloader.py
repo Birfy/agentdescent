@@ -140,3 +140,29 @@ def test_split_dataset_stratified_keeps_classes_in_each_split():
 def test_dataset_from_splits():
     ds = dl.dataset_from_splits([1, 2], [3], [4, 5], name="x")
     assert ds.sizes() == (2, 1, 2) and ds.name == "x"
+
+
+def test_val_frac_round_trips_through_evolve():
+    """Dataset.val_frac promises the engine's held-out split IS the Dataset's val.
+
+    Float truncation (13.9999 -> 13) silently moved one train item into held-out
+    for many dataset sizes, so the two splits disagreed.
+    """
+    from agentdescent.dataloader import split_dataset
+    from agentdescent.evolution import Task, _build_engine
+
+    for n in (29, 87, 100, 149, 200):
+        rows = [{"i": i} for i in range(n)]
+        ds = split_dataset(rows, ratios=(0.5, 0.25, 0.25), seed=0)
+        tasks = [Task(id=f"t{i}", prompt="q") for i in range(len(ds.trainval))]
+
+        eng = _build_engine(
+            tasks, lambda t, o: 1.0, agent=None,
+            run=lambda r, t: "x", propose=lambda r, t, o, s: None,
+            strategy=None, initial_state=None, blast_radius=0.2,
+            artifact_id="a", held_out_frac=ds.val_frac, repo_path=None,
+            agg_config=None, staleness_policy=None, aggregator_factory=None,
+            oracle_budget=10)
+        assert len(eng.train) == len(ds.train), (
+            f"n={n}: engine train={len(eng.train)} but Dataset train={len(ds.train)}")
+        assert len(eng.held_out) == len(ds.val)
