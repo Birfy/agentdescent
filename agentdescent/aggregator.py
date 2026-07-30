@@ -65,6 +65,11 @@ class AggregatorConfig:
     alpha_head: int = 5             # staleness tolerance for hot artifacts
     alpha_tail: int = 1             # staleness tolerance for cold artifacts
     trust_region_ops: int = 6       # max ops per diff (trust region)
+    #: Max characters in any single op's value. The op-count trust region did not
+    #: bound *size*, so one runaway proposal (a reflector that echoes its input,
+    #: say) could commit a 500 KB value that then renders into every later prompt.
+    #: Real ops in the shipped ports are ~2.5k chars, so this is ~12x headroom.
+    trust_region_chars: int = 32_000
     promote_after_k: int = 3        # dev->stable survival rounds (EMA)
 
 
@@ -307,8 +312,14 @@ class Aggregator:
         # dropped *before* `considered` was computed and never settled, so they
         # vanished from both the report and the evidence pool -- silently.
         n_considered = len(cards)
-        oversized = [c for c in cards if c.diff.size() > self.config.trust_region_ops]
-        cards = [c for c in cards if c.diff.size() <= self.config.trust_region_ops]
+        def _within_trust_region(card) -> bool:
+            if card.diff.size() > self.config.trust_region_ops:
+                return False
+            return all(len(str(v)) <= self.config.trust_region_chars
+                       for v in card.diff.ops.values())
+
+        oversized = [c for c in cards if not _within_trust_region(c)]
+        cards = [c for c in cards if _within_trust_region(c)]
         if oversized:
             self.buffer.settle(oversized)
 

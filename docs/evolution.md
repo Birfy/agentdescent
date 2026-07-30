@@ -20,6 +20,37 @@ print(result.final_reward)    # held-out reward
 
 That's the minimum. Everything below is optional and swappable.
 
+## Bring an agent you already have
+
+The common case is not "write an agent for the framework" — it is "I have an
+agent, make it better". That needs three lines: adapt it, pick something to
+reflect with, say what evolves.
+
+```python
+from agentdescent.agents import claude
+from agentdescent.evolution import SingleSlot, evolve, reflector
+
+def my_agent(system_prompt, question):        # whatever you already have
+    ...
+
+result = evolve(
+    tasks, reward,
+    run=lambda rendered, task: my_agent(rendered, task.prompt),   # adapt it
+    propose=reflector(claude(model="claude-haiku-4-5")),          # who reflects
+    strategy=SingleSlot(initial_value="Answer concisely."),       # what evolves
+    n_workers=4, max_concurrency=4,        # ...in parallel
+    # asynchronous=True,                   # ...or barrier-free
+)
+print(result.rendered)      # the evolved system prompt
+```
+
+`reflector(completion)` turns any model into the thing that looks at a failure and
+says what to change — it need not be the model your agent uses, and a cheap one is
+often the right reflector for an expensive agent. `SingleSlot` is the artifact
+being one value that each accepted proposal replaces, which is what you want for a
+system prompt. Switching between parallel and barrier-free async is one argument;
+nothing else in the call changes.
+
 !!! tip "Where do `tasks` come from?"
     The `tasks` and `reward` are yours to define. To pull them from a public
     benchmark without writing HuggingFace paging/caching boilerplate, use the
@@ -94,6 +125,7 @@ evolve(tasks, reward, agent=agent, strategy=KeyedRules(categories=["route","fmt"
 
 | Strategy | Rule |
 |---|---|
+| **`SingleSlot`** | the artifact **is one value** (a system prompt, an instruction) and each accepted proposal replaces it — the most common case |
 | `AppendRules` | each proposal → a content-addressed rule; identical ones dedupe, complementary ones **fuse** (append-only) |
 | `KeyedRules(categories)` | one entry per category; competing proposals for the same category **contradict** and are resolved on held-out score |
 

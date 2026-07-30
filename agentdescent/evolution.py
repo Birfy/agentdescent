@@ -115,6 +115,24 @@ class LLMAgent:
         return None if (not rule or rule.upper().startswith("NONE")) else rule
 
 
+def reflector(complete: Completion, template: str = _PROPOSE_TMPL) -> Propose:
+    """Use any model as the *reflector* for an agent you already have.
+
+    :class:`LLMAgent` bundles solving and proposing, which only fits when the
+    framework also drives the rollout. The common case is the other way round --
+    you have an agent, you want it evolved, and you need something to look at a
+    failure and say what to change:
+
+        evolve(tasks, reward,
+               run=lambda rendered, task: my_agent(rendered, task.prompt),
+               propose=reflector(claude(model="claude-haiku-4-5")),
+               strategy=SingleSlot())
+
+    The model never has to be the same one the agent uses; a cheap model is often
+    the right reflector for an expensive agent."""
+    return LLMAgent(complete, propose_template=template).propose
+
+
 def claude_agent(model: str = "claude-opus-4-8", max_tokens: int = 1024) -> LLMAgent:
     """Convenience: ``LLMAgent(claude(model))`` (provider code lives in :mod:`agentdescent.agents`)."""
     return LLMAgent(claude(model=model, max_tokens=max_tokens))
@@ -172,6 +190,42 @@ class AppendRules:
 
 
 @dataclass
+class SingleSlot:
+    """The artifact **is one value**, and each accepted proposal replaces it.
+
+    The most common thing anyone evolves -- a system prompt, an instruction, one
+    document -- and until now every caller wrote this themselves (three of the
+    shipped algorithm ports each rolled their own variant). Competing proposals
+    contradict on the same key, so the aggregator resolves them on held-out score
+    and the best replacement wins:
+
+        evolve(tasks, reward, agent=agent,
+               strategy=SingleSlot(initial="Answer concisely."))
+
+    ``key`` names the slot in the artifact state; ``initial`` seeds it. Set
+    ``keep_longest=False`` to accept any different proposal (the default guards
+    against a reflector that answers with a terse non-answer)."""
+
+    initial_value: str = ""
+    key: str = "value"
+    empty_render: str = "(no instruction yet)"
+    min_chars: int = 1
+
+    def initial(self) -> Dict[str, str]:
+        return {self.key: self.initial_value} if self.initial_value else {}
+
+    def render(self, state: Dict[str, str]) -> str:
+        return state.get(self.key) or self.empty_render
+
+    def to_diff(self, state, proposal, author, base_version, target) -> Optional[Diff]:
+        text = (proposal or "").strip()
+        if len(text) < self.min_chars or state.get(self.key) == text:
+            return None
+        return Diff(diff_id=f"{author}:{self.key}:{base_version}", target=target,
+                    ops={self.key: text}, author=author)
+
+
+@dataclass
 class KeyedRules:
     """One entry per *category*: competing proposals contradict and are resolved.
 
@@ -215,11 +269,28 @@ class KeyedRules:
 _REWARD_TOL = 1e-6
 
 
+class ProposalContractError(TypeError):
+    """``propose`` returned something that is not text (or ``None``).
+
+    A strategy then fails deep inside ``to_diff`` with something like
+    ``'int' object has no attribute 'strip'``, which reads as a framework bug
+    rather than a caller one."""
+
+
 class RewardContractError(ValueError):
     """The caller's ``reward`` returned something outside the documented contract.
 
     A distinct type so the engine can tell a *caller* mistake (fail fast, the run
     is meaningless) from a *backend* failure (stop, keep partial results)."""
+
+
+def _checked_proposal(value, task: "Task"):
+    """``propose`` may return text or ``None``; anything else is a caller error."""
+    if value is None or isinstance(value, str):
+        return value
+    raise ProposalContractError(
+        f"propose(task={task.id!r}, ...) returned {type(value).__name__} "
+        f"({value!r:.40}); it must return a string or None")
 
 
 def _checked_reward(value, task: "Task") -> float:
@@ -727,7 +798,8 @@ def evolve(
             sampler.record(task.id, score)               # learn which tasks carry signal
             if score >= 0.999:
                 return
-            proposal = propose(artifact.render(), task, output, score)
+            proposal = _checked_proposal(
+                propose(artifact.render(), task, output, score), task)
             if not proposal:
                 return
             diff = strategy.to_diff(artifact.state, proposal, f"w{unit.worker}", base_v, artifact_id)
@@ -787,7 +859,7 @@ def evolve(
                     _run_unit(unit)
 
             reports = aggregator.step()
-        except RewardContractError:
+        except (RewardContractError, ProposalContractError):
             raise            # a caller-contract violation: the run is meaningless
         except Exception as e:  # noqa: BLE001 - a rollout backend failure (e.g. an
             # API/credit error) shouldn't lose the run: stop and return partial results.

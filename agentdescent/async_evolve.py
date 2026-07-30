@@ -38,7 +38,8 @@ from typing import Callable, Dict, List, Optional
 
 from .evolution import (
     Agent, EvolutionResult, Propose, Reward, RoundInfo, Run, Strategy, Task,
-    _build_engine, _checked_reward, RewardContractError,
+    _build_engine, _checked_proposal, _checked_reward,
+    ProposalContractError, RewardContractError,
 )
 from .aggregator import AggregatorConfig
 from .evolvable import EvidenceCard, vv_staleness
@@ -211,7 +212,8 @@ def async_evolve(
                 score = _checked_reward(eng.reward(task, output), task)
                 sampler.record(task.id, score)     # learn which tasks carry signal
                 if score < 0.999:
-                    proposal = eng.propose(artifact.render(), task, output, score)
+                    proposal = _checked_proposal(
+                        eng.propose(artifact.render(), task, output, score), task)
                     if proposal:
                         diff = eng.strategy.to_diff(artifact.state, proposal,
                                                     f"w{wid}", base_v, eng.artifact_id)
@@ -232,7 +234,7 @@ def async_evolve(
                                 trajectory_refs=[task])
                             with intake_lock:
                                 intake.append(card)
-            except RewardContractError as e:
+            except (RewardContractError, ProposalContractError) as e:
                 # a caller-contract violation, not a flaky backend: stop at once.
                 with counter_lock:
                     if errors[0] is None:

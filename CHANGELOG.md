@@ -6,6 +6,27 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **`SingleSlot`** — the artifact *is* one value (a system prompt, an instruction)
+  and each accepted proposal replaces it. The most common thing anyone evolves, and
+  until now every caller wrote it themselves: three of the six shipped ports each
+  rolled their own variant, and the docs offered it as copy-paste.
+- **`reflector(completion)`** — turn any model into the thing that looks at a
+  failure and says what to change, so you can keep your own agent as `run=`.
+  Evolving an agent you already have is now three lines: adapt it, pick a
+  reflector, say what evolves — and switching parallel↔async is one argument.
+
+### Fixed
+- **The trust region bounded op *count* but not op *size*.** A runaway proposal —
+  a reflector echoing its input, say — committed a 500 KB value that then rendered
+  into every later prompt, exploding cost and context silently. `AggregatorConfig`
+  gains `trust_region_chars` (default 32k, ~12x the largest real op in the shipped
+  ports).
+- **A non-text proposal failed as `'int' object has no attribute 'strip'`**, deep
+  inside a strategy, and was reported as a backend failure. `propose` returning
+  anything but text or `None` now raises `ProposalContractError` naming the task
+  and the contract, on both engine paths.
+
 ## [0.2.0] — 2026-07-30
 
 A correctness and honesty pass over 0.1.0. Most of what changed was not a crash
