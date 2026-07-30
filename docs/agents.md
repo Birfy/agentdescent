@@ -168,8 +168,20 @@ answer = backend.answer(question, document_text, skills=learned_skills)
 
 It adapts to what it is given: a `WorkspaceAgent` gets a scratch directory with the
 document written into it (so it can genuinely grep a huge table), while a plain
-completion gets the document inline, truncated. That is why the same OfficeQA
-example runs on OpenHands, Claude Code, or a bare API model.
+completion gets the document inline, truncated at `inline_chars`. That is why the
+same OfficeQA example runs on OpenHands, Claude Code, or a bare API model.
+
+!!! warning "The inline path is a fallback, not an equivalent"
+    Measured on three real OfficeQA items (documents of 266–390 KB) with
+    `document_agent(openai_compatible(model="deepseek-v4-flash"))`: **1 of 3
+    correct**, 249k prompt tokens, and two answers came back *empty* — because at
+    the default `inline_chars=200_000` roughly half of each document never reached
+    the model, and the figure sometimes lived in the half that was dropped. A
+    `RuntimeWarning` now says so whenever truncation happens, since an empty answer
+    otherwise looks like a model failure rather than a missing input.
+
+    If the material is bigger than a comfortable prompt, give the adapter a
+    workspace agent — it reads the file itself and nothing is dropped.
 
 EvoSkill selects one with `--backend openhands|toolloop|retrieval`; the measured
 gated lift with OpenHands + DeepSeek (**58.0% → 65.7%**) is on the

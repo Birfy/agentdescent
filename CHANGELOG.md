@@ -25,6 +25,12 @@ All notable changes to AgentDescent are documented here. The format follows
   really grep a 1 MB table), a plain completion gets it inline and truncated. The
   same example therefore runs on OpenHands, Claude Code, Codex, or a bare API
   model — `evoskill --backend claude-code|codex` are now available.
+- **`document_agent` no longer truncates in silence.** Validating the inline path
+  on real OfficeQA documents (266–390 KB) gave 1/3 correct with two *empty*
+  answers: at the default `inline_chars` about half of each document never reached
+  the model, and the figure was sometimes in the dropped half — indistinguishable
+  from a model failure. Truncation now emits a `RuntimeWarning` naming the sizes
+  and pointing at the fix (pass a workspace agent, which reads the file itself).
 - **The reward contract is enforced.** `reward` must return `[0, 1]`; the engine
   treats `>= 0.999` as solved, so a scorer on a 0-100 scale silently made *every*
   task look solved — `propose()` was never called, nothing was learned, and

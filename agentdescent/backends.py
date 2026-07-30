@@ -32,6 +32,7 @@ from __future__ import annotations
 import os
 import re
 import tempfile
+import warnings
 from typing import Callable, Protocol, runtime_checkable
 
 from .agents import Completion, WorkspaceAgent
@@ -106,6 +107,19 @@ def document_agent(completion: Completion, *, doc_filename: str = "document.txt"
                 f.write(document)
             prompt = _DOC_INSTR.format(skills=skill_block, fname=doc_filename, q=question)
             return completion.in_workspace(workdir)(prompt).strip()
+        if len(document) > inline_chars:
+            # Never drop half a document in silence: the answer may be in the part
+            # the agent never saw, and an empty or wrong reply then looks like a
+            # model failure rather than a truncation. A workspace agent avoids this
+            # entirely -- it reads the file itself.
+            warnings.warn(
+                f"document_agent: inlining only {inline_chars:,} of "
+                f"{len(document):,} chars ({100 * inline_chars / len(document):.0f}%) "
+                "because this agent has no workspace to read the file from; the "
+                "answer may lie in the truncated part. Pass a WorkspaceAgent "
+                "(openhands(), claude_code(), codex(), cli_agent(...)) to let the "
+                "agent grep the whole document, or raise inline_chars.",
+                RuntimeWarning, stacklevel=3)
         prompt = _DOC_INSTR_INLINE.format(
             skills=skill_block, doc=document[:inline_chars], q=question)
         return completion(prompt).strip()

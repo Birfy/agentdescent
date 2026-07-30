@@ -115,7 +115,10 @@ def test_document_agent_truncates_a_huge_inline_document():
         seen["n"] = len(prompt)
         return "done"
 
-    document_agent(capture, inline_chars=1000).answer("q?", "x" * 500_000)
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")          # truncation warns; asserted elsewhere
+        document_agent(capture, inline_chars=1000).answer("q?", "x" * 500_000)
     assert seen["n"] < 5000, "an inline document must be bounded"
 
 
@@ -143,3 +146,42 @@ def test_openhands_backend_is_now_just_a_composition():
     from agentdescent.backends import openhands_backend
 
     assert hasattr(openhands_backend(model="openai/x"), "answer")
+
+
+def test_inline_truncation_is_reported_not_silent():
+    """Dropping half a document must not look like a model failure.
+
+    On real OfficeQA docs (266-390 KB) the inline path silently discarded
+    everything past inline_chars; the answer sometimes lived in the discarded
+    half, so the model returned an empty string and the truncation was invisible.
+    """
+    import warnings
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        document_agent(lambda p: "x").answer("q?", "y" * 400_000)
+    msgs = [str(x.message) for x in w]
+    assert any("truncated" in m or "inlining only" in m for m in msgs), msgs
+    assert any("WorkspaceAgent" in m or "workspace" in m for m in msgs), \
+        "the warning should point at the fix"
+
+
+def test_a_document_that_fits_does_not_warn():
+    import warnings
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        document_agent(lambda p: "x").answer("q?", "y" * 100)
+    assert not [x for x in w if "inlining" in str(x.message)]
+
+
+def test_a_workspace_agent_never_truncates():
+    """It reads the file itself, so size is irrelevant -- and it must not warn."""
+    import warnings
+
+    reader = cli_agent(["sh", "-c", "wc -c < document.txt"], via_stdin=True)
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        out = document_agent(reader).answer("q?", "y" * 400_000)
+    assert int(out.strip()) == 400_000, "the whole document must reach the workspace"
+    assert not [x for x in w if "inlining" in str(x.message)]
