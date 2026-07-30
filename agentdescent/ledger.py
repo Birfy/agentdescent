@@ -187,13 +187,22 @@ class Ledger:
 
         ``base_version`` is the version the writer read for this artifact.  If
         the head has advanced past it, :class:`CASConflict` is raised and the
-        caller must rebase (design doc, section 4.2)."""
+        caller must rebase (design doc, section 4.2).
+
+        The vector **must** mention this artifact: defaulting a missing entry to
+        the current head would make the check unfalsifiable, so a writer that
+        declared no base would always win -- precisely the lost update CAS
+        exists to prevent."""
         with self._lock:
             self._checkout(branch)
             vv = self._read_versions()
             aid = new_state.id
             head = vv.get(aid, 0)
-            expected = base_version.get(aid, head)
+            if aid not in base_version:
+                raise CASConflict(
+                    f"{aid}: base_version must declare the version this write was "
+                    f"based on (got {dict(base_version)!r}); head={head}")
+            expected = base_version[aid]
             if head != expected:
                 raise CASConflict(
                     f"{aid}: head={head} but diff based on {expected}"
@@ -221,10 +230,14 @@ class Ledger:
         with self._lock:
             self._checkout(branch)
             vv = self._read_versions()
-            # phase 1: validate all
+            # phase 1: validate all (every id must declare its base -- see commit())
             for st in new_states:
                 head = vv.get(st.id, 0)
-                expected = base_version.get(st.id, head)
+                if st.id not in base_version:
+                    raise CASConflict(
+                        f"{st.id}: base_version must declare the version this write "
+                        f"was based on (got {dict(base_version)!r}); head={head}")
+                expected = base_version[st.id]
                 if head != expected:
                     raise CASConflict(
                         f"{st.id}: head={head} but diff based on {expected}"

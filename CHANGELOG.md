@@ -22,6 +22,11 @@ All notable changes to AgentDescent are documented here. The format follows
   that ended it early, so callers can tell "converged" from "died".
 
 ### Fixed
+- **`Ledger` CAS could be bypassed.** `base_version.get(aid, head)` defaulted a
+  missing entry to the current head, so a writer that declared no base version
+  (or an unrelated one) always committed — the exact lost update the
+  compare-and-swap exists to prevent. Both `commit` and `commit_atomic` now
+  require the vector to declare every artifact they write.
 - **`async_evolve` reported a probability as the held-out reward.** A caching
   optimisation put `MergeReport.prob_improve` (a Beta-posterior P(delta>0)) into
   `RoundInfo.held_out_reward`, so `history` was fiction and `target_reward` could

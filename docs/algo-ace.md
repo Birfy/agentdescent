@@ -64,12 +64,36 @@ The example provides these plug-ins to `evolve()` (in
 | default `Aggregator` | (the Curator) | dedup + Beta-posterior acceptance — a bullet commits only if it raises held-out reward; **no custom aggregator needed** |
 | `ace_agent()` | `agent=` | Generator (`solve`) + Reflector (`propose`) over a completion |
 
+## Empirical results — FiNER-139 with DeepSeek
+
+Run through `evolve()` (synchronous DP, 4 workers, 8 rounds) with
+`deepseek-v4-flash` on the real FiNER-139 validation split, 57 single-entity
+sentences over the 40 most frequent XBRL concepts, split train / val / test:
+
+| Concepts | Tasks | Baseline (empty playbook) | After curation | Held-out test | Bullets curated |
+|---|---|---|---|---|---|
+| top-40 | 57 | **87.0%** | **95.7% (+8.7)** | **90.5%** | 2 |
+
+The Curator admitted **2 of the bullets** the Reflector proposed; the rest were
+rejected by the Beta-posterior acceptance test, which is the point — a lesson
+only lands if it demonstrably raises held-out accuracy.
+
+!!! warning "Pick a configuration that isn't saturated"
+    With the default `--top-k 10` (the ten *most frequent* tags) a strong model
+    scores **100% at baseline**, so there are no failures to reflect on and ACE
+    correctly curates nothing. Self-evolution can only work where the base agent
+    actually fails: widen `--top-k` (rarer, more confusable concepts) until the
+    baseline leaves headroom. The same effect is visible in
+    [EvoSkill](algo-evoskill.md#empirical-results-real-openhands-agent-deepseek-on-officeqa),
+    and it is why [`DifficultyWeighted` task sampling](evolution.md#task-selection-which-rollout-to-spend)
+    exists — it steers rollouts toward the tasks that still fail.
+
 ## Run it
 
 ```bash
 python -m examples.ace_context_evolution --dry-run
 python -m examples.ace_context_evolution --model claude-haiku-4-5
-python -m examples.ace_context_evolution --top-k 10 --rounds 6
+python -m examples.ace_context_evolution --top-k 40 --pool 400 --rounds 8   # the run above
 ```
 
 Offline tests: `tests/test_ace_example.py`.

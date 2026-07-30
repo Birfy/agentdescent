@@ -69,3 +69,46 @@ def test_promote_to_stable(tmp_path):
     assert led.snapshot(Ledger.STABLE).get("s").table == {}  # not yet promoted
     led.promote_to_stable("s")
     assert led.snapshot(Ledger.STABLE).get("s").table == {"a": "x"}
+
+
+def test_cas_requires_the_base_version_to_declare_the_artifact(tmp_path):
+    """A writer that declares no base version must NOT win.
+
+    `base_version.get(aid, head)` made the check unfalsifiable: an omitted entry
+    defaulted to the current head, so an empty (or unrelated) vector always
+    committed -- exactly the lost update CAS exists to prevent.
+    """
+    from agentdescent.evolution import EvolvingArtifact
+    from agentdescent.ledger import CASConflict, Ledger
+
+    lg = Ledger(str(tmp_path), lambda a: {"state": dict(a.state)},
+                lambda aid, v, s: EvolvingArtifact(aid, s.get("state", {}), v))
+    lg.register(EvolvingArtifact("a", {"n": "1"}))
+    lg.commit(EvolvingArtifact("a", {"n": "2"}), {"a": 1})
+
+    for bad in ({}, {"other": 7}, {"a": 1}):          # undeclared, unrelated, stale
+        try:
+            lg.commit(EvolvingArtifact("a", {"n": "99"}), bad)
+        except CASConflict:
+            continue
+        raise AssertionError(f"base_version={bad!r} should have been rejected")
+
+    # the honest writer still succeeds and the value it lost is intact
+    lg.commit(EvolvingArtifact("a", {"n": "3"}), {"a": 2})
+    assert lg.snapshot(Ledger.DEV).get("a").state == {"n": "3"}
+
+
+def test_commit_atomic_also_requires_declared_bases(tmp_path):
+    from agentdescent.evolution import EvolvingArtifact
+    from agentdescent.ledger import CASConflict, Ledger
+
+    lg = Ledger(str(tmp_path), lambda a: {"state": dict(a.state)},
+                lambda aid, v, s: EvolvingArtifact(aid, s.get("state", {}), v))
+    lg.register(EvolvingArtifact("a", {"n": "1"}))
+    lg.register(EvolvingArtifact("b", {"n": "1"}))
+    try:
+        lg.commit_atomic([EvolvingArtifact("a", {"n": "9"}),
+                          EvolvingArtifact("b", {"n": "9"})], {"a": 1})   # 'b' undeclared
+    except CASConflict:
+        return
+    raise AssertionError("commit_atomic should reject an undeclared artifact base")
