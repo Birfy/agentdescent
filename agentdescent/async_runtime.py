@@ -86,10 +86,15 @@ class AsyncStats:
     final_dev_accuracy: float = 0.0
     final_stable_accuracy: float = 0.0
     wallclock: float = 0.0
+    #: ``None`` on a clean run; otherwise the backend failure that ended it. A run
+    #: whose workers all died used to return normal-looking zeros.
+    error: Optional[str] = None
     timeline: List[Tuple[int, float]] = field(default_factory=list)
 
 
 class AsyncAgentDescent:
+
+    _MAX_WORKER_ERRORS = 3
     """Barrier-free, thread-per-worker parallel self-evolution runtime."""
 
     def __init__(
@@ -148,6 +153,9 @@ class AsyncAgentDescent:
         # nothing commits), forcing every worker to sync regardless of the ratio.
         self._refresh_epoch = 0
         self._stats_lock = threading.Lock()
+        # worker resilience: retire a worker after this many consecutive backend
+        # failures; the run ends once every worker has retired.
+        self._live_workers = len(self.workers)
 
     # -- shared head bookkeeping (ROLL Flash async ratio) --------------------
 
@@ -177,6 +185,7 @@ class AsyncAgentDescent:
         local = snap.get(self.skill_id)
         local_v = snap.version.get(self.skill_id, 0)
         local_epoch = self._epoch()
+        consecutive = 0            # consecutive backend failures for this worker
 
         while not self._stop.is_set():
             drift = self._head_version(self.skill_id) - local_v
@@ -196,7 +205,26 @@ class AsyncAgentDescent:
             cost = float(sum(len(t.text) for t in cluster.tasks))
             predicted = self.estimator.estimate(cost) if self.estimator else 0.0
             t0 = time.time()
-            card = worker.run(local, {self.skill_id: local_v}, cluster.tasks)
+            try:
+                card = worker.run(local, {self.skill_id: local_v}, cluster.tasks)
+            except Exception as e:  # noqa: BLE001 - a backend failure must not kill
+                # the thread silently: an unhandled exception here used to print a
+                # traceback and leave the run spinning out its whole budget with no
+                # producers, returning zeros that looked like a normal result.
+                consecutive += 1
+                with self._stats_lock:
+                    if self.stats.error is None:
+                        self.stats.error = f"{type(e).__name__}: {str(e)[:200]}"
+                if consecutive >= self._MAX_WORKER_ERRORS:
+                    with self._stats_lock:
+                        self._live_workers -= 1
+                        all_dead = self._live_workers <= 0
+                    if all_dead:
+                        self._stop.set()      # nothing can make progress any more
+                    return
+                time.sleep(min(2.0 ** consecutive, 5.0))
+                continue
+            consecutive = 0
             elapsed = time.time() - t0
             if self.estimator is not None:
                 self.estimator.observe(cost, elapsed)
@@ -225,7 +253,16 @@ class AsyncAgentDescent:
     def _aggregator_loop(self) -> None:
         no_commit_streak = 0
         while not self._stop.is_set():
-            reports = self.aggregator.step()
+            try:
+                reports = self.aggregator.step()
+            except Exception as e:  # noqa: BLE001 - the only writer; if it dies the
+                # workers fill a buffer nobody drains and the run spins to its
+                # deadline with no reason given.
+                with self._stats_lock:
+                    if self.stats.error is None:
+                        self.stats.error = f"{type(e).__name__}: {str(e)[:200]}"
+                self._stop.set()
+                return
             committed = False
             with self._stats_lock:
                 self.stats.sweeps += 1

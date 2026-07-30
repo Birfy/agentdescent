@@ -62,3 +62,58 @@ def test_stable_branch_promotes_under_async():
     s = _run("full")
     # dev converged; the EMA stable branch should have caught up at least partway.
     assert s.final_stable_accuracy > 0.0
+
+
+def _failing_run(policy_name="full", n_fail=None, seconds=20.0):
+    """Run the reference stack with workers whose rollouts raise."""
+    import tempfile
+
+    from agentdescent.async_runtime import AsyncAgentDescent, AsyncConfig
+
+    universe = make_task_universe(seed=7)
+    cfg = AsyncConfig(n_workers=4, async_ratio=4, target_accuracy=0.95,
+                      max_seconds=seconds, seed=1)
+    with tempfile.TemporaryDirectory() as repo:
+        sysm = AsyncAgentDescent(repo, universe, config=cfg,
+                                 staleness_policy=get_policy(policy_name))
+        state = {"n": 0}
+        original = [w.run for w in sysm.workers]
+
+        def make(idx):
+            def run(*a, **k):
+                state["n"] += 1
+                if n_fail is None or state["n"] <= n_fail:
+                    raise RuntimeError("backend down")
+                return original[idx](*a, **k)
+            return run
+
+        for i, w in enumerate(sysm.workers):
+            w.run = make(i)
+        return sysm.run()
+
+
+def test_dead_backend_is_reported_not_silent():
+    """Every worker raising used to print tracebacks, burn the whole budget, and
+    return normal-looking zeros with no way for the caller to tell."""
+    s = _failing_run()
+    assert s.error is not None
+    assert "backend down" in s.error
+
+
+def test_dead_backend_ends_the_run_early():
+    import time as _t
+
+    t0 = _t.time()
+    _failing_run(seconds=20.0)
+    assert _t.time() - t0 < 15.0, "should retire the workers, not spin out the budget"
+
+
+def test_transient_failures_are_survived():
+    """A few failures must not end the run -- they are retried."""
+    s = _failing_run(n_fail=2, seconds=15.0)
+    assert s.rollouts > 0, "the workers should have recovered and produced"
+
+
+def test_a_healthy_run_reports_no_error():
+    s = _run("full")
+    assert s.error is None

@@ -193,6 +193,8 @@ with tempfile.TemporaryDirectory() as repo:
 | `oracle_budget` | 400 | oracle calls the AuditScheduler may spend |
 | `stall_patience` | 150 | no-commit sweeps before a backpressure sync |
 
+`AsyncStats.error` is `None` on a clean run and carries the backend failure that ended it otherwise — check it, since a run whose workers all died otherwise returns normal-looking zeros.
+
 ### Staleness policy
 
 ```python

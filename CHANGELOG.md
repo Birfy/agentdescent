@@ -92,6 +92,16 @@ All notable changes to AgentDescent are documented here. The format follows
   instead of 4.7 s with byte-identical results.
 
 ### Fixed
+- **The reference runtime had no error handling at all.** `async_runtime.py` and
+  `orchestrator.py` contained zero `except` clauses, so a failing backend printed
+  tracebacks from dead worker threads, the run span out its **entire**
+  `max_seconds` with no producers, and it returned `rollouts=0, accuracy=0.000` —
+  a normal-looking result with no way for the caller to tell. It now retries
+  transient failures, retires a worker after 3 consecutive ones, ends the run once
+  every worker has retired (20s budget → returns in 6s), guards the aggregator
+  thread the same way, and reports the cause through the new `AsyncStats.error`.
+  This is the same treatment the general engine got; the reference stack still
+  drives the `run_async`, `efficiency` and `duration_scheduling` examples.
 - **A wall-clock-dependent test was flaky in CI.**
   `test_guarded_discards_more_than_reflective` asserted an absolute accuracy
   (`>= 0.95`) from a run bounded by 12 seconds, so how far it converged depended on
