@@ -21,7 +21,7 @@ Evidence cards are bucketed by artifact; a bucket fires on batch size `B` or a
 3. **Fusion tournament** — complementary diffs are fused (model-soup style) and run against the singles on held-out; the best wins.
 4. **Statistical acceptance** — commit only if `P(Δ > 0) > 1 − δ` under a Beta posterior (not a point threshold); `δ` anneals with version.
 5. **Commit** — compare-and-swap on `dev` (2PC for contract-breaking multi-artifact diffs).
-6. **Dual-branch promotion** — `dev → stable` after *K* regression-free rounds (EMA).
+6. **Dual-branch promotion** — `dev → stable` every *K* **accepted commits** (EMA-style confirmation). Note it counts commits, not rounds: a round that merges nothing does not advance the counter, and there is no separate regression check — the guard is the acceptance test each commit already passed.
 7. **Audit** — the merge is submitted to the `AuditScheduler`; high-blast-radius / L1 merges are forced through the oracle. *The optimizer audits itself.*
 
 Deep dive on the *why*: [concepts §4](concepts.md#4-the-aggregator-a-discrete-space-optimizer).

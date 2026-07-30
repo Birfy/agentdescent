@@ -53,6 +53,17 @@ All notable changes to AgentDescent are documented here. The format follows
   instead of 4.7 s with byte-identical results.
 
 ### Fixed
+- **A governance violation was slow and misreported on the async path.** Only the
+  reference aggregator's per-merge guard caught an L0-frozen target, so nothing was
+  ever mutated — but `async_evolve` burned its whole `max_seconds` budget first and
+  then reported the violation through the *backend failure* channel. Both paths now
+  check governance before the first rollout and raise `GovernanceError` at once.
+- **Two more documented-but-absent features.** The "tail canary set" inside
+  held-out eval and the L1 staged rollout ("counterfactual replay → canary →
+  full") do not exist; the docs now say so. Dual-branch promotion was described as
+  "after *K* regression-free rounds" when it fires every *K* accepted **commits**
+  and has no separate regression check (a round that merges nothing does not
+  count) — verified working end to end, only the description was wrong.
 - **The async staleness gate ignored `agg_config`.** It hardcoded `alpha = 5/1`
   while the aggregator behind it read `alpha_head`/`alpha_tail`, so a tightened
   staleness tolerance was honoured in one place and not the other.

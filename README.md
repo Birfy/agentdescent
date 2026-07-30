@@ -266,8 +266,8 @@ optimizer step:
    `δ` anneals with version (LR decay); a trust-region caps diff size.
 5. **Commit (§4.1)** — compare-and-swap on `dev` (2PC for contract-breaking
    multi-artifact diffs).
-6. **Dual-branch promotion (§4.5)** — `dev → stable` after *K* regression-free
-   rounds (EMA-style confirmation).
+6. **Dual-branch promotion (§4.5)** — `dev → stable` every *K* accepted commits
+   (EMA-style confirmation; it counts commits, not rounds).
 7. **Audit (§5.3)** — the merge decision is itself submitted to the
    `AuditScheduler`; high-blast-radius / low-trust merges are forced through the
    oracle. The optimizer audits itself.
@@ -342,8 +342,12 @@ AgentDescent treats "the long tail" as three separate problems:
   [async runtime](https://github.com/Birfy/agentdescent/blob/main/agentdescent/async_evolve.py)
   is what actually stops one slow rollout from stalling the others today.
 - **L-task** (data): Zipfian artifact triggering → **UCB over
-  (cluster × artifact)** so starved tail artifacts get an exploration bonus,
-  plus a difficulty filter and a tail canary set.
+  (cluster × artifact)** so starved tail artifacts get an exploration bonus, plus
+  a **difficulty filter** that down-weights all-pass / all-fail groups (the
+  zero-advantage argument). The same filter is available to `evolve()` as
+  [`DifficultyWeighted` task sampling](https://github.com/Birfy/agentdescent/blob/main/agentdescent/sampling.py).
+  *A dedicated tail canary set is **not** implemented* — held-out is a single
+  split, not stratified into a canary.
 - **L-value** (signal): most diffs are marginal → `AuditScheduler` spends the
   scarce oracle budget on `blast_radius × uncertainty / trust`.
 

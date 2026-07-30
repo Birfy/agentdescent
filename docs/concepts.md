@@ -163,7 +163,7 @@ artifacts don't starve). Then, in order:
    anneals with version (LR decay); a trust-region caps diff size.
 5. **Commit** — compare-and-swap on `dev` (2PC for contract-breaking
    multi-artifact diffs).
-6. **Dual-branch promotion** — `dev → stable` after *K* regression-free rounds
+6. **Dual-branch promotion** — `dev → stable` every *K* accepted commits
    (EMA-style confirmation). Production workers ride `stable`; explorers ride
    `dev`.
 7. **Audit** — the merge decision is itself submitted to the AuditScheduler;
@@ -196,8 +196,11 @@ mechanism:
 - **L-task (data layer)** — Zipfian artifact triggering (head skills flooded,
   tail skills starved — a problem parameter space doesn't have, since gradients
   flow to all parameters but diffs only to triggered artifacts). Handled by
-  **UCB over (task-cluster × artifact)**, a difficulty filter (GRPO
-  zero-advantage groups), and a **tail canary set** in held-out eval.
+  **UCB over (task-cluster × artifact)** and a difficulty filter (GRPO
+  zero-advantage groups) — both implemented, the latter also reachable from
+  `evolve()` as [`DifficultyWeighted`](evolution.md#task-selection-which-rollout-to-spend)
+  task sampling. The design also calls for a **tail canary set** inside held-out
+  eval; that is **not implemented** — held-out is one undifferentiated split.
 - **L-value (signal layer)** — most diffs are marginal, a few are high-value
   refactors. The **AuditScheduler** spends the scarce oracle budget by
   `blast_radius × uncertainty / trust`.
@@ -219,7 +222,8 @@ system):
 - **L2** is naturally isolated — only tasks that trigger an artifact are affected
   — so it merges fully async.
 - **L1** has no such isolation, so *at most one L1 diff is in evaluation at a
-  time* (the serial gate), plus offline counterfactual replay → canary → full.
+  time* (the serial gate — implemented). The design's staged rollout beyond that
+  (offline counterfactual replay → canary → full) is **not implemented**.
 - **L0** must be frozen: without it, the self-referential loop eventually
   pollutes itself (a verifier that learns to pass itself is undetectable).
   AgentDescent minimizes the frozen set to "audit + permissions", leaving the

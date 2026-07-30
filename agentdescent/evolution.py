@@ -421,6 +421,11 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     if not re.fullmatch(r"[A-Za-z0-9_.\-]+", artifact_id):
         raise ValueError("artifact_id must match [A-Za-z0-9_.-]+ (it becomes a filename), "
                          f"got {artifact_id!r}")
+    # Governance is a caller-level constraint, so check it before any rollout.
+    # Previously only the reference aggregator's per-merge guard caught an L0
+    # target: nothing was mutated, but the async path burned its whole budget
+    # first and then reported the violation as a *backend failure*.
+    assert_mutable(EvolvingArtifact(artifact_id, {}, blast_radius=blast_radius))
     # round, not truncate: Dataset.val_frac promises "the engine's held-out split
     # is exactly this Dataset's val", and float truncation (13.9999 -> 13) quietly
     # pushed one train item into held-out for many dataset sizes.
