@@ -54,9 +54,11 @@ from .worker import Worker
 from .orchestrator import AgentDescent, RoundStat, run_fork_baseline
 from .agents import (
     Completion,
+    Usage,
     claude,
     echo,
     from_callable,
+    metered,
     openai_compatible,
     with_retries,
 )
@@ -158,6 +160,8 @@ __all__ = [
     "section_of",
     "shard_round_robin",
     "Completion",
+    "Usage",
+    "metered",
     "claude",
     "echo",
     "from_callable",

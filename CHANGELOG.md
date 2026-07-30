@@ -15,6 +15,12 @@ All notable changes to AgentDescent are documented here. The format follows
   That is a *targeting* result: on a real ACE/FiNER run the sampler reached a
   lesson sooner but scored lower than round-robin, so it ships opt-in with the
   caveat documented rather than as a default.
+- **`Usage` cost accounting (`agentdescent.agents`)** — `claude(usage=...)` and
+  `openai_compatible(usage=...)` now keep the **real** token counts the API
+  returns (they were discarded at the `prompt -> text` boundary), plus calls,
+  failures and model wall-clock; `metered()` covers any other completion.
+  Thread-safe, and `estimated_cost()` takes the prices so no stale price table
+  ships with the library.
 - `evolve(on_round=...)` / `async_evolve(on_round=...)` — a progress callback per
   round (per merger sweep when async). A long LLM run previously reported nothing
   until it returned; a callback that raises is warned about, never fatal.

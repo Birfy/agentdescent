@@ -40,6 +40,35 @@ robust = with_retries(claude(model="claude-haiku-4-5"), attempts=3)
 `claude()` accepts a `client=` to reuse an existing `anthropic.Anthropic`
 instance, and forwards extra kwargs to `messages.create`.
 
+## What did the run cost? — `Usage`
+
+A `Completion` is `prompt -> text`, so the token counts the providers *do* return
+would be thrown away at the adapter boundary. Pass a `Usage` and they are kept:
+
+```python
+from agentdescent.agents import Usage, openai_compatible, metered
+
+usage = Usage()
+model = openai_compatible(model="deepseek-v4-flash", usage=usage)   # or claude(usage=usage)
+
+evolve(tasks, reward, agent=LLMAgent(model), rounds=10)
+
+print(usage.summary())          # 412 calls, 1,204,881 prompt + 96,004 completion tokens, 903.2s in the model
+print(usage.estimated_cost(per_1m_prompt=0.28, per_1m_completion=0.42))
+```
+
+| | |
+|---|---|
+| `calls`, `failures` | attempts made, and how many raised (retries count individually — they cost money) |
+| `prompt_tokens`, `completion_tokens`, `total_tokens` | **real** counts from the API response |
+| `seconds` | wall-clock spent inside the model |
+| `estimated_cost(...)` | you supply the per-million prices; the library ships no price table it would have to keep current |
+
+`Usage` is safe to share across worker threads. For a backend that is not one of
+the built-in providers — a tool-using agent loop, say — wrap it in
+`metered(completion, usage)`, which counts calls, failures and time (tokens are
+not observable through a plain `Completion`).
+
 ## Bringing another provider
 
 There is no provider lock-in — any `prompt -> text` function is a completion:

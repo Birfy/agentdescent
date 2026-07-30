@@ -20,11 +20,76 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 import urllib.request
+from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 Completion = Callable[[str], str]
+
+
+@dataclass
+class Usage:
+    """What a run cost: calls, tokens, and wall-clock spent in the model.
+
+    A ``Completion`` is ``prompt -> text``, so token counts would be discarded at
+    the adapter boundary even though the providers return them. Pass one of these
+    to :func:`claude` / :func:`openai_compatible` and they record the **real**
+    counts from the API response; wrap anything else in :func:`metered` to at
+    least count calls and time.
+
+    Safe to share across worker threads.
+    """
+
+    calls: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    seconds: float = 0.0
+    failures: int = 0
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    @property
+    def total_tokens(self) -> int:
+        return self.prompt_tokens + self.completion_tokens
+
+    def record(self, *, prompt_tokens: int = 0, completion_tokens: int = 0,
+               seconds: float = 0.0, failed: bool = False) -> None:
+        with self._lock:
+            self.calls += 1
+            self.prompt_tokens += prompt_tokens
+            self.completion_tokens += completion_tokens
+            self.seconds += seconds
+            self.failures += 1 if failed else 0
+
+    def estimated_cost(self, per_1m_prompt: float, per_1m_completion: float) -> float:
+        """Cost at the given per-million-token prices (both provider-specific)."""
+        return (self.prompt_tokens * per_1m_prompt
+                + self.completion_tokens * per_1m_completion) / 1_000_000
+
+    def summary(self) -> str:
+        return (f"{self.calls} calls, {self.prompt_tokens:,} prompt + "
+                f"{self.completion_tokens:,} completion tokens, "
+                f"{self.seconds:.1f}s in the model"
+                + (f", {self.failures} failed" if self.failures else ""))
+
+
+def metered(completion: Completion, usage: Usage) -> Completion:
+    """Count calls and model wall-clock for *any* completion.
+
+    Token counts are unavailable here -- a plain ``Completion`` never exposes
+    them -- so use the ``usage=`` argument of :func:`claude` /
+    :func:`openai_compatible` when you need exact tokens."""
+    def complete(prompt: str) -> str:
+        t0 = time.time()
+        try:
+            out = completion(prompt)
+        except Exception:
+            usage.record(seconds=time.time() - t0, failed=True)
+            raise
+        usage.record(seconds=time.time() - t0)
+        return out
+    return complete
 
 
 def from_callable(fn: Completion) -> Completion:
@@ -58,13 +123,15 @@ def with_retries(completion: Completion, attempts: int = 3,
 
 
 def claude(model: str = "claude-opus-4-8", max_tokens: int = 1024,
-           client: Optional[object] = None, **create_kwargs) -> Completion:
+           client: Optional[object] = None, usage: Optional[Usage] = None,
+           **create_kwargs) -> Completion:
     """A Claude-backed completion (requires ``pip install anthropic`` + creds).
 
     Pass ``client`` to reuse an existing ``anthropic.Anthropic`` instance;
     otherwise a default one is constructed lazily (resolving credentials from
     the environment / an ``ant auth login`` profile). Use a cheaper ``model``
-    (e.g. ``"claude-haiku-4-5"``) for call-heavy loops."""
+    (e.g. ``"claude-haiku-4-5"``) for call-heavy loops. Pass ``usage=Usage()`` to
+    accumulate the exact token counts the API reports."""
     _client = client
 
     def complete(prompt: str) -> str:
@@ -72,10 +139,21 @@ def claude(model: str = "claude-opus-4-8", max_tokens: int = 1024,
         if _client is None:
             from anthropic import Anthropic  # lazy, optional dependency
             _client = Anthropic()
-        msg = _client.messages.create(
-            model=model, max_tokens=max_tokens,
-            messages=[{"role": "user", "content": prompt}], **create_kwargs,
-        )
+        t0 = time.time()
+        try:
+            msg = _client.messages.create(
+                model=model, max_tokens=max_tokens,
+                messages=[{"role": "user", "content": prompt}], **create_kwargs,
+            )
+        except Exception:
+            if usage is not None:
+                usage.record(seconds=time.time() - t0, failed=True)
+            raise
+        if usage is not None:
+            u = getattr(msg, "usage", None)
+            usage.record(prompt_tokens=getattr(u, "input_tokens", 0) or 0,
+                         completion_tokens=getattr(u, "output_tokens", 0) or 0,
+                         seconds=time.time() - t0)
         return "".join(b.text for b in msg.content if b.type == "text")
 
     return complete
@@ -84,7 +162,8 @@ def claude(model: str = "claude-opus-4-8", max_tokens: int = 1024,
 def openai_compatible(model: str, *, base_url_env: str = "OPENAI_BASE_URL",
                       api_key_env: str = "OPENAI_API_KEY",
                       default_base_url: str = "https://api.openai.com/v1",
-                      max_tokens: int = 1024, timeout: float = 120.0) -> Completion:
+                      max_tokens: int = 1024, timeout: float = 120.0,
+                      usage: Optional[Usage] = None) -> Completion:
     """A completion for any OpenAI-compatible chat endpoint (GLM/Zhipu, proxies,
     local servers, OpenAI itself).
 
@@ -105,8 +184,19 @@ def openai_compatible(model: str, *, base_url_env: str = "OPENAI_BASE_URL",
         req = urllib.request.Request(
             f"{base}/chat/completions", data=body,
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.load(resp)
+        t0 = time.time()
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                data = json.load(resp)
+        except Exception:
+            if usage is not None:
+                usage.record(seconds=time.time() - t0, failed=True)
+            raise
+        if usage is not None:
+            u = data.get("usage") or {}
+            usage.record(prompt_tokens=u.get("prompt_tokens", 0) or 0,
+                         completion_tokens=u.get("completion_tokens", 0) or 0,
+                         seconds=time.time() - t0)
         return data["choices"][0]["message"]["content"]
 
     return complete
