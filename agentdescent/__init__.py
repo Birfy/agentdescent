@@ -21,6 +21,9 @@ from .evolvable import (
 )
 from .ledger import Ledger, Snapshot, CASConflict, ContractRejected
 from .verifier import ThreeLayerVerifier, VerifierBudget
+from . import backends, dataloader          # submodules: agentdescent.dataloader.hf_rows(...)
+from .dataloader import Dataset, split_dataset
+from .sampling import DifficultyWeighted, RoundRobin, TaskSampler
 from .scheduler import (
     AuditScheduler,
     DurationEstimator,
@@ -105,6 +108,13 @@ __all__ = [
     "ThreeLayerVerifier",
     "VerifierBudget",
     "AuditScheduler",
+    "Dataset",
+    "split_dataset",
+    "backends",
+    "dataloader",
+    "DifficultyWeighted",
+    "RoundRobin",
+    "TaskSampler",
     "ResumeQueue",
     "DurationEstimator",
     "lpt_schedule",

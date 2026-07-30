@@ -26,9 +26,12 @@ for the common case where the same actor both runs tasks and proposes changes;
 
 from __future__ import annotations
 
+import atexit
 import hashlib
 import re
+import shutil
 import threading
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Protocol, Sequence, runtime_checkable
 
@@ -37,6 +40,7 @@ from .aggregator import Aggregator, AggregatorConfig, AggregatorFactory
 from .evolvable import Contract, Diff, EvidenceCard
 from .governance import assert_mutable
 from .ledger import Ledger
+from .sampling import RoundRobin, TaskSampler
 from .scheduler import AuditScheduler
 from .staleness import StalenessPolicy
 
@@ -333,6 +337,19 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     tasks = list(tasks)
     if len(tasks) < 4:
         raise ValueError("need at least 4 tasks to split train/held-out")
+    # Fail loudly on inputs that would otherwise produce silent nonsense: a run
+    # that does no work, a split with no training data, or tasks that vanish
+    # because two of them share an id.
+    if not 0.0 < held_out_frac < 1.0:
+        raise ValueError(f"held_out_frac must be in (0, 1), got {held_out_frac}")
+    if not 0.0 <= blast_radius <= 1.0:
+        raise ValueError(f"blast_radius must be in [0, 1], got {blast_radius}")
+    dupes = {t.id for t in tasks if sum(1 for o in tasks if o.id == t.id) > 1}
+    if dupes:
+        raise ValueError(f"task ids must be unique; duplicated: {sorted(dupes)[:5]}")
+    if not re.fullmatch(r"[A-Za-z0-9_.\-]+", artifact_id):
+        raise ValueError("artifact_id must match [A-Za-z0-9_.-]+ (it becomes a filename), "
+                         f"got {artifact_id!r}")
     cut = max(1, int(len(tasks) * (1 - held_out_frac)))
     train, held_out = tasks[:cut], tasks[cut:]
     if not held_out:
@@ -347,7 +364,13 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
         return EvolvingArtifact(aid, state.get("state", {}), version,
                                 state.get("blast_radius", blast_radius), runtime, strategy)
 
-    repo = repo_path or tempfile.mkdtemp(prefix="agentdescent-evolve-")
+    if repo_path:
+        repo = repo_path              # caller-owned (and how a run is resumed): keep it
+    else:
+        # A scratch ledger per run would otherwise pile up in $TMPDIR forever --
+        # one git repo per evolve() call, never reclaimed.
+        repo = tempfile.mkdtemp(prefix="agentdescent-evolve-")
+        atexit.register(shutil.rmtree, repo, True)
     ledger = Ledger(repo, serialize, deserialize)
     ledger.register(EvolvingArtifact(artifact_id, initial_state or strategy.initial(),
                                      blast_radius=blast_radius, runtime=runtime,
@@ -382,6 +405,7 @@ def evolve(
     propose: Optional[Propose] = None,
     strategy: Optional[Strategy] = None,
     parallel: Optional["ParallelStrategy"] = None,
+    task_sampler: Optional["TaskSampler"] = None,
     initial_state: Optional[Dict[str, str]] = None,
     blast_radius: float = 0.2,
     artifact_id: str = "artifact",
@@ -390,7 +414,7 @@ def evolve(
     max_concurrency: int = 1,
     asynchronous: bool = False,
     async_ratio: int = 3,
-    max_seconds: float = 20.0,
+    max_seconds: Optional[float] = None,
     self_verify: bool = True,
     held_out_frac: float = 0.4,
     repo_path: Optional[str] = None,
@@ -439,13 +463,21 @@ def evolve(
         return async_evolve(
             tasks, reward, agent=agent, run=run, propose=propose, strategy=strategy,
             initial_state=initial_state, blast_radius=blast_radius, artifact_id=artifact_id,
-            n_workers=n_workers, async_ratio=async_ratio, max_seconds=max_seconds,
+            n_workers=n_workers, async_ratio=async_ratio,
+            max_seconds=20.0 if max_seconds is None else max_seconds,
             max_iters=rounds * max(1, n_workers), held_out_frac=held_out_frac,
             repo_path=repo_path, agg_config=agg_config, staleness_policy=staleness_policy,
             aggregator_factory=aggregator_factory, oracle_budget=oracle_budget,
             self_verify=self_verify, verbose=verbose)
 
+    if n_workers < 1:
+        raise ValueError(f"n_workers must be >= 1, got {n_workers}")
+    if rounds < 1:
+        raise ValueError(f"rounds must be >= 1, got {rounds}")
+    if max_concurrency < 1:
+        raise ValueError(f"max_concurrency must be >= 1, got {max_concurrency}")
     parallel = parallel or DataParallel()
+    sampler = task_sampler or RoundRobin()
     eng = _build_engine(
         tasks, reward, agent=agent, run=run, propose=propose, strategy=strategy,
         initial_state=initial_state, blast_radius=blast_radius, artifact_id=artifact_id,
@@ -458,7 +490,12 @@ def evolve(
 
     history: List[RoundInfo] = []
     run_error: Optional[str] = None
+    deadline = time.time() + max_seconds if max_seconds else None
     for r in range(rounds):
+        if deadline is not None and time.time() >= deadline:
+            if verbose:
+                print(f"round {r:>3}  stopping: max_seconds={max_seconds} reached")
+            break
         snap = ledger.snapshot(Ledger.DEV)
         artifact = snap.get(artifact_id)
         base_v = snap.version.get(artifact_id, 0)
@@ -468,9 +505,10 @@ def evolve(
             """One worker: rollout -> propose -> ingest evidence (against `snap`)."""
             if not unit.keys:
                 return
-            task = by_id[unit.keys[r % len(unit.keys)]]  # a task from this worker's shard
+            task = by_id[sampler.pick(unit.keys, r)]     # a task from this worker's shard
             output = run(artifact.render(), task)
             score = reward(task, output)
+            sampler.record(task.id, score)               # learn which tasks carry signal
             if score >= 0.999:
                 return
             proposal = propose(artifact.render(), task, output, score)
@@ -479,10 +517,16 @@ def evolve(
             diff = strategy.to_diff(artifact.state, proposal, f"w{unit.worker}", base_v, artifact_id)
             if diff is None:
                 return
-            after = reward(task, run(artifact.apply(diff).render(), task))
+            # The self-verify rollout doubles the cost of every proposal, so it is
+            # opt-out here exactly as it is on the async path.
+            if self_verify:
+                after = reward(task, run(artifact.apply(diff).render(), task))
+                delta = after - score
+            else:
+                delta = 0.0
             aggregator.ingest(EvidenceCard(
                 diff=diff, base_version={artifact_id: base_v}, touched=[artifact_id],
-                before_after_delta=after - score, trajectory_refs=[task]))
+                before_after_delta=delta, trajectory_refs=[task]))
 
         try:
             # the parallel strategy assigns this round's tasks to workers; they run

@@ -7,6 +7,13 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Task samplers (`agentdescent.sampling`)** — `evolve(task_sampler=...)`. A rollout
+  is the expensive unit of work, and spending it on a task the agent already solves
+  teaches nothing. `DifficultyWeighted` prefers tasks whose pass rate sits away from
+  the all-pass / all-fail extremes (the zero-advantage filter), landing ~1.6-2.2x
+  more rollouts on informative tasks than the `RoundRobin` default in measurement.
+- `agentdescent.dataloader` / `agentdescent.backends` are now importable from the
+  package namespace (`Dataset` and `split_dataset` are re-exported).
 - `tests` CI workflow — runs the offline suite on push/PR across Python 3.9 / 3.11 / 3.12.
 - Test coverage for the async SGD path: `SgdSkillAggregator` keep/rollback,
   `eval_at_end`, batch-level propose, and the sync frontier gate.
@@ -21,6 +28,19 @@ All notable changes to AgentDescent are documented here. The format follows
   discarding committed work. Failures are now retried with backoff, a worker
   retires only after 3 consecutive errors, the run ends when all workers retire,
   and the cause is reported via the new `EvolutionResult.error`.
+- **`self_verify=False` was silently ignored by synchronous `evolve()`** — the
+  extra verification rollout ran anyway, quietly doubling the LLM cost of every
+  proposal. It is now honoured on both paths.
+- **`max_seconds=` was silently ignored by synchronous `evolve()`** — a sync run
+  had no wall-clock bound at all. It is now enforced; the default is `None`
+  (unbounded) so existing runs are unaffected, and the async default is unchanged.
+- **Scratch ledgers leaked.** Every `evolve()` call without `repo_path` created a
+  temp git repo that was never reclaimed (133 had accumulated in `$TMPDIR` during
+  development); they are now cleaned up at exit.
+- Input validation: `n_workers=0` raised `ZeroDivisionError` deep in the async
+  sharding, duplicate task ids silently collapsed tasks, and out-of-range
+  `held_out_frac` / `blast_radius` or an `artifact_id` containing a path separator
+  were accepted and failed later. All now raise `ValueError` immediately.
 - Bare `pytest` (fresh clone / CI) failed with `ModuleNotFoundError` because the
   repo root was not on `sys.path`; set `pythonpath = ["."]` in the pytest config.
 

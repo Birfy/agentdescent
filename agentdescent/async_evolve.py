@@ -41,6 +41,7 @@ from .evolution import (
 )
 from .evolvable import EvidenceCard, vv_staleness
 from .ledger import Ledger
+from .sampling import RoundRobin, TaskSampler
 from .staleness import StaleAction, StalenessPolicy, get_policy
 
 
@@ -67,6 +68,7 @@ def async_evolve(
     aggregator_factory=None,
     oracle_budget: int = 200,
     self_verify: bool = True,
+    task_sampler: Optional["TaskSampler"] = None,
     verbose: bool = False,
 ) -> EvolutionResult:
     """Evolve an artifact **without a round barrier**.
@@ -83,7 +85,10 @@ def async_evolve(
         held_out_frac=held_out_frac, repo_path=repo_path, agg_config=agg_config,
         staleness_policy=staleness_policy, aggregator_factory=aggregator_factory,
         oracle_budget=oracle_budget)
+    if n_workers < 1:
+        raise ValueError(f"n_workers must be >= 1, got {n_workers}")
     policy = staleness_policy or get_policy("guarded")
+    sampler = task_sampler or RoundRobin()
     alpha = 5 if eng.blast_radius > 0.5 else 1        # L1 tolerates more staleness
 
     # data-parallel: shard the train tasks round-robin across workers.
@@ -106,6 +111,8 @@ def async_evolve(
         snap = eng.ledger.snapshot(Ledger.DEV)
         base_v = snap.version.get(eng.artifact_id, 0)
         artifact = snap.get(eng.artifact_id)
+        shard_ids = [t.id for t in shard]          # the sampler works on ids
+        by_shard_id = {t.id: t for t in shard}
         i = 0
         consecutive = 0            # consecutive backend failures for this worker
         while not stop.is_set():
@@ -126,11 +133,12 @@ def async_evolve(
                 snap = eng.ledger.snapshot(Ledger.DEV)
                 base_v = snap.version.get(eng.artifact_id, 0)
                 artifact = snap.get(eng.artifact_id)
-            task = shard[i % len(shard)]
+            task = by_shard_id[sampler.pick(shard_ids, i)]
             i += 1
             try:
                 output = eng.run(artifact.render(), task)
                 score = eng.reward(task, output)
+                sampler.record(task.id, score)     # learn which tasks carry signal
                 if score < 0.999:
                     proposal = eng.propose(artifact.render(), task, output, score)
                     if proposal:
