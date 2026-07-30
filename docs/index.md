@@ -97,7 +97,7 @@ The one place the analogy *must* break defines the whole system:
 | optimizer step | `Aggregator` merge decision |
 | per-param adaptive LR (Adam) | per-artifact Beta-posterior test |
 | staleness / decoupled PPO | per-diff η + rebase re-verify |
-| partial rollout | turn-level checkpoint / `ResumeQueue` |
+| partial rollout | straggler detection (`ResumeQueue`; resume not implemented) |
 | EMA (weight averaging) | `stable`/`dev` dual branch |
 | training code (not self-modifiable) | L0 frozen layer |
 

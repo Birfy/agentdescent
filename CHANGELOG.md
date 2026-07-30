@@ -48,6 +48,15 @@ All notable changes to AgentDescent are documented here. The format follows
   instead of 4.7 s with byte-identical results.
 
 ### Fixed
+- **`ResumeQueue` / "partial rollout" was documented as implemented but is not.**
+  The README, concepts page and analogy table promised "turn-level checkpoint +
+  `ResumeQueue`, resumed against the latest ledger (a free cross-version A/B
+  signal)". In fact the rollout is never interrupted (the flag is recorded *after*
+  it returns), the queued item carries no continuation state (`turn=0`,
+  `conversation=[]`), and **nothing pops the queue**. The docs now describe what
+  the code does — straggler *detection and accounting* — and say plainly that
+  resume needs a rollout contract exposing turns, which `run(rendered, task)`
+  does not. The `duration_scheduling` example no longer claims to checkpoint.
 - **Git failures were opaque.** `capture_output=True` swallowed stderr, so any
   git problem read only "returned non-zero exit status 128"; a new `GitError`
   carries git's own message (missing repo, held index lock, ...).

@@ -7,7 +7,7 @@
 Agentic rollouts are heavy-tailed and their cost correlates with task size. This
 module **estimates a rollout's duration from the task's length**, then uses that
 estimate for asynchronous scheduling — dispatching to minimize makespan and
-checkpointing stragglers. It's the concrete machinery behind the design's
+detecting stragglers. It's the concrete machinery behind the design's
 **L-traj** (trajectory-duration) long tail (design spec §5.1).
 
 ```bash
@@ -90,13 +90,26 @@ sys = AsyncAgentDescent(repo, universe,
                      config=AsyncConfig(duration_timeout_factor=3.0),
                      estimator=DurationEstimator())
 stats = sys.run()
-stats.stragglers_checkpointed        # overrunning rollouts sent to the resume queue
+stats.stragglers_checkpointed        # overrunning rollouts DETECTED (see the note below)
 ```
 
 ```
-rollouts=727, learned base≈0.006s, stragglers checkpointed to resume queue=108
+rollouts=727, learned base≈0.006s, stragglers detected=108
 ```
 
 This is the design's partial-rollout mechanism (§5.1) driven by a live estimate:
 a rollout predicted to be short but running long is set aside and resumed against
 the latest ledger, rather than defining the wall-clock of its worker.
+
+!!! warning "Straggler *resume* is not implemented"
+    A rollout that overruns its predicted cost is flagged into `ResumeQueue` and
+    counted — that part is real, and it is what keeps a straggler from silently
+    defining the round's wall-clock in the reported stats. But the rollout is not
+    interrupted (the flag is recorded *after* it returns), the queued item carries
+    no continuation state, and **nothing pops the queue**. True turn-level
+    checkpoint-and-resume would need a rollout contract that exposes its turns;
+    the engine's `run(rendered, task) -> output` is opaque. What actually prevents
+    one slow rollout from stalling the rest today is removing the barrier — see
+    [the async runtime](evolution.md#the-barrier-free-runtime-async_evolve), which
+    the [efficiency experiments](efficiency.md) measure at ~2.8x over a sync
+    barrier under heavy-tailed latency.

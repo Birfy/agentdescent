@@ -186,7 +186,7 @@ rollout latency (100% vs 40% worker utilization). See
 | optimizer step | `Aggregator` merge decision |
 | per-param adaptive LR (Adam) | per-artifact Beta-posterior test |
 | staleness / decoupled PPO | per-diff η + rebase re-verify |
-| partial rollout | turn-level checkpoint / `ResumeQueue` |
+| partial rollout | straggler detection (`ResumeQueue`; resume itself not implemented) |
 | EMA (weight averaging) | stable/dev dual branch |
 | training code (not self-modifiable) | L0 frozen layer |
 
@@ -332,9 +332,15 @@ to 1.000, but at `async_ratio=4`:
 
 AgentDescent treats "the long tail" as three separate problems:
 
-- **L-traj** (system): heavy-tailed rollout durations → turn-level checkpoint +
-  `ResumeQueue`, resumed against the latest ledger (a free cross-version A/B
-  signal).
+- **L-traj** (system): heavy-tailed rollout durations → an online duration
+  estimator, LPT dispatch, and **straggler detection**: a rollout that overruns
+  its predicted cost is flagged and counted rather than being allowed to define
+  the round's wall-clock. *Turn-level checkpoint-and-resume is **not**
+  implemented* — `ResumeQueue` records stragglers but nothing resumes them, and
+  doing so needs a resumable rollout contract the engine does not have (`run` is
+  an opaque callable). The barrier-free
+  [async runtime](https://github.com/Birfy/agentdescent/blob/main/agentdescent/async_evolve.py)
+  is what actually stops one slow rollout from stalling the others today.
 - **L-task** (data): Zipfian artifact triggering → **UCB over
   (cluster × artifact)** so starved tail artifacts get an exploration bonus,
   plus a difficulty filter and a tail canary set.

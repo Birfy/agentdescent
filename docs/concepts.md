@@ -180,10 +180,16 @@ artifacts don't starve). Then, in order:
 "The long tail" is really three independent problems, each with its own
 mechanism:
 
-- **L-traj (system layer)** — heavy-tailed rollout durations. Turn-level
-  checkpoint + `ResumeQueue`, resumed against the *latest* Ledger. The resumed
-  trajectory (first half on V_k, second half on V_{k+1}) is a **free A/B
-  signal** across versions.
+- **L-traj (system layer)** — heavy-tailed rollout durations. Handled today by
+  the duration estimator + LPT dispatch and by **detecting** stragglers: a
+  rollout that overruns its prediction is flagged into `ResumeQueue` and counted.
+  **The resume half is not implemented** — nothing pops that queue, and the
+  recorded item carries no continuation state, because a resumable rollout would
+  have to expose its turns and `run(rendered, task) -> output` is opaque. The
+  design's "resume on the latest Ledger for a free cross-version A/B signal"
+  therefore remains a design note, not behaviour. Removing the barrier
+  ([async](evolution.md#the-barrier-free-runtime-async_evolve)) is what keeps one
+  slow rollout from setting the pace in practice.
 - **L-task (data layer)** — Zipfian artifact triggering (head skills flooded,
   tail skills starved — a problem parameter space doesn't have, since gradients
   flow to all parameters but diffs only to triggered artifacts). Handled by

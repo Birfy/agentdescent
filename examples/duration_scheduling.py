@@ -95,8 +95,8 @@ def experiment_stragglers(seed=3):
         stats = sys.run()
     b, m = sys.estimator.params
     print(f"rollouts={stats.rollouts}, learned base≈{b:.3f}s, "
-          f"stragglers checkpointed to resume queue={stats.stragglers_checkpointed}")
-    print("(overrunning rollouts are checkpointed instead of blocking a worker)\n")
+          f"stragglers detected={stats.stragglers_checkpointed}")
+    print("(overrunning rollouts are detected and counted; resuming them is not implemented)\n")
 
 
 def main() -> None:
