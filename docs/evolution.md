@@ -43,6 +43,7 @@ That's the minimum. Everything below is optional and swappable.
 | `staleness_policy=` | staleness (`get_policy(...)`) | how stale diffs are handled | `guarded` |
 | `rounds=`, `n_workers=` | driver | loop size, parallel worker count | `15`, `4` |
 | `max_concurrency=` | driver | run a round's workers **concurrently** (thread pool); aggregator = barrier (synchronous DP) | `1` (sequential) |
+| `round_timeout=` | driver | cap how long a round waits for its workers — abandons stragglers | `None` (wait forever) |
 | `asynchronous=`, `async_ratio=` | [`async_evolve`](#the-barrier-free-runtime-async_evolve) | **barrier-free** async: workers never wait for the merge; lag budget | `False`, `3` |
 | `self_verify=` | [`async_evolve`](#the-barrier-free-runtime-async_evolve) | async only: a worker re-runs its trajectory with the diff applied for a local before/after signal; faithful ports that score the candidate on held-out only pass `False` | `True` |
 | `on_round=` | driver | **progress callback** — fires per round / merger sweep | `None` |
@@ -419,6 +420,22 @@ so it shows up at two levels:
 ```python
 evolve(tasks, reward, agent=agent, n_workers=4, max_concurrency=4)   # 4 workers overlap
 ```
+
+!!! tip "Bound the barrier — `round_timeout`"
+    Because the aggregator *is* the barrier, a round waits for its slowest worker
+    for as long as that takes: one hung rollout stalls the run indefinitely. Cap it:
+
+    ```python
+    evolve(tasks, reward, agent=agent, n_workers=4, max_concurrency=4,
+           round_timeout=300)          # give up on stragglers after 5 min
+    ```
+
+    Abandoned work keeps running in the background — Python cannot cancel a
+    thread — it is simply no longer waited for, and a genuine backend error still
+    surfaces through `result.error`. This is the achievable part of the
+    heavy-tailed-rollout problem for an opaque `run`; true turn-level resume would
+    need a rollout contract exposing its turns (see
+    [duration-aware scheduling](duration-scheduling.md)).
 
 * **Across rounds — `asynchronous=True` (barrier-free).** Removing the round
   barrier entirely is [`async_evolve()`](#the-barrier-free-runtime-async_evolve),

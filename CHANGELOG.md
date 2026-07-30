@@ -7,6 +7,11 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **`evolve(round_timeout=...)`** — cap how long a round waits for its concurrent
+  workers. The aggregator *is* the barrier, so one hung rollout previously stalled
+  the run indefinitely; stragglers are now abandoned (their work continues in the
+  background, since Python cannot cancel a thread) while genuine backend errors
+  still surface. Verified: a 30s hang no longer blocks a run that finishes in 2.5s.
 - **Task samplers (`agentdescent.sampling`)** — `evolve(task_sampler=...)`. A rollout
   is the expensive unit of work, and spending it on a task the agent already solves
   teaches nothing. `DifficultyWeighted` prefers tasks whose pass rate sits away from

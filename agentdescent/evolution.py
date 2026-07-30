@@ -495,6 +495,7 @@ def evolve(
     rounds: int = 15,
     n_workers: int = 4,
     max_concurrency: int = 1,
+    round_timeout: Optional[float] = None,
     asynchronous: bool = False,
     async_ratio: int = 3,
     max_seconds: Optional[float] = None,
@@ -576,6 +577,14 @@ def evolve(
         Workers per round (``>= 1``).
     max_concurrency:
         How many of them actually run at once (see above).
+    round_timeout:
+        Seconds a round will wait for its concurrent workers before giving up on
+        the slow ones. ``None`` (default) waits forever, which is what you want
+        when every rollout is bounded -- but a single hung rollout then stalls the
+        run, because the aggregator is a barrier. Abandoned work keeps running in
+        the background (Python cannot cancel a thread) and is simply not waited
+        for; it is reported when ``verbose``. Only applies when
+        ``max_concurrency > 1``.
     asynchronous, async_ratio:
         Delegate to :func:`~agentdescent.async_evolve.async_evolve` -- no round
         barrier, with ``async_ratio`` as the staleness lag budget.
@@ -618,7 +627,7 @@ def evolve(
         it is ``None`` only on a clean run, and a run that died still returns a
         (partial) result rather than raising.
     """
-    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import ThreadPoolExecutor, wait as futures_wait
     from .parallel import DataParallel
 
     if asynchronous:
@@ -656,6 +665,7 @@ def evolve(
 
     history: List[RoundInfo] = []
     run_error: Optional[str] = None
+    straggler_rounds = 0
     deadline = time.time() + max_seconds if max_seconds else None
     for r in range(rounds):
         if deadline is not None and time.time() >= deadline:
@@ -699,8 +709,25 @@ def evolve(
             # concurrently (rollout+propose overlap) then the aggregator is the barrier.
             units = list(parallel.plan(n_workers, r, train_ids))
             if max_concurrency > 1 and len(units) > 1:
-                with ThreadPoolExecutor(max_workers=min(max_concurrency, len(units))) as pool:
-                    list(pool.map(_run_unit, units))
+                # The aggregator is the round barrier, so without a bound the whole
+                # round waits on its slowest worker for as long as that takes -- one
+                # hung rollout stalls the run indefinitely. round_timeout caps the
+                # wait; stragglers are abandoned (Python cannot kill a thread, so the
+                # work continues in the background but no longer holds up the round).
+                pool = ThreadPoolExecutor(max_workers=min(max_concurrency, len(units)))
+                try:
+                    futures = [pool.submit(_run_unit, u) for u in units]
+                    done, pending = futures_wait(futures, timeout=round_timeout)
+                    for f in done:
+                        f.result()          # re-raise a genuine backend failure
+                    if pending:
+                        straggler_rounds += 1
+                        if verbose:
+                            print(f"round {r:>3}  abandoned {len(pending)} straggler(s) "
+                                  f"after round_timeout={round_timeout}s")
+                finally:
+                    # never block shutdown on an abandoned straggler
+                    pool.shutdown(wait=False)
             else:
                 for unit in units:
                     _run_unit(unit)
