@@ -21,8 +21,21 @@ template, a harness module, or a learned verifier.  What evolves is decided by
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Tuple, runtime_checkable
+
+
+def stable_hash(key: Any) -> int:
+    """A process-independent hash for seeding and partitioning.
+
+    Python randomises ``hash()`` of ``str``/``bytes`` per process unless
+    ``PYTHONHASHSEED`` is pinned, so using it to seed an RNG or assign a section
+    makes a ``seed=`` argument meaningless: the same seed gives different results
+    on every run. Anything reproducible must hash through here instead.
+    """
+    return int.from_bytes(
+        hashlib.blake2b(repr(key).encode(), digest_size=8).digest(), "big")
 
 # A version vector maps ``artifact_id -> integer version``.  A diff only records
 # the artifacts it actually read or wrote, so most vectors are sparse.

@@ -28,7 +28,7 @@ from enum import Enum
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from .domains.router import RouterSkill
-from .evolvable import Diff
+from .evolvable import Diff, stable_hash
 
 
 class ParallelMode(Enum):
@@ -44,7 +44,7 @@ class ParallelMode(Enum):
 
 def section_of(key: str, n_sections: int) -> int:
     """Deterministically map an artifact key (keyword) to a section id."""
-    return (hash(key) & 0x7FFFFFFF) % n_sections
+    return (stable_hash(key) & 0x7FFFFFFF) % n_sections
 
 
 def assign_sections(worker_ids: Sequence[str], n_sections: int) -> Dict[str, int]:

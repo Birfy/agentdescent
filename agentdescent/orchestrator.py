@@ -32,6 +32,7 @@ from .domains.router import (
     router_eval,
     serialize_router,
 )
+from .evolvable import stable_hash
 from .ledger import Ledger
 from .scheduler import AuditScheduler, TaskCluster, TaskScheduler
 from .verifier import ThreeLayerVerifier, VerifierBudget
@@ -105,7 +106,7 @@ class AgentDescent:
 
     def _snapshot_for(self, worker: Worker, round_idx: int) -> Tuple[RouterSkill, Dict[str, int]]:
         cached = self._snapshots.get(worker.worker_id)
-        due = (round_idx % self.refresh_interval) == (hash(worker.worker_id) % self.refresh_interval)
+        due = (round_idx % self.refresh_interval) == (stable_hash(worker.worker_id) % self.refresh_interval)
         if cached is None or due:
             snap = self.ledger.snapshot(Ledger.DEV)
             skill = snap.get(self.skill_id)

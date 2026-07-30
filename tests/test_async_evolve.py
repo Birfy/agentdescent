@@ -131,3 +131,34 @@ def test_clean_run_reports_no_error():
                      n_workers=2, async_ratio=3, max_seconds=6.0,
                      target_reward=1.0, held_out_frac=0.5)
     assert r.error is None
+
+
+def test_history_reports_real_reward_not_a_probability():
+    """RoundInfo.held_out_reward must be the held-out reward.
+
+    A previous optimisation reported MergeReport.prob_improve (a Beta-posterior
+    P(delta>0)) instead, which corrupted `history` and made `target_reward` fire
+    spuriously. Pin the units: the last sweep's reward must equal a fresh
+    held-out score of the final artifact.
+    """
+    r = async_evolve(_tasks(), REWARD, agent=_Composer(), strategy=AppendRules(),
+                     n_workers=3, async_ratio=3, max_seconds=6.0, held_out_frac=0.5)
+    assert r.history, "expected at least one sweep"
+    assert abs(r.history[-1].held_out_reward - r.final_reward) < 1e-9
+
+
+def test_target_reward_is_compared_against_the_real_reward():
+    """Stopping early must require the true reward, not a probability >= target."""
+    # _DeadEnd never solves anything -> true reward stays 0.0, so a target of 1.0
+    # must never be reached even though acceptance probabilities can approach 1.
+    class _DeadEnd:
+        def solve(self, rendered, task):
+            return "no"
+        def propose(self, rendered, task, output, reward):
+            return task.meta["hint"]
+
+    r = async_evolve(_tasks(), REWARD, agent=_DeadEnd(), strategy=AppendRules(),
+                     n_workers=2, async_ratio=3, max_seconds=3.0,
+                     target_reward=1.0, held_out_frac=0.5)
+    assert r.final_reward == 0.0
+    assert all(info.held_out_reward == 0.0 for info in r.history)

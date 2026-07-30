@@ -206,12 +206,13 @@ def async_evolve(
             # DISCARD -> drop the card
         reports = eng.aggregator.step()
         committed = sum(1 for x in reports if x.committed_version is not None)
-        dev = eng.ledger.snapshot(Ledger.DEV).get(eng.artifact_id)   # cheap read (no scoring)
-        # Reuse the aggregator's own post-merge score (it already evaluated the
-        # candidate on held_out inside step()); only re-score if it reported none.
-        # Avoids a redundant full held-out re-eval every sweep.
-        reported = [x.prob_improve for x in reports]
-        r = max(reported) if reported else dev.score(eng.held_out)
+        dev = eng.ledger.snapshot(Ledger.DEV).get(eng.artifact_id)
+        # Must be the real held-out reward: MergeReport.prob_improve is P(Δ>0)
+        # from the Beta posterior, a *probability*, and reporting it here would
+        # both corrupt `history` and make `target_reward` fire spuriously. This
+        # is not a redundant eval -- `_Runtime.eval_one` memoises on
+        # (artifact signature, task id), so re-scoring an unchanged head is free.
+        r = dev.score(eng.held_out)
         history.append(RoundInfo(len(history), r, len(dev.state), committed,
                                  len(reports) - committed))
         if verbose:

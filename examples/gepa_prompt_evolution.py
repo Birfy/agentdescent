@@ -423,7 +423,8 @@ def main() -> None:
            blast_radius=0.2, artifact_id="gepa_prompt",
            rounds=args.rounds, n_workers=args.workers, max_concurrency=args.workers,
            asynchronous=args.asynchronous, async_ratio=args.async_ratio,
-           max_seconds=args.max_seconds, held_out_frac=ds.val_frac,
+           max_seconds=args.max_seconds if args.asynchronous else None,
+           held_out_frac=ds.val_frac,
            aggregator_factory=factory, verbose=True)
 
     agg: ParetoAggregator = factory.holder["agg"]  # type: ignore[attr-defined]

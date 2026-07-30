@@ -619,7 +619,8 @@ def run_evoskill(complete: Completion, docs: Dict[str, str],
                     strategy=SkillLibraryStrategy(), blast_radius=0.2,
                     artifact_id="skill_library", rounds=iterations,
                     n_workers=workers, max_concurrency=workers,
-                    asynchronous=asynchronous, async_ratio=async_ratio, max_seconds=max_seconds,
+                    asynchronous=asynchronous, async_ratio=async_ratio,
+                    max_seconds=max_seconds if asynchronous else None,
                     held_out_frac=len(val) / max(1, len(tasks)),
                     self_verify=False,   # repo evaluates the child on val only -- no per-trajectory re-run
                     aggregator_factory=factory, verbose=verbose)

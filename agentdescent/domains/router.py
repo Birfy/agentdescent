@@ -25,7 +25,7 @@ import random
 from dataclasses import dataclass, field
 from typing import Dict, List, Mapping, Optional, Sequence
 
-from ..evolvable import Contract, Diff, EvidenceCard
+from ..evolvable import Contract, Diff, EvidenceCard, stable_hash
 
 
 @dataclass(frozen=True)
@@ -153,5 +153,5 @@ class TaskUniverse:
         """Partition tasks into clusters by keyword hash (task long tail)."""
         buckets: List[List[Task]] = [[] for _ in range(n_clusters)]
         for t in self.tasks:
-            buckets[hash(t.keyword) % n_clusters].append(t)
+            buckets[stable_hash(t.keyword) % n_clusters].append(t)
         return [b for b in buckets if b]

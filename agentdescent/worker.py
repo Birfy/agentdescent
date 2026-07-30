@@ -19,7 +19,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence
 
-from .evolvable import Diff, EvidenceCard, VersionVector
+from .evolvable import Diff, EvidenceCard, VersionVector, stable_hash
 from .domains.router import RouterSkill, Task
 
 
@@ -36,7 +36,7 @@ class Worker:
     rollout_latency: Optional[Callable[[], float]] = None
 
     def __post_init__(self) -> None:
-        self._rng = random.Random(hash((self.worker_id, self.seed)) & 0xFFFF)
+        self._rng = random.Random(stable_hash((self.worker_id, self.seed)) & 0xFFFF)
 
     def run(
         self,
