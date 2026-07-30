@@ -562,7 +562,8 @@ def run_meta_agent_search(complete: Completion, val: List[Tuple[str, str]],
 
     evolve(tasks, reward, run=run, propose=make_propose(ctx, complete),
            strategy=AgentDesignStrategy(), blast_radius=0.6, artifact_id="agentic_system",
-           rounds=generations, n_workers=2, max_concurrency=2,
+           rounds=generations, n_workers=2,
+           max_concurrency=1 if asynchronous else 2,
            asynchronous=asynchronous, async_ratio=async_ratio,
            max_seconds=max_seconds if asynchronous else None,
            held_out_frac=0.5, aggregator_factory=factory, verbose=verbose)

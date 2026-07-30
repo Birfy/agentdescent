@@ -93,10 +93,12 @@ _SOLVE_TMPL = (
 _PROPOSE_TMPL = (
     "The artifact just failed a task (score {reward:.2f} out of 1.0).\n\n"
     "Artifact so far:\n{artifact}\n\nTask input:\n{prompt}\n\n"
-    "It produced:\n{output}\n\n"
+    "It produced:\n{output}\n{expected}\n"
     "Propose exactly ONE concise, general rule (a single imperative sentence) to "
-    "improve the artifact for this and similar cases. Output only the rule text, "
-    "or NONE if no rule would help."
+    "improve the artifact for this and similar cases. State the rule in general "
+    "terms -- it will be applied to other tasks, so do NOT mention this task's "
+    "specific values or answer. Output only the rule text, or NONE if no rule "
+    "would help."
 )
 
 
@@ -107,6 +109,14 @@ class LLMAgent:
     complete: Completion
     solve_template: str = _SOLVE_TMPL
     propose_template: str = _PROPOSE_TMPL
+    #: Show ``task.meta`` to the reflector. Without it the reflector sees only a
+    #: score -- it is told it was wrong but not what right looks like, which makes
+    #: any convention it cannot guess effectively unlearnable. Callers put the
+    #: expected answer there (every shipped port does), so it is on by default;
+    #: set ``False`` if your meta holds something you would rather not show.
+    show_meta: bool = True
+    #: Meta is rendered truncated: it can hold a whole document.
+    meta_chars: int = 600
     _empty_replies: int = field(default=0, repr=False)
 
     def solve(self, rendered: str, task: Task) -> str:
@@ -115,7 +125,8 @@ class LLMAgent:
 
     def propose(self, rendered: str, task: Task, output: str, reward: float) -> Optional[str]:
         raw = self.complete(self.propose_template.format(
-            artifact=rendered, prompt=task.prompt, output=output, reward=reward))
+            artifact=rendered, prompt=task.prompt, output=output, reward=reward,
+            expected=_expected_block(task, self.show_meta, self.meta_chars)))
         rule = raw.strip()
         if not rule:
             # An empty completion is almost never "no rule would help" -- that answer
@@ -135,7 +146,18 @@ class LLMAgent:
         return None if rule.upper().startswith("NONE") else rule
 
 
-def reflector(complete: Completion, template: str = _PROPOSE_TMPL) -> Propose:
+def _expected_block(task: "Task", show_meta: bool, limit: int) -> str:
+    """Render ``task.meta`` for the reflection prompt, bounded."""
+    if not show_meta or not getattr(task, "meta", None):
+        return ""
+    text = ", ".join(f"{k}={v!r}" for k, v in task.meta.items())
+    if len(text) > limit:
+        text = text[:limit] + " ..."
+    return f"\nWhat the scorer expected (task metadata):\n{text}\n"
+
+
+def reflector(complete: Completion, template: str = _PROPOSE_TMPL,
+              show_meta: bool = True) -> Propose:
     """Use any model as the *reflector* for an agent you already have.
 
     :class:`LLMAgent` bundles solving and proposing, which only fits when the
@@ -150,7 +172,7 @@ def reflector(complete: Completion, template: str = _PROPOSE_TMPL) -> Propose:
 
     The model never has to be the same one the agent uses; a cheap model is often
     the right reflector for an expensive agent."""
-    return LLMAgent(complete, propose_template=template).propose
+    return LLMAgent(complete, propose_template=template, show_meta=show_meta).propose
 
 
 def claude_agent(model: str = "claude-opus-4-8", max_tokens: int = 1024) -> LLMAgent:
@@ -779,6 +801,26 @@ def evolve(
     if asynchronous:
         # barrier-free mode: hand the same plug-ins to the async runtime. `rounds`
         # becomes a worker-rollout budget (rounds x n_workers) alongside max_seconds.
+        # Two sync-only knobs have no meaning here and were previously dropped in
+        # silence, so `parallel=TensorParallel(...)` looked honoured while the run
+        # was plain DP. Say so instead: the async runtime shards round-robin itself
+        # and its concurrency *is* `n_workers`.
+        for name, value, why in (
+            ("parallel", parallel,
+             f"the async runtime shards data-parallel across its own {n_workers} "
+             f"workers"),
+            ("max_concurrency", None if max_concurrency == 1 else max_concurrency,
+             "async concurrency is n_workers"),
+            ("round_timeout", round_timeout,
+             "it bounds the round barrier, and the async path has no barrier -- "
+             "bound a rollout with your backend's own timeout= instead, and the "
+             "run with max_seconds"),
+        ):
+            if value is not None:
+                warnings.warn(
+                    f"evolve(asynchronous=True) ignores {name}=: {why}. Use the "
+                    f"synchronous path if you need it.", RuntimeWarning,
+                    stacklevel=2)
         from .async_evolve import async_evolve
         return async_evolve(
             tasks, reward, agent=agent, run=run, propose=propose, strategy=strategy,
@@ -789,7 +831,7 @@ def evolve(
             repo_path=repo_path, agg_config=agg_config, staleness_policy=staleness_policy,
             aggregator_factory=aggregator_factory, oracle_budget=oracle_budget,
             self_verify=self_verify, task_sampler=task_sampler,
-            target_reward=target_reward,
+            target_reward=target_reward, patience=patience,
             on_round=on_round, verbose=verbose)
 
     if n_workers < 1:

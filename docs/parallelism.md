@@ -130,6 +130,10 @@ orthogonal to **whether rounds have a barrier**:
     sync-path knob (async concurrency is `n_workers`). Use the synchronous path
     when you want a specific partitioning.
 
+    Passing either one to `evolve(asynchronous=True)` now raises a
+    `RuntimeWarning` naming it. It used to be dropped in silence, which is the
+    worse failure: the run *looked* tensor-parallel and was plain DP.
+
 So a run picks *both* a partition (`parallel=`) and a schedule (sync
 `max_concurrency` vs barrier-free `asynchronous`). See
 [Parallelism & async](evolution.md#parallelism-async-the-frameworks-core).

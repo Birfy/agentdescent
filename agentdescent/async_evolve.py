@@ -63,6 +63,7 @@ def async_evolve(
     max_seconds: float = 20.0,
     max_iters: Optional[int] = None,
     target_reward: Optional[float] = None,
+    patience: Optional[int] = None,
     held_out_frac: float = 0.4,
     repo_path: Optional[str] = None,
     agg_config=None,
@@ -82,7 +83,8 @@ def async_evolve(
     snapshot until head drifts past it, then refreshes -- so stale diffs (η > 0)
     arise and the ``staleness_policy`` (default ``guarded``) rebases or discards
     them. The run stops at ``max_seconds`` (or ``max_iters`` worker rollouts, or
-    when held-out reward reaches ``target_reward``).
+    when held-out reward reaches ``target_reward``, or stalls for ``patience``
+    sweeps).
 
     ``tasks``, ``reward``, ``agent``, ``run``, ``propose``, ``strategy``,
     ``initial_state``, ``blast_radius``, ``artifact_id``, ``held_out_frac``,
@@ -112,6 +114,11 @@ def async_evolve(
         short for any sweep to finish.
     max_iters:
         Stop after this many worker rollouts in total (a budget, not a barrier).
+    patience:
+        Stop after this many consecutive merge sweeps that fail to beat the best
+        held-out reward seen so far. The async analogue of the synchronous knob:
+        there are no round barriers here, so a *sweep* (one drain-and-merge by the
+        merger) is the unit. ``None`` disables it.
     target_reward:
         Stop as soon as a sweep's held-out reward reaches this. Compared against
         the real reward, never against an acceptance probability.
@@ -171,6 +178,9 @@ def async_evolve(
     counter = [0]
     counter_lock = threading.Lock()
     history: List[RoundInfo] = []
+    # [best held-out reward so far, sweeps since it last improved] -- a list so
+    # the merger closure can mutate it without a `nonlocal` per field.
+    best: List[float] = [float('-inf'), 0]
     errors: List[Optional[str]] = [None]      # first backend failure seen (diagnostic)
     died = [False]                            # True only if the run ENDED on failure
     contract_error: List[Optional[BaseException]] = [None]   # caller bug -> re-raise
@@ -296,6 +306,10 @@ def async_evolve(
         # is not a redundant eval -- `_Runtime.eval_one` memoises on
         # (artifact signature, task id), so re-scoring an unchanged head is free.
         r = dev.score(eng.held_out)
+        if r > best[0] + 1e-12:
+            best[0], best[1] = r, 0
+        else:
+            best[1] += 1
         history.append(RoundInfo(len(history), r, len(dev.state), committed,
                                  len(reports) - committed))
         if verbose:
@@ -308,6 +322,8 @@ def async_evolve(
                 warnings.warn(f"on_round callback raised: {type(e).__name__}: {e}",
                               RuntimeWarning, stacklevel=2)
         if target_reward is not None and r >= target_reward:
+            stop.set()
+        elif patience is not None and best[1] >= patience:
             stop.set()
 
     def _merger() -> None:

@@ -368,7 +368,8 @@ def run_dgm(instances: List[dict], generations: int = 12,
 
     evolve(tasks, reward, run=run, propose=propose, strategy=HarnessStrategy(),
            blast_radius=0.6, artifact_id="coding_agent", rounds=generations,
-           n_workers=selfimprove_size, max_concurrency=selfimprove_size,
+           n_workers=selfimprove_size,
+           max_concurrency=1 if asynchronous else selfimprove_size,
            asynchronous=asynchronous, async_ratio=async_ratio,
            max_seconds=max_seconds if asynchronous else None,
            held_out_frac=0.5, aggregator_factory=factory, verbose=verbose)

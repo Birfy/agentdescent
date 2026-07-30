@@ -355,7 +355,8 @@ def main() -> None:
     result = evolve(ds.trainval, reward, agent=agent,
                     strategy=ACEPlaybook(), parallel=DataParallel(),
                     blast_radius=0.2, artifact_id="ace_playbook",
-                    rounds=args.rounds, n_workers=args.workers, max_concurrency=args.workers,
+                    rounds=args.rounds, n_workers=args.workers,
+                    max_concurrency=1 if args.asynchronous else args.workers,
                     task_sampler=(DifficultyWeighted() if args.sampler == "difficulty"
                                   else RoundRobin()),
                     asynchronous=args.asynchronous, async_ratio=args.async_ratio,

@@ -51,6 +51,23 @@ being one value that each accepted proposal replaces, which is what you want for
 system prompt. Switching between parallel and barrier-free async is one argument;
 nothing else in the call changes.
 
+!!! tip "Put the expected answer in `Task.meta` — the reflector reads it"
+    A reflector that sees only the score is told *that* it was wrong, never what
+    right looks like. It can then fix reasoning errors, but it cannot discover a
+    **convention** it has no way to guess — an output format, a unit, a required
+    field. Whatever you put in `meta` is shown to it:
+
+    ```python
+    Task(id="7", prompt="What do 7 pens cost?", meta={"gold": "2800"})   # cents
+    ```
+
+    `meta` is free-form and yours: the gold answer, a rubric, the failing
+    assertion. It is rendered truncated (`meta_chars=600`) so a whole document in
+    there cannot blow up the prompt, and the template tells the reflector to state
+    its rule in general terms rather than naming this task's answer. Withhold it
+    with `reflector(model, show_meta=False)` if your meta holds something you would
+    rather the reflector not see.
+
 !!! tip "Where do `tasks` come from?"
     The `tasks` and `reward` are yours to define. To pull them from a public
     benchmark without writing HuggingFace paging/caching boilerplate, use the
@@ -472,6 +489,10 @@ evolve(tasks, reward, agent=agent, n_workers=4, max_concurrency=4)   # 4 workers
            target_reward=0.95,   # stop as soon as held-out reaches this
            patience=5)           # ...or after 5 rounds with no improvement
     ```
+
+    Both work under `asynchronous=True` too. There are no round barriers there, so
+    `patience` counts **merge sweeps** (one drain-and-merge by the merger) rather
+    than rounds.
 
 !!! tip "Bound the barrier — `round_timeout`"
     Because the aggregator *is* the barrier, a round waits for its slowest worker

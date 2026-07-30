@@ -6,7 +6,27 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **`evolve(asynchronous=True)` no longer drops knobs in silence.** `patience=`
+  was accepted and never forwarded, so an async run ignored it entirely; it is
+  now implemented in the async runtime, counting **merge sweeps** since there are
+  no round barriers. `parallel=`, `max_concurrency=` and `round_timeout=` genuinely
+  have no meaning there (the runtime shards round-robin across `n_workers`, and
+  there is no barrier to bound) and now raise a `RuntimeWarning` naming the ignored
+  argument — previously `parallel=TensorParallel(4)` looked honoured while the run
+  was plain DP. A test now walks `evolve`'s whole signature and fails if any future
+  argument is neither forwarded nor warned about.
+
 ### Added
+- **The reflector can see `Task.meta`.** It previously received the score and
+  nothing else — told *that* it was wrong, never what right looks like. That made
+  any **convention** it could not guess (an output unit, a format, a required
+  field) permanently unlearnable, no matter how many rounds it ran. `meta` is
+  free-form and caller-owned, and every shipped port already puts the expected
+  answer there. Rendered truncated (`meta_chars=600`) so a document in `meta`
+  cannot blow up the prompt; the template asks for a *general* rule so the
+  reflector does not simply restate this task's answer; `show_meta=False` opts
+  out. Custom `propose_template`s that lack the new field keep working.
 - **`SingleSlot`** — the artifact *is* one value (a system prompt, an instruction)
   and each accepted proposal replaces it. The most common thing anyone evolves, and
   until now every caller wrote it themselves: three of the six shipped ports each
