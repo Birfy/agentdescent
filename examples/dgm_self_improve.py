@@ -403,7 +403,8 @@ def main() -> None:
     p.add_argument("--generations", type=int, default=12)
     p.add_argument("--selfimprove-size", type=int, default=2)
     p.add_argument("--archive", default="keep_all", choices=["keep_all", "keep_better"])
-    p.add_argument("--provider", default="claude", choices=["claude", "glm"])
+    p.add_argument("--provider", default="claude",
+                   choices=["claude", "openai", "glm"], help="claude, or any OpenAI-compatible endpoint (DeepSeek, GLM, vLLM, ...) via OPENAI_BASE_URL + OPENAI_API_KEY; 'glm' is a legacy alias")
     p.add_argument("--model", default=None,
                    help="optional: let an LLM propose self-modifications (else deterministic)")
     p.add_argument("--seed", type=int, default=0)
@@ -439,7 +440,7 @@ def main() -> None:
 
     complete = None
     if args.model:
-        complete = (openai_compatible(model=args.model) if args.provider == "glm"
+        complete = (openai_compatible(model=args.model) if args.provider in ("openai", "glm")
                     else claude(model=args.model))
         try:
             complete("Reply with the single word: ok")

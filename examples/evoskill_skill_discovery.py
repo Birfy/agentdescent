@@ -674,7 +674,8 @@ def evaluate(complete: Completion, docs: Dict[str, str], skills: Dict[str, str],
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--provider", default="claude", choices=["claude", "glm"])
+    p.add_argument("--provider", default="claude",
+                   choices=["claude", "openai", "glm"], help="claude, or any OpenAI-compatible endpoint (DeepSeek, GLM, vLLM, ...) via OPENAI_BASE_URL + OPENAI_API_KEY; 'glm' is a legacy alias")
     p.add_argument("--model", default="claude-haiku-4-5")
     p.add_argument("--iterations", type=int, default=6)
     p.add_argument("--frontier", type=int, default=3)
@@ -724,7 +725,7 @@ def main() -> None:
             print("aborted.")
             return
 
-    completion = (openai_compatible(model=args.model) if args.provider == "glm"
+    completion = (openai_compatible(model=args.model) if args.provider in ("openai", "glm")
                   else claude(model=args.model))
     try:
         completion("Reply with the single word: ok")
@@ -737,7 +738,7 @@ def main() -> None:
     if args.backend == "openhands":
         from agentdescent.backends import openhands_backend
         oh_model = args.model if args.model.startswith("openai/") else f"openai/{args.model}"
-        base = ("https://api.deepseek.com" if args.provider == "glm"
+        base = ("https://api.deepseek.com" if args.provider in ("openai", "glm")
                 else os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"))
         backend = openhands_backend(model=oh_model, base_url=base)
         print(f"Backend  : real OpenHands agent (terminal + file_editor) on {oh_model}")

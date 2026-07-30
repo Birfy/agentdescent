@@ -464,7 +464,8 @@ def load_dataset(n_train: int, n_val: int, seed: int = 0) -> Dataset:
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--provider", default="claude", choices=["claude", "glm"])
+    p.add_argument("--provider", default="claude",
+                   choices=["claude", "openai", "glm"], help="claude, or any OpenAI-compatible endpoint (DeepSeek, GLM, vLLM, ...) via OPENAI_BASE_URL + OPENAI_API_KEY; 'glm' is a legacy alias")
     p.add_argument("--model", default="claude-haiku-4-5")
     p.add_argument("--steps", type=int, default=8)
     p.add_argument("--lr", type=int, default=4, help="max edits/step (learning rate)")
@@ -514,7 +515,7 @@ def main() -> None:
             return
 
     usage = Usage()                       # what the run actually costs
-    completion = (openai_compatible(model=args.model, usage=usage) if args.provider == "glm"
+    completion = (openai_compatible(model=args.model, usage=usage) if args.provider in ("openai", "glm")
                   else claude(model=args.model, usage=usage))
     try:
         completion("Reply with the single word: ok")

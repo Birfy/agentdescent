@@ -58,6 +58,13 @@ All notable changes to AgentDescent are documented here. The format follows
   ever mutated — but `async_evolve` burned its whole `max_seconds` budget first and
   then reported the violation through the *backend failure* channel. Both paths now
   check governance before the first rollout and raise `GovernanceError` at once.
+- **`--provider glm` was misleading** — it means "any OpenAI-compatible endpoint",
+  and every real run in these docs used it to reach *DeepSeek*. Examples now accept
+  `--provider openai` with `glm` kept as an alias, and the help text says so.
+- **The commit stage was described as "CAS / 2PC".** `commit_atomic` exists and is
+  tested, but the reference aggregator buckets per artifact and no engine path
+  calls it, so 2PC is an available Ledger capability rather than pipeline
+  behaviour. Corrected in four places.
 - **Two more documented-but-absent features.** The "tail canary set" inside
   held-out eval and the L1 staged rollout ("counterfactual replay → canary →
   full") do not exist; the docs now say so. Dual-branch promotion was described as

@@ -20,7 +20,7 @@ Evidence cards are bucketed by artifact; a bucket fires on batch size `B` or a
 2. **Conflict resolution** — contradictory diffs (same key, different value) are projected out PCGrad-style; keep the better of the pair, iterating until no surviving pair contradicts. Key *overlap* alone is not a conflict — identical proposals are duplicates and dedupe.
 3. **Fusion tournament** — complementary diffs are fused (model-soup style) and run against the singles on held-out; the best wins.
 4. **Statistical acceptance** — commit only if `P(Δ > 0) > 1 − δ` under a Beta posterior (not a point threshold); `δ` anneals with version.
-5. **Commit** — compare-and-swap on `dev` (2PC for contract-breaking multi-artifact diffs).
+5. **Commit** — compare-and-swap on `dev`, one artifact per merge. The `Ledger` *also* offers `commit_atomic` (2PC across several artifacts, for a contract-breaking diff that must land with its adapters), but the reference aggregator buckets by artifact and never needs it — no engine path calls it today.
 6. **Dual-branch promotion** — `dev → stable` every *K* **accepted commits** (EMA-style confirmation). Note it counts commits, not rounds: a round that merges nothing does not advance the counter, and there is no separate regression check — the guard is the acceptance test each commit already passed.
 7. **Audit** — the merge is submitted to the `AuditScheduler`; high-blast-radius / L1 merges are forced through the oracle. *The optimizer audits itself.*
 

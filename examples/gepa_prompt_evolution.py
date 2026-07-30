@@ -360,7 +360,8 @@ def evaluate(agent, instruction: str, tasks: List[Task], reward) -> float:
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--provider", default="claude", choices=["claude", "glm"])
+    p.add_argument("--provider", default="claude",
+                   choices=["claude", "openai", "glm"], help="claude, or any OpenAI-compatible endpoint (DeepSeek, GLM, vLLM, ...) via OPENAI_BASE_URL + OPENAI_API_KEY; 'glm' is a legacy alias")
     p.add_argument("--model", default="claude-haiku-4-5")
     p.add_argument("--rounds", type=int, default=10)
     p.add_argument("--workers", type=int, default=3)
@@ -405,7 +406,7 @@ def main() -> None:
             return
 
     usage = Usage()                       # what the run actually costs
-    completion = (openai_compatible(model=args.model, usage=usage) if args.provider == "glm"
+    completion = (openai_compatible(model=args.model, usage=usage) if args.provider in ("openai", "glm")
                   else claude(model=args.model, usage=usage))
     agent = gepa_agent(completion)
     try:

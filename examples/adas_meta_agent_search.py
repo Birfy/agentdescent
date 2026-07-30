@@ -576,7 +576,8 @@ def run_meta_agent_search(complete: Completion, val: List[Tuple[str, str]],
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--provider", default="claude", choices=["claude", "glm"])
+    p.add_argument("--provider", default="claude",
+                   choices=["claude", "openai", "glm"], help="claude, or any OpenAI-compatible endpoint (DeepSeek, GLM, vLLM, ...) via OPENAI_BASE_URL + OPENAI_API_KEY; 'glm' is a legacy alias")
     p.add_argument("--model", default="claude-haiku-4-5")
     p.add_argument("--generations", type=int, default=6)
     p.add_argument("--langs", default="en,es,fr",
@@ -627,7 +628,7 @@ def main() -> None:
             return
 
     usage = Usage()                       # what the run actually costs
-    completion = (openai_compatible(model=args.model, usage=usage) if args.provider == "glm"
+    completion = (openai_compatible(model=args.model, usage=usage) if args.provider in ("openai", "glm")
                   else claude(model=args.model, usage=usage))
     try:
         completion("Reply with the single word: ok")

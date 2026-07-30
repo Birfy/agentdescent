@@ -123,7 +123,8 @@ def main() -> None:
     p.add_argument("--task", default="salient_translation_error_detection",
                    help="BIG-Bench-Hard task name (a single-skill task where a "
                         "learned lesson transfers works best; e.g. hyperbaton)")
-    p.add_argument("--provider", default="claude", choices=["claude", "glm"],
+    p.add_argument("--provider", default="claude",
+                   choices=["claude", "openai", "glm"],
                    help="claude (Anthropic) or glm (any OpenAI-compatible endpoint; "
                         "reads OPENAI_BASE_URL + OPENAI_API_KEY from your env)")
     p.add_argument("--model", default="claude-haiku-4-5",
@@ -168,7 +169,7 @@ def main() -> None:
 
     # provider layer (agentdescent.agents): any prompt->text completion works.
     usage = Usage()                       # what the run actually costs
-    completion = (openai_compatible(model=args.model, usage=usage) if args.provider == "glm"
+    completion = (openai_compatible(model=args.model, usage=usage) if args.provider in ("openai", "glm")
                   else claude(model=args.model, usage=usage))
     agent = LLMAgent(completion)
     try:

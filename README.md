@@ -231,7 +231,7 @@ Every module cites the design section it implements.
 | Component | Module | Design § |
 |---|---|---|
 | `Evolvable` unit, `Diff`, `EvidenceCard`, version vectors | [`evolvable.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/evolvable.py) | 3.2, 3.3 |
-| Git-backed Ledger: version vectors, CAS, 2PC, dual branch | [`ledger.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/ledger.py) | 3.1, 4.5 |
+| Git-backed Ledger: version vectors, CAS, dual branch (2PC available, unused) | [`ledger.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/ledger.py) | 3.1, 4.5 |
 | Aggregator: staleness → conflict → fusion → Beta accept → commit | [`aggregator.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/aggregator.py) | 4 |
 | **Staleness policies: Full / Guarded / Reflective** | [`staleness.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/staleness.py) | 4.2 |
 | **Async stage-orchestration runtime + `async_ratio`** | [`async_runtime.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/async_runtime.py) | 3.1 |
@@ -264,8 +264,8 @@ optimizer step:
 4. **Statistical acceptance (§4.4)** — commit only if
    `P(Δ > 0) > 1 − δ` under a per-artifact Beta posterior, not a point threshold.
    `δ` anneals with version (LR decay); a trust-region caps diff size.
-5. **Commit (§4.1)** — compare-and-swap on `dev` (2PC for contract-breaking
-   multi-artifact diffs).
+5. **Commit (§4.1)** — compare-and-swap on `dev`, one artifact per merge
+   (`commit_atomic`/2PC exists in the Ledger but no engine path calls it).
 6. **Dual-branch promotion (§4.5)** — `dev → stable` every *K* accepted commits
    (EMA-style confirmation; it counts commits, not rounds).
 7. **Audit (§5.3)** — the merge decision is itself submitted to the

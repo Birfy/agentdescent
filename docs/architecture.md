@@ -37,7 +37,7 @@ flowchart TD
         S1[1. staleness filter η vs α] --> S2[2. conflict resolution]
         S2 --> S3[3. fusion tournament]
         S3 --> S4["4. Beta acceptance P(Δ>0) &gt; 1−δ"]
-        S4 --> S5[5. commit CAS / 2PC]
+        S4 --> S5[5. commit CAS]
         S5 --> S6[6. dual-branch dev→stable]
         S6 --> S7[7. audit]
     end
@@ -75,7 +75,7 @@ The same flow, with the design-doc section numbers annotated:
         │  2. conflict resolve   contradictions dropped         │  §4.3
         │  3. fusion tournament  complementary diffs merged     │  §4.3
         │  4. Beta acceptance    P(Δ>0) > 1−δ                    │  §4.4
-        │  5. commit             CAS / 2PC                       │  §4.1
+        │  5. commit             CAS (one artifact per merge)     │  §4.1
         │  6. dual-branch        dev → stable (EMA)              │  §4.5
         │  7. audit              submit merge to AuditScheduler  │  §5.3
         └───────────────────────────┬─────────────────────────┘
@@ -98,11 +98,11 @@ the Aggregator calls at steps 1–4 (cheap) and step 7 (oracle, budgeted).
 | Component | Module | Responsibility |
 |---|---|---|
 | **Evolvable** | [`evolvable.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/evolvable.py) | The interface every unit of evolution implements (`diff`/`apply`/`cheap_eval`/`full_eval`). Also `Diff`, `EvidenceCard`, version-vector math. |
-| **Ledger** | [`ledger.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/ledger.py) | Git-backed store. Per-artifact integer versions form the version vector. CAS commits, 2PC atomic multi-artifact commits, `dev`/`stable` branches. |
+| **Ledger** | [`ledger.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/ledger.py) | Git-backed store. Per-artifact integer versions form the version vector. CAS commits and `dev`/`stable` branches; `commit_atomic` (2PC across artifacts) is provided and tested but not used by any engine path today. |
 | **Aggregator** | [`aggregator.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/aggregator.py) | The optimizer. Buckets evidence by artifact and runs the 7-step merge pipeline. Owns the per-artifact Beta posteriors. |
 | **StalenessPolicy** | [`staleness.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/staleness.py) | Full / Guarded / Reflective. Decides `ACCEPT/REBASE/DISCARD` for a stale diff. Swappable without touching the pipeline. |
 | **Verifier** | [`verifier.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/verifier.py) | rule (cheap subset), learned (noisy + uncertainty), oracle (ground truth, budgeted). |
-| **Schedulers** | [`scheduler.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/scheduler.py) | `TaskScheduler` (UCB task leasing), `AuditScheduler` (oracle-budget allocation + trust), `ResumeQueue` (partial-rollout checkpoints). |
+| **Schedulers** | [`scheduler.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/scheduler.py) | `TaskScheduler` (UCB task leasing), `AuditScheduler` (oracle-budget allocation + trust), `ResumeQueue` (straggler records; nothing resumes them — see §4). |
 | **Governance** | [`governance.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/governance.py) | Sorts artifacts into L0/L1/L2 by blast radius; L0 is read-only to the loop; L1 serial gate. |
 | **Worker** | [`worker.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/worker.py) | rollout + propose. Emits evidence cards; never mutates the Ledger directly. |
 | **Sync runtime** | [`orchestrator.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/orchestrator.py) | `AgentDescent`: round-barrier DP loop + fork baseline. |

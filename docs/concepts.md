@@ -161,8 +161,10 @@ artifacts don't starve). Then, in order:
 4. **Statistical acceptance** — commit only if `P(Δ > 0) > 1 − δ` under a Beta
    posterior comparison of candidate vs base, **not** a point threshold. `δ`
    anneals with version (LR decay); a trust-region caps diff size.
-5. **Commit** — compare-and-swap on `dev` (2PC for contract-breaking
-   multi-artifact diffs).
+5. **Commit** — compare-and-swap on `dev`, one artifact per merge. (`Ledger`
+   also implements `commit_atomic`, a 2PC across artifacts for a
+   contract-breaking diff that must land with its adapters, but the reference
+   aggregator buckets per artifact and no engine path uses it.)
 6. **Dual-branch promotion** — `dev → stable` every *K* accepted commits
    (EMA-style confirmation). Production workers ride `stable`; explorers ride
    `dev`.
