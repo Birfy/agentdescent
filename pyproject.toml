@@ -31,3 +31,6 @@ include = ["agentdescent*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+# Put the repo root on sys.path so `import agentdescent` / `import examples`
+# resolve under a bare `pytest` invocation (CI), not just `python -m pytest`.
+pythonpath = ["."]
