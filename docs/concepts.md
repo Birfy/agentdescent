@@ -116,9 +116,20 @@ onto the current policy, then reused."
 
 !!! tip "Why artifacts tolerate staleness better than parameters"
     A stale gradient is simply lost. A stale *diff* can be rebased and its
-    evidence card re-verified — and if discarded, the evidence settles back into
-    the pool for reuse. That structural difference is the framework's claimed
-    advantage over parameter-space RL (design spec, RQ2).
+    evidence card re-verified. That structural difference is the framework's
+    claimed advantage over parameter-space RL (design spec, RQ2), and the rebase
+    half of it is what `evolve()` actually implements.
+
+!!! warning "Settled evidence is retained, not yet reused"
+    A discarded card is `settle()`d rather than dropped, and the design calls for
+    re-filing it into the trajectory pool. **Nothing in the library reads the pool
+    back** — so treat it as a diagnostic ring of recent rejections, not a queue
+    that feeds later rounds.
+
+    It is also *bounded* (`SETTLED_MAX_CARDS=256`, `SETTLED_MAX_CHARS=2M`, oldest
+    evicted). It used to be unbounded, which leaked exactly the payloads the trust
+    region exists to reject: 500 oversized diffs from a runaway reflector retained
+    **250 MB** that no code path could ever read.
 
 ### 3.4 async_ratio (ROLL Flash) — the global lag budget
 

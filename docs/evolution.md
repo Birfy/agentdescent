@@ -68,6 +68,20 @@ nothing else in the call changes.
     with `reflector(model, show_meta=False)` if your meta holds something you would
     rather the reflector not see.
 
+    Measured on a real two-step `deepseek-v4-flash` agent over 12 money word
+    problems whose scorer demands **integer cents** — a convention stated nowhere
+    in the prompt:
+
+    | | held-out |
+    |---|---|
+    | initial prompt (`"You are a helpful assistant."`) | 3/12 = **0.250** |
+    | reflector blind to `meta`, 8 rounds | 0.500 (plateau) |
+    | reflector reading `meta` | 12/12 = **1.000**, in one round (141 s, 63 calls) |
+
+    And it generalised rather than memorising — the rule it wrote was
+    *"Express all monetary amounts as integers representing cents, without dollar
+    signs or decimal points."*, not this task's answer.
+
 !!! tip "Where do `tasks` come from?"
     The `tasks` and `reward` are yours to define. To pull them from a public
     benchmark without writing HuggingFace paging/caching boilerplate, use the

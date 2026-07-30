@@ -139,7 +139,10 @@ load-bearing invariants are reproduced faithfully from the repo:
 3. **textual learning-rate budget** — an integer edit cap per step (AgentDescent's
    `trust_region_ops` analogue);
 4. **rejected-edit buffer** — rejected edits are remembered in-epoch and fed back
-   to the optimizer (AgentDescent's "settled evidence survives").
+   into the reflection prompt, so the optimizer stops re-proposing them. The
+   example implements this itself: the core `settle()` pool retains discarded
+   evidence but [nothing reads it back](concepts.md#33-staleness-policies-flashevolve-full-guarded-reflective), so this
+   is the worked example of what that pool is *for*.
 
 ```bash
 python -m examples.skillopt_skill_training --dry-run

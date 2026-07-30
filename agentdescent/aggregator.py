@@ -20,9 +20,10 @@ The per-bucket pipeline (design doc, section 4):
 from __future__ import annotations
 
 import threading
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Protocol, Tuple, runtime_checkable
+from typing import (Callable, Deque, Dict, List, Optional, Protocol, Tuple,
+                    runtime_checkable)
 
 from .evolvable import (
     ContractError, Diff, EvidenceCard, Evolvable, VersionVector, stable_hash,
@@ -125,10 +126,18 @@ class EvidenceBuffer:
     :meth:`add` concurrently while the aggregator thread calls :meth:`ready` /
     :meth:`drain`.  All bucket mutations are guarded by an internal lock."""
 
+    #: Cap on the settled pool: at most this many cards, and at most this many
+    #: characters of diff payload across them. It is a *diagnostic* ring, so old
+    #: entries are evicted rather than allowed to accumulate -- see :meth:`settle`.
+    SETTLED_MAX_CARDS = 256
+    SETTLED_MAX_CHARS = 2_000_000
+
     def __init__(self) -> None:
         self._buckets: Dict[str, List[EvidenceCard]] = defaultdict(list)
         self._waited: Dict[str, int] = defaultdict(int)
-        self._settled: List[EvidenceCard] = []
+        # (payload chars, card), oldest first -- see :meth:`settle` for the bound.
+        self._settled: Deque[Tuple[int, EvidenceCard]] = deque()
+        self._settled_chars = 0
         self._lock = threading.Lock()
 
     def add(self, card: EvidenceCard) -> None:
@@ -161,19 +170,44 @@ class EvidenceBuffer:
             return sum(len(c) for c in self._buckets.values())
 
     def settle(self, cards: List[EvidenceCard]) -> None:
-        """Return discarded-diff evidence to the pool for later reuse.
+        """Keep discarded-diff evidence addressable, under a hard bound.
 
         This is the structural advantage of artifacts over gradients (design
         doc, section 3.3): a stale gradient is simply lost, but a stale diff's
-        evidence survives.  Here we keep the cards addressable; a fuller system
-        would re-file them into the trajectory pool."""
+        evidence survives. Nothing in the library consumes the pool yet -- a
+        fuller system would re-file the cards into the trajectory pool -- so
+        treat it as a **diagnostic ring**, not a queue.
+
+        It is bounded because it was not, and the unbounded version leaked
+        precisely the payloads the trust region exists to reject: a runaway
+        reflector's oversized diffs are settled here, and 500 of them retained
+        250 MB that no code path could ever read. Oldest entries are evicted
+        once either :attr:`SETTLED_MAX_CARDS` or :attr:`SETTLED_MAX_CHARS` is
+        exceeded.
+        """
         with self._lock:
-            self._settled.extend(cards)
+            for card in cards:
+                cost = sum(len(str(v)) for v in card.diff.ops.values())
+                self._settled.append((cost, card))
+                self._settled_chars += cost
+            while self._settled and (
+                len(self._settled) > self.SETTLED_MAX_CARDS
+                or self._settled_chars > self.SETTLED_MAX_CHARS
+            ):
+                cost, _ = self._settled.popleft()
+                self._settled_chars -= cost
 
     @property
     def settled(self) -> List[EvidenceCard]:
+        """The retained tail of discarded evidence (bounded; see :meth:`settle`)."""
         with self._lock:
-            return list(self._settled)
+            return [c for _, c in self._settled]
+
+    @property
+    def settled_chars(self) -> int:
+        """Diff payload currently retained by the settled pool."""
+        with self._lock:
+            return self._settled_chars
 
 
 def diffs_conflict(a: Diff, b: Diff) -> bool:

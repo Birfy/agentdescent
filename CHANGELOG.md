@@ -7,6 +7,15 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **The settled-evidence pool grew without bound.** Every discarded card — stale,
+  oversized, CAS-conflicted — is `settle()`d, and **nothing in the library reads
+  the pool back**, so it was a pure accumulator. Worse, the oversized-diff path
+  settles precisely the payloads the trust region exists to reject: 500 diffs from
+  a reflector echoing its input retained **250 MB** unreachable by any code path
+  (now 2 MB). It is bounded to `SETTLED_MAX_CARDS=256` / `SETTLED_MAX_CHARS=2M`,
+  newest kept. The docs claimed discarded evidence "settles back into the pool for
+  reuse"; they now say plainly that reuse is not implemented and point at the
+  SkillOpt example as the worked version of it.
 - **`evolve(asynchronous=True)` no longer drops knobs in silence.** `patience=`
   was accepted and never forwarded, so an async run ignored it entirely; it is
   now implemented in the async runtime, counting **merge sweeps** since there are
@@ -27,6 +36,12 @@ All notable changes to AgentDescent are documented here. The format follows
   cannot blow up the prompt; the template asks for a *general* rule so the
   reflector does not simply restate this task's answer; `show_meta=False` opts
   out. Custom `propose_template`s that lack the new field keep working.
+  Verified on a real two-step `deepseek-v4-flash` agent over 12 money word
+  problems scored in integer cents — a convention stated nowhere in the prompt:
+  the initial prompt gets **3/12**, a reflector blind to `meta` plateaus at 0.500
+  over 8 rounds, and one reading `meta` reaches **12/12 in a single round**. It
+  generalised rather than memorised, writing *"Express all monetary amounts as
+  integers representing cents, without dollar signs or decimal points."*
 - **`SingleSlot`** — the artifact *is* one value (a system prompt, an instruction)
   and each accepted proposal replaces it. The most common thing anyone evolves, and
   until now every caller wrote it themselves: three of the six shipped ports each
