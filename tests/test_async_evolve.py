@@ -5,6 +5,8 @@ monotonicity (the aggregator never regresses the head) and that the pipeline run
 and commits, rather than exact wall-clock outcomes.
 """
 
+import warnings
+
 import pytest
 
 from agentdescent.async_evolve import async_evolve
@@ -167,3 +169,49 @@ def test_target_reward_is_compared_against_the_real_reward():
                      target_reward=1.0, held_out_frac=0.5)
     assert r.final_reward == 0.0
     assert all(info.held_out_reward == 0.0 for info in r.history)
+
+
+class _SlowAgent:
+    """A backend whose rollouts outlast a short budget."""
+
+    def __init__(self, delay=0.6):
+        self.delay = delay
+
+    def solve(self, rendered, task):
+        import time as _t
+        _t.sleep(self.delay)
+        return "yes"
+
+    def propose(self, rendered, task, output, reward):
+        return task.meta["hint"]
+
+
+def test_shutdown_does_not_scale_with_worker_count():
+    """Joining 2s per worker plus 10s for the merger made the overshoot grow with
+    n_workers; the joins now share one bounded grace period."""
+    import time as _t
+
+    def elapsed(n_workers):
+        t0 = _t.time()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            async_evolve(_tasks(), lambda t, o: 1.0, agent=_SlowAgent(),
+                         strategy=AppendRules(), n_workers=n_workers,
+                         max_seconds=0.5, held_out_frac=0.5, shutdown_grace=0.5)
+        return _t.time() - t0
+
+    few, many = elapsed(2), elapsed(8)
+    # 4x the workers must not cost meaningfully more shutdown time
+    assert many < few + 3.0, f"shutdown scaled with workers: {few:.1f}s -> {many:.1f}s"
+
+
+def test_shutdown_grace_is_respected_and_warns():
+    import time as _t
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        async_evolve(_tasks(), lambda t, o: 1.0, agent=_SlowAgent(delay=2.0),
+                     strategy=AppendRules(), n_workers=2, max_seconds=0.3,
+                     held_out_frac=0.5, shutdown_grace=0.2)
+    assert any("still" in str(x.message) for x in w), \
+        "abandoning in-flight rollouts must be reported, not silent"

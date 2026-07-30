@@ -48,6 +48,12 @@ All notable changes to AgentDescent are documented here. The format follows
   instead of 4.7 s with byte-identical results.
 
 ### Fixed
+- **Async shutdown overshot the budget in proportion to `n_workers`** — each
+  worker was joined for 2s and the merger for 10s, so a 1s budget could return
+  16s later. The joins now share one bounded `shutdown_grace`, and abandoning an
+  in-flight rollout is reported rather than silent. `max_seconds` is documented
+  precisely: it bounds the production phase, after which one held-out scoring
+  pass still runs (memoised, so free when the head was already scored).
 - **`Task` was unhashable** despite being a frozen dataclass — the generated
   `__hash__` hit the mutable `meta` dict, so `set(tasks)` and `{task: ...}` raised
   `TypeError`. It now hashes and compares on `id`, which the engine already

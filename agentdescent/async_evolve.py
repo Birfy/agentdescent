@@ -69,6 +69,7 @@ def async_evolve(
     aggregator_factory=None,
     oracle_budget: int = 200,
     self_verify: bool = True,
+    shutdown_grace: float = 2.0,
     task_sampler: Optional["TaskSampler"] = None,
     on_round: Optional[Callable[[RoundInfo], None]] = None,
     verbose: bool = False,
@@ -100,8 +101,14 @@ def async_evolve(
         than this many cards sit un-merged. The second bound matters at cold
         start, before any commit has moved head.
     max_seconds:
-        Wall-clock budget for the production phase. Thread joins and the final
-        held-out scoring happen after it, so the call can return somewhat later.
+        Wall-clock budget for the **production phase only**. Two things still
+        happen after it, so budget for them: a bounded shutdown
+        (``shutdown_grace``, since an in-flight rollout cannot be cancelled) and
+        **one held-out scoring pass** to compute ``final_reward``. That pass is
+        memoised per (artifact, task), so it is free when the final head was
+        already scored by a sweep and costs a full held-out sweep of the backend
+        when it was not -- which is exactly the case when the budget was too
+        short for any sweep to finish.
     max_iters:
         Stop after this many worker rollouts in total (a budget, not a barrier).
     target_reward:
@@ -110,6 +117,11 @@ def async_evolve(
     self_verify:
         As in :func:`evolve`. ``False`` skips the extra per-trajectory rollout,
         which is what ports that judge candidates only on held-out want.
+    shutdown_grace:
+        Total seconds to wait for the worker and merger threads after the budget
+        expires -- shared across all of them, not per thread. An in-flight
+        rollout cannot be cancelled, so a slow backend can still overrun it; a
+        warning says so and work already merged is kept.
     task_sampler:
         Which task a worker takes next from its shard.
     on_round:
@@ -302,9 +314,21 @@ def async_evolve(
     while time.time() - t0 < max_seconds and not stop.is_set():
         time.sleep(0.02)
     stop.set()
+    # Bounded shutdown. Joining each worker for 2s and the merger for 10s made the
+    # overshoot scale with n_workers -- a 1s budget could return 16s later. The
+    # threads are daemons and the merger does a final drain, so share one short
+    # deadline across all the joins instead of paying it per thread.
+    shutdown_deadline = time.time() + shutdown_grace
     for t in workers:
-        t.join(timeout=2.0)
-    merger.join(timeout=10.0)
+        t.join(timeout=max(0.0, shutdown_deadline - time.time()))
+    merger.join(timeout=max(0.0, shutdown_deadline - time.time()))
+    if any(t.is_alive() for t in workers) or merger.is_alive():
+        # A rollout in flight cannot be cancelled; say so rather than hang.
+        warnings.warn(
+            f"async_evolve: {sum(t.is_alive() for t in workers)} worker(s) still "
+            f"running after the {shutdown_grace}s shutdown grace; their in-flight "
+            "rollouts are abandoned (results already merged are kept)",
+            RuntimeWarning, stacklevel=2)
 
     final = eng.ledger.snapshot(Ledger.DEV).get(eng.artifact_id)
     # Scoring the final artifact runs the agent too, so a dead backend must not
