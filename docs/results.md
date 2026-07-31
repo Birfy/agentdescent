@@ -4,34 +4,41 @@ Every empirical claim in these docs, with the setup that produced it. All runs u
 **`deepseek-v4-flash`** through `openai_compatible` unless stated otherwise, on
 each algorithm's own dataset.
 
-!!! warning "Read this before the table"
-    **Four of the six algorithm ports have no headroom to demonstrate.** DeepSeek
-    already scores 0.9–1.0 on FiNER-139, SearchQA and MGSM at these sample sizes,
-    so there is nothing for a skill to add — and the framework correctly commits
-    **nothing**, which is the result worth reporting.
+!!! note "Difficulty had to be set before any of this could be measured"
+    At their out-of-the-box settings, four of the six ports had **no headroom**:
+    `deepseek-v4-flash` already scored 0.9–1.0 on FiNER-139, SearchQA and MGSM, and
+    EvoSkill could not load its dataset at all. Every run correctly committed
+    nothing — the acceptance gate doing its job — which is the right behaviour and
+    a useless demonstration.
 
-    Two levers close that gap, both now shipped: ACE's difficulty knob
-    (`--top-k`, default raised 10 → 40) and
+    Each row below therefore says **which knob was turned**. Two are general:
+    a per-example difficulty setting (ACE's `--top-k`, ADAS's `--langs`), and
     [`select_hard`](dataloader.md#turning-a-saturated-benchmark-into-one-with-headroom-select_hard),
-    which keeps the items a baseline gets wrong (`--hard` on SkillOpt).
+    which keeps the items a baseline gets wrong (`--hard`).
 
-    That is the acceptance gate doing its job. A naive implementation would happily
-    accumulate plausible-sounding "improvements" against a flat signal; this one
-    rejects them, and `result.outcomes()` says `below-threshold` rather than
-    pretending. Skill evolution shows value exactly where there is a *gap* —
-    a format the model does not follow, a convention it cannot guess, a tool it is
-    not using.
+    Numbers from a hard subset are **not comparable** with numbers from the full
+    split. Both are given where both were run.
 
 ## The algorithm ports
 
-| Algorithm | Dataset | Held-out, before → after | Cost | What happened |
+| Algorithm | Dataset | Difficulty setting | Held-out, before → after | Cost |
 |---|---|---|---|---|
-| **[GEPA](algo-gepa.md)** | HotpotQA | Pareto EM **0.500 → 0.600**; **test EM 0.700** | 80 calls, 10 min | Real lift. Learned to connect multi-paragraph evidence and answer with a short phrase |
-| **[EvoSkill](algo-evoskill.md)** | FinQA (ungated stand-in) | val **0.487 → 0.573**; **test 0.617** | 115 calls, 4 min | OfficeQA is HF-gated; the old fallback was a 12-row sample that always read 0.000. FinQA is the same shape at 60 items with ~4 KB docs. On real OfficeQA with a tool-using agent: **58.0% → 65.7%** |
-| **[ACE](algo-ace.md)** | FiNER-139 | 0.875 val / **0.895 test** at `--top-k 40` (now the default); 1.000 → 1.000 at 10 | 174 calls, 8 min | Difficulty is the concept count. At 40 there is headroom, though this 5-round / 2-worker run curated no bullet; a longer 8-round run reached 95.7% |
-| **[SkillOpt](algo-skillopt.md)** | SearchQA | 0.900 → 0.900 | 54 calls, 5 min | Saturated. The strict gate saw one proposed edit and **rejected it**: 0 accepted / 1 rejected. Use `--hard` for a subset with signal |
-| **[ADAS](algo-adas.md)** | MGSM | 1.000 from round 0 | ~8 min/generation | Saturated; rejected everything (`+0/-1`). Stopped after 2 of 4 generations — the answer was settled |
-| **[DGM](algo-dgm.md)** | *surrogate* | resolve-rate **0.000 → 0.300**; test 0.200 | offline | The objective is a capability-cover surrogate — real DGM runs SWE-bench in Docker. The archive, selection and staged escalation are faithful |
+| **[GEPA](algo-gepa.md)** | HotpotQA | none needed | Pareto EM **0.500 → 0.600**; test EM **0.700** | 80 calls, 10 min |
+| **[ACE](algo-ace.md)** | FiNER-139 | `--top-k 120` (121 tasks) | val **0.844 → 0.889**; test **0.884**, 2 bullets | 403 calls, ~20 min |
+| **[SkillOpt](algo-skillopt.md)** | SearchQA | `--hard` (69 of 280 kept) | val hard-EM **0.250 → 0.500**; test **0.450** | 6 steps |
+| **[EvoSkill](algo-evoskill.md)** | FinQA (ungated stand-in) | `--dataset finqa` | val **0.487 → 0.573**; test **0.617**, 1 skill | 115 calls, 4 min |
+| **[DGM](algo-dgm.md)** | *surrogate* | none needed | resolve-rate **0.000 → 0.300**; test 0.200 | offline |
+| **[ADAS](algo-adas.md)** | MGSM | `--hard --langs bn,sw,te,th` | *(see page)* | — |
+
+### What they were before the difficulty was set
+
+The same examples at their previous defaults, for contrast:
+
+| | before | after |
+|---|---|---|
+| ACE at `--top-k 10` | 1.000 → 1.000, 0 bullets | `--top-k 120`: 0.844 → **0.889** |
+| SkillOpt, full split | 0.900 → 0.900, 0 edits accepted | `--hard`: 0.250 → **0.500** |
+| EvoSkill, 12-row gated fallback | 0.000 → 0.000, 0 skills | FinQA: 0.487 → **0.573** |
 
 ## The one-call path
 

@@ -58,18 +58,24 @@ In [`examples/skillopt_skill_training.py`](https://github.com/Birfy/agentdescent
 
 `--steps 5 --provider openai --model deepseek-v4-flash`:
 
-| | hard-EM |
-|---|---|
-| val, before → after | 0.900 → **0.900** |
-| test (held out, never seen by the gate) | 0.900 |
+| | full split | `--hard` subset |
+|---|---|---|
+| items | 120 train / 80 val / 80 test | 29 / 20 / 20 (69 of 280 kept) |
+| val hard-EM, before → after | 0.900 → 0.900 | **0.250 → 0.500** |
+| test hard-EM | 0.900 | **0.450** |
+| edits accepted / rejected | 0 / 1 | 3 / 3 |
 
-54 model calls, ~5 min. **Edits accepted / rejected: 0 / 1.**
+On the full split the baseline already answers 9 of 10, so there is nothing for a
+skill document to add — and the strict gate refused the one edit proposed rather
+than accepting a change that did not beat it. Correct, and uninformative.
 
-The baseline already answers 9 of 10, so there is nothing for a skill document to
-add — and the strict gate refused the one edit that was proposed rather than
-accepting a change that did not beat it. That is the intended behaviour on a
-saturated benchmark, and it is the failure mode a naive implementation has: it
-would have accumulated a plausible-sounding rule against a flat signal.
+`--hard` keeps the 69 questions of 280 that the seed skill gets **wrong**, and on
+those the skill document doubles hard-EM. Note the gate stayed strict there too:
+3 of 6 proposed edits were still rejected.
+
+!!! warning "The two columns are different benchmarks"
+    0.250 is not "worse than 0.900" — it is the score on a subset selected for
+    being unsolved. Report which one you used.
 
 ## Making it measurable — `--hard`
 

@@ -591,6 +591,11 @@ def main() -> None:
                    help="run barrier-free (async_evolve)")
     p.add_argument("--async-ratio", type=int, default=3, help="staleness lag budget")
     p.add_argument("--max-seconds", type=float, default=60.0, help="async wall-clock budget")
+    p.add_argument("--hard", action="store_true",
+                   help="keep only items a plain single call gets wrong -- MGSM is "
+                        "already ~1.000 for a strong model, so the search has no "
+                        "gradient. Those are exactly the items where agentic "
+                        "structure (CoT, debate, self-refine) can help")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--yes", action="store_true")
     args = p.parse_args()
@@ -631,6 +636,23 @@ def main() -> None:
     usage = Usage()                       # what the run actually costs
     completion = (openai_compatible(model=args.model, usage=usage) if args.provider in ("openai", "glm")
                   else claude(model=args.model, usage=usage))
+    if args.hard:
+        # A plain, structure-free call is the right baseline here: what ADAS
+        # searches over IS structure, so the items worth keeping are the ones a
+        # single call cannot already do.
+        from agentdescent.dataloader import select_hard
+
+        def _direct(ex):
+            q, a = ex
+            out = completion(f"{q}\n\nAnswer with the final number only.")
+            digits = "".join(c for c in (out or "") if c.isdigit() or c in ".-")
+            return 1.0 if score_mgsm(a, digits.strip(".-") or None) else 0.0
+
+        pool = select_hard(build_examples(langs, args.per_lang, seed=args.seed), _direct)
+        ds = split_dataset(pool, ratios=(0.5, 0.25, 0.25), seed=args.seed, name="MGSM")
+        ntr, nva, nte = ds.sizes()
+        print(f"Hard mode: {ntr} train / {nva} val / {nte} test  "
+              f"(items a single call answers incorrectly)")
     try:
         completion("Reply with the single word: ok")
     except Exception as e:  # noqa: BLE001
