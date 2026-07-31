@@ -54,6 +54,23 @@ In [`examples/skillopt_skill_training.py`](https://github.com/Birfy/agentdescent
 | **`LRScheduler`** | (edit budget) | the integer "learning-rate" cap on edits per step (`constant`/`linear`/`cosine`) |
 | `make_propose(...)` | `propose=` | the analyst — one failed rollout → a budget-capped edit patch |
 
+## Measured — SearchQA with DeepSeek
+
+`--steps 5 --provider openai --model deepseek-v4-flash`:
+
+| | hard-EM |
+|---|---|
+| val, before → after | 0.900 → **0.900** |
+| test (held out, never seen by the gate) | 0.900 |
+
+54 model calls, ~5 min. **Edits accepted / rejected: 0 / 1.**
+
+The baseline already answers 9 of 10, so there is nothing for a skill document to
+add — and the strict gate refused the one edit that was proposed rather than
+accepting a change that did not beat it. That is the intended behaviour on a
+saturated benchmark, and it is the failure mode a naive implementation has: it
+would have accumulated a plausible-sounding rule against a flat signal.
+
 ## Run it
 
 ```bash

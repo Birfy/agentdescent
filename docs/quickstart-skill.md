@@ -108,7 +108,7 @@ Early stopping is on so a small dataset does not buy eight rounds of nothing.
 ## When to drop to `evolve()`
 
 The moment you want something this does not express — a different artifact shape
-([`strategy=`](evolution.md#2-the-evolution-rule--strategy)), a custom optimizer
+([`strategy=`](evolution.md#2-the-evolution-rule-strategy)), a custom optimizer
 ([`aggregator_factory=`](aggregator.md)), a multi-step agent as `run=`. You can
 also get there gradually: every one of those is just a keyword argument here,
 because they pass straight through.

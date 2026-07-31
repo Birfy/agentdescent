@@ -61,6 +61,28 @@ In [`examples/gepa_prompt_evolution.py`](https://github.com/Birfy/agentdescent/b
 | **`pareto_frontier` / `pareto_select`** | (pure, unit-tested) | Algorithm 2: per-instance best → union of winners → dominance pruning → frequency-weighted sampling |
 | `gepa_agent()` | `agent=` | Generator + reflective-mutation actor (rewrites the instruction from trace + NL feedback) |
 
+## Measured — HotpotQA with DeepSeek
+
+`--rounds 5 --fetch 40 --provider openai --model deepseek-v4-flash`:
+
+| | exact match |
+|---|---|
+| seed instruction, on the Pareto set | 0.500 |
+| best candidate found | **0.600** |
+| **test set** (held out, never seen by the optimizer) | **0.700** |
+
+4 candidates explored, 80 model calls, ~10 min wall-clock. The instruction it
+found:
+
+> *"Read the context carefully and connect information across multiple paragraphs
+> to identify who matches all the clues in the question. Then give only the final
+> answer as a short phrase, without explanation."*
+
+Both halves of that are real HotpotQA failures: multi-hop evidence, and a model
+that answers a short-span question with a paragraph. This is the one shipped port
+whose benchmark still has headroom for `deepseek-v4-flash` — see
+[Measured results](results.md) for why the others do not.
+
 ## Run it
 
 ```bash

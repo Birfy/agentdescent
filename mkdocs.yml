@@ -33,6 +33,7 @@ theme:
 nav:
   - Home: index.md
   - Quickstart — dataset to skill: quickstart-skill.md
+  - Measured results: results.md
   - Architecture: architecture.md
   - Concepts: concepts.md
   - The evolve method: evolution.md
@@ -52,7 +53,7 @@ nav:
     - SkillOpt — skill-document training: algo-skillopt.md
     - ADAS — meta agent search (harness): algo-adas.md
     - DGM — Darwin Gödel Machine (harness): algo-dgm.md
-  - Usage & extending: usage.md
+  - Install, run, extend: usage.md
 
 markdown_extensions:
   - admonition

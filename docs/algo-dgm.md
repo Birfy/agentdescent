@@ -57,6 +57,25 @@ In [`examples/dgm_self_improve.py`](https://github.com/Birfy/agentdescent/blob/m
 | **`dgm_parent_weights` / `choose_selfimproves`** | (selection) | the exact DGM rule `p_i ∝ sigmoid(10·(score−0.5)) · 1/(1+children_i)` |
 | `propose` + `make_surrogate_evaluator` | `propose=` / objective | add the most-needed capability; the transparent surrogate objective (swap in a real Docker harness via `evaluate_fn`) |
 
+## Measured — surrogate objective
+
+`--generations 4 --provider openai --model deepseek-v4-flash`:
+
+| | resolve rate |
+|---|---|
+| val, before → after | 0.000 → **0.300** |
+| test (held out, never seen by selection) | 0.200 |
+
+Archive: 4 agents (keep-all). The best lineage reached generation 3 with
+capabilities `context-retrieval`, `dependency-resolver`, `diff-minimization`,
+`regression-test-runner`.
+
+!!! warning "This is the surrogate, not SWE-bench"
+    The objective is a capability-cover stand-in; real DGM evaluates on SWE-bench
+    Verified inside Docker, which this example does not run. What is faithful is
+    the **archive, the selection rule and the staged escalation** — the numbers
+    above measure those mechanics, not coding ability.
+
 ## Run it
 
 ```bash

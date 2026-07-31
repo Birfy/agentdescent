@@ -57,6 +57,20 @@ In [`examples/adas_meta_agent_search.py`](https://github.com/Birfy/agentdescent/
 | **`Interpreter`** + **`seed_archive`** | (agent substrate) | the safe control-flow DSL (`cot`/`cot_sc`/`reflexion`/`debate`/`step_back`/`role_assignment`/`ensemble`) and the seven MGSM seeds |
 | **`dgm_parent_weights`** | `--select dgm` | DGM's sigmoid×novelty rule as an alternative archive-conditioning strategy |
 
+## Measured — MGSM with DeepSeek
+
+`--generations 4 --provider openai --model deepseek-v4-flash`: the seed archive
+already scores **1.000** on the sampled MGSM items, so Meta Agent Search has no
+gradient to follow and the archive merge accepts nothing (`+0/-1` in both
+generations measured; the run was stopped after two, since the answer was not
+going to change).
+
+Saturated, like most of the shipped ports at these sample sizes — see
+[Measured results](results.md). ADAS is also the most expensive example to run
+(the searched agents are multi-step, so one generation is hundreds of model calls);
+raise `--per-lang` and use a weaker base model if you want a benchmark with room
+to improve.
+
 ## Run it
 
 ```bash
