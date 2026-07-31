@@ -64,8 +64,9 @@ python -m examples.rq2_staleness
 Faithful ports of the latest skill- and harness-self-evolution algorithms — ACE,
 GEPA, EvoSkill, SkillOpt, ADAS, DGM (see
 [the catalog](self-evolution-examples.md)). Each loads a real benchmark through
-the [`agentdescent.dataloader`](dataloader.md) data layer and runs offline with
-`--dry-run`:
+the [`agentdescent.dataloader`](dataloader.md) data layer. `--dry-run` previews
+the dataset and estimates the API cost **without calling a model** — note that it
+still downloads the benchmark, and does not run the evolution loop:
 
 ```bash
 python -m examples.ace_context_evolution --dry-run     # ACE   / FiNER-139
