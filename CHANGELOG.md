@@ -16,7 +16,23 @@ All notable changes to AgentDescent are documented here. The format follows
   Measured: val **0.487 → 0.573**, held-out **test 0.617**, one skill discovered.
 - **`select_hard(items, score)`** — keep the items a baseline gets wrong, turning a
   saturated benchmark into one with headroom without swapping the dataset (which
-  would break fidelity to the paper being ported). Wired into SkillOpt as `--hard`.
+  would break fidelity to the paper being ported). Wired into SkillOpt and ADAS as
+  `--hard`. It refuses to return an unusable split: on a near-saturated benchmark
+  the survivors can be a handful, and 3 items either measure nothing or crash the
+  engine's train/held-out split, so it tops up to `min_items` and warns with the
+  fraction of the pool that was already solved.
+
+### Measured, after setting the difficulty
+- With difficulty set, every port that has a gap now shows one. Full setups and
+  before/after on the [results page](docs/results.md):
+
+  | | before (default settings) | after |
+  |---|---|---|
+  | ACE, FiNER-139 | 1.000 → 1.000 at `--top-k 10` | `--top-k 120`: **0.844 → 0.889**, test 0.884 |
+  | SkillOpt, SearchQA | 0.900 → 0.900, 0 edits accepted | `--hard`: **0.250 → 0.500**, test 0.450 |
+  | EvoSkill | 0.000 → 0.000 (12-row gated fallback) | FinQA: **0.487 → 0.573**, test 0.617 |
+  | GEPA, HotpotQA | — | **0.500 → 0.600**, test 0.700 |
+  | DGM, surrogate | — | **0.000 → 0.300** |
 - **`eval_concurrency=`** — how many held-out tasks a gate scores at once, the
   merge half of the run's parallelism and independent of `n_workers`. It existed
   only as a default on a private dataclass, which made it both unreachable and

@@ -123,9 +123,35 @@ def test_sampler_learns_from_recorded_outcomes_during_a_run():
 
 def test_select_hard_keeps_only_what_the_baseline_fails():
     from agentdescent.dataloader import select_hard
-    items = list(range(20))
+    items = list(range(40))
     hard = select_hard(items, lambda i: 1.0 if i % 2 == 0 else 0.0)
     assert hard == [i for i in items if i % 2]
+
+
+def test_select_hard_tops_up_rather_than_returning_an_unusable_split():
+    """The point is a near-saturated benchmark, so survivors can be a handful.
+
+    Measured: on MGSM, fewer than 12 of 160 items failed -- which splits into a
+    3-item validation set, or crashes the engine's train/held-out split outright.
+    """
+    import warnings
+
+    from agentdescent.dataloader import select_hard
+
+    items = list(range(40))
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        out = select_hard(items, lambda i: 0.0 if i < 3 else 1.0)
+    assert len(out) == 12                       # the 3 failures, topped up
+    assert out[:3] == [0, 1, 2]                 # failures first
+    assert any("already solved" in str(x.message) for x in w), "topped up silently"
+
+
+def test_select_hard_min_items_can_be_switched_off():
+    from agentdescent.dataloader import select_hard
+    items = list(range(40))
+    out = select_hard(items, lambda i: 0.0 if i < 3 else 1.0, min_items=0)
+    assert out == [0, 1, 2]
 
 
 def test_select_hard_returns_everything_when_nothing_fails():

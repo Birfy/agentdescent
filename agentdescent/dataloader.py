@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+import warnings
 import random
 import re
 import urllib.parse
@@ -267,7 +268,7 @@ def load_gated_hf(dataset: str, split: str, *,
 
 def select_hard(items: Sequence[Any], score: Callable[[Any], float],
                 keep: Optional[int] = None, threshold: float = 0.999,
-                concurrency: int = 8) -> List[Any]:
+                concurrency: int = 8, min_items: int = 12) -> List[Any]:
     """Keep the items a baseline gets **wrong** -- headroom, from a saturated set.
 
     A benchmark a model already solves cannot demonstrate a skill: there is
@@ -297,4 +298,16 @@ def select_hard(items: Sequence[Any], score: Callable[[Any], float],
     hard = [it for it, sc in zip(items, scores) if sc < threshold]
     if not hard:
         return items                      # nothing failed: caller keeps the full set
+    if len(hard) < min_items:
+        # The whole point is a benchmark that is nearly saturated, so the survivors
+        # can be a handful -- and a handful splits into a 2-item validation set that
+        # measures nothing, or crashes the engine outright. Say so, and top up with
+        # the easiest items rather than returning something unusable.
+        warnings.warn(
+            f"select_hard kept only {len(hard)} of {len(items)} items "
+            f"({1 - len(hard)/len(items):.0%} of the pool is already solved). "
+            f"Topping up to {min_items}; pass a larger pool for a subset that is "
+            f"entirely hard.", RuntimeWarning, stacklevel=2)
+        rest = [it for it, sc in zip(items, scores) if sc >= threshold]
+        hard = hard + rest[:min_items - len(hard)]
     return hard[:keep] if keep else hard
