@@ -107,7 +107,10 @@ All notable changes to AgentDescent are documented here. The format follows
   caller rather than each call site.
 - **ACE's difficulty default demonstrated nothing.** `--top-k` is the difficulty
   knob and defaulted to 10, where `deepseek-v4-flash` scores **1.000** and there is
-  nothing to learn. Raised to 40, where it scores 0.875.
+  nothing to learn. Raised to **120**, the first value that actually demonstrates
+  the algorithm: at 40 there is headroom (0.850) but no bullet beats the baseline,
+  so the gate rejects everything; at 120 two bullets survive and val goes
+  **0.844 → 0.889**.
 - **The merge gate was serial, and it dominated the run.** `EvolvingArtifact.score`
   summed a generator, so every held-out evaluation ran its tasks one at a time --
   and the aggregator calls it once per candidate, so a round paid N x held-out

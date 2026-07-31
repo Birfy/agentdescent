@@ -84,16 +84,11 @@ are easy to get wrong:
 | `"contains"` | the gold appears anywhere in the output | forgiving, and the easiest to fool: gold `"2"` is inside `"12"` |
 | `"numeric_close"` | last number within a relative tolerance | for rounded answers |
 
-!!! warning "A dataset's answer column is often not the answer"
-    GSM8K's `answer` is the whole worked solution ending in `#### 72`. Parsing
-    that as a bare number fails — and it fails **silently**: every item scores 0,
-    which reads as a hopeless model rather than a scorer mismatch. Measured on
-    real GSM8K, this was the difference between a reported **0/7** and the true
-    **7/7**.
-
-    `last_number` therefore reads the gold the same way it reads the output, so
-    `"72"`, `"#### 72"` and `"The answer is 72."` all work. A gold with no number
-    in it at all now raises instead of scoring zero.
+!!! tip "A dataset's answer column is often not just the answer"
+    GSM8K's `answer` is the whole worked solution, ending in `#### 72`.
+    `last_number` reads the gold the same way it reads the output, so `"72"`,
+    `"#### 72"` and `"The answer is 72."` all match. A gold with no number in it
+    raises, rather than scoring every item zero.
 
 ## What it chooses for you
 
