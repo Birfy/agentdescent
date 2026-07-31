@@ -176,10 +176,18 @@ class ParetoAggregator(AggregatorProtocol):
 
     Keeps a **pool** of candidate instructions (states), each with its per-
     instance score row over ``D_pareto`` (= the verifier's held-out set). Each
-    round it admits the round's mutated candidates **only if they improved on
-    their minibatch** (GEPA Alg. 1: "if sigma' improves"), then samples the next
+    round it admits the round's mutated candidates that did not regress on their
+    feedback sample (GEPA Alg. 1: "if sigma' improves"), then samples the next
     parent from the Pareto frontier and makes it the dev head, so `evolve()`
-    mutates the illumination-selected parent next round."""
+    mutates the illumination-selected parent next round.
+
+    **Documented deviation: the feedback minibatch has size 1.** GEPA evaluates a
+    child on a minibatch of size *b* and compares means; `evolve()` gives one
+    rollout per worker per round, so the comparison is a single Bernoulli draw.
+    The admission test is therefore "did not regress" rather than "improved" --
+    see the note at the gate. Everything downstream (Algorithm 2's per-instance
+    frontier, domination pruning, win-frequency sampling) is scored on the full
+    ``D_pareto`` row and is unaffected."""
 
     def __init__(self, ledger: Ledger, verifier, audit, config, policy,
                  artifact_id: str = "gepa_prompt", seed: int = 0):
@@ -237,8 +245,22 @@ class ParetoAggregator(AggregatorProtocol):
         cards, self._cards = self._cards, []
         admitted = 0
         for card in cards:
-            # GEPA accepts a child into the pool only if its minibatch improved.
-            if card.before_after_delta <= 0:
+            # GEPA Alg. 1 admits a child whose score on the feedback minibatch is
+            # not worse than its parent's. Here that "minibatch" has size **1**:
+            # `evolve()` rolls out one task per worker per round, so
+            # `before_after_delta` is a single-instance measurement, and for a
+            # binary reward like HotpotQA EM it is exactly {-1, 0, +1}.
+            #
+            # So this gate must not be `> 0`. That demanded the one sampled
+            # instance flip wrong->right -- and it is the instance the mutation was
+            # generated *from*, so a prompt that helps broadly but does not fix that
+            # particular question was thrown away before it was ever scored.
+            # Rejected candidates never enter `self.states`, never get a
+            # `_score_row`, and so can never reach the Pareto frontier -- which is
+            # precisely the "complementary specialist" the frontier exists to keep
+            # alive. `>= 0` filters obvious regressions and leaves the selection to
+            # domination pruning, which is what illumination is supposed to do.
+            if card.before_after_delta < 0:
                 continue
             candidate = head.apply(card.diff)
             before = len(self.states)

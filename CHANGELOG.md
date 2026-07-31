@@ -7,6 +7,51 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **The DGM port ran a staged-eval rung upstream does not have.** `DGM_outer.py`
+  passes exactly two subsets to each self-improve attempt -- `small` (10) and
+  `medium` (50), one `test_more_threshold = 0.4` -- and `big.json` (140) belongs
+  to the separate full-evaluation path, gated by the *archive-relative*
+  `get_full_eval_threshold(...)`. The port ran `big` as a third rung on the same
+  0.4, which changed what `agent.score` means: a high scorer's became a
+  140-instance number while a low scorer's stayed a 10-instance one, and both then
+  fed the same `dgm_parent_weights` sigmoid. The example's own docstring described
+  upstream correctly ("big=140 for top agents") while its code did something else.
+- **The GEPA port's admission test was a minibatch of one.** GEPA's Algorithm 1
+  compares a child against its parent on a feedback minibatch of size *b*;
+  `evolve()` rolls out one task per worker per round, so `before_after_delta` is a
+  single-instance measurement -- exactly `{-1, 0, +1}` for a binary reward like
+  HotpotQA EM. Gating on `> 0` therefore demanded that the one sampled instance
+  flip wrong-to-right, and it is the instance the mutation was generated *from*.
+  A prompt that helps broadly but does not fix that particular question was
+  discarded before it was ever scored: rejected candidates never enter the pool,
+  never get a `_score_row`, and so can never reach the Pareto frontier -- which is
+  precisely the complementary specialist the frontier exists to keep alive. Now
+  `>= 0`, which filters obvious regressions and leaves selection to domination
+  pruning. Algorithm 2 itself is scored on the full `D_pareto` row and is
+  unaffected.
+- **EvoSkill's frontier bound was 3, upstream's is 5**
+  (`src/registry/manager.py:379`), including the `--frontier` default.
+- **ADAS seed name.** `Self-Consistency with CoT` is
+  `Self-Consistency with Chain-of-Thought` in `get_init_archive()`.
+- **Upstream citations pointed at paths that do not exist.** EvoSkill's
+  `runner.py:79` / `:319` are `src/loop/runner.py`, and `registry/manager.py` is
+  `src/registry/manager.py`. The **line numbers were exact** -- `:79` really is the
+  tolerance ladder and `:319` really is the 0.8 pass/fail -- so only the prefix was
+  missing, but it made the citations un-followable.
+
+### Changed
+- ADAS's bootstrap resample count (2 000 against upstream's 100 000) is now named
+  as a deliberate speed trade in the docstring and on the fidelity page, rather
+  than left for a reader to diff against the repo.
+
+### Added
+- `tests/test_port_fidelity.py` pins the constants and control flow that have an
+  exact upstream source: DGM's selection weights, subset sizes and where the
+  ladder stops; ADAS's seven MGSM seeds and the documented resample deviation;
+  EvoSkill's tolerance ladder, pass threshold, weight formula and frontier bound
+  (a top-K leaderboard, not the Pareto front the paper's abstract describes).
+
+### Fixed
 - **The L1/L2 boundary was defined three times, with two different numbers.**
   `governance.classify` drew it at `FAST_MAX = 0.30`; the aggregator's staleness
   tolerance re-derived it as `blast_radius > 0.5` and the audit gate as

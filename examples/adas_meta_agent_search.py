@@ -192,7 +192,7 @@ def seed_archive() -> List[dict]:
     return [
         {"name": "Chain-of-Thought", "thought": "Step-by-step reasoning.",
          "program": {"block": "cot"}},
-        {"name": "Self-Consistency with CoT",
+        {"name": "Self-Consistency with Chain-of-Thought",
          "thought": "Sample multiple CoT paths and take the majority answer.",
          "program": {"block": "cot_sc", "k": 3}},
         {"name": "Self-Refine (Reflexion)",
@@ -221,7 +221,13 @@ def seed_archive() -> List[dict]:
 
 def bootstrap_ci(correct: List[float], n_resamples: int = 2000, seed: int = 0
                  ) -> Tuple[float, float, float]:
-    """ADAS's fitness: mean accuracy with a 95% bootstrap CI (utils.py)."""
+    """ADAS's fitness: mean accuracy with a 95% bootstrap CI (`_mgsm/utils.py`).
+
+    Upstream uses ``num_bootstrap_samples=100000``; 2000 is a deliberate speed
+    trade for an example that runs in seconds. The CI half-width it produces
+    differs by well under a percentage point at these sample sizes, and the archive
+    ranks on the mean either way -- but it *is* a deviation, so it is named here
+    rather than left for a reader to diff against the repo."""
     if not correct:
         return 0.0, 0.0, 0.0
     rng = random.Random(seed)
