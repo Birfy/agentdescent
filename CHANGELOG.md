@@ -7,6 +7,36 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **The measured worker-retirement fix existed in only one of the two async
+  pipelines.** `async_evolve` retires a worker only while *no* worker has ever
+  succeeded, with a comment recording why: keyed on a worker's own history, an
+  intermittent backend retires whoever loses its first few rolls, and since every
+  worker shares one backend, shedding workers cannot relieve the throttling and
+  only guarantees the run dies -- measured at a 1-in-3 call failure rate as all
+  three workers retiring in 22s with nothing learned. `AsyncAgentDescent` still
+  had exactly the blanket rule that paragraph describes. Ported, along with
+  `retired_workers` so a run finishing at a fraction of its concurrency is visible.
+- **The reference merger was still a single point of failure.** It ended the run
+  on its first exception -- and it *calls the backend* every sweep, since it scores
+  held-out. `async_evolve` removed that pattern after measuring a run end with 0
+  sweeps while the workers were healthy; the same tolerance now applies here.
+
+### Added
+- **Backpressure on the general async path** (`async_evolve(stall_patience=)`).
+  `concepts.md` documents this guard as what keeps a mismatched `async_ratio > α`
+  from livelocking under Guarded -- workers propose against a snapshot too old for
+  the policy to accept, every card is discarded, head never moves, so the lag
+  budget never triggers a refresh either. It existed only in the reference
+  runtime, which is not the one a real workload reaches. `result.forced_refreshes`
+  counts how often it fired.
+- **Duration-aware straggler detection on the general async path**
+  (`async_evolve(duration_estimator=, straggler_factor=)` →
+  `result.stragglers`). The design's L-traj mechanism was reachable only through
+  `AsyncAgentDescent`, which accepts nothing but a `TaskUniverse`. Detection only:
+  resuming a partial rollout would need it to expose its turns, and
+  `run(rendered, task) -> output` is opaque.
+
+### Fixed
 - **`examples/rq2_staleness` swept a parameter the run never reads.** It varied
   `alpha_head`, which `Aggregator._alpha_for` consults only for an L1 artifact,
   while the reference `RouterSkill` is `blast_radius=0.2` -- so the live knob was

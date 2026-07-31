@@ -135,11 +135,23 @@ the Aggregator calls at steps 1–3 and 5 (cheap) and at step 4 (oracle, budgete
     It does its own sharding, keeps its own intake buffer, and selects tasks via a
     [`task_sampler`](evolution.md#task-selection-which-rollout-to-spend).
 
-    So two capabilities described below are, today, reachable **only** through the
-    reference stack: UCB task-cluster leasing (§5.2 / L-task) and partial-rollout
-    resume (§5.1 / L-traj). `evolve()`'s `task_sampler` covers the L-task idea at
-    task granularity; there is no `evolve()`-level resume yet. This split is a
-    known wart, not a design intent — it is tracked for consolidation.
+    They are still **two implementations**, which is a known wart rather than a
+    design intent. What no longer differs is *behaviour*: the worker-retirement
+    heuristic and the merger's error tolerance were measured, fixed in
+    `async_evolve`, and have been ported back — so a resilience bug cannot live in
+    one and not the other. Backpressure (the guard that keeps `async_ratio > α`
+    from livelocking under Guarded) and duration-aware straggler detection (§5.1 /
+    L-traj) are reachable from `async_evolve` too, via `stall_patience=` and
+    `duration_estimator=`, and reported as `result.forced_refreshes` /
+    `result.stragglers`.
+
+    One capability remains reference-only: **UCB task-cluster leasing** (§5.2 /
+    L-task), because it partitions a `TaskUniverse` into clusters and `evolve()`
+    takes a flat task list. `evolve()`'s
+    [`task_sampler`](evolution.md#task-selection-which-rollout-to-spend) covers the
+    same idea at task granularity. Partial-rollout **resume** is unimplemented on
+    both paths — `run(rendered, task) -> output` is opaque, so there is no
+    continuation state to check point; both now *detect* and count stragglers.
 
 AgentDescent separates *what to merge* (the Aggregator, identical in both) from
 *when workers and the aggregator run relative to each other* (the runtime).

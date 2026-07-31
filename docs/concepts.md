@@ -141,7 +141,10 @@ more than `async_ratio` versions ahead of it.
 
 A **backpressure** guard forces a global sync if the pipeline stalls (evidence
 keeps arriving but nothing commits) — otherwise a mismatched `async_ratio > α`
-would livelock under the Guarded policy.
+would livelock under the Guarded policy: workers keep proposing against a
+snapshot too old for the policy to accept, every card is discarded, head never
+moves, and so the lag budget never triggers a refresh either. `stall_patience=`
+on both async paths; `result.forced_refreshes` counts how often it fired.
 
 Observed trade-off at `async_ratio=4` (all three converge to 1.000):
 
@@ -201,7 +204,10 @@ mechanism:
 
 - **L-traj (system layer)** — heavy-tailed rollout durations. Handled today by
   the duration estimator + LPT dispatch and by **detecting** stragglers: a
-  rollout that overruns its prediction is flagged into `ResumeQueue` and counted.
+  rollout that overruns its prediction is counted. Reachable from `evolve()` /
+  `async_evolve` as `duration_estimator=` → `result.stragglers`; it used to exist
+  only in the reference runtime, which accepts nothing but the synthetic domain,
+  so the mechanism was unreachable from the API a real workload uses.
   **The resume half is not implemented** — nothing pops that queue, and the
   recorded item carries no continuation state, because a resumable rollout would
   have to expose its turns and `run(rendered, task) -> output` is opaque. The
