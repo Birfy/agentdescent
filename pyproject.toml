@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentdescent"
-version = "0.2.0"
+dynamic = ["version"]
 description = "Gradient descent, but the parameters are agents — a parallel, asynchronous framework for self-evolving agents (skills, prompts, harnesses)"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -24,6 +24,12 @@ docs = ["mkdocs-material>=9.5"]
 
 [project.urls]
 Homepage = "https://github.com/Birfy/agentdescent"
+
+[tool.setuptools.dynamic]
+# Single-sourced: agentdescent/__init__.py is the only place the version
+# lives. It used to be duplicated here, and drifted -- __version__ said
+# 0.7.0 while every wheel, the PyPI page and the README badge said 0.2.0.
+version = { attr = "agentdescent.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["agentdescent*"]

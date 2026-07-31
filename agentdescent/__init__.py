@@ -12,6 +12,8 @@ it implements.
 
 from .evolvable import (
     Contract,
+    ContractError,
+    stable_hash,
     Diff,
     EvidenceCard,
     Evolvable,
@@ -19,7 +21,9 @@ from .evolvable import (
     vv_dominates,
     vv_staleness,
 )
-from .ledger import Ledger, Snapshot, CASConflict, ContractRejected
+from .ledger import (
+    Ledger, Snapshot, CASConflict, ContractRejected, GitError, LedgerFailure,
+)
 from .verifier import ThreeLayerVerifier, VerifierBudget
 from . import backends, dataloader          # submodules: agentdescent.dataloader.hf_rows(...)
 from .dataloader import Dataset, split_dataset
@@ -33,9 +37,17 @@ from .scheduler import (
     fifo_makespan,
     lpt_schedule,
 )
-from .governance import Layer, classify, assert_mutable, GovernanceError, L1SerialGate
+from .governance import (
+    FAST_MAX, FROZEN_IDS, Layer, classify, assert_mutable, GovernanceError,
+    L1SerialGate,
+)
 from .aggregator import (
     Aggregator,
+    AggregatorContractError,
+    MergeOutcome,
+    diffs_conflict,
+    diffs_contradict,
+    fuse_diffs,
     AggregatorConfig,
     AggregatorProtocol,
     AggregatorFactory,
@@ -80,7 +92,10 @@ from .evolution import (
     KeyedRules,
     SingleSlot,
     EvolutionResult,
+    ProposalContractError,
     RewardContractError,
+    SOLVED,
+    tasks_from,
     RoundInfo,
     evolve,
     claude_agent,
@@ -98,6 +113,7 @@ from .parallel import (
     TensorParallelMerge,
     PipelineChain,
     SectionViolation,
+    assign_key_sections,
     assign_sections,
     section_of,
     shard_round_robin,
@@ -107,6 +123,8 @@ __version__ = "0.7.0"
 
 __all__ = [
     "Contract",
+    "ContractError",
+    "stable_hash",
     "Diff",
     "EvidenceCard",
     "Evolvable",
@@ -116,6 +134,8 @@ __all__ = [
     "Ledger",
     "Snapshot",
     "CASConflict",
+    "GitError",
+    "LedgerFailure",
     "ContractRejected",
     "ThreeLayerVerifier",
     "VerifierBudget",
@@ -137,12 +157,19 @@ __all__ = [
     "classify",
     "assert_mutable",
     "GovernanceError",
+    "FAST_MAX",
+    "FROZEN_IDS",
     "L1SerialGate",
     "Aggregator",
     "AggregatorConfig",
     "AggregatorProtocol",
     "AggregatorFactory",
     "MergeReport",
+    "MergeOutcome",
+    "AggregatorContractError",
+    "diffs_conflict",
+    "diffs_contradict",
+    "fuse_diffs",
     "EvidenceBuffer",
     "StaleAction",
     "StalenessPolicy",
@@ -167,6 +194,7 @@ __all__ = [
     "PipelineChain",
     "SectionViolation",
     "assign_sections",
+    "assign_key_sections",
     "section_of",
     "shard_round_robin",
     "Completion",
@@ -193,6 +221,9 @@ __all__ = [
     "SingleSlot",
     "EvolutionResult",
     "RewardContractError",
+    "ProposalContractError",
+    "SOLVED",
+    "tasks_from",
     "RoundInfo",
     "evolve",
     "async_evolve",

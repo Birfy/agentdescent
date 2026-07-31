@@ -368,6 +368,18 @@ class KeyedRules:
 # healthy. Catch that at the boundary instead.
 _REWARD_TOL = 1e-6
 
+#: A reward at or above this counts as solved: the engine asks for no proposal and
+#: the task sampler counts a pass. It was written out four times -- twice in the
+#: drivers, once in `evolve`'s docstring, and once as `DifficultyWeighted`'s
+#: default, whose own docstring says it "mirrors the engine" (exactly the coupling
+#: a shared constant exists to express). Right for a binary scorer, and wrong in a
+#: way that produces no error for a graded one: a ROUGE or LLM-judge score rarely
+#: reaches 0.999, so *every* rollout requests a proposal, the reflector is asked to
+#: fix an answer that scored 0.95, and the run reports `below-threshold` -- which
+#: reads as "the reflector is useless" when the real cause is that nothing is ever
+#: recognised as solved. `evolve(solved_threshold=)` overrides it.
+SOLVED = 0.999
+
 
 class ProposalContractError(ContractError, TypeError):
     """``propose`` returned something that is not text (or ``None``).
@@ -694,6 +706,16 @@ class EvolutionResult:
         beat the baseline (the reflector is the problem). ``all-stale`` means they
         never reached it (the lag budget is). ``cas-conflict`` means workers raced.
 
+        The keys are :class:`~agentdescent.aggregator.MergeOutcome` values, which
+        subclass ``str`` -- so ``outcomes()["below-threshold"]`` works, and so does
+        ``outcomes()[MergeOutcome.BELOW_THRESHOLD]``:
+
+        ``committed`` · ``below-threshold`` · ``all-stale`` · ``oversized``
+        (outside the trust region -- a runaway reflector, which used to be counted
+        as ``all-stale`` and so pointed at the opposite fix) · ``oracle-rejected``
+        · ``cas-conflict`` · ``unknown-artifact`` · ``section-violation``
+        (tensor-parallel only).
+
         >>> result.outcomes()
         {'below-threshold': 7, 'committed': 2, 'all-stale': 1}
         """
@@ -1003,6 +1025,7 @@ def evolve(
     aggregator_factory: Optional[AggregatorFactory] = None,
     oracle_budget: int = 200,
     cheap_eval_tasks: Optional[int] = None,
+    solved_threshold: float = SOLVED,
     shuffle: bool = False,
     seed: int = 0,
     on_round: Optional[Callable[["RoundInfo"], None]] = None,
@@ -1045,6 +1068,13 @@ def evolve(
         The work the artifact is evaluated on. Split into train / held-out **by
         position** -- the last ``held_out_frac`` of the sequence is held out, in
         the order given. At least 4 are required and ids must be unique.
+    solved_threshold:
+        A reward at or above this counts as solved, so no proposal is requested
+        and the task sampler counts a pass. The default (:data:`SOLVED`, 0.999) is
+        right for a binary scorer. **Lower it for a graded one** -- a ROUGE score
+        or an LLM judge rarely reaches 0.999, so every rollout would ask the
+        reflector to "fix" an answer that scored 0.95, and the run reports
+        ``below-threshold`` as if the reflector were the problem.
     shuffle, seed:
         Shuffle ``tasks`` before that positional split. Off by default, which
         keeps a run reproducible and keeps
@@ -1056,7 +1086,7 @@ def evolve(
         ``target_reward``, ``final_reward``) would then be measured against it.
     reward:
         ``(task, output) -> [0, 1]``. Scores in ``[0, 1]``; the engine treats
-        ``>= 0.999`` as a pass (no proposal is requested).
+``>= solved_threshold`` as a pass (no proposal is requested).
     agent:
         An object with ``solve`` + ``propose``. Provide this **or** ``run`` and
         ``propose``; both signatures are checked before the first rollout.
@@ -1242,6 +1272,7 @@ def evolve(
             repo_path=repo_path, agg_config=agg_config, staleness_policy=staleness_policy,
             aggregator_factory=aggregator_factory, oracle_budget=oracle_budget,
             cheap_eval_tasks=cheap_eval_tasks, shuffle=shuffle, seed=seed,
+            solved_threshold=solved_threshold,
             self_verify=self_verify, task_sampler=task_sampler,
             target_reward=target_reward, patience=patience,
             max_worker_errors=max_worker_errors,
@@ -1357,7 +1388,7 @@ def evolve(
             with unit_lock:
                 ok_units[0] += 1
                 any_success[0] = True
-            if score >= 0.999:
+            if score >= solved_threshold:
                 return
             proposal = _checked_proposal(
                 propose(artifact.render(), task, output, score), task)

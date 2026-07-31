@@ -26,7 +26,7 @@ from __future__ import annotations
 import math
 import threading
 from collections import defaultdict
-from typing import Dict, Protocol, Sequence, Tuple, runtime_checkable
+from typing import Dict, Optional, Protocol, Sequence, Tuple, runtime_checkable
 
 
 @runtime_checkable
@@ -94,10 +94,14 @@ class DifficultyWeighted:
 
     name = "difficulty-weighted"
 
-    def __init__(self, c: float = 0.2, pass_threshold: float = 0.999,
+    def __init__(self, c: float = 0.2, pass_threshold: Optional[float] = None,
                  prior: float = 0.5) -> None:
         self.c = c
-        self.pass_threshold = pass_threshold
+        # Defaults to the engine's own SOLVED rather than repeating the
+        # literal: the docstring says this 'mirrors the engine', which is
+        # exactly the coupling a shared constant should carry.
+        from .evolution import SOLVED
+        self.pass_threshold = SOLVED if pass_threshold is None else pass_threshold
         self.prior = prior
         # task_id -> (passes, trials); untried tasks fall back to the prior.
         self._stats: Dict[str, Tuple[float, float]] = defaultdict(lambda: (0.0, 0.0))
