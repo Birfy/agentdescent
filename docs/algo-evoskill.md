@@ -140,40 +140,34 @@ in [Connecting agents & LLMs → Tool-using agent backends](agents.md#running-th
 The full OfficeQA is HF-**gated** (`databricks/officeqa`, set `HF_TOKEN`); absent
 that the example loads the repo's **bundled 12-row sample**.
 
-## When OfficeQA is out of reach — `--dataset finqa`
+## Datasets — `--dataset officeqa|finqa`
 
-OfficeQA is **HF-gated** (`databricks/officeqa`, needs an accepted licence and
-`HF_TOKEN`). Without it the example used to fall back to a bundled 12-row sample,
-which splits into 5 train / 3 val / 2 test — too small to measure anything. Every
-run reported **0.000** and read like a broken algorithm rather than a missing
-dataset.
-
-The fallback is now **FinQA** (`dreamerdeo/finqa`, ungated): the same shape — a
-financial document plus a numeric answer that has to be located and computed — at
-60 items and **~4 KB documents** instead of ~272 KB, so a model without tools can
-actually read them.
+OfficeQA is **HF-gated** (`databricks/officeqa`: an accepted licence plus
+`HF_TOKEN`). Without that access the example uses **FinQA**
+(`dreamerdeo/finqa`, ungated) — the same shape, a financial document plus a
+numeric answer to locate and compute, at 60 items with ~4 KB documents that a
+model without tools can read directly.
 
 ```bash
 python -m examples.evoskill_skill_discovery --dataset finqa \
     --provider openai --model deepseek-v4-flash --iterations 5 --yes
 ```
 
-Measured: val **0.487 → 0.573**, held-out **test 0.617**, one skill discovered —
-a real curve where there was previously a flat zero. It is a *substitute*, not the
-paper's dataset, and the run header says which one it loaded.
-
-The skill it induced is about numeric presentation, which is exactly what the
-scorer punishes:
+Measured: val **0.487 → 0.573**, held-out **test 0.617**, one skill discovered.
+The skill it induced is about numeric presentation, which is what the scorer
+rewards:
 
 > *"When a percentage appears in a table, round your answer to the same number of
 > decimal places shown in that table... compute the unrounded value first, then
 > round once at the end to the required precision."*
 
-!!! note "It does not reproduce the hard part"
+The run header states which dataset it loaded.
+
+!!! note "FinQA does not reproduce the retrieval challenge"
     OfficeQA's difficulty is finding one figure inside a 272 KB bulletin, which is
     what makes a *tool-using* agent worth having. FinQA's documents fit in a
     prompt, so it exercises the discovery loop but not the retrieval problem. For
-    that, keep OfficeQA and use `--backend openhands|toolloop|claude-code`.
+    that, use OfficeQA with `--backend openhands|toolloop|claude-code`.
 
 ## Run it
 

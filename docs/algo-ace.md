@@ -108,25 +108,20 @@ for 8 rounds over 57 tasks — well under a cent at `deepseek-v4-flash` prices.
     and it is why [`DifficultyWeighted` task sampling](evolution.md#task-selection-which-rollout-to-spend)
     exists — it steers rollouts toward the tasks that still fail.
 
-### `--top-k` is the difficulty knob
+### `--top-k` sets the difficulty
 
 The number of XBRL concepts *is* the difficulty: it is a k-way choice. Measured
 with `deepseek-v4-flash`, 8 rounds, 4 workers:
 
 | `--top-k` | tasks | val, before → after | test | bullets |
 |---|---|---|---|---|
-| 10 (the old default) | 37 | 1.000 → 1.000 | 1.000 | 0 |
-| 40 (the new default) | 57 | 0.850 → 0.850 | 0.921 | 0 |
-| **120** | 121 | **0.844 → 0.889** | **0.884** | **2** |
+| 10 | 37 | 1.000 → 1.000 | 1.000 | 0 |
+| 40 | 57 | 0.850 → 0.850 | 0.921 | 0 |
+| **120** (the default) | 121 | **0.844 → 0.889** | **0.884** | **2** |
 
-At 10 the task is solved before it starts. At 40 there is headroom but the Curator
-still finds no bullet that beats the baseline — the gate rejects every proposal,
-which is correct and uninformative. At 120 the problem is hard enough that two
-bullets survive the gate and val rises by 4.5 points.
-
-The lesson generalises past ACE: **an evolution run can only be as informative as
-the gap it is given.** See [Measured results](results.md) for the same effect on
-the other ports.
+At 10 the task is already solved. At 40 there is headroom, but no bullet beats the
+baseline and the Curator's gate rejects every proposal. At 120 two bullets survive
+the gate and validation accuracy rises 4.5 points.
 
 ## Run it
 

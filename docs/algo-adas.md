@@ -59,17 +59,25 @@ In [`examples/adas_meta_agent_search.py`](https://github.com/Birfy/agentdescent/
 
 ## Measured — MGSM with DeepSeek
 
-`--generations 4 --provider openai --model deepseek-v4-flash`: the seed archive
-already scores **1.000** on the sampled MGSM items, so Meta Agent Search has no
-gradient to follow and the archive merge accepts nothing (`+0/-1` in both
-generations measured; the run was stopped after two, since the answer was not
-going to change).
+MGSM is grade-school arithmetic, and a strong model answers it directly: at the
+default `--langs en,es,fr` the seed archive already scores **1.000**, so the
+search has no gradient and the archive merge accepts nothing.
 
-Saturated, like most of the shipped ports at these sample sizes — see
-[Measured results](results.md). ADAS is also the most expensive example to run
-(the searched agents are multi-step, so one generation is hundreds of model calls);
-raise `--per-lang` and use a weaker base model if you want a benchmark with room
-to improve.
+Two settings give it room, and MGSM's own difficulty axis is language:
+
+```bash
+python -m examples.adas_meta_agent_search --hard --langs bn,sw,te,th \
+    --per-lang 150 --provider openai --model deepseek-v4-flash --generations 4 --yes
+```
+
+`--hard` keeps the items a **plain single call** answers incorrectly, which is the
+right filter here: what ADAS searches over *is* structure, so the items worth
+keeping are the ones a structure-free call cannot already do. Over a 600-item
+low-resource pool that leaves 47 genuinely hard questions (24 train / 12 val /
+11 test).
+
+ADAS is also the most expensive example — the searched agents are multi-step, so
+one generation is hundreds of model calls.
 
 ## Run it
 

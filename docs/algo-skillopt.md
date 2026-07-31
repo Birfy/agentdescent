@@ -65,13 +65,12 @@ In [`examples/skillopt_skill_training.py`](https://github.com/Birfy/agentdescent
 | test hard-EM | 0.900 | **0.450** |
 | edits accepted / rejected | 0 / 1 | 3 / 3 |
 
-On the full split the baseline already answers 9 of 10, so there is nothing for a
-skill document to add — and the strict gate refused the one edit proposed rather
-than accepting a change that did not beat it. Correct, and uninformative.
+On the full split the seed skill already answers 9 of 10, so a skill document has
+nothing to add and the strict gate accepts no edit.
 
 `--hard` keeps the 69 questions of 280 that the seed skill gets **wrong**, and on
-those the skill document doubles hard-EM. Note the gate stayed strict there too:
-3 of 6 proposed edits were still rejected.
+those the skill document **doubles** hard-EM. The gate stays strict there too:
+3 of 6 proposed edits are still rejected.
 
 !!! warning "The two columns are different benchmarks"
     0.250 is not "worse than 0.900" — it is the score on a subset selected for

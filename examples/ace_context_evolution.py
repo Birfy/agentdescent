@@ -286,11 +286,12 @@ def main() -> None:
     p.add_argument("--model", default="claude-haiku-4-5")
     p.add_argument("--rounds", type=int, default=6)
     p.add_argument("--workers", type=int, default=2)
-    p.add_argument("--top-k", type=int, default=40,
+    p.add_argument("--top-k", type=int, default=120,
                    help="restrict to the k most frequent XBRL concepts -- this is "
-                        "the difficulty knob. At 10 the choice is easy enough that "
-                        "deepseek-v4-flash scores 1.000 and there is nothing to "
-                        "learn; at 40 it scores ~0.875")
+                        "the difficulty knob, and the default is the first value "
+                        "that demonstrates anything. deepseek-v4-flash scores 1.000 "
+                        "at 10 (nothing to learn) and 0.850 at 40 (headroom, but no "
+                        "bullet beats the baseline); at 120 it goes 0.844 -> 0.889")
     p.add_argument("--pool", type=int, default=800,
                    help="FiNER validation rows to scan for single-entity sentences")
     p.add_argument("--seed", type=int, default=0)
