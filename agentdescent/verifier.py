@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
-from typing import Callable, List, Sequence, Tuple
+from typing import Callable, Dict, List, Sequence, Tuple
 
 from .evolvable import Evolvable
 
@@ -51,6 +51,9 @@ class ThreeLayerVerifier:
 
     eval_fn: EvalFn
     held_out: Sequence
+    #: How many held-out items the *cheap* layers score. Smaller is cheaper and
+    #: noisier; the acceptance test (:meth:`eval_counts`) always uses the full set,
+    #: so this trades tournament precision, not commit safety.
     rule_subset: int = 8
     learned_noise: float = 0.04
     seed: int = 0
@@ -59,12 +62,29 @@ class ThreeLayerVerifier:
 
     def __post_init__(self) -> None:
         self._rng = random.Random(self.seed)
+        self._subsets: Dict[int, Sequence] = {}
 
     def _subset(self, k: int) -> Sequence:
+        """A **stable** sample of ``k`` held-out items, drawn once per size.
+
+        It used to draw a fresh sample on every call, which is only safe because
+        ``evolve()`` pinned ``rule_subset`` to the full set and made the sampling a
+        no-op. The moment the cheap layer is genuinely cheap that is a silent
+        correctness bug: the aggregator compares candidates against each other with
+        it -- ``_resolve_conflicts`` pits two diffs head to head and ``_tournament``
+        ranks every candidate -- so a fresh draw per call scores candidate A on
+        {1,3,5} and candidate B on {2,4,6} and calls the difference a winner. It
+        also defeats the evaluation cache, which memoises per (artifact, task).
+
+        Fixed per size, so a comparison is always like-for-like. Overfitting to the
+        sample is bounded by the acceptance test, which never sub-samples.
+        """
         if k >= len(self.held_out):
             return self.held_out
-        idx = self._rng.sample(range(len(self.held_out)), k)
-        return [self.held_out[i] for i in idx]
+        if k not in self._subsets:
+            idx = sorted(self._rng.sample(range(len(self.held_out)), k))
+            self._subsets[k] = [self.held_out[i] for i in idx]
+        return self._subsets[k]
 
     def rule_eval(self, artifact: Evolvable) -> float:
         """Cheap, deterministic-ish check on a tiny subset."""

@@ -7,6 +7,41 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **The oracle audit could never fire below `blast_radius=0.5`.** `force_oracle`
+  gates on `blast_radius >= 0.5 or trust < 0.75`, and `update_trust` -- the only
+  writer of trust -- sat *inside* that branch. The condition gated the one thing
+  that could change it, so for any artifact under 0.5 it was unreachable: measured
+  on the default `blast_radius=0.2`, `oracle_calls_used` stayed at **0** for a
+  whole run and trust at its initial 1.0. An artifact at 0.4 -- which
+  `governance.classify` calls L1, the *slow, conservative* layer -- received
+  exactly as much scrutiny as an L2 skill: none. Cheap-vs-full agreement is now
+  measured on every merge and costs nothing, since the Beta acceptance test
+  already scores base and candidate on the full held-out set.
+- **`evolve()` collapsed the three-layer verifier into one, so `oracle_budget`
+  capped nothing.** It pinned `rule_subset=len(held_out)` with zero noise, on the
+  reasoning that `eval_fn` is deterministic ground truth -- true of the synthetic
+  router domain, and exactly backwards here, where `eval_fn` **runs the agent**.
+  Rule, learned and oracle computed the identical number, so the aggregator bought
+  a full held-out sweep for every candidate it merely wanted to *rank*, and the
+  budget's documented fallback (`rule_eval`) returned the very value it was trying
+  to avoid buying. New `evolve(cheap_eval_tasks=N)` / `async_evolve(...)` sizes the
+  ranking sample; the acceptance test still scores the full set, so this trades
+  ranking precision, never commit safety. Default `None` keeps exact scoring, so
+  no existing run changes behaviour.
+- **The cheap sample moved between calls.** `ThreeLayerVerifier._subset` drew a
+  fresh `random.sample` every time -- harmless only while the "sample" was the
+  whole set. The aggregator compares candidates *against each other* with it
+  (`_resolve_conflicts` head to head, `_tournament` ranking all of them), so a
+  moving sample scores candidate A on `{1,3,5}` against candidate B on `{2,4,6}`
+  and calls the difference a winner. It also defeated the evaluation cache, which
+  memoises per (artifact, task). Now drawn once per size.
+
+### Changed
+- `docs/concepts.md` §5 states plainly that `AuditScheduler`'s priority queue has
+  no consumer: the audit that runs is the inline `force_oracle` gate, and the heap
+  is a priority *model*, not work in flight.
+
+### Fixed
 - **The stable branch was never promoted, because `promote_after_k` counted
   commits instead of regression-free rounds.** The counter was bumped on the
   commit path, so it measured how many times an artifact had *changed* -- the

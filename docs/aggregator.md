@@ -56,6 +56,29 @@ evolve(tasks, reward, agent=agent, agg_config=AggregatorConfig(
 | `trust_region_ops` | diff-size cap (the trust region) |
 | `promote_after_k` | dev→stable after this many regression-free rounds (EMA) |
 
+!!! tip "Making the cheap layer actually cheap — `evolve(cheap_eval_tasks=)`"
+    The aggregator scores candidates twice for two different reasons, and only one
+    of them needs to be exact:
+
+    | | what it decides | cost |
+    |---|---|---|
+    | **cheap layer** | which candidate to *put forward* — conflict resolution, the fusion tournament | once **per candidate** |
+    | **acceptance test** (`eval_counts`) | whether to *commit* it | once per merge |
+
+    `evolve()` used to pin the cheap layer to the whole held-out set, so rule /
+    learned / oracle were one full sweep wearing three names — and on an LLM
+    workload `eval_fn` **runs the agent**, so a round paid a full sweep for every
+    candidate it merely wanted to rank. `oracle_budget` capped nothing either: its
+    documented fallback (`rule_eval`) returned the very value it was trying to
+    avoid buying.
+
+    `cheap_eval_tasks=N` scores N held-out tasks for ranking. The acceptance test
+    still uses the full set, so this trades ranking precision, never commit safety.
+    The sample is **fixed for the run** — it used to be redrawn on every call,
+    which is harmless only while the "sample" is the whole set, and silently scores
+    candidate A on `{1,3,5}` against candidate B on `{2,4,6}` the moment it is not.
+    Default is `None` (exact), so nothing changes unless you opt in.
+
 ---
 
 ## Replacing — `aggregator_factory=` (`AggregatorProtocol`)

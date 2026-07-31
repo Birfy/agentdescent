@@ -73,6 +73,7 @@ def async_evolve(
     staleness_policy: Optional[StalenessPolicy] = None,
     aggregator_factory=None,
     oracle_budget: int = 200,
+    cheap_eval_tasks: Optional[int] = None,
     self_verify: bool = True,
     shutdown_grace: float = 2.0,
     task_sampler: Optional["TaskSampler"] = None,
@@ -132,6 +133,9 @@ def async_evolve(
     target_reward:
         Stop as soon as a sweep's held-out reward reaches this. Compared against
         the real reward, never against an acceptance probability.
+    cheap_eval_tasks:
+        As in :func:`evolve`: how many held-out tasks the cheap layer scores when
+        ranking candidates. ``None`` scores them all.
     self_verify:
         As in :func:`evolve`. ``False`` skips the extra per-trajectory rollout,
         which is what ports that judge candidates only on held-out want.
@@ -166,7 +170,8 @@ def async_evolve(
         initial_state=initial_state, blast_radius=blast_radius, artifact_id=artifact_id,
         held_out_frac=held_out_frac, repo_path=repo_path, agg_config=agg_config,
         staleness_policy=staleness_policy, aggregator_factory=aggregator_factory,
-        oracle_budget=oracle_budget, eval_concurrency=eval_concurrency)
+        oracle_budget=oracle_budget, eval_concurrency=eval_concurrency,
+        cheap_eval_tasks=cheap_eval_tasks)
     if n_workers < 1:
         raise ValueError(f"n_workers must be >= 1, got {n_workers}")
     policy = staleness_policy or get_policy("guarded")

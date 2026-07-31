@@ -793,7 +793,8 @@ def _check_callable(fn: Callable, n_args: int, sig_hint: str) -> None:
 def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state,
                   blast_radius, artifact_id, held_out_frac, repo_path, agg_config,
                   staleness_policy, aggregator_factory, oracle_budget,
-                  eval_concurrency: int = 8) -> _Engine:
+                  eval_concurrency: int = 8,
+                  cheap_eval_tasks: Optional[int] = None) -> _Engine:
     """Wire the ledger, runtime, verifier and aggregator (shared by
     :func:`evolve` and :func:`~agentdescent.async_evolve.async_evolve`)."""
     import tempfile
@@ -880,11 +881,25 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
                                      blast_radius=blast_radius, runtime=runtime,
                                      strategy=strategy))
 
-    # The eval_fn here IS ground truth (deterministic, memoized), so the cheap
-    # layers must NOT add noise or sub-sample (see the note in the original).
+    # The cheap layer must actually be cheap. It used to be pinned to the full
+    # held-out set (`rule_subset=len(held_out)`) with zero noise, on the reasoning
+    # that `eval_fn` is deterministic ground truth -- true of the synthetic router
+    # domain, and exactly backwards here, where `eval_fn` RUNS THE AGENT. That made
+    # rule / learned / oracle compute the identical number, so the aggregator paid
+    # a full held-out sweep for every candidate it merely wanted to *rank*, and
+    # `oracle_budget` capped nothing (its documented fallback, `rule_eval`, returned
+    # the same value it was trying to avoid buying).
+    #
+    # Ranking is what the cheap layer is for; committing is not. `eval_counts` --
+    # the Beta-posterior acceptance test -- still uses the whole held-out set, so
+    # sub-sampling trades tournament precision, never commit safety. Noise stays at
+    # zero: `eval_fn` is deterministic, so the sub-sample is the only approximation
+    # and inventing more would just make the ranking worse.
+    cheap = (len(held_out) if cheap_eval_tasks is None
+             else max(1, min(int(cheap_eval_tasks), len(held_out))))
     verifier = ThreeLayerVerifier(
         eval_fn=lambda a, ts: a.score(ts), held_out=held_out,
-        rule_subset=len(held_out), learned_noise=0.0,
+        rule_subset=cheap, learned_noise=0.0,
         budget=VerifierBudget(oracle_calls_remaining=oracle_budget))
 
     def _default_aggregator(ledger, verifier, audit, config, policy):
@@ -940,6 +955,7 @@ def evolve(
     staleness_policy: Optional[StalenessPolicy] = None,
     aggregator_factory: Optional[AggregatorFactory] = None,
     oracle_budget: int = 200,
+    cheap_eval_tasks: Optional[int] = None,
     on_round: Optional[Callable[["RoundInfo"], None]] = None,
     verbose: bool = False,
 ) -> EvolutionResult:
@@ -1079,8 +1095,20 @@ def evolve(
         Replace the optimizer entirely; receives
         ``(ledger, verifier, audit, config, staleness_policy)``.
     oracle_budget:
-        Hard cap on full held-out oracle evaluations during L1 audits. Once
-        spent, the verifier falls back to its cheap layer.
+        Hard cap on full held-out oracle evaluations during audits. Once spent,
+        the verifier falls back to its cheap layer -- which only saves anything
+        when ``cheap_eval_tasks`` makes that layer genuinely cheaper, so the two
+        knobs go together.
+    cheap_eval_tasks:
+        How many held-out tasks the *cheap* layer scores when the aggregator is
+        merely **ranking** candidates -- conflict resolution and the fusion
+        tournament, which run once per candidate. ``None`` (default) scores the
+        whole held-out set, which is exact but means a full sweep of real agent
+        calls per candidate. Set it to trade ranking precision for cost; the
+        acceptance test always scores the full set, so this never affects whether
+        a change is safe to commit, only which candidate is put forward. The
+        sample is fixed for the run, so candidates are always compared
+        like-for-like.
     on_round:
         Called with each :class:`RoundInfo` as the round completes -- progress
         for a long run, which otherwise reports nothing until it returns. An
@@ -1131,6 +1159,7 @@ def evolve(
             max_iters=rounds * max(1, n_workers), held_out_frac=held_out_frac,
             repo_path=repo_path, agg_config=agg_config, staleness_policy=staleness_policy,
             aggregator_factory=aggregator_factory, oracle_budget=oracle_budget,
+            cheap_eval_tasks=cheap_eval_tasks,
             self_verify=self_verify, task_sampler=task_sampler,
             target_reward=target_reward, patience=patience,
             max_worker_errors=max_worker_errors,
@@ -1159,7 +1188,8 @@ def evolve(
         initial_state=initial_state, blast_radius=blast_radius, artifact_id=artifact_id,
         held_out_frac=held_out_frac, repo_path=repo_path, agg_config=agg_config,
         staleness_policy=staleness_policy, aggregator_factory=aggregator_factory,
-        oracle_budget=oracle_budget, eval_concurrency=eval_concurrency)
+        oracle_budget=oracle_budget, eval_concurrency=eval_concurrency,
+        cheap_eval_tasks=cheap_eval_tasks)
     ledger, aggregator, strategy = eng.ledger, eng.aggregator, eng.strategy
     run, propose, reward = eng.run, eng.propose, eng.reward
     held_out, by_id, train_ids = eng.held_out, eng.by_id, eng.train_ids

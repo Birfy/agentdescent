@@ -219,7 +219,20 @@ mechanism:
   eval; that is **not implemented** — held-out is one undifferentiated split.
 - **L-value (signal layer)** — most diffs are marginal, a few are high-value
   refactors. The **AuditScheduler** spends the scarce oracle budget by
-  `blast_radius × uncertainty / trust`.
+  `blast_radius × uncertainty / trust`, where *trust* is how often the cheap layer
+  has agreed with the full held-out set. That agreement is measured on **every**
+  merge and costs nothing (the acceptance test already scores both on the full
+  set), which is what makes the gate reachable: trust used to be written only
+  *inside* the branch it gates, so an artifact below `blast_radius 0.5` could
+  never earn an audit — measured at the default 0.2, `oracle_calls_used` was 0 for
+  a whole run.
+
+    !!! warning "The priority queue has no consumer"
+        `AuditScheduler.submit` ranks merges by `Ĝ` into a bounded heap, and
+        nothing in the engines pops it. The audit that actually runs is the inline
+        `force_oracle` gate in the merge pipeline, which reads trust but not the
+        queue. Treat the queue as a priority *model* — the ordering a fuller
+        system would spend a background budget against — not as work in flight.
 
 ---
 
