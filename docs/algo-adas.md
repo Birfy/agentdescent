@@ -59,63 +59,113 @@ In [`examples/adas_meta_agent_search.py`](https://github.com/Birfy/agentdescent/
 
 ## Measured — MGSM with DeepSeek
 
-**This is the one shipped port where I could not demonstrate a lift**, and the
-reason is worth stating rather than hiding.
+MGSM is saturated for a strong model, so the search has no gradient without
+`--hard`. Measured with `deepseek-v4-flash` over the **whole benchmark** — all 11
+languages, 250 items each:
 
-At the default settings MGSM is saturated: the seed archive already scores 1.000
-on the sampled items, so Meta Agent Search has no gradient and the archive merge
-accepts nothing. `--hard` is the lever — but MGSM resists it from both sides:
-
-| pool | items a single structure-free call gets **wrong** |
+| | |
 |---|---|
-| `--per-lang 40` on `bn,sw,te,th` (160) | fewer than 12 — `select_hard` warns and tops up |
-| `--per-lang 150` (600) | **47** (23 train / 12 val / 11 test) |
+| pool | 2750 items |
+| direct, structure-free single call | **0.919** |
+| items it answers incorrectly | **222** (8.1%) |
 
-So a subset with real signal exists, but it is ~8% of a large pool. The bind is
-cost: with 23 training items a three-generation run is ~9000 model calls and takes
-hours. Shrinking it to fit a budget shrinks the *measurement* with it — at
-`--hard-keep 12` the split is 6 train / 3 val / 3 test, and a 3-item validation set
-cannot separate anything:
+Those 222 are what the search runs on, split 15 / 50 / 35:
 
 ```
-round 0  reward=0.400  +0/-1
-round 1  reward=0.400  +0/-1
-test accuracy (held out): 0.000        # 3 items
-791 calls, 5653 s in the model, 24 min wall-clock
+Split    : 34 trigger / 110 val (fitness) / 78 test
 ```
 
-The archive rejected every candidate. On this evidence that is neither a working
-demonstration nor a bug — it is a measurement too small to read. What the run
-*does* show is that the loop, the archive, the selection rule and the gate all
-execute against a real dataset.
+The train share only *triggers* proposals — the meta-agent conditions on the
+archive, not on the task `evolve()` hands it, so a generation consumes `--workers`
+items and ignores the rest. Everything else measures. Splits are stratified by
+language, because MGSM's languages differ by 8 points of baseline accuracy (`en`
+0.964, `ja` 0.880) and an unstratified draw hands validation one mixture and test
+another.
 
-To get a number you can trust here, budget for `--per-lang 150` with no
-`--hard-keep` and expect hours, or use a weaker base model so the plain benchmark
-has headroom.
+On a `--hard` subset the structure-free baseline is 0.000 by construction, so the
+searched agent's test accuracy on its own says nothing. The run scores the best
+hand-designed seed on the same split and reports both:
+
+```
+                                  val (search)   test (held out)
+  best hand-designed seed              ?.???           ?.???
+  best searched design                 ?.???           ?.???
+  lift                                +?.???          +?.???
+```
+
+!!! note "The lift row is not filled in yet"
+    A run over the split above is ~2 hours and 6k–17k model calls. One has not
+    been completed against the current code, so this page does not claim a
+    demonstrated lift — the table is the shape of the answer, not the answer.
+
+### Give a reasoning model a real token budget
+
+`deepseek-v4-flash` spends its budget on hidden reasoning first; visible content
+is what is left. At the library default of 4096 the meta-agent returns **empty
+content on every call**, so no design ever reaches the archive:
+
+| `--max-tokens` | meta-agent replies | solver blank rate | solver CoT |
+|---|---|---|---|
+| 4096 | **0 / 4** | 13 / 40 | 0.275 |
+| 16384 (default here) | **4 / 4** | 2 / 40 | 0.325 |
+
+An empty completion does not raise — `_extract_int("")` is `None` and that scores
+as a wrong answer, so a starved run reports a low accuracy indistinguishable from
+a model that cannot do the problems. The run counts blank replies and warns, and
+the pre-flight check sends a *reasoning* prompt and aborts if it comes back
+empty. You are billed for tokens generated, not for the cap.
 
 !!! warning "This is by far the most expensive example"
-    Every candidate is scored on every training item, and each score is a
-    *multi-step* program — self-consistency and debate make several model calls per
-    question. One generation over 23 items is on the order of a thousand calls, so
-    a three-generation run takes hours even fully parallel.
+    Every candidate is scored on every validation item, and each score is a
+    *multi-step* program. Wall-clock is set by the **serial** chains, not by
+    fan-out, so past `--eval-concurrency >= |val|` more concurrency buys nothing:
 
-    Two knobs control the cost directly:
-
-    | | |
+    | chain | length |
     |---|---|
-    | `--hard-keep N` | cap the hard subset. Evaluation is *candidates × items × multi-step calls*, so this is the strongest lever |
-    | `--eval-concurrency N` | how many examples are scored at once (default 16). Purely I/O bound |
+    | seed archive | 19 sequential calls per item (7 seeds) |
+    | `propose` | 3 Reflexion rounds, ~84 s |
+    | candidate evaluation | `program_cost` calls per item, candidates run one after another |
 
-    `--hard-keep` caps the **pool**, which is then split 50/25/25 — so
-    `--hard-keep 12` leaves only 6 training items, and the fan-out cannot exceed
-    that. Ask for roughly four times the training set you want.
+    A proposed design may cost up to `MAX_PROGRAM_CALLS` (10) calls per question
+    against a seed average of 2.7, which is what dominates a generation. The
+    budget line reports both ends of the range for exactly this reason.
 
-## Run it## Run it
+    | knob | effect |
+    |---|---|
+    | `--generations`, `--workers` | candidates searched |
+    | `--hard-keep N` | caps the pool, and with it every sweep |
+    | `--eval-concurrency N` | set it to at least `|val|` |
+    | `--max-tokens`, `--timeout` | see above |
+
+## Run it
+
+Point the example at your own endpoint with two environment variables — they are
+read at call time and never stored by the repo (full list, including Claude and
+local servers: [Configuring your provider and key](agents.md#configuring-your-provider-and-key)):
+
+```bash
+export OPENAI_BASE_URL=https://api.deepseek.com     # or your gateway
+export OPENAI_API_KEY=sk-...
+```
+
+Then confirm the setup costs nothing before it costs something — `--dry-run`
+loads MGSM, prints the plan and the budget, and makes **no API calls**:
 
 ```bash
 python -m examples.adas_meta_agent_search --dry-run
-python -m examples.adas_meta_agent_search --model claude-haiku-4-5 --generations 6
 python -m examples.adas_meta_agent_search --select dgm --langs en,es
+```
+
+The settings the numbers above come from — the whole benchmark, hard subset, a
+split that leaves something to measure. The baseline pass is cached per
+(model, question), so only the first run pays for it:
+
+```bash
+python -m examples.adas_meta_agent_search \
+    --provider openai --model deepseek-v4-flash \
+    --hard --langs bn,de,en,es,fr,ja,ru,sw,te,th,zh --per-lang 250 \
+    --generations 4 --workers 3 --eval-concurrency 128 \
+    --train-frac 0.15 --test-frac 0.35 --yes
 ```
 
 Offline tests: `tests/test_adas_example.py`.

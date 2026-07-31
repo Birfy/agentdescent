@@ -18,6 +18,80 @@ Anything that maps a prompt to text is a completion — an LLM call, a tool-usin
 agent loop, a canned stub. Adapters build completions; higher layers turn a
 completion into whatever task interface they need.
 
+## Configuring your provider and key
+
+Credentials are read from the **environment at call time** — they never pass
+through code, arguments, or a config file the repo owns. Two variables decide
+everything:
+
+| variable | used by | value |
+|---|---|---|
+| `OPENAI_BASE_URL` | `openai_compatible` | the endpoint's root, e.g. `https://api.deepseek.com` |
+| `OPENAI_API_KEY` | `openai_compatible` | your key for that endpoint |
+| `ANTHROPIC_API_KEY` | `claude` | your Anthropic key (or run `ant auth login`) |
+
+**DeepSeek**
+
+```bash
+export OPENAI_BASE_URL=https://api.deepseek.com
+export OPENAI_API_KEY=sk-...
+python -m examples.adas_meta_agent_search --provider openai --model deepseek-v4-flash
+```
+
+**GLM / Zhipu**
+
+```bash
+export OPENAI_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+export OPENAI_API_KEY=...
+python -m examples.adas_meta_agent_search --provider openai --model glm-4.6
+```
+
+**OpenAI** — `OPENAI_BASE_URL` is the default here and may be omitted
+
+```bash
+export OPENAI_BASE_URL=https://api.openai.com/v1
+export OPENAI_API_KEY=sk-...
+python -m examples.adas_meta_agent_search --provider openai --model gpt-4.1-mini
+```
+
+**A local server** (vLLM, Ollama, LM Studio) — the key is unused but must be set
+
+```bash
+export OPENAI_BASE_URL=http://localhost:8000/v1
+export OPENAI_API_KEY=not-used
+python -m examples.adas_meta_agent_search --provider openai --model my-local-model
+```
+
+**Claude** — a different variable, and `ant auth login` works instead
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+python -m examples.adas_meta_agent_search --provider claude --model claude-haiku-4-5
+```
+
+Put the `export` lines in your shell profile to keep them across sessions. Every
+example also takes `--dry-run`, which loads the dataset and prints the plan
+**without a single API call** — the cheapest way to confirm your setup before
+paying for a run:
+
+```bash
+python -m examples.adas_meta_agent_search --dry-run
+```
+
+!!! tip "Check the endpoint before a long run"
+    `--provider openai` talks to whatever `OPENAI_BASE_URL` points at, so a typo
+    surfaces as an HTTP error rather than a wrong answer. To see what a key can
+    reach:
+
+    ```bash
+    curl -s "$OPENAI_BASE_URL/models" -H "Authorization: Bearer $OPENAI_API_KEY"
+    ```
+
+    Common replies: `401` — the key is wrong for this base URL; `402` /
+    `Insufficient Balance` — the account is out of credit; `404` on
+    `/chat/completions` — the base URL is missing or has an extra path segment
+    (most gateways want the version prefix, e.g. `/v1`).
+
 ## Adapters
 
 ```python
@@ -64,6 +138,15 @@ instance, and forwards extra kwargs to `messages.create`.
     Both adapters default to **4096**. You are billed for tokens *generated*, not
     for the cap, so a generous limit costs nothing — and an empty reflection emits
     a `RuntimeWarning` naming this as the likely cause.
+
+    **4096 is not always enough.** That figure was measured on a short reflection
+    prompt; the budget a model needs scales with how much it has to think about.
+    On ADAS's meta-agent prompt — a whole archive of designs and their fitness —
+    `deepseek-v4-flash` at 4096 returned empty content on **every** call, burning
+    the full budget on reasoning each time; at 16384 it answered every time, with
+    a reply of only ~250 tokens. If a caller's prompts are long or its task is
+    hard, raise the cap and check: an empty completion scores as a wrong answer,
+    it does not raise.
 
 ## What did the run cost? — `Usage`
 

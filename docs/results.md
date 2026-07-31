@@ -13,16 +13,22 @@ so you can reproduce it.
 | **[SkillOpt](algo-skillopt.md)** | SearchQA | `--hard --steps 6` | val hard-EM **0.250 → 0.500**; test **0.450** | 6 steps |
 | **[EvoSkill](algo-evoskill.md)** | FinQA | `--dataset finqa --iterations 5` | val **0.487 → 0.573**; test **0.617**, 1 skill | 115 calls, 4 min |
 | **[DGM](algo-dgm.md)** | surrogate | `--generations 4` | resolve-rate **0.000 → 0.300**; test 0.200 | offline |
-| **[ADAS](algo-adas.md)** | MGSM | `--hard --langs bn,sw,te,th` | **no lift demonstrated** — see below | 791 calls, 24 min |
+| **[ADAS](algo-adas.md)** | MGSM | `--hard`, all 11 languages | direct **0.919** → 222-item hard subset; lift **not yet measured** | ~2 h, 6k–17k calls |
 
-!!! warning "ADAS is the exception, and the reason is cost"
-    MGSM is saturated at the default settings, and `select_hard` does find a real
-    subset (47 of 600 items) — but evaluating one candidate there is a *multi-step
-    program per item*, so a three-generation run is ~9000 calls and hours long.
-    Shrinking it to fit a budget shrinks the measurement too: at 6 train / 3 val /
-    3 test the archive rejected every candidate and held-out test was 0.000 on
-    three items. That is a measurement too small to read, not a demonstration and
-    not a bug. [Details](algo-adas.md#measured-mgsm-with-deepseek).
+!!! warning "ADAS is the exception: the lift row is still empty"
+    Everything else in this table is a completed before → after. ADAS is not, and
+    the honest reason is that no run against the current code has finished.
+
+    What *is* measured: over the whole benchmark (2750 items, 11 languages)
+    `deepseek-v4-flash` answers **0.919** directly, leaving **222** items with
+    real signal — enough for a 34 / 110 / 78 split, where the previous attempt had
+    47 items and split them 23 / 12 / 11.
+
+    One thing to know before running it: this example needs `--max-tokens` set for
+    a reasoning model. At the library default the meta-agent returns empty content
+    on every call and no design reaches the archive — and an empty completion
+    scores as a wrong answer rather than raising.
+    [Details](algo-adas.md#measured-mgsm-with-deepseek).
 
 Each learned something specific to the failure it was shown:
 
