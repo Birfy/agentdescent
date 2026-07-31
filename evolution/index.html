@@ -2107,6 +2107,13 @@ give-up rule is the same global one, counting consecutive rounds in which
 too — so a blip there raised straight out of <code>evolve()</code>, discarding everything
 already committed. It is now treated like a failed round: the last known reward
 carries forward so early stopping still has something to compare.</p>
+<p><strong>Every <em>evaluation</em> is retried at one choke point.</strong> A held-out score runs the
+agent, so it is a backend call — and the engine makes them in more places than is
+obvious: each round's measurement, the final measurement, and the aggregator's own
+accept/reject comparisons (<code>cheap_eval</code>, <code>eval_counts</code>, <code>oracle_eval</code>). A
+transient in any of them used to end the run. They all funnel through one memoised
+evaluation, which now retries there, so a retry re-runs only the task that
+actually failed and every call site is covered at once.</p>
 <p>The <strong>merger</strong> gets the same tolerance, and this matters more than it sounds: it
 scores the held-out set every sweep, so it calls the backend too. A single
 try/except around its loop made it a single point of failure that one transient
