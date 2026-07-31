@@ -366,9 +366,27 @@ def score_mgsm(target: str, prediction: Optional[str]) -> bool:
     return target.replace(",", "") == prediction.replace(",", "")
 
 
-def evaluate_agent(interp: Interpreter, program: dict,
-                   examples: List[Tuple[str, str]]) -> List[float]:
-    return [1.0 if score_mgsm(a, interp.run(program, q)) else 0.0 for q, a in examples]
+def evaluate_agent(interp: Interpreter, program: dict, examples: List[Tuple[str, str]],
+                   concurrency: int = 8) -> List[float]:
+    """Score a program on each example, concurrently.
+
+    This was a sequential list comprehension, and it is the whole run: every
+    candidate is scored on every example, and each score is a *multi-step* program
+    (debate and self-consistency make several model calls per question). Serially
+    that made ADAS's effective concurrency ~1 no matter how many workers the
+    engine was given -- measured, a 6-example generation had not finished after 25
+    minutes. `Interpreter` holds only a completion, so the runs are independent.
+    """
+    if not examples:
+        return []
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(ex):
+        q, a = ex
+        return 1.0 if score_mgsm(a, interp.run(program, q)) else 0.0
+
+    with ThreadPoolExecutor(max(1, min(concurrency, len(examples)))) as pool:
+        return list(pool.map(one, examples))
 
 
 def load_dataset(langs: List[str], per_lang: int, seed: int = 0,
@@ -477,7 +495,17 @@ class MetaSearchAggregator(AggregatorProtocol):
     def _fitness(self, head, design: str) -> float:
         art = head.apply(Diff(diff_id="eval", target=self.aid,
                               ops={"design": design}, author="adas"))
-        correct = [art.score([t]) for t in self.verifier.held_out]   # 0/1 per instance
+        # Per-instance 0/1, because the bootstrap CI needs the individual outcomes --
+        # but scored concurrently. One task per `score()` call sidesteps the
+        # engine's own fan-out (it short-circuits at a single task), so this loop
+        # was serial even though everything under it is not.
+        from concurrent.futures import ThreadPoolExecutor
+        held = list(self.verifier.held_out)
+        if held:
+            with ThreadPoolExecutor(max(1, min(8, len(held)))) as pool:
+                correct = list(pool.map(lambda t: art.score([t]), held))
+        else:
+            correct = []
         return bootstrap_ci(correct, seed=self.boot_seed)[0]
 
     def ingest(self, card: EvidenceCard) -> None:

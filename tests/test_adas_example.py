@@ -89,3 +89,61 @@ def test_search_evaluates_seed_archive():
     assert len(result.archive) >= len(seed_archive())
     assert 0.0 <= result.seed_fitness <= 1.0
     assert result.best_fitness >= result.seed_fitness
+
+
+# --- concurrency: ADAS is the most expensive example, and it was serial --------
+
+def test_evaluate_agent_scores_examples_concurrently():
+    """This loop *is* the run: every candidate is scored on every example, and
+    each score is a multi-step program. Serially, ADAS's effective concurrency was
+    ~1 no matter how many workers the engine was given -- measured, a 6-example
+    generation had not finished after 25 minutes.
+    """
+    import threading
+    import time
+
+    from examples.adas_meta_agent_search import evaluate_agent
+
+    live, peak, lock = [0], [0], threading.Lock()
+
+    def slow(prompt):
+        with lock:
+            live[0] += 1
+            peak[0] = max(peak[0], live[0])
+        time.sleep(0.05)
+        with lock:
+            live[0] -= 1
+        return "Answer: 42"
+
+    examples = [(f"q{i}", "42") for i in range(8)]
+    scores = evaluate_agent(Interpreter(slow), {"block": "cot"}, examples)
+    assert scores == [1.0] * 8
+    assert peak[0] > 1, "evaluate_agent scored the examples serially"
+
+
+def test_evaluate_agent_handles_an_empty_split():
+    from examples.adas_meta_agent_search import evaluate_agent
+    assert evaluate_agent(Interpreter(lambda p: "Answer: 1"), {"block": "cot"}, []) == []
+
+
+def test_evaluate_agent_preserves_order():
+    """Concurrency must not scramble the per-instance outcomes -- the bootstrap
+    CI is computed over them."""
+    from examples.adas_meta_agent_search import evaluate_agent
+
+    def echo(prompt):
+        return f"Answer: {prompt.count('#')}"
+
+    examples = [("#" * i, str(i)) for i in range(1, 7)]
+    assert evaluate_agent(Interpreter(echo), {"block": "cot"}, examples) == [1.0] * 6
+
+
+def test_hard_mode_keeps_items_a_single_call_gets_wrong():
+    """`--hard` exists because MGSM is ~95% solved by one call, so the search has
+    no gradient. The filter is `select_hard` over a structure-free baseline."""
+    from agentdescent.dataloader import select_hard
+
+    pool = [(f"q{i}", str(i)) for i in range(40)]
+    # a "baseline" that only gets the even ones right
+    kept = select_hard(pool, lambda ex: 1.0 if int(ex[1]) % 2 == 0 else 0.0)
+    assert kept == [ex for ex in pool if int(ex[1]) % 2]
