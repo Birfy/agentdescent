@@ -588,6 +588,18 @@ evolve(tasks, reward, agent=agent, n_workers=4, max_concurrency=4)   # 4 workers
     `patience` counts **merge sweeps** (one drain-and-merge by the merger) rather
     than rounds.
 
+!!! warning "An abandoned straggler keeps running — and used to keep the process alive"
+    Python cannot kill a thread, so a rollout abandoned by `round_timeout` runs to
+    completion in the background. The round is bounded; the *work* is not. Its late
+    evidence carries the version it was built against, so the staleness filter
+    judges it like any other stale diff rather than applying it to a newer artifact.
+
+    The round used to run on a `ThreadPoolExecutor`, which registers an atexit hook
+    that **joins** its workers — so `shutdown(wait=False)` bounded the round and not
+    the program: a rollout wedged for 600 s returned from `evolve()` and then held
+    the interpreter open. Rounds now use daemon threads (with a semaphore preserving
+    `max_concurrency`), and the same case exits in **4.5 s**.
+
 !!! tip "Bound the barrier — `round_timeout`"
     Because the aggregator *is* the barrier, a round waits for its slowest worker
     for as long as that takes: one hung rollout stalls the run indefinitely. Cap it:

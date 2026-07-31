@@ -916,6 +916,7 @@ def evolve(
     stalled = 0
     unit_lock = threading.Lock()
     first_error: List[Optional[str]] = [None]
+    contract_error: List[Optional[BaseException]] = [None]   # caller bug -> re-raise
     any_success = [False]      # has ANY worker ever completed a rollout?
     dead_rounds = 0            # consecutive rounds where every worker failed
     deadline = time.time() + max_seconds if max_seconds else None
@@ -940,8 +941,13 @@ def evolve(
             """
             try:
                 _run_unit_inner(unit)
-            except ContractError:
-                raise                     # a caller bug: the run is meaningless
+            except ContractError as e:
+                # A caller bug: the run is meaningless. It has to travel back to the
+                # main thread by hand -- an exception raised in a plain worker thread
+                # goes to the thread excepthook and is lost, not propagated.
+                with unit_lock:
+                    if contract_error[0] is None:
+                        contract_error[0] = e
             except Exception as e:  # noqa: BLE001 - a backend failure
                 with unit_lock:
                     if first_error[0] is None:
@@ -1005,23 +1011,42 @@ def evolve(
                 # hung rollout stalls the run indefinitely. round_timeout caps the
                 # wait; stragglers are abandoned (Python cannot kill a thread, so the
                 # work continues in the background but no longer holds up the round).
-                pool = ThreadPoolExecutor(max_workers=min(max_concurrency, len(units)))
-                try:
-                    futures = [pool.submit(_run_unit, u) for u in units]
-                    done, pending = futures_wait(futures, timeout=round_timeout)
-                    for f in done:
-                        f.result()          # re-raise a genuine backend failure
-                    if pending:
-                        straggler_rounds += 1
-                        if verbose:
-                            print(f"round {r:>3}  abandoned {len(pending)} straggler(s) "
-                                  f"after round_timeout={round_timeout}s")
-                finally:
-                    # never block shutdown on an abandoned straggler
-                    pool.shutdown(wait=False)
+                # Daemon threads rather than a ThreadPoolExecutor, because the
+                # executor registers an atexit hook that JOINS its workers: with
+                # `shutdown(wait=False)` the round moved on as documented, but the
+                # abandoned straggler still held the interpreter open at exit.
+                # Measured: a rollout wedged for 600s printed "evolve returned" and
+                # then kept the process alive -- round_timeout bounded the round and
+                # not the program.
+                gate = threading.Semaphore(min(max_concurrency, len(units)))
+
+                def _bounded(u=None):
+                    with gate:              # preserve max_concurrency
+                        _run_unit(u)
+
+                threads = [threading.Thread(target=_bounded, args=(u,), daemon=True)
+                           for u in units]
+                for t in threads:
+                    t.start()
+                cutoff = None if round_timeout is None else time.time() + round_timeout
+                for t in threads:
+                    t.join(None if cutoff is None else max(0.0, cutoff - time.time()))
+                pending = [t for t in threads if t.is_alive()]
+                if pending:
+                    straggler_rounds += 1
+                    if verbose:
+                        print(f"round {r:>3}  abandoned {len(pending)} straggler(s) "
+                              f"after round_timeout={round_timeout}s")
             else:
                 for unit in units:
                     _run_unit(unit)
+
+            # Both paths funnel a caller bug through `contract_error` rather than
+            # letting it propagate directly, because on the threaded path a raise
+            # inside a worker never reaches here. Re-raise before any evidence is
+            # read: a broken contract makes the round meaningless.
+            if contract_error[0] is not None:
+                raise contract_error[0]
 
             # Decide on the round's tally rather than on the first exception. The
             # same global signal the async path uses: while NO worker has ever

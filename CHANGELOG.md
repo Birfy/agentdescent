@@ -7,6 +7,15 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **An abandoned straggler kept the process alive.** `round_timeout` documents that
+  a slow worker is abandoned and the run continues, and it was — but the round ran
+  on a `ThreadPoolExecutor`, which registers an atexit hook that *joins* its
+  workers. So `shutdown(wait=False)` bounded the round and not the program:
+  measured, a rollout wedged for 600 s printed its result and then held the
+  interpreter open indefinitely. Rounds now use daemon threads with a semaphore
+  preserving `max_concurrency`; the same case exits in **4.5 s**. A `ContractError`
+  raised in a worker is carried back to the main thread by hand, since an exception
+  in a plain thread goes to the excepthook rather than propagating.
 - **A single transient ended a whole *synchronous* run** — the default path, and
   the one every shipped example uses. A worker's exception propagated out of its
   future and broke the round loop, with no retry or tolerance anywhere: measured,

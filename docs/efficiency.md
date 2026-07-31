@@ -15,6 +15,30 @@ Source: [`examples/efficiency.py`](https://github.com/Birfy/agentdescent/blob/ma
 
 ---
 
+## Threads and the GIL — is this *really* parallel?
+
+Yes, for this workload, and no amount of arguing about the GIL settles it — so
+here it is measured. Eight threads, one pool, two workloads: a real API round
+trip, and pure-Python arithmetic.
+
+| workload | sequential | 8 threads | speedup |
+|---|---|---|---|
+| **I/O** — a real `deepseek-v4-flash` call | 14.9 s | **2.1 s** | **7.1×** |
+| **CPU** — pure Python arithmetic | 1.0 s | 1.0 s | 1.0× |
+
+Near-linear on I/O, exactly nothing on CPU. CPython releases the GIL around
+socket I/O and holds it around bytecode, and a rollout is almost entirely spent
+waiting on the model — so threads are the right primitive here and **you do not
+need multiple processes**.
+
+The corollary matters more than the headline: the speedup tracks how much of
+your rollout is *waiting*. Threads buy you nothing for an agent that burns CPU
+locally — a local model in-process, heavy parsing, big numeric work. For that,
+put the CPU work behind a process pool or a separate service, and keep the
+framework's workers on the I/O.
+
+---
+
 ## Experiment 1 — parallel throughput scaling
 
 Run the async runtime with N = 1, 2, 4, 8 workers for a fixed wall-clock window
