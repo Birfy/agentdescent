@@ -64,6 +64,7 @@ def async_evolve(
     max_iters: Optional[int] = None,
     target_reward: Optional[float] = None,
     patience: Optional[int] = None,
+    max_worker_errors: int = 3,
     held_out_frac: float = 0.4,
     repo_path: Optional[str] = None,
     agg_config=None,
@@ -114,6 +115,10 @@ def async_evolve(
         short for any sweep to finish.
     max_iters:
         Stop after this many worker rollouts in total (a budget, not a barrier).
+    max_worker_errors:
+        Consecutive failed rollouts before a worker that has *never* succeeded
+        gives up. Workers that have succeeded at least once never retire; they
+        back off and keep trying until the run's own budget ends it.
     patience:
         Stop after this many consecutive merge sweeps that fail to beat the best
         held-out reward seen so far. The async analogue of the synchronous knob:
@@ -186,7 +191,9 @@ def async_evolve(
     contract_error: List[Optional[BaseException]] = [None]   # caller bug -> re-raise
     n_live = sum(1 for s in shards if s)      # workers that will actually start
     live = [n_live]                           # workers still running
-    max_worker_errors = 3                     # consecutive failures before retiring one
+    retired = [0]                             # workers that gave up (diagnostic)
+    any_success = [False]                     # has ANY worker ever completed one?
+    max_merger_errors = max(3, max_worker_errors)   # sweeps it may fail in a row
 
     def _worker(wid: int, shard: List[Task]) -> None:
         snap = eng.ledger.snapshot(Ledger.DEV)
@@ -196,6 +203,7 @@ def async_evolve(
         by_shard_id = {t.id: t for t in shard}
         i = 0
         consecutive = 0            # consecutive backend failures for this worker
+        warned = False
         while not stop.is_set():
             # Lag budget bounds *un-merged* work too, not just committed drift.
             # Before head first advances (no commit yet) the version check can't
@@ -263,16 +271,46 @@ def async_evolve(
                 if verbose:
                     print(f"worker {wid}  error {consecutive}/{max_worker_errors}: "
                           f"{type(e).__name__}: {str(e)[:100]}")
-                if consecutive >= max_worker_errors:
+                # Two different situations wear the same exception, and they want
+                # opposite responses. If NO worker has ever completed a rollout the
+                # backend is almost certainly misconfigured -- wrong key, dead
+                # endpoint -- so retire fast and let the run end loudly. Once any
+                # worker has succeeded the backend demonstrably works, so this is a
+                # transient: a rate limit, a blip. The test is deliberately global:
+                # keyed on the worker's own history instead, an intermittent backend
+                # retires whoever loses its first few rolls (at a 2-in-3 failure rate
+                # that is ~30% of workers) even though nothing is wrong with them.
+                # Retiring it there is actively wrong, because every worker shares
+                # one backend, so shedding workers cannot relieve the throttling and
+                # only guarantees the run dies. Measured: at a 1-in-3 call failure
+                # rate (~56% per rollout, an ordinary 429 storm) the old blanket
+                # rule retired all three workers in 22s with nothing learned.
+                if not any_success[0] and consecutive >= max_worker_errors:
                     with counter_lock:
+                        retired[0] += 1
                         live[0] -= 1
                         if live[0] <= 0:          # every worker retired -> end the run
                             died[0] = True
                             stop.set()
                     return
-                time.sleep(min(2.0 ** consecutive, 10.0))    # backoff, then retry
+                if any_success[0] and consecutive >= max_worker_errors and not warned:
+                    warned = True   # a backend that dies mid-run must not look idle
+                    warnings.warn(
+                        f"async_evolve: worker {wid} has failed {consecutive} "
+                        f"rollouts in a row and is backing off, not retiring "
+                        f"(it succeeded earlier, so this reads as transient). "
+                        f"Last error: {type(e).__name__}: {str(e)[:120]}",
+                        RuntimeWarning, stacklevel=2)
+                # Cap the backoff well above the retirement threshold so a throttled
+                # run waits the limit out instead of hammering it.
+                # A short backoff on purpose: unlike a worker, the merger blocks
+                # the whole run while it waits, and its work is memoised, so a
+                # retry is cheap. A worker-sized backoff spent an entire short run
+                # asleep and produced no sweeps at all.
+                stop.wait(min(0.25 * 2.0 ** consecutive, 5.0))     # backoff, then retry
                 continue
-            consecutive = 0                                   # a clean rollout resets
+            consecutive, warned = 0, False                    # a clean rollout resets
+            any_success[0] = True
             with counter_lock:
                 counter[0] += 1
                 if max_iters is not None and counter[0] >= max_iters:
@@ -329,19 +367,50 @@ def async_evolve(
     def _merger() -> None:
         # The merger is the only writer; if it dies the workers would keep filling a
         # buffer nobody drains and the run would spin to max_seconds with no reason
-        # given. Record the failure and stop the run instead.
-        try:
-            while not stop.is_set():
+        # given. But it also *calls the backend* every sweep (it scores the held-out
+        # set), so a single blanket try/except around the whole loop made it a single
+        # point of failure that one transient could take out permanently -- measured:
+        # against a backend refusing 1 call in 3, the run ended with 0 sweeps while
+        # the workers were still healthy. It gets the same tolerance they have.
+        consecutive = 0
+        while True:
+            try:
+                if stop.is_set():
+                    _drain_and_merge()       # final drain after stop
+                    return
                 _drain_and_merge()
-            _drain_and_merge()           # final drain after stop
-        except Exception as e:  # noqa: BLE001 - surface, don't hang
-            with counter_lock:
-                if errors[0] is None:
-                    errors[0] = f"{type(e).__name__}: {str(e)[:200]}"
-                died[0] = True
-            if verbose:
-                print(f"merger stopped: {type(e).__name__}: {str(e)[:120]}")
-            stop.set()
+                consecutive = 0
+            except ContractError as e:
+                # A caller bug (a broken aggregator, a bad reward) must propagate,
+                # not be absorbed and reported as if the provider had failed.
+                with counter_lock:
+                    if contract_error[0] is None:
+                        contract_error[0] = e
+                stop.set()
+                return
+            except Exception as e:  # noqa: BLE001 - surface, don't hang
+                consecutive += 1
+                with counter_lock:
+                    if errors[0] is None:
+                        errors[0] = f"{type(e).__name__}: {str(e)[:200]}"
+                if verbose:
+                    print(f"merger error {consecutive}/{max_merger_errors}: "
+                          f"{type(e).__name__}: {str(e)[:120]}")
+                # Deliberately no fail-fast of its own: killing the run here would
+                # repeat the workers' old mistake, and the two cases that *should*
+                # end a run are already covered. A truly dead backend retires every
+                # worker, which ends it; a broken aggregator or reward raises
+                # ContractError, handled above. What is left is a transient, and the
+                # run's own budget (max_seconds / target_reward / patience) bounds
+                # the wait. Say it out loud once so a merger that never recovers is
+                # not mistaken for an idle one.
+                if consecutive == max_merger_errors:
+                    warnings.warn(
+                        f"async_evolve: the merger has failed {consecutive} sweeps "
+                        f"in a row and is retrying; nothing will merge until it "
+                        f"recovers. Last error: {type(e).__name__}: {str(e)[:120]}",
+                        RuntimeWarning, stacklevel=2)
+                stop.wait(min(2.0 ** consecutive, 30.0))
 
     workers = [threading.Thread(target=_worker, args=(w, s), daemon=True)
                for w, s in enumerate(shards) if s]
@@ -374,11 +443,25 @@ def async_evolve(
     final = eng.ledger.snapshot(Ledger.DEV).get(eng.artifact_id)
     # Scoring the final artifact runs the agent too, so a dead backend must not
     # raise out of the driver -- that would discard the work already committed.
-    try:
-        final_reward = final.score(eng.held_out)
-    except Exception as e:  # noqa: BLE001 - report, keep the partial result
-        if errors[0] is None:
-            errors[0] = f"{type(e).__name__}: {str(e)[:200]}"
+    # Retry it: scoring is memoised per (artifact, task), so a retry re-runs only
+    # the tasks that actually failed. Without this a single transient on the last
+    # measurement of an otherwise healthy run got reported as `error`, which is
+    # documented to mean the run *ended* on a failure -- it did not.
+    final_reward, score_error = None, None
+    for attempt in range(3):
+        try:
+            final_reward = final.score(eng.held_out)
+            break
+        except Exception as e:  # noqa: BLE001 - report, keep the partial result
+            score_error = f"{type(e).__name__}: {str(e)[:200]}"
+            if attempt < 2:
+                time.sleep(1.0 * (attempt + 1))
+    if final_reward is None:
+        # Say which of the two happened. The workers may have run fine all along
+        # and only this last measurement failed, and the fixes differ.
+        errors[0] = (f"final held-out scoring failed after 3 attempts, so "
+                     f"final_reward falls back to the last measured round: "
+                     f"{score_error}")
         died[0] = True
         final_reward = history[-1].held_out_reward if history else 0.0
 
@@ -393,4 +476,4 @@ def async_evolve(
     return EvolutionResult(state=dict(final.state), rendered=final.render(),
                            final_reward=final_reward, history=history,
                            ledger_log=eng.ledger.log(Ledger.DEV, limit=40),
-                           error=run_error)
+                           error=run_error, retired_workers=retired[0])

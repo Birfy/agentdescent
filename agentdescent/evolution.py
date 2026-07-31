@@ -242,11 +242,12 @@ class SingleSlot:
     and the best replacement wins:
 
         evolve(tasks, reward, agent=agent,
-               strategy=SingleSlot(initial="Answer concisely."))
+               strategy=SingleSlot(initial_value="Answer concisely."))
 
-    ``key`` names the slot in the artifact state; ``initial`` seeds it. Set
-    ``keep_longest=False`` to accept any different proposal (the default guards
-    against a reflector that answers with a terse non-answer)."""
+    ``key`` names the slot in the artifact state and ``initial_value`` seeds it.
+    ``min_chars`` is the shortest proposal worth taking, which guards against a
+    reflector that replies with a terse non-answer; ``empty_render`` is what the
+    artifact renders as before anything has been accepted."""
 
     initial_value: str = ""
     key: str = "value"
@@ -460,10 +461,17 @@ class EvolutionResult:
     final_reward: float
     history: List[RoundInfo]
     ledger_log: List[str]
-    #: ``None`` on a clean run; otherwise ``"<ExcType>: <message>"`` describing the
-    #: backend failure that ended the run early. The artifact evolved so far is
-    #: still returned -- check this to tell "converged" from "died".
+    #: ``None`` on a clean run; otherwise a description of the backend failure that
+    #: either ended the run early **or** made its final measurement unusable (in
+    #: which case ``final_reward`` falls back to the last measured round, and the
+    #: message says so). The artifact evolved so far is still returned -- check this
+    #: to tell "converged" from "died".
     error: Optional[str] = None
+    #: Workers that gave up after repeated backend failures (async path only). A
+    #: run can finish *cleanly* at a fraction of its requested concurrency, so
+    #: `error` stays `None` while throughput quietly drops -- check this to tell a
+    #: fast run from a lucky one.
+    retired_workers: int = 0
 
     def outcomes(self) -> Dict[str, int]:
         """Merge outcomes for the whole run, by category -- *why* it went as it did.
@@ -501,6 +509,7 @@ class EvolutionResult:
                  "rejected": h.rejected, "reasons": h.reasons}
                 for h in self.history
             ],
+            "retired_workers": self.retired_workers,
             "ledger_log": list(self.ledger_log),
         }
         with open(path, "w", encoding="utf-8") as fh:
@@ -518,6 +527,7 @@ class EvolutionResult:
             final_reward=d["final_reward"],
             history=[RoundInfo(**h) for h in d.get("history", [])],
             ledger_log=d.get("ledger_log", []), error=d.get("error"),
+            retired_workers=d.get("retired_workers", 0),
         )
 
 
@@ -689,6 +699,7 @@ def evolve(
     round_timeout: Optional[float] = None,
     target_reward: Optional[float] = None,
     patience: Optional[int] = None,
+    max_worker_errors: int = 3,
     asynchronous: bool = False,
     async_ratio: int = 3,
     max_seconds: Optional[float] = None,
@@ -770,6 +781,12 @@ def evolve(
         Workers per round (``>= 1``).
     max_concurrency:
         How many of them actually run at once (see above).
+    max_worker_errors:
+        Async only. Consecutive failed rollouts before a worker gives up -- and
+        only while *no* worker has ever succeeded, which reads as a
+        misconfiguration. Once any worker has completed a rollout the backend
+        demonstrably works, so failures are treated as transient and nobody
+        retires. See ``result.retired_workers``.
     target_reward:
         Stop as soon as held-out reward reaches this. Without it a run always
         spends all ``rounds``, including after it has converged -- measured at 43%
@@ -865,6 +882,7 @@ def evolve(
             aggregator_factory=aggregator_factory, oracle_budget=oracle_budget,
             self_verify=self_verify, task_sampler=task_sampler,
             target_reward=target_reward, patience=patience,
+            max_worker_errors=max_worker_errors,
             on_round=on_round, verbose=verbose)
 
     if n_workers < 1:

@@ -36,3 +36,28 @@ def test_result_documents_the_error_contract():
 
     src = inspect.getsource(EvolutionResult)
     assert "error" in src and "clean run" in src
+
+
+def test_docstring_constructor_examples_use_real_arguments():
+    """A copy-pasteable example that raises TypeError is worse than none.
+
+    `SingleSlot`'s docstring advertised `SingleSlot(initial=...)` when the field is
+    `initial_value`, and described a `keep_longest` parameter that never existed.
+    """
+    import dataclasses
+    import re
+
+    import agentdescent.evolution as ev
+
+    bad = []
+    for name in dir(ev):
+        obj = getattr(ev, name)
+        if not (dataclasses.is_dataclass(obj) and isinstance(obj, type)):
+            continue
+        fields = {f.name for f in dataclasses.fields(obj)}
+        doc = inspect.getdoc(obj) or ""
+        for kwarg in re.findall(rf"\b{name}\(\s*([a-z_][a-z_0-9]*)\s*=", doc):
+            if kwarg not in fields:
+                bad.append(f"{name}(...) docstring passes '{kwarg}'; fields are "
+                           f"{sorted(fields)}")
+    assert not bad, "\n".join(bad)

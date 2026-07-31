@@ -6,6 +6,41 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **A flaky backend killed the whole async run.** Measured against a real endpoint
+  refusing 1 call in 3 (~56% per rollout — an ordinary 429 storm): the run ended
+  after **22 s with 0 sweeps and nothing learned**, while two thirds of calls were
+  succeeding. Two causes, both now fixed.
+
+    *Workers* retired on 3 consecutive failures regardless of context. Retirement
+    now keys on a **global** signal — if no worker has *ever* succeeded the backend
+    is misconfigured, so fail fast; once any has, the backend demonstrably works, so
+    nobody retires and they back off instead. Shedding workers could never have
+    helped anyway: they all share one backend. The signal is global because keyed
+    per-worker, an intermittent backend retires whoever loses its first few rolls
+    (~30% of them at a 2-in-3 failure rate). `max_worker_errors=` is now a
+    parameter, and `result.retired_workers` reports the count — a run can finish
+    *cleanly* at a fraction of its requested concurrency with `error` still `None`.
+
+    The *merger* had a single try/except around its whole loop, and it calls the
+    backend every sweep to score held-out — so one transient took it out
+    permanently and the run reported 0 sweeps while every worker was healthy. It now
+    retries with a short backoff and never ends the run itself, since a dead backend
+    already retires the workers. A `ContractError` raised there (a broken custom
+    aggregator) used to be absorbed and reported as a provider outage; it now
+    propagates, as documented. After the fix the same 1-in-3 run reaches **1.000
+    held-out** and learns the rule, with 24 of 70 calls still failing.
+- **`error` conflated "the run died" with "the final measurement failed".** A
+  transient on the last held-out scoring of an otherwise healthy run was reported
+  as a run-ending failure. Scoring is now retried (it is memoised per task, so a
+  retry re-runs only what failed), and if it still cannot be made the message says
+  so and that `final_reward` fell back to the last measured round.
+- **`SingleSlot`'s docstring did not compile.** It advertised
+  `SingleSlot(initial=...)` when the field is `initial_value`, and described a
+  `keep_longest` parameter that never existed. A test now walks every dataclass in
+  the module and fails when a docstring's constructor example names a field that
+  is not there.
+
 ### Added
 - **`result.outcomes()` — why the run went as it did.** A run that committed
   nothing reported `rejected: 3` and no more, though the aggregator had computed

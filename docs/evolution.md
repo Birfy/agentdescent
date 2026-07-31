@@ -110,6 +110,7 @@ nothing else in the call changes.
 | `self_verify=` | [`async_evolve`](#the-barrier-free-runtime-async_evolve) | async only: a worker re-runs its trajectory with the diff applied for a local before/after signal; faithful ports that score the candidate on held-out only pass `False` | `True` |
 | `on_round=` | driver | **progress callback** — fires per round / merger sweep | `None` |
 | `target_reward=`, `patience=` | driver | **early stopping** — stop at a reward, or after N rounds without improvement | `None`, `None` |
+| `max_worker_errors=` | [async driver](#the-barrier-free-runtime-async_evolve) | consecutive failures before a worker gives up — only while *no* worker has ever succeeded | `3` |
 | `blast_radius`, `oracle_budget` | governance + verifier | audit budget for L1 merges | `0.2`, `200` |
 
 The building blocks in detail:
@@ -148,6 +149,24 @@ evolve(tasks, reward,
 `Diff`**. The artifact's state is a flat `{key: value}` dict — the op-space the
 aggregator resolves conflicts and fusion over.
 
+!!! important "The framework never injects the artifact into your prompt — you do"
+    `run(rendered, task)` hands you `rendered`, the current artifact as text. Where
+    it goes is entirely your call: a system prompt, a prefix, a few-shot block, a
+    tool description. Nothing is inserted behind your back.
+
+    ```python
+    evolve(tasks, reward,
+           run=lambda rendered, task: model(f"{rendered}\n\nQ: {task.prompt}"),
+           #                                  ^^^^^^^^ you decide where it lands
+           propose=reflector(model),
+           strategy=SingleSlot(initial_value="You are a helpful assistant."))
+    ```
+
+    So "what evolves" is set by two things together: `strategy=` fixes the
+    artifact's *shape*, and `run=` decides how that shape reaches the model. The
+    same `SingleSlot` is a system prompt or a tool description depending only on
+    where you interpolate it.
+
 ```python
 from agentdescent.evolution import AppendRules, KeyedRules
 
@@ -166,15 +185,15 @@ Write your own by implementing three methods (`initial` / `render` / `to_diff`):
 ```python
 from agentdescent.evolvable import Diff
 
-class SingleSlot:                     # the artifact is one value each proposal replaces
+class OneValue:                       # this is `SingleSlot`, written out longhand
     def initial(self): return {}
     def render(self, state): return state.get("v", "(none)")
     def to_diff(self, state, proposal, author, base_version, target):
-        if state.get("v") == proposal: return None
+        if state.get("v") == proposal: return None   # None -> propose nothing
         return Diff(diff_id=f"{author}:{base_version}", target=target,
                     ops={"v": proposal}, author=author)
 
-evolve(tasks, reward, agent=agent, strategy=SingleSlot())
+evolve(tasks, reward, agent=agent, strategy=OneValue())
 ```
 
 Distinct `Diff.ops` keys → **fused**; same key, different value → **resolved** on
@@ -463,10 +482,37 @@ parameter) raises `TypeError` immediately instead of surfacing as a
 backend-shaped failure with zero rounds run and an empty artifact.
 
 **Backend failures are tolerated, not fatal.** In the async runtime a transient
-error (a rate limit, a flaky endpoint) is retried with exponential backoff; a
-worker retires only after `3` *consecutive* failures, and the run ends when every
-worker has retired — so one hiccup in one worker no longer kills a long run. The
-first failure seen is always reported through `result.error`.
+error (a rate limit, a flaky endpoint) is retried with exponential backoff. What
+happens next depends on a **global** signal — has *any* worker ever completed a
+rollout?
+
+| | what it means | response |
+|---|---|---|
+| nothing has ever succeeded | misconfiguration: wrong key, dead endpoint | each worker retires after `max_worker_errors=3` consecutive failures; when all have, the run ends and `result.error` names the failure |
+| something succeeded, now failing | a transient: the backend demonstrably works | **no one retires** — back off and keep trying until the run's own budget ends it. A `RuntimeWarning` names the worker so a backend dying mid-run is not mistaken for idleness |
+
+The signal is global on purpose. Keyed on each worker's own history instead, an
+intermittent backend retires whoever loses its first few rolls — at a 2-in-3
+failure rate that is about 30% of workers, none of which were faulty.
+
+!!! warning "Shedding workers cannot fix a throttled backend"
+    Every worker shares one backend, so retiring workers over rate limits reduces
+    throughput without relieving the limit, and then ends the run. Measured against
+    a backend refusing 1 call in 3 (~56% per rollout, an ordinary 429 storm), the
+    old blanket rule retired all three workers in **22 s with nothing learned**.
+
+The **merger** gets the same tolerance, and this matters more than it sounds: it
+scores the held-out set every sweep, so it calls the backend too. A single
+try/except around its loop made it a single point of failure that one transient
+took out permanently — the run then reported `0 sweeps` while every worker was
+still healthy. It now retries with a short backoff and never ends the run by
+itself, because the two cases that *should* end one are already covered: a dead
+backend retires the workers, and a broken aggregator or reward raises
+[`ContractError`](aggregator.md), which propagates rather than being absorbed.
+
+`result.retired_workers` counts workers that gave up. A run can finish *cleanly*
+at a fraction of its requested concurrency, with `error` still `None` — check it
+before reading a fast run as a healthy one.
 
 ---
 
