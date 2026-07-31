@@ -7,6 +7,15 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **A transient during *merge decisions* ended a synchronous run.** The third
+  unprotected backend call site, after the round and final scoring: the aggregator
+  runs the agent for its own accept/reject comparisons (`cheap_eval`,
+  `eval_counts`, `oracle_eval`), and a blip there propagated out of the round.
+  Rather than guard each site, the single memoised evaluation every one of them
+  funnels through now retries — so a retry re-runs only the task that failed, and
+  the round scoring no longer loses a whole measurement to one unlucky task (on a
+  30-task held-out set at a 1% per-call failure rate, ~26% of rounds measured
+  nothing). Contract violations are not retried.
 - **An abandoned straggler kept the process alive.** `round_timeout` documents that
   a slow worker is abandoned and the run continues, and it was — but the round ran
   on a `ThreadPoolExecutor`, which registers an atexit hook that *joins* its
@@ -64,6 +73,14 @@ All notable changes to AgentDescent are documented here. The format follows
   is not there.
 
 ### Added
+- **A fault-injection harness in the suite (`tests/faults.py`).** Every resilience
+  bug so far surfaced only under a real fault — a dead socket, a wedged thread, a
+  process that would not exit — each found by a throwaway script that then
+  disappeared. The faults are now reusable (`never_works`, `flaky`, `dies_after`,
+  `recovers_after`, `wedged`, `slow`) and a matrix runs each against **both**
+  engines, asserting outcomes rather than exceptions: a run never hangs, never ends
+  silently, survives anything recoverable, and gives up fast on anything not. It
+  found the merge-decision gap above on its first run.
 - **`result.outcomes()` — why the run went as it did.** A run that committed
   nothing reported `rejected: 3` and no more, though the aggregator had computed
   the reason and thrown it away. Merge outcomes are now tallied by a stable

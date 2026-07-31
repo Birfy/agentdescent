@@ -419,11 +419,32 @@ class _Runtime:
     reward: Reward
     cache: _EvalCache
 
+    #: Attempts per (artifact, task) evaluation before the failure is raised.
+    #: Every evaluation the engine makes funnels through here -- a round's held-out
+    #: score, the final score, and the aggregator's own accept/reject measurements
+    #: (`cheap_eval`, `eval_counts`, `oracle_eval`) -- and each of those *runs the
+    #: agent*, so each is a backend call that can hit a transient. Retrying at the
+    #: single choke point covers all of them at once, and it is nearly free: the
+    #: result is memoised, so a retry re-runs only what actually failed.
+    ATTEMPTS = 3
+
     def eval_one(self, artifact: EvolvingArtifact, task: Task) -> float:
         key = (artifact._signature(), task.id)
-        return self.cache.get_or_eval(
-            key, lambda: _checked_reward(self.reward(task, self.run(artifact.render(), task)),
-                                        task))
+
+        def _measure() -> float:
+            for attempt in range(self.ATTEMPTS):
+                try:
+                    return _checked_reward(
+                        self.reward(task, self.run(artifact.render(), task)), task)
+                except ContractError:
+                    raise            # a caller bug: retrying cannot help
+                except Exception:  # noqa: BLE001 - a backend transient
+                    if attempt == self.ATTEMPTS - 1:
+                        raise
+                    time.sleep(0.2 * (attempt + 1))
+            raise AssertionError("unreachable")
+
+        return self.cache.get_or_eval(key, _measure)
 
 
 # ---------------------------------------------------------------------------
@@ -1081,11 +1102,24 @@ def evolve(
         # must not raise out of the driver -- that would discard everything already
         # committed. Treat an unmeasurable round like a failed one: keep the last
         # known reward so early stopping still has something to compare.
-        try:
-            round_reward = dev.score(held_out)
-        except ContractError:
-            raise
-        except Exception as e:  # noqa: BLE001
+        # Retried like the final measurement, and for the same reason: scoring is
+        # memoised per (artifact, task), so a retry re-runs only the tasks that
+        # actually failed. Giving up after one try loses the whole round's
+        # measurement to a single unlucky task -- on a 30-task held-out set with a
+        # 1% per-call failure rate that is ~26% of rounds measuring nothing.
+        round_reward, score_error = None, None
+        for attempt in range(3):
+            try:
+                round_reward = dev.score(held_out)
+                break
+            except ContractError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                score_error = e
+                if attempt < 2:
+                    time.sleep(0.2 * (attempt + 1))
+        if round_reward is None:
+            e = score_error
             if first_error[0] is None:
                 first_error[0] = f"{type(e).__name__}: {str(e)[:200]}"
             dead_rounds += 1

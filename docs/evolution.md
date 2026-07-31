@@ -514,6 +514,14 @@ too — so a blip there raised straight out of `evolve()`, discarding everything
 already committed. It is now treated like a failed round: the last known reward
 carries forward so early stopping still has something to compare.
 
+**Every *evaluation* is retried at one choke point.** A held-out score runs the
+agent, so it is a backend call — and the engine makes them in more places than is
+obvious: each round's measurement, the final measurement, and the aggregator's own
+accept/reject comparisons (`cheap_eval`, `eval_counts`, `oracle_eval`). A
+transient in any of them used to end the run. They all funnel through one memoised
+evaluation, which now retries there, so a retry re-runs only the task that
+actually failed and every call site is covered at once.
+
 The **merger** gets the same tolerance, and this matters more than it sounds: it
 scores the held-out set every sweep, so it calls the backend too. A single
 try/except around its loop made it a single point of failure that one transient
