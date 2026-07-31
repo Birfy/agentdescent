@@ -1614,8 +1614,8 @@ benchmark without writing HuggingFace paging/caching boilerplate, use the
 </tr>
 <tr>
 <td><code>max_worker_errors=</code></td>
-<td><a href="#the-barrier-free-runtime-async_evolve">async driver</a></td>
-<td>consecutive failures before a worker gives up — only while <em>no</em> worker has ever succeeded</td>
+<td>driver</td>
+<td>how much total failure to tolerate — only while <em>no</em> worker has ever succeeded</td>
 <td><code>3</code></td>
 </tr>
 <tr>
@@ -2096,6 +2096,17 @@ throughput without relieving the limit, and then ends the run. Measured against
 a backend refusing 1 call in 3 (~56% per rollout, an ordinary 429 storm), the
 old blanket rule retired all three workers in <strong>22 s with nothing learned</strong>.</p>
 </div>
+<p><strong>The synchronous path had the same disease in a worse form.</strong> A worker's
+exception propagated out of its future and broke the round loop, so a <em>single</em>
+transient ended the run — measured, one 429 on call 5 turned a 20-round run into
+<strong>0 rounds</strong>, and sync is the default. A failing worker now costs its own
+evidence and nothing more; the round merges what the others gathered. The
+give-up rule is the same global one, counting consecutive rounds in which
+<em>every</em> worker failed. A dead backend still ends the run in well under a second.</p>
+<p>The per-round held-out scoring sat <em>outside</em> that handling, and it runs the agent
+too — so a blip there raised straight out of <code>evolve()</code>, discarding everything
+already committed. It is now treated like a failed round: the last known reward
+carries forward so early stopping still has something to compare.</p>
 <p>The <strong>merger</strong> gets the same tolerance, and this matters more than it sounds: it
 scores the held-out set every sweep, so it calls the backend too. A single
 try/except around its loop made it a single point of failure that one transient
