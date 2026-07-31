@@ -139,6 +139,18 @@ empty. You are billed for tokens generated, not for the cap.
 
 ## Run it
 
+Point the example at your own endpoint with two environment variables — they are
+read at call time and never stored by the repo (full list, including Claude and
+local servers: [Configuring your provider and key](agents.md#configuring-your-provider-and-key)):
+
+```bash
+export OPENAI_BASE_URL=https://api.deepseek.com     # or your gateway
+export OPENAI_API_KEY=sk-...
+```
+
+Then confirm the setup costs nothing before it costs something — `--dry-run`
+loads MGSM, prints the plan and the budget, and makes **no API calls**:
+
 ```bash
 python -m examples.adas_meta_agent_search --dry-run
 python -m examples.adas_meta_agent_search --select dgm --langs en,es
