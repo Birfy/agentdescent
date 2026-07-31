@@ -220,12 +220,25 @@ each is a real `Strategy` you can read and reuse:
 [`agentdescent.parallel`](parallelism.md).
 
 ```python
-from agentdescent.parallel import DataParallel, TensorParallel, PipelineParallel
+from agentdescent.parallel import DataParallel, TensorParallel
 
 evolve(tasks, reward, agent=agent, parallel=DataParallel())                # default (shard tasks)
-evolve(tasks, reward, agent=agent, parallel=TensorParallel(n_sections=4))  # disjoint sections
-evolve(tasks, reward, agent=agent, parallel=PipelineParallel(stages=[...]))# per-stage workers
+evolve(tasks, reward, agent=agent,                                         # disjoint sections
+       strategy=KeyedRules(categories=CATS),
+       parallel=TensorParallel(n_sections=4, route=category_of))
 ```
+
+`TensorParallel` splits the **artifact** into disjoint sections, one per worker, so
+the merge is a conflict-free union. It needs a strategy with a fixed key space
+(`KeyedRules`; `AppendRules` content-addresses its keys and is refused), and
+`route=` maps a task to the artifact key its failure will edit so each worker only
+sees tasks it may act on. Out-of-section proposals are rejected and counted as
+`section-violation` in [`result.outcomes()`](#7-reading-the-result). See
+[Parallelism](parallelism.md).
+
+`PipelineParallel` is **not** an `evolve()` mode — it needs one artifact per stage
+and `evolve()` evolves one, so passing it raises. Its stage ordering and blame
+attribution live in `agentdescent.parallel.PipelineChain`.
 
 Or your own — implement `plan(n_workers, round_index, keys) -> [WorkUnit]`:
 
