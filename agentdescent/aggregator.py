@@ -504,6 +504,23 @@ class Aggregator:
         _, uncertainty = self.verifier.learned_eval(best_state)
         self.audit.submit(best_diff.diff_id, artifact_id, artifact.blast_radius,
                           uncertainty, payload=best_diff)
+        # Trust is "how often does the cheap layer agree with the full held-out
+        # set", and it has to be measurable WITHOUT spending oracle budget --
+        # otherwise it is circular. It was: `force_oracle` fires on
+        # `blast_radius >= 0.5 or trust < 0.75`, and the only writer of trust sat
+        # inside that branch, so for any artifact below 0.5 the condition could
+        # never become true and the audit never ran at all. Measured on the default
+        # blast_radius=0.2: oracle_calls_used == 0 for the whole run, trust pinned
+        # at its initial 1.0.
+        #
+        # The signal is free here: `eval_counts` already scored base and candidate
+        # on the full held-out set for the Beta test above, so comparing its verdict
+        # with the cheap layer's costs nothing and happens on every merge.
+        base_full = base_s / max(1e-9, base_s + base_f)
+        cand_full = cand_s / max(1e-9, cand_s + cand_f)
+        if cand_full != base_full or cand_score != base_score:
+            self.audit.update_trust(
+                artifact_id, (cand_full > base_full) == (cand_score > base_score))
         if self.audit.force_oracle(artifact.blast_radius, artifact_id):
             oracle_base = self.verifier.oracle_eval(artifact)
             oracle_cand = self.verifier.oracle_eval(best_state)
