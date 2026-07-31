@@ -36,17 +36,17 @@ flowchart TD
         direction TB
         S1[1. staleness filter η vs α] --> S2[2. conflict resolution]
         S2 --> S3[3. fusion tournament]
-        S3 --> S4["4. Beta acceptance P(Δ>0) &gt; 1−δ"]
-        S4 --> S5[5. commit CAS]
-        S5 --> S6[6. dual-branch dev→stable]
-        S6 --> S7[7. audit]
+        S3 --> S7["4. audit gate (force_oracle)"]
+        S7 --> S4["5. Beta acceptance P(Δ>0) &gt; 1−δ"]
+        S4 --> S5[6. commit CAS]
+        S5 --> S6[7. dual-branch dev→stable]
     end
     AG -->|commit| LG["Ledger (git-backed)<br/>dev + stable branches"]
     LG -->|broadcast changed artifact| W1
     LG -->|broadcast| W2
     LG -->|broadcast| WN
-    S7 -.->|Ĝ priority| AUD["AuditScheduler → Oracle"]
-    AUD -.->|spot-check| LG
+    S7 -->|Ĝ priority| AUD["AuditScheduler → Oracle"]
+    AUD -->|veto: oracle-rejected| OUT[dropped]
 ```
 
 The same flow, with the design-doc section numbers annotated:
@@ -74,10 +74,10 @@ The same flow, with the design-doc section numbers annotated:
         │  1. staleness filter   η vs α  → ACCEPT/REBASE/DISCARD│  §4.2
         │  2. conflict resolve   contradictions dropped         │  §4.3
         │  3. fusion tournament  complementary diffs merged     │  §4.3
-        │  4. Beta acceptance    P(Δ>0) > 1−δ                    │  §4.4
-        │  5. commit             CAS (one artifact per merge)     │  §4.1
-        │  6. dual-branch        dev → stable (EMA)              │  §4.5
-        │  7. audit              submit merge to AuditScheduler  │  §5.3
+        │  4. audit gate         oracle may VETO here            │  §5.3
+        │  5. Beta acceptance    P(Δ>0) > 1−δ                    │  §4.4
+        │  6. commit             CAS (one artifact per merge)     │  §4.1
+        │  7. dual-branch        dev → stable, K clean rounds     │  §4.5
         └───────────────────────────┬─────────────────────────┘
                                      ▼
                     Ledger  (git-backed, version-vectored)         §3.1
@@ -89,7 +89,13 @@ The same flow, with the design-doc section numbers annotated:
 ```
 
 The three-layer **verifier** (rule / learned / oracle) is the evaluation backend
-the Aggregator calls at steps 1–4 (cheap) and step 7 (oracle, budgeted).
+the Aggregator calls at steps 1–3 and 5 (cheap) and at step 4 (oracle, budgeted).
+
+!!! note "The audit is a gate, not a spot-check"
+    It runs *before* the acceptance test and can return `oracle-rejected` outright,
+    so it sits on the critical path of every merge that trips `force_oracle` — the
+    diagrams used to place it after the commit with a dotted "spot-check" arrow,
+    which reads as advisory when it holds a veto.
 
 ---
 

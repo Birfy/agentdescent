@@ -169,19 +169,23 @@ artifacts don't starve). Then, in order:
    contradicts.
 3. **Fusion tournament** — complementary diffs are fused (model-soup analogy)
    and run against the individual candidates on held-out data; the best wins.
-4. **Statistical acceptance** — commit only if `P(Δ > 0) > 1 − δ` under a Beta
+4. **Audit gate** — the candidate is submitted to the AuditScheduler, and a
+   high-blast-radius or low-trust one is forced through the oracle, which can
+   **veto it here** (`oracle-rejected`) before the acceptance test runs. **The
+   optimizer audits itself** — as a blocking gate on the accept path, not a
+   post-commit spot-check.
+5. **Statistical acceptance** — commit only if `P(Δ > 0) > 1 − δ` under a Beta
    posterior comparison of candidate vs base, **not** a point threshold. `δ`
    anneals with version (LR decay); a trust-region caps diff size.
-5. **Commit** — compare-and-swap on `dev`, one artifact per merge. (`Ledger`
+6. **Commit** — compare-and-swap on `dev`, one artifact per merge. (`Ledger`
    also implements `commit_atomic`, a 2PC across artifacts for a
    contract-breaking diff that must land with its adapters, but the reference
    aggregator buckets per artifact and no engine path uses it.)
-6. **Dual-branch promotion** — `dev → stable` every *K* accepted commits
-   (EMA-style confirmation). Production workers ride `stable`; explorers ride
+7. **Dual-branch promotion** — `dev → stable` after *K* **regression-free
+   rounds** on dev (EMA-style confirmation). A commit restarts the clock, so the
+   artifact most likely to be promoted is the one that has *stopped* changing
+   because nothing beats it. Production workers ride `stable`; explorers ride
    `dev`.
-7. **Audit** — the merge decision is itself submitted to the AuditScheduler;
-   high-blast-radius or low-trust merges are forced through the oracle. **The
-   optimizer audits itself.**
 
 !!! info "Why a statistical test, not a threshold"
     A Beta posterior gives evidence-starved *tail* artifacts an automatically

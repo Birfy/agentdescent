@@ -36,13 +36,13 @@ budget, then prints the learning curve and the comparison:
 
 ```
 round  dev_acc   stable  commit  fused  stale  confl  oracle
-    0    0.853    0.000       1      1      0      0       0
-    2    0.983    0.000       1      1      0      1       0     ← a contradiction dropped
-    8    1.000    1.000       1      0      0      0       0     ← stable branch catches up
+    0    0.828    0.000       1      1      0      0       0
+    3    1.000    0.000       1      0      0      1       0     ← a contradiction dropped
+    8    1.000    1.000       0      0      0      0       0     ← stable branch catches up
 
 AgentDescent (merge) held-out accuracy : 1.000
-Fork/archive best-fork accuracy     : 0.353
-merge advantage                     : +0.647
+Fork/archive best-fork accuracy     : 0.379
+merge advantage                     : +0.621
 ```
 
 ### Async stage orchestration (FlashEvolve-style)
