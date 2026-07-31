@@ -21,8 +21,10 @@ def main() -> None:
     universe = make_task_universe(seed=7)
 
     print("=== staleness policies (async_ratio=4) ===")
+    print("dev_acc saturates -- every policy reaches the ceiling on this domain --")
+    print("so the comparison is in the cost columns: rollouts spent and time taken.\n")
     print(f"{'policy':>11} {'dev_acc':>8} {'commits':>8} {'rollouts':>9} "
-          f"{'stale':>6} {'refresh':>8} {'secs':>6}")
+          f"{'stale':>6} {'wasted':>7} {'refresh':>8} {'secs':>6}")
     for policy_name in ("full", "guarded", "reflective"):
         with tempfile.TemporaryDirectory() as repo:
             cfg = AsyncConfig(n_workers=6, async_ratio=4, noise=0.15,
@@ -30,12 +32,14 @@ def main() -> None:
             sys = AsyncAgentDescent(repo, universe, config=cfg,
                                  staleness_policy=get_policy(policy_name))
             s = sys.run()
+            wasted = (100.0 * s.discarded_stale / s.rollouts) if s.rollouts else 0.0
             print(f"{policy_name:>11} {s.final_dev_accuracy:>8.3f} {s.commits:>8} "
-                  f"{s.rollouts:>9} {s.discarded_stale:>6} {s.forced_refreshes:>8} "
-                  f"{s.wallclock:>6.1f}")
+                  f"{s.rollouts:>9} {s.discarded_stale:>6} {wasted:>6.0f}% "
+                  f"{s.forced_refreshes:>8} {s.wallclock:>6.1f}")
 
     print("\n=== async_ratio sweep (guarded policy) ===")
-    print(f"{'async_ratio':>12} {'dev_acc':>8} {'stale':>6} {'refresh':>8} {'commits':>8}")
+    print(f"{'async_ratio':>12} {'dev_acc':>8} {'rollouts':>9} {'stale':>6} "
+          f"{'wasted':>7} {'refresh':>8} {'commits':>8}")
     for ratio in (0, 2, 4, 8):
         with tempfile.TemporaryDirectory() as repo:
             cfg = AsyncConfig(n_workers=6, async_ratio=ratio, noise=0.1,
@@ -43,8 +47,10 @@ def main() -> None:
             sys = AsyncAgentDescent(repo, universe, config=cfg,
                                  staleness_policy=get_policy("guarded"))
             s = sys.run()
-            print(f"{ratio:>12} {s.final_dev_accuracy:>8.3f} {s.discarded_stale:>6} "
-                  f"{s.forced_refreshes:>8} {s.commits:>8}")
+            wasted = (100.0 * s.discarded_stale / s.rollouts) if s.rollouts else 0.0
+            print(f"{ratio:>12} {s.final_dev_accuracy:>8.3f} {s.rollouts:>9} "
+                  f"{s.discarded_stale:>6} {wasted:>6.0f}% {s.forced_refreshes:>8} "
+                  f"{s.commits:>8}")
 
 
 if __name__ == "__main__":

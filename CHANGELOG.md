@@ -7,6 +7,20 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **`examples/rq2_staleness` swept a parameter the run never reads.** It varied
+  `alpha_head`, which `Aggregator._alpha_for` consults only for an L1 artifact,
+  while the reference `RouterSkill` is `blast_radius=0.2` -- so the live knob was
+  `alpha_tail=min(alpha, 1)` and **three of the four published rows were the same
+  configuration**. It sweeps both bands now, and alpha=0 genuinely separates:
+  7 rounds to converge and 7 stale discards, against 4 rounds and 1 for alpha>=1.
+- **Every published sweep reported `dev_acc=1.000` for every setting.** The router
+  domain is reachable from all of them, including zero staleness tolerance, so the
+  outcome column was constant and the experiments could not answer the question
+  they were run to answer. `rq2_staleness` and `run_async` now report **cost** --
+  rounds and rollouts to converge, and the share of rollouts discarded -- which
+  does vary: `guarded` wastes 91% of its rollouts against `full`'s 0% and
+  `reflective`'s 12%. Both scripts say plainly that accuracy saturates and the
+  cost columns are the comparison.
 - **The docstring-completeness guard was a substring match.** `test_api_docs.py`
   exists to keep `evolve` / `async_evolve` honest as their signatures grow, and
   checked `p not in doc` against the *whole* docstring. Delete `async_evolve`'s
@@ -26,6 +40,25 @@ All notable changes to AgentDescent are documented here. The format follows
   that keeps running and can `ingest` mid-drain. `AggregatorProtocol` now states
   the contract it always relied on: `ingest` may be called from many worker
   threads, `step` from one, guard anything both touch.
+- **`tests/faults.py` gained the three fault classes that had actually caused
+  bugs.** Every primitive raised, so "the backend succeeds and returns nothing"
+  -- the failure the codebase itself calls the most insidious, with a dedicated
+  counter and warning in `LLMAgent.propose` -- had no way to be injected;
+  `returns_nothing` covers it, and the matrix pins that a mute backend cannot
+  produce a commit. Faults only ever wrapped `run`, so a reflector outage (a
+  *separate* backend call, often to a different model) was untested;
+  `flaky_propose` covers it. And nothing faulted the ledger -- the sole writer,
+  on the critical path, with no retry anywhere -- whose failure escaping as an
+  exception was found only by injecting it by hand; `ledger_dies_after` covers it.
+- **`tests/test_bbh_example.py` tested `examples/skill_evolution.py`**, a stale
+  name from a rename, so the test for that example was the one file nobody would
+  look in for it. Renamed.
+- **The five fully-offline examples had no test at all**, while all six algorithm
+  ports -- which need credentials to do anything real -- had offline tests of
+  their helpers, and CI runs `pytest` only. `tests/test_offline_examples.py`
+  covers them, including the RQ1 merge-vs-fork advantage three doc pages quote.
+- `docs/usage.md` said the algorithm ports "run offline with `--dry-run`". It
+  still downloads the benchmark, and does not run the evolution loop.
 
 ### Fixed
 - **The published version drifted five minor releases behind the code.**
