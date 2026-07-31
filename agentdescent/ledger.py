@@ -66,18 +66,66 @@ class GitError(RuntimeError):
     """A git command failed; the message carries git's own stderr."""
 
 
+#: What a ledger read or write can fail with -- a third category alongside
+#: ``ContractError`` (a caller bug: propagate) and a backend failure (absorb and
+#: report). The ledger is *infrastructure*: a held ``index.lock``, a full
+#: ``$TMPDIR``, a killed ``git``. Its failure ends the run but must still leave a
+#: partial result behind, so the drivers catch this tuple rather than letting it
+#: escape (which used to discard a completed run -- even when the failing call was
+#: only fetching the cosmetic ``ledger_log``).
+LedgerFailure = (GitError, OSError, json.JSONDecodeError)
+
+
+# Config the ledger imposes on every invocation, overriding whatever the user has
+# in ~/.gitconfig. These commits are the ledger's bookkeeping, not the user's, and
+# a scratch repo in $TMPDIR has no business honouring personal git preferences:
+# `commit.gpgsign = true` -- a common setting -- failed the genesis commit, so
+# `evolve()` raised before running a single task, from a call that mentions git
+# nowhere. `core.hooksPath` would likewise run the user's pre-commit hook against
+# a temp directory it knows nothing about.
+_GIT_OVERRIDES = (
+    "-c", "commit.gpgsign=false",
+    "-c", "tag.gpgsign=false",
+    "-c", "core.hooksPath=",
+    "-c", "gc.auto=0",
+)
+# 120s is enormous for the operations here (all local, all tiny) and exists only
+# so a wedged git -- an NFS stall, a held index.lock -- surfaces as a GitError
+# instead of hanging the process. Every call holds the ledger lock, so one
+# blocked git would otherwise stall every worker.
+_GIT_TIMEOUT = 120.0
+
+
 def _git(repo: str, *args: str) -> str:
     """Run a git command, surfacing *why* it failed.
 
     ``capture_output=True`` swallows stderr, so a failure used to read only
     "returned non-zero exit status 128" -- the actual cause (a missing repo, an
     index lock held by another process) was discarded.
+
+    The environment is isolated (see ``_GIT_OVERRIDES``): system and user config
+    must not decide whether the ledger can write, and ``GIT_TERMINAL_PROMPT=0``
+    keeps a credential prompt from wedging a run that has no terminal.
     """
-    out = subprocess.run(
-        ["git", "-C", repo, *args],
-        capture_output=True,
-        text=True,
-    )
+    env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"}
+    try:
+        out = subprocess.run(
+            ["git", "-C", repo, *_GIT_OVERRIDES, *args],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT,
+            env=env,
+        )
+    except FileNotFoundError as e:
+        # Otherwise a machine without git fails with a bare OSError traceback,
+        # while every other missing-executable path in the package names it.
+        raise GitError(
+            "'git' is not installed or not on PATH; the Ledger stores artifacts "
+            "in a git repository, so it is required") from e
+    except subprocess.TimeoutExpired as e:
+        raise GitError(
+            f"git {' '.join(args)} in {repo} exceeded {_GIT_TIMEOUT}s and was "
+            "abandoned (a held index.lock or a stalled filesystem)") from e
     if out.returncode != 0:
         detail = (out.stderr or out.stdout or "").strip() or "no output"
         raise GitError(f"git {' '.join(args)} failed in {repo}: {detail}")

@@ -456,7 +456,17 @@ The second call starts from the artifact the first one committed, not from
 * `initial_state=` is ignored when the artifact already exists (a `RuntimeWarning`
   says so). Use a fresh `repo_path` to start over.
 
-Omit `repo_path` and the ledger is a scratch directory, cleaned up at exit.
+Omit `repo_path` and the ledger is a throwaway directory, removed when `evolve()`
+returns — not held until the interpreter exits, so a notebook or a parameter sweep
+does not accumulate one git repo per run. A process killed outright (SIGKILL, OOM)
+skips that cleanup; the next run in a fresh process collects anything older than a
+day.
+
+The ledger also runs git with **its own configuration**, ignoring your
+`~/.gitconfig` and `/etc/gitconfig`. These are the ledger's internal bookkeeping
+commits in a directory you never see — `commit.gpgsign = true` or a global
+`core.hooksPath` used to fail them, and with it the whole run, before a single
+task had executed.
 
 The engine returns **partial results** if the model backend fails mid-run (rate
 limit, credit exhaustion) — progress isn't lost.
@@ -475,6 +485,18 @@ limit, credit exhaustion) — progress isn't lost.
     `error` means *the run ended because of this failure* — a transient error the
     workers retried past leaves it `None`. A `RuntimeWarning` is also emitted, so
     a failed run is never completely silent even at the default `verbose=False`.
+
+!!! note "Three failure categories, not two"
+    | category | example | what happens |
+    |---|---|---|
+    | **caller contract** | `reward` returns `47`, `propose` returns an `int` | raises (`ContractError`) — the run is meaningless, so failing fast is the only useful answer |
+    | **backend** | 429, dead endpoint, credit exhausted | absorbed, retried, tolerated; ends the run only when nothing can make progress, and then `error` names it |
+    | **ledger** | a held `index.lock`, a full `$TMPDIR`, a killed `git` | ends the run, but still returns the artifact evolved so far with `error` naming git |
+
+    The third used to escape as a bare `GitError`, discarding a completed run —
+    including when the failing call was only fetching the cosmetic
+    `result.ledger_log`, which now degrades to `[]` rather than taking the result
+    with it.
 
 **Actor signatures are checked before the first rollout.** `run` and `propose` are
 bound-tested up front, so a plain typo (a `propose` missing its `reward`

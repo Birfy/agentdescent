@@ -37,12 +37,13 @@ import warnings
 from typing import Callable, Dict, List, Optional
 
 from .evolution import (
+    _safe_log,
     Agent, EvolutionResult, Propose, Reward, RoundInfo, Run, Strategy, Task, _tally,
     _build_engine, _checked_proposal, _checked_reward,
 )
 from .aggregator import AggregatorConfig, check_reports
 from .evolvable import ContractError, EvidenceCard, vv_staleness
-from .ledger import Ledger
+from .ledger import Ledger, LedgerFailure
 from .sampling import RoundRobin, TaskSampler
 from .staleness import StaleAction, StalenessPolicy, get_policy
 
@@ -191,6 +192,9 @@ def async_evolve(
     # the merger closure can mutate it without a `nonlocal` per field.
     best: List[float] = [float('-inf'), 0]
     errors: List[Optional[str]] = [None]      # first backend failure seen (diagnostic)
+    # Most recent artifact read from the ledger, so a failing final read still
+    # yields a result instead of an exception (same reasoning as the sync path).
+    last_good: List[object] = [None]
     died = [False]                            # True only if the run ENDED on failure
     contract_error: List[Optional[BaseException]] = [None]   # caller bug -> re-raise
     n_live = sum(1 for s in shards if s)      # workers that will actually start
@@ -342,6 +346,7 @@ def async_evolve(
         reports = check_reports(eng.aggregator.step(), eng.aggregator)
         committed = sum(1 for x in reports if x.committed_version is not None)
         dev = eng.ledger.snapshot(Ledger.DEV).get(eng.artifact_id)
+        last_good[0] = dev
         # Must be the real held-out reward: MergeReport.prob_improve is P(Δ>0)
         # from the Beta posterior, a *probability*, and reporting it here would
         # both corrupt `history` and make `target_reward` fire spuriously. This
@@ -444,7 +449,22 @@ def async_evolve(
 
     if contract_error[0] is not None:
         raise contract_error[0]
-    final = eng.ledger.snapshot(Ledger.DEV).get(eng.artifact_id)
+    try:
+        final = eng.ledger.snapshot(Ledger.DEV).get(eng.artifact_id)
+    except LedgerFailure as e:
+        # The ledger is infrastructure: neither a caller bug nor a backend blip.
+        # Its failure must still leave a result behind (see the sync path), so fall
+        # back to whatever the merger last read.
+        final = last_good[0]
+        errors[0] = (f"the final ledger read failed, so the returned artifact is "
+                     f"the last one successfully read: {type(e).__name__}: "
+                     f"{str(e)[:160]}")
+        died[0] = True
+    if final is None:                  # nothing was ever read: hand back the seed
+        from .evolution import EvolvingArtifact
+        final = EvolvingArtifact(eng.artifact_id, dict(eng.strategy.initial()),
+                                 blast_radius=eng.blast_radius,
+                                 runtime=eng.runtime, strategy=eng.strategy)
     # Scoring the final artifact runs the agent too, so a dead backend must not
     # raise out of the driver -- that would discard the work already committed.
     # Retry it: scoring is memoised per (artifact, task), so a retry re-runs only
@@ -477,7 +497,9 @@ def async_evolve(
             print(f"async run ended with a backend failure: {run_error[:140]}")
         warnings.warn(f"async_evolve() ended with a backend failure: {run_error}",
                       RuntimeWarning, stacklevel=2)
-    return EvolutionResult(state=dict(final.state), rendered=final.render(),
-                           final_reward=final_reward, history=history,
-                           ledger_log=eng.ledger.log(Ledger.DEV, limit=40),
-                           error=run_error, retired_workers=retired[0])
+    result = EvolutionResult(state=dict(final.state), rendered=final.render(),
+                             final_reward=final_reward, history=history,
+                             ledger_log=_safe_log(eng.ledger),
+                             error=run_error, retired_workers=retired[0])
+    eng.cleanup()          # do not hold a scratch git repo for the whole process
+    return result
