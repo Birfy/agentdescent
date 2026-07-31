@@ -1,4 +1,7 @@
-"""Offline tests for the BBH skill-evolution example's pure helpers.
+"""Offline tests for `examples/skill_evolution.py`'s pure helpers.
+
+Named `test_bbh_example.py` until the file it tests was renamed, so the
+test for `skill_evolution` was the one place nobody would look for it.
 
 These exercise dataset shaping and scoring without any network or LLM calls.
 """

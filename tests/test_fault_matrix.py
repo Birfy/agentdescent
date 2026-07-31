@@ -75,6 +75,54 @@ def test_no_fault_makes_a_run_outlast_its_budget(engine):
 
 
 @pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("value", [None, "", "   "], ids=["null", "empty", "blank"])
+def test_a_mute_backend_does_not_look_like_a_converged_run(engine, value):
+    """The fault class every other primitive misses: success with no content.
+
+    It raises nothing, so it bypasses every retry and error-tolerance path and
+    lands as `error=None` with a full history -- while `outcomes()` reports
+    `below-threshold`, documented to mean "the reflector is the problem", which is
+    the opposite of the truth. Nothing can currently distinguish it, so this pins
+    the *observable* consequence rather than a diagnosis that does not exist yet:
+    the artifact never moves off its seed, and nothing is ever committed.
+    """
+    res = _run(faults.returns_nothing(value), engine)
+    assert res.rendered == "v", (
+        "a backend that says nothing cannot have taught the artifact anything, "
+        f"yet it rendered {res.rendered!r}")
+    assert res.outcomes().get("committed", 0) == 0, \
+        f"a mute backend produced a commit: {res.outcomes()}"
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_a_reflector_outage_does_not_end_a_healthy_run(engine):
+    """`propose` is a separate backend call, often to a different model.
+
+    The matrix faulted only `run` and paired it with a reflector that never
+    fails, so "the solver is fine and the reflector is down" -- an ordinary
+    two-provider outage -- was untested.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        res = evolve(TASKS, lambda t, o: 0.5, run=faults.OK,
+                     propose=faults.flaky_propose(1 / 3),
+                     strategy=SingleSlot(initial_value="v"),
+                     rounds=12, held_out_frac=0.5, **engine)
+    assert res.error is None, f"a flaky reflector ended the run: {res.error}"
+
+
+def test_a_dying_ledger_still_returns_what_was_learned():
+    """The sole writer, on the critical path, with no retry anywhere -- and no
+    fault primitive until now. Its failure used to escape as an exception,
+    against the documented "a run that died still returns a partial result"."""
+    with faults.ledger_dies_after(24):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            res = _run(faults.OK, {"n_workers": 3, "max_concurrency": 3})
+    assert res.rendered, "a ledger failure discarded the artifact"
+
+
+@pytest.mark.parametrize("engine", ENGINES)
 def test_a_clean_run_reports_no_error(engine):
     """The control: without a fault, none of the above machinery fires."""
     res = _run(faults.OK, engine)
