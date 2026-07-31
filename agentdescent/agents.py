@@ -23,6 +23,7 @@ import os
 import threading
 import time
 import subprocess
+import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional, Protocol, Sequence, runtime_checkable
@@ -287,7 +288,8 @@ def openai_compatible(model: str, *, base_url_env: str = "OPENAI_BASE_URL",
                       api_key_env: str = "OPENAI_API_KEY",
                       default_base_url: str = "https://api.openai.com/v1",
                       max_tokens: int = 4096, timeout: float = 120.0,
-                      usage: Optional[Usage] = None, retries: int = 3) -> Completion:
+                      usage: Optional[Usage] = None, retries: int = 3,
+                      **create_kwargs) -> Completion:
     """A completion for any OpenAI-compatible chat endpoint (GLM/Zhipu, proxies,
     local servers, OpenAI itself).
 
@@ -298,7 +300,10 @@ def openai_compatible(model: str, *, base_url_env: str = "OPENAI_BASE_URL",
 
     ``max_tokens`` defaults high on purpose -- see :func:`claude`: a reasoning
     model starved of budget returns empty content, and at 1024 that happened for
-    half of one measured batch of reflection prompts."""
+    half of one measured batch of reflection prompts.
+
+    Extra keyword arguments go into the request body, so ``temperature=0`` and any
+    provider-specific field work the same way they do on :func:`claude`."""
     def complete(prompt: str) -> str:
         base = os.environ.get(base_url_env, default_base_url).rstrip("/")
         key = os.environ.get(api_key_env)
@@ -308,6 +313,7 @@ def openai_compatible(model: str, *, base_url_env: str = "OPENAI_BASE_URL",
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": max_tokens,
+            **create_kwargs,
         }).encode()
         req = urllib.request.Request(
             f"{base}/chat/completions", data=body,
@@ -316,6 +322,21 @@ def openai_compatible(model: str, *, base_url_env: str = "OPENAI_BASE_URL",
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 data = json.load(resp)
+        except urllib.error.HTTPError as e:
+            # The body carries the only useful part -- "rate limit: retry in 12s",
+            # "context length exceeded", "insufficient quota" -- and it lives on
+            # e.read(), so re-raising bare collapses every 4xx to "HTTP Error 429:
+            # Too Many Requests". `_git` and `_CliAgent` both surface the
+            # underlying detail; this was the one provider path that did not.
+            if usage is not None:
+                usage.record(seconds=time.time() - t0, failed=True)
+            try:
+                detail = e.read().decode("utf-8", "replace").strip()[:400]
+            except Exception:  # noqa: BLE001 - the body is best-effort
+                detail = ""
+            raise RuntimeError(
+                f"{base} returned HTTP {e.code} for model {model!r}"
+                + (f": {detail}" if detail else "")) from e
         except Exception:
             if usage is not None:
                 usage.record(seconds=time.time() - t0, failed=True)
@@ -325,6 +346,21 @@ def openai_compatible(model: str, *, base_url_env: str = "OPENAI_BASE_URL",
             usage.record(prompt_tokens=u.get("prompt_tokens", 0) or 0,
                          completion_tokens=u.get("completion_tokens", 0) or 0,
                          seconds=time.time() - t0)
-        return data["choices"][0]["message"]["content"]
+        try:
+            message = data["choices"][0]["message"]
+        except (KeyError, IndexError, TypeError):
+            # Some proxies answer HTTP 200 with {"error": ...}; without this the
+            # caller gets a bare KeyError naming nothing.
+            raise RuntimeError(
+                f"{base} returned a response with no choices for model {model!r}: "
+                f"{json.dumps(data)[:300]}") from None
+        # `content` is JSON null, not "", when a reasoning model spends its whole
+        # budget on `reasoning_content` -- DeepSeek's reasoner and GLM's thinking
+        # modes both do it. Returning None breaks the one contract in the package
+        # (`Completion` is prompt -> str) and surfaces as
+        # "'NoneType' object has no attribute 'strip'" from inside LLMAgent, which
+        # the engine then retries as a *backend transient*. Normalising to "" lets
+        # the empty-completion warning fire and say the true cause.
+        return message.get("content") or ""
 
     return with_retries(complete, attempts=retries) if retries > 1 else complete

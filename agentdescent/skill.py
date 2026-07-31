@@ -90,7 +90,9 @@ def evolve_skill(
     **evolve_kwargs:
         Passed to :func:`~agentdescent.evolution.evolve` and override the defaults
         chosen here (``asynchronous=True``, a different ``strategy=``, an
-        ``aggregator_factory=``, ...).
+        ``aggregator_factory=``, ...). ``shuffle=True`` is worth knowing about:
+        rows arrive in dataset order and the train/held-out split is positional,
+        so grouped data otherwise holds out one end of the file.
 
     The defaults it picks -- and why they are defaults, not decisions
     ----------------------------------------------------------------

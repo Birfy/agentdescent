@@ -40,6 +40,21 @@ robust = with_retries(claude(model="claude-haiku-4-5"), attempts=3)
 `claude()` accepts a `client=` to reuse an existing `anthropic.Anthropic`
 instance, and forwards extra kwargs to `messages.create`.
 
+!!! warning "`content: null` is not the same as `""`"
+    On OpenAI-compatible endpoints a reasoning model that spends its whole budget
+    on `reasoning_content` answers with JSON `null`, not an empty string.
+    `openai_compatible` normalises that to `""`, because returning `None` breaks
+    the one contract in the package (`Completion` is `prompt -> str`) and used to
+    surface as `'NoneType' object has no attribute 'strip'` from inside
+    `LLMAgent` — which the engine then **retried as a backend transient**,
+    diagnosing a systematic model/parameter mismatch as a flaky endpoint. With the
+    empty string the warning above fires instead and names the real cause.
+
+    HTTP errors carry the provider's own message too (`rate limit: retry in 12s`,
+    `context length exceeded`), rather than collapsing to `HTTP Error 429`. Extra
+    keyword arguments — `temperature=0` and any provider-specific field — go
+    straight into the request body, matching `claude()`.
+
 !!! tip "Give a reasoning model room"
     A reasoning model spends its budget on internal reasoning *before* emitting
     visible text, so too small a `max_tokens` yields an **empty completion**, not a
