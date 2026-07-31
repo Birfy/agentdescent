@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from .domains.router import RouterSkill
 from .evolvable import Diff, stable_hash
@@ -43,8 +43,33 @@ class ParallelMode(Enum):
 
 
 def section_of(key: str, n_sections: int) -> int:
-    """Deterministically map an artifact key (keyword) to a section id."""
+    """Hash an artifact key to a section id.
+
+    A hash *bucket*, not a partition: with ``n_sections`` comparable to the number
+    of keys, collisions leave some sections owning several keys and others owning
+    none. Kept for callers that have no declared key space; prefer
+    :func:`assign_key_sections`, which is what :class:`TensorParallel` uses when
+    the key space is known.
+    """
     return (stable_hash(key) & 0x7FFFFFFF) % n_sections
+
+
+def assign_key_sections(keys: Sequence[str], n_sections: int) -> Dict[str, int]:
+    """Partition a **known** artifact key space into balanced, disjoint sections.
+
+    TP's guarantee is that each worker owns a disjoint section, so the merge is a
+    conflict-free union. That only holds if the sections are a genuine partition of
+    the keys the strategy will actually write. Hashing gave neither balance nor
+    coverage -- on the four categories the tests use, two collided into one section
+    and a third owned nothing at all, so the worker holding it could never commit.
+
+    Round-robin over the sorted keys instead: deterministic, every section
+    non-empty whenever ``n_sections <= len(keys)``, and sizes differ by at most one.
+    """
+    ordered = sorted(dict.fromkeys(keys))
+    if not ordered:
+        return {}
+    return {k: i % n_sections for i, k in enumerate(ordered)}
 
 
 def assign_sections(worker_ids: Sequence[str], n_sections: int) -> Dict[str, int]:
@@ -183,18 +208,61 @@ class DataParallel:
 class TensorParallel:
     """TP -- one hot artifact is split into ``n_sections`` disjoint sections; each
     worker owns a section, so edits are conflict-free *by construction* and the
-    merge is a union (concatenation + a consistency check)."""
+    merge is a union (concatenation + a consistency check).
+
+    ``keys`` is the **artifact's** key space -- the keys the strategy writes. It is
+    what the sections are carved out of, and :func:`~agentdescent.evolution.evolve`
+    fills it in from the strategy when the strategy declares one
+    (:class:`~agentdescent.evolution.KeyedRules` does; so does
+    :class:`~agentdescent.evolution.SingleSlot`, with a single key, which is why it
+    cannot be tensor-parallelised).
+
+    The section and the *tasks* a worker rolls out are orthogonal, and conflating
+    them was the bug this replaces: ``plan`` used to filter **task ids** through
+    ``section_of``, then ``evolve`` enforced the section against the **artifact
+    keys** the resulting diff wrote. Two unrelated key spaces, so a worker's legal
+    tasks had nothing to do with its legal edits and 75-88% of proposals were
+    dropped without a word. Tasks are now sharded data-parallel exactly as
+    :class:`DataParallel` does; only the section is TP's business.
+
+    ``route`` closes the loop. A worker owns a section of the *artifact*, but it is
+    handed *tasks* -- and only the caller knows which artifact key a given task's
+    failure will produce an edit for. Give ``route(task_id) -> artifact key`` and
+    each worker is handed exactly the tasks whose edits land in its own section, so
+    every proposal is legal and TP costs nothing in throughput. Without it, tasks
+    are sharded data-parallel and any proposal that misses the worker's section is
+    rejected and counted as ``section-violation`` in
+    :meth:`~agentdescent.evolution.EvolutionResult.outcomes` -- visible, rather
+    than the silent discard this replaces.
+    """
 
     n_sections: int
+    keys: Optional[Sequence[str]] = None
+    route: Optional[Callable[[str], str]] = None
     name: str = "TP"
 
     def plan(self, n_workers, round_index, keys) -> List[WorkUnit]:
-        units = []
-        for i in range(n_workers):
-            sec = i % self.n_sections
-            owned = [k for k in keys if section_of(k, self.n_sections) == sec]
-            units.append(WorkUnit(worker=i, keys=owned, section=sec))
-        return units
+        # `keys` are TASK ids. The artifact section is a separate axis.
+        sections = [i % self.n_sections for i in range(n_workers)]
+        if self.route is not None:
+            owner = self.section_map()
+            by_section: Dict[int, List[str]] = {s: [] for s in range(self.n_sections)}
+            for task_id in keys:
+                sec = owner.get(self.route(task_id))
+                if sec is not None:
+                    by_section[sec].append(task_id)
+            return [WorkUnit(worker=i, keys=list(by_section[sections[i]]),
+                             section=sections[i])
+                    for i in range(n_workers)]
+        shards = shard_round_robin(list(keys), n_workers)
+        m = len(shards)
+        return [WorkUnit(worker=i, keys=shards[(i + round_index) % m],
+                         section=sections[i])
+                for i in range(n_workers)]
+
+    def section_map(self) -> Dict[str, int]:
+        """``artifact key -> section``. Empty when no key space was declared."""
+        return assign_key_sections(self.keys or (), self.n_sections)
 
 
 @dataclass

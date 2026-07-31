@@ -151,7 +151,30 @@ class Ledger:
         self._author = author
         self._lock = threading.RLock()
         self._current_branch: Optional[str] = None   # see _checkout()
+        self._closed = False
         self._init_repo()
+
+    # -- lifecycle ------------------------------------------------------------
+
+    def close(self) -> None:
+        """Refuse further use of this ledger. Idempotent.
+
+        A driver that owns a throwaway repo removes it when it returns, but a
+        round abandoned on ``round_timeout`` leaves worker threads running that
+        Python cannot cancel -- and one of those, finishing later, would commit
+        into the deleted directory and *recreate* it (``_dump_artifact`` calls
+        ``makedirs(exist_ok=True)``). Closing first turns that late write into an
+        ordinary error inside the straggler's own thread, where the driver already
+        absorbs it."""
+        with self._lock:
+            self._closed = True
+
+    def _ensure_open(self) -> None:
+        if self._closed:
+            raise GitError(
+                f"this Ledger has been closed and its repository at "
+                f"{self.repo_path} removed; a rollout abandoned by round_timeout "
+                "finished after the run returned")
 
     # -- repository bootstrap -------------------------------------------------
 
@@ -211,6 +234,7 @@ class Ledger:
     def register(self, artifact: Evolvable, branch: str = DEV) -> None:
         """Add a brand-new artifact at version 1 on both branches."""
         with self._lock:
+            self._ensure_open()
             for br in (self.STABLE, self.DEV):
                 self._checkout(br)
                 vv = self._read_versions()
@@ -236,6 +260,7 @@ class Ledger:
     def snapshot(self, branch: str = DEV) -> Snapshot:
         """Materialize every artifact on ``branch`` into live Evolvables."""
         with self._lock:
+            self._ensure_open()
             self._checkout(branch)
             vv = self._read_versions()
             artifacts: Dict[str, Evolvable] = {}
@@ -249,6 +274,7 @@ class Ledger:
 
     def head_version(self, branch: str = DEV) -> VersionVector:
         with self._lock:
+            self._ensure_open()
             self._checkout(branch)
             return self._read_versions()
 
@@ -270,6 +296,7 @@ class Ledger:
         declared no base would always win -- precisely the lost update CAS
         exists to prevent."""
         with self._lock:
+            self._ensure_open()
             self._checkout(branch)
             vv = self._read_versions()
             aid = new_state.id
@@ -304,6 +331,7 @@ class Ledger:
         Phase 1 validates every CAS precondition; phase 2 writes and commits in
         a single git commit."""
         with self._lock:
+            self._ensure_open()
             self._checkout(branch)
             vv = self._read_versions()
             # phase 1: validate all (every id must declare its base -- see commit())
@@ -335,6 +363,7 @@ class Ledger:
         survived K rounds on dev without a regression report (design doc,
         section 4.5)."""
         with self._lock:
+            self._ensure_open()
             self._checkout(self.DEV)
             dev_vv = self._read_versions()
             if artifact_id not in dev_vv:
@@ -355,6 +384,7 @@ class Ledger:
 
     def log(self, branch: str = DEV, limit: int = 20) -> List[str]:
         with self._lock:
+            self._ensure_open()
             self._checkout(branch)
             out = _git(
                 self.repo_path, "log", f"-{limit}", "--pretty=format:%h %s"

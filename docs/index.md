@@ -71,7 +71,9 @@ The one place the analogy *must* break defines the whole system:
 
 -   :material-vector-triangle: **[Customizable parallelism](parallelism.md)** → `parallel=`
 
-    Pluggable DP / TP / PP methods — or write your own `ParallelStrategy`.
+    Pluggable DP / TP methods — or write your own `ParallelStrategy`. (PP needs
+    one artifact per stage, so it is a standalone primitive, not an `evolve()`
+    mode.)
 
 -   :material-timer-sand: **[Duration-aware scheduling](duration-scheduling.md)**
 

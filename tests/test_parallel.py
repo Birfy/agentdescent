@@ -3,6 +3,7 @@ import pytest
 from agentdescent.domains.router import RouterSkill
 from agentdescent.evolvable import Diff
 from agentdescent.parallel import (
+    assign_key_sections,
     PipelineChain,
     SectionViolation,
     TensorParallelMerge,
@@ -81,6 +82,7 @@ def test_pp_upstream_lookup():
 # -- pluggable parallel strategies (DP / TP / PP + custom) -------------------
 
 from agentdescent.parallel import (
+    assign_key_sections,
     DataParallel,
     TensorParallel,
     PipelineParallel,
@@ -105,13 +107,40 @@ def test_data_parallel_rotates_ownership_across_rounds():
     assert a != b                                # ownership rotates by round
 
 
-def test_tensor_parallel_keys_stay_in_their_section():
-    plan = TensorParallel(n_sections=4).plan(4, 0, KEYS)
-    for u in plan:
-        assert all(section_of(k, 4) == u.section for k in u.keys)
-    # union covers every key exactly once (disjoint sections)
+def test_tensor_parallel_shards_tasks_and_assigns_sections_independently():
+    """`plan` receives TASK ids; the section is about the ARTIFACT.
+
+    These used to be the same call: `plan` filtered task ids through
+    `section_of`, and `evolve` then enforced the section against the artifact keys
+    the resulting diff wrote. Two unrelated key spaces, so a worker's legal tasks
+    said nothing about its legal edits.
+    """
+    plan = TensorParallel(n_sections=4, keys=list("abcd")).plan(4, 0, KEYS)
+    assert [u.section for u in plan] == [0, 1, 2, 3], "each worker owns one section"
+    # tasks are sharded data-parallel: every task assigned exactly once
     seen = [k for u in plan for k in u.keys]
     assert sorted(seen) == sorted(KEYS) and len(seen) == len(set(seen))
+    # ...and no worker is starved of tasks just because of how its section hashed
+    assert all(u.keys for u in plan), "a worker with no tasks cannot contribute"
+
+
+def test_sections_partition_the_declared_key_space():
+    """Every section non-empty, disjoint, and covering -- a partition, not a hash.
+
+    `section_of` is `stable_hash(key) % n`, a hash *bucket*. On the four categories
+    the TP tests use it put two keys in one section and left another owning
+    nothing at all, so the worker holding it could never commit a single edit.
+    """
+    keys = ["alpha", "beta", "gamma", "delta"]
+    mapping = assign_key_sections(keys, 4)
+    assert sorted(mapping) == sorted(keys), "every key is assigned"
+    assert sorted(mapping.values()) == [0, 1, 2, 3], "every section owns exactly one"
+    # balanced when the split is uneven, and stable across calls
+    uneven = assign_key_sections(["a", "b", "c", "d", "e"], 2)
+    sizes = sorted(list(uneven.values()).count(s) for s in set(uneven.values()))
+    assert sizes == [2, 3], f"sections should differ by at most one, got {sizes}"
+    assert uneven == assign_key_sections(["e", "d", "c", "b", "a"], 2), \
+        "assignment must not depend on input order"
 
 
 def test_pipeline_parallel_assigns_stages():

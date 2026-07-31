@@ -7,6 +7,33 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **TensorParallel silently discarded 75-88% of every worker's proposals.**
+  `plan()` sharded **task ids** through `section_of`, while `evolve()` enforced the
+  section against the **artifact keys** the resulting diff wrote -- two unrelated
+  key spaces, so a worker's legal tasks said nothing about its legal edits. With
+  `SingleSlot` the key is a constant, so one section owned everything and the other
+  workers could never commit at all; with `AppendRules` the key is a content hash,
+  so legality was a coin flip. Nothing reported it: the rejections were appended to
+  a list that was never read, so a TP run that threw away most of its work looked
+  exactly like one whose reflector had nothing useful to say. Tasks are now sharded
+  data-parallel and the section is a separate axis; the pairing is validated before
+  the first rollout (a strategy with no declared key space, or more sections than
+  keys, is refused with a message naming the fix); every rejection is counted as
+  `section-violation` in `result.outcomes()`; and the new `TensorParallel(route=)`
+  maps a task to the artifact key its failure will edit, so each worker is handed
+  only tasks it may act on and TP delivers exactly what DP does.
+- **`section_of` was a hash bucket, not a partition.** On four keys and four
+  sections it put two keys in one section and left another owning nothing, so the
+  worker holding it could never commit. `assign_key_sections` partitions a declared
+  key space evenly and deterministically instead.
+- **`parallel=PipelineParallel(...)` was accepted and quietly ignored.**
+  `WorkUnit.stage` -- the only thing distinguishing PP's units, since it hands every
+  worker the whole task list -- was never read by any driver, so PP degraded to
+  n_workers redundantly rolling out the same tasks: strictly worse than the default,
+  with no signal. Measured on 24 tasks and 3 workers, it covered 14 distinct tasks
+  against DP's 22, with three workers on the same task in one round. `evolve()` now
+  raises and points at `PipelineChain`, which is where PP's stage ordering and blame
+  attribution actually live.
 - **A personal `~/.gitconfig` could stop `evolve()` before it ran a single task.**
   The ledger shelled out to plain `git`, so `commit.gpgsign = true` -- a common
   setting, and the default in several corporate onboarding scripts -- failed the
