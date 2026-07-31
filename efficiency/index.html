@@ -634,6 +634,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#threads-and-the-gil-is-this-really-parallel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Threads and the GIL — is this really parallel?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#experiment-1-parallel-throughput-scaling" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1023,6 +1034,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#threads-and-the-gil-is-this-really-parallel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Threads and the GIL — is this really parallel?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#experiment-1-parallel-throughput-scaling" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1074,6 +1096,44 @@ processes or hosts would.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.efficiency
 </code></pre></div>
 <p>Source: <a href="https://github.com/Birfy/agentdescent/blob/main/examples/efficiency.py"><code>examples/efficiency.py</code></a>.</p>
+<hr />
+<h2 id="threads-and-the-gil-is-this-really-parallel">Threads and the GIL — is this <em>really</em> parallel?<a class="headerlink" href="#threads-and-the-gil-is-this-really-parallel" title="Permanent link">&para;</a></h2>
+<p>Yes, for this workload, and no amount of arguing about the GIL settles it — so
+here it is measured. Eight threads, one pool, two workloads: a real API round
+trip, and pure-Python arithmetic.</p>
+<table>
+<thead>
+<tr>
+<th>workload</th>
+<th>sequential</th>
+<th>8 threads</th>
+<th>speedup</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>I/O</strong> — a real <code>deepseek-v4-flash</code> call</td>
+<td>14.9 s</td>
+<td><strong>2.1 s</strong></td>
+<td><strong>7.1×</strong></td>
+</tr>
+<tr>
+<td><strong>CPU</strong> — pure Python arithmetic</td>
+<td>1.0 s</td>
+<td>1.0 s</td>
+<td>1.0×</td>
+</tr>
+</tbody>
+</table>
+<p>Near-linear on I/O, exactly nothing on CPU. CPython releases the GIL around
+socket I/O and holds it around bytecode, and a rollout is almost entirely spent
+waiting on the model — so threads are the right primitive here and <strong>you do not
+need multiple processes</strong>.</p>
+<p>The corollary matters more than the headline: the speedup tracks how much of
+your rollout is <em>waiting</em>. Threads buy you nothing for an agent that burns CPU
+locally — a local model in-process, heavy parsing, big numeric work. For that,
+put the CPU work behind a process pool or a separate service, and keep the
+framework's workers on the I/O.</p>
 <hr />
 <h2 id="experiment-1-parallel-throughput-scaling">Experiment 1 — parallel throughput scaling<a class="headerlink" href="#experiment-1-parallel-throughput-scaling" title="Permanent link">&para;</a></h2>
 <p>Run the async runtime with N = 1, 2, 4, 8 workers for a fixed wall-clock window

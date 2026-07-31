@@ -2167,6 +2167,18 @@ calls for a result reached at 69 — <strong>51% of the budget bought nothing</s
 <code>patience</code> counts <strong>merge sweeps</strong> (one drain-and-merge by the merger) rather
 than rounds.</p>
 </div>
+<div class="admonition warning">
+<p class="admonition-title">An abandoned straggler keeps running — and used to keep the process alive</p>
+<p>Python cannot kill a thread, so a rollout abandoned by <code>round_timeout</code> runs to
+completion in the background. The round is bounded; the <em>work</em> is not. Its late
+evidence carries the version it was built against, so the staleness filter
+judges it like any other stale diff rather than applying it to a newer artifact.</p>
+<p>The round used to run on a <code>ThreadPoolExecutor</code>, which registers an atexit hook
+that <strong>joins</strong> its workers — so <code>shutdown(wait=False)</code> bounded the round and not
+the program: a rollout wedged for 600 s returned from <code>evolve()</code> and then held
+the interpreter open. Rounds now use daemon threads (with a semaphore preserving
+<code>max_concurrency</code>), and the same case exits in <strong>4.5 s</strong>.</p>
+</div>
 <div class="admonition tip">
 <p class="admonition-title">Bound the barrier — <code>round_timeout</code></p>
 <p>Because the aggregator <em>is</em> the barrier, a round waits for its slowest worker
