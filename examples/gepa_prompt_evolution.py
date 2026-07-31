@@ -40,6 +40,8 @@ instruction module and the minibatch is the per-round worker sample (raise
 
 from __future__ import annotations
 
+import threading
+
 import argparse
 import random
 import re
@@ -196,6 +198,7 @@ class ParetoAggregator(AggregatorProtocol):
         self.artifact_id = artifact_id
         self.rng = random.Random(seed)
         self._cards: List[EvidenceCard] = []
+        self._lock = threading.Lock()   # ingest: workers; step: one thread
         # pool: list of (state_dict, per_instance_scores, avg). Parallel lists so
         # score rows stay aligned for pareto_frontier.
         self.states: List[Dict[str, str]] = []
@@ -233,7 +236,9 @@ class ParetoAggregator(AggregatorProtocol):
     # -- AggregatorProtocol --------------------------------------------------
 
     def ingest(self, card: EvidenceCard) -> None:
-        self._cards.append(card)
+        # ingest runs on worker threads, step on one: see AggregatorProtocol.
+        with self._lock:
+            self._cards.append(card)
 
     def step(self) -> List[MergeReport]:
         snap = self.ledger.snapshot(Ledger.DEV)
@@ -242,7 +247,8 @@ class ParetoAggregator(AggregatorProtocol):
         if not self.states:                       # seed the pool with the base system
             self._admit(head)
 
-        cards, self._cards = self._cards, []
+        with self._lock:
+            cards, self._cards = self._cards, []
         admitted = 0
         for card in cards:
             # GEPA Alg. 1 admits a child whose score on the feedback minibatch is

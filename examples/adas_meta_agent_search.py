@@ -500,6 +500,7 @@ class MetaSearchAggregator(AggregatorProtocol):
         self.aid = artifact_id
         self.boot_seed = boot_seed
         self.cards: List[EvidenceCard] = []
+        self._lock = threading.Lock()   # ingest: workers; step: one thread
         self._seeded = False
 
     def _fitness(self, head, design: str) -> float:
@@ -519,7 +520,9 @@ class MetaSearchAggregator(AggregatorProtocol):
         return bootstrap_ci(correct, seed=self.boot_seed)[0]
 
     def ingest(self, card: EvidenceCard) -> None:
-        self.cards.append(card)
+        # ingest runs on worker threads, step on one: see AggregatorProtocol.
+        with self._lock:
+            self.cards.append(card)
 
     def _record(self, name, thought, program, fitness):
         agent = {"name": name, "thought": thought, "program": program, "fitness": fitness}
@@ -541,7 +544,8 @@ class MetaSearchAggregator(AggregatorProtocol):
             self.ctx.seed_fitness = self.ctx.best_fitness
             self._seeded = True
 
-        cards, self.cards = self.cards, []
+        with self._lock:
+            cards, self.cards = self.cards, []
         for card in cards:
             design = card.diff.ops["design"]
             self._record(card.diff.ops.get("name", "agent"),

@@ -52,7 +52,16 @@ class AggregatorProtocol(Protocol):
     An aggregator is the framework's *optimizer*: it receives evidence cards
     (diffs + evidence) and, on ``step()``, decides what to merge into the shared
     ledger. Implement these two methods (see :class:`Aggregator` for the
-    reference 7-stage pipeline) to swap in your own merge/acceptance logic."""
+    reference 7-stage pipeline) to swap in your own merge/acceptance logic.
+
+    **Threading contract.** ``ingest`` may be called concurrently from many worker
+    threads; ``step`` is called from one. Guard anything both touch. This was
+    unwritten, and the shipped examples all relied on ``list.append`` happening to
+    be atomic under the GIL -- which stops being true the moment ``ingest`` grows a
+    counter, a dict update or a dedup check, and is already not enough when
+    ``evolve(round_timeout=)`` abandons a straggler that keeps running and can
+    ``ingest`` in the middle of a ``step``'s drain. :class:`EvidenceBuffer` is the
+    worked example."""
 
     def ingest(self, card: EvidenceCard) -> None: ...
 

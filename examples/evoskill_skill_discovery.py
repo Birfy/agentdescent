@@ -432,10 +432,13 @@ class TopKFrontierAggregator(AggregatorProtocol):
         self.ctx = ctx
         self.aid = artifact_id
         self.cards: List[EvidenceCard] = []
+        self._lock = threading.Lock()   # ingest: workers; step: one thread
         self._seeded = False
 
     def ingest(self, card: EvidenceCard) -> None:
-        self.cards.append(card)
+        # ingest runs on worker threads, step on one: see AggregatorProtocol.
+        with self._lock:
+            self.cards.append(card)
 
     def _eval(self, artifact) -> float:
         """Score an artifact on the held-out (val) set -- **concurrently**, so the
@@ -462,7 +465,8 @@ class TopKFrontierAggregator(AggregatorProtocol):
             self.ctx.frontier.update(dict(head.state), self.ctx.seed_score)
             self._seeded = True
 
-        cards, self.cards = self.cards, []
+        with self._lock:
+            cards, self.cards = self.cards, []
         for card in cards:
             candidate = head.apply(card.diff)
             score = self._eval(candidate)
@@ -507,13 +511,16 @@ class SgdSkillAggregator(AggregatorProtocol):
         self.ctx = ctx
         self.aid = artifact_id
         self.cards: List[EvidenceCard] = []
+        self._lock = threading.Lock()   # ingest: workers; step: one thread
         self._seeded = False
         self.checkpoint: Dict[str, str] = {}   # last val-confirmed skill library
         self.ckpt_score = 0.0
         self.steps = 0                          # applied updates since last validation
 
     def ingest(self, card: EvidenceCard) -> None:
-        self.cards.append(card)
+        # ingest runs on worker threads, step on one: see AggregatorProtocol.
+        with self._lock:
+            self.cards.append(card)
 
     def _eval(self, artifact) -> float:
         tasks = self.verifier.held_out
@@ -550,7 +557,8 @@ class SgdSkillAggregator(AggregatorProtocol):
             self.checkpoint = dict(head.state)
             self._seeded = True
 
-        cards, self.cards = self.cards, []
+        with self._lock:
+            cards, self.cards = self.cards, []
         if not cards:
             # Always report ckpt_score so the async runtime never falls back to a
             # full held-out re-eval (which would defeat eval-at-end / val_every).
