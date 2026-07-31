@@ -233,7 +233,7 @@ the merge is a conflict-free union. It needs a strategy with a fixed key space
 (`KeyedRules`; `AppendRules` content-addresses its keys and is refused), and
 `route=` maps a task to the artifact key its failure will edit so each worker only
 sees tasks it may act on. Out-of-section proposals are rejected and counted as
-`section-violation` in [`result.outcomes()`](#7-reading-the-result). See
+`section-violation` in [`result.outcomes()`](#what-evolve-returns). See
 [Parallelism](parallelism.md).
 
 `PipelineParallel` is **not** an `evolve()` mode — it needs one artifact per stage
