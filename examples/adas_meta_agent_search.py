@@ -517,23 +517,33 @@ EVAL_CONCURRENCY = 16          # set from --eval-concurrency; I/O bound, so high
 
 
 def estimate_calls(generations: int, n_train: int, n_val: int, n_test: int,
-                   n_workers: int = 2) -> int:
-    """Model calls a run of this shape costs, from the actual program costs.
+                   n_workers: int = 2) -> Tuple[int, int]:
+    """``(typical, ceiling)`` model calls for a run of this shape.
 
     The old estimate was ``(7 + generations) * (n_val + n_test) * 3`` computed
     *before* ``--hard`` narrowed the split, so it reported the cost of a run over
     the full pool for a run that would actually happen on 8% of it. The recorded
     figure was ~9009 calls for a run that made 791 -- an order of magnitude, on
-    the number a caller uses to decide whether they can afford this at all."""
+    the number a caller uses to decide whether they can afford this at all.
+
+    A single number cannot be honest here either, because a candidate's cost is
+    whatever the meta-agent proposes: anywhere from 1 call per question (`cot`) to
+    :data:`MAX_PROGRAM_CALLS`. So both ends are given -- the typical figure prices
+    a candidate at the mean seed cost, the ceiling at the cap. Not every
+    generation yields a candidate either (a proposal is only requested when the
+    trigger rollout fails), so even the low end is an over-estimate."""
     seeds = seed_archive()
-    seed_calls = sum(program_cost(s["program"]) for s in seeds) * n_val
-    # Three Reflexion rounds per meta-agent, and a candidate costs at most
-    # MAX_PROGRAM_CALLS per item -- which is the cap, so this is an upper bound.
-    propose = generations * n_workers * 3
-    trigger = generations * n_workers * MAX_PROGRAM_CALLS
-    candidates = generations * n_workers * n_val * MAX_PROGRAM_CALLS
-    test = 2 * n_test * MAX_PROGRAM_CALLS          # best seed + best searched
-    return int(seed_calls + propose + trigger + candidates + test)
+    costs = [program_cost(s["program"]) for s in seeds]
+    seed_calls = sum(costs) * n_val
+    typical_cost = sum(costs) / len(costs)
+    propose = generations * n_workers * 3          # three Reflexion rounds each
+    out = []
+    for per_item in (typical_cost, float(MAX_PROGRAM_CALLS)):
+        trigger = generations * n_workers * per_item
+        candidates = generations * n_workers * n_val * per_item
+        test = 2 * n_test * per_item               # best seed + best searched
+        out.append(int(seed_calls + propose + trigger + candidates + test))
+    return out[0], out[1]
 
 
 class _HardCache:
@@ -921,8 +931,8 @@ def main() -> None:
               "generation (synchronous DP; the archive merge is the barrier)")
 
     if args.dry_run:
-        print(f"\nBudget   : ~{estimate_calls(args.generations, *ds.sizes(), args.workers)} "
-              f"model calls on this (unfiltered) split")
+        lo, hi = estimate_calls(args.generations, *ds.sizes(), args.workers)
+        print(f"\nBudget   : ~{lo}-{hi} model calls on this (unfiltered) split")
         print("\n[dry-run] not calling the API. Drop --dry-run to run Meta Agent Search.")
         return
 
@@ -994,8 +1004,9 @@ def main() -> None:
 
     ntr, nva, nte = ds.sizes()
     print(f"Split    : {ntr} trigger / {nva} val (fitness) / {nte} test")
-    print(f"Budget   : ~{estimate_calls(args.generations, ntr, nva, nte, args.workers)} "
-          f"model calls (each candidate is a multi-step program, run on every val item)")
+    lo, hi = estimate_calls(args.generations, ntr, nva, nte, args.workers)
+    print(f"Budget   : ~{lo}-{hi} model calls (each candidate is a multi-step "
+          f"program, run on every val item)")
     if nva < 20 or nte < 20:
         print("WARNING  : fewer than 20 items on a split -- at this size a single "
               "rollout moves the number by 5%+ and no lift is readable. "

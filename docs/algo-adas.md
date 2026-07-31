@@ -110,7 +110,7 @@ has headroom.
     `--hard-keep 12` leaves only 6 training items, and the fan-out cannot exceed
     that. Ask for roughly four times the training set you want.
 
-## Run it## Run it
+## Run it
 
 ```bash
 python -m examples.adas_meta_agent_search --dry-run
