@@ -11,10 +11,17 @@ The per-bucket pipeline (design doc, section 4):
        + rebase & cheap re-verify
     3. conflict resolution     (section 4.3)  semantic contradiction / PCGrad-drop
        + candidate fusion tournament          (model-soup style)
-    4. Beta-posterior accept   (section 4.4)  P(delta > 0) > 1 - delta
-    5. CAS / 2PC commit        (section 4.1)
-    6. dual-branch promotion   (section 4.5)  EMA-style dev -> stable
-    7. audit submission        (section 5.3)  the optimizer audits itself
+    4. audit gate              (section 5.3)  high blast radius / low trust -> the
+       oracle decides, and can veto here      optimizer audits itself
+    5. Beta-posterior accept   (section 4.4)  P(delta > 0) > 1 - delta
+    6. CAS / 2PC commit        (section 4.1)
+    7. dual-branch promotion   (section 4.5)  EMA-style dev -> stable, after K
+                                              regression-free rounds
+
+The audit is stage **4**, not a post-commit spot-check. It runs before the
+acceptance test and returns ``oracle-rejected`` outright, so it is a blocking gate
+on the accept path -- the diagrams used to draw it after the commit with a dotted
+"spot-check" arrow, which reads as advisory when it holds a veto.
 """
 
 from __future__ import annotations
@@ -72,7 +79,7 @@ class AggregatorConfig:
     #: say) could commit a 500 KB value that then renders into every later prompt.
     #: Real ops in the shipped ports are ~2.5k chars, so this is ~12x headroom.
     trust_region_chars: int = 32_000
-    promote_after_k: int = 3        # dev->stable survival rounds (EMA)
+    promote_after_k: int = 3        # dev->stable: regression-free ROUNDS (EMA)
 
 
 class AggregatorContractError(ContractError, TypeError):
@@ -269,6 +276,8 @@ class Aggregator:
         self._posteriors: Dict[str, BetaPosterior] = defaultdict(BetaPosterior)
         # dev-branch survival counter for EMA-style promotion.
         self._survival: Dict[str, int] = defaultdict(int)
+        # dev version last copied onto stable, so an unchanged head is not re-promoted.
+        self._promoted_at: Dict[str, int] = {}
 
     # -- staleness (section 4.2) ---------------------------------------------
 
@@ -366,7 +375,64 @@ class Aggregator:
         reports: List[MergeReport] = []
         for aid in self.buffer.ready(self.config):
             reports.append(self._process(aid))
+        self._age_and_promote(reports)
         return reports
+
+    # -- dual-branch EMA promotion (section 4.5) -----------------------------
+
+    def _age_and_promote(self, reports: List[MergeReport]) -> None:
+        """Promote dev -> stable after K **regression-free rounds** on dev.
+
+        The counter used to be bumped on the *commit* path, so it measured how many
+        times an artifact had **changed**, not how long it had held up -- the exact
+        opposite of what every description of it says ("survival rounds",
+        "regression-free rounds", "EMA confirmation rounds"). The incentive was
+        inverted: an artifact that converged, which is the success state, stopped
+        committing and could therefore never be promoted, while one that thrashed
+        promoted every K commits. In the shipped demo the artifact reached 1.000
+        held-out accuracy after two commits and then sat there for 36 rounds with
+        `stable` stuck at 0.000 for the entire run.
+
+        So: one round is one ``step()``. A commit restarts the clock (the new
+        version has survived nothing yet) and so does an oracle rejection (a
+        measured regression). Everything else is a round survived.
+        """
+        by_id = {r.artifact_id: r for r in reports}
+        for aid in set(self._survival) | set(by_id):
+            rep = by_id.get(aid)
+            if rep is not None and (rep.committed_version is not None
+                                    or rep.category == "oracle-rejected"):
+                self._survival[aid] = 0        # changed, or measurably worse
+                continue
+            self._survival[aid] += 1
+            if self._survival[aid] >= self.config.promote_after_k:
+                self._promote(aid)
+                self._survival[aid] = 0
+
+    def _promote(self, artifact_id: str) -> None:
+        """Copy dev onto stable, skipping the git work when they already agree.
+
+        The synchronous driver calls ``step()`` once per round, but the async
+        merger polls it every couple of milliseconds -- so without this a converged
+        async run re-promoted an unchanged artifact every K sweeps (52 times in one
+        6-second run), each a handful of git operations under the ledger lock that
+        every worker is queued behind."""
+        dev_v = self.ledger.head_version(Ledger.DEV).get(artifact_id, 0)
+        if self._promoted_at.get(artifact_id) == dev_v:
+            return
+        if self.ledger.promote_to_stable(artifact_id) is not None:
+            self._promoted_at[artifact_id] = dev_v
+
+    def finalize(self) -> None:
+        """Publish the current dev head to stable at the end of a clean run.
+
+        Confirmation takes ``promote_after_k`` rounds, and a run can legitimately
+        stop before that many have elapsed -- ``target_reward`` fires on the very
+        commit that reaches it, so the artifact the run was *for* would otherwise
+        never reach the branch production reads. Only ever called when a run
+        finishes without an error, and never in place of the round-based rule."""
+        for aid in list(self._survival):
+            self._promote(aid)
 
     def _process(self, artifact_id: str) -> MergeReport:
         cards = self.buffer.drain(artifact_id)
@@ -476,11 +542,9 @@ class Aggregator:
 
         prior.update(True, weight=2.0)  # a committed improvement is strong evidence.
 
-        # -- dual-branch EMA promotion (section 4.5) -------------------------
-        self._survival[artifact_id] += 1
-        if self._survival[artifact_id] >= self.config.promote_after_k:
-            self.ledger.promote_to_stable(artifact_id)
-            self._survival[artifact_id] = 0
+        # Promotion is decided in `_age_and_promote`, per round, not per commit:
+        # a commit restarts the survival clock rather than advancing it.
+        self._survival[artifact_id] = 0
 
         return MergeReport(artifact_id, best_diff, fused, n_considered, len(survivors),
                            len(discarded), conflicts, p_improve, new_version,

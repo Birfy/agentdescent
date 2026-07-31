@@ -360,8 +360,10 @@ class Ledger:
         """EMA-style confirmation: copy dev's current artifact onto stable.
 
         Called by the aggregator's dual-branch logic after an artifact has
-        survived K rounds on dev without a regression report (design doc,
-        section 4.5)."""
+        survived ``promote_after_k`` rounds on dev without a commit or a measured
+        regression (design doc, section 4.5). A commit restarts that clock -- the
+        new version has survived nothing yet -- so a *converged* artifact is the
+        one most likely to be promoted, which is the point."""
         with self._lock:
             self._ensure_open()
             self._checkout(self.DEV)

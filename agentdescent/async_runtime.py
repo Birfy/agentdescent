@@ -333,6 +333,10 @@ class AsyncAgentDescent:
             t.join(timeout=2.0)
         agg_thread.join(timeout=2.0)
 
+        if self.stats.error is None:
+            # Confirmation takes promote_after_k rounds and this loop can stop the
+            # instant target_accuracy is hit, so publish the head the run produced.
+            self.aggregator.finalize()
         self.stats.wallclock = time.time() - start
         self.stats.final_dev_accuracy = self._dev_accuracy()
         self.stats.final_stable_accuracy = self._stable_accuracy()

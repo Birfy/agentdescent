@@ -6,6 +6,42 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **The stable branch was never promoted, because `promote_after_k` counted
+  commits instead of regression-free rounds.** The counter was bumped on the
+  commit path, so it measured how many times an artifact had *changed* -- the
+  opposite of what every description of it said ("survival rounds",
+  "regression-free rounds", "EMA confirmation rounds"). The incentive was
+  inverted: an artifact that converged stopped committing and could therefore
+  never be promoted, while one that thrashed promoted every K commits. In
+  `examples/run_demo` the artifact reached 1.000 held-out accuracy after two
+  commits and `stable` then sat at **0.000 for all 40 rounds**, while
+  `docs/usage.md` published a table showing it catching up at round 8 -- output
+  this code could not produce. One round is now one `step()`; a commit restarts
+  the clock (the new version has survived nothing yet) and so does an oracle
+  rejection, while a `below-threshold` rejection counts as a round *survived*,
+  because the gate turning a challenger away is the artifact winning. Promotion is
+  idempotent per version (an unchanged head was being re-copied every K sweeps --
+  52 times in one 6-second async run, each a handful of git operations under the
+  lock every worker queues behind), and a clean run calls `finalize()` to publish
+  its head, since `target_reward` fires on the very commit that reaches it and
+  confirmation takes K rounds it will never get.
+
+### Changed
+- **The documented aggregator pipeline now matches the code.** All four copies --
+  both `docs/architecture.md` diagrams, the `concepts.md` §4 list and
+  `aggregator.py`'s module docstring -- listed the audit as stage 7, after the
+  commit, drawn with a dotted "spot-check" arrow. It actually runs at stage **4**,
+  before the Beta-posterior acceptance test, and returns `oracle-rejected`
+  outright: a blocking gate on the accept path, not an advisory review. Three
+  consequences the old ordering hid: the budgeted oracle sits on the critical path
+  of every merge that trips `force_oracle`; `oracle-rejected` masks candidates that
+  would also have failed the acceptance test, so `outcomes()` under-counts
+  `below-threshold`; and `prob_improvement` runs 4000 Monte-Carlo draws before a
+  gate that may discard the result unused.
+- `docs/usage.md`'s `run_demo` output was refreshed against a real run (the fork
+  baseline had drifted from 0.353 to 0.379).
+
 ### Added
 - **An ungated dataset for EvoSkill — `--dataset finqa`.** OfficeQA is HF-gated, and
   the fallback was a bundled 12-row sample that splits into 5 train / 3 val / 2

@@ -128,6 +128,7 @@ class AgentDescent:
                     )
             reports = self.aggregator.step()
             history.append(self._collect(r, reports))
+        self.aggregator.finalize()      # publish the head this run produced
         return history
 
     def _collect(self, r: int, reports: Sequence[MergeReport]) -> RoundStat:
