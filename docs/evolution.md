@@ -469,6 +469,27 @@ The second call starts from the artifact the first one committed, not from
 * `initial_state=` is ignored when the artifact already exists (a `RuntimeWarning`
   says so). Use a fresh `repo_path` to start over.
 
+!!! note "The train/held-out split is positional"
+    The last `held_out_frac` of `tasks` is held out, **in the order given** — no
+    shuffle. That keeps `Dataset.val_frac`'s promise (the engine's held-out split
+    is exactly that `Dataset`'s `val`, which only holds because `trainval` is
+    train + val in that order) and keeps a seeded run reproducible.
+
+    It is the wrong default for **grouped** data — anything ordered by category,
+    source, difficulty or date, which is most benchmarks loaded raw through
+    `hf_rows`. On a 20-task set whose first 12 are class `a`:
+
+    ```
+    shuffle=False   held-out classes: ['b']        a/b: 0/8
+    shuffle=True    held-out classes: ['a', 'b']   a/b: 5/3
+    ```
+
+    Every gate in the run — the acceptance test, `target_reward`, `patience`,
+    `final_reward` — is measured on that set, so pass `shuffle=True, seed=...`
+    (or pre-split with `dataloader.split_dataset`, which shuffles and can
+    stratify). A held-out set of fewer than 4 tasks now warns: at 1 item
+    `final_reward` is 0.0 or 1.0 and nothing in between.
+
 Omit `repo_path` and the ledger is a throwaway directory, removed when `evolve()`
 returns — not held until the interpreter exits, so a notebook or a parameter sweep
 does not accumulate one git repo per run. A process killed outright (SIGKILL, OOM)
@@ -498,6 +519,22 @@ limit, credit exhaustion) — progress isn't lost.
     `error` means *the run ended because of this failure* — a transient error the
     workers retried past leaves it `None`. A `RuntimeWarning` is also emitted, so
     a failed run is never completely silent even at the default `verbose=False`.
+
+!!! warning "`error` cannot tell convergence from a spent budget — `stop_reason` can"
+    A run that reached `target_reward` and a run that ran out of budget both come
+    back with `error=None` and a populated `history`:
+
+    ```python
+    result.stop_reason   # "target_reward" | "patience" | "rounds"
+                         # | "max_seconds" | "max_iters" | "error"
+    ```
+
+    This matters most under `asynchronous=True`, where **`max_seconds=None` means
+    20 seconds**, not "unbounded" as it does on the synchronous path — flipping one
+    boolean could truncate a run and the result looked converged. Both that and
+    `rounds` changing meaning (it becomes a `rounds × n_workers` rollout budget,
+    and `RoundInfo.round` becomes a merger-sweep index) now emit a
+    `RuntimeWarning`.
 
 !!! note "Three failure categories, not two"
     | category | example | what happens |

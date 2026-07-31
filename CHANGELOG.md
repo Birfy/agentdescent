@@ -7,6 +7,51 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **`openai_compatible` returned `None` on reasoning models.** `Completion` is
+  `prompt -> str`, but a model that spends its whole budget on `reasoning_content`
+  answers with JSON `null` for `content` -- DeepSeek's reasoner and GLM's thinking
+  modes both do. The `None` surfaced as
+  `'NoneType' object has no attribute 'strip'` from inside `LLMAgent`, which the
+  engine caught and **retried as a backend transient**, diagnosing a systematic
+  model/parameter mismatch as a flaky endpoint. Doubly unfortunate: `LLMAgent`
+  already carries the right diagnosis for a starved reasoning model, and never got
+  to run it. Normalised to `""` so that warning fires instead.
+- **HTTP errors discarded the provider's message.** The useful part -- "rate
+  limit: retry in 12s", "context length exceeded", "insufficient quota" -- lives on
+  `e.read()`, so re-raising bare collapsed every 4xx to `HTTP Error 429: Too Many
+  Requests`, for the error class most likely to occur in a loop making thousands
+  of calls. `_git` and `_CliAgent` both surface the underlying detail; this was the
+  one provider path that did not. An HTTP 200 carrying `{"error": ...}` (some
+  proxies) now names the endpoint and model instead of raising a bare `KeyError`.
+
+### Added
+- **`EvolutionResult.stop_reason`** -- `"target_reward"` / `"patience"` /
+  `"rounds"` / `"max_seconds"` / `"max_iters"` / `"error"`. A run that converged
+  and a run that ran out of budget both returned `error=None` with a populated
+  `history`, and the only way to tell them apart was re-deriving `len(history)`
+  against arguments whose meaning changes between the two paths. The `verbose`
+  print lines always knew; now a non-interactive caller does too.
+- **`evolve(shuffle=, seed=)`** (and on `async_evolve`). The train/held-out split
+  is positional -- the last `held_out_frac` of `tasks`, in the order given -- which
+  is right for a pre-split `Dataset` and wrong for grouped data. On a 20-task set
+  whose first 12 are one class, the default holds out **0/8 of that class**;
+  `shuffle=True` gives 5/3. Every gate in the run is measured on that set. Off by
+  default so `Dataset.val_frac` keeps its meaning and seeded runs stay
+  reproducible.
+- **`openai_compatible(**create_kwargs)`** -- `temperature=0` and provider-specific
+  fields now reach the request body, matching `claude()`.
+
+### Changed
+- `evolve(asynchronous=True)` warns about the two parameters it silently
+  *redefined* rather than ignored: `max_seconds=None` becomes 20 seconds (it means
+  "unbounded" on the synchronous path, so flipping one boolean could truncate a
+  run into something that looked converged), and `rounds` becomes a
+  `rounds x n_workers` rollout budget with `RoundInfo.round` as a sweep index. The
+  three it *ignores* already warned.
+- A held-out set smaller than 4 tasks warns: at 1 item `final_reward` is 0.0 or
+  1.0 and nothing in between, yet it still gates every acceptance decision.
+
+### Fixed
 - **The oracle audit could never fire below `blast_radius=0.5`.** `force_oracle`
   gates on `blast_radius >= 0.5 or trust < 0.75`, and `update_trust` -- the only
   writer of trust -- sat *inside* that branch. The condition gated the one thing

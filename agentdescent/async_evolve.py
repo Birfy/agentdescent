@@ -74,6 +74,8 @@ def async_evolve(
     aggregator_factory=None,
     oracle_budget: int = 200,
     cheap_eval_tasks: Optional[int] = None,
+    shuffle: bool = False,
+    seed: int = 0,
     self_verify: bool = True,
     shutdown_grace: float = 2.0,
     task_sampler: Optional["TaskSampler"] = None,
@@ -136,6 +138,9 @@ def async_evolve(
     cheap_eval_tasks:
         As in :func:`evolve`: how many held-out tasks the cheap layer scores when
         ranking candidates. ``None`` scores them all.
+    shuffle, seed:
+        As in :func:`evolve`: shuffle before the positional train/held-out split.
+        Off by default.
     self_verify:
         As in :func:`evolve`. ``False`` skips the extra per-trajectory rollout,
         which is what ports that judge candidates only on held-out want.
@@ -157,7 +162,9 @@ def async_evolve(
     -------
     EvolutionResult
         ``error`` is set only when the run **ended** because of a failure -- a
-        transient error the workers retried past leaves it ``None``.
+        transient error the workers retried past leaves it ``None``, so read
+        ``stop_reason`` to tell ``"target_reward"`` from ``"max_seconds"`` /
+        ``"max_iters"`` / ``"patience"``.
 
         ``history`` holds one entry per **merger sweep** that had cards to merge,
         not per round: its length tracks how fast the workers produced and is not
@@ -171,7 +178,7 @@ def async_evolve(
         held_out_frac=held_out_frac, repo_path=repo_path, agg_config=agg_config,
         staleness_policy=staleness_policy, aggregator_factory=aggregator_factory,
         oracle_budget=oracle_budget, eval_concurrency=eval_concurrency,
-        cheap_eval_tasks=cheap_eval_tasks)
+        cheap_eval_tasks=cheap_eval_tasks, shuffle=shuffle, seed=seed)
     if n_workers < 1:
         raise ValueError(f"n_workers must be >= 1, got {n_workers}")
     policy = staleness_policy or get_policy("guarded")
@@ -202,6 +209,7 @@ def async_evolve(
     last_good: List[object] = [None]
     died = [False]                            # True only if the run ENDED on failure
     contract_error: List[Optional[BaseException]] = [None]   # caller bug -> re-raise
+    stop_reason = ["max_seconds"]             # overwritten by whichever bound fires
     n_live = sum(1 for s in shards if s)      # workers that will actually start
     live = [n_live]                           # workers still running
     retired = [0]                             # workers that gave up (diagnostic)
@@ -327,6 +335,7 @@ def async_evolve(
             with counter_lock:
                 counter[0] += 1
                 if max_iters is not None and counter[0] >= max_iters:
+                    stop_reason[0] = "max_iters"
                     stop.set()
 
     def _drain_and_merge() -> None:
@@ -374,8 +383,10 @@ def async_evolve(
                 warnings.warn(f"on_round callback raised: {type(e).__name__}: {e}",
                               RuntimeWarning, stacklevel=2)
         if target_reward is not None and r >= target_reward:
+            stop_reason[0] = "target_reward"
             stop.set()
         elif patience is not None and best[1] >= patience:
+            stop_reason[0] = "patience"
             stop.set()
 
     def _merger() -> None:
@@ -505,6 +516,7 @@ def async_evolve(
     result = EvolutionResult(state=dict(final.state), rendered=final.render(),
                              final_reward=final_reward, history=history,
                              ledger_log=_safe_log(eng.ledger),
-                             error=run_error, retired_workers=retired[0])
+                             error=run_error, retired_workers=retired[0],
+                             stop_reason="error" if run_error else stop_reason[0])
     eng.cleanup()          # do not hold a scratch git repo for the whole process
     return result

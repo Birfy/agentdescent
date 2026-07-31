@@ -671,6 +671,14 @@ class EvolutionResult:
     #: artifact evolved so far is still returned -- check this to tell "converged"
     #: from "died".
     error: Optional[str] = None
+    #: Why the run ended -- ``"target_reward"`` / ``"patience"`` / ``"rounds"`` /
+    #: ``"max_seconds"`` / ``"max_iters"`` / ``"error"``. Without it a budget
+    #: expiry is indistinguishable from convergence: ``error`` is ``None`` for
+    #: both, ``history`` has entries for both, and the only other clue is
+    #: re-deriving ``len(history)`` against arguments whose meaning changes between
+    #: the sync and async paths. The ``verbose`` print lines always knew the
+    #: reason; this makes it available to a non-interactive caller.
+    stop_reason: str = "rounds"
     #: Workers that gave up after repeated backend failures (async path only). A
     #: run can finish *cleanly* at a fraction of its requested concurrency, so
     #: `error` stays `None` while throughput quietly drops -- check this to tell a
@@ -714,6 +722,7 @@ class EvolutionResult:
                 for h in self.history
             ],
             "retired_workers": self.retired_workers,
+            "stop_reason": self.stop_reason,
             "ledger_log": list(self.ledger_log),
         }
         with open(path, "w", encoding="utf-8") as fh:
@@ -732,6 +741,7 @@ class EvolutionResult:
             history=[RoundInfo(**h) for h in d.get("history", [])],
             ledger_log=d.get("ledger_log", []), error=d.get("error"),
             retired_workers=d.get("retired_workers", 0),
+            stop_reason=d.get("stop_reason", "rounds"),
         )
 
 
@@ -794,7 +804,8 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
                   blast_radius, artifact_id, held_out_frac, repo_path, agg_config,
                   staleness_policy, aggregator_factory, oracle_budget,
                   eval_concurrency: int = 8,
-                  cheap_eval_tasks: Optional[int] = None) -> _Engine:
+                  cheap_eval_tasks: Optional[int] = None,
+                  shuffle: bool = False, seed: int = 0) -> _Engine:
     """Wire the ledger, runtime, verifier and aggregator (shared by
     :func:`evolve` and :func:`~agentdescent.async_evolve.async_evolve`)."""
     import tempfile
@@ -834,6 +845,14 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     # target: nothing was mutated, but the async path burned its whole budget
     # first and then reported the violation as a *backend failure*.
     assert_mutable(EvolvingArtifact(artifact_id, {}, blast_radius=blast_radius))
+    if shuffle:
+        # Off by default so `Dataset.val_frac` keeps its promise ("the engine's
+        # held-out split is exactly this Dataset's val", which only holds because
+        # `trainval` is train + val in that order and the split below is
+        # positional) and so a seeded run stays reproducible.
+        import random as _random
+        tasks = list(tasks)
+        _random.Random(seed).shuffle(tasks)
     # round, not truncate: Dataset.val_frac promises "the engine's held-out split
     # is exactly this Dataset's val", and float truncation (13.9999 -> 13) quietly
     # pushed one train item into held-out for many dataset sizes.
@@ -841,6 +860,18 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     train, held_out = tasks[:cut], tasks[cut:]
     if not held_out:
         train, held_out = tasks[:-1], tasks[-1:]
+    # Every gate in the run -- the Beta acceptance test, target_reward, patience,
+    # final_reward -- is measured on this set. At 3 items a single binary rollout
+    # moves the reported reward by 0.33, and at 1 it is 0.0 or 1.0 and nothing
+    # else. The engine already refuses fewer than 4 tasks; this is the same
+    # argument one level down, where it decides whether the numbers mean anything.
+    if len(held_out) < 4:
+        warnings.warn(
+            f"the held-out set has only {len(held_out)} task(s) "
+            f"({len(tasks)} tasks x held_out_frac={held_out_frac}), so every "
+            "acceptance decision and the reported final_reward rest on that many "
+            "rollouts. Pass more tasks or raise held_out_frac.",
+            RuntimeWarning, stacklevel=3)
 
     runtime = _Runtime(run=run, reward=reward, cache=_EvalCache(),
                        eval_concurrency=eval_concurrency)
@@ -956,6 +987,8 @@ def evolve(
     aggregator_factory: Optional[AggregatorFactory] = None,
     oracle_budget: int = 200,
     cheap_eval_tasks: Optional[int] = None,
+    shuffle: bool = False,
+    seed: int = 0,
     on_round: Optional[Callable[["RoundInfo"], None]] = None,
     verbose: bool = False,
 ) -> EvolutionResult:
@@ -993,8 +1026,18 @@ def evolve(
     Parameters
     ----------
     tasks:
-        The work the artifact is evaluated on. Split into train / held-out by
-        ``held_out_frac``; at least 4 are required and ids must be unique.
+        The work the artifact is evaluated on. Split into train / held-out **by
+        position** -- the last ``held_out_frac`` of the sequence is held out, in
+        the order given. At least 4 are required and ids must be unique.
+    shuffle, seed:
+        Shuffle ``tasks`` before that positional split. Off by default, which
+        keeps a run reproducible and keeps
+        :attr:`~agentdescent.dataloader.Dataset.val_frac`'s promise that the
+        engine's held-out split is exactly that ``Dataset``'s ``val``. Turn it on
+        for **grouped** data -- anything ordered by category, source, difficulty
+        or date -- where the tail of the file is a different distribution from
+        the head, and every gate in the run (the acceptance test,
+        ``target_reward``, ``final_reward``) would then be measured against it.
     reward:
         ``(task, output) -> [0, 1]``. Scores in ``[0, 1]``; the engine treats
         ``>= 0.999`` as a pass (no proposal is requested).
@@ -1120,9 +1163,12 @@ def evolve(
     Returns
     -------
     EvolutionResult
-        The evolved artifact plus ``history`` and ``error``. **Check ``error``**:
-        it is ``None`` only on a clean run, and a run that died still returns a
-        (partial) result rather than raising.
+        The evolved artifact plus ``history``, ``error`` and ``stop_reason``.
+        **Check ``error``**: it is ``None`` only on a clean run, and a run that
+        died still returns a (partial) result rather than raising. **Check
+        ``stop_reason``** to tell convergence (``"target_reward"``) from a budget
+        expiry (``"max_seconds"`` / ``"rounds"`` / ``"max_iters"``) -- ``error``
+        is ``None`` for both.
     """
     from concurrent.futures import ThreadPoolExecutor, wait as futures_wait
     from .parallel import DataParallel
@@ -1150,6 +1196,26 @@ def evolve(
                     f"evolve(asynchronous=True) ignores {name}=: {why}. Use the "
                     f"synchronous path if you need it.", RuntimeWarning,
                     stacklevel=2)
+        # The two above that are *not* ignored but silently REDEFINED were the
+        # sharper edge, because nothing said so. Flipping one boolean turned an
+        # unbounded run into a 20-second one, and a partial artifact with
+        # `error=None` and a populated `history` is indistinguishable from a
+        # converged one.
+        if max_seconds is None:
+            warnings.warn(
+                "evolve(asynchronous=True) has no unbounded mode: max_seconds=None "
+                "becomes 20.0 seconds here, where it means 'no limit' on the "
+                "synchronous path. Pass max_seconds= explicitly, and check "
+                "result.stop_reason -- a budget expiry otherwise looks exactly "
+                "like convergence.", RuntimeWarning, stacklevel=2)
+        if rounds != 15:                     # i.e. the caller chose a value
+            warnings.warn(
+                f"evolve(asynchronous=True) has no round barrier, so rounds={rounds} "
+                f"is reinterpreted as a budget of {rounds * max(1, n_workers)} worker "
+                "rollouts, and RoundInfo.round becomes a merger-sweep index -- "
+                "len(result.history) is not comparable with the synchronous path. "
+                "Call async_evolve(max_iters=) directly for an exact count.",
+                RuntimeWarning, stacklevel=2)
         from .async_evolve import async_evolve
         return async_evolve(
             tasks, reward, agent=agent, run=run, propose=propose, strategy=strategy,
@@ -1159,7 +1225,7 @@ def evolve(
             max_iters=rounds * max(1, n_workers), held_out_frac=held_out_frac,
             repo_path=repo_path, agg_config=agg_config, staleness_policy=staleness_policy,
             aggregator_factory=aggregator_factory, oracle_budget=oracle_budget,
-            cheap_eval_tasks=cheap_eval_tasks,
+            cheap_eval_tasks=cheap_eval_tasks, shuffle=shuffle, seed=seed,
             self_verify=self_verify, task_sampler=task_sampler,
             target_reward=target_reward, patience=patience,
             max_worker_errors=max_worker_errors,
@@ -1189,7 +1255,7 @@ def evolve(
         held_out_frac=held_out_frac, repo_path=repo_path, agg_config=agg_config,
         staleness_policy=staleness_policy, aggregator_factory=aggregator_factory,
         oracle_budget=oracle_budget, eval_concurrency=eval_concurrency,
-        cheap_eval_tasks=cheap_eval_tasks)
+        cheap_eval_tasks=cheap_eval_tasks, shuffle=shuffle, seed=seed)
     ledger, aggregator, strategy = eng.ledger, eng.aggregator, eng.strategy
     run, propose, reward = eng.run, eng.propose, eng.reward
     held_out, by_id, train_ids = eng.held_out, eng.by_id, eng.train_ids
@@ -1208,8 +1274,10 @@ def evolve(
     any_success = [False]      # has ANY worker ever completed a rollout?
     dead_rounds = 0            # consecutive rounds where every worker failed
     deadline = time.time() + max_seconds if max_seconds else None
+    stop_reason = "rounds"
     for r in range(rounds):
         if deadline is not None and time.time() >= deadline:
+            stop_reason = "max_seconds"
             if verbose:
                 print(f"round {r:>3}  stopping: max_seconds={max_seconds} reached")
             break
@@ -1452,6 +1520,7 @@ def evolve(
             print(f"round {r:>3}  reward={info.held_out_reward:.3f}  "
                   f"items={info.n_items}  +{committed}/-{rejected}")
         if target_reward is not None and info.held_out_reward >= target_reward:
+            stop_reason = "target_reward"
             if verbose:
                 print(f"round {r:>3}  target_reward={target_reward} reached, stopping")
             if on_round is not None:
@@ -1461,6 +1530,7 @@ def evolve(
                     pass
             break
         if patience is not None and stalled >= patience:
+            stop_reason = "patience"
             if verbose:
                 print(f"round {r:>3}  no improvement for {stalled} rounds, stopping")
             break
@@ -1504,6 +1574,7 @@ def evolve(
     # back rather than holding it for the lifetime of the interpreter.
     result = EvolutionResult(state=dict(final.state), rendered=final.render(),
                              final_reward=final_reward, history=history,
-                             ledger_log=_safe_log(ledger), error=run_error)
+                             ledger_log=_safe_log(ledger), error=run_error,
+                             stop_reason="error" if run_error else stop_reason)
     eng.cleanup()
     return result
