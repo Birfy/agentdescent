@@ -16,9 +16,9 @@ things used to go wrong and each is pinned here.
    had ever created.
 """
 
-import glob
 import os
 import tempfile
+import threading
 import time
 import warnings
 
@@ -47,11 +47,14 @@ def _propose(rendered, task, output, score):
 
 def _evolve(**kw):
     kw.setdefault("rounds", 8)
+    kw.setdefault("run", _run)
+    kw.setdefault("n_workers", 2)
+    kw.setdefault("max_concurrency", 1)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        return evolve(TASKS, _reward, run=_run, propose=_propose,
+        return evolve(TASKS, _reward, propose=_propose,
                       strategy=SingleSlot(initial_value="v"),
-                      n_workers=2, max_concurrency=1, held_out_frac=0.5, **kw)
+                      held_out_frac=0.5, **kw)
 
 
 # -- 1. the user's git config must not decide whether the ledger can write ------
@@ -191,18 +194,60 @@ def test_a_failing_ledger_log_does_not_discard_a_completed_run():
 # -- 3. scratch ledgers are reclaimed, not held for the process lifetime --------
 
 
-def _live_scratch_repos():
-    return set(glob.glob(os.path.join(tempfile.gettempdir(),
-                                      "agentdescent-evolve-*")))
+def _scratch_dirs_created_by(fn, monkeypatch):
+    """The scratch repos `fn` creates, captured at the source.
+
+    Deliberately not a `$TMPDIR` diff: this suite abandons straggler threads on
+    purpose, so global temp state is not a stable thing to assert against. What
+    matters is that *this call* reclaims *its own* directory.
+    """
+    created = []
+    real_mkdtemp = tempfile.mkdtemp
+
+    def recording(*a, **kw):
+        path = real_mkdtemp(*a, **kw)
+        if str(kw.get("prefix", "")).startswith("agentdescent-evolve-"):
+            created.append(path)
+        return path
+
+    monkeypatch.setattr(tempfile, "mkdtemp", recording)
+    fn()
+    monkeypatch.undo()
+    return created
 
 
-def test_a_scratch_ledger_is_reclaimed_when_evolve_returns():
+def test_a_scratch_ledger_is_reclaimed_when_evolve_returns(monkeypatch):
     """atexit alone meant a sweep held one git repo per run until the process died."""
-    before = _live_scratch_repos()
-    for _ in range(3):
-        _evolve(rounds=2)
-    assert _live_scratch_repos() - before == set(), \
-        "evolve() left its scratch ledger behind"
+    created = _scratch_dirs_created_by(lambda: _evolve(rounds=2), monkeypatch)
+    assert created, "premise: omitting repo_path should create a scratch ledger"
+    for path in created:
+        assert not os.path.exists(path), \
+            f"evolve() left its scratch ledger behind at {path}"
+
+
+def test_a_straggler_cannot_resurrect_a_reclaimed_ledger(monkeypatch):
+    """`round_timeout` abandons threads Python cannot cancel.
+
+    One finishing after the run returned would commit into the deleted directory
+    and recreate it -- `_dump_artifact` calls `makedirs(exist_ok=True)`. The ledger
+    is closed before removal so that late write fails inside the straggler's own
+    thread, where the driver already absorbs it.
+    """
+    release = threading.Event()
+
+    def hangs(rendered, task):
+        if task.id == "0":
+            release.wait(timeout=5.0)       # outlives its round
+        return _run(rendered, task)
+
+    created = _scratch_dirs_created_by(
+        lambda: _evolve(run=hangs, rounds=3, max_concurrency=2, round_timeout=0.2),
+        monkeypatch)
+    release.set()                           # let the straggler finish, post-cleanup
+    time.sleep(0.5)
+    for path in created:
+        assert not os.path.exists(path), \
+            f"an abandoned straggler recreated the reclaimed ledger at {path}"
 
 
 def test_a_caller_supplied_repo_path_is_never_reclaimed(tmp_path):
