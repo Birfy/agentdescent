@@ -12,11 +12,11 @@ which differs from some paper-level claims -- flagged inline:
 
   * **Failure-driven skill induction.** Each iteration samples train items, runs
     the base agent, and collects failures (an item is a FAILURE when its
-    multi-tolerance score < 0.8, `runner.py:319`). A **Skill Proposer** analyses
+    multi-tolerance score < 0.8, `src/loop/runner.py:319`). A **Skill Proposer** analyses
     the failure *patterns* ("a GENERAL improvement, not a fix for any single
     case") and a **Skill Generator** writes/edits one `SKILL.md` skill file.
   * **Bounded top-K aggregate frontier (NOT per-instance Pareto).** Despite the
-    paper's framing, `registry/manager.py:update_frontier` keeps a bounded
+    paper's framing, `src/registry/manager.py:update_frontier` keeps a bounded
     leaderboard on a single scalar (mean validation accuracy): admit if the
     frontier has room, else replace the worst member iff strictly greater. The
     parent for the next iteration is selected from it (default: `best`).
@@ -62,14 +62,14 @@ from agentdescent.ledger import CASConflict, Ledger
 RAW = "https://raw.githubusercontent.com/sentient-agi/EvoSkill/main/examples/officeqa/data"
 Completion = Callable[[str], str]
 
-# runner.py:79 -- the exact tolerance ladder and the 0.8 pass threshold.
+# src/loop/runner.py:79 -- the exact tolerance ladder and the 0.8 pass threshold.
 TOLERANCE_LEVELS = [0.05, 0.01, 0.1, 0.0, 0.025]
 PASS_THRESHOLD = 0.8
 UNITS = {"trillion": 1e12, "billion": 1e9, "million": 1e6, "thousand": 1e3}
 
 
 # ===========================================================================
-# Faithful numeric scorer (src/evaluation/reward.py + runner._score_multi_tolerance)
+# Faithful numeric scorer (src/evaluation/reward.py + src/loop/runner.py:_score_multi_tolerance)
 # ===========================================================================
 
 
@@ -239,7 +239,7 @@ def propose_and_generate(complete: Completion, skills: Dict[str, str],
 
 @dataclass
 class Frontier:
-    max_size: int = 3
+    max_size: int = 5      # src/registry/manager.py:update_frontier's default
     members: List[Tuple[Dict[str, str], float]] = field(default_factory=list)
 
     def update(self, skills: Dict[str, str], score: float) -> bool:
@@ -599,7 +599,7 @@ class EvoResult:
 
 def run_evoskill(complete: Completion, docs: Dict[str, str],
                  train: List[dict], val: List[dict], iterations: int = 6,
-                 max_frontier: int = 3, seed: int = 0, asynchronous: bool = False,
+                 max_frontier: int = 5, seed: int = 0, asynchronous: bool = False,
                  async_ratio: int = 3, max_seconds: float = 30.0, backend=None,
                  eval_concurrency: int = 8, batch_size: int = 4, val_every: int = 3,
                  eval_at_end: bool = False, verbose: bool = False) -> EvoResult:
@@ -726,7 +726,9 @@ def main() -> None:
                    choices=["claude", "openai", "glm"], help="claude, or any OpenAI-compatible endpoint (DeepSeek, GLM, vLLM, ...) via OPENAI_BASE_URL + OPENAI_API_KEY; 'glm' is a legacy alias")
     p.add_argument("--model", default="claude-haiku-4-5")
     p.add_argument("--iterations", type=int, default=6)
-    p.add_argument("--frontier", type=int, default=3)
+    p.add_argument("--frontier", type=int, default=5,
+                   help="bounded top-K frontier size "
+                        "(src/registry/manager.py:update_frontier uses 5)")
     p.add_argument("--dataset", default="auto", choices=["auto", "officeqa", "finqa"],
                    help="auto: the paper's OfficeQA when HF_TOKEN grants access, "
                         "else FinQA (ungated, same shape, ~4KB documents)")

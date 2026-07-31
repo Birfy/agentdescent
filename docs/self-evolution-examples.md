@@ -92,6 +92,18 @@ The optimizer sets the dev head to the sampled Pareto parent, so `evolve()`'s
 next round mutates *it*, not the greedy best. Reflective mutation (the LLM
 rewriting the instruction from execution trace + NL feedback) is the propose step.
 
+*Documented deviation:* GEPA's Algorithm 1 admits a child by comparing means on a
+feedback minibatch of size *b*. `evolve()` rolls out **one** task per worker per
+round, so that comparison is a single Bernoulli draw — for a binary reward like
+HotpotQA EM, exactly `{-1, 0, +1}`. The admission test is therefore "did not
+regress" rather than "improved": requiring the one sampled instance to flip
+wrong→right threw away prompts that help broadly but do not fix *that* question,
+and a rejected candidate never enters the pool, never gets a score row, and so can
+never reach the frontier — which is precisely the complementary specialist the
+frontier exists to keep alive. Algorithm 2 itself (per-instance frontier,
+domination pruning, win-frequency sampling) is scored on the full `D_pareto` row
+and is unaffected.
+
 ```bash
 python -m examples.gepa_prompt_evolution --dry-run
 python -m examples.gepa_prompt_evolution --model claude-haiku-4-5
@@ -105,10 +117,12 @@ Faithful to what the **repo code** does (which differs from some paper claims):
 **batch-level failure-driven skill induction** (collect items scored `< 0.8`, a
 Skill Proposer analyses a *batch* of failure patterns → a Skill Generator writes
 one `SKILL.md`) governed by a **bounded top-K aggregate frontier** — *not* a
-per-instance Pareto frontier (`registry/manager.py:update_frontier` is a
-leaderboard on mean validation accuracy). The unit-aware numeric scorer and the
-exact tolerance ladder (`[0.05, 0.01, 0.1, 0.0, 0.025]`, weight `1/(1+20·tol)`)
-are ported. On the **sync** path this strict per-candidate frontier
+per-instance Pareto frontier (`src/registry/manager.py:update_frontier` is a
+leaderboard on mean validation accuracy, while the paper's abstract says "a Pareto
+frontier of agent programs governs selection"). The unit-aware numeric scorer and the
+exact tolerance ladder (`src/loop/runner.py:79` — `[0.05, 0.01, 0.1, 0.0, 0.025]`,
+weight `1/(1+20·tol)`, pass threshold `0.8` at `:319`) are ported, as is the
+frontier bound (`src/registry/manager.py:379`, `max_size=5`). On the **sync** path this strict per-candidate frontier
 (`TopKFrontierAggregator`) runs verbatim; on the **async** path it switches to
 `SgdSkillAggregator` — SGD-style skill descent that validates every `val_every`
 steps and rolls back on no gain, amortising the held-out eval
@@ -160,8 +174,9 @@ python -m examples.skillopt_skill_training --model claude-haiku-4-5
 Evolves the **agentic system itself** — a *harness* change, so the artifact is
 **L1** (`classify()` prints the layer). A **meta-agent**, conditioned on the
 entire **archive** of prior agents + their fitness, proposes the next agent, with
-two Reflexion refinement rounds; fitness is a bootstrap-CI mean; the archive is
-**keep-all**. The seven ADAS MGSM seeds (CoT, Self-Consistency, Reflexion,
+two Reflexion refinement rounds; fitness is a bootstrap-CI mean (upstream `_mgsm/utils.py` resamples 100 000
+times; this example uses 2 000 so it runs in seconds — a stated deviation, not a
+silent one); the archive is **keep-all**. The seven ADAS MGSM seeds (CoT, Self-Consistency, Reflexion,
 Debate, Step-back, Quality-Diversity, Role-Assignment) are the starting archive.
 
 *Safety substitution (documented):* ADAS `exec`s model-written Python `forward()`
