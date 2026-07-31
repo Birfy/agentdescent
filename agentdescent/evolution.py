@@ -456,7 +456,19 @@ class EvolvingArtifact:
                                 self._rt, self._strategy)
 
     def _signature(self):
-        return tuple(sorted(self.state.items()))
+        """The evaluation-cache key: what the artifact *renders to*.
+
+        It used to be the whole state, which is a finer key than evaluation
+        actually depends on -- ``eval_one`` only ever passes ``render()`` to
+        ``run``, so two states that render identically cannot score differently.
+        Any state a strategy carries for bookkeeping rather than for rendering
+        (ADAS keeps the design's name and rationale beside the design itself)
+        therefore invalidated the cache for free: the aggregator scored a
+        candidate on the full held-out set, the round committed it, and the
+        driver's own held-out measurement re-ran every one of those rollouts
+        because a label had changed. On an LLM workload that is a duplicate sweep
+        of real model calls per committing round."""
+        return self.render()
 
     def score(self, tasks: Sequence[Task]) -> float:
         """Mean reward over ``tasks``, evaluated concurrently.
@@ -644,6 +656,11 @@ def _tally(reports) -> Dict[str, int]:
 class RoundInfo:
     round: int
     held_out_reward: float
+    #: How many **keys the artifact holds** -- its size (rules for `AppendRules`,
+    #: slots for `KeyedRules`), not how many tasks `held_out_reward` was measured
+    #: on. The verbose line prints it as ``size=`` for that reason: sitting beside
+    #: the reward under the name ``items`` it reads as the sample size, and a
+    #: reader who takes it that way concludes a 108-item measurement rested on 3.
     n_items: int
     committed: int
     rejected: int
@@ -1533,8 +1550,8 @@ def evolve(
         else:
             stalled += 1
         if verbose:
-            print(f"round {r:>3}  reward={info.held_out_reward:.3f}  "
-                  f"items={info.n_items}  +{committed}/-{rejected}")
+            print(f"round {r:>3}  reward={info.held_out_reward:.3f} on "
+                  f"{len(held_out)}  size={info.n_items}  +{committed}/-{rejected}")
         if target_reward is not None and info.held_out_reward >= target_reward:
             stop_reason = "target_reward"
             if verbose:

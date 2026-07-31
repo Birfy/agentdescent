@@ -4,6 +4,8 @@ Exercise the safe DSL validation + interpreter, MGSM scoring, bootstrap fitness,
 the DGM parent-selection formula, and the search loop. No network or LLM calls.
 """
 
+import json
+
 from examples.adas_meta_agent_search import (
     Interpreter,
     _extract_int,
@@ -147,3 +149,115 @@ def test_hard_mode_keeps_items_a_single_call_gets_wrong():
     # a "baseline" that only gets the even ones right
     kept = select_hard(pool, lambda ex: 1.0 if int(ex[1]) % 2 == 0 else 0.0)
     assert kept == [ex for ex in pool if int(ex[1]) % 2]
+
+
+# --- measurability: the fixes that turned "no lift demonstrated" into a number --
+
+def test_parse_agent_survives_prose_around_the_json():
+    """The meta-agent wraps its JSON in a fence and a closing remark. A single
+    greedy `\\{.*\\}` spans from the first brace to the last one anywhere in the
+    reply, so one stray brace in the prose discarded the whole proposal -- and a
+    generation produces one proposal."""
+    reply = ('Here is my design:\n```json\n'
+             '{"thought":"t","name":"N","program":{"block":"cot_sc","k":3}}\n'
+             '```\nNote: {this} composes two ideas.')
+    assert _parse_agent(reply)["name"] == "N"
+
+
+def test_parse_agent_rejects_a_program_it_cannot_afford():
+    """Cost is multiplicative in this DSL and evaluation is candidates x items x
+    cost, so one unbounded proposal outweighs the rest of the search."""
+    from examples.adas_meta_agent_search import MAX_PROGRAM_CALLS, program_cost
+
+    greedy = {"block": "ensemble", "children": [
+        {"block": "debate", "roles": ["a", "b", "c"], "rounds": 2},
+        {"block": "debate", "roles": ["a", "b", "c"], "rounds": 2}]}
+    assert program_cost(greedy) > MAX_PROGRAM_CALLS
+    assert _parse_agent(json.dumps({"program": greedy})) is None
+    # ... and every shipped seed stays comfortably inside the cap
+    assert all(program_cost(s["program"]) <= MAX_PROGRAM_CALLS for s in seed_archive())
+
+
+def test_program_cost_counts_the_calls_the_interpreter_makes():
+    """The budget line and the cap both read this, so it has to match the
+    interpreter rather than approximate it."""
+    from examples.adas_meta_agent_search import program_cost
+
+    for program in ([s["program"] for s in seed_archive()] +
+                    [{"block": "debate", "roles": ["x", "y"], "rounds": 2}]):
+        calls = [0]
+
+        def count(prompt):
+            calls[0] += 1
+            return "Answer: 42"
+
+        Interpreter(count).run(program, "q")
+        assert calls[0] == program_cost(program), program
+
+
+def test_propose_keeps_a_valid_draft_when_a_later_round_degrades():
+    """Two Reflexion rounds refine the draft; returning whatever the *last* round
+    emitted throws away a good agent whenever the last one is malformed."""
+    from examples.adas_meta_agent_search import propose_agent
+
+    good = '{"thought":"t","name":"Good","program":{"block":"step_back"}}'
+    replies = iter([good] + ["not json"] * 6)
+
+    agent = propose_agent(lambda prompt: next(replies), seed_archive())
+    assert agent is not None and agent["name"] == "Good"
+
+
+def test_seed_archive_is_scored_before_the_first_proposal():
+    """The meta-agent's only conditioning signal is the archive. Scoring the seeds
+    inside the first `step()` means generation 0 designs against seven entries all
+    reading `unevaluated`."""
+    seen = []
+
+    def stub(prompt):
+        if "archive of agents discovered so far" in prompt:
+            seen.append(prompt)
+        return "Answer: 42"
+
+    val = [(f"q{i}", "42" if i % 2 else "7") for i in range(8)]
+    run_meta_agent_search(stub, val, generations=1, seed=0)
+    assert seen, "the meta-agent was never asked for a design"
+    assert "unevaluated" not in seen[0], (
+        "the first proposal was conditioned on an unscored archive")
+
+
+def test_search_reports_the_best_seed_for_comparison():
+    """On a `--hard` subset the structure-free baseline is 0.000 by construction,
+    so searched-vs-seed is the only comparison that carries information."""
+    val = [(f"q{i}", "42" if i % 2 else "7") for i in range(8)]
+    result = run_meta_agent_search(lambda p: "Answer: 42", val, generations=1, seed=0)
+    assert validate_program(result.best_seed.get("program", {}))
+    assert any(a.get("seed") for a in result.archive)
+    assert result.best_fitness >= result.seed_fitness
+
+
+def test_merge_reports_name_the_outcome():
+    """`committed_version is None` is the driver's whole tally, so an archive whose
+    best design simply did not change was reported identically to a rejection."""
+    from agentdescent.evolution import Task, evolve
+
+    from examples.adas_meta_agent_search import (AdasContext, AgentDesignStrategy,
+                                                 MetaSearchAggregator, make_propose)
+
+    ctx = AdasContext()
+    interp = Interpreter(lambda p: "Answer: 42")
+    tasks = [Task(id=f"t{i}", prompt="q", meta={"answer": "42"}) for i in range(8)]
+
+    def factory(ledger, verifier, audit, config, policy):
+        agg = MetaSearchAggregator(ledger, verifier, ctx, artifact_id="agentic_system")
+        agg.seed()
+        return agg
+
+    out = evolve(tasks, lambda t, o: 1.0 if o == "42" else 0.0,
+                 run=lambda r, t: interp.run(json.loads(r), t.prompt) or "",
+                 propose=make_propose(ctx, lambda p: "Answer: 42"),
+                 strategy=AgentDesignStrategy(), artifact_id="agentic_system",
+                 blast_radius=0.6, rounds=1, n_workers=1, self_verify=False,
+                 held_out_frac=0.5, aggregator_factory=factory)
+    assert set(out.outcomes()) <= {"committed", "already-best", "no-candidates",
+                                   "cas-conflict"}
+    assert "unknown" not in out.outcomes()
