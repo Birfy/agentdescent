@@ -261,3 +261,15 @@ def test_merge_reports_name_the_outcome():
     assert set(out.outcomes()) <= {"committed", "already-best", "no-candidates",
                                    "cas-conflict"}
     assert "unknown" not in out.outcomes()
+
+
+def test_search_surfaces_why_each_generation_went_as_it_did():
+    """`already-best` and `no-candidates` both print as `+0/-1` on the driver's
+    line, and they need opposite fixes. The run that concluded "the archive
+    rejected every candidate" had no way to tell which one it had seen."""
+    # a stub that answers every task correctly -> no trigger rollout ever fails,
+    # so evolve() never asks for a proposal and nothing reaches the archive.
+    val = [(f"q{i}", "42") for i in range(12)]
+    r = run_meta_agent_search(lambda p: "Answer: 42", val, generations=2, seed=0)
+    assert r.outcomes == {"no-candidates": 2}, r.outcomes
+    assert r.stop_reason == "rounds" and r.error is None

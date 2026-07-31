@@ -7,6 +7,60 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **ADAS reported "no lift demonstrated", and most of the reasons were not the
+  algorithm.** The recorded run spent 791 calls to report `test accuracy 0.000`
+  on three items. Fixed across the measurement, the search and the accounting:
+    - The hard subset came from a 600-item sample of four languages, leaving 47
+      items to split three ways. Full MGSM is 2750 items over 11 languages and
+      `deepseek-v4-flash` answers 0.919 of it directly — a 222-item hard pool.
+    - The split was 50/25/25, but the train half only ever *triggers* proposals:
+      the meta-agent conditions on the archive, not on the task `evolve()` hands
+      it, so a generation consumes two items and ignores the rest. `--train-frac`
+      / `--test-frac` now default to 15/50/35, and splits are stratified by
+      language (MGSM languages differ by 8 points of baseline accuracy, so an
+      unstratified draw can hand val one mixture and test another — and that
+      difference reads as a lift).
+    - The run reported only the searched agent's test accuracy, which on a
+      `--hard` subset cannot say whether searching helped: the structure-free
+      baseline is 0.000 there by construction. It now scores the best seed on the
+      same split and prints both rows and the delta.
+    - The `--hard` baseline was scored with a digit-concatenating extractor while
+      the agents used `_extract_int`, so "hard" partly meant "the two extractors
+      disagree". One extractor for both sides. The printed direct accuracy was
+      also derived from the subset size, so a pool `select_hard` had *topped up*
+      reported the top-up as model error.
+    - The seed archive was scored inside the first `step()` — after generation 0
+      had already proposed — so the first generation designed against seven
+      entries all reading `unevaluated`. Seeded before round 0 instead.
+    - `propose_agent` returned whatever the last Reflexion round emitted,
+      discarding a valid draft from an earlier round; `_parse_agent`'s greedy
+      `\{.*\}` spanned first brace to last brace in the whole reply, so one brace
+      in the closing prose threw the proposal away. A generation produces one
+      proposal, so each of these costs a whole generation.
+    - Nothing bounded a proposal's cost, which is multiplicative in this DSL (an
+      ensemble of two 2-round debates is 14 calls per question against a
+      most-expensive-seed of 5). Now capped, and the cap is in the meta-prompt.
+    - `self_verify` ran an extra multi-step rollout per proposal for a delta the
+      archive never reads; `--eval-concurrency` never reached `evolve()`; and
+      `--hard` re-ran its entire baseline pass every invocation (2750 calls at
+      full size), now cached per (model, question).
+    - The budget line was computed *before* `--hard` narrowed the split, so it
+      advertised ~9009 calls for a run that made 791. It is now derived from the
+      real program costs, after the split, and reports a range.
+    - `MetaSearchAggregator` left `MergeReport.accepted`/`category` empty while it
+      was committing, so an unchanged best design printed `+0/-1` and
+      `outcomes()` bucketed every generation as `unknown`.
+- **The evaluation cache keyed on state the artifact does not render.**
+  `_EvalCache` used the whole state dict, but `eval_one` only ever passes
+  `render()` to `run` — so two states that render identically cannot score
+  differently. ADAS keeps a design's name and rationale beside the design itself,
+  and committing a candidate the aggregator had just scored therefore re-ran the
+  entire held-out set because a label changed: a duplicate sweep of real model
+  calls per committing round.
+- **`RoundInfo.n_items` is the artifact's key count, not the sample size.** The
+  verbose line printed it as `items=` directly beside the reward, where it reads
+  as "measured on this many" — a 110-item measurement announced itself as 3. Now
+  `size=`, with the held-out count printed next to the reward it belongs to.
 - **The L1/L2 boundary was defined three times, with two different numbers.**
   `governance.classify` drew it at `FAST_MAX = 0.30`; the aggregator's staleness
   tolerance re-derived it as `blast_radius > 0.5` and the audit gate as

@@ -805,6 +805,17 @@ class SearchResult:
     #: `--hard` subset the direct baseline is 0.000 by construction, so the only
     #: comparison that says anything about the search is searched-vs-seed.
     best_seed: dict = field(default_factory=dict)
+    #: ``EvolutionResult.outcomes()`` -- why each generation went as it did.
+    #: The driver's own ``+0/-1`` line cannot distinguish "candidates reached the
+    #: archive and none beat the incumbent" (`already-best`) from "no candidate
+    #: was ever produced" (`no-candidates`, i.e. every trigger rollout passed, so
+    #: `evolve()` never asked for a proposal). Those need opposite fixes -- a
+    #: better meta-prompt versus a harder trigger split -- and the recorded run
+    #: that concluded "the archive rejected every candidate" had no way to tell
+    #: which of the two it had actually observed.
+    outcomes: dict = field(default_factory=dict)
+    stop_reason: str = "rounds"
+    error: Optional[str] = None
 
 
 def run_meta_agent_search(complete: Completion, val: List[Tuple[str, str]],
@@ -834,7 +845,7 @@ def run_meta_agent_search(complete: Completion, val: List[Tuple[str, str]],
         agg.seed()             # score the seed archive BEFORE round 0 proposes
         return agg
 
-    evolve(tasks, reward, run=run, propose=make_propose(ctx, complete),
+    out = evolve(tasks, reward, run=run, propose=make_propose(ctx, complete),
            strategy=AgentDesignStrategy(), blast_radius=0.6, artifact_id="agentic_system",
            rounds=generations, n_workers=n_workers,
            max_concurrency=1 if asynchronous else n_workers,
@@ -849,7 +860,8 @@ def run_meta_agent_search(complete: Completion, val: List[Tuple[str, str]],
            eval_concurrency=EVAL_CONCURRENCY,
            held_out_frac=held_out_frac, aggregator_factory=factory, verbose=verbose)
     return SearchResult(ctx.archive, ctx.best_agent or {}, ctx.seed_fitness,
-                        ctx.best_fitness, ctx.best_seed or {})
+                        ctx.best_fitness, ctx.best_seed or {},
+                        out.outcomes(), out.stop_reason, out.error)
 
 
 # ===========================================================================
@@ -1042,6 +1054,14 @@ def main() -> None:
     print(f"\narchive: {len(result.archive)} designs "
           f"({sum(1 for a in result.archive if a.get('seed'))} seeds + "
           f"{sum(1 for a in result.archive if not a.get('seed'))} searched)")
+    # Why the generations went as they did. `already-best` and `no-candidates`
+    # both print as `+0/-1` on the driver's line and need opposite fixes.
+    if result.outcomes:
+        print("generations: " + ", ".join(f"{k}={v}" for k, v in
+                                          sorted(result.outcomes.items()))
+              + f"  (stopped: {result.stop_reason})")
+    if result.error:
+        print(f"WARNING: the run did not finish cleanly -- {result.error}")
     print("\n                                  val (search)   test (held out)")
     print(f"  best hand-designed seed         {result.seed_fitness:>9.3f}   "
           f"{seed_test:>13.3f}   ({result.best_seed.get('name', '?')})")
