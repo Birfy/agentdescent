@@ -13,7 +13,16 @@ so you can reproduce it.
 | **[SkillOpt](algo-skillopt.md)** | SearchQA | `--hard --steps 6` | val hard-EM **0.250 → 0.500**; test **0.450** | 6 steps |
 | **[EvoSkill](algo-evoskill.md)** | FinQA | `--dataset finqa --iterations 5` | val **0.487 → 0.573**; test **0.617**, 1 skill | 115 calls, 4 min |
 | **[DGM](algo-dgm.md)** | surrogate | `--generations 4` | resolve-rate **0.000 → 0.300**; test 0.200 | offline |
-| **[ADAS](algo-adas.md)** | MGSM | `--hard --langs bn,sw,te,th --per-lang 150` | *see page — the run takes hours* | ~9000 calls |
+| **[ADAS](algo-adas.md)** | MGSM | `--hard --langs bn,sw,te,th` | **no lift demonstrated** — see below | 791 calls, 24 min |
+
+!!! warning "ADAS is the exception, and the reason is cost"
+    MGSM is saturated at the default settings, and `select_hard` does find a real
+    subset (47 of 600 items) — but evaluating one candidate there is a *multi-step
+    program per item*, so a three-generation run is ~9000 calls and hours long.
+    Shrinking it to fit a budget shrinks the measurement too: at 6 train / 3 val /
+    3 test the archive rejected every candidate and held-out test was 0.000 on
+    three items. That is a measurement too small to read, not a demonstration and
+    not a bug. [Details](algo-adas.md#measured-mgsm-with-deepseek).
 
 Each learned something specific to the failure it was shown:
 

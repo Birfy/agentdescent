@@ -396,12 +396,16 @@ def load_dataset(langs: List[str], per_lang: int, seed: int = 0,
                          ratios=ratios, seed=seed, name="MGSM")
 
 
+EVAL_CONCURRENCY = 16          # set from --eval-concurrency; I/O bound, so high
+
+
 def evaluate(complete: Completion, program: dict,
              examples: List[Tuple[str, str]]) -> float:
     """Mean MGSM accuracy of an agent program on a held-out split."""
     if not examples:
         return 0.0
-    return sum(evaluate_agent(Interpreter(complete), program, examples)) / len(examples)
+    return sum(evaluate_agent(Interpreter(complete), program, examples,
+                              concurrency=EVAL_CONCURRENCY)) / len(examples)
 
 
 # ===========================================================================
@@ -502,7 +506,7 @@ class MetaSearchAggregator(AggregatorProtocol):
         from concurrent.futures import ThreadPoolExecutor
         held = list(self.verifier.held_out)
         if held:
-            with ThreadPoolExecutor(max(1, min(8, len(held)))) as pool:
+            with ThreadPoolExecutor(max(1, min(EVAL_CONCURRENCY, len(held)))) as pool:
                 correct = list(pool.map(lambda t: art.score([t]), held))
         else:
             correct = []
@@ -619,6 +623,12 @@ def main() -> None:
                    help="run barrier-free (async_evolve)")
     p.add_argument("--async-ratio", type=int, default=3, help="staleness lag budget")
     p.add_argument("--max-seconds", type=float, default=60.0, help="async wall-clock budget")
+    p.add_argument("--hard-keep", type=int, default=None,
+                   help="cap the hard subset -- evaluation cost is candidates x "
+                        "items x (multi-step calls), so this is the strongest lever "
+                        "on how long a run takes")
+    p.add_argument("--eval-concurrency", type=int, default=16,
+                   help="how many examples to score at once (I/O bound)")
     p.add_argument("--hard", action="store_true",
                    help="keep only items a plain single call gets wrong -- MGSM is "
                         "already ~1.000 for a strong model, so the search has no "
@@ -664,6 +674,7 @@ def main() -> None:
     usage = Usage()                       # what the run actually costs
     completion = (openai_compatible(model=args.model, usage=usage) if args.provider in ("openai", "glm")
                   else claude(model=args.model, usage=usage))
+    globals()["EVAL_CONCURRENCY"] = args.eval_concurrency
     if args.hard:
         # A plain, structure-free call is the right baseline here: what ADAS
         # searches over IS structure, so the items worth keeping are the ones a
@@ -676,7 +687,9 @@ def main() -> None:
             digits = "".join(c for c in (out or "") if c.isdigit() or c in ".-")
             return 1.0 if score_mgsm(a, digits.strip(".-") or None) else 0.0
 
-        pool = select_hard(build_examples(langs, args.per_lang, seed=args.seed), _direct)
+        pool = select_hard(build_examples(langs, args.per_lang, seed=args.seed),
+                           _direct, keep=args.hard_keep,
+                           concurrency=args.eval_concurrency)
         ds = split_dataset(pool, ratios=(0.5, 0.25, 0.25), seed=args.seed, name="MGSM")
         ntr, nva, nte = ds.sizes()
         print(f"Hard mode: {ntr} train / {nva} val / {nte} test  "

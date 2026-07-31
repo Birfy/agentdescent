@@ -59,31 +59,56 @@ In [`examples/adas_meta_agent_search.py`](https://github.com/Birfy/agentdescent/
 
 ## Measured — MGSM with DeepSeek
 
-At the default settings MGSM is **saturated**: the seed archive already scores
-1.000 on the sampled items, so Meta Agent Search has no gradient and the archive
-merge accepts nothing.
+**This is the one shipped port where I could not demonstrate a lift**, and the
+reason is worth stating rather than hiding.
 
-`--hard` is the lever, and MGSM needs both of the difficulty knobs at once. Even
-restricted to its low-resource languages, `deepseek-v4-flash` answers ~95% of
-items correctly with a single structure-free call, so finding a subset with signal
-takes a large pool:
+At the default settings MGSM is saturated: the seed archive already scores 1.000
+on the sampled items, so Meta Agent Search has no gradient and the archive merge
+accepts nothing. `--hard` is the lever — but MGSM resists it from both sides:
 
-| pool | items a single call gets wrong |
+| pool | items a single structure-free call gets **wrong** |
 |---|---|
 | `--per-lang 40` on `bn,sw,te,th` (160) | fewer than 12 — `select_hard` warns and tops up |
-| `--per-lang 150` on `bn,sw,te,th` (600) | **47** (23 train / 12 val / 11 test) |
+| `--per-lang 150` (600) | **47** (23 train / 12 val / 11 test) |
 
-```bash
-python -m examples.adas_meta_agent_search --hard --langs bn,sw,te,th \
-    --per-lang 150 --generations 3 --provider openai --model deepseek-v4-flash --yes
+So a subset with real signal exists, but it is ~8% of a large pool. The bind is
+cost: with 23 training items a three-generation run is ~9000 model calls and takes
+hours. Shrinking it to fit a budget shrinks the *measurement* with it — at
+`--hard-keep 12` the split is 6 train / 3 val / 3 test, and a 3-item validation set
+cannot separate anything:
+
 ```
+round 0  reward=0.400  +0/-1
+round 1  reward=0.400  +0/-1
+test accuracy (held out): 0.000        # 3 items
+791 calls, 5653 s in the model, 24 min wall-clock
+```
+
+The archive rejected every candidate. On this evidence that is neither a working
+demonstration nor a bug — it is a measurement too small to read. What the run
+*does* show is that the loop, the archive, the selection rule and the gate all
+execute against a real dataset.
+
+To get a number you can trust here, budget for `--per-lang 150` with no
+`--hard-keep` and expect hours, or use a weaker base model so the plain benchmark
+has headroom.
 
 !!! warning "This is by far the most expensive example"
     Every candidate is scored on every training item, and each score is a
     *multi-step* program — self-consistency and debate make several model calls per
     question. One generation over 23 items is on the order of a thousand calls, so
-    a three-generation run takes hours even fully parallel. Start with a small
-    `--per-lang` and `--generations 1` to see the loop work.
+    a three-generation run takes hours even fully parallel.
+
+    Two knobs control the cost directly:
+
+    | | |
+    |---|---|
+    | `--hard-keep N` | cap the hard subset. Evaluation is *candidates × items × multi-step calls*, so this is the strongest lever |
+    | `--eval-concurrency N` | how many examples are scored at once (default 16). Purely I/O bound |
+
+    `--hard-keep` caps the **pool**, which is then split 50/25/25 — so
+    `--hard-keep 12` leaves only 6 training items, and the fan-out cannot exceed
+    that. Ask for roughly four times the training set you want.
 
 ## Run it## Run it
 
