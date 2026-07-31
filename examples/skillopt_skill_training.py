@@ -449,12 +449,29 @@ def download_searchqa(split: str, limit: int) -> List[dict]:
     return out
 
 
-def load_dataset(n_train: int, n_val: int, seed: int = 0) -> Dataset:
+def load_dataset(n_train: int, n_val: int, seed: int = 0, hard: bool = False,
+                 rollout: "Rollout" = None) -> Dataset:
     """SearchQA using its native `train` split, and splitting `validation` into
-    the val (gate) and test halves."""
+    the val (gate) and test halves.
+
+    ``hard=True`` first runs the seed skill over a wider pool and keeps only the
+    questions it gets **wrong**. Measured with ``deepseek-v4-flash``, plain
+    SearchQA scores 0.900 out of the box -- the model already knows the answers,
+    so a skill document has nothing to add and the strict gate correctly accepts
+    no edit. That is the right behaviour and a useless demonstration; this keeps
+    the dataset and drops the items carrying no signal.
+    """
     train = download_searchqa("train", n_train)
-    pool = split_dataset(download_searchqa("validation", n_val), ratios=(0.0, 0.5, 0.5),
-                         seed=seed, name="SearchQA")
+    pool_rows = download_searchqa("validation", n_val)
+    if hard and rollout is not None:
+        from agentdescent.dataloader import select_hard
+        scorer = lambda ex: em_score(rollout.answer(SEED_SKILL, ex), ex["answers"])
+        before = len(train) + len(pool_rows)
+        train = select_hard(train, scorer)
+        pool_rows = select_hard(pool_rows, scorer)
+        print(f"Hard mode: kept {len(train) + len(pool_rows)} of {before} items the "
+              f"seed skill answers incorrectly")
+    pool = split_dataset(pool_rows, ratios=(0.0, 0.5, 0.5), seed=seed, name="SearchQA")
     return Dataset(train=train, val=pool.val, test=pool.test, name="SearchQA")
 
 
@@ -479,6 +496,10 @@ def main() -> None:
                    help="run barrier-free (async_evolve)")
     p.add_argument("--async-ratio", type=int, default=3, help="staleness lag budget")
     p.add_argument("--max-seconds", type=float, default=40.0, help="async wall-clock budget")
+    p.add_argument("--hard", action="store_true",
+                   help="keep only questions the seed skill answers wrong -- plain "
+                        "SearchQA is already ~0.900 for a strong model, so there is "
+                        "nothing for a skill document to add")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--yes", action="store_true")
     args = p.parse_args()
@@ -518,6 +539,13 @@ def main() -> None:
     usage = Usage()                       # what the run actually costs
     completion = (openai_compatible(model=args.model, usage=usage) if args.provider in ("openai", "glm")
                   else claude(model=args.model, usage=usage))
+    if args.hard:
+        # Needs the model, which is built above, so the dataset is re-selected here
+        # rather than at load time.
+        ds = load_dataset(args.train, args.val, seed=args.seed, hard=True,
+                          rollout=Rollout(completion))
+        ntr, nva, nte = ds.sizes()
+        print(f"Splits   : {ntr} train / {nva} val / {nte} test  (hard subset)")
     try:
         completion("Reply with the single word: ok")
     except Exception as e:  # noqa: BLE001

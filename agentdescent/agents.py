@@ -237,7 +237,7 @@ def with_retries(completion: Completion, attempts: int = 3,
 
 def claude(model: str = "claude-opus-4-8", max_tokens: int = 4096,
            client: Optional[object] = None, usage: Optional[Usage] = None,
-           **create_kwargs) -> Completion:
+           retries: int = 3, **create_kwargs) -> Completion:
     """A Claude-backed completion (requires ``pip install anthropic`` + creds).
 
     Pass ``client`` to reuse an existing ``anthropic.Anthropic`` instance;
@@ -275,14 +275,19 @@ def claude(model: str = "claude-opus-4-8", max_tokens: int = 4096,
                          seconds=time.time() - t0)
         return "".join(b.text for b in msg.content if b.type == "text")
 
-    return complete
+    # Retried by default: a transient socket error is ordinary, and it used to end
+    # whatever was running. Measured on a real run, one `RemoteDisconnected`
+    # during an example's final held-out evaluation -- a plain `completion(...)`
+    # call outside anything the engine protects -- discarded the entire run.
+    # `retries=0` opts out.
+    return with_retries(complete, attempts=retries) if retries > 1 else complete
 
 
 def openai_compatible(model: str, *, base_url_env: str = "OPENAI_BASE_URL",
                       api_key_env: str = "OPENAI_API_KEY",
                       default_base_url: str = "https://api.openai.com/v1",
                       max_tokens: int = 4096, timeout: float = 120.0,
-                      usage: Optional[Usage] = None) -> Completion:
+                      usage: Optional[Usage] = None, retries: int = 3) -> Completion:
     """A completion for any OpenAI-compatible chat endpoint (GLM/Zhipu, proxies,
     local servers, OpenAI itself).
 
@@ -322,4 +327,4 @@ def openai_compatible(model: str, *, base_url_env: str = "OPENAI_BASE_URL",
                          seconds=time.time() - t0)
         return data["choices"][0]["message"]["content"]
 
-    return complete
+    return with_retries(complete, attempts=retries) if retries > 1 else complete

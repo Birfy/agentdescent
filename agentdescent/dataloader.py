@@ -264,3 +264,37 @@ def load_gated_hf(dataset: str, split: str, *,
         return [dict(r) for r in ds]
     except Exception:  # noqa: BLE001 - any auth/library failure -> fall back
         return None
+
+def select_hard(items: Sequence[Any], score: Callable[[Any], float],
+                keep: Optional[int] = None, threshold: float = 0.999,
+                concurrency: int = 8) -> List[Any]:
+    """Keep the items a baseline gets **wrong** -- headroom, from a saturated set.
+
+    A benchmark a model already solves cannot demonstrate a skill: there is
+    nothing to add, and a correct implementation commits nothing. Measured with
+    ``deepseek-v4-flash``, three of the shipped ports sit at 0.9-1.0 out of the
+    box (FiNER-139 at the default concept count, SearchQA, MGSM).
+
+    Swapping in another dataset breaks fidelity to the paper being ported, so the
+    other lever is to keep the dataset and drop the items that carry no signal.
+    One baseline pass, scored concurrently, keeps whatever falls below
+    ``threshold``:
+
+        items = select_hard(items, lambda it: score(solve(it), it["answer"]))
+
+    This makes the *benchmark* harder, so numbers from it are not comparable with
+    numbers from the full set -- say which you used. ``keep`` caps the result
+    (the hardest are kept in their original order); if nothing fails, everything
+    is returned rather than an empty set.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    items = list(items)
+    if not items:
+        return items
+    with ThreadPoolExecutor(max(1, min(concurrency, len(items)))) as pool:
+        scores = list(pool.map(score, items))
+    hard = [it for it, sc in zip(items, scores) if sc < threshold]
+    if not hard:
+        return items                      # nothing failed: caller keeps the full set
+    return hard[:keep] if keep else hard

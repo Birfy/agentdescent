@@ -7,6 +7,16 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **An ungated dataset for EvoSkill — `--dataset finqa`.** OfficeQA is HF-gated, and
+  the fallback was a bundled 12-row sample that splits into 5 train / 3 val / 2
+  test — too small to measure anything, so every run reported **0.000** and read
+  like a broken algorithm rather than a missing dataset. FinQA (`dreamerdeo/finqa`)
+  is the same shape — a financial document plus a numeric answer to locate and
+  compute — at 60 items with ~4 KB documents a non-tool model can actually read.
+  Measured: val **0.487 → 0.573**, held-out **test 0.617**, one skill discovered.
+- **`select_hard(items, score)`** — keep the items a baseline gets wrong, turning a
+  saturated benchmark into one with headroom without swapping the dataset (which
+  would break fidelity to the paper being ported). Wired into SkillOpt as `--hard`.
 - **`eval_concurrency=`** — how many held-out tasks a gate scores at once, the
   merge half of the run's parallelism and independent of `n_workers`. It existed
   only as a default on a private dataclass, which made it both unreachable and
@@ -73,8 +83,15 @@ All notable changes to AgentDescent are documented here. The format follows
   and `async_evolve()` now remove their own scratch ledger on the way out (a
   caller-supplied `repo_path` is never touched -- it is how a run is resumed), and
   each run first collects orphans older than a day.
-
-### Fixed
+- **A transient network error outside the engine discarded a whole run.** The
+  engine retries its own evaluations, but an example's *final* held-out scoring is
+  a plain `completion(...)` call with no cover — measured, one
+  `RemoteDisconnected` there threw away a complete EvoSkill run. `claude()` and
+  `openai_compatible()` now retry (`retries=3`, `0` opts out), which covers every
+  caller rather than each call site.
+- **ACE's difficulty default demonstrated nothing.** `--top-k` is the difficulty
+  knob and defaulted to 10, where `deepseek-v4-flash` scores **1.000** and there is
+  nothing to learn. Raised to 40, where it scores 0.875.
 - **The merge gate was serial, and it dominated the run.** `EvolvingArtifact.score`
   summed a generator, so every held-out evaluation ran its tasks one at a time --
   and the aggregator calls it once per candidate, so a round paid N x held-out
