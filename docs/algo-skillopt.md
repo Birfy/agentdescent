@@ -71,6 +71,22 @@ accepting a change that did not beat it. That is the intended behaviour on a
 saturated benchmark, and it is the failure mode a naive implementation has: it
 would have accumulated a plausible-sounding rule against a flat signal.
 
+## Making it measurable — `--hard`
+
+SearchQA is saturated for a strong model, so the run above proves the gate works
+and nothing else. `--hard` keeps the dataset and drops the questions carrying no
+signal: one pass of the seed skill over a wider pool, keeping only what it gets
+**wrong**.
+
+```bash
+python -m examples.skillopt_skill_training --hard \
+    --provider openai --model deepseek-v4-flash --steps 5 --yes
+```
+
+That makes the *benchmark* harder, so its numbers are not comparable with numbers
+from the full split — say which you used. The underlying helper,
+[`select_hard`](dataloader.md), works on any item list and any scorer.
+
 ## Run it
 
 ```bash

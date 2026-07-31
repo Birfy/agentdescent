@@ -52,7 +52,8 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from agentdescent.agents import claude, openai_compatible
 from agentdescent.aggregator import AggregatorProtocol, MergeReport
-from agentdescent.dataloader import Dataset, fetch_text, load_gated_hf, split_dataset
+from agentdescent.dataloader import (Dataset, fetch_text, hf_rows,
+                                     load_gated_hf, split_dataset)
 from agentdescent.evolvable import Diff, EvidenceCard
 from agentdescent.evolution import EvolvingArtifact, Task, evolve
 from agentdescent.governance import classify
@@ -265,6 +266,29 @@ def _load_bundled_sample() -> List[dict]:
     text = fetch_text(f"{RAW}/officeqa_sample.csv", cache_subdir="officeqa",
                       filename="officeqa_sample.csv")
     return list(csv.DictReader(text.splitlines()))
+
+
+# FinQA (ungated) stands in when OfficeQA's gate is shut. Same shape -- a financial
+# document plus a numeric answer that has to be found and computed -- and the
+# documents are ~4 KB rather than ~272 KB, so a non-tool model can actually read
+# them. It is a *substitute*, not the paper's dataset, and the run says so.
+FINQA = "dreamerdeo/finqa"
+
+
+def load_finqa(limit: int = 60) -> Tuple[List[dict], Dict[str, str]]:
+    """Ungated financial numeric QA, in OfficeQA's item/doc shape."""
+    rows = hf_rows(FINQA, "train", limit=limit)
+    items, docs = [], {}
+    for r in rows:
+        uid = str(r.get("id") or len(items))
+        docs[uid] = "\n".join(str(r.get(k, "")) for k in
+                               ("pre_text", "table", "post_text"))
+        items.append({"uid": uid, "question": str(r["question"]),
+                      "answer": str(r["answer"]), "source_files": uid,
+                      # FinQA carries no difficulty label; the split is stratified
+                      # on it, so one bucket keeps that code path honest.
+                      "difficulty": "medium"})
+    return items, docs
 
 
 def load_officeqa() -> List[dict]:
@@ -647,10 +671,32 @@ def run_evoskill(complete: Completion, docs: Dict[str, str],
 # ===========================================================================
 
 
-def load_dataset(seed: int = 0, ratios=(0.5, 0.25, 0.25)) -> Dataset:
-    """OfficeQA items split train/val/test, stratified by difficulty."""
-    return split_dataset(load_officeqa(), ratios=ratios, seed=seed,
-                         stratify_key=lambda it: it["difficulty"], name="OfficeQA")
+def load_dataset(seed: int = 0, ratios=(0.5, 0.25, 0.25),
+                 dataset: str = "auto") -> Tuple[Dataset, Dict[str, str], str]:
+    """Items split train/val/test, plus the documents and a label for the source.
+
+    ``auto`` prefers the paper's OfficeQA and falls back to FinQA when the gate is
+    shut. The old fallback was a bundled 12-row sample, which splits into 5 train /
+    3 val / 2 test -- too small to measure anything, so every run reported 0.000
+    and looked like a broken algorithm rather than a missing dataset.
+    """
+    if dataset in ("auto", "officeqa"):
+        items = load_officeqa()
+        if len(items) > 12:                     # the gate opened: real OfficeQA
+            docs = fetch_docs(items)
+            return (split_dataset(items, ratios=ratios, seed=seed,
+                                  stratify_key=lambda it: it["difficulty"],
+                                  name="OfficeQA"), docs, "full HF OfficeQA")
+        if dataset == "officeqa":               # asked for it explicitly
+            docs = fetch_docs(items)
+            return (split_dataset(items, ratios=ratios, seed=seed,
+                                  stratify_key=lambda it: it["difficulty"],
+                                  name="OfficeQA"), docs,
+                    "bundled 12-row sample (HF gated -- too small to measure)")
+    items, docs = load_finqa()
+    return (split_dataset(items, ratios=ratios, seed=seed,
+                          stratify_key=lambda it: it["difficulty"], name="FinQA"),
+            docs, "FinQA (ungated stand-in; OfficeQA needs HF_TOKEN)")
 
 
 def evaluate(complete: Completion, docs: Dict[str, str], skills: Dict[str, str],
@@ -681,6 +727,9 @@ def main() -> None:
     p.add_argument("--model", default="claude-haiku-4-5")
     p.add_argument("--iterations", type=int, default=6)
     p.add_argument("--frontier", type=int, default=3)
+    p.add_argument("--dataset", default="auto", choices=["auto", "officeqa", "finqa"],
+                   help="auto: the paper's OfficeQA when HF_TOKEN grants access, "
+                        "else FinQA (ungated, same shape, ~4KB documents)")
     p.add_argument("--backend", default="retrieval",
                    choices=["retrieval", "toolloop", "openhands", "claude-code", "codex"],
                    help="base agent: passive keyword retriever (default), a local "
@@ -698,13 +747,11 @@ def main() -> None:
     args = p.parse_args()
 
     print("Algorithm: EvoSkill -- failure-driven skill discovery (top-K frontier)")
-    print("Dataset  : OfficeQA (U.S. Treasury Bulletins, deterministic numeric scorer)")
-    ds = load_dataset(seed=args.seed)
-    docs = fetch_docs(ds.train + ds.val + ds.test)
+    ds, docs, src = load_dataset(seed=args.seed, dataset=args.dataset)
+    print(f"Dataset  : {ds.name} (financial documents, deterministic numeric scorer)")
     art = EvolvingArtifact("skill_library", blast_radius=0.2)
     ntr, nva, nte = ds.sizes()
     print(f"Governance: skill library blast_radius={art.blast_radius} -> {classify(art).name}")
-    src = "full HF OfficeQA" if len(ds) > 12 else "bundled 12-row sample (HF gated)"
     print(f"Loaded   : {len(ds)} items ({src}); {ntr} train / {nva} val / {nte} test; "
           f"{len(docs)} docs")
     print("\nExample problem:")

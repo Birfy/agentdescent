@@ -117,3 +117,51 @@ def test_sampler_learns_from_recorded_outcomes_during_a_run():
            rounds=8, n_workers=3, held_out_frac=0.3, task_sampler=s)
     assert s.stats(), "the engine should have reported rollout outcomes"
     assert all(trials > 0 for _, trials in s.stats().values())
+
+
+# --- select_hard: turning a saturated benchmark into one with headroom ---------
+
+def test_select_hard_keeps_only_what_the_baseline_fails():
+    from agentdescent.dataloader import select_hard
+    items = list(range(20))
+    hard = select_hard(items, lambda i: 1.0 if i % 2 == 0 else 0.0)
+    assert hard == [i for i in items if i % 2]
+
+
+def test_select_hard_returns_everything_when_nothing_fails():
+    """An empty benchmark is worse than a saturated one -- say so by returning it."""
+    from agentdescent.dataloader import select_hard
+    items = list(range(10))
+    assert select_hard(items, lambda i: 1.0) == items
+
+
+def test_select_hard_caps_with_keep():
+    from agentdescent.dataloader import select_hard
+    items = list(range(20))
+    assert select_hard(items, lambda i: 0.0, keep=3) == [0, 1, 2]
+
+
+def test_select_hard_handles_an_empty_pool():
+    from agentdescent.dataloader import select_hard
+    assert select_hard([], lambda i: 0.0) == []
+
+
+def test_select_hard_scores_concurrently():
+    """It runs a whole baseline pass, so serial scoring would make it unusable."""
+    import threading
+    from agentdescent.dataloader import select_hard
+
+    live, peak, lock = [0], [0], threading.Lock()
+
+    def score(i):
+        with lock:
+            live[0] += 1
+            peak[0] = max(peak[0], live[0])
+        import time
+        time.sleep(0.05)
+        with lock:
+            live[0] -= 1
+        return 0.0
+
+    select_hard(list(range(16)), score, concurrency=8)
+    assert peak[0] > 1, "select_hard scored the pool serially"

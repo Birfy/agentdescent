@@ -111,3 +111,27 @@ def download_hotpotqa(limit):
 * **Not in the engine.** Nothing in `agentdescent.evolution` / `agentdescent.aggregator`
   imports this — it is a convenience for examples and experiments, exactly like
   `agentdescent.agents`.
+
+## Turning a saturated benchmark into one with headroom — `select_hard`
+
+A benchmark your model already solves cannot demonstrate a skill: there is nothing
+to add, and a correct implementation commits nothing. Measured with
+`deepseek-v4-flash`, three of the shipped ports sit at 0.9–1.0 out of the box
+(FiNER-139 at the default concept count, SearchQA, MGSM).
+
+Swapping datasets breaks fidelity to the paper being ported, so the other lever is
+to keep the dataset and drop the items that carry no signal:
+
+```python
+from agentdescent.dataloader import select_hard
+
+items = select_hard(items, lambda it: score(solve(it), it["answer"]))
+```
+
+One baseline pass, scored concurrently, keeping whatever falls below `threshold`
+(default: anything not fully correct). `keep=` caps the result; if nothing fails
+it returns the full set rather than nothing.
+
+!!! warning "This changes the benchmark, not just the sample"
+    Numbers from a hard subset are not comparable with numbers from the full set.
+    Report which one you used — [Measured results](results.md) does.

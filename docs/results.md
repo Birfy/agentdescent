@@ -10,6 +10,11 @@ each algorithm's own dataset.
     so there is nothing for a skill to add — and the framework correctly commits
     **nothing**, which is the result worth reporting.
 
+    Two levers close that gap, both now shipped: ACE's difficulty knob
+    (`--top-k`, default raised 10 → 40) and
+    [`select_hard`](dataloader.md#turning-a-saturated-benchmark-into-one-with-headroom-select_hard),
+    which keeps the items a baseline gets wrong (`--hard` on SkillOpt).
+
     That is the acceptance gate doing its job. A naive implementation would happily
     accumulate plausible-sounding "improvements" against a flat signal; this one
     rejects them, and `result.outcomes()` says `below-threshold` rather than
@@ -22,9 +27,9 @@ each algorithm's own dataset.
 | Algorithm | Dataset | Held-out, before → after | Cost | What happened |
 |---|---|---|---|---|
 | **[GEPA](algo-gepa.md)** | HotpotQA | Pareto EM **0.500 → 0.600**; **test EM 0.700** | 80 calls, 10 min | Real lift. Learned to connect multi-paragraph evidence and answer with a short phrase |
-| **[EvoSkill](algo-evoskill.md)** | OfficeQA | **0.000 → 0.000** (no tools) | 34 calls, 7 min | The dataset is HF-gated, so this falls back to a 12-row sample, and a *non-tool* model cannot find a figure inside a 272 KB bulletin. With a real tool-using agent: **58.0% → 65.7%** |
-| **[ACE](algo-ace.md)** | FiNER-139 | 1.000 → 1.000 at `--top-k 10`; **87.0% → 95.7%** at `--top-k 40` | 42 calls, 2 min | Difficulty is the number of concepts: a 10-way choice is saturated, a 40-way one is not |
-| **[SkillOpt](algo-skillopt.md)** | SearchQA | 0.900 → 0.900 | 54 calls, 5 min | Saturated. The strict gate saw one proposed edit and **rejected it**: 0 accepted / 1 rejected |
+| **[EvoSkill](algo-evoskill.md)** | FinQA (ungated stand-in) | val **0.487 → 0.573**; **test 0.617** | 115 calls, 4 min | OfficeQA is HF-gated; the old fallback was a 12-row sample that always read 0.000. FinQA is the same shape at 60 items with ~4 KB docs. On real OfficeQA with a tool-using agent: **58.0% → 65.7%** |
+| **[ACE](algo-ace.md)** | FiNER-139 | 0.875 val / **0.895 test** at `--top-k 40` (now the default); 1.000 → 1.000 at 10 | 174 calls, 8 min | Difficulty is the concept count. At 40 there is headroom, though this 5-round / 2-worker run curated no bullet; a longer 8-round run reached 95.7% |
+| **[SkillOpt](algo-skillopt.md)** | SearchQA | 0.900 → 0.900 | 54 calls, 5 min | Saturated. The strict gate saw one proposed edit and **rejected it**: 0 accepted / 1 rejected. Use `--hard` for a subset with signal |
 | **[ADAS](algo-adas.md)** | MGSM | 1.000 from round 0 | ~8 min/generation | Saturated; rejected everything (`+0/-1`). Stopped after 2 of 4 generations — the answer was settled |
 | **[DGM](algo-dgm.md)** | *surrogate* | resolve-rate **0.000 → 0.300**; test 0.200 | offline | The objective is a capability-cover surrogate — real DGM runs SWE-bench in Docker. The archive, selection and staged escalation are faithful |
 
