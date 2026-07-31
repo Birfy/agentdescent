@@ -94,6 +94,24 @@ def _majority(answers: List[Optional[str]]) -> Optional[str]:
     return votes.most_common(1)[0][0] if votes else None
 
 
+def canonical(program: dict) -> str:
+    """A design's identity: its JSON with **sorted keys**.
+
+    Every dedup in the search is string equality on this -- `to_diff` drops a
+    proposal identical to the head, `step()` commits only when the best design
+    differs from it, and the evaluation cache keys on it (an artifact's cache key
+    is what it renders to, and a design IS what this artifact renders). Plain
+    `json.dumps` preserves *insertion* order, which for a proposal is whatever
+    key order the model happened to emit -- so `{"block":"cot_sc","k":3}` and
+    `{"k":3,"block":"cot_sc"}` were two different designs. The duplicate passed
+    the dedup, was scored on every val item (~330 model calls at this size),
+    landed the same fitness as the design it duplicated, failed the strict
+    `>` test, and showed up as one more `+0/-1`. Sorted, the duplicate is
+    recognised for free -- and if one slips through anyway it now hits the
+    evaluation cache instead of being re-run."""
+    return json.dumps(program, sort_keys=True)
+
+
 def validate_program(program: dict, depth: int = 0) -> bool:
     """Reject any program that is not built purely from known DSL blocks."""
     if depth > 4 or not isinstance(program, dict):
@@ -515,6 +533,52 @@ def load_dataset(langs: List[str], per_lang: int, seed: int = 0,
 
 EVAL_CONCURRENCY = 16          # set from --eval-concurrency; I/O bound, so high
 
+#: Token budget per model call. Far above what any single reply here needs -- the
+#: meta-agent's JSON is ~250 tokens and an answer is a handful -- because on a
+#: *reasoning* model the budget is spent on hidden reasoning first and the visible
+#: content is what is left. Measured on ``deepseek-v4-flash`` at the library
+#: default of 4096: **0 of 4** meta-agent calls returned anything at all, each
+#: burning its entire 4096 on reasoning; at 16384 all 4 returned a well-formed
+#: 740-1068 character design. You are billed for tokens generated, not for the
+#: cap, so the headroom is free.
+MAX_TOKENS = 16384
+
+
+class EmptyCompletionGuard:
+    """Wraps a completion and counts the replies that come back blank.
+
+    An empty completion is the most dangerous failure mode this example has,
+    because it is *silent*: `_extract_int("")` is `None`, `score_mgsm` scores that
+    as a wrong answer, and a starved run therefore reports a low accuracy that
+    looks exactly like a model that cannot do the problems. Nothing raises, so
+    every gate downstream -- fitness, the archive, the lift -- is computed over
+    answers that were never generated. Counting them turns a corrupted
+    measurement into a visible one."""
+
+    def __init__(self, complete: Completion) -> None:
+        self._complete = complete
+        self.blank = 0
+        self.total = 0
+        self._lock = threading.Lock()
+
+    def __call__(self, prompt: str) -> str:
+        out = self._complete(prompt)
+        if not (out or "").strip():
+            with self._lock:
+                self.blank += 1
+        with self._lock:
+            self.total += 1
+        return out
+
+    def report(self) -> Optional[str]:
+        if not self.blank:
+            return None
+        return (f"{self.blank}/{self.total} model calls returned EMPTY content "
+                f"({self.blank / self.total:.1%}). On a reasoning model that means "
+                f"the token budget was spent on hidden reasoning -- raise "
+                f"--max-tokens. Every blank reply was scored as a wrong answer, so "
+                f"the numbers below understate the agents by an unknown amount.")
+
 
 def estimate_calls(generations: int, n_train: int, n_val: int, n_test: int,
                    n_workers: int = 2) -> Tuple[int, int]:
@@ -649,7 +713,7 @@ class AgentDesignStrategy:
 
     def initial(self):
         seed = seed_archive()[0]                            # start from Chain-of-Thought
-        return {"design": json.dumps(seed["program"]),
+        return {"design": canonical(seed["program"]),
                 "name": seed["name"], "thought": seed["thought"]}
 
     def render(self, state):
@@ -659,7 +723,7 @@ class AgentDesignStrategy:
         agent = _parse_agent(proposal)
         if agent is None:
             return None
-        design = json.dumps(agent["program"])
+        design = canonical(agent["program"])
         if design == state.get("design"):
             return None
         return Diff(diff_id=f"{author}:{rule_id(design)}:{base_version}", target=target,
@@ -730,7 +794,7 @@ class MetaSearchAggregator(AggregatorProtocol):
         self._seeded = True
         head = self.ledger.snapshot(Ledger.DEV).get(self.aid)
         for a in seed_archive():
-            mean, ci = self._fitness(head, json.dumps(a["program"]))
+            mean, ci = self._fitness(head, canonical(a["program"]))
             self._record(a["name"], a["thought"], a["program"], mean, ci, seed=True)
         self.ctx.seed_fitness = self.ctx.best_fitness
         self.ctx.best_seed = dict(self.ctx.best_agent)
@@ -762,7 +826,7 @@ class MetaSearchAggregator(AggregatorProtocol):
                          card.diff.ops.get("thought", ""),
                          json.loads(design), mean, ci)
 
-        best_design = json.dumps(self.ctx.best_agent["program"])
+        best_design = canonical(self.ctx.best_agent["program"])
         diff = Diff(diff_id="best", target=self.aid,
                     ops={"design": best_design,
                          "name": self.ctx.best_agent["name"],
@@ -891,6 +955,11 @@ def main() -> None:
                         "on how long a run takes")
     p.add_argument("--eval-concurrency", type=int, default=16,
                    help="how many examples to score at once (I/O bound)")
+    p.add_argument("--max-tokens", type=int, default=MAX_TOKENS,
+                   help="token budget per model call. On a reasoning model the "
+                        "budget is spent on hidden reasoning first, so too small a "
+                        "cap returns EMPTY content -- which scores as a wrong "
+                        "answer and silently understates every agent")
     p.add_argument("--workers", type=int, default=2,
                    help="meta-agents proposing per generation. A proposal is only "
                         "requested when the generation's trigger rollout FAILS, so "
@@ -954,15 +1023,28 @@ def main() -> None:
             return
 
     usage = Usage()                       # what the run actually costs
-    completion = (openai_compatible(model=args.model, usage=usage) if args.provider in ("openai", "glm")
-                  else claude(model=args.model, usage=usage))
+    raw = (openai_compatible(model=args.model, usage=usage, max_tokens=args.max_tokens)
+           if args.provider in ("openai", "glm")
+           else claude(model=args.model, usage=usage, max_tokens=args.max_tokens))
+    guard = EmptyCompletionGuard(raw)
+    completion = guard
     globals()["EVAL_CONCURRENCY"] = args.eval_concurrency
     try:
-        completion("Reply with the single word: ok")
+        probe = completion("Solve: what is 17 * 23? Think step by step, then end "
+                           "with `Answer: <integer>`.")
     except Exception as e:  # noqa: BLE001
         print(f"\nCould not reach the model ({type(e).__name__}: {e}).")
         print("For --provider openai set OPENAI_BASE_URL + OPENAI_API_KEY; "
               "for claude set ANTHROPIC_API_KEY (or `ant auth login`).")
+        return
+    # A *reasoning* prompt, not "reply with ok": the cheap probe passes at any
+    # budget, and the whole run is reasoning prompts. An empty reply here means
+    # every rollout will be blank and score as wrong, with nothing raising.
+    if not (probe or "").strip():
+        print(f"\nThe model returned EMPTY content for a reasoning prompt at "
+              f"--max-tokens {args.max_tokens}. On a reasoning model the budget is "
+              f"spent on hidden reasoning first, so every rollout would come back "
+              f"blank and be scored as a wrong answer. Raise --max-tokens.")
         return
 
     if args.hard:
@@ -1072,6 +1154,9 @@ def main() -> None:
     if args.hard:
         print("\n  (a structure-free single call scores 0.000 on this subset by "
               "construction -- the seed row is the baseline that matters)")
+    blank = guard.report()
+    if blank:
+        print(f"\nWARNING: {blank}")
     print(f"\nmodel usage: {usage.summary()}")
 
 

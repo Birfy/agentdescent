@@ -273,3 +273,58 @@ def test_search_surfaces_why_each_generation_went_as_it_did():
     r = run_meta_agent_search(lambda p: "Answer: 42", val, generations=2, seed=0)
     assert r.outcomes == {"no-candidates": 2}, r.outcomes
     assert r.stop_reason == "rounds" and r.error is None
+
+
+def test_empty_completions_are_counted_not_silently_scored_wrong():
+    """The most dangerous failure this example has is silent: a reasoning model
+    that spends its whole token budget on hidden reasoning returns EMPTY visible
+    content, `_extract_int("")` is None, and `score_mgsm` scores that as a wrong
+    answer. Nothing raises, so a starved run reports a low accuracy that looks
+    exactly like a model which cannot do the problems. Measured on
+    deepseek-v4-flash at the library default of 4096: 0 of 4 meta-agent calls
+    returned anything at all."""
+    from examples.adas_meta_agent_search import EmptyCompletionGuard
+
+    replies = iter(["", "Answer: 42", "   ", "Answer: 7"])
+    guard = EmptyCompletionGuard(lambda p: next(replies))
+    assert [guard(f"p{i}") for i in range(4)] == ["", "Answer: 42", "   ", "Answer: 7"]
+    assert guard.blank == 2 and guard.total == 4
+    msg = guard.report()
+    assert msg and "EMPTY" in msg and "50.0%" in msg
+
+    quiet = EmptyCompletionGuard(lambda p: "Answer: 1")
+    quiet("p")
+    assert quiet.report() is None      # silent when there is nothing to report
+
+
+def test_an_empty_completion_scores_as_a_wrong_answer():
+    """Why the guard has to exist: this is indistinguishable from being wrong."""
+    from examples.adas_meta_agent_search import evaluate_agent
+
+    scores = evaluate_agent(Interpreter(lambda p: ""), {"block": "cot"},
+                            [("q", "42"), ("q2", "7")])
+    assert scores == [0.0, 0.0]        # no error, no warning -- just "wrong"
+
+
+def test_design_identity_ignores_key_order():
+    """Every dedup in the search is string equality on the design's JSON, and a
+    proposal's key order is whatever the model emitted. Unsorted, a semantically
+    identical design counted as new: it passed `to_diff`, was scored on every val
+    item, tied the design it duplicated, failed the strict `>` test, and appeared
+    as one more `+0/-1` -- having spent a full evaluation sweep to learn nothing."""
+    from examples.adas_meta_agent_search import AgentDesignStrategy, canonical
+
+    a = {"block": "cot_sc", "k": 3}
+    b = {"k": 3, "block": "cot_sc"}
+    assert canonical(a) == canonical(b)
+    assert json.dumps(a) != json.dumps(b)      # why this function has to exist
+
+    # the head is stored canonically, so a re-proposal of it is dropped, not scored
+    strat = AgentDesignStrategy()
+    state = strat.initial()
+    same = json.dumps({"name": "N", "thought": "t",
+                       "program": {"k": 3, "block": "cot"}})   # CoT, reordered+extra
+    head_prog = json.loads(state["design"])
+    assert head_prog == {"block": "cot"}
+    resend = json.dumps({"name": "N", "thought": "t", "program": {"block": "cot"}})
+    assert strat.to_diff(state, resend, "w0", 1, "agentic_system") is None
