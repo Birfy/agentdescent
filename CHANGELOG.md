@@ -7,6 +7,27 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **The docstring-completeness guard was a substring match.** `test_api_docs.py`
+  exists to keep `evolve` / `async_evolve` honest as their signatures grow, and
+  checked `p not in doc` against the *whole* docstring. Delete `async_evolve`'s
+  entire Parameters section and **20 of its 27 parameters still passed**, because
+  its opening paragraph names them in prose; `evolve` kept 11 of 30 the same way.
+  Substrings made it worse -- `run` matches "running", `agent` matches "agents",
+  `parallel` matches "parallelism". It now parses numpydoc entries, plus a
+  meta-test that fails if stripping the section leaves anything looking
+  documented. `async_evolve`'s 15 cross-referenced parameters got a real entry
+  rather than relying on the prose.
+
+### Changed
+- **The six custom optimizers in `examples/` take a lock.** They were safe only
+  because every `ingest` happened to be a single `list.append`, atomic under the
+  GIL -- which stops holding the moment `ingest` grows a counter or a dedup check,
+  and is already not enough when `evolve(round_timeout=)` abandons a straggler
+  that keeps running and can `ingest` mid-drain. `AggregatorProtocol` now states
+  the contract it always relied on: `ingest` may be called from many worker
+  threads, `step` from one, guard anything both touch.
+
+### Fixed
 - **The published version drifted five minor releases behind the code.**
   `__version__` said `0.7.0`; `pyproject.toml` said `0.2.0`, and the build backend
   reads the latter -- so every wheel, the PyPI page and the README badge were

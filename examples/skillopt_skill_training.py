@@ -338,10 +338,13 @@ class StrictGateAggregator(AggregatorProtocol):
         self.ctx = ctx
         self.aid = artifact_id
         self.cards: List[EvidenceCard] = []
+        self._lock = threading.Lock()   # ingest: workers; step: one thread
         self.current_em = None
 
     def ingest(self, card: EvidenceCard) -> None:
-        self.cards.append(card)
+        # ingest runs on worker threads, step on one: see AggregatorProtocol.
+        with self._lock:
+            self.cards.append(card)
 
     def step(self) -> List[MergeReport]:
         snap = self.ledger.snapshot(Ledger.DEV)
@@ -351,7 +354,8 @@ class StrictGateAggregator(AggregatorProtocol):
             self.current_em = head.score(self.verifier.held_out)
             self.ctx.seed_em = self.ctx.best_em = self.current_em
 
-        cards, self.cards = self.cards, []
+        with self._lock:
+            cards, self.cards = self.cards, []
         best = None
         for card in cards:                                 # pick the best strict improver
             em = head.apply(card.diff).score(self.verifier.held_out)

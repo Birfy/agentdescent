@@ -51,6 +51,8 @@ escalation, keep-all) is therefore fully runnable and testable offline; the
 
 from __future__ import annotations
 
+import threading
+
 import argparse
 import hashlib
 import math
@@ -290,6 +292,7 @@ class DGMArchiveAggregator(AggregatorProtocol):
         self.ctx = ctx
         self.aid = artifact_id
         self.cards: List[EvidenceCard] = []
+        self._lock = threading.Lock()   # ingest: workers; step: one thread
         self.head_index = 0
         self._seeded = False
 
@@ -302,7 +305,9 @@ class DGMArchiveAggregator(AggregatorProtocol):
                                insts[:STAGE_SMALL], insts[:STAGE_MEDIUM], insts[:STAGE_BIG])
 
     def ingest(self, card: EvidenceCard) -> None:
-        self.cards.append(card)
+        # ingest runs on worker threads, step on one: see AggregatorProtocol.
+        with self._lock:
+            self.cards.append(card)
 
     def step(self) -> List[MergeReport]:
         snap = self.ledger.snapshot(Ledger.DEV)
@@ -320,7 +325,8 @@ class DGMArchiveAggregator(AggregatorProtocol):
 
         parent_idx = self.head_index
         parent = self.ctx.archive[parent_idx]
-        cards, self.cards = self.cards, []
+        with self._lock:
+            cards, self.cards = self.cards, []
         for card in cards:                                 # each card = a self-modification
             child_caps = _caps_of(card.diff.ops["capabilities"])
             child = Agent(tuple(sorted(child_caps)), parent=parent_idx,

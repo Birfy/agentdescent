@@ -44,6 +44,8 @@ AppWorld (a heavy simulator) which this dependency-free example omits.
 
 from __future__ import annotations
 
+import threading
+
 import argparse
 import re
 import sys

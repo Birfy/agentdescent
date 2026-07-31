@@ -102,6 +102,10 @@ def async_evolve(
 
     Parameters
     ----------
+    tasks, reward, agent, run, propose, strategy, initial_state, blast_radius, artifact_id, held_out_frac, repo_path, agg_config, staleness_policy, aggregator_factory, oracle_budget:
+        Exactly as in :func:`~agentdescent.evolution.evolve`, which documents them.
+        (Listed rather than left to the paragraph above: a completeness check that
+        reads prose cannot tell a documented parameter from a mentioned one.)
     n_workers:
         Producer threads (``>= 1``). The train tasks are sharded round-robin
         across them; a worker with an empty shard is not started.
