@@ -7,6 +7,31 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **ADAS's meta-agent returned empty content on every call, so the search
+  proposed nothing.** `deepseek-v4-flash` is a reasoning model: the token budget
+  is spent on hidden reasoning first and the visible content is what is left. The
+  example took the library default of 4096 — sized for "answer with the final
+  number" — and used one completion for both the multi-step agent programs and
+  the meta-agent, whose prompt is far longer. At 4096, **0 of 4** meta-agent
+  calls returned anything at all; at 16384, 4 of 4 returned a well-formed design.
+  The solver is affected too (blank replies 13/40 → 2/40), though the accuracy
+  difference at n=40 is inside the noise. The defect is that it is *silent*: an
+  empty completion does not raise, `_extract_int("")` is `None`, and `score_mgsm`
+  scores `None` as a wrong answer — so a starved run reports a low accuracy
+  indistinguishable from a model that cannot do the problems. Now `--max-tokens`
+  (default 16384) and `--timeout` (300 s), blank replies are counted and warned
+  about, and the pre-flight check sends a *reasoning* prompt and aborts if it
+  comes back empty ("Reply with the single word: ok" passes at any budget, which
+  is why it never caught this).
+- **A design's identity ignored key order.** Every dedup in the search is string
+  equality on the program's JSON, and a proposal's key order is whatever the
+  model emitted, so two orderings of the same program were two designs. The
+  duplicate passed the dedup, cost a full evaluation sweep, tied what it
+  duplicated, and failed the acceptance test. Now `json.dumps(..., sort_keys=True)`.
+- **A run that finished its search printed nothing if the test split failed.**
+  The test split is scored after the search is over and paid for; letting a
+  backend failure there escape discarded every validation number the run had
+  produced. Test accuracy now degrades to `n/a` and the rest still prints.
 - **ADAS reported "no lift demonstrated", and most of the reasons were not the
   algorithm.** The recorded run spent 791 calls to report `test accuracy 0.000`
   on three items. Fixed across the measurement, the search and the accounting:

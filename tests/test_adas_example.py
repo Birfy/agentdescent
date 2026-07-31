@@ -328,3 +328,15 @@ def test_design_identity_ignores_key_order():
     assert head_prog == {"block": "cot"}
     resend = json.dumps({"name": "N", "thought": "t", "program": {"block": "cot"}})
     assert strat.to_diff(state, resend, "w0", 1, "agentic_system") is None
+
+
+def test_a_missing_score_prints_as_missing():
+    """The test split is scored *after* the search is finished and paid for. When
+    that call fails -- an account ran out of credit inside it, 79 minutes in --
+    the validation numbers are still in hand, so they must still print. Formatting
+    `None` with `:.3f` raises, which would discard them along with the failure."""
+    from examples.adas_meta_agent_search import fmt_score
+
+    assert fmt_score(0.4375).strip() == "0.438"
+    assert fmt_score(None).strip() == "n/a"
+    assert len(fmt_score(None)) == len(fmt_score(0.5))    # column stays aligned

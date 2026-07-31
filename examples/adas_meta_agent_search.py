@@ -580,6 +580,15 @@ class EmptyCompletionGuard:
                 f"the numbers below understate the agents by an unknown amount.")
 
 
+def fmt_score(x: Optional[float]) -> str:
+    """A score, or ``n/a`` when it could not be measured.
+
+    A missing number must print as missing. Formatting `None` with `:.3f` raises,
+    which would turn "we could not score the test split" into a traceback that
+    also discards the validation numbers the run *did* produce."""
+    return "     n/a" if x is None else f"{x:>8.3f}"
+
+
 def estimate_calls(generations: int, n_train: int, n_val: int, n_test: int,
                    n_workers: int = 2) -> Tuple[int, int]:
     """``(typical, ceiling)`` model calls for a run of this shape.
@@ -955,6 +964,11 @@ def main() -> None:
                         "on how long a run takes")
     p.add_argument("--eval-concurrency", type=int, default=16,
                    help="how many examples to score at once (I/O bound)")
+    p.add_argument("--timeout", type=float, default=300.0,
+                   help="per-call timeout. A reasoning model given a large "
+                        "--max-tokens can spend minutes on one call, and the "
+                        "library default of 120s then turns a working run into "
+                        "retries and lost rounds")
     p.add_argument("--max-tokens", type=int, default=MAX_TOKENS,
                    help="token budget per model call. On a reasoning model the "
                         "budget is spent on hidden reasoning first, so too small a "
@@ -1023,7 +1037,8 @@ def main() -> None:
             return
 
     usage = Usage()                       # what the run actually costs
-    raw = (openai_compatible(model=args.model, usage=usage, max_tokens=args.max_tokens)
+    raw = (openai_compatible(model=args.model, usage=usage,
+                             max_tokens=args.max_tokens, timeout=args.timeout)
            if args.provider in ("openai", "glm")
            else claude(model=args.model, usage=usage, max_tokens=args.max_tokens))
     guard = EmptyCompletionGuard(raw)
@@ -1125,9 +1140,28 @@ def main() -> None:
         print("\nNo agentic system was evaluated -- see the error above.")
         print(f"model usage: {usage.summary()}")
         return
-    seed_test = evaluate(completion, seed_prog, ds.test)
+    # The search is already done and paid for at this point: the archive holds
+    # every design's validation fitness. Letting a backend failure *here* escape
+    # throws all of it away and prints nothing -- which is how a run that had
+    # completed its seeding and its generations reported a bare traceback. It
+    # happened: an account ran out of credit during this very call, after 79
+    # minutes of work. Test accuracy is the one thing that becomes unavailable;
+    # everything measured on val survives, so report that and say which number is
+    # missing rather than losing both.
+    def _on_test(program) -> Optional[float]:
+        try:
+            return evaluate(completion, program, ds.test)
+        except Exception as e:  # noqa: BLE001 - a backend failure, not a caller bug
+            print(f"\nWARNING: could not score the test split "
+                  f"({type(e).__name__}: {str(e)[:160]}).")
+            print("         The validation numbers below are complete; the test "
+                  "column is not available for this run.")
+            return None
+
+    seed_test = _on_test(seed_prog)
     test_acc = (seed_test if seed_prog == best_prog
-                else evaluate(completion, best_prog, ds.test))
+                else _on_test(best_prog) if seed_test is not None else None)
+
 
     print("\n=== best discovered agentic system ===")
     print(f"name   : {result.best.get('name', '?')}")
@@ -1144,13 +1178,15 @@ def main() -> None:
               + f"  (stopped: {result.stop_reason})")
     if result.error:
         print(f"WARNING: the run did not finish cleanly -- {result.error}")
+    lift_test = (None if seed_test is None or test_acc is None
+                 else test_acc - seed_test)
     print("\n                                  val (search)   test (held out)")
     print(f"  best hand-designed seed         {result.seed_fitness:>9.3f}   "
-          f"{seed_test:>13.3f}   ({result.best_seed.get('name', '?')})")
+          f"{fmt_score(seed_test):>13}   ({result.best_seed.get('name', '?')})")
     print(f"  best searched design            {result.best_fitness:>9.3f}   "
-          f"{test_acc:>13.3f}   ({result.best.get('name', '?')})")
+          f"{fmt_score(test_acc):>13}   ({result.best.get('name', '?')})")
     print(f"  lift                            {result.best_fitness - result.seed_fitness:>+9.3f}   "
-          f"{test_acc - seed_test:>+13.3f}")
+          f"{('     n/a' if lift_test is None else f'{lift_test:>+8.3f}'):>13}")
     if args.hard:
         print("\n  (a structure-free single call scores 0.000 on this subset by "
               "construction -- the seed row is the baseline that matters)")
