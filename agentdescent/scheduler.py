@@ -3,9 +3,14 @@
 AgentDescent treats the long tail as *three* distinct problems, each with its own
 mechanism:
 
-* :class:`TaskScheduler` -- L-task (data layer): UCB over (task-cluster x
-  artifact) so evidence-starved tail artifacts get an exploration bonus and
-  converged head artifacts are down-weighted (design doc, section 5.2).
+* :class:`TaskScheduler` -- L-task (data layer): UCB over **task clusters**, so
+  evidence-starved clusters get an exploration bonus and clusters that carry no
+  learning signal are down-weighted (design doc, section 5.2). The design frames
+  L-task as an *artifact* problem -- head skills flooded, tail skills starved --
+  and the cross-product ``(task-cluster x artifact)`` it calls for is **not**
+  implemented: :class:`TaskCluster` has no artifact dimension, and both reference
+  runtimes register exactly one artifact, as does ``evolve()``, so there is
+  nowhere for the second axis to live yet.
 * :class:`AuditScheduler` -- L-value (signal layer): allocates the scarce oracle
   budget to high-blast-radius, high-uncertainty, low-trust diffs, and audits the
   aggregator's own merges to prevent self-pollution (design doc, section 5.3).
@@ -67,11 +72,22 @@ class TaskScheduler:
             return self._ranked()[0]
 
     def select_batch(self, k: int) -> List[TaskCluster]:
-        """Lease up to ``k`` *distinct* clusters to workers, UCB-ordered.
+        """Lease ``k`` clusters to workers, UCB-ordered, cycling if ``k`` exceeds
+        the number of clusters.
 
-        Data-parallel sharding: distinct leases guarantee coverage across the
-        task long tail while UCB still front-loads the highest-value clusters
-        (design doc, sections 3.1 and 5.2)."""
+        Data-parallel sharding: leases spread coverage across the task long tail
+        while UCB front-loads the highest-value clusters (design doc, sections 3.1
+        and 5.2).
+
+        **Not distinct beyond ``len(clusters)``.** The docstring used to promise
+        distinctness and "guaranteed coverage", which holds only while there are at
+        least ``k`` clusters -- and :meth:`TaskUniverse.clusters` drops empty hash
+        buckets, so on the default 24-keyword universe that stops being true at 12
+        workers, and by 24 workers 7 of them (29%) are handed a cluster another
+        worker already has. Those workers roll out the same deterministic tasks and
+        produce diffs that content-address to duplicates: real budget, no extra
+        evidence. :class:`~agentdescent.orchestrator.AgentDescent` now warns when it
+        has fewer clusters than workers."""
         with self._lock:
             ranked = self._ranked()
             if not ranked:
@@ -170,8 +186,14 @@ class AuditScheduler:
             return priority
 
     def force_oracle(self, blast_radius: float, artifact_id: str) -> bool:
-        """High-impact or low-trust changes are forced through the oracle."""
-        return blast_radius >= 0.5 or self._trust[artifact_id] < 0.75
+        """High-impact or low-trust changes are forced through the oracle.
+
+        "High-impact" means L1, and the boundary belongs to
+        :func:`~agentdescent.governance.classify` -- a third hand-written
+        threshold here (``>= 0.5``) meant an artifact at 0.4 was L1 by governance
+        and audited like an L2 skill: never."""
+        from .governance import FAST_MAX
+        return blast_radius > FAST_MAX or self._trust[artifact_id] < 0.75
 
     def pop(self) -> Optional[_AuditItem]:
         with self._lock:

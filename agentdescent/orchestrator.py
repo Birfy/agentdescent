@@ -20,6 +20,7 @@ head and the aggregator must rebase or discard (design doc, section 4.2).
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -87,6 +88,16 @@ class AgentDescent:
                                      staleness_policy=staleness_policy)
 
         clusters = universe.clusters(n_clusters=max(2, n_workers))
+        if len(clusters) < n_workers:
+            # `clusters()` buckets by keyword hash and drops the empty buckets, so
+            # asking for n_workers of them can return fewer -- and `select_batch`
+            # then cycles, handing two workers the same cluster. They roll out the
+            # same tasks and propose diffs that content-address to duplicates.
+            warnings.warn(
+                f"{n_workers} workers but only {len(clusters)} non-empty task "
+                f"clusters, so {n_workers - len(clusters)} worker(s) will duplicate "
+                "another's cluster each round and add no new evidence. Use more "
+                "keywords or fewer workers.", RuntimeWarning, stacklevel=2)
         self.task_scheduler = TaskScheduler(
             [TaskCluster(id=f"c{i}", tasks=c) for i, c in enumerate(clusters)]
         )

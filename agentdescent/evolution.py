@@ -43,7 +43,7 @@ from .aggregator import (
     check_reports,
 )
 from .evolvable import Contract, ContractError, Diff, EvidenceCard
-from .governance import assert_mutable
+from .governance import FROZEN_IDS, GovernanceError, assert_mutable
 from .ledger import Ledger, LedgerFailure
 from .sampling import RoundRobin, TaskSampler
 from .scheduler import AuditScheduler
@@ -840,6 +840,22 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     if not re.fullmatch(r"[A-Za-z0-9_.\-]+", artifact_id):
         raise ValueError("artifact_id must match [A-Za-z0-9_.-]+ (it becomes a filename), "
                          f"got {artifact_id!r}")
+    # A handful of names are reserved for the frozen layer, and they are ordinary
+    # words -- "oracle" is a plausible name for an evolving judge prompt. Say so
+    # here, where the other artifact_id rules live, rather than letting it surface
+    # as a GovernanceError on the first round that names governance and not the
+    # actual cause, which is the *name*.
+    if artifact_id in FROZEN_IDS:
+        # GovernanceError, not ValueError: refusing to mutate L0 is the safety
+        # claim, and callers are told to catch that type. What changes is the
+        # *message* -- it now names the cause, which is the name -- and the timing,
+        # since this is checked beside the other artifact_id rules rather than
+        # surfacing on the first round.
+        raise GovernanceError(
+            f"artifact_id={artifact_id!r} is reserved for the L0 frozen layer "
+            f"({', '.join(sorted(FROZEN_IDS))}), which the evolution loop may only "
+            "read -- these are ordinary words, so this is most likely just a name "
+            "collision. Rename the artifact.")
     # Governance is a caller-level constraint, so check it before any rollout.
     # Previously only the reference aggregator's per-merge guard caught an L0
     # target: nothing was mutated, but the async path burned its whole budget

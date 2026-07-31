@@ -25,7 +25,7 @@ resistant to the three long tails.
 
 ```mermaid
 flowchart TD
-    TS["TaskScheduler (UCB)<br/>leases task-cluster × artifact"] -->|lease| W1[Worker 1]
+    TS["TaskScheduler (UCB)<br/>leases task clusters"] -->|lease| W1[Worker 1]
     TS -->|lease| W2[Worker 2]
     TS -->|lease| WN[Worker N]
     W1 -->|diff + evidence + base_version| EB
@@ -54,7 +54,7 @@ The same flow, with the design-doc section numbers annotated:
 ```
                 ┌──────────────────────────────────────────────┐
                 │            TaskScheduler (UCB)                │  §5.2
-                │   leases (task-cluster × artifact) to workers │
+                │   leases task clusters to workers              │
                 └───────────────┬──────────────────────────────┘
                      lease tasks │
         ┌─────────────┬──────────┴────────┬─────────────┐
@@ -108,8 +108,8 @@ the Aggregator calls at steps 1–3 and 5 (cheap) and at step 4 (oracle, budgete
 | **Aggregator** | [`aggregator.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/aggregator.py) | The optimizer. Buckets evidence by artifact and runs the 7-step merge pipeline. Owns the per-artifact Beta posteriors. |
 | **StalenessPolicy** | [`staleness.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/staleness.py) | Full / Guarded / Reflective. Decides `ACCEPT/REBASE/DISCARD` for a stale diff. Swappable without touching the pipeline. |
 | **Verifier** | [`verifier.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/verifier.py) | rule (cheap subset), learned (noisy + uncertainty), oracle (ground truth, budgeted). The cheap subset is **fixed for the run**, so candidates ranked against each other are always scored on the same tasks; `evolve(cheap_eval_tasks=)` sizes it. |
-| **Schedulers** | [`scheduler.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/scheduler.py) | `TaskScheduler` (UCB task leasing), `AuditScheduler` (oracle-budget allocation + trust), `ResumeQueue` (straggler records; nothing resumes them — see §4). |
-| **Governance** | [`governance.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/governance.py) | Sorts artifacts into L0/L1/L2 by blast radius; L0 is read-only to the loop; L1 serial gate. |
+| **Schedulers** | [`scheduler.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/scheduler.py) | `TaskScheduler` (UCB over task **clusters** — the design's `× artifact` axis is not implemented), `AuditScheduler` (oracle-budget allocation + trust; its priority queue has no consumer), `ResumeQueue` (straggler records; nothing resumes them — see §4). |
+| **Governance** | [`governance.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/governance.py) | `classify` is the single definition of the L1/L2 boundary (`FAST_MAX = 0.30`), used by the aggregator's staleness tolerance and the audit gate rather than re-derived. L0 is reached by name, not radius, and is read-only to the loop. `L1SerialGate` is a primitive for concurrent merging, not in the path — the shipped runtimes merge on one thread. |
 | **Worker** | [`worker.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/worker.py) | rollout + propose. Emits evidence cards; never mutates the Ledger directly. |
 | **Sync runtime** | [`orchestrator.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/orchestrator.py) | `AgentDescent`: round-barrier DP loop + fork baseline. |
 | **Async runtime** | [`async_runtime.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/async_runtime.py) | `AsyncAgentDescent`: barrier-free thread pipeline + `async_ratio` + backpressure. |
@@ -150,7 +150,8 @@ A round barrier:
 
 ```
 for round in range(R):
-    leases = scheduler.select_batch(n_workers)   # distinct clusters
+    leases = scheduler.select_batch(n_workers)   # UCB-ordered, cycling if
+                                                 # there are fewer clusters
     for worker, cluster in zip(workers, leases):
         card = worker.run(snapshot, base_version, cluster.tasks)
         aggregator.ingest(card)

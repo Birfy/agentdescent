@@ -212,11 +212,16 @@ mechanism:
 - **L-task (data layer)** — Zipfian artifact triggering (head skills flooded,
   tail skills starved — a problem parameter space doesn't have, since gradients
   flow to all parameters but diffs only to triggered artifacts). Handled by
-  **UCB over (task-cluster × artifact)** and a difficulty filter (GRPO
-  zero-advantage groups) — both implemented, the latter also reachable from
+  **UCB over task clusters** and a difficulty filter (GRPO zero-advantage
+  groups) — both implemented, the latter also reachable from
   `evolve()` as [`DifficultyWeighted`](evolution.md#task-selection-which-rollout-to-spend)
-  task sampling. The design also calls for a **tail canary set** inside held-out
-  eval; that is **not implemented** — held-out is one undifferentiated split.
+  task sampling. The design's cross-product **(task-cluster × artifact)** is
+  **not implemented**: `TaskCluster` has no artifact dimension, and both reference
+  runtimes register exactly one artifact, as does `evolve()` — so the second axis
+  has nowhere to live yet, and the mechanism operates on clusters while the
+  problem statement is about artifacts. The design also calls for a **tail canary
+  set** inside held-out eval; that is **not implemented** — held-out is one
+  undifferentiated split.
 - **L-value (signal layer)** — most diffs are marginal, a few are high-value
   refactors. The **AuditScheduler** spends the scarce oracle budget by
   `blast_radius × uncertainty / trust`, where *trust* is how often the cheap layer
@@ -251,12 +256,27 @@ system):
 - **L2** is naturally isolated — only tasks that trigger an artifact are affected
   — so it merges fully async.
 - **L1** has no such isolation, so *at most one L1 diff is in evaluation at a
-  time* (the serial gate — implemented). The design's staged rollout beyond that
-  (offline counterfactual replay → canary → full) is **not implemented**.
+  time*. That holds today **by construction, not by the gate**: every merge
+  decision runs on one thread — the round barrier in `evolve()`, the single merger
+  in `async_evolve` and `AsyncAgentDescent` — so at most one diff of any layer is
+  ever in evaluation. `L1SerialGate` is the primitive that would enforce it once
+  merges run concurrently (a process or host pool); it is tested in isolation and
+  is not in the path. The design's staged rollout beyond that (offline
+  counterfactual replay → canary → full) is **not implemented**.
+- The L1/L2 boundary is `FAST_MAX = 0.30`, and `governance.classify` is the only
+  place it is defined. It used to be re-derived twice more from raw floats — the
+  aggregator's staleness tolerance at `> 0.5` and the audit gate at `>= 0.5` — so
+  an artifact at 0.4 was L1 by governance and treated as L2 by both mechanisms
+  that decide what being L1 *means*.
 - **L0** must be frozen: without it, the self-referential loop eventually
   pollutes itself (a verifier that learns to pass itself is undetectable).
   AgentDescent minimizes the frozen set to "audit + permissions", leaving the
-  verifier's learnable part in L1 under audit.
+  verifier's learnable part in L1 under audit. Unlike L1/L2, **L0 is reached by
+  name, not by blast radius** — no measurement can tell you an artifact *is* the
+  oracle, and an estimated layer is exactly what would fail to catch it. The
+  reserved names are ordinary words (`oracle`, `audit_budget`,
+  `merge_permissions`, `safety_constraints`), so `evolve(artifact_id="oracle")` is
+  refused up front with a message saying to rename it.
 
 ---
 

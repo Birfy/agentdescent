@@ -7,6 +7,51 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **The L1/L2 boundary was defined three times, with two different numbers.**
+  `governance.classify` drew it at `FAST_MAX = 0.30`; the aggregator's staleness
+  tolerance re-derived it as `blast_radius > 0.5` and the audit gate as
+  `blast_radius >= 0.5`. An artifact at 0.4 was therefore **L1 by governance** --
+  the slow, conservative layer -- and treated as L2 by both mechanisms that decide
+  what being L1 means: it got the staleness tolerance meant for a cold L2 skill,
+  and no oracle audit at all. `evolve()`'s docstring papered over the gap by
+  recommending 0.2 and 0.6, the two values where the thresholds happen to agree.
+  Both sites now call `classify`.
+- **A reserved artifact name failed late and blamed the wrong thing.** The L0
+  frozen ids are ordinary words -- `oracle` is a plausible name for an evolving
+  judge prompt -- and `evolve(artifact_id="oracle")` surfaced a `GovernanceError`
+  on the first round that named governance rather than the cause, which is the
+  *name*. Now refused beside the other `artifact_id` rules, before any rollout,
+  with a message that says to rename it. Still a `GovernanceError`: refusing to
+  mutate L0 is the safety claim, and callers are told to catch that type.
+
+### Removed
+- `governance.SLOW_MAX`. It was defined with a comment describing a frozen-layer
+  rule, and `classify` never read it -- so 0.31 and 0.99 classified identically
+  while the comment documented behaviour that did not exist. L0 is reached by id,
+  not by radius, so one threshold is all there is.
+
+### Changed
+- **Documentation now matches the scheduler.** `TaskScheduler` was described as
+  "UCB over (task-cluster x artifact)" in four places -- both `architecture.md`
+  diagrams, `concepts.md` §5 and its own module docstring. There is no artifact
+  dimension: `TaskCluster` has no such field, and both reference runtimes register
+  exactly one artifact, as does `evolve()`. The missing axis is the one L-task is
+  *about* ("head skills flooded, tail skills starved"), so the mechanism operates
+  on clusters while the problem statement is about artifacts. Documented as
+  not-implemented, alongside the tail canary set and partial-rollout resume.
+- **`select_batch` no longer promises distinct leases.** It cycles when asked for
+  more than there are clusters, and `TaskUniverse.clusters` drops empty hash
+  buckets -- so on the default 24-keyword universe distinctness stops holding at
+  12 workers, and at 24 workers 7 of them (29%) duplicate another's cluster,
+  rolling out the same deterministic tasks for no extra evidence.
+  `AgentDescent.__init__` now warns when it has fewer clusters than workers.
+- **`L1SerialGate` is documented as a primitive, not as something in the path.**
+  "At most one L1 diff in evaluation at a time" holds today by construction --
+  every merge decision runs on one thread -- and the gate is what would enforce it
+  once merges run concurrently. `concepts.md` said "implemented", which was only
+  discoverable as untrue by grep.
+
+### Fixed
 - **`openai_compatible` returned `None` on reasoning models.** `Completion` is
   `prompt -> str`, but a model that spends its whole budget on `reasoning_content`
   answers with JSON `null` for `content` -- DeepSeek's reasoner and GLM's thinking

@@ -284,8 +284,13 @@ class Aggregator:
     def _alpha_for(self, artifact: Evolvable, card: EvidenceCard) -> int:
         if card.diff.contract_breaking:
             return 0  # contract-breaking diffs must be re-proposed, not rebased.
-        # hotter artifacts (bigger blast radius) tolerate more staleness.
-        return self.config.alpha_head if artifact.blast_radius > 0.5 else self.config.alpha_tail
+        # Hotter artifacts (bigger blast radius) tolerate more staleness. The
+        # boundary is `governance.classify`, not a second hand-written threshold:
+        # this used to test `blast_radius > 0.5` while governance drew the line at
+        # 0.30, so an artifact at 0.4 was L1 by governance and got the *cold*
+        # tolerance meant for an L2 skill.
+        return (self.config.alpha_head if classify(artifact) is Layer.L1_SLOW
+                else self.config.alpha_tail)
 
     def _staleness_filter(
         self, artifact: Evolvable, head: VersionVector, cards: List[EvidenceCard]
