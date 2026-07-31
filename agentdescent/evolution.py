@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import atexit
 import hashlib
+import os
 import re
 import shutil
 import threading
@@ -43,7 +44,7 @@ from .aggregator import (
 )
 from .evolvable import Contract, ContractError, Diff, EvidenceCard
 from .governance import assert_mutable
-from .ledger import Ledger
+from .ledger import Ledger, LedgerFailure
 from .sampling import RoundRobin, TaskSampler
 from .scheduler import AuditScheduler
 from .staleness import StalenessPolicy
@@ -504,6 +505,51 @@ class _Runtime:
 # ---------------------------------------------------------------------------
 
 
+#: Scratch ledgers are named so they can be recognised and reclaimed later.
+_SCRATCH_PREFIX = "agentdescent-evolve-"
+#: How long an orphaned scratch ledger may sit in $TMPDIR before the next run
+#: collects it. Generous, because a *live* run's directory must never be touched.
+_SCRATCH_MAX_AGE = 24 * 3600.0
+
+
+def _reap_stale_scratch_repos(max_age: float = _SCRATCH_MAX_AGE) -> int:
+    """Delete scratch ledgers left behind by processes that never exited cleanly.
+
+    ``atexit`` does not run on SIGKILL, an OOM kill or a hard container stop, so
+    every such death leaks a git repo into ``$TMPDIR``. Best-effort and silent:
+    reclaiming disk must never be able to fail a run."""
+    import tempfile
+    removed = 0
+    try:
+        root = tempfile.gettempdir()
+        cutoff = time.time() - max_age
+        for name in os.listdir(root):
+            if not name.startswith(_SCRATCH_PREFIX):
+                continue
+            path = os.path.join(root, name)
+            try:
+                if os.path.isdir(path) and os.path.getmtime(path) < cutoff:
+                    shutil.rmtree(path, ignore_errors=True)
+                    removed += 1
+            except OSError:
+                continue
+    except OSError:
+        return removed
+    return removed
+
+
+def _safe_log(ledger: Ledger, limit: int = 40) -> List[str]:
+    """``ledger.log()``, but never at the cost of the result.
+
+    ``ledger_log`` is a diagnostic -- the last few commit subjects. It used to be
+    fetched inside the ``return`` expression, so a git failure there discarded a
+    run that had already completed every round and computed its final reward."""
+    try:
+        return ledger.log(Ledger.DEV, limit=limit)
+    except LedgerFailure:
+        return []
+
+
 def _tally(reports) -> Dict[str, int]:
     """Count merge outcomes by stable category (see ``MergeReport.category``)."""
     out: Dict[str, int] = {}
@@ -534,11 +580,15 @@ class EvolutionResult:
     final_reward: float
     history: List[RoundInfo]
     ledger_log: List[str]
-    #: ``None`` on a clean run; otherwise a description of the backend failure that
-    #: either ended the run early **or** made its final measurement unusable (in
-    #: which case ``final_reward`` falls back to the last measured round, and the
-    #: message says so). The artifact evolved so far is still returned -- check this
-    #: to tell "converged" from "died".
+    #: ``None`` on a clean run; otherwise a description of the failure that either
+    #: ended the run early **or** made its final measurement unusable (in which case
+    #: ``final_reward`` falls back to the last measured round, and the message says
+    #: so). Covers both a *backend* failure (a rate limit, a dead endpoint) and a
+    #: *ledger* failure (a held ``index.lock``, a full ``$TMPDIR``) -- neither is
+    #: allowed to escape as an exception. A caller-contract violation is the one
+    #: thing that still raises, because the run is meaningless either way. The
+    #: artifact evolved so far is still returned -- check this to tell "converged"
+    #: from "died".
     error: Optional[str] = None
     #: Workers that gave up after repeated backend failures (async path only). A
     #: run can finish *cleanly* at a fraction of its requested concurrency, so
@@ -623,6 +673,16 @@ class _Engine:
     train_ids: List[str]
     artifact_id: str
     blast_radius: float
+    #: Set only when the ledger lives in a throwaway directory this call created;
+    #: ``None`` when the caller passed ``repo_path`` (theirs to keep, and how a run
+    #: is resumed).
+    scratch_repo: Optional[str] = None
+
+    def cleanup(self) -> None:
+        """Remove the scratch ledger, if this call created one. Idempotent."""
+        if self.scratch_repo:
+            shutil.rmtree(self.scratch_repo, ignore_errors=True)
+            self.scratch_repo = None
 
 
 def _check_callable(fn: Callable, n_args: int, sig_hint: str) -> None:
@@ -703,12 +763,20 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
         return EvolvingArtifact(aid, state.get("state", {}), version,
                                 state.get("blast_radius", blast_radius), runtime, strategy)
 
+    scratch: Optional[str] = None
     if repo_path:
         repo = repo_path              # caller-owned (and how a run is resumed): keep it
     else:
         # A scratch ledger per run would otherwise pile up in $TMPDIR forever --
-        # one git repo per evolve() call, never reclaimed.
-        repo = tempfile.mkdtemp(prefix="agentdescent-evolve-")
+        # one git repo per evolve() call, never reclaimed. atexit alone was not
+        # enough: it does not run on SIGKILL/OOM, and inside a notebook or a
+        # parameter sweep it fires only when the *interpreter* exits, so every run
+        # in the process held a live git repo. The driver now removes its own
+        # scratch repo on the way out; atexit stays as the belt-and-braces path for
+        # an exception escaping the driver, and the reaper collects what earlier
+        # killed processes left behind.
+        _reap_stale_scratch_repos()
+        repo = scratch = tempfile.mkdtemp(prefix=_SCRATCH_PREFIX)
         atexit.register(shutil.rmtree, repo, True)
     ledger = Ledger(repo, serialize, deserialize)
     # `register` is a no-op when the artifact already exists, which is what makes
@@ -750,7 +818,7 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
 
     return _Engine(ledger, runtime, verifier, aggregator, strategy, run, reward,
                    propose, train, held_out, {t.id: t for t in train},
-                   [t.id for t in train], artifact_id, blast_radius)
+                   [t.id for t in train], artifact_id, blast_radius, scratch)
 
 
 def evolve(
@@ -891,8 +959,13 @@ def evolve(
     held_out_frac:
         Fraction of ``tasks`` reserved for held-out scoring, in ``(0, 1)``.
     repo_path:
-        Where the git-backed ledger lives. Omit for a scratch repo that is
-        cleaned up at exit; **passing the same path again resumes** that ledger.
+        Where the git-backed ledger lives. Omit for a throwaway repo that is
+        removed when this call returns (not held until interpreter exit, so a
+        sweep does not accumulate one git repo per run); **passing the same path
+        again resumes** that ledger, and a caller-supplied path is never deleted.
+        Git runs with an isolated config, so a personal ``~/.gitconfig``
+        (``commit.gpgsign``, ``core.hooksPath``) cannot fail the ledger's own
+        bookkeeping commits.
     agg_config:
         Tuning for the reference aggregator (batching, acceptance risk, trust
         region, staleness tolerance).
@@ -984,6 +1057,9 @@ def evolve(
 
     history: List[RoundInfo] = []
     run_error: Optional[str] = None
+    #: The most recent artifact successfully read from the ledger. If the final
+    #: read fails there is still a real result to hand back instead of an exception.
+    last_good: Optional[EvolvingArtifact] = None
     straggler_rounds = 0
     best_reward = float('-inf')
     stalled = 0
@@ -998,7 +1074,25 @@ def evolve(
             if verbose:
                 print(f"round {r:>3}  stopping: max_seconds={max_seconds} reached")
             break
-        snap = ledger.snapshot(Ledger.DEV)
+        try:
+            snap = ledger.snapshot(Ledger.DEV)
+        except LedgerFailure as e:
+            # The ledger is infrastructure, not a backend and not a caller bug, so
+            # it fits neither existing category -- and letting it propagate broke
+            # the one guarantee the result contract makes ("a run that died still
+            # returns a partial result"). Treat it like an unmeasurable round: the
+            # same tally decides whether to keep going or give up.
+            if first_error[0] is None:
+                first_error[0] = f"ledger read failed: {type(e).__name__}: {str(e)[:200]}"
+            dead_rounds += 1
+            if dead_rounds >= max_worker_errors:
+                run_error = first_error[0]
+                if verbose:
+                    print(f"round {r:>3}  giving up: {run_error}")
+                break
+            if verbose:
+                print(f"round {r:>3}  ledger unreadable, skipping: {str(e)[:100]}")
+            continue
         artifact = snap.get(artifact_id)
         base_v = snap.version.get(artifact_id, 0)
         assert_mutable(artifact)
@@ -1149,7 +1243,17 @@ def evolve(
             break
         committed = sum(1 for x in reports if x.committed_version is not None)
         rejected = sum(1 for x in reports if x.committed_version is None)
-        dev = ledger.snapshot(Ledger.DEV).get(artifact_id)
+        try:
+            dev = ledger.snapshot(Ledger.DEV).get(artifact_id)
+        except LedgerFailure as e:      # as at the round head: skip, do not raise
+            if first_error[0] is None:
+                first_error[0] = f"ledger read failed: {type(e).__name__}: {str(e)[:200]}"
+            dead_rounds += 1
+            if dead_rounds >= max_worker_errors:
+                run_error = first_error[0]
+                break
+            continue
+        last_good = dev
         # Scoring held-out runs the agent, so it is a backend call like any other and
         # must not raise out of the driver -- that would discard everything already
         # committed. Treat an unmeasurable round like a failed one: keep the last
@@ -1218,7 +1322,20 @@ def evolve(
                 warnings.warn(f"on_round callback raised: {type(e).__name__}: {e}",
                               RuntimeWarning, stacklevel=2)
 
-    final = ledger.snapshot(Ledger.DEV).get(artifact_id)
+    try:
+        final = ledger.snapshot(Ledger.DEV).get(artifact_id)
+    except LedgerFailure as e:
+        # Fall back to the last artifact we did read. Raising here would throw away
+        # a run that has already finished all its rounds, which is exactly what the
+        # result contract promises not to do.
+        final = last_good
+        run_error = run_error or (
+            f"the final ledger read failed, so the returned artifact is the last "
+            f"one successfully read: {type(e).__name__}: {str(e)[:160]}")
+    if final is None:                 # nothing was ever read: hand back the seed
+        final = EvolvingArtifact(artifact_id, dict(initial_state or strategy.initial()),
+                                 blast_radius=blast_radius, runtime=eng.runtime,
+                                 strategy=strategy)
     # Scoring runs the agent, so a dead backend must not raise out of the driver
     # and discard everything already committed.
     try:
@@ -1233,6 +1350,10 @@ def evolve(
         # result is otherwise indistinguishable from a converged one.
         warnings.warn(f"evolve() stopped early after {len(history)} round(s): "
                       f"{run_error}", RuntimeWarning, stacklevel=2)
-    return EvolutionResult(state=dict(final.state), rendered=final.render(),
-                           final_reward=final_reward, history=history,
-                           ledger_log=ledger.log(Ledger.DEV, limit=40), error=run_error)
+    # Read the log before reclaiming the repo, then hand the scratch directory
+    # back rather than holding it for the lifetime of the interpreter.
+    result = EvolutionResult(state=dict(final.state), rendered=final.render(),
+                             final_reward=final_reward, history=history,
+                             ledger_log=_safe_log(ledger), error=run_error)
+    eng.cleanup()
+    return result

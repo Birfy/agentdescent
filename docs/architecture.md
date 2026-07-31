@@ -98,7 +98,7 @@ the Aggregator calls at steps 1–4 (cheap) and step 7 (oracle, budgeted).
 | Component | Module | Responsibility |
 |---|---|---|
 | **Evolvable** | [`evolvable.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/evolvable.py) | The interface every unit of evolution implements (`diff`/`apply`/`cheap_eval`/`full_eval`). Also `Diff`, `EvidenceCard`, version-vector math. |
-| **Ledger** | [`ledger.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/ledger.py) | Git-backed store. Per-artifact integer versions form the version vector. CAS commits and `dev`/`stable` branches; `commit_atomic` (2PC across artifacts) is provided and tested but not used by any engine path today. |
+| **Ledger** | [`ledger.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/ledger.py) | Git-backed store. Per-artifact integer versions form the version vector. CAS commits and `dev`/`stable` branches; `commit_atomic` (2PC across artifacts) is provided and tested but not used by any engine path today. Runs git with an isolated config (no system/user `gitconfig`, no hooks, no signing) so a personal git preference cannot decide whether the ledger can write. |
 | **Aggregator** | [`aggregator.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/aggregator.py) | The optimizer. Buckets evidence by artifact and runs the 7-step merge pipeline. Owns the per-artifact Beta posteriors. |
 | **StalenessPolicy** | [`staleness.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/staleness.py) | Full / Guarded / Reflective. Decides `ACCEPT/REBASE/DISCARD` for a stale diff. Swappable without touching the pipeline. |
 | **Verifier** | [`verifier.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/verifier.py) | rule (cheap subset), learned (noisy + uncertainty), oracle (ground truth, budgeted). |
@@ -188,6 +188,11 @@ explicitly:
   calls don't race.
 - **Verifier / posteriors** — touched only by the single aggregator thread, so
   they need no locking.
+
+A ledger failure is its own category, distinct from a caller bug (`ContractError`,
+propagated) and a backend blip (absorbed and retried): it is infrastructure, it
+ends the run, and the drivers still return the artifact evolved so far rather than
+raising. See the failure-category table in [evolution.md](evolution.md).
 
 The GIL means threads don't give true CPU parallelism, but the **pipeline
 overlap** and every concurrency-control mechanism (CAS, version vectors,

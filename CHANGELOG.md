@@ -7,6 +7,38 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **A personal `~/.gitconfig` could stop `evolve()` before it ran a single task.**
+  The ledger shelled out to plain `git`, so `commit.gpgsign = true` -- a common
+  setting, and the default in several corporate onboarding scripts -- failed the
+  genesis commit and raised `GitError` out of `Ledger.__init__`, from a call whose
+  signature mentions git nowhere. A global `core.hooksPath` ran the user's
+  `pre-commit` hook against a temp directory it knew nothing about. These are the
+  ledger's own bookkeeping commits in a scratch repo the caller never sees, so git
+  now runs with an isolated config (`GIT_CONFIG_NOSYSTEM`, signing and hooks off)
+  plus `GIT_TERMINAL_PROMPT=0` and a timeout, so a credential prompt or a stalled
+  filesystem surfaces as an error instead of wedging every worker behind the
+  ledger lock. A missing `git` binary now says so by name instead of raising a
+  bare `OSError`.
+- **A ledger failure mid-run escaped as an exception, discarding the artifact.**
+  `EvolutionResult` documents that "a run that died still returns a (partial)
+  result rather than raising", and every rollout, reward and merge call site was
+  wrapped -- but the ledger's five call sites were not. The worst case: `ledger.log()`
+  was fetched *inside the `return` expression*, purely to fill the cosmetic
+  `ledger_log`, so a git failure there threw away a run that had already completed
+  every round and computed its final reward. A ledger failure is now its own
+  category alongside a caller-contract violation (raises) and a backend blip
+  (absorbed): it ends the run, names itself in `error`, and still hands back what
+  was learned. `ledger_log` degrades to `[]`.
+- **Scratch ledgers were reclaimed only at interpreter exit.** `atexit` does not
+  run on SIGKILL or an OOM kill, so each such death leaked a git repo into
+  `$TMPDIR` -- 115 directories totalling 19 MB accumulated on one machine in a
+  single day. Worse, inside a notebook or a parameter sweep `atexit` fires only
+  when the *process* ends, so every run in the process held a live repo. `evolve()`
+  and `async_evolve()` now remove their own scratch ledger on the way out (a
+  caller-supplied `repo_path` is never touched -- it is how a run is resumed), and
+  each run first collects orphans older than a day.
+
+### Fixed
 - **The merge gate was serial, and it dominated the run.** `EvolvingArtifact.score`
   summed a generator, so every held-out evaluation ran its tasks one at a time --
   and the aggregator calls it once per candidate, so a round paid N x held-out
