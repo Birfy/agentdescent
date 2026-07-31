@@ -1295,6 +1295,21 @@ completion into whatever task interface they need.</p>
 </code></pre></div>
 <p><code>claude()</code> accepts a <code>client=</code> to reuse an existing <code>anthropic.Anthropic</code>
 instance, and forwards extra kwargs to <code>messages.create</code>.</p>
+<div class="admonition warning">
+<p class="admonition-title"><code>content: null</code> is not the same as <code>""</code></p>
+<p>On OpenAI-compatible endpoints a reasoning model that spends its whole budget
+on <code>reasoning_content</code> answers with JSON <code>null</code>, not an empty string.
+<code>openai_compatible</code> normalises that to <code>""</code>, because returning <code>None</code> breaks
+the one contract in the package (<code>Completion</code> is <code>prompt -&gt; str</code>) and used to
+surface as <code>'NoneType' object has no attribute 'strip'</code> from inside
+<code>LLMAgent</code> — which the engine then <strong>retried as a backend transient</strong>,
+diagnosing a systematic model/parameter mismatch as a flaky endpoint. With the
+empty string the warning above fires instead and names the real cause.</p>
+<p>HTTP errors carry the provider's own message too (<code>rate limit: retry in 12s</code>,
+<code>context length exceeded</code>), rather than collapsing to <code>HTTP Error 429</code>. Extra
+keyword arguments — <code>temperature=0</code> and any provider-specific field — go
+straight into the request body, matching <code>claude()</code>.</p>
+</div>
 <div class="admonition tip">
 <p class="admonition-title">Give a reasoning model room</p>
 <p>A reasoning model spends its budget on internal reasoning <em>before</em> emitting

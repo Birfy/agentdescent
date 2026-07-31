@@ -2106,6 +2106,24 @@ to a rate limit or a dropped connection:</p>
 <li><code>initial_state=</code> is ignored when the artifact already exists (a <code>RuntimeWarning</code>
   says so). Use a fresh <code>repo_path</code> to start over.</li>
 </ul>
+<div class="admonition note">
+<p class="admonition-title">The train/held-out split is positional</p>
+<p>The last <code>held_out_frac</code> of <code>tasks</code> is held out, <strong>in the order given</strong> — no
+shuffle. That keeps <code>Dataset.val_frac</code>'s promise (the engine's held-out split
+is exactly that <code>Dataset</code>'s <code>val</code>, which only holds because <code>trainval</code> is
+train + val in that order) and keeps a seeded run reproducible.</p>
+<p>It is the wrong default for <strong>grouped</strong> data — anything ordered by category,
+source, difficulty or date, which is most benchmarks loaded raw through
+<code>hf_rows</code>. On a 20-task set whose first 12 are class <code>a</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>shuffle=False   held-out classes: [&#39;b&#39;]        a/b: 0/8
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>shuffle=True    held-out classes: [&#39;a&#39;, &#39;b&#39;]   a/b: 5/3
+</code></pre></div>
+<p>Every gate in the run — the acceptance test, <code>target_reward</code>, <code>patience</code>,
+<code>final_reward</code> — is measured on that set, so pass <code>shuffle=True, seed=...</code>
+(or pre-split with <code>dataloader.split_dataset</code>, which shuffles and can
+stratify). A held-out set of fewer than 4 tasks now warns: at 1 item
+<code>final_reward</code> is 0.0 or 1.0 and nothing in between.</p>
+</div>
 <p>Omit <code>repo_path</code> and the ledger is a throwaway directory, removed when <code>evolve()</code>
 returns — not held until the interpreter exits, so a notebook or a parameter sweep
 does not accumulate one git repo per run. A process killed outright (SIGKILL, OOM)
@@ -2124,12 +2142,26 @@ limit, credit exhaustion) — progress isn't lost.</p>
 <code>EvolutionResult</code>. <code>error</code> is what distinguishes them — it is <code>None</code> only on a
 clean run. Treating a failed run as a converged one is the easiest way to
 misread an experiment:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="k">if</span> <span class="n">result</span><span class="o">.</span><span class="n">error</span><span class="p">:</span>
-<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;incomplete: </span><span class="si">{</span><span class="n">result</span><span class="o">.</span><span class="n">error</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>   <span class="c1"># partial artifact still usable</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="k">if</span> <span class="n">result</span><span class="o">.</span><span class="n">error</span><span class="p">:</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;incomplete: </span><span class="si">{</span><span class="n">result</span><span class="o">.</span><span class="n">error</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>   <span class="c1"># partial artifact still usable</span>
 </code></pre></div>
 <p><code>error</code> means <em>the run ended because of this failure</em> — a transient error the
 workers retried past leaves it <code>None</code>. A <code>RuntimeWarning</code> is also emitted, so
 a failed run is never completely silent even at the default <code>verbose=False</code>.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title"><code>error</code> cannot tell convergence from a spent budget — <code>stop_reason</code> can</p>
+<p>A run that reached <code>target_reward</code> and a run that ran out of budget both come
+back with <code>error=None</code> and a populated <code>history</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="n">result</span><span class="o">.</span><span class="n">stop_reason</span>   <span class="c1"># &quot;target_reward&quot; | &quot;patience&quot; | &quot;rounds&quot;</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>                     <span class="c1"># | &quot;max_seconds&quot; | &quot;max_iters&quot; | &quot;error&quot;</span>
+</code></pre></div>
+<p>This matters most under <code>asynchronous=True</code>, where <strong><code>max_seconds=None</code> means
+20 seconds</strong>, not "unbounded" as it does on the synchronous path — flipping one
+boolean could truncate a run and the result looked converged. Both that and
+<code>rounds</code> changing meaning (it becomes a <code>rounds × n_workers</code> rollout budget,
+and <code>RoundInfo.round</code> becomes a merger-sweep index) now emit a
+<code>RuntimeWarning</code>.</p>
 </div>
 <div class="admonition note">
 <p class="admonition-title">Three failure categories, not two</p>
@@ -2236,18 +2268,18 @@ before reading a fast run as a healthy one.</p>
 <h2 id="putting-it-all-together">Putting it all together<a class="headerlink" href="#putting-it-all-together" title="Permanent link">&para;</a></h2>
 <p>The one complete, runnable example threads every block above on a real dataset
 with a real LLM:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.agents</span><span class="w"> </span><span class="kn">import</span> <span class="n">claude</span>
-<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.evolution</span><span class="w"> </span><span class="kn">import</span> <span class="n">evolve</span><span class="p">,</span> <span class="n">LLMAgent</span><span class="p">,</span> <span class="n">AppendRules</span>
-<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.parallel</span><span class="w"> </span><span class="kn">import</span> <span class="n">DataParallel</span>
-<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a>
-<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="n">result</span> <span class="o">=</span> <span class="n">evolve</span><span class="p">(</span>
-<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a>    <span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span>
-<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a>    <span class="n">agent</span><span class="o">=</span><span class="n">LLMAgent</span><span class="p">(</span><span class="n">claude</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">&quot;claude-haiku-4-5&quot;</span><span class="p">)),</span>   <span class="c1"># 1. actor       (agents)</span>
-<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a>    <span class="n">strategy</span><span class="o">=</span><span class="n">AppendRules</span><span class="p">(),</span>                              <span class="c1"># 2. rule        (strategy)</span>
-<a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a>    <span class="n">parallel</span><span class="o">=</span><span class="n">DataParallel</span><span class="p">(),</span>                             <span class="c1"># 3. parallelism (parallel)</span>
-<a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a>    <span class="n">blast_radius</span><span class="o">=</span><span class="mf">0.2</span><span class="p">,</span>                                    <span class="c1"># 4. governance  (L2)</span>
-<a id="__codelineno-20-11" name="__codelineno-20-11" href="#__codelineno-20-11"></a>    <span class="n">rounds</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span> <span class="n">n_workers</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span>
-<a id="__codelineno-20-12" name="__codelineno-20-12" href="#__codelineno-20-12"></a><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.agents</span><span class="w"> </span><span class="kn">import</span> <span class="n">claude</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.evolution</span><span class="w"> </span><span class="kn">import</span> <span class="n">evolve</span><span class="p">,</span> <span class="n">LLMAgent</span><span class="p">,</span> <span class="n">AppendRules</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.parallel</span><span class="w"> </span><span class="kn">import</span> <span class="n">DataParallel</span>
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a>
+<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="n">result</span> <span class="o">=</span> <span class="n">evolve</span><span class="p">(</span>
+<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a>    <span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span>
+<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a>    <span class="n">agent</span><span class="o">=</span><span class="n">LLMAgent</span><span class="p">(</span><span class="n">claude</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">&quot;claude-haiku-4-5&quot;</span><span class="p">)),</span>   <span class="c1"># 1. actor       (agents)</span>
+<a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a>    <span class="n">strategy</span><span class="o">=</span><span class="n">AppendRules</span><span class="p">(),</span>                              <span class="c1"># 2. rule        (strategy)</span>
+<a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a>    <span class="n">parallel</span><span class="o">=</span><span class="n">DataParallel</span><span class="p">(),</span>                             <span class="c1"># 3. parallelism (parallel)</span>
+<a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a>    <span class="n">blast_radius</span><span class="o">=</span><span class="mf">0.2</span><span class="p">,</span>                                    <span class="c1"># 4. governance  (L2)</span>
+<a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a>    <span class="n">rounds</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span> <span class="n">n_workers</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span>
+<a id="__codelineno-22-12" name="__codelineno-22-12" href="#__codelineno-22-12"></a><span class="p">)</span>
 </code></pre></div>
 <p>Walkthrough with a real result (<code>0.750 → 0.792</code>): the
 <a href="../skill-evolution/">skill-evolution example</a>.</p>
@@ -2266,16 +2298,16 @@ so it shows up at two levels:</p>
   strategies/aggregators guard the shared state they mutate from <code>propose</code>/
   <code>to_diff</code> with a lock.</li>
 </ul>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">,</span> <span class="n">n_workers</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">max_concurrency</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>   <span class="c1"># 4 workers overlap</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">,</span> <span class="n">n_workers</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">max_concurrency</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>   <span class="c1"># 4 workers overlap</span>
 </code></pre></div>
 <div class="admonition tip">
 <p class="admonition-title">Stop paying once it has converged — <code>target_reward</code> / <code>patience</code></p>
 <p>A run spends all <code>rounds</code> by default, including after the artifact stops
 changing. On a workload that converges in two rounds, 20 rounds cost 141 model
 calls for a result reached at 69 — <strong>51% of the budget bought nothing</strong>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">,</span> <span class="n">rounds</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span>
-<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>       <span class="n">target_reward</span><span class="o">=</span><span class="mf">0.95</span><span class="p">,</span>   <span class="c1"># stop as soon as held-out reaches this</span>
-<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>       <span class="n">patience</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>           <span class="c1"># ...or after 5 rounds with no improvement</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">,</span> <span class="n">rounds</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>       <span class="n">target_reward</span><span class="o">=</span><span class="mf">0.95</span><span class="p">,</span>   <span class="c1"># stop as soon as held-out reaches this</span>
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a>       <span class="n">patience</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>           <span class="c1"># ...or after 5 rounds with no improvement</span>
 </code></pre></div>
 <p>Both work under <code>asynchronous=True</code> too. There are no round barriers there, so
 <code>patience</code> counts <strong>merge sweeps</strong> (one drain-and-merge by the merger) rather
@@ -2295,8 +2327,8 @@ wedged for 600 s still lets the process exit in <strong>4.5 s</strong>.</p>
 <p class="admonition-title">Bound the barrier — <code>round_timeout</code></p>
 <p>Because the aggregator <em>is</em> the barrier, a round waits for its slowest worker
 for as long as that takes: one hung rollout stalls the run indefinitely. Cap it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">,</span> <span class="n">n_workers</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">max_concurrency</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span>
-<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>       <span class="n">round_timeout</span><span class="o">=</span><span class="mi">300</span><span class="p">)</span>          <span class="c1"># give up on stragglers after 5 min</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">,</span> <span class="n">n_workers</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">max_concurrency</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span>
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a>       <span class="n">round_timeout</span><span class="o">=</span><span class="mi">300</span><span class="p">)</span>          <span class="c1"># give up on stragglers after 5 min</span>
 </code></pre></div>
 <p>Abandoned work keeps running in the background — Python cannot cancel a
 thread — it is simply no longer waited for, and a genuine backend error still
@@ -2311,7 +2343,7 @@ need a rollout contract exposing its turns (see
   reachable as <code>evolve(asynchronous=True, async_ratio=…)</code>. It takes the <strong>same</strong>
   plug-ins, so every example runs async with a <code>--async</code> flag.</li>
 </ul>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">,</span> <span class="n">asynchronous</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">async_ratio</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">max_seconds</span><span class="o">=</span><span class="mi">30</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">,</span> <span class="n">asynchronous</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">async_ratio</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">max_seconds</span><span class="o">=</span><span class="mi">30</span><span class="p">)</span>
 </code></pre></div>
 <h2 id="the-barrier-free-runtime-async_evolve">The barrier-free runtime: <code>async_evolve()</code><a class="headerlink" href="#the-barrier-free-runtime-async_evolve" title="Permanent link">&para;</a></h2>
 <p><code>evolve()</code>'s round barrier means the aggregator waits for all workers each round.
@@ -2339,36 +2371,36 @@ GEPA, EvoSkill, SkillOpt, ADAS, DGM) also runs async:</p>
   whose repo evaluates the child on the validation set and never re-runs the
   sampled task — pass <code>self_verify=False</code> to skip that extra rollout.</li>
 </ul>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent</span><span class="w"> </span><span class="kn">import</span> <span class="n">async_evolve</span>
-<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="n">result</span> <span class="o">=</span> <span class="n">async_evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">,</span>
-<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a>                      <span class="n">n_workers</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">async_ratio</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">max_seconds</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span>   <span class="c1"># or max_iters / target_reward</span>
-<a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a>                      <span class="n">staleness_policy</span><span class="o">=</span><span class="n">get_policy</span><span class="p">(</span><span class="s2">&quot;reflective&quot;</span><span class="p">))</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent</span><span class="w"> </span><span class="kn">import</span> <span class="n">async_evolve</span>
+<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="n">result</span> <span class="o">=</span> <span class="n">async_evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">,</span>
+<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a>                      <span class="n">n_workers</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">async_ratio</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">max_seconds</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span>   <span class="c1"># or max_iters / target_reward</span>
+<a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a>                      <span class="n">staleness_policy</span><span class="o">=</span><span class="n">get_policy</span><span class="p">(</span><span class="s2">&quot;reflective&quot;</span><span class="p">))</span>
 </code></pre></div>
 <p>Reach it via <code>evolve(asynchronous=True)</code> or directly. Small <code>async_ratio</code> →
 near-synchronous, few stale diffs; large → highly asynchronous, many stale diffs
 the policy must rebase or discard.</p>
 <h3 id="more-async-parallel-recipes">More async / parallel recipes<a class="headerlink" href="#more-async-parallel-recipes" title="Permanent link">&para;</a></h3>
 <p>The two levers compose; pick per workload:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="c1"># 1. Synchronous data-parallel: a round&#39;s workers overlap, aggregator is the barrier.</span>
-<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">,</span> <span class="n">n_workers</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">max_concurrency</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">rounds</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
-<a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a>
-<a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a><span class="c1"># 2. Barrier-free async, time-bounded: run for 20 min, keep the best head so far.</span>
-<a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a><span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">,</span> <span class="n">asynchronous</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">async_ratio</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">max_seconds</span><span class="o">=</span><span class="mi">1200</span><span class="p">)</span>
-<a id="__codelineno-26-6" name="__codelineno-26-6" href="#__codelineno-26-6"></a>
-<a id="__codelineno-26-7" name="__codelineno-26-7" href="#__codelineno-26-7"></a><span class="c1"># 3. Async to a target: stop as soon as held-out reward crosses a bar.</span>
-<a id="__codelineno-26-8" name="__codelineno-26-8" href="#__codelineno-26-8"></a><span class="n">async_evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">,</span> <span class="n">n_workers</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span> <span class="n">target_reward</span><span class="o">=</span><span class="mf">0.85</span><span class="p">)</span>
-<a id="__codelineno-26-9" name="__codelineno-26-9" href="#__codelineno-26-9"></a>
-<a id="__codelineno-26-10" name="__codelineno-26-10" href="#__codelineno-26-10"></a><span class="c1"># 4. Async, rollout-bounded: cap total worker rollouts (budget), not wall-clock.</span>
-<a id="__codelineno-26-11" name="__codelineno-26-11" href="#__codelineno-26-11"></a><span class="n">async_evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">,</span> <span class="n">n_workers</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">max_iters</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span>
-<a id="__codelineno-26-12" name="__codelineno-26-12" href="#__codelineno-26-12"></a>
-<a id="__codelineno-26-13" name="__codelineno-26-13" href="#__codelineno-26-13"></a><span class="c1"># 5. Faithful port on the async path: skip the per-trajectory re-run, score the</span>
-<a id="__codelineno-26-14" name="__codelineno-26-14" href="#__codelineno-26-14"></a><span class="c1">#    candidate on held-out only (see EvoSkill), with concurrent held-out eval.</span>
-<a id="__codelineno-26-15" name="__codelineno-26-15" href="#__codelineno-26-15"></a><span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">run</span><span class="o">=</span><span class="n">run</span><span class="p">,</span> <span class="n">propose</span><span class="o">=</span><span class="n">propose</span><span class="p">,</span> <span class="n">strategy</span><span class="o">=</span><span class="n">strat</span><span class="p">,</span>
-<a id="__codelineno-26-16" name="__codelineno-26-16" href="#__codelineno-26-16"></a>       <span class="n">aggregator_factory</span><span class="o">=</span><span class="n">factory</span><span class="p">,</span> <span class="n">asynchronous</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">self_verify</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
-<a id="__codelineno-26-17" name="__codelineno-26-17" href="#__codelineno-26-17"></a>
-<a id="__codelineno-26-18" name="__codelineno-26-18" href="#__codelineno-26-18"></a><span class="c1"># 6. Highly-async, staleness-heavy: large lag budget + reflective rebase-and-verify.</span>
-<a id="__codelineno-26-19" name="__codelineno-26-19" href="#__codelineno-26-19"></a><span class="n">async_evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">,</span> <span class="n">n_workers</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">async_ratio</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span>
-<a id="__codelineno-26-20" name="__codelineno-26-20" href="#__codelineno-26-20"></a>             <span class="n">staleness_policy</span><span class="o">=</span><span class="n">get_policy</span><span class="p">(</span><span class="s2">&quot;reflective&quot;</span><span class="p">))</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="c1"># 1. Synchronous data-parallel: a round&#39;s workers overlap, aggregator is the barrier.</span>
+<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">,</span> <span class="n">n_workers</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">max_concurrency</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">rounds</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
+<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a>
+<a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a><span class="c1"># 2. Barrier-free async, time-bounded: run for 20 min, keep the best head so far.</span>
+<a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a><span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">,</span> <span class="n">asynchronous</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">async_ratio</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">max_seconds</span><span class="o">=</span><span class="mi">1200</span><span class="p">)</span>
+<a id="__codelineno-28-6" name="__codelineno-28-6" href="#__codelineno-28-6"></a>
+<a id="__codelineno-28-7" name="__codelineno-28-7" href="#__codelineno-28-7"></a><span class="c1"># 3. Async to a target: stop as soon as held-out reward crosses a bar.</span>
+<a id="__codelineno-28-8" name="__codelineno-28-8" href="#__codelineno-28-8"></a><span class="n">async_evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">,</span> <span class="n">n_workers</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span> <span class="n">target_reward</span><span class="o">=</span><span class="mf">0.85</span><span class="p">)</span>
+<a id="__codelineno-28-9" name="__codelineno-28-9" href="#__codelineno-28-9"></a>
+<a id="__codelineno-28-10" name="__codelineno-28-10" href="#__codelineno-28-10"></a><span class="c1"># 4. Async, rollout-bounded: cap total worker rollouts (budget), not wall-clock.</span>
+<a id="__codelineno-28-11" name="__codelineno-28-11" href="#__codelineno-28-11"></a><span class="n">async_evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">,</span> <span class="n">n_workers</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">max_iters</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span>
+<a id="__codelineno-28-12" name="__codelineno-28-12" href="#__codelineno-28-12"></a>
+<a id="__codelineno-28-13" name="__codelineno-28-13" href="#__codelineno-28-13"></a><span class="c1"># 5. Faithful port on the async path: skip the per-trajectory re-run, score the</span>
+<a id="__codelineno-28-14" name="__codelineno-28-14" href="#__codelineno-28-14"></a><span class="c1">#    candidate on held-out only (see EvoSkill), with concurrent held-out eval.</span>
+<a id="__codelineno-28-15" name="__codelineno-28-15" href="#__codelineno-28-15"></a><span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">run</span><span class="o">=</span><span class="n">run</span><span class="p">,</span> <span class="n">propose</span><span class="o">=</span><span class="n">propose</span><span class="p">,</span> <span class="n">strategy</span><span class="o">=</span><span class="n">strat</span><span class="p">,</span>
+<a id="__codelineno-28-16" name="__codelineno-28-16" href="#__codelineno-28-16"></a>       <span class="n">aggregator_factory</span><span class="o">=</span><span class="n">factory</span><span class="p">,</span> <span class="n">asynchronous</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">self_verify</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<a id="__codelineno-28-17" name="__codelineno-28-17" href="#__codelineno-28-17"></a>
+<a id="__codelineno-28-18" name="__codelineno-28-18" href="#__codelineno-28-18"></a><span class="c1"># 6. Highly-async, staleness-heavy: large lag budget + reflective rebase-and-verify.</span>
+<a id="__codelineno-28-19" name="__codelineno-28-19" href="#__codelineno-28-19"></a><span class="n">async_evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">,</span> <span class="n">n_workers</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">async_ratio</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span>
+<a id="__codelineno-28-20" name="__codelineno-28-20" href="#__codelineno-28-20"></a>             <span class="n">staleness_policy</span><span class="o">=</span><span class="n">get_policy</span><span class="p">(</span><span class="s2">&quot;reflective&quot;</span><span class="p">))</span>
 </code></pre></div>
 <p>An aggregator can amortise the expensive held-out eval on the async path — apply
 each diff as a cheap step and only validate every <em>N</em> steps, rolling back on no

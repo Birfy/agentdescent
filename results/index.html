@@ -1258,12 +1258,22 @@ so you can reproduce it.</p>
 <tr>
 <td><strong><a href="../algo-adas/">ADAS</a></strong></td>
 <td>MGSM</td>
-<td><code>--hard --langs bn,sw,te,th --per-lang 150</code></td>
-<td><em>see page — the run takes hours</em></td>
-<td>~9000 calls</td>
+<td><code>--hard --langs bn,sw,te,th</code></td>
+<td><strong>no lift demonstrated</strong> — see below</td>
+<td>791 calls, 24 min</td>
 </tr>
 </tbody>
 </table>
+<div class="admonition warning">
+<p class="admonition-title">ADAS is the exception, and the reason is cost</p>
+<p>MGSM is saturated at the default settings, and <code>select_hard</code> does find a real
+subset (47 of 600 items) — but evaluating one candidate there is a <em>multi-step
+program per item</em>, so a three-generation run is ~9000 calls and hours long.
+Shrinking it to fit a budget shrinks the measurement too: at 6 train / 3 val /
+3 test the archive rejected every candidate and held-out test was 0.000 on
+three items. That is a measurement too small to read, not a demonstration and
+not a bug. <a href="../algo-adas/#measured-mgsm-with-deepseek">Details</a>.</p>
+</div>
 <p>Each learned something specific to the failure it was shown:</p>
 <ul>
 <li><strong>GEPA</strong> — <em>"connect information across multiple paragraphs… then give only the

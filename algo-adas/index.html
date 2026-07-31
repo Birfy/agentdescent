@@ -1307,18 +1307,16 @@ only the agent <em>substrate</em> is a safe DSL instead of raw <code>exec</code>
 </tbody>
 </table>
 <h2 id="measured-mgsm-with-deepseek">Measured — MGSM with DeepSeek<a class="headerlink" href="#measured-mgsm-with-deepseek" title="Permanent link">&para;</a></h2>
-<p>At the default settings MGSM is <strong>saturated</strong>: the seed archive already scores
-1.000 on the sampled items, so Meta Agent Search has no gradient and the archive
-merge accepts nothing.</p>
-<p><code>--hard</code> is the lever, and MGSM needs both of the difficulty knobs at once. Even
-restricted to its low-resource languages, <code>deepseek-v4-flash</code> answers ~95% of
-items correctly with a single structure-free call, so finding a subset with signal
-takes a large pool:</p>
+<p><strong>This is the one shipped port where I could not demonstrate a lift</strong>, and the
+reason is worth stating rather than hiding.</p>
+<p>At the default settings MGSM is saturated: the seed archive already scores 1.000
+on the sampled items, so Meta Agent Search has no gradient and the archive merge
+accepts nothing. <code>--hard</code> is the lever — but MGSM resists it from both sides:</p>
 <table>
 <thead>
 <tr>
 <th>pool</th>
-<th>items a single call gets wrong</th>
+<th>items a single structure-free call gets <strong>wrong</strong></th>
 </tr>
 </thead>
 <tbody>
@@ -1327,21 +1325,56 @@ takes a large pool:</p>
 <td>fewer than 12 — <code>select_hard</code> warns and tops up</td>
 </tr>
 <tr>
-<td><code>--per-lang 150</code> on <code>bn,sw,te,th</code> (600)</td>
+<td><code>--per-lang 150</code> (600)</td>
 <td><strong>47</strong> (23 train / 12 val / 11 test)</td>
 </tr>
 </tbody>
 </table>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.adas_meta_agent_search<span class="w"> </span>--hard<span class="w"> </span>--langs<span class="w"> </span>bn,sw,te,th<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">    </span>--per-lang<span class="w"> </span><span class="m">150</span><span class="w"> </span>--generations<span class="w"> </span><span class="m">3</span><span class="w"> </span>--provider<span class="w"> </span>openai<span class="w"> </span>--model<span class="w"> </span>deepseek-v4-flash<span class="w"> </span>--yes
+<p>So a subset with real signal exists, but it is ~8% of a large pool. The bind is
+cost: with 23 training items a three-generation run is ~9000 model calls and takes
+hours. Shrinking it to fit a budget shrinks the <em>measurement</em> with it — at
+<code>--hard-keep 12</code> the split is 6 train / 3 val / 3 test, and a 3-item validation set
+cannot separate anything:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>round 0  reward=0.400  +0/-1
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>round 1  reward=0.400  +0/-1
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>test accuracy (held out): 0.000        # 3 items
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>791 calls, 5653 s in the model, 24 min wall-clock
 </code></pre></div>
+<p>The archive rejected every candidate. On this evidence that is neither a working
+demonstration nor a bug — it is a measurement too small to read. What the run
+<em>does</em> show is that the loop, the archive, the selection rule and the gate all
+execute against a real dataset.</p>
+<p>To get a number you can trust here, budget for <code>--per-lang 150</code> with no
+<code>--hard-keep</code> and expect hours, or use a weaker base model so the plain benchmark
+has headroom.</p>
 <div class="admonition warning">
 <p class="admonition-title">This is by far the most expensive example</p>
 <p>Every candidate is scored on every training item, and each score is a
 <em>multi-step</em> program — self-consistency and debate make several model calls per
 question. One generation over 23 items is on the order of a thousand calls, so
-a three-generation run takes hours even fully parallel. Start with a small
-<code>--per-lang</code> and <code>--generations 1</code> to see the loop work.</p>
+a three-generation run takes hours even fully parallel.</p>
+<p>Two knobs control the cost directly:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--hard-keep N</code></td>
+<td>cap the hard subset. Evaluation is <em>candidates × items × multi-step calls</em>, so this is the strongest lever</td>
+</tr>
+<tr>
+<td><code>--eval-concurrency N</code></td>
+<td>how many examples are scored at once (default 16). Purely I/O bound</td>
+</tr>
+</tbody>
+</table>
+<p><code>--hard-keep</code> caps the <strong>pool</strong>, which is then split 50/25/25 — so
+<code>--hard-keep 12</code> leaves only 6 training items, and the fan-out cannot exceed
+that. Ask for roughly four times the training set you want.</p>
 </div>
 <h2 id="run-it-run-it">Run it## Run it<a class="headerlink" href="#run-it-run-it" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.adas_meta_agent_search<span class="w"> </span>--dry-run
