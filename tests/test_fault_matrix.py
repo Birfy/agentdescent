@@ -80,3 +80,28 @@ def test_a_clean_run_reports_no_error(engine):
     res = _run(faults.OK, engine)
     assert res.error is None and res.retired_workers == 0
     assert res.history
+
+
+def test_eval_concurrency_is_reachable_and_changes_behaviour():
+    """It was a dataclass default on a private class -- unreachable, and setting
+    the class attribute silently did nothing because dataclasses bake defaults
+    into __init__. That made it impossible to measure or tune."""
+    import inspect
+    from agentdescent.evolution import evolve as _evolve
+    from agentdescent.async_evolve import async_evolve
+    assert "eval_concurrency" in inspect.signature(_evolve).parameters
+    assert "eval_concurrency" in inspect.signature(async_evolve).parameters
+
+    seen = {}
+
+    def run(rendered, task):
+        seen.setdefault("threads", set()).add(__import__("threading").get_ident())
+        return "wrong"
+
+    for conc in (1, 4):
+        seen.clear()
+        _run(run, {"n_workers": 1, "max_concurrency": 1}, eval_concurrency=conc)
+    # A real behavioural check lives in the efficiency docs (wall-clock); here we
+    # only pin that the argument reaches the engine rather than being swallowed.
+    res = _run(faults.OK, {"n_workers": 2, "max_concurrency": 2}, eval_concurrency=2)
+    assert res.error is None

@@ -15,6 +15,56 @@ Source: [`examples/efficiency.py`](https://github.com/Birfy/agentdescent/blob/ma
 
 ---
 
+## Where the parallelism actually goes
+
+A real HotpotQA run spent **3058 s inside the model but 1535 s of wall-clock** —
+only **2.0×** overlap with 8 workers. That number is worth taking apart, because
+three different things are mixed into it and only one of them was a bug.
+
+Measured with a fixed-latency stub backend, so the only variable is the framework:
+
+| what changes | overlap with `n_workers=8` |
+|---|---|
+| uniform latency | **5.9×** |
+| moderate latency spread | 4.8× |
+| high spread | 3.3× |
+| heavy tail (a reasoning model) | **2.4×** |
+
+**Latency variance is the cost, and the round barrier is where you pay it.** The
+aggregator is a synchronisation point, so a round lasts as long as its *slowest*
+worker — and a reasoning model's latency has a long tail (a short answer and a
+2000-token deliberation are the same call). Nothing is broken at 2.4×; that is
+what a barrier costs on a heavy-tailed distribution. The real run's 2.0× sits
+exactly in this regime.
+
+Removing the barrier is what [`asynchronous=True`](evolution.md#the-barrier-free-runtime-async_evolve)
+is for, and it recovers part of it — **2.4× → 3.0×** on the same heavy-tailed
+workload — because workers stop waiting for the merge.
+
+### The part that *was* a bug — the gate was serial
+
+Every gate goes through one held-out evaluation: each round's measurement and,
+far more often, the aggregator's per-candidate comparisons. It summed a
+generator, so it ran its tasks one at a time while the workers that produced
+those candidates ran in parallel. Same work, varying only `eval_concurrency`:
+
+| `eval_concurrency` | wall-clock | |
+|---|---|---|
+| 1 (the old behaviour) | 193.6 s | — |
+| 4 | 96.7 s | **2.0× faster** |
+| 8 (default) | 90.0 s | **2.2× faster** |
+| 16 | 89.0 s | saturated — the held-out set is only 12 tasks |
+
+It saturates once `eval_concurrency` reaches the size of your held-out set, so
+raise it if yours is large and your provider allows the concurrency.
+
+!!! tip "Which knob to reach for"
+    `n_workers` buys **rollout** parallelism, `eval_concurrency` buys **gate**
+    parallelism, and they are independent. If a run feels slower than its worker
+    count suggests, the gate is the usual reason — and if it still does after
+    that, the barrier is meeting a heavy tail, which is what `asynchronous=True`
+    addresses.
+
 ## Threads and the GIL — is this *really* parallel?
 
 Yes, for this workload, and no amount of arguing about the GIL settles it — so
