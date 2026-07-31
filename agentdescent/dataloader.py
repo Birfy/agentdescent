@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+import warnings
 import random
 import re
 import urllib.parse
@@ -264,3 +265,49 @@ def load_gated_hf(dataset: str, split: str, *,
         return [dict(r) for r in ds]
     except Exception:  # noqa: BLE001 - any auth/library failure -> fall back
         return None
+
+def select_hard(items: Sequence[Any], score: Callable[[Any], float],
+                keep: Optional[int] = None, threshold: float = 0.999,
+                concurrency: int = 8, min_items: int = 12) -> List[Any]:
+    """Keep the items a baseline gets **wrong** -- headroom, from a saturated set.
+
+    A benchmark a model already solves cannot demonstrate a skill: there is
+    nothing to add, and a correct implementation commits nothing. Measured with
+    ``deepseek-v4-flash``, three of the shipped ports sit at 0.9-1.0 out of the
+    box (FiNER-139 at the default concept count, SearchQA, MGSM).
+
+    Swapping in another dataset breaks fidelity to the paper being ported, so the
+    other lever is to keep the dataset and drop the items that carry no signal.
+    One baseline pass, scored concurrently, keeps whatever falls below
+    ``threshold``:
+
+        items = select_hard(items, lambda it: score(solve(it), it["answer"]))
+
+    This makes the *benchmark* harder, so numbers from it are not comparable with
+    numbers from the full set -- say which you used. ``keep`` caps the result
+    (the hardest are kept in their original order); if nothing fails, everything
+    is returned rather than an empty set.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    items = list(items)
+    if not items:
+        return items
+    with ThreadPoolExecutor(max(1, min(concurrency, len(items)))) as pool:
+        scores = list(pool.map(score, items))
+    hard = [it for it, sc in zip(items, scores) if sc < threshold]
+    if not hard:
+        return items                      # nothing failed: caller keeps the full set
+    if len(hard) < min_items:
+        # The whole point is a benchmark that is nearly saturated, so the survivors
+        # can be a handful -- and a handful splits into a 2-item validation set that
+        # measures nothing, or crashes the engine outright. Say so, and top up with
+        # the easiest items rather than returning something unusable.
+        warnings.warn(
+            f"select_hard kept only {len(hard)} of {len(items)} items "
+            f"({1 - len(hard)/len(items):.0%} of the pool is already solved). "
+            f"Topping up to {min_items}; pass a larger pool for a subset that is "
+            f"entirely hard.", RuntimeWarning, stacklevel=2)
+        rest = [it for it, sc in zip(items, scores) if sc >= threshold]
+        hard = hard + rest[:min_items - len(hard)]
+    return hard[:keep] if keep else hard

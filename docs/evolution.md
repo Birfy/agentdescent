@@ -233,7 +233,7 @@ the merge is a conflict-free union. It needs a strategy with a fixed key space
 (`KeyedRules`; `AppendRules` content-addresses its keys and is refused), and
 `route=` maps a task to the artifact key its failure will edit so each worker only
 sees tasks it may act on. Out-of-section proposals are rejected and counted as
-`section-violation` in [`result.outcomes()`](#7-reading-the-result). See
+`section-violation` in [`result.outcomes()`](#what-evolve-returns). See
 [Parallelism](parallelism.md).
 
 `PipelineParallel` is **not** an `evolve()` mode — it needs one artifact per stage
@@ -553,9 +553,9 @@ carries forward so early stopping still has something to compare.
 agent, so it is a backend call — and the engine makes them in more places than is
 obvious: each round's measurement, the final measurement, and the aggregator's own
 accept/reject comparisons (`cheap_eval`, `eval_counts`, `oracle_eval`). A
-transient in any of them used to end the run. They all funnel through one memoised
-evaluation, which now retries there, so a retry re-runs only the task that
-actually failed and every call site is covered at once.
+they all funnel through one memoised evaluation, which retries there — so a retry
+re-runs only the task that actually failed, and every call site is covered at
+once.
 
 The **merger** gets the same tolerance, and this matters more than it sounds: it
 scores the held-out set every sweep, so it calls the backend too. A single
@@ -631,17 +631,15 @@ evolve(tasks, reward, agent=agent, n_workers=4, max_concurrency=4)   # 4 workers
     `patience` counts **merge sweeps** (one drain-and-merge by the merger) rather
     than rounds.
 
-!!! warning "An abandoned straggler keeps running — and used to keep the process alive"
+!!! note "An abandoned straggler keeps running"
     Python cannot kill a thread, so a rollout abandoned by `round_timeout` runs to
     completion in the background. The round is bounded; the *work* is not. Its late
     evidence carries the version it was built against, so the staleness filter
     judges it like any other stale diff rather than applying it to a newer artifact.
 
-    The round used to run on a `ThreadPoolExecutor`, which registers an atexit hook
-    that **joins** its workers — so `shutdown(wait=False)` bounded the round and not
-    the program: a rollout wedged for 600 s returned from `evolve()` and then held
-    the interpreter open. Rounds now use daemon threads (with a semaphore preserving
-    `max_concurrency`), and the same case exits in **4.5 s**.
+    Rounds run on daemon threads (with a semaphore preserving `max_concurrency`),
+    so an abandoned rollout never holds the interpreter open at exit: a rollout
+    wedged for 600 s still lets the process exit in **4.5 s**.
 
 !!! tip "Bound the barrier — `round_timeout`"
     Because the aggregator *is* the barrier, a round waits for its slowest worker

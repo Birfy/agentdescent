@@ -7,6 +7,32 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **An ungated dataset for EvoSkill — `--dataset finqa`.** OfficeQA is HF-gated, and
+  the fallback was a bundled 12-row sample that splits into 5 train / 3 val / 2
+  test — too small to measure anything, so every run reported **0.000** and read
+  like a broken algorithm rather than a missing dataset. FinQA (`dreamerdeo/finqa`)
+  is the same shape — a financial document plus a numeric answer to locate and
+  compute — at 60 items with ~4 KB documents a non-tool model can actually read.
+  Measured: val **0.487 → 0.573**, held-out **test 0.617**, one skill discovered.
+- **`select_hard(items, score)`** — keep the items a baseline gets wrong, turning a
+  saturated benchmark into one with headroom without swapping the dataset (which
+  would break fidelity to the paper being ported). Wired into SkillOpt and ADAS as
+  `--hard`. It refuses to return an unusable split: on a near-saturated benchmark
+  the survivors can be a handful, and 3 items either measure nothing or crash the
+  engine's train/held-out split, so it tops up to `min_items` and warns with the
+  fraction of the pool that was already solved.
+
+### Measured, after setting the difficulty
+- With difficulty set, every port that has a gap now shows one. Full setups and
+  before/after on the [results page](docs/results.md):
+
+  | | before (default settings) | after |
+  |---|---|---|
+  | ACE, FiNER-139 | 1.000 → 1.000 at `--top-k 10` | `--top-k 120`: **0.844 → 0.889**, test 0.884 |
+  | SkillOpt, SearchQA | 0.900 → 0.900, 0 edits accepted | `--hard`: **0.250 → 0.500**, test 0.450 |
+  | EvoSkill | 0.000 → 0.000 (12-row gated fallback) | FinQA: **0.487 → 0.573**, test 0.617 |
+  | GEPA, HotpotQA | — | **0.500 → 0.600**, test 0.700 |
+  | DGM, surrogate | — | **0.000 → 0.300** |
 - **`eval_concurrency=`** — how many held-out tasks a gate scores at once, the
   merge half of the run's parallelism and independent of `n_workers`. It existed
   only as a default on a private dataclass, which made it both unreachable and
@@ -73,8 +99,18 @@ All notable changes to AgentDescent are documented here. The format follows
   and `async_evolve()` now remove their own scratch ledger on the way out (a
   caller-supplied `repo_path` is never touched -- it is how a run is resumed), and
   each run first collects orphans older than a day.
-
-### Fixed
+- **A transient network error outside the engine discarded a whole run.** The
+  engine retries its own evaluations, but an example's *final* held-out scoring is
+  a plain `completion(...)` call with no cover — measured, one
+  `RemoteDisconnected` there threw away a complete EvoSkill run. `claude()` and
+  `openai_compatible()` now retry (`retries=3`, `0` opts out), which covers every
+  caller rather than each call site.
+- **ACE's difficulty default demonstrated nothing.** `--top-k` is the difficulty
+  knob and defaulted to 10, where `deepseek-v4-flash` scores **1.000** and there is
+  nothing to learn. Raised to **120**, the first value that actually demonstrates
+  the algorithm: at 40 there is headroom (0.850) but no bullet beats the baseline,
+  so the gate rejects everything; at 120 two bullets survive and val goes
+  **0.844 → 0.889**.
 - **The merge gate was serial, and it dominated the run.** `EvolvingArtifact.score`
   summed a generator, so every held-out evaluation ran its tasks one at a time --
   and the aggregator calls it once per candidate, so a round paid N x held-out

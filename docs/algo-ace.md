@@ -108,16 +108,20 @@ for 8 rounds over 57 tasks — well under a cent at `deepseek-v4-flash` prices.
     and it is why [`DifficultyWeighted` task sampling](evolution.md#task-selection-which-rollout-to-spend)
     exists — it steers rollouts toward the tasks that still fail.
 
-!!! note "Difficulty is set by `--top-k`, and the default is easy"
-    Those runs used the **40** most frequent concepts. At the default
-    `--top-k 10` the same example loads 37 tasks over a 10-way choice, and
-    `deepseek-v4-flash` scores **1.000 before and after** — nothing for the Curator
-    to add, so it curates one bullet and commits no change (42 calls, 2 min).
+### `--top-k` sets the difficulty
 
-    That is not a different result, it is a different problem: a 10-way
-    classification is far easier than a 40-way one. Raise `--top-k` if you want a
-    run with headroom. See [Measured results](results.md) for how many of the
-    shipped ports are saturated for a strong model at small sample sizes.
+The number of XBRL concepts *is* the difficulty: it is a k-way choice. Measured
+with `deepseek-v4-flash`, 8 rounds, 4 workers:
+
+| `--top-k` | tasks | val, before → after | test | bullets |
+|---|---|---|---|---|
+| 10 | 37 | 1.000 → 1.000 | 1.000 | 0 |
+| 40 | 57 | 0.850 → 0.850 | 0.921 | 0 |
+| **120** (the default) | 121 | **0.844 → 0.889** | **0.884** | **2** |
+
+At 10 the task is already solved. At 40 there is headroom, but no bullet beats the
+baseline and the Curator's gate rejects every proposal. At 120 two bullets survive
+the gate and validation accuracy rises 4.5 points.
 
 ## Run it
 

@@ -40,22 +40,15 @@ robust = with_retries(claude(model="claude-haiku-4-5"), attempts=3)
 `claude()` accepts a `client=` to reuse an existing `anthropic.Anthropic`
 instance, and forwards extra kwargs to `messages.create`.
 
-!!! warning "Give a reasoning model room, or it returns nothing"
+!!! tip "Give a reasoning model room"
     A reasoning model spends its budget on internal reasoning *before* emitting
     visible text, so too small a `max_tokens` yields an **empty completion**, not a
-    short answer. The engine reads an empty proposal as "nothing worth changing",
-    so the run looks like it cannot learn while the reflector never actually spoke.
+    short answer. Measured on `deepseek-v4-flash` with the standard reflection
+    prompt: at `max_tokens=1024`, 4 of 8 replies came back empty; at 3000, none did.
 
-    Measured on `deepseek-v4-flash` with the standard reflection prompt:
-
-    | `max_tokens` | empty replies |
-    |---|---|
-    | 1024 | **4 of 8** |
-    | 3000 | 0 of 8 |
-
-    Both adapters therefore default to **4096**. You are billed for tokens
-    *generated*, not for the cap, so a generous limit costs nothing — and an empty
-    reflection now emits a `RuntimeWarning` naming this as the likely cause.
+    Both adapters default to **4096**. You are billed for tokens *generated*, not
+    for the cap, so a generous limit costs nothing — and an empty reflection emits
+    a `RuntimeWarning` naming this as the likely cause.
 
 ## What did the run cost? — `Usage`
 
@@ -191,11 +184,9 @@ same OfficeQA example runs on OpenHands, Claude Code, or a bare API model.
 !!! warning "The inline path is a fallback, not an equivalent"
     Measured on three real OfficeQA items (documents of 266–390 KB) with
     `document_agent(openai_compatible(model="deepseek-v4-flash"))`: **1 of 3
-    correct**, 249k prompt tokens, and two answers came back *empty* — because at
-    the default `inline_chars=200_000` roughly half of each document never reached
-    the model, and the figure sometimes lived in the half that was dropped. A
-    `RuntimeWarning` now says so whenever truncation happens, since an empty answer
-    otherwise looks like a model failure rather than a missing input.
+    correct**, because at `inline_chars=200_000` roughly half of each document
+    never reaches the model. Truncation emits a `RuntimeWarning` so a short answer
+    is never mistaken for a model failure.
 
     If the material is bigger than a comfortable prompt, give the adapter a
     workspace agent — it reads the file itself and nothing is dropped.

@@ -140,6 +140,35 @@ in [Connecting agents & LLMs → Tool-using agent backends](agents.md#running-th
 The full OfficeQA is HF-**gated** (`databricks/officeqa`, set `HF_TOKEN`); absent
 that the example loads the repo's **bundled 12-row sample**.
 
+## Datasets — `--dataset officeqa|finqa`
+
+OfficeQA is **HF-gated** (`databricks/officeqa`: an accepted licence plus
+`HF_TOKEN`). Without that access the example uses **FinQA**
+(`dreamerdeo/finqa`, ungated) — the same shape, a financial document plus a
+numeric answer to locate and compute, at 60 items with ~4 KB documents that a
+model without tools can read directly.
+
+```bash
+python -m examples.evoskill_skill_discovery --dataset finqa \
+    --provider openai --model deepseek-v4-flash --iterations 5 --yes
+```
+
+Measured: val **0.487 → 0.573**, held-out **test 0.617**, one skill discovered.
+The skill it induced is about numeric presentation, which is what the scorer
+rewards:
+
+> *"When a percentage appears in a table, round your answer to the same number of
+> decimal places shown in that table... compute the unrounded value first, then
+> round once at the end to the required precision."*
+
+The run header states which dataset it loaded.
+
+!!! note "FinQA does not reproduce the retrieval challenge"
+    OfficeQA's difficulty is finding one figure inside a 272 KB bulletin, which is
+    what makes a *tool-using* agent worth having. FinQA's documents fit in a
+    prompt, so it exercises the discovery loop but not the retrieval problem. For
+    that, use OfficeQA with `--backend openhands|toolloop|claude-code`.
+
 ## Run it
 
 ```bash

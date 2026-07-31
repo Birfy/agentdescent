@@ -117,3 +117,77 @@ def test_sampler_learns_from_recorded_outcomes_during_a_run():
            rounds=8, n_workers=3, held_out_frac=0.3, task_sampler=s)
     assert s.stats(), "the engine should have reported rollout outcomes"
     assert all(trials > 0 for _, trials in s.stats().values())
+
+
+# --- select_hard: turning a saturated benchmark into one with headroom ---------
+
+def test_select_hard_keeps_only_what_the_baseline_fails():
+    from agentdescent.dataloader import select_hard
+    items = list(range(40))
+    hard = select_hard(items, lambda i: 1.0 if i % 2 == 0 else 0.0)
+    assert hard == [i for i in items if i % 2]
+
+
+def test_select_hard_tops_up_rather_than_returning_an_unusable_split():
+    """The point is a near-saturated benchmark, so survivors can be a handful.
+
+    Measured: on MGSM, fewer than 12 of 160 items failed -- which splits into a
+    3-item validation set, or crashes the engine's train/held-out split outright.
+    """
+    import warnings
+
+    from agentdescent.dataloader import select_hard
+
+    items = list(range(40))
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        out = select_hard(items, lambda i: 0.0 if i < 3 else 1.0)
+    assert len(out) == 12                       # the 3 failures, topped up
+    assert out[:3] == [0, 1, 2]                 # failures first
+    assert any("already solved" in str(x.message) for x in w), "topped up silently"
+
+
+def test_select_hard_min_items_can_be_switched_off():
+    from agentdescent.dataloader import select_hard
+    items = list(range(40))
+    out = select_hard(items, lambda i: 0.0 if i < 3 else 1.0, min_items=0)
+    assert out == [0, 1, 2]
+
+
+def test_select_hard_returns_everything_when_nothing_fails():
+    """An empty benchmark is worse than a saturated one -- say so by returning it."""
+    from agentdescent.dataloader import select_hard
+    items = list(range(10))
+    assert select_hard(items, lambda i: 1.0) == items
+
+
+def test_select_hard_caps_with_keep():
+    from agentdescent.dataloader import select_hard
+    items = list(range(20))
+    assert select_hard(items, lambda i: 0.0, keep=3) == [0, 1, 2]
+
+
+def test_select_hard_handles_an_empty_pool():
+    from agentdescent.dataloader import select_hard
+    assert select_hard([], lambda i: 0.0) == []
+
+
+def test_select_hard_scores_concurrently():
+    """It runs a whole baseline pass, so serial scoring would make it unusable."""
+    import threading
+    from agentdescent.dataloader import select_hard
+
+    live, peak, lock = [0], [0], threading.Lock()
+
+    def score(i):
+        with lock:
+            live[0] += 1
+            peak[0] = max(peak[0], live[0])
+        import time
+        time.sleep(0.05)
+        with lock:
+            live[0] -= 1
+        return 0.0
+
+    select_hard(list(range(16)), score, concurrency=8)
+    assert peak[0] > 1, "select_hard scored the pool serially"

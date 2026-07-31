@@ -126,10 +126,9 @@ onto the current policy, then reused."
     back** — so treat it as a diagnostic ring of recent rejections, not a queue
     that feeds later rounds.
 
-    It is also *bounded* (`SETTLED_MAX_CARDS=256`, `SETTLED_MAX_CHARS=2M`, oldest
-    evicted). It used to be unbounded, which leaked exactly the payloads the trust
-    region exists to reject: 500 oversized diffs from a runaway reflector retained
-    **250 MB** that no code path could ever read.
+    It is *bounded* (`SETTLED_MAX_CARDS=256`, `SETTLED_MAX_CHARS=2M`, oldest
+    evicted), so a long run cannot accumulate the oversized diffs the trust region
+    rejects.
 
 ### 3.4 async_ratio (ROLL Flash) — the global lag budget
 
