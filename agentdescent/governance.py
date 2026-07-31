@@ -8,10 +8,17 @@ frequency (a two-timescale system):
     L1 (slow)   harness / context / learned verifier days    serial + staged rollout
     L0 (frozen) oracle / audit budget / merge perms  human   read-only to the loop
 
-The key design point is that this is *not* a hand-labelled artifact taxonomy: a
-skill triggered by every task is pulled into the slow layer automatically, while
-a harness patch that only touches one task cluster may ride the fast layer
-(design doc, section 3.2).
+The L1/L2 boundary is *not* a hand-labelled taxonomy: a skill triggered by every
+task is pulled into the slow layer automatically by its blast radius, while a
+harness patch that only touches one task cluster may ride the fast layer (design
+doc, section 3.2).
+
+**L0 is the exception, and deliberately so.** Nothing about a blast radius can
+tell you that an artifact is the oracle -- an artifact that can rewrite the thing
+that judges it is a structural fact, not a measured one -- so the frozen set is an
+explicit list of ids (:data:`FROZEN_IDS`). That is a hand-labelled taxonomy, and
+it should be: a verifier that learns to pass itself is exactly what an *estimated*
+layer would fail to catch.
 """
 
 from __future__ import annotations
@@ -30,11 +37,17 @@ class Layer(IntEnum):
     L0_FROZEN = 0
 
 
-# Thresholds on blast_radius (a normalized [0, 1] estimate of task-surface impact).
+#: The one threshold on blast_radius (a normalized [0, 1] estimate of task-surface
+#: impact): at or below it an artifact is L2, above it L1. There used to be a
+#: second constant, ``SLOW_MAX = 0.85``, with a comment describing a frozen-layer
+#: rule -- ``classify`` never read it, so 0.31 and 0.99 classified identically and
+#: the comment documented behaviour that did not exist. L0 is reached by id, not
+#: by radius, so one threshold is all there is.
 FAST_MAX = 0.30
-SLOW_MAX = 0.85
-# Above SLOW_MAX an artifact is a candidate for the frozen layer *only* if it is
-# also declared structural (see ``FROZEN_IDS``); otherwise it stays L1.
+
+#: Artifacts the loop may read but never mutate. An id list rather than a radius,
+#: because "this is the oracle" is structural (see the module docstring). Names
+#: here are reserved: ``evolve(artifact_id="oracle")`` is refused up front.
 FROZEN_IDS = frozenset(
     {
         "oracle",
@@ -46,7 +59,13 @@ FROZEN_IDS = frozenset(
 
 
 def classify(artifact: Evolvable) -> Layer:
-    """Assign an artifact to a governance layer from its blast radius."""
+    """Assign an artifact to a governance layer.
+
+    This is the single definition of the L1/L2 boundary. The aggregator and the
+    audit scheduler used to re-derive it from raw floats with a *different*
+    threshold (``blast_radius > 0.5``), so an artifact at 0.4 was L1 by governance
+    and treated as L2 everywhere it mattered: it got the cold-artifact staleness
+    tolerance and no oracle audit at all."""
     if artifact.id in FROZEN_IDS:
         return Layer.L0_FROZEN
     if artifact.blast_radius <= FAST_MAX:
@@ -61,7 +80,15 @@ class L1SerialGate:
     L2 artifacts are naturally isolated -- only tasks that trigger them are
     affected -- so they merge fully async.  L1 artifacts have no such isolation,
     so their in-flight changes must be serialized in time to keep attribution
-    tractable."""
+    tractable.
+
+    **Not wired into the shipped runtimes, because they already satisfy it.**
+    Every merge decision runs on one thread -- the round barrier in ``evolve()``,
+    the single merger thread in ``async_evolve`` and ``AsyncAgentDescent`` -- so at
+    most one diff of any layer is ever in evaluation. The guarantee holds by
+    construction; this gate is what would enforce it once merges run concurrently
+    (a process or host pool), and it is tested in isolation for that day. Treat it
+    as a primitive, not as something currently in the path."""
 
     _in_flight: Dict[str, str] = None  # artifact_id -> diff_id
     #: try_acquire is a check-then-act, so calling it from several threads could

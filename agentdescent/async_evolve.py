@@ -187,7 +187,8 @@ def async_evolve(
     # hardcoding 5/1 here silently ignored agg_config.alpha_head/alpha_tail, so a
     # tightened tolerance was honoured by the aggregator but not by this gate.
     _cfg = agg_config or AggregatorConfig()
-    alpha = _cfg.alpha_head if eng.blast_radius > 0.5 else _cfg.alpha_tail
+    from .governance import FAST_MAX
+    alpha = _cfg.alpha_head if eng.blast_radius > FAST_MAX else _cfg.alpha_tail
 
     # data-parallel: shard the train tasks round-robin across workers.
     shards: List[List[Task]] = [[] for _ in range(n_workers)]
