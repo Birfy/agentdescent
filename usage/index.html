@@ -23,7 +23,7 @@
     
     
       
-        <title>Usage & extending - AgentDescent</title>
+        <title>Install, run, extend - AgentDescent</title>
       
     
     
@@ -74,7 +74,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#usage-extending" class="md-skip">
+        <a href="#install-run-extend" class="md-skip">
           Skip to content
         </a>
       
@@ -110,7 +110,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Usage & extending
+              Install, run, extend
             
           </span>
         </div>
@@ -310,6 +310,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Measured results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../architecture/" class="md-nav__link">
         
   
@@ -418,10 +445,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
             
   
   
@@ -439,8 +466,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -548,7 +575,7 @@
   <span class="md-ellipsis">
     
   
-    Customizable parallelism (DP/TP/PP)
+    Customizable parallelism (DP/TP)
   
 
     
@@ -688,10 +715,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
         
           
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
             
   
   
@@ -709,8 +736,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_8">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -946,7 +973,7 @@
   <span class="md-ellipsis">
     
   
-    Usage & extending
+    Install, run, extend
   
 
     
@@ -964,7 +991,7 @@
   <span class="md-ellipsis">
     
   
-    Usage & extending
+    Install, run, extend
   
 
     
@@ -1531,7 +1558,7 @@
   
 
 
-<h1 id="usage-extending">Usage &amp; extending<a class="headerlink" href="#usage-extending" title="Permanent link">&para;</a></h1>
+<h1 id="install-run-extend">Install, run, extend<a class="headerlink" href="#install-run-extend" title="Permanent link">&para;</a></h1>
 <p>How to install, run the demos, tune the knobs, and — most importantly — plug in
 your own <code>Evolvable</code> domain.</p>
 <hr />
@@ -1555,13 +1582,13 @@ you the library only.</p>
 <p>Runs the merge-based <code>AgentDescent</code> loop and a DGM-style fork baseline on the same
 budget, then prints the learning curve and the comparison:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>round  dev_acc   stable  commit  fused  stale  confl  oracle
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    0    0.853    0.000       1      1      0      0       0
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    2    0.983    0.000       1      1      0      1       0     ← a contradiction dropped
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    8    1.000    1.000       1      0      0      0       0     ← stable branch catches up
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    0    0.828    0.000       1      1      0      0       0
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    3    1.000    0.000       1      0      0      1       0     ← a contradiction dropped
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    8    1.000    1.000       0      0      0      0       0     ← stable branch catches up
 <a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
 <a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>AgentDescent (merge) held-out accuracy : 1.000
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>Fork/archive best-fork accuracy     : 0.353
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>merge advantage                     : +0.647
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>Fork/archive best-fork accuracy     : 0.379
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>merge advantage                     : +0.621
 </code></pre></div>
 <h3 id="async-stage-orchestration-flashevolve-style">Async stage orchestration (FlashEvolve-style)<a class="headerlink" href="#async-stage-orchestration-flashevolve-style" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.run_async
@@ -1587,69 +1614,44 @@ the <a href="../dataloader/"><code>agentdescent.dataloader</code></a> data layer
 <hr />
 <h2 id="3-programmatic-use">3. Programmatic use<a class="headerlink" href="#3-programmatic-use" title="Permanent link">&para;</a></h2>
 <h3 id="the-entry-point-evolve">The entry point — <code>evolve()</code><a class="headerlink" href="#the-entry-point-evolve" title="Permanent link">&para;</a></h3>
-<p>This is what you want in almost every case, and what every
-<a href="../self-evolution-examples/">algorithm port</a> uses. Nothing here needs an API key:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.evolution</span><span class="w"> </span><span class="kn">import</span> <span class="n">Task</span><span class="p">,</span> <span class="n">evolve</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="n">tasks</span> <span class="o">=</span> <span class="p">[</span><span class="n">Task</span><span class="p">(</span><span class="nb">id</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;t</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">prompt</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;say the year for item </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">12</span><span class="p">)]</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="k">def</span><span class="w"> </span><span class="nf">reward</span><span class="p">(</span><span class="n">task</span><span class="p">,</span> <span class="n">output</span><span class="p">):</span>                 <span class="c1"># must return [0, 1]</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    <span class="k">return</span> <span class="mf">1.0</span> <span class="k">if</span> <span class="s2">&quot;2026&quot;</span> <span class="ow">in</span> <span class="n">output</span> <span class="k">else</span> <span class="mf">0.0</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="n">rendered</span><span class="p">,</span> <span class="n">task</span><span class="p">):</span>                  <span class="c1"># your solver -- an LLM, a script, anything</span>
-<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>    <span class="k">return</span> <span class="s2">&quot;answer&quot;</span> <span class="o">+</span> <span class="p">(</span><span class="s2">&quot; 2026&quot;</span> <span class="k">if</span> <span class="s2">&quot;year&quot;</span> <span class="ow">in</span> <span class="n">rendered</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
-<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>
-<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="k">def</span><span class="w"> </span><span class="nf">propose</span><span class="p">(</span><span class="n">rendered</span><span class="p">,</span> <span class="n">task</span><span class="p">,</span> <span class="n">output</span><span class="p">,</span> <span class="n">reward</span><span class="p">):</span>
-<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>    <span class="k">return</span> <span class="s2">&quot;always state the year&quot;</span>        <span class="c1"># what to add on a failure</span>
-<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>
-<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="n">result</span> <span class="o">=</span> <span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">run</span><span class="o">=</span><span class="n">run</span><span class="p">,</span> <span class="n">propose</span><span class="o">=</span><span class="n">propose</span><span class="p">,</span> <span class="n">rounds</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span> <span class="n">n_workers</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>
-<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">final_reward</span><span class="p">,</span> <span class="n">result</span><span class="o">.</span><span class="n">state</span><span class="p">)</span>
-<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="k">if</span> <span class="n">result</span><span class="o">.</span><span class="n">error</span><span class="p">:</span>                          <span class="c1"># always check: died vs converged</span>
-<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a>    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;incomplete:&quot;</span><span class="p">,</span> <span class="n">result</span><span class="o">.</span><span class="n">error</span><span class="p">)</span>
-</code></pre></div>
-<p>Swap <code>run</code>/<code>propose</code> for a model by passing <code>agent=</code> instead — any backend works,
-including a tool-using one:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.agents</span><span class="w"> </span><span class="kn">import</span> <span class="n">LLMAgent</span><span class="p">,</span> <span class="n">claude</span><span class="p">,</span> <span class="n">openai_compatible</span><span class="p">,</span> <span class="n">claude_code</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.evolution</span><span class="w"> </span><span class="kn">import</span> <span class="n">evolve</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">LLMAgent</span><span class="p">(</span><span class="n">claude</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">&quot;claude-haiku-4-5&quot;</span><span class="p">)))</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">LLMAgent</span><span class="p">(</span><span class="n">openai_compatible</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">&quot;deepseek-v4-flash&quot;</span><span class="p">)))</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">LLMAgent</span><span class="p">(</span><span class="n">claude_code</span><span class="p">()))</span>          <span class="c1"># Claude Code CLI</span>
-</code></pre></div>
-<p>They are all the same <code>Completion</code> contract — see
-<a href="../agents/#tool-using-agents-the-same-contract">Connecting agents &amp; LLMs</a>. Run it
-without a barrier by adding <code>asynchronous=True</code>, watch progress with
-<code>on_round=...</code>, keep the artifact with <code>result.save(path)</code>, and resume an
-interrupted run by re-using the same <code>repo_path</code>
-(<a href="../evolution/#resuming-a-run">details</a>).</p>
+<p>Covered in full elsewhere, and not repeated here:</p>
+<ul>
+<li><strong><a href="../quickstart-skill/">Quickstart</a></strong> — a dataset to an evolved skill in one
+  call, with the measured result of running it.</li>
+<li><strong><a href="../evolution/">The <code>evolve</code> method</a></strong> — the entry point underneath, with every
+  parameter and what it plugs into.</li>
+<li><strong><a href="../agents/">Connecting agents &amp; LLMs</a></strong> — any <code>prompt -&gt; text</code> is a backend,
+  including tool-using CLI agents.</li>
+<li><strong><a href="../results/">Measured results</a></strong> — every empirical claim with its setup.</li>
+</ul>
 <h3 id="the-reference-stack-agentdescent-asyncagentdescent">The reference stack — <code>AgentDescent</code> / <code>AsyncAgentDescent</code><a class="headerlink" href="#the-reference-stack-agentdescent-asyncagentdescent" title="Permanent link">&para;</a></h3>
 <p>A <strong>separate</strong> runtime used by the RQ1/RQ2 and efficiency experiments on the
 built-in synthetic router domain. It has the <code>TaskScheduler</code> / <code>EvidenceBuffer</code> /
 duration-estimator machinery that <code>evolve()</code> does not — see the
 <a href="../architecture/#4-the-two-runtimes">two-stack note</a>. Reach for it to reproduce
 those experiments, not to evolve your own artifact.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">tempfile</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.domains.router</span><span class="w"> </span><span class="kn">import</span> <span class="n">make_task_universe</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.orchestrator</span><span class="w"> </span><span class="kn">import</span> <span class="n">AgentDescent</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="n">universe</span> <span class="o">=</span> <span class="n">make_task_universe</span><span class="p">(</span><span class="n">seed</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="k">with</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">TemporaryDirectory</span><span class="p">()</span> <span class="k">as</span> <span class="n">repo</span><span class="p">:</span>
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>    <span class="n">system</span> <span class="o">=</span> <span class="n">AgentDescent</span><span class="p">(</span><span class="n">repo</span><span class="p">,</span> <span class="n">universe</span><span class="p">,</span> <span class="n">n_workers</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span> <span class="n">noise</span><span class="o">=</span><span class="mf">0.15</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
-<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>    <span class="n">history</span> <span class="o">=</span> <span class="n">system</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">rounds</span><span class="o">=</span><span class="mi">40</span><span class="p">)</span>
-<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>    <span class="nb">print</span><span class="p">(</span><span class="n">system</span><span class="o">.</span><span class="n">final_accuracy</span><span class="p">())</span>      <span class="c1"># held-out accuracy on the dev branch</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">tempfile</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.domains.router</span><span class="w"> </span><span class="kn">import</span> <span class="n">make_task_universe</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.orchestrator</span><span class="w"> </span><span class="kn">import</span> <span class="n">AgentDescent</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="n">universe</span> <span class="o">=</span> <span class="n">make_task_universe</span><span class="p">(</span><span class="n">seed</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="k">with</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">TemporaryDirectory</span><span class="p">()</span> <span class="k">as</span> <span class="n">repo</span><span class="p">:</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>    <span class="n">system</span> <span class="o">=</span> <span class="n">AgentDescent</span><span class="p">(</span><span class="n">repo</span><span class="p">,</span> <span class="n">universe</span><span class="p">,</span> <span class="n">n_workers</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span> <span class="n">noise</span><span class="o">=</span><span class="mf">0.15</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>    <span class="n">history</span> <span class="o">=</span> <span class="n">system</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">rounds</span><span class="o">=</span><span class="mi">40</span><span class="p">)</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>    <span class="nb">print</span><span class="p">(</span><span class="n">system</span><span class="o">.</span><span class="n">final_accuracy</span><span class="p">())</span>      <span class="c1"># held-out accuracy on the dev branch</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">tempfile</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.async_runtime</span><span class="w"> </span><span class="kn">import</span> <span class="n">AsyncAgentDescent</span><span class="p">,</span> <span class="n">AsyncConfig</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.domains.router</span><span class="w"> </span><span class="kn">import</span> <span class="n">make_task_universe</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.staleness</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_policy</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="n">universe</span> <span class="o">=</span> <span class="n">make_task_universe</span><span class="p">(</span><span class="n">seed</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="n">cfg</span> <span class="o">=</span> <span class="n">AsyncConfig</span><span class="p">(</span><span class="n">n_workers</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span> <span class="n">async_ratio</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">target_accuracy</span><span class="o">=</span><span class="mf">0.98</span><span class="p">,</span> <span class="n">max_seconds</span><span class="o">=</span><span class="mf">15.0</span><span class="p">)</span>
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="k">with</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">TemporaryDirectory</span><span class="p">()</span> <span class="k">as</span> <span class="n">repo</span><span class="p">:</span>
-<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>    <span class="n">system</span> <span class="o">=</span> <span class="n">AsyncAgentDescent</span><span class="p">(</span><span class="n">repo</span><span class="p">,</span> <span class="n">universe</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="n">cfg</span><span class="p">,</span>
-<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>                            <span class="n">staleness_policy</span><span class="o">=</span><span class="n">get_policy</span><span class="p">(</span><span class="s2">&quot;reflective&quot;</span><span class="p">))</span>
-<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>    <span class="n">stats</span> <span class="o">=</span> <span class="n">system</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
-<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>    <span class="nb">print</span><span class="p">(</span><span class="n">stats</span><span class="o">.</span><span class="n">final_dev_accuracy</span><span class="p">,</span> <span class="n">stats</span><span class="o">.</span><span class="n">commits</span><span class="p">,</span> <span class="n">stats</span><span class="o">.</span><span class="n">discarded_stale</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">tempfile</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.async_runtime</span><span class="w"> </span><span class="kn">import</span> <span class="n">AsyncAgentDescent</span><span class="p">,</span> <span class="n">AsyncConfig</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.domains.router</span><span class="w"> </span><span class="kn">import</span> <span class="n">make_task_universe</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.staleness</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_policy</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="n">universe</span> <span class="o">=</span> <span class="n">make_task_universe</span><span class="p">(</span><span class="n">seed</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="n">cfg</span> <span class="o">=</span> <span class="n">AsyncConfig</span><span class="p">(</span><span class="n">n_workers</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span> <span class="n">async_ratio</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">target_accuracy</span><span class="o">=</span><span class="mf">0.98</span><span class="p">,</span> <span class="n">max_seconds</span><span class="o">=</span><span class="mf">15.0</span><span class="p">)</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="k">with</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">TemporaryDirectory</span><span class="p">()</span> <span class="k">as</span> <span class="n">repo</span><span class="p">:</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>    <span class="n">system</span> <span class="o">=</span> <span class="n">AsyncAgentDescent</span><span class="p">(</span><span class="n">repo</span><span class="p">,</span> <span class="n">universe</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="n">cfg</span><span class="p">,</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>                            <span class="n">staleness_policy</span><span class="o">=</span><span class="n">get_policy</span><span class="p">(</span><span class="s2">&quot;reflective&quot;</span><span class="p">))</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>    <span class="n">stats</span> <span class="o">=</span> <span class="n">system</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>    <span class="nb">print</span><span class="p">(</span><span class="n">stats</span><span class="o">.</span><span class="n">final_dev_accuracy</span><span class="p">,</span> <span class="n">stats</span><span class="o">.</span><span class="n">commits</span><span class="p">,</span> <span class="n">stats</span><span class="o">.</span><span class="n">discarded_stale</span><span class="p">)</span>
 </code></pre></div>
 <hr />
 <h2 id="4-configuration-reference">4. Configuration reference<a class="headerlink" href="#4-configuration-reference" title="Permanent link">&para;</a></h2>
@@ -1759,10 +1761,10 @@ those experiments, not to evolve your own artifact.</p>
 </table>
 <p><code>AsyncStats.error</code> is <code>None</code> on a clean run and carries the backend failure that ended it otherwise — check it, since a run whose workers all died otherwise returns normal-looking zeros.</p>
 <h3 id="staleness-policy">Staleness policy<a class="headerlink" href="#staleness-policy" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.staleness</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_policy</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">get_policy</span><span class="p">(</span><span class="s2">&quot;full&quot;</span><span class="p">)</span>        <span class="c1"># accept stale diffs directly</span>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">get_policy</span><span class="p">(</span><span class="s2">&quot;guarded&quot;</span><span class="p">)</span>     <span class="c1"># version-gated (default)</span>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="n">get_policy</span><span class="p">(</span><span class="s2">&quot;reflective&quot;</span><span class="p">)</span>  <span class="c1"># always rebase + re-verify</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.staleness</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_policy</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">get_policy</span><span class="p">(</span><span class="s2">&quot;full&quot;</span><span class="p">)</span>        <span class="c1"># accept stale diffs directly</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">get_policy</span><span class="p">(</span><span class="s2">&quot;guarded&quot;</span><span class="p">)</span>     <span class="c1"># version-gated (default)</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="n">get_policy</span><span class="p">(</span><span class="s2">&quot;reflective&quot;</span><span class="p">)</span>  <span class="c1"># always rebase + re-verify</span>
 </code></pre></div>
 <hr />
 <h2 id="5-plug-in-your-own-domain">5. Plug in your own domain<a class="headerlink" href="#5-plug-in-your-own-domain" title="Permanent link">&para;</a></h2>
@@ -1771,24 +1773,24 @@ registration, not hard-coded.</strong> To evolve something new, provide four thi
 <h3 id="51-an-evolvable">5.1 An <code>Evolvable</code><a class="headerlink" href="#51-an-evolvable" title="Permanent link">&para;</a></h3>
 <p>Implement the protocol from <code>agentdescent/evolvable.py</code>
 (<a href="https://github.com/Birfy/agentdescent/blob/main/agentdescent/domains/router.py">reference: <code>RouterSkill</code></a>):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.evolvable</span><span class="w"> </span><span class="kn">import</span> <span class="n">Contract</span><span class="p">,</span> <span class="n">Diff</span><span class="p">,</span> <span class="n">EvidenceCard</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="k">class</span><span class="w"> </span><span class="nc">MyArtifact</span><span class="p">:</span>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">id</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">version</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">blast_radius</span><span class="o">=</span><span class="mf">0.2</span><span class="p">):</span>
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">id</span> <span class="o">=</span> <span class="nb">id</span>
-<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">version</span> <span class="o">=</span> <span class="n">version</span>
-<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">blast_radius</span> <span class="o">=</span> <span class="n">blast_radius</span>            <span class="c1"># → auto L0/L1/L2 layering</span>
-<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">contract</span> <span class="o">=</span> <span class="n">Contract</span><span class="p">(</span><span class="n">major</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
-<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">state</span> <span class="o">=</span> <span class="n">state</span>
-<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>
-<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">diff</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Diff</span><span class="p">:</span> <span class="o">...</span>              <span class="c1"># difference to another instance</span>
-<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">apply</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">diff</span><span class="p">:</span> <span class="n">Diff</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;MyArtifact&quot;</span><span class="p">:</span>    <span class="c1"># return a NEW instance, version+1</span>
-<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a>        <span class="o">...</span>
-<a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">cheap_eval</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">evidence</span><span class="p">:</span> <span class="n">EvidenceCard</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
-<a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a>        <span class="c1"># score on the tasks the evidence card carries (used by rebase re-verify)</span>
-<a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a>        <span class="o">...</span>
-<a id="__codelineno-12-17" name="__codelineno-12-17" href="#__codelineno-12-17"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">full_eval</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_set</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>          <span class="c1"># ground-truth metrics</span>
-<a id="__codelineno-12-18" name="__codelineno-12-18" href="#__codelineno-12-18"></a>        <span class="o">...</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.evolvable</span><span class="w"> </span><span class="kn">import</span> <span class="n">Contract</span><span class="p">,</span> <span class="n">Diff</span><span class="p">,</span> <span class="n">EvidenceCard</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="k">class</span><span class="w"> </span><span class="nc">MyArtifact</span><span class="p">:</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">id</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">version</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">blast_radius</span><span class="o">=</span><span class="mf">0.2</span><span class="p">):</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">id</span> <span class="o">=</span> <span class="nb">id</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">version</span> <span class="o">=</span> <span class="n">version</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">blast_radius</span> <span class="o">=</span> <span class="n">blast_radius</span>            <span class="c1"># → auto L0/L1/L2 layering</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">contract</span> <span class="o">=</span> <span class="n">Contract</span><span class="p">(</span><span class="n">major</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">state</span> <span class="o">=</span> <span class="n">state</span>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">diff</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Diff</span><span class="p">:</span> <span class="o">...</span>              <span class="c1"># difference to another instance</span>
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">apply</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">diff</span><span class="p">:</span> <span class="n">Diff</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;MyArtifact&quot;</span><span class="p">:</span>    <span class="c1"># return a NEW instance, version+1</span>
+<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a>        <span class="o">...</span>
+<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">cheap_eval</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">evidence</span><span class="p">:</span> <span class="n">EvidenceCard</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a>        <span class="c1"># score on the tasks the evidence card carries (used by rebase re-verify)</span>
+<a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a>        <span class="o">...</span>
+<a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">full_eval</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_set</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>          <span class="c1"># ground-truth metrics</span>
+<a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a>        <span class="o">...</span>
 </code></pre></div>
 <div class="admonition important">
 <p class="admonition-title"><code>apply</code> must be pure</p>
@@ -1798,21 +1800,21 @@ effects.</p>
 </div>
 <h3 id="52-serialize-deserialize-for-the-ledger">5.2 Serialize / deserialize for the Ledger<a class="headerlink" href="#52-serialize-deserialize-for-the-ledger" title="Permanent link">&para;</a></h3>
 <p>The Ledger stores artifacts as JSON blobs in git, so give it two functions:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">serialize_mine</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>            <span class="c1"># → JSON-friendly dict</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;state&quot;</span><span class="p">:</span> <span class="n">a</span><span class="o">.</span><span class="n">state</span><span class="p">,</span> <span class="s2">&quot;blast_radius&quot;</span><span class="p">:</span> <span class="n">a</span><span class="o">.</span><span class="n">blast_radius</span><span class="p">}</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
-<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="k">def</span><span class="w"> </span><span class="nf">deserialize_mine</span><span class="p">(</span><span class="n">artifact_id</span><span class="p">,</span> <span class="n">version</span><span class="p">,</span> <span class="n">state</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">MyArtifact</span><span class="p">:</span>
-<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>    <span class="k">return</span> <span class="n">MyArtifact</span><span class="p">(</span><span class="n">artifact_id</span><span class="p">,</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;state&quot;</span><span class="p">],</span> <span class="n">version</span><span class="p">,</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;blast_radius&quot;</span><span class="p">])</span>
-<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>
-<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="n">ledger</span> <span class="o">=</span> <span class="n">Ledger</span><span class="p">(</span><span class="n">repo_path</span><span class="p">,</span> <span class="n">serialize_mine</span><span class="p">,</span> <span class="n">deserialize_mine</span><span class="p">)</span>
-<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="n">ledger</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">MyArtifact</span><span class="p">(</span><span class="s2">&quot;my-art&quot;</span><span class="p">,</span> <span class="n">initial_state</span><span class="p">))</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">serialize_mine</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>            <span class="c1"># → JSON-friendly dict</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;state&quot;</span><span class="p">:</span> <span class="n">a</span><span class="o">.</span><span class="n">state</span><span class="p">,</span> <span class="s2">&quot;blast_radius&quot;</span><span class="p">:</span> <span class="n">a</span><span class="o">.</span><span class="n">blast_radius</span><span class="p">}</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="k">def</span><span class="w"> </span><span class="nf">deserialize_mine</span><span class="p">(</span><span class="n">artifact_id</span><span class="p">,</span> <span class="n">version</span><span class="p">,</span> <span class="n">state</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">MyArtifact</span><span class="p">:</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    <span class="k">return</span> <span class="n">MyArtifact</span><span class="p">(</span><span class="n">artifact_id</span><span class="p">,</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;state&quot;</span><span class="p">],</span> <span class="n">version</span><span class="p">,</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;blast_radius&quot;</span><span class="p">])</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="n">ledger</span> <span class="o">=</span> <span class="n">Ledger</span><span class="p">(</span><span class="n">repo_path</span><span class="p">,</span> <span class="n">serialize_mine</span><span class="p">,</span> <span class="n">deserialize_mine</span><span class="p">)</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="n">ledger</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">MyArtifact</span><span class="p">(</span><span class="s2">&quot;my-art&quot;</span><span class="p">,</span> <span class="n">initial_state</span><span class="p">))</span>
 </code></pre></div>
 <h3 id="53-an-eval-function-for-the-verifier">5.3 An eval function for the verifier<a class="headerlink" href="#53-an-eval-function-for-the-verifier" title="Permanent link">&para;</a></h3>
 <p>Ground-truth scorer over a held-out task set:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">my_eval</span><span class="p">(</span><span class="n">artifact</span><span class="p">,</span> <span class="n">tasks</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>    <span class="c1"># accuracy / reward in [0, 1]</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>    <span class="o">...</span>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="n">verifier</span> <span class="o">=</span> <span class="n">ThreeLayerVerifier</span><span class="p">(</span><span class="n">eval_fn</span><span class="o">=</span><span class="n">my_eval</span><span class="p">,</span> <span class="n">held_out</span><span class="o">=</span><span class="n">held_out_tasks</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">my_eval</span><span class="p">(</span><span class="n">artifact</span><span class="p">,</span> <span class="n">tasks</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>    <span class="c1"># accuracy / reward in [0, 1]</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>    <span class="o">...</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="n">verifier</span> <span class="o">=</span> <span class="n">ThreeLayerVerifier</span><span class="p">(</span><span class="n">eval_fn</span><span class="o">=</span><span class="n">my_eval</span><span class="p">,</span> <span class="n">held_out</span><span class="o">=</span><span class="n">held_out_tasks</span><span class="p">)</span>
 </code></pre></div>
 <h3 id="54-a-worker-that-proposes-diffs">5.4 A worker that proposes diffs<a class="headerlink" href="#54-a-worker-that-proposes-diffs" title="Permanent link">&para;</a></h3>
 <p>Workers turn observed failures into a <code>Diff</code> + <code>EvidenceCard</code>. The reference
@@ -1826,9 +1828,9 @@ paradigms — works unchanged.</p>
 <hr />
 <h2 id="6-building-the-documentation-site">6. Building the documentation site<a class="headerlink" href="#6-building-the-documentation-site" title="Permanent link">&para;</a></h2>
 <p>These docs render as a website via <a href="https://www.mkdocs.org/">MkDocs</a>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s2">&quot;.[docs]&quot;</span>
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>mkdocs<span class="w"> </span>serve<span class="w">      </span><span class="c1"># live preview at http://127.0.0.1:8000</span>
-<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>mkdocs<span class="w"> </span>build<span class="w">      </span><span class="c1"># static HTML into ./site</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s2">&quot;.[docs]&quot;</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>mkdocs<span class="w"> </span>serve<span class="w">      </span><span class="c1"># live preview at http://127.0.0.1:8000</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>mkdocs<span class="w"> </span>build<span class="w">      </span><span class="c1"># static HTML into ./site</span>
 </code></pre></div>
 
 

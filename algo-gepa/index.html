@@ -312,6 +312,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Measured results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../architecture/" class="md-nav__link">
         
   
@@ -420,10 +447,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
             
   
   
@@ -441,8 +468,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -550,7 +577,7 @@
   <span class="md-ellipsis">
     
   
-    Customizable parallelism (DP/TP/PP)
+    Customizable parallelism (DP/TP)
   
 
     
@@ -692,10 +719,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" checked>
         
           
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
             
   
   
@@ -713,8 +740,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_8">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_9">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -891,6 +918,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#measured-hotpotqa-with-deepseek" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Measured — HotpotQA with DeepSeek
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#run-it" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1043,7 +1081,7 @@
   <span class="md-ellipsis">
     
   
-    Usage & extending
+    Install, run, extend
   
 
     
@@ -1120,6 +1158,17 @@
     <span class="md-ellipsis">
       
         Plug-ins implemented
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#measured-hotpotqa-with-deepseek" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Measured — HotpotQA with DeepSeek
       
     </span>
   </a>
@@ -1253,6 +1302,41 @@ sample (raise <code>--workers</code>). The Pareto set is the held-out split.</p>
 </tr>
 </tbody>
 </table>
+<h2 id="measured-hotpotqa-with-deepseek">Measured — HotpotQA with DeepSeek<a class="headerlink" href="#measured-hotpotqa-with-deepseek" title="Permanent link">&para;</a></h2>
+<p><code>--rounds 5 --fetch 40 --provider openai --model deepseek-v4-flash</code>:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>exact match</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>seed instruction, on the Pareto set</td>
+<td>0.500</td>
+</tr>
+<tr>
+<td>best candidate found</td>
+<td><strong>0.600</strong></td>
+</tr>
+<tr>
+<td><strong>test set</strong> (held out, never seen by the optimizer)</td>
+<td><strong>0.700</strong></td>
+</tr>
+</tbody>
+</table>
+<p>4 candidates explored, 80 model calls, ~10 min wall-clock. The instruction it
+found:</p>
+<blockquote>
+<p><em>"Read the context carefully and connect information across multiple paragraphs
+to identify who matches all the clues in the question. Then give only the final
+answer as a short phrase, without explanation."</em></p>
+</blockquote>
+<p>Both halves of that are real HotpotQA failures: multi-hop evidence, and a model
+that answers a short-span question with a paragraph. This is the one shipped port
+whose benchmark still has headroom for <code>deepseek-v4-flash</code> — see
+<a href="../results/">Measured results</a> for why the others do not.</p>
 <h2 id="run-it">Run it<a class="headerlink" href="#run-it" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.gepa_prompt_evolution<span class="w"> </span>--dry-run
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.gepa_prompt_evolution<span class="w"> </span>--model<span class="w"> </span>claude-haiku-4-5

@@ -316,6 +316,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#start-here" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Start here
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#where-to-go-next" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -371,6 +382,33 @@
     
   
     Quickstart — dataset to skill
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Measured results
   
 
     
@@ -498,10 +536,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
             
   
   
@@ -519,8 +557,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -628,7 +666,7 @@
   <span class="md-ellipsis">
     
   
-    Customizable parallelism (DP/TP/PP)
+    Customizable parallelism (DP/TP)
   
 
     
@@ -768,10 +806,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
         
           
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
             
   
   
@@ -789,8 +827,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_8">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1017,7 +1055,7 @@
   <span class="md-ellipsis">
     
   
-    Usage & extending
+    Install, run, extend
   
 
     
@@ -1055,6 +1093,17 @@
       Table of contents
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#start-here" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Start here
+      
+    </span>
+  </a>
+  
+</li>
       
         <li class="md-nav__item">
   <a href="#where-to-go-next" class="md-nav__link">
@@ -1132,23 +1181,54 @@ statistical acceptance + transactional commit</strong>. That merge is what
 <a href="architecture/#3-component-responsibilities"><code>aggregator.py</code></a> implements.</p>
 </div>
 <hr />
+<h2 id="start-here">Start here<a class="headerlink" href="#start-here" title="Permanent link">&para;</a></h2>
+<p>Have a dataset? That is the whole input.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent</span><span class="w"> </span><span class="kn">import</span> <span class="n">evolve_skill</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.agents</span><span class="w"> </span><span class="kn">import</span> <span class="n">openai_compatible</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.dataloader</span><span class="w"> </span><span class="kn">import</span> <span class="n">hf_rows</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="n">rows</span> <span class="o">=</span> <span class="n">hf_rows</span><span class="p">(</span><span class="s2">&quot;hotpotqa/hotpot_qa&quot;</span><span class="p">,</span> <span class="s2">&quot;validation&quot;</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="s2">&quot;distractor&quot;</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="mi">40</span><span class="p">)</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="n">result</span> <span class="o">=</span> <span class="n">evolve_skill</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">model</span><span class="o">=</span><span class="n">openai_compatible</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">&quot;deepseek-v4-flash&quot;</span><span class="p">),</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>                      <span class="n">prompt</span><span class="o">=</span><span class="s2">&quot;question&quot;</span><span class="p">,</span> <span class="n">gold</span><span class="o">=</span><span class="s2">&quot;answer&quot;</span><span class="p">,</span> <span class="n">score</span><span class="o">=</span><span class="s2">&quot;exact&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">rendered</span><span class="p">)</span>        <span class="c1"># the skill it learned</span>
+</code></pre></div>
+<p>Run as written, that lifted held-out exact match from <strong>0.167 to 0.583</strong> and wrote
+<em>"Respond with only the requested answer, omitting any extra explanation or
+restatement."</em> — see <a href="quickstart-skill/">Quickstart</a> for the full measurement.</p>
+<p>Nothing is hidden: it builds ordinary arguments and calls
+<a href="evolution/"><code>evolve()</code></a>, which is where you go the moment you want more.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>pip<span class="w"> </span>install<span class="w"> </span>agentdescent
+</code></pre></div>
+<hr />
 <h2 id="where-to-go-next">Where to go next<a class="headerlink" href="#where-to-go-next" title="Permanent link">&para;</a></h2>
 <div class="grid cards">
 <ul>
 <li>
-<p>:material-star-four-points: <strong><a href="evolution/">The <code>evolve</code> method</a></strong> — start here</p>
-<p>The one entry point. Each capability is a plug-in to one <code>evolve()</code>
-parameter — this is the map, with an example per module.</p>
+<p>:material-rocket-launch: <strong><a href="quickstart-skill/">Quickstart — dataset to skill</a></strong> — start here</p>
+<p>One call, three decisions: your data, how to score it, which model. With the
+measured result of running it.</p>
+</li>
+<li>
+<p>:material-star-four-points: <strong><a href="evolution/">The <code>evolve</code> method</a></strong></p>
+<p>The one entry point underneath. Every capability is a plug-in to one
+<code>evolve()</code> parameter — this is the map, with an example per module.</p>
 </li>
 <li>
 <p>:material-robot: <strong><a href="skill-evolution/">Complete example</a></strong></p>
-<p>One end-to-end run — real dataset, real LLM, every module — evolving a skill
-that lifts held-out accuracy.</p>
+<p>The same thing written out by hand — real dataset, real LLM, every module
+wired explicitly.</p>
 </li>
 <li>
 <p>:material-sitemap: <strong><a href="architecture/">Architecture</a></strong></p>
 <p>How the components fit together and how a diff travels from a worker to a
 committed change.</p>
+</li>
+<li>
+<p>:material-chart-box: <strong><a href="results/">Measured results</a></strong></p>
+<p>Every empirical claim with the setup that produced it — including the four
+benchmarks where the honest answer is "nothing to learn here".</p>
 </li>
 <li>
 <p>:material-lightbulb-on: <strong><a href="concepts/">Concepts</a></strong></p>
@@ -1177,7 +1257,9 @@ own.</p>
 </li>
 <li>
 <p>:material-vector-triangle: <strong><a href="parallelism/">Customizable parallelism</a></strong> → <code>parallel=</code></p>
-<p>Pluggable DP / TP / PP methods — or write your own <code>ParallelStrategy</code>.</p>
+<p>Pluggable DP / TP methods — or write your own <code>ParallelStrategy</code>. (PP needs
+one artifact per stage, so it is a standalone primitive, not an <code>evolve()</code>
+mode.)</p>
 </li>
 <li>
 <p>:material-timer-sand: <strong><a href="duration-scheduling/">Duration-aware scheduling</a></strong></p>
@@ -1186,8 +1268,8 @@ stragglers (async runtime).</p>
 </li>
 <li>
 <p>:material-speedometer: <strong><a href="efficiency/">Efficiency experiments</a></strong></p>
-<p>Measured parallel scaling (near-linear to 8 workers) and async tail-hiding
-(~2.6-2.9× over a sync barrier).</p>
+<p>Where the parallelism actually goes: 5.9× of 8 workers on uniform latency,
+<strong>2.4× on a reasoning model's heavy tail</strong>, and which knob fixes which.</p>
 </li>
 </ul>
 </div>
@@ -1241,12 +1323,12 @@ stragglers (async runtime).</p>
 </table>
 <hr />
 <h2 id="30-second-tour">30-second tour<a class="headerlink" href="#30-second-tour" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s2">&quot;.[dev]&quot;</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.run_demo<span class="w">      </span><span class="c1"># RQ1: merge vs fork (synchronous DP)</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.run_async<span class="w">     </span><span class="c1"># FlashEvolve-style async + staleness policies</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.rq2_staleness<span class="w"> </span><span class="c1"># RQ2: staleness tolerance sweep</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>pytest<span class="w">                           </span><span class="c1">#  tests, no external services</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s2">&quot;.[dev]&quot;</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.run_demo<span class="w">      </span><span class="c1"># RQ1: merge vs fork (synchronous DP)</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.run_async<span class="w">     </span><span class="c1"># FlashEvolve-style async + staleness policies</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.rq2_staleness<span class="w"> </span><span class="c1"># RQ2: staleness tolerance sweep</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>pytest<span class="w">                           </span><span class="c1">#  tests, no external services</span>
 </code></pre></div>
 <p>No LLM or external service is required: the reference domain is a fully
 deterministic keyword-router skill, so the entire parallel loop runs in-process

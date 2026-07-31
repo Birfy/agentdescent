@@ -312,6 +312,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Measured results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../architecture/" class="md-nav__link">
         
   
@@ -666,10 +693,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
             
   
   
@@ -687,8 +714,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -796,7 +823,7 @@
   <span class="md-ellipsis">
     
   
-    Customizable parallelism (DP/TP/PP)
+    Customizable parallelism (DP/TP)
   
 
     
@@ -936,10 +963,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
         
           
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
             
   
   
@@ -957,8 +984,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_8">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1185,7 +1212,7 @@
   <span class="md-ellipsis">
     
   
-    Usage & extending
+    Install, run, extend
   
 
     
@@ -1783,12 +1810,23 @@ each is a real <code>Strategy</code> you can read and reuse:</p>
 <h2 id="3-the-parallelism-method-parallel">3. The parallelism method — <code>parallel=</code><a class="headerlink" href="#3-the-parallelism-method-parallel" title="Permanent link">&para;</a></h2>
 <p><em>What:</em> how each round's tasks are partitioned across the <code>n_workers</code>. <em>Module:</em>
 <a href="../parallelism/"><code>agentdescent.parallel</code></a>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.parallel</span><span class="w"> </span><span class="kn">import</span> <span class="n">DataParallel</span><span class="p">,</span> <span class="n">TensorParallel</span><span class="p">,</span> <span class="n">PipelineParallel</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.parallel</span><span class="w"> </span><span class="kn">import</span> <span class="n">DataParallel</span><span class="p">,</span> <span class="n">TensorParallel</span>
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
 <a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">,</span> <span class="n">parallel</span><span class="o">=</span><span class="n">DataParallel</span><span class="p">())</span>                <span class="c1"># default (shard tasks)</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">,</span> <span class="n">parallel</span><span class="o">=</span><span class="n">TensorParallel</span><span class="p">(</span><span class="n">n_sections</span><span class="o">=</span><span class="mi">4</span><span class="p">))</span>  <span class="c1"># disjoint sections</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">,</span> <span class="n">parallel</span><span class="o">=</span><span class="n">PipelineParallel</span><span class="p">(</span><span class="n">stages</span><span class="o">=</span><span class="p">[</span><span class="o">...</span><span class="p">]))</span><span class="c1"># per-stage workers</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">evolve</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">,</span>                                         <span class="c1"># disjoint sections</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>       <span class="n">strategy</span><span class="o">=</span><span class="n">KeyedRules</span><span class="p">(</span><span class="n">categories</span><span class="o">=</span><span class="n">CATS</span><span class="p">),</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>       <span class="n">parallel</span><span class="o">=</span><span class="n">TensorParallel</span><span class="p">(</span><span class="n">n_sections</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">route</span><span class="o">=</span><span class="n">category_of</span><span class="p">))</span>
 </code></pre></div>
+<p><code>TensorParallel</code> splits the <strong>artifact</strong> into disjoint sections, one per worker, so
+the merge is a conflict-free union. It needs a strategy with a fixed key space
+(<code>KeyedRules</code>; <code>AppendRules</code> content-addresses its keys and is refused), and
+<code>route=</code> maps a task to the artifact key its failure will edit so each worker only
+sees tasks it may act on. Out-of-section proposals are rejected and counted as
+<code>section-violation</code> in <a href="#what-evolve-returns"><code>result.outcomes()</code></a>. See
+<a href="../parallelism/">Parallelism</a>.</p>
+<p><code>PipelineParallel</code> is <strong>not</strong> an <code>evolve()</code> mode — it needs one artifact per stage
+and <code>evolve()</code> evolves one, so passing it raises. Its stage ordering and blame
+attribution live in <code>agentdescent.parallel.PipelineChain</code>.</p>
 <p>Or your own — implement <code>plan(n_workers, round_index, keys) -&gt; [WorkUnit]</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.parallel</span><span class="w"> </span><span class="kn">import</span> <span class="n">WorkUnit</span>
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
@@ -2068,7 +2106,16 @@ to a rate limit or a dropped connection:</p>
 <li><code>initial_state=</code> is ignored when the artifact already exists (a <code>RuntimeWarning</code>
   says so). Use a fresh <code>repo_path</code> to start over.</li>
 </ul>
-<p>Omit <code>repo_path</code> and the ledger is a scratch directory, cleaned up at exit.</p>
+<p>Omit <code>repo_path</code> and the ledger is a throwaway directory, removed when <code>evolve()</code>
+returns — not held until the interpreter exits, so a notebook or a parameter sweep
+does not accumulate one git repo per run. A process killed outright (SIGKILL, OOM)
+skips that cleanup; the next run in a fresh process collects anything older than a
+day.</p>
+<p>The ledger also runs git with <strong>its own configuration</strong>, ignoring your
+<code>~/.gitconfig</code> and <code>/etc/gitconfig</code>. These are the ledger's internal bookkeeping
+commits in a directory you never see — <code>commit.gpgsign = true</code> or a global
+<code>core.hooksPath</code> used to fail them, and with it the whole run, before a single
+task had executed.</p>
 <p>The engine returns <strong>partial results</strong> if the model backend fails mid-run (rate
 limit, credit exhaustion) — progress isn't lost.</p>
 <div class="admonition warning">
@@ -2083,6 +2130,39 @@ misread an experiment:</p>
 <p><code>error</code> means <em>the run ended because of this failure</em> — a transient error the
 workers retried past leaves it <code>None</code>. A <code>RuntimeWarning</code> is also emitted, so
 a failed run is never completely silent even at the default <code>verbose=False</code>.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Three failure categories, not two</p>
+<table>
+<thead>
+<tr>
+<th>category</th>
+<th>example</th>
+<th>what happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>caller contract</strong></td>
+<td><code>reward</code> returns <code>47</code>, <code>propose</code> returns an <code>int</code></td>
+<td>raises (<code>ContractError</code>) — the run is meaningless, so failing fast is the only useful answer</td>
+</tr>
+<tr>
+<td><strong>backend</strong></td>
+<td>429, dead endpoint, credit exhausted</td>
+<td>absorbed, retried, tolerated; ends the run only when nothing can make progress, and then <code>error</code> names it</td>
+</tr>
+<tr>
+<td><strong>ledger</strong></td>
+<td>a held <code>index.lock</code>, a full <code>$TMPDIR</code>, a killed <code>git</code></td>
+<td>ends the run, but still returns the artifact evolved so far with <code>error</code> naming git</td>
+</tr>
+</tbody>
+</table>
+<p>The third used to escape as a bare <code>GitError</code>, discarding a completed run —
+including when the failing call was only fetching the cosmetic
+<code>result.ledger_log</code>, which now degrades to <code>[]</code> rather than taking the result
+with it.</p>
 </div>
 <p><strong>Actor signatures are checked before the first rollout.</strong> <code>run</code> and <code>propose</code> are
 bound-tested up front, so a plain typo (a <code>propose</code> missing its <code>reward</code>
@@ -2138,9 +2218,9 @@ carries forward so early stopping still has something to compare.</p>
 agent, so it is a backend call — and the engine makes them in more places than is
 obvious: each round's measurement, the final measurement, and the aggregator's own
 accept/reject comparisons (<code>cheap_eval</code>, <code>eval_counts</code>, <code>oracle_eval</code>). A
-transient in any of them used to end the run. They all funnel through one memoised
-evaluation, which now retries there, so a retry re-runs only the task that
-actually failed and every call site is covered at once.</p>
+they all funnel through one memoised evaluation, which retries there — so a retry
+re-runs only the task that actually failed, and every call site is covered at
+once.</p>
 <p>The <strong>merger</strong> gets the same tolerance, and this matters more than it sounds: it
 scores the held-out set every sweep, so it calls the backend too. A single
 try/except around its loop made it a single point of failure that one transient
@@ -2201,17 +2281,15 @@ calls for a result reached at 69 — <strong>51% of the budget bought nothing</s
 <code>patience</code> counts <strong>merge sweeps</strong> (one drain-and-merge by the merger) rather
 than rounds.</p>
 </div>
-<div class="admonition warning">
-<p class="admonition-title">An abandoned straggler keeps running — and used to keep the process alive</p>
+<div class="admonition note">
+<p class="admonition-title">An abandoned straggler keeps running</p>
 <p>Python cannot kill a thread, so a rollout abandoned by <code>round_timeout</code> runs to
 completion in the background. The round is bounded; the <em>work</em> is not. Its late
 evidence carries the version it was built against, so the staleness filter
 judges it like any other stale diff rather than applying it to a newer artifact.</p>
-<p>The round used to run on a <code>ThreadPoolExecutor</code>, which registers an atexit hook
-that <strong>joins</strong> its workers — so <code>shutdown(wait=False)</code> bounded the round and not
-the program: a rollout wedged for 600 s returned from <code>evolve()</code> and then held
-the interpreter open. Rounds now use daemon threads (with a semaphore preserving
-<code>max_concurrency</code>), and the same case exits in <strong>4.5 s</strong>.</p>
+<p>Rounds run on daemon threads (with a semaphore preserving <code>max_concurrency</code>),
+so an abandoned rollout never holds the interpreter open at exit: a rollout
+wedged for 600 s still lets the process exit in <strong>4.5 s</strong>.</p>
 </div>
 <div class="admonition tip">
 <p class="admonition-title">Bound the barrier — <code>round_timeout</code></p>

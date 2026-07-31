@@ -312,6 +312,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Measured results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../architecture/" class="md-nav__link">
         
   
@@ -420,10 +447,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
             
   
   
@@ -441,8 +468,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -550,7 +577,7 @@
   <span class="md-ellipsis">
     
   
-    Customizable parallelism (DP/TP/PP)
+    Customizable parallelism (DP/TP)
   
 
     
@@ -692,10 +719,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" checked>
         
           
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
             
   
   
@@ -713,8 +740,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_8">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_9">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -936,6 +963,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#measured-searchqa-with-deepseek" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Measured — SearchQA with DeepSeek
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#making-it-measurable-hard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Making it measurable — --hard
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#run-it" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1032,7 +1081,7 @@
   <span class="md-ellipsis">
     
   
-    Usage & extending
+    Install, run, extend
   
 
     
@@ -1098,6 +1147,28 @@
     <span class="md-ellipsis">
       
         Plug-ins implemented
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#measured-searchqa-with-deepseek" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Measured — SearchQA with DeepSeek
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#making-it-measurable-hard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Making it measurable — --hard
       
     </span>
   </a>
@@ -1229,9 +1300,63 @@ repo and omitted from this minimal-but-faithful slice.</p>
 </tr>
 </tbody>
 </table>
+<h2 id="measured-searchqa-with-deepseek">Measured — SearchQA with DeepSeek<a class="headerlink" href="#measured-searchqa-with-deepseek" title="Permanent link">&para;</a></h2>
+<p><code>--steps 5 --provider openai --model deepseek-v4-flash</code>:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>full split</th>
+<th><code>--hard</code> subset</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>items</td>
+<td>120 train / 80 val / 80 test</td>
+<td>29 / 20 / 20 (69 of 280 kept)</td>
+</tr>
+<tr>
+<td>val hard-EM, before → after</td>
+<td>0.900 → 0.900</td>
+<td><strong>0.250 → 0.500</strong></td>
+</tr>
+<tr>
+<td>test hard-EM</td>
+<td>0.900</td>
+<td><strong>0.450</strong></td>
+</tr>
+<tr>
+<td>edits accepted / rejected</td>
+<td>0 / 1</td>
+<td>3 / 3</td>
+</tr>
+</tbody>
+</table>
+<p>On the full split the seed skill already answers 9 of 10, so a skill document has
+nothing to add and the strict gate accepts no edit.</p>
+<p><code>--hard</code> keeps the 69 questions of 280 that the seed skill gets <strong>wrong</strong>, and on
+those the skill document <strong>doubles</strong> hard-EM. The gate stays strict there too:
+3 of 6 proposed edits are still rejected.</p>
+<div class="admonition warning">
+<p class="admonition-title">The two columns are different benchmarks</p>
+<p>0.250 is not "worse than 0.900" — it is the score on a subset selected for
+being unsolved. Report which one you used.</p>
+</div>
+<h2 id="making-it-measurable-hard">Making it measurable — <code>--hard</code><a class="headerlink" href="#making-it-measurable-hard" title="Permanent link">&para;</a></h2>
+<p>SearchQA is saturated for a strong model, so the run above proves the gate works
+and nothing else. <code>--hard</code> keeps the dataset and drops the questions carrying no
+signal: one pass of the seed skill over a wider pool, keeping only what it gets
+<strong>wrong</strong>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.skillopt_skill_training<span class="w"> </span>--hard<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">    </span>--provider<span class="w"> </span>openai<span class="w"> </span>--model<span class="w"> </span>deepseek-v4-flash<span class="w"> </span>--steps<span class="w"> </span><span class="m">5</span><span class="w"> </span>--yes
+</code></pre></div>
+<p>That makes the <em>benchmark</em> harder, so its numbers are not comparable with numbers
+from the full split — say which you used. The underlying helper,
+<a href="../dataloader/"><code>select_hard</code></a>, works on any item list and any scorer.</p>
 <h2 id="run-it">Run it<a class="headerlink" href="#run-it" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.skillopt_skill_training<span class="w"> </span>--dry-run
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.skillopt_skill_training<span class="w"> </span>--model<span class="w"> </span>claude-haiku-4-5<span class="w"> </span>--lr<span class="w"> </span><span class="m">4</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.skillopt_skill_training<span class="w"> </span>--dry-run
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.skillopt_skill_training<span class="w"> </span>--model<span class="w"> </span>claude-haiku-4-5<span class="w"> </span>--lr<span class="w"> </span><span class="m">4</span>
 </code></pre></div>
 <p>Offline tests: <code>tests/test_skillopt_example.py</code>.</p>
 

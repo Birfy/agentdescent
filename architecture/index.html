@@ -11,7 +11,7 @@
       
       
       
-        <link rel="prev" href="../quickstart-skill/">
+        <link rel="prev" href="../results/">
       
       
         <link rel="next" href="../concepts/">
@@ -309,6 +309,33 @@
       
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Measured results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
     
   
   
@@ -561,10 +588,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
             
   
   
@@ -582,8 +609,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -691,7 +718,7 @@
   <span class="md-ellipsis">
     
   
-    Customizable parallelism (DP/TP/PP)
+    Customizable parallelism (DP/TP)
   
 
     
@@ -831,10 +858,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
         
           
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
             
   
   
@@ -852,8 +879,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_8">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1080,7 +1107,7 @@
   <span class="md-ellipsis">
     
   
-    Usage & extending
+    Install, run, extend
   
 
     
@@ -1262,17 +1289,17 @@ resistant to the three long tails.</p>
         direction TB
         S1[1. staleness filter η vs α] --&gt; S2[2. conflict resolution]
         S2 --&gt; S3[3. fusion tournament]
-        S3 --&gt; S4["4. Beta acceptance P(Δ&gt;0) &amp;gt; 1−δ"]
-        S4 --&gt; S5[5. commit CAS]
-        S5 --&gt; S6[6. dual-branch dev→stable]
-        S6 --&gt; S7[7. audit]
+        S3 --&gt; S7["4. audit gate (force_oracle)"]
+        S7 --&gt; S4["5. Beta acceptance P(Δ&gt;0) &amp;gt; 1−δ"]
+        S4 --&gt; S5[6. commit CAS]
+        S5 --&gt; S6[7. dual-branch dev→stable]
     end
     AG --&gt;|commit| LG["Ledger (git-backed)&lt;br/&gt;dev + stable branches"]
     LG --&gt;|broadcast changed artifact| W1
     LG --&gt;|broadcast| W2
     LG --&gt;|broadcast| WN
-    S7 -.-&gt;|Ĝ priority| AUD["AuditScheduler → Oracle"]
-    AUD -.-&gt;|spot-check| LG</code></pre>
+    S7 --&gt;|Ĝ priority| AUD["AuditScheduler → Oracle"]
+    AUD --&gt;|veto: oracle-rejected| OUT[dropped]</code></pre>
 <p>The same flow, with the design-doc section numbers annotated:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>                ┌──────────────────────────────────────────────┐
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>                │            TaskScheduler (UCB)                │  §5.2
@@ -1296,10 +1323,10 @@ resistant to the three long tails.</p>
 <a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>        │  1. staleness filter   η vs α  → ACCEPT/REBASE/DISCARD│  §4.2
 <a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>        │  2. conflict resolve   contradictions dropped         │  §4.3
 <a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>        │  3. fusion tournament  complementary diffs merged     │  §4.3
-<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>        │  4. Beta acceptance    P(Δ&gt;0) &gt; 1−δ                    │  §4.4
-<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>        │  5. commit             CAS (one artifact per merge)     │  §4.1
-<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>        │  6. dual-branch        dev → stable (EMA)              │  §4.5
-<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>        │  7. audit              submit merge to AuditScheduler  │  §5.3
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>        │  4. audit gate         oracle may VETO here            │  §5.3
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>        │  5. Beta acceptance    P(Δ&gt;0) &gt; 1−δ                    │  §4.4
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>        │  6. commit             CAS (one artifact per merge)     │  §4.1
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>        │  7. dual-branch        dev → stable, K clean rounds     │  §4.5
 <a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>        └───────────────────────────┬─────────────────────────┘
 <a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>                                     ▼
 <a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>                    Ledger  (git-backed, version-vectored)         §3.1
@@ -1310,7 +1337,14 @@ resistant to the three long tails.</p>
 <a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a>                    AuditScheduler (Ĝ) → Oracle spot-checks         §5.3
 </code></pre></div>
 <p>The three-layer <strong>verifier</strong> (rule / learned / oracle) is the evaluation backend
-the Aggregator calls at steps 1–4 (cheap) and step 7 (oracle, budgeted).</p>
+the Aggregator calls at steps 1–3 and 5 (cheap) and at step 4 (oracle, budgeted).</p>
+<div class="admonition note">
+<p class="admonition-title">The audit is a gate, not a spot-check</p>
+<p>It runs <em>before</em> the acceptance test and can return <code>oracle-rejected</code> outright,
+so it sits on the critical path of every merge that trips <code>force_oracle</code> — the
+diagrams used to place it after the commit with a dotted "spot-check" arrow,
+which reads as advisory when it holds a veto.</p>
+</div>
 <hr />
 <h2 id="3-component-responsibilities">3. Component responsibilities<a class="headerlink" href="#3-component-responsibilities" title="Permanent link">&para;</a></h2>
 <table>
@@ -1330,7 +1364,7 @@ the Aggregator calls at steps 1–4 (cheap) and step 7 (oracle, budgeted).</p>
 <tr>
 <td><strong>Ledger</strong></td>
 <td><a href="https://github.com/Birfy/agentdescent/blob/main/agentdescent/ledger.py"><code>ledger.py</code></a></td>
-<td>Git-backed store. Per-artifact integer versions form the version vector. CAS commits and <code>dev</code>/<code>stable</code> branches; <code>commit_atomic</code> (2PC across artifacts) is provided and tested but not used by any engine path today.</td>
+<td>Git-backed store. Per-artifact integer versions form the version vector. CAS commits and <code>dev</code>/<code>stable</code> branches; <code>commit_atomic</code> (2PC across artifacts) is provided and tested but not used by any engine path today. Runs git with an isolated config (no system/user <code>gitconfig</code>, no hooks, no signing) so a personal git preference cannot decide whether the ledger can write.</td>
 </tr>
 <tr>
 <td><strong>Aggregator</strong></td>
@@ -1345,7 +1379,7 @@ the Aggregator calls at steps 1–4 (cheap) and step 7 (oracle, budgeted).</p>
 <tr>
 <td><strong>Verifier</strong></td>
 <td><a href="https://github.com/Birfy/agentdescent/blob/main/agentdescent/verifier.py"><code>verifier.py</code></a></td>
-<td>rule (cheap subset), learned (noisy + uncertainty), oracle (ground truth, budgeted).</td>
+<td>rule (cheap subset), learned (noisy + uncertainty), oracle (ground truth, budgeted). The cheap subset is <strong>fixed for the run</strong>, so candidates ranked against each other are always scored on the same tasks; <code>evolve(cheap_eval_tasks=)</code> sizes it.</td>
 </tr>
 <tr>
 <td><strong>Schedulers</strong></td>
@@ -1447,6 +1481,10 @@ explicitly:</p>
 <li><strong>Verifier / posteriors</strong> — touched only by the single aggregator thread, so
   they need no locking.</li>
 </ul>
+<p>A ledger failure is its own category, distinct from a caller bug (<code>ContractError</code>,
+propagated) and a backend blip (absorbed and retried): it is infrastructure, it
+ends the run, and the drivers still return the artifact evolved so far rather than
+raising. See the failure-category table in <a href="../evolution/">evolution.md</a>.</p>
 <p>The GIL means threads don't give true CPU parallelism, but the <strong>pipeline
 overlap</strong> and every concurrency-control mechanism (CAS, version vectors,
 per-diff staleness, backpressure) are real — the same code shape drives a

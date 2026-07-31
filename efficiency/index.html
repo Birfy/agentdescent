@@ -312,6 +312,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Measured results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../architecture/" class="md-nav__link">
         
   
@@ -422,10 +449,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" checked>
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
             
   
   
@@ -443,8 +470,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_6">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_7">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -552,7 +579,7 @@
   <span class="md-ellipsis">
     
   
-    Customizable parallelism (DP/TP/PP)
+    Customizable parallelism (DP/TP)
   
 
     
@@ -659,6 +686,34 @@
       Table of contents
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#where-the-parallelism-actually-goes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the parallelism actually goes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Where the parallelism actually goes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-other-axis-eval_concurrency" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The other axis — eval_concurrency
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
       
         <li class="md-nav__item">
   <a href="#threads-and-the-gil-is-this-really-parallel" class="md-nav__link">
@@ -772,10 +827,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
         
           
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
             
   
   
@@ -793,8 +848,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_8">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1021,7 +1076,7 @@
   <span class="md-ellipsis">
     
   
-    Usage & extending
+    Install, run, extend
   
 
     
@@ -1059,6 +1114,34 @@
       Table of contents
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#where-the-parallelism-actually-goes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the parallelism actually goes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Where the parallelism actually goes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-other-axis-eval_concurrency" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The other axis — eval_concurrency
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
       
         <li class="md-nav__item">
   <a href="#threads-and-the-gil-is-this-really-parallel" class="md-nav__link">
@@ -1124,6 +1207,90 @@ processes or hosts would.</p>
 </code></pre></div>
 <p>Source: <a href="https://github.com/Birfy/agentdescent/blob/main/examples/efficiency.py"><code>examples/efficiency.py</code></a>.</p>
 <hr />
+<h2 id="where-the-parallelism-actually-goes">Where the parallelism actually goes<a class="headerlink" href="#where-the-parallelism-actually-goes" title="Permanent link">&para;</a></h2>
+<p>Overlap depends almost entirely on your latency <em>distribution</em>, not on your worker
+count. Measured with a fixed-latency stub backend, so the only variable is the
+framework:</p>
+<table>
+<thead>
+<tr>
+<th>what changes</th>
+<th>overlap with <code>n_workers=8</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>uniform latency</td>
+<td><strong>5.9×</strong></td>
+</tr>
+<tr>
+<td>moderate latency spread</td>
+<td>4.8×</td>
+</tr>
+<tr>
+<td>high spread</td>
+<td>3.3×</td>
+</tr>
+<tr>
+<td>heavy tail (a reasoning model)</td>
+<td><strong>2.4×</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Latency variance is the cost, and the round barrier is where you pay it.</strong> The
+aggregator is a synchronisation point, so a round lasts as long as its <em>slowest</em>
+worker — and a reasoning model's latency has a long tail (a short answer and a
+2000-token deliberation are the same call). 2.4× is what a barrier costs on a
+heavy-tailed distribution; a real HotpotQA run measured 2.0×, squarely in this
+regime.</p>
+<p>Removing the barrier is what <a href="../evolution/#the-barrier-free-runtime-async_evolve"><code>asynchronous=True</code></a>
+is for, and it recovers part of it — <strong>2.4× → 3.0×</strong> on the same heavy-tailed
+workload — because workers stop waiting for the merge.</p>
+<h3 id="the-other-axis-eval_concurrency">The other axis — <code>eval_concurrency</code><a class="headerlink" href="#the-other-axis-eval_concurrency" title="Permanent link">&para;</a></h3>
+<p>Every gate goes through one held-out evaluation: each round's measurement and, far
+more often, the aggregator's per-candidate comparisons. That is a second pool,
+independent of <code>n_workers</code>. Same work, varying only <code>eval_concurrency</code>:</p>
+<table>
+<thead>
+<tr>
+<th><code>eval_concurrency</code></th>
+<th>wall-clock</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1 (serial)</td>
+<td>193.6 s</td>
+<td>—</td>
+</tr>
+<tr>
+<td>4</td>
+<td>96.7 s</td>
+<td><strong>2.0× faster</strong></td>
+</tr>
+<tr>
+<td>8 (default)</td>
+<td>90.0 s</td>
+<td><strong>2.2× faster</strong></td>
+</tr>
+<tr>
+<td>16</td>
+<td>89.0 s</td>
+<td>saturated — the held-out set is only 12 tasks</td>
+</tr>
+</tbody>
+</table>
+<p>It saturates once <code>eval_concurrency</code> reaches the size of your held-out set, so
+raise it if yours is large and your provider allows the concurrency.</p>
+<div class="admonition tip">
+<p class="admonition-title">Which knob to reach for</p>
+<p><code>n_workers</code> buys <strong>rollout</strong> parallelism, <code>eval_concurrency</code> buys <strong>gate</strong>
+parallelism, and they are independent. If a run feels slower than its worker
+count suggests, the gate is the usual reason — and if it still does after
+that, the barrier is meeting a heavy tail, which is what <code>asynchronous=True</code>
+addresses.</p>
+</div>
 <h2 id="threads-and-the-gil-is-this-really-parallel">Threads and the GIL — is this <em>really</em> parallel?<a class="headerlink" href="#threads-and-the-gil-is-this-really-parallel" title="Permanent link">&para;</a></h2>
 <p>Yes, for this workload, and no amount of arguing about the GIL settles it — so
 here it is measured. Eight threads, one pool, two workloads: a real API round

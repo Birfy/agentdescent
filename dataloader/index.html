@@ -312,6 +312,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Measured results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../architecture/" class="md-nav__link">
         
   
@@ -422,10 +449,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" checked>
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
             
   
   
@@ -443,8 +470,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_6">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_7">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -603,6 +630,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#turning-a-saturated-benchmark-into-one-with-headroom-select_hard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Turning a saturated benchmark into one with headroom — select_hard
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -654,7 +692,7 @@
   <span class="md-ellipsis">
     
   
-    Customizable parallelism (DP/TP/PP)
+    Customizable parallelism (DP/TP)
   
 
     
@@ -794,10 +832,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
         
           
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
             
   
   
@@ -815,8 +853,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_8">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1043,7 +1081,7 @@
   <span class="md-ellipsis">
     
   
-    Usage & extending
+    Install, run, extend
   
 
     
@@ -1131,6 +1169,17 @@
     <span class="md-ellipsis">
       
         Design notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#turning-a-saturated-benchmark-into-one-with-headroom-select_hard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Turning a saturated benchmark into one with headroom — select_hard
       
     </span>
   </a>
@@ -1307,6 +1356,25 @@ splits (e.g. SearchQA's <code>train</code> / <code>validation</code>), build the
   imports this — it is a convenience for examples and experiments, exactly like
   <code>agentdescent.agents</code>.</li>
 </ul>
+<h2 id="turning-a-saturated-benchmark-into-one-with-headroom-select_hard">Turning a saturated benchmark into one with headroom — <code>select_hard</code><a class="headerlink" href="#turning-a-saturated-benchmark-into-one-with-headroom-select_hard" title="Permanent link">&para;</a></h2>
+<p>A benchmark your model already solves cannot demonstrate a skill: there is nothing
+to add, and a correct implementation commits nothing. Measured with
+<code>deepseek-v4-flash</code>, three of the shipped ports sit at 0.9–1.0 out of the box
+(FiNER-139 at the default concept count, SearchQA, MGSM).</p>
+<p>Swapping datasets breaks fidelity to the paper being ported, so the other lever is
+to keep the dataset and drop the items that carry no signal:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.dataloader</span><span class="w"> </span><span class="kn">import</span> <span class="n">select_hard</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">items</span> <span class="o">=</span> <span class="n">select_hard</span><span class="p">(</span><span class="n">items</span><span class="p">,</span> <span class="k">lambda</span> <span class="n">it</span><span class="p">:</span> <span class="n">score</span><span class="p">(</span><span class="n">solve</span><span class="p">(</span><span class="n">it</span><span class="p">),</span> <span class="n">it</span><span class="p">[</span><span class="s2">&quot;answer&quot;</span><span class="p">]))</span>
+</code></pre></div>
+<p>One baseline pass, scored concurrently, keeping whatever falls below <code>threshold</code>
+(default: anything not fully correct). <code>keep=</code> caps the result; if nothing fails
+it returns the full set rather than nothing.</p>
+<div class="admonition warning">
+<p class="admonition-title">This changes the benchmark, not just the sample</p>
+<p>Numbers from a hard subset are not comparable with numbers from the full set.
+Report which one you used — <a href="../results/">Measured results</a> does.</p>
+</div>
 
 
 

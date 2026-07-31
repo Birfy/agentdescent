@@ -25,7 +25,7 @@
     
     
       
-        <title>Customizable parallelism (DP/TP/PP) - AgentDescent</title>
+        <title>Customizable parallelism (DP/TP) - AgentDescent</title>
       
     
     
@@ -76,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#customizable-parallelism-dp-tp-pp" class="md-skip">
+        <a href="#customizable-parallelism-dp-tp" class="md-skip">
           Skip to content
         </a>
       
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Customizable parallelism (DP/TP/PP)
+              Customizable parallelism (DP/TP)
             
           </span>
         </div>
@@ -312,6 +312,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Measured results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../architecture/" class="md-nav__link">
         
   
@@ -422,10 +449,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" checked>
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
             
   
   
@@ -443,8 +470,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_6">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_7">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -561,7 +588,7 @@
   <span class="md-ellipsis">
     
   
-    Customizable parallelism (DP/TP/PP)
+    Customizable parallelism (DP/TP)
   
 
     
@@ -579,7 +606,7 @@
   <span class="md-ellipsis">
     
   
-    Customizable parallelism (DP/TP/PP)
+    Customizable parallelism (DP/TP)
   
 
     
@@ -794,10 +821,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
         
           
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
             
   
   
@@ -815,8 +842,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_8">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1043,7 +1070,7 @@
   <span class="md-ellipsis">
     
   
-    Usage & extending
+    Install, run, extend
   
 
     
@@ -1157,15 +1184,24 @@
   
 
 
-<h1 id="customizable-parallelism-dp-tp-pp">Customizable parallelism (DP / TP / PP)<a class="headerlink" href="#customizable-parallelism-dp-tp-pp" title="Permanent link">&para;</a></h1>
+<h1 id="customizable-parallelism-dp-tp">Customizable parallelism (DP / TP)<a class="headerlink" href="#customizable-parallelism-dp-tp" title="Permanent link">&para;</a></h1>
 <blockquote>
 <p><strong>Plugs into <a href="../evolution/"><code>evolve</code></a> via</strong> <code>parallel=DataParallel()</code> (or
-<code>TensorParallel</code> / <code>PipelineParallel</code> / your own).</p>
+<code>TensorParallel</code> / your own).</p>
 </blockquote>
 <p>The parallelism <em>method</em> — how a round of work is partitioned across workers — is
-<strong>pluggable</strong>. Pick one of the three classic paradigms, or implement the
-<code>ParallelStrategy</code> protocol yourself. This is the design's DP/TP/PP mapping
-(design spec §8) made selectable.</p>
+<strong>pluggable</strong>. Pick a paradigm, or implement the <code>ParallelStrategy</code> protocol
+yourself. This is the design's DP/TP mapping (design spec §8) made selectable.</p>
+<div class="admonition warning">
+<p class="admonition-title">PP is a standalone primitive, not an <code>evolve()</code> mode</p>
+<p><code>evolve()</code> evolves a <strong>single</strong> <code>artifact_id</code>; pipeline parallelism needs one
+artifact per stage. <code>evolve(parallel=PipelineParallel(...))</code> therefore
+<strong>raises</strong> — it used to be accepted and quietly ignored, handing every worker
+the whole task list (strictly worse than the DP default, with no signal). The
+PP machinery is still available directly as
+<a href="https://github.com/Birfy/agentdescent/blob/main/agentdescent/parallel.py"><code>PipelineChain</code></a>
+— stage ordering, <code>blame</code>, counterfactual-replay pairs.</p>
+</div>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.parallelism
 </code></pre></div>
 <p>Source:
@@ -1200,32 +1236,47 @@ PP/TP, which stage/section) a worker owns that round.</p>
 <td>diffs merged (fuse)</td>
 </tr>
 <tr>
-<td><strong><code>TensorParallel(n_sections)</code></strong> (TP)</td>
+<td><strong><code>TensorParallel(n_sections, keys=, route=)</code></strong> (TP)</td>
 <td>one hot artifact <strong>split into disjoint sections</strong>; each worker owns a section</td>
 <td>union — conflict-free <em>by construction</em></td>
 </tr>
-<tr>
-<td><strong><code>PipelineParallel(stages)</code></strong> (PP)</td>
-<td>artifacts form a <strong>dependency chain</strong>; each worker drives one stage</td>
-<td>downstream failure blames the earliest failing stage</td>
-</tr>
 </tbody>
 </table>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.parallel</span><span class="w"> </span><span class="kn">import</span> <span class="n">DataParallel</span><span class="p">,</span> <span class="n">TensorParallel</span><span class="p">,</span> <span class="n">PipelineParallel</span>
+<p><code>TensorParallel</code> needs two things beyond the section count:</p>
+<ul>
+<li><strong><code>keys=</code></strong> — the artifact's key space, which is what the sections partition.
+  <code>evolve()</code> fills it in from the strategy when the strategy declares one
+  (<code>KeyedRules</code> does), so you rarely pass it by hand.</li>
+<li><strong><code>route=</code></strong> — <code>task_id -&gt; artifact key</code>, so each worker is handed exactly the
+  tasks whose edits land in its own section. Optional but wanted: without it a
+  worker gets a data-parallel shard and most of what it proposes falls outside its
+  own section.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.parallel</span><span class="w"> </span><span class="kn">import</span> <span class="n">DataParallel</span><span class="p">,</span> <span class="n">TensorParallel</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">strategy</span> <span class="o">=</span> <span class="n">TensorParallel</span><span class="p">(</span><span class="n">n_sections</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>            <span class="c1"># or DataParallel(), or ...</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">plan</span> <span class="o">=</span> <span class="n">strategy</span><span class="o">.</span><span class="n">plan</span><span class="p">(</span><span class="n">n_workers</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">round_index</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">keys</span><span class="o">=</span><span class="n">my_keys</span><span class="p">)</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">strategy</span> <span class="o">=</span> <span class="n">TensorParallel</span><span class="p">(</span><span class="n">n_sections</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">keys</span><span class="o">=</span><span class="n">CATEGORIES</span><span class="p">,</span> <span class="n">route</span><span class="o">=</span><span class="n">category_of</span><span class="p">)</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">plan</span> <span class="o">=</span> <span class="n">strategy</span><span class="o">.</span><span class="n">plan</span><span class="p">(</span><span class="n">n_workers</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">round_index</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">keys</span><span class="o">=</span><span class="n">task_ids</span><span class="p">)</span>   <span class="c1"># TASK ids</span>
 </code></pre></div>
-<p>Running the example (fill a <code>key -&gt; value</code> artifact; all converge, TP has zero
-collisions by construction):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>              strategy  final acc  items  collisions
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>     DP (DataParallel)      1.000     24           0
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>   TP (TensorParallel)      1.000     24           0   static disjoint sections
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a> block (BlockParallel)      1.000     24           0
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>PP (PipelineParallel): pipeline complete=1.000, 3 stages,
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    downstream-failure blame -&gt; earliest failing stage = &#39;lit-review&#39;
+<div class="admonition danger">
+<p class="admonition-title"><code>plan()</code> receives task ids, not artifact keys</p>
+<p>This is the distinction TP got wrong. <code>plan()</code> is handed the round's <strong>task
+ids</strong>; the <strong>section</strong> is about the <em>artifact</em>. They used to be conflated —
+<code>plan</code> filtered task ids through <code>section_of</code> while <code>evolve()</code> enforced the
+section against the artifact keys the resulting diff wrote — two unrelated key
+spaces, so <strong>75–88% of every worker's proposals were discarded</strong> with no
+report at all.</p>
+</div>
+<p>Running the example, through <code>evolve()</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>                                strategy  proposed  delivered  out-of-section  keys  reward
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>                          DataParallel()         4          4               0     4   1.000
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>               BlockParallel()  [custom]        14         14               0     4   1.000
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>             TensorParallel(4, keys=...)         8          4               4     4   1.000
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>  TensorParallel(4, keys=..., route=...)         4          4               0     4   1.000
 </code></pre></div>
+<p>The third row is TP being honest: half of what those workers proposed was for a
+section they do not own, so it was rejected <strong>and counted</strong>. The fourth row routes
+tasks to their section owner, so TP delivers everything DP does while keeping the
+merge a conflict-free union.</p>
 <h2 id="writing-your-own">Writing your own<a class="headerlink" href="#writing-your-own" title="Permanent link">&para;</a></h2>
 <p>Implement <code>plan</code> and you have a new parallelism method — no other change:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentdescent.parallel</span><span class="w"> </span><span class="kn">import</span> <span class="n">WorkUnit</span>
@@ -1241,7 +1292,9 @@ collisions by construction):</p>
 <p><code>isinstance(BlockParallel(), ParallelStrategy)</code> is <code>True</code> structurally — pass it
 anywhere a strategy is accepted.</p>
 <p>TP additionally provides <a href="https://github.com/Birfy/agentdescent/blob/main/agentdescent/parallel.py"><code>TensorParallelMerge</code></a>
-(union + a consistency reviewer that rejects out-of-section edits), and PP
+(union + a consistency reviewer that rejects out-of-section edits) and
+<code>assign_key_sections</code> (a balanced <strong>partition</strong> of a declared key space — unlike
+<code>section_of</code>, which is a hash bucket and can leave a section owning nothing). PP
 provides <a href="https://github.com/Birfy/agentdescent/blob/main/agentdescent/parallel.py"><code>PipelineChain</code></a>
 (<code>blame</code> + counterfactual-replay pairs) — see <a href="../concepts/#7-parallel-paradigms-dp-tp-pp">Concepts §7</a>.</p>
 <h2 id="what-each-paradigm-actually-enforces-in-evolve">What each paradigm actually enforces in <code>evolve()</code><a class="headerlink" href="#what-each-paradigm-actually-enforces-in-evolve" title="Permanent link">&para;</a></h2>
@@ -1264,28 +1317,33 @@ provides <a href="https://github.com/Birfy/agentdescent/blob/main/agentdescent/p
 <tr>
 <td><strong>TP</strong></td>
 <td>✅ <code>section</code></td>
-<td>a worker's diff is <strong>rejected if it touches a key outside its section</strong>, which is what makes the union conflict-free. Without that check TP was only differently-sharded DP: every worker could edit the same hot key</td>
+<td>a worker's diff is <strong>rejected if it touches a key outside its section</strong>, which is what makes the union conflict-free — and every rejection is counted as <code>section-violation</code> in <a href="../evolution/"><code>result.outcomes()</code></a></td>
 </tr>
 <tr>
 <td><strong>PP</strong></td>
-<td>❌ <code>stage</code></td>
-<td>ignored. <code>evolve()</code> evolves <strong>one</strong> <code>artifact_id</code>, so there is no artifact chain for stages to walk; <code>PipelineParallel</code> there only changes task sharding</td>
+<td>⛔ refused</td>
+<td><code>evolve()</code> raises. It evolves <strong>one</strong> <code>artifact_id</code>, so there is no artifact chain for stages to walk</td>
 </tr>
 </tbody>
 </table>
-<p>So <code>parallel=TensorParallel(n_sections=4)</code> genuinely gives tensor parallelism
-through <code>evolve()</code>. Pipeline parallelism does not: its <code>blame</code> /
-counterfactual-replay machinery lives in
-<a href="https://github.com/Birfy/agentdescent/blob/main/agentdescent/parallel.py"><code>PipelineChain</code></a>
-and is exercised by <code>examples/parallelism.py</code> and the tests, not by the engine.
-Evolving a genuine dependency chain would need <code>evolve()</code> to take several
-artifacts, which it does not.</p>
+<p><code>evolve()</code> also validates the TP pairing <strong>before the first rollout</strong>, because an
+incompatible one used to be discovered a silently-dropped diff at a time:</p>
+<ul>
+<li>a strategy with <strong>no declared key space</strong> (<code>AppendRules</code> content-addresses its
+  keys, so a proposal's section is unpredictable) is refused, naming the fix;</li>
+<li><code>n_sections</code> greater than the number of keys is refused — a section owning
+  nothing means a worker that can never commit. <code>SingleSlot</code> has exactly one key,
+  so it cannot be tensor-parallelised at all.</li>
+</ul>
 <div class="admonition note">
-<p class="admonition-title">Out-of-section edits are dropped, not merged</p>
-<p>A rejected TP proposal is simply not turned into evidence — the worker moves
-on. That is the intended semantics (the section owner will propose it), but it
-does mean a strategy whose proposals ignore sections will appear to make no
-progress under TP. Have <code>propose</code> target the keys the worker owns.</p>
+<p class="admonition-title">Out-of-section edits are rejected — and reported</p>
+<p>A rejected TP proposal is not turned into evidence; the worker moves on and
+the section owner will propose it instead. That is the intended semantics, but
+it means a strategy whose proposals ignore sections spends rollouts for
+nothing. <code>result.outcomes()["section-violation"]</code> is how you see it — without
+that count, a TP run discarding most of its work looked exactly like one whose
+reflector had nothing useful to say, and those need opposite fixes. Pass
+<code>route=</code> to remove the waste entirely.</p>
 </div>
 <h2 id="parallel-vs-the-async-runtime"><code>parallel=</code> vs the async runtime<a class="headerlink" href="#parallel-vs-the-async-runtime" title="Permanent link">&para;</a></h2>
 <p><code>parallel=</code> decides <strong>how one round's tasks are split</strong> across workers; it is
@@ -1300,13 +1358,13 @@ orthogonal to <strong>whether rounds have a barrier</strong>:</p>
 <div class="admonition warning">
 <p class="admonition-title">The async path does its own sharding</p>
 <p><code>async_evolve</code> shards the train tasks round-robin across its worker threads and
-<strong>ignores <code>parallel=</code></strong> — so DP is what you get, and <code>TensorParallel</code> /
-<code>PipelineParallel</code> have no effect there. <code>max_concurrency</code> is likewise a
+<strong>ignores <code>parallel=</code></strong> — so DP is what you get, and <code>TensorParallel</code> has no
+effect there. <code>max_concurrency</code> is likewise a
 sync-path knob (async concurrency is <code>n_workers</code>). Use the synchronous path
 when you want a specific partitioning.</p>
-<p>Passing either one to <code>evolve(asynchronous=True)</code> now raises a
-<code>RuntimeWarning</code> naming it. It used to be dropped in silence, which is the
-worse failure: the run <em>looked</em> tensor-parallel and was plain DP.</p>
+<p>Passing either one to <code>evolve(asynchronous=True)</code> raises a <code>RuntimeWarning</code>
+naming the ignored argument, so a run never silently behaves differently from
+how it reads.</p>
 </div>
 <p>So a run picks <em>both</em> a partition (<code>parallel=</code>) and a schedule (sync
 <code>max_concurrency</code> vs barrier-free <code>asynchronous</code>). See

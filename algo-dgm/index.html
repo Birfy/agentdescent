@@ -312,6 +312,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Measured results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../architecture/" class="md-nav__link">
         
   
@@ -420,10 +447,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
             
   
   
@@ -441,8 +468,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -550,7 +577,7 @@
   <span class="md-ellipsis">
     
   
-    Customizable parallelism (DP/TP/PP)
+    Customizable parallelism (DP/TP)
   
 
     
@@ -692,10 +719,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" checked>
         
           
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
             
   
   
@@ -713,8 +740,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_8">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_9">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1003,6 +1030,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#measured-surrogate-objective" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Measured — surrogate objective
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#run-it" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1043,7 +1081,7 @@
   <span class="md-ellipsis">
     
   
-    Usage & extending
+    Install, run, extend
   
 
     
@@ -1120,6 +1158,17 @@
     <span class="md-ellipsis">
       
         Plug-ins implemented
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#measured-surrogate-objective" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Measured — surrogate objective
       
     </span>
   </a>
@@ -1254,6 +1303,36 @@ plug in the actual Docker harness.</p>
 </tr>
 </tbody>
 </table>
+<h2 id="measured-surrogate-objective">Measured — surrogate objective<a class="headerlink" href="#measured-surrogate-objective" title="Permanent link">&para;</a></h2>
+<p><code>--generations 4 --provider openai --model deepseek-v4-flash</code>:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>resolve rate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>val, before → after</td>
+<td>0.000 → <strong>0.300</strong></td>
+</tr>
+<tr>
+<td>test (held out, never seen by selection)</td>
+<td>0.200</td>
+</tr>
+</tbody>
+</table>
+<p>Archive: 4 agents (keep-all). The best lineage reached generation 3 with
+capabilities <code>context-retrieval</code>, <code>dependency-resolver</code>, <code>diff-minimization</code>,
+<code>regression-test-runner</code>.</p>
+<div class="admonition warning">
+<p class="admonition-title">This is the surrogate, not SWE-bench</p>
+<p>The objective is a capability-cover stand-in; real DGM evaluates on SWE-bench
+Verified inside Docker, which this example does not run. What is faithful is
+the <strong>archive, the selection rule and the staged escalation</strong> — the numbers
+above measure those mechanics, not coding ability.</p>
+</div>
 <h2 id="run-it">Run it<a class="headerlink" href="#run-it" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.dgm_self_improve<span class="w">                      </span><span class="c1"># runs offline (surrogate)</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.dgm_self_improve<span class="w"> </span>--generations<span class="w"> </span><span class="m">12</span><span class="w"> </span>--archive<span class="w"> </span>keep_all

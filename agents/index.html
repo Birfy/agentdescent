@@ -312,6 +312,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Measured results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../architecture/" class="md-nav__link">
         
   
@@ -422,10 +449,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" checked>
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
             
   
   
@@ -443,8 +470,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_6">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_7">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -693,7 +720,7 @@
   <span class="md-ellipsis">
     
   
-    Customizable parallelism (DP/TP/PP)
+    Customizable parallelism (DP/TP)
   
 
     
@@ -833,10 +860,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
         
           
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
             
   
   
@@ -854,8 +881,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_8">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1082,7 +1109,7 @@
   <span class="md-ellipsis">
     
   
-    Usage & extending
+    Install, run, extend
   
 
     
@@ -1268,34 +1295,15 @@ completion into whatever task interface they need.</p>
 </code></pre></div>
 <p><code>claude()</code> accepts a <code>client=</code> to reuse an existing <code>anthropic.Anthropic</code>
 instance, and forwards extra kwargs to <code>messages.create</code>.</p>
-<div class="admonition warning">
-<p class="admonition-title">Give a reasoning model room, or it returns nothing</p>
+<div class="admonition tip">
+<p class="admonition-title">Give a reasoning model room</p>
 <p>A reasoning model spends its budget on internal reasoning <em>before</em> emitting
 visible text, so too small a <code>max_tokens</code> yields an <strong>empty completion</strong>, not a
-short answer. The engine reads an empty proposal as "nothing worth changing",
-so the run looks like it cannot learn while the reflector never actually spoke.</p>
-<p>Measured on <code>deepseek-v4-flash</code> with the standard reflection prompt:</p>
-<table>
-<thead>
-<tr>
-<th><code>max_tokens</code></th>
-<th>empty replies</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>1024</td>
-<td><strong>4 of 8</strong></td>
-</tr>
-<tr>
-<td>3000</td>
-<td>0 of 8</td>
-</tr>
-</tbody>
-</table>
-<p>Both adapters therefore default to <strong>4096</strong>. You are billed for tokens
-<em>generated</em>, not for the cap, so a generous limit costs nothing — and an empty
-reflection now emits a <code>RuntimeWarning</code> naming this as the likely cause.</p>
+short answer. Measured on <code>deepseek-v4-flash</code> with the standard reflection
+prompt: at <code>max_tokens=1024</code>, 4 of 8 replies came back empty; at 3000, none did.</p>
+<p>Both adapters default to <strong>4096</strong>. You are billed for tokens <em>generated</em>, not
+for the cap, so a generous limit costs nothing — and an empty reflection emits
+a <code>RuntimeWarning</code> naming this as the likely cause.</p>
 </div>
 <h2 id="what-did-the-run-cost-usage">What did the run cost? — <code>Usage</code><a class="headerlink" href="#what-did-the-run-cost-usage" title="Permanent link">&para;</a></h2>
 <p>A <code>Completion</code> is <code>prompt -&gt; text</code>, so the token counts the providers <em>do</em> return
@@ -1444,11 +1452,9 @@ same OfficeQA example runs on OpenHands, Claude Code, or a bare API model.</p>
 <p class="admonition-title">The inline path is a fallback, not an equivalent</p>
 <p>Measured on three real OfficeQA items (documents of 266–390 KB) with
 <code>document_agent(openai_compatible(model="deepseek-v4-flash"))</code>: <strong>1 of 3
-correct</strong>, 249k prompt tokens, and two answers came back <em>empty</em> — because at
-the default <code>inline_chars=200_000</code> roughly half of each document never reached
-the model, and the figure sometimes lived in the half that was dropped. A
-<code>RuntimeWarning</code> now says so whenever truncation happens, since an empty answer
-otherwise looks like a model failure rather than a missing input.</p>
+correct</strong>, because at <code>inline_chars=200_000</code> roughly half of each document
+never reaches the model. Truncation emits a <code>RuntimeWarning</code> so a short answer
+is never mistaken for a model failure.</p>
 <p>If the material is bigger than a comfortable prompt, give the adapter a
 workspace agent — it reads the file itself and nothing is dropped.</p>
 </div>

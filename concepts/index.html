@@ -312,6 +312,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Measured results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../architecture/" class="md-nav__link">
         
   
@@ -611,10 +638,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
             
   
   
@@ -632,8 +659,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -741,7 +768,7 @@
   <span class="md-ellipsis">
     
   
-    Customizable parallelism (DP/TP/PP)
+    Customizable parallelism (DP/TP)
   
 
     
@@ -881,10 +908,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
         
           
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
             
   
   
@@ -902,8 +929,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_8">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1130,7 +1157,7 @@
   <span class="md-ellipsis">
     
   
-    Usage & extending
+    Install, run, extend
   
 
     
@@ -1495,10 +1522,9 @@ half of it is what <code>evolve()</code> actually implements.</p>
 re-filing it into the trajectory pool. <strong>Nothing in the library reads the pool
 back</strong> — so treat it as a diagnostic ring of recent rejections, not a queue
 that feeds later rounds.</p>
-<p>It is also <em>bounded</em> (<code>SETTLED_MAX_CARDS=256</code>, <code>SETTLED_MAX_CHARS=2M</code>, oldest
-evicted). It used to be unbounded, which leaked exactly the payloads the trust
-region exists to reject: 500 oversized diffs from a runaway reflector retained
-<strong>250 MB</strong> that no code path could ever read.</p>
+<p>It is <em>bounded</em> (<code>SETTLED_MAX_CARDS=256</code>, <code>SETTLED_MAX_CHARS=2M</code>, oldest
+evicted), so a long run cannot accumulate the oversized diffs the trust region
+rejects.</p>
 </div>
 <h3 id="34-async_ratio-roll-flash-the-global-lag-budget">3.4 async_ratio (ROLL Flash) — the global lag budget<a class="headerlink" href="#34-async_ratio-roll-flash-the-global-lag-budget" title="Permanent link">&para;</a></h3>
 <p>In the async runtime, a worker refreshes its snapshot only once head has drifted
@@ -1557,6 +1583,11 @@ artifacts don't starve). Then, in order:</p>
    contradicts.</li>
 <li><strong>Fusion tournament</strong> — complementary diffs are fused (model-soup analogy)
    and run against the individual candidates on held-out data; the best wins.</li>
+<li><strong>Audit gate</strong> — the candidate is submitted to the AuditScheduler, and a
+   high-blast-radius or low-trust one is forced through the oracle, which can
+   <strong>veto it here</strong> (<code>oracle-rejected</code>) before the acceptance test runs. <strong>The
+   optimizer audits itself</strong> — as a blocking gate on the accept path, not a
+   post-commit spot-check.</li>
 <li><strong>Statistical acceptance</strong> — commit only if <code>P(Δ &gt; 0) &gt; 1 − δ</code> under a Beta
    posterior comparison of candidate vs base, <strong>not</strong> a point threshold. <code>δ</code>
    anneals with version (LR decay); a trust-region caps diff size.</li>
@@ -1564,12 +1595,11 @@ artifacts don't starve). Then, in order:</p>
    also implements <code>commit_atomic</code>, a 2PC across artifacts for a
    contract-breaking diff that must land with its adapters, but the reference
    aggregator buckets per artifact and no engine path uses it.)</li>
-<li><strong>Dual-branch promotion</strong> — <code>dev → stable</code> every <em>K</em> accepted commits
-   (EMA-style confirmation). Production workers ride <code>stable</code>; explorers ride
+<li><strong>Dual-branch promotion</strong> — <code>dev → stable</code> after <em>K</em> <strong>regression-free
+   rounds</strong> on dev (EMA-style confirmation). A commit restarts the clock, so the
+   artifact most likely to be promoted is the one that has <em>stopped</em> changing
+   because nothing beats it. Production workers ride <code>stable</code>; explorers ride
    <code>dev</code>.</li>
-<li><strong>Audit</strong> — the merge decision is itself submitted to the AuditScheduler;
-   high-blast-radius or low-trust merges are forced through the oracle. <strong>The
-   optimizer audits itself.</strong></li>
 </ol>
 <div class="admonition info">
 <p class="admonition-title">Why a statistical test, not a threshold</p>
@@ -1601,9 +1631,25 @@ mechanism:</p>
   <code>evolve()</code> as <a href="../evolution/#task-selection-which-rollout-to-spend"><code>DifficultyWeighted</code></a>
   task sampling. The design also calls for a <strong>tail canary set</strong> inside held-out
   eval; that is <strong>not implemented</strong> — held-out is one undifferentiated split.</li>
-<li><strong>L-value (signal layer)</strong> — most diffs are marginal, a few are high-value
+<li>
+<p><strong>L-value (signal layer)</strong> — most diffs are marginal, a few are high-value
   refactors. The <strong>AuditScheduler</strong> spends the scarce oracle budget by
-  <code>blast_radius × uncertainty / trust</code>.</li>
+  <code>blast_radius × uncertainty / trust</code>, where <em>trust</em> is how often the cheap layer
+  has agreed with the full held-out set. That agreement is measured on <strong>every</strong>
+  merge and costs nothing (the acceptance test already scores both on the full
+  set), which is what makes the gate reachable: trust used to be written only
+  <em>inside</em> the branch it gates, so an artifact below <code>blast_radius 0.5</code> could
+  never earn an audit — measured at the default 0.2, <code>oracle_calls_used</code> was 0 for
+  a whole run.</p>
+<div class="admonition warning">
+<p class="admonition-title">The priority queue has no consumer</p>
+<p><code>AuditScheduler.submit</code> ranks merges by <code>Ĝ</code> into a bounded heap, and
+nothing in the engines pops it. The audit that actually runs is the inline
+<code>force_oracle</code> gate in the merge pipeline, which reads trust but not the
+queue. Treat the queue as a priority <em>model</em> — the ordering a fuller
+system would spend a background budget against — not as work in flight.</p>
+</div>
+</li>
 </ul>
 <hr />
 <h2 id="6-governance-blast-radius-decides-parallelism">6. Governance: blast radius decides parallelism<a class="headerlink" href="#6-governance-blast-radius-decides-parallelism" title="Permanent link">&para;</a></h2>
@@ -1662,11 +1708,17 @@ work is partitioned and recombined.</p>
   structure into disjoint sections; each worker owns a section, so edits are
   conflict-free <strong>by construction</strong> and the merge degrades to concatenation plus
   a lightweight consistency reviewer (the all-reduce analogue). For a few
-  super-hot artifacts only.</li>
+  super-hot artifacts only. The sections partition the <strong>artifact's</strong> key space,
+  which is a different thing from the tasks a worker rolls out — conflating the
+  two is what made TP silently discard most of its proposals; <code>route=</code> maps one
+  onto the other. See <a href="../parallelism/">Parallelism</a>.</li>
 <li><strong>PP (pipeline parallel)</strong> — artifacts form a dependency chain
   (<code>lit-review → mol-engine → hpc-submit</code>); each stage has its own worker, and a
   downstream failure back-propagates blame to the earliest failing upstream
-  stage (shared with the counterfactual-replay attribution).</li>
+  stage (shared with the counterfactual-replay attribution). <strong>Not an <code>evolve()</code>
+  mode</strong>: the engine evolves one artifact and PP needs one per stage, so
+  <code>evolve(parallel=PipelineParallel(...))</code> raises. <code>PipelineChain</code> provides the
+  stage ordering and blame attribution as a standalone primitive.</li>
 </ul>
 
 

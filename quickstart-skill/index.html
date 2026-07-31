@@ -14,7 +14,7 @@
         <link rel="prev" href="..">
       
       
-        <link rel="next" href="../architecture/">
+        <link rel="next" href="../results/">
       
       
         
@@ -425,6 +425,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Measured results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../architecture/" class="md-nav__link">
         
   
@@ -533,10 +560,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
             
   
   
@@ -554,8 +581,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -663,7 +690,7 @@
   <span class="md-ellipsis">
     
   
-    Customizable parallelism (DP/TP/PP)
+    Customizable parallelism (DP/TP)
   
 
     
@@ -803,10 +830,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
         
           
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
             
   
   
@@ -824,8 +851,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_8">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1052,7 +1079,7 @@
   <span class="md-ellipsis">
     
   
-    Usage & extending
+    Install, run, extend
   
 
     
@@ -1318,16 +1345,12 @@ are easy to get wrong:</p>
 </tr>
 </tbody>
 </table>
-<div class="admonition warning">
-<p class="admonition-title">A dataset's answer column is often not the answer</p>
-<p>GSM8K's <code>answer</code> is the whole worked solution ending in <code>#### 72</code>. Parsing
-that as a bare number fails — and it fails <strong>silently</strong>: every item scores 0,
-which reads as a hopeless model rather than a scorer mismatch. Measured on
-real GSM8K, this was the difference between a reported <strong>0/7</strong> and the true
-<strong>7/7</strong>.</p>
-<p><code>last_number</code> therefore reads the gold the same way it reads the output, so
-<code>"72"</code>, <code>"#### 72"</code> and <code>"The answer is 72."</code> all work. A gold with no number
-in it at all now raises instead of scoring zero.</p>
+<div class="admonition tip">
+<p class="admonition-title">A dataset's answer column is often not just the answer</p>
+<p>GSM8K's <code>answer</code> is the whole worked solution, ending in <code>#### 72</code>.
+<code>last_number</code> reads the gold the same way it reads the output, so <code>"72"</code>,
+<code>"#### 72"</code> and <code>"The answer is 72."</code> all match. A gold with no number in it
+raises, rather than scoring every item zero.</p>
 </div>
 <h2 id="what-it-chooses-for-you">What it chooses for you<a class="headerlink" href="#what-it-chooses-for-you" title="Permanent link">&para;</a></h2>
 <p>All defaults, all overridable — pass any of them and yours wins:</p>
@@ -1339,7 +1362,7 @@ in it at all now raises instead of scoring zero.</p>
 <p>Early stopping is on so a small dataset does not buy eight rounds of nothing.</p>
 <h2 id="when-to-drop-to-evolve">When to drop to <code>evolve()</code><a class="headerlink" href="#when-to-drop-to-evolve" title="Permanent link">&para;</a></h2>
 <p>The moment you want something this does not express — a different artifact shape
-(<a href="../evolution/#2-the-evolution-rule--strategy"><code>strategy=</code></a>), a custom optimizer
+(<a href="../evolution/#2-the-evolution-rule-strategy"><code>strategy=</code></a>), a custom optimizer
 (<a href="../aggregator/"><code>aggregator_factory=</code></a>), a multi-step agent as <code>run=</code>. You can
 also get there gradually: every one of those is just a keyword argument here,
 because they pass straight through.</p>

@@ -312,6 +312,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Measured results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../architecture/" class="md-nav__link">
         
   
@@ -420,10 +447,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
             
   
   
@@ -441,8 +468,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -550,7 +577,7 @@
   <span class="md-ellipsis">
     
   
-    Customizable parallelism (DP/TP/PP)
+    Customizable parallelism (DP/TP)
   
 
     
@@ -692,10 +719,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" checked>
         
           
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
             
   
   
@@ -713,8 +740,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_8">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_9">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -941,6 +968,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#datasets-dataset-officeqafinqa" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Datasets — --dataset officeqa|finqa
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#run-it" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1065,7 +1103,7 @@
   <span class="md-ellipsis">
     
   
-    Usage & extending
+    Install, run, extend
   
 
     
@@ -1164,6 +1202,17 @@
     <span class="md-ellipsis">
       
         Dataset caveat
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#datasets-dataset-officeqafinqa" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Datasets — --dataset officeqa|finqa
       
     </span>
   </a>
@@ -1418,9 +1467,34 @@ in <a href="../agents/#running-the-openhands-backend">Connecting agents &amp; LL
 <h2 id="dataset-caveat">Dataset caveat<a class="headerlink" href="#dataset-caveat" title="Permanent link">&para;</a></h2>
 <p>The full OfficeQA is HF-<strong>gated</strong> (<code>databricks/officeqa</code>, set <code>HF_TOKEN</code>); absent
 that the example loads the repo's <strong>bundled 12-row sample</strong>.</p>
+<h2 id="datasets-dataset-officeqafinqa">Datasets — <code>--dataset officeqa|finqa</code><a class="headerlink" href="#datasets-dataset-officeqafinqa" title="Permanent link">&para;</a></h2>
+<p>OfficeQA is <strong>HF-gated</strong> (<code>databricks/officeqa</code>: an accepted licence plus
+<code>HF_TOKEN</code>). Without that access the example uses <strong>FinQA</strong>
+(<code>dreamerdeo/finqa</code>, ungated) — the same shape, a financial document plus a
+numeric answer to locate and compute, at 60 items with ~4 KB documents that a
+model without tools can read directly.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.evoskill_skill_discovery<span class="w"> </span>--dataset<span class="w"> </span>finqa<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">    </span>--provider<span class="w"> </span>openai<span class="w"> </span>--model<span class="w"> </span>deepseek-v4-flash<span class="w"> </span>--iterations<span class="w"> </span><span class="m">5</span><span class="w"> </span>--yes
+</code></pre></div>
+<p>Measured: val <strong>0.487 → 0.573</strong>, held-out <strong>test 0.617</strong>, one skill discovered.
+The skill it induced is about numeric presentation, which is what the scorer
+rewards:</p>
+<blockquote>
+<p><em>"When a percentage appears in a table, round your answer to the same number of
+decimal places shown in that table... compute the unrounded value first, then
+round once at the end to the required precision."</em></p>
+</blockquote>
+<p>The run header states which dataset it loaded.</p>
+<div class="admonition note">
+<p class="admonition-title">FinQA does not reproduce the retrieval challenge</p>
+<p>OfficeQA's difficulty is finding one figure inside a 272 KB bulletin, which is
+what makes a <em>tool-using</em> agent worth having. FinQA's documents fit in a
+prompt, so it exercises the discovery loop but not the retrieval problem. For
+that, use OfficeQA with <code>--backend openhands|toolloop|claude-code</code>.</p>
+</div>
 <h2 id="run-it">Run it<a class="headerlink" href="#run-it" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.evoskill_skill_discovery<span class="w"> </span>--dry-run
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.evoskill_skill_discovery<span class="w"> </span>--model<span class="w"> </span>claude-haiku-4-5<span class="w"> </span>--backend<span class="w"> </span>toolloop
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.evoskill_skill_discovery<span class="w"> </span>--dry-run
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>python<span class="w"> </span>-m<span class="w"> </span>examples.evoskill_skill_discovery<span class="w"> </span>--model<span class="w"> </span>claude-haiku-4-5<span class="w"> </span>--backend<span class="w"> </span>toolloop
 </code></pre></div>
 <p>Offline tests: <code>tests/test_evoskill_example.py</code>, <code>tests/test_backends.py</code>.</p>
 
