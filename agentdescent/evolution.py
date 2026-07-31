@@ -156,6 +156,39 @@ def _expected_block(task: "Task", show_meta: bool, limit: int) -> str:
     return f"\nWhat the scorer expected (task metadata):\n{text}\n"
 
 
+def tasks_from(rows, prompt: str = "prompt", gold: str = "gold",
+               id: Optional[str] = None, **meta_keys: str) -> List["Task"]:
+    """Turn a list of dicts -- a dataset -- into :class:`Task` objects.
+
+    The same six lines everyone writes after loading a dataset, including the
+    ``enumerate`` for ids and the ``meta`` dict the scorers and the reflector both
+    read.
+
+        rows  = hf_rows("openai/gsm8k", config="main", split="train", limit=64)
+        tasks = tasks_from(rows, prompt="question", gold="answer")
+
+    ``prompt`` and ``gold`` name the columns. ``id`` names a column to use as the
+    task id; without it rows are numbered. Extra keyword arguments map more
+    columns into ``meta`` (``difficulty="level"`` puts ``row["level"]`` at
+    ``meta["difficulty"]``), which is useful because the reflector sees ``meta``.
+    """
+    out: List[Task] = []
+    for i, row in enumerate(rows):
+        if prompt not in row:
+            raise KeyError(
+                f"row {i} has no {prompt!r} column; it has {sorted(row)}. "
+                f"Pass prompt= to name the question column.")
+        meta = {"gold": row[gold]} if gold in row else {}
+        for name, column in meta_keys.items():
+            if column in row:
+                meta[name] = row[column]
+        out.append(Task(id=str(row[id]) if id else str(i),
+                        prompt=str(row[prompt]), meta=meta))
+    if not out:
+        raise ValueError("tasks_from() got no rows")
+    return out
+
+
 def reflector(complete: Completion, template: str = _PROPOSE_TMPL,
               show_meta: bool = True) -> Propose:
     """Use any model as the *reflector* for an agent you already have.
@@ -402,9 +435,25 @@ class EvolvingArtifact:
         return tuple(sorted(self.state.items()))
 
     def score(self, tasks: Sequence[Task]) -> float:
+        """Mean reward over ``tasks``, evaluated concurrently.
+
+        This is the hot path and it used to be a sequential generator sum. Every
+        gate in the system goes through it -- each round's held-out measurement and,
+        far more often, the aggregator's per-candidate comparisons -- so with N
+        candidates a round paid N x len(tasks) rollouts *one at a time*, while the
+        workers that produced those candidates ran in parallel. Measured on
+        HotpotQA with a reasoning model, that made the merge, not the rollouts,
+        about 90% of a round's wall-clock.
+        """
         if not tasks or self._rt is None:
             return 0.0
-        return sum(self._rt.eval_one(self, t) for t in tasks) / len(tasks)
+        if len(tasks) == 1 or self._rt.eval_concurrency <= 1:
+            return sum(self._rt.eval_one(self, t) for t in tasks) / len(tasks)
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(
+                min(self._rt.eval_concurrency, len(tasks))) as pool:
+            scores = list(pool.map(lambda t: self._rt.eval_one(self, t), tasks))
+        return sum(scores) / len(scores)
 
     def cheap_eval(self, evidence: EvidenceCard) -> float:
         return self.score([t for t in evidence.trajectory_refs if isinstance(t, Task)])
@@ -418,6 +467,9 @@ class _Runtime:
     run: Run
     reward: Reward
     cache: _EvalCache
+    #: How many held-out tasks to evaluate at once. Memoised and lock-guarded, so
+    #: this is safe; 1 restores the old sequential behaviour.
+    eval_concurrency: int = 8
 
     #: Attempts per (artifact, task) evaluation before the failure is raised.
     #: Every evaluation the engine makes funnels through here -- a round's held-out

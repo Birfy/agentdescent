@@ -7,6 +7,21 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **The merge gate was serial, and it dominated the run.** `EvolvingArtifact.score`
+  summed a generator, so every held-out evaluation ran its tasks one at a time --
+  and the aggregator calls it once per candidate, so a round paid N x held-out
+  rollouts sequentially while the workers that produced those candidates ran in
+  parallel. Measured on HotpotQA with a reasoning model: **~25 min per round ->
+  ~5 min**. Evaluation is memoised and lock-guarded, so this is only a matter of
+  fanning it out (`_Runtime.eval_concurrency`, default 8; set 1 for the old
+  behaviour).
+- **`last_number` read the gold as a bare number and silently scored everything
+  zero.** A dataset's answer column is often the whole worked solution — GSM8K's
+  ends `#### 72` — and parsing that as a number fails, so *every* item scored 0.
+  The failure is invisible: it reads as a hopeless model, not a scorer mismatch.
+  Measured on real GSM8K with `deepseek-v4-flash`, this was the difference between
+  a reported **0/7** and the true **7/7**. The gold is now read the same way as the
+  output, and a gold containing no number at all raises instead of scoring zero.
 - **A transient during *merge decisions* ended a synchronous run.** The third
   unprotected backend call site, after the round and final scoring: the aggregator
   runs the agent for its own accept/reject comparisons (`cheap_eval`,
@@ -73,6 +88,25 @@ All notable changes to AgentDescent are documented here. The format follows
   is not there.
 
 ### Added
+- **`evolve_skill()` — a dataset to an evolved skill in one call.** Evolving a
+  skill needs three things that are genuinely yours: your data, how to score an
+  answer, and which model. Everything else was boilerplate everyone rewrote
+  identically — wrapping rows as `Task`s, the lambda that puts the skill in front
+  of the question, the same last-number regex, and a dozen knobs a first-time user
+  has no basis to choose. The same real program goes from **21 lines to 11**, and
+  from ten decisions to three. It is a thin wrapper: same engine, same
+  `EvolutionResult`, every default overridable, and any extra argument passes
+  straight through to `evolve()`. Measured end to end on 40 real HotpotQA items
+  with `deepseek-v4-flash`: held-out exact match **0.167 -> 0.583** in four rounds,
+  learning *"Respond with only the requested answer, omitting any extra
+  explanation or restatement."* -- exactly the failure it was shown.
+- **`agentdescent.rewards`** — `last_number`, `exact_match`, `contains`,
+  `numeric_close`. Ready-made scorers that get right the details that are easy to
+  get wrong: thousands separators, a trailing period, a model that answers in a
+  sentence.
+- **`tasks_from(rows, prompt=, gold=)`** — the six lines everyone writes after
+  loading a dataset, including the `enumerate` for ids and the `meta` dict that
+  both the scorers and the reflector read.
 - **A fault-injection harness in the suite (`tests/faults.py`).** Every resilience
   bug so far surfaced only under a real fault — a dead socket, a wedged thread, a
   process that would not exit — each found by a throwaway script that then

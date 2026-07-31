@@ -50,6 +50,8 @@ from .staleness import (
     ReflectiveStaleness,
     get_policy,
 )
+from . import rewards                      # agentdescent.rewards.last_number(...)
+from .skill import evolve_skill
 from .worker import Worker
 from .orchestrator import AgentDescent, RoundStat, run_fork_baseline
 from .agents import (

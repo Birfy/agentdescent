@@ -32,6 +32,7 @@ theme:
 
 nav:
   - Home: index.md
+  - Quickstart — dataset to skill: quickstart-skill.md
   - Architecture: architecture.md
   - Concepts: concepts.md
   - The evolve method: evolution.md

@@ -65,7 +65,33 @@ python -m examples.run_demo      # no API key needed
 
 ## Quickstart
 
-Runnable as-is — no API key, no dependencies:
+**Have a dataset? One call.** `evolve_skill` supplies the boilerplate — wrapping
+rows as tasks, the lambda that puts the skill in front of the question, the
+scorer, the knobs — and leaves you the three decisions that are actually yours:
+your data, how to score it, and which model.
+
+```python
+from agentdescent import evolve_skill
+from agentdescent.agents import openai_compatible
+from agentdescent.dataloader import hf_rows
+
+rows = hf_rows("hotpotqa/hotpot_qa", "validation", config="distractor", limit=40)
+
+result = evolve_skill(rows, model=openai_compatible(model="deepseek-v4-flash"),
+                      prompt="question", gold="answer", score="exact")
+
+print(result.rendered)        # the skill it learned
+print(result.final_reward)    # held-out reward
+print(result.outcomes())      # why it went that way
+```
+
+It is a thin wrapper over `evolve()` — same engine, same result object — and any
+extra argument passes straight through (`asynchronous=True`, a custom
+`strategy=`, your own `run=`). Drop to `evolve()` the moment you want something
+it does not express.
+
+<details>
+<summary>The same thing without the wrapper. Runnable as-is — no API key, no dependencies.</summary>
 
 ```python
 from agentdescent.evolution import Task, evolve
@@ -99,6 +125,8 @@ evolve(tasks, reward, agent=LLMAgent(openai_compatible(model="deepseek-v4-flash"
 evolve(tasks, reward, agent=LLMAgent(claude_code()))     # Claude Code CLI
 # ...or run barrier-free: evolve(..., asynchronous=True, async_ratio=3)
 ```
+
+</details>
 
 ## 📖 Documentation
 
