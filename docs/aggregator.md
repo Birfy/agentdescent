@@ -35,7 +35,7 @@ Deep dive on the *why*: [concepts §4](concepts.md#4-the-aggregator-a-discrete-s
 Keep the reference pipeline, change its knobs:
 
 ```python
-from agentdescent.aggregator import AggregatorConfig
+from agentdescent import AggregatorConfig
 
 evolve(tasks, reward, agent=agent, agg_config=AggregatorConfig(
     batch_trigger=2,      # fire a merge once this many proposals collect for an artifact
@@ -55,6 +55,24 @@ evolve(tasks, reward, agent=agent, agg_config=AggregatorConfig(
 | `alpha_head` / `alpha_tail` | staleness tolerance `α` (hot vs cold artifacts) |
 | `trust_region_ops` | diff-size cap (the trust region) |
 | `promote_after_k` | dev→stable after this many regression-free rounds (EMA) |
+| `anneal_half_life` | how fast the acceptance threshold tightens with version |
+| `accept_samples` | Monte-Carlo draws behind each acceptance decision |
+
+!!! note "`anneal_half_life` sets the shape of a long run"
+    `base_delta` was exposed; the half-life that turns it into the actual
+    threshold was a default argument inside `stats.annealed_delta`, reachable from
+    nothing a caller touches. It decides how quickly committing gets harder:
+
+    | artifact version | `P(Δ>0)` must exceed |
+    |---|---|
+    | 1 | 0.505 |
+    | 64 | 0.750 |
+    | 128 | 0.875 |
+    | 256 | 0.969 |
+    | 400+ | 0.990 (floor) |
+
+    Version counts *commits*, so a run with many small accepted diffs reaches the
+    floor much sooner than one with a few large ones.
 
 !!! tip "Making the cheap layer actually cheap — `evolve(cheap_eval_tasks=)`"
     The aggregator scores candidates twice for two different reasons, and only one
@@ -88,8 +106,8 @@ contract is two methods:
 
 ```python
 from typing import Protocol, List
-from agentdescent.evolvable import EvidenceCard
-from agentdescent.aggregator import MergeReport
+from agentdescent import EvidenceCard
+from agentdescent import MergeReport
 
 class AggregatorProtocol(Protocol):
     def ingest(self, card: EvidenceCard) -> None: ...     # a worker's diff + evidence
@@ -114,7 +132,7 @@ deps it owns — `(ledger, verifier, audit, config, staleness_policy)` — and
 returns any `AggregatorProtocol`:
 
 ```python
-from agentdescent.aggregator import Aggregator
+from agentdescent import Aggregator
 
 class StrictAggregator(Aggregator):
     def _tournament(self, artifact, diffs):

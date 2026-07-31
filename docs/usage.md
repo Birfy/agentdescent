@@ -107,7 +107,7 @@ those experiments, not to evolve your own artifact.
 ```python
 import tempfile
 from agentdescent.domains.router import make_task_universe
-from agentdescent.orchestrator import AgentDescent
+from agentdescent import AgentDescent
 
 universe = make_task_universe(seed=7)
 with tempfile.TemporaryDirectory() as repo:
@@ -118,9 +118,9 @@ with tempfile.TemporaryDirectory() as repo:
 
 ```python
 import tempfile
-from agentdescent.async_runtime import AsyncAgentDescent, AsyncConfig
+from agentdescent import AsyncAgentDescent, AsyncConfig
 from agentdescent.domains.router import make_task_universe
-from agentdescent.staleness import get_policy
+from agentdescent import get_policy
 
 universe = make_task_universe(seed=7)
 cfg = AsyncConfig(n_workers=6, async_ratio=4, target_accuracy=0.98, max_seconds=15.0)
@@ -166,7 +166,7 @@ with tempfile.TemporaryDirectory() as repo:
 ### Staleness policy
 
 ```python
-from agentdescent.staleness import get_policy
+from agentdescent import get_policy
 get_policy("full")        # accept stale diffs directly
 get_policy("guarded")     # version-gated (default)
 get_policy("reflective")  # always rebase + re-verify
@@ -185,7 +185,7 @@ Implement the protocol from `agentdescent/evolvable.py`
 ([reference: `RouterSkill`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/domains/router.py)):
 
 ```python
-from agentdescent.evolvable import Contract, Diff, EvidenceCard
+from agentdescent import Contract, Diff, EvidenceCard
 
 class MyArtifact:
     def __init__(self, id, state, version=1, blast_radius=0.2):

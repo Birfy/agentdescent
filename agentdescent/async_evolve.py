@@ -39,7 +39,7 @@ from typing import Callable, Dict, List, Optional
 from .evolution import (
     _safe_log,
     Agent, EvolutionResult, Propose, Reward, RoundInfo, Run, Strategy, Task, _tally,
-    _build_engine, _checked_proposal, _checked_reward,
+    SOLVED, _build_engine, _checked_proposal, _checked_reward,
 )
 from .aggregator import AggregatorConfig, check_reports
 from .evolvable import ContractError, EvidenceCard, vv_staleness
@@ -74,6 +74,7 @@ def async_evolve(
     aggregator_factory=None,
     oracle_budget: int = 200,
     cheap_eval_tasks: Optional[int] = None,
+    solved_threshold: float = SOLVED,
     shuffle: bool = False,
     seed: int = 0,
     self_verify: bool = True,
@@ -138,6 +139,9 @@ def async_evolve(
     cheap_eval_tasks:
         As in :func:`evolve`: how many held-out tasks the cheap layer scores when
         ranking candidates. ``None`` scores them all.
+    solved_threshold:
+        As in :func:`evolve`: the reward at which a task counts as solved and no
+        proposal is requested. Lower it for a graded scorer.
     shuffle, seed:
         As in :func:`evolve`: shuffle before the positional train/held-out split.
         Off by default.
@@ -250,7 +254,7 @@ def async_evolve(
                 output = eng.run(artifact.render(), task)
                 score = _checked_reward(eng.reward(task, output), task)
                 sampler.record(task.id, score)     # learn which tasks carry signal
-                if score < 0.999:
+                if score < solved_threshold:
                     proposal = _checked_proposal(
                         eng.propose(artifact.render(), task, output, score), task)
                     if proposal:

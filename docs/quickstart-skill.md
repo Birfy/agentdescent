@@ -16,7 +16,7 @@ every time.
 
 ```python
 from agentdescent import evolve_skill
-from agentdescent.agents import openai_compatible
+from agentdescent import openai_compatible
 from agentdescent.dataloader import hf_rows
 
 rows = hf_rows("hotpotqa/hotpot_qa", "validation", config="distractor", limit=40)
@@ -119,7 +119,7 @@ result = evolve_skill(rows, model=model, prompt="question", gold="answer",
 The two layers underneath are public, and useful on their own:
 
 ```python
-from agentdescent.evolution import tasks_from
+from agentdescent import tasks_from
 from agentdescent.rewards import last_number
 
 tasks = tasks_from(rows, prompt="question", gold="answer", difficulty="level")

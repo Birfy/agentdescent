@@ -6,8 +6,8 @@ evolves* and *the rules of evolution*, and it runs the parallel, merge-based loo
 is a **plug-in to a single `evolve()` parameter** — this page is the map.
 
 ```python
-from agentdescent.agents import claude
-from agentdescent.evolution import evolve, LLMAgent
+from agentdescent import claude
+from agentdescent import evolve, LLMAgent
 
 result = evolve(
     tasks,                                   # what to work on
@@ -27,8 +27,8 @@ agent, make it better". That needs three lines: adapt it, pick something to
 reflect with, say what evolves.
 
 ```python
-from agentdescent.agents import claude
-from agentdescent.evolution import SingleSlot, evolve, reflector
+from agentdescent import claude
+from agentdescent import SingleSlot, evolve, reflector
 
 def my_agent(system_prompt, question):        # whatever you already have
     ...
@@ -125,8 +125,8 @@ provides the provider-agnostic **completion** (`prompt -> text`); `LLMAgent`
 adapts a completion into the two-method actor.
 
 ```python
-from agentdescent.agents import claude, openai_compatible, from_callable
-from agentdescent.evolution import LLMAgent
+from agentdescent import claude, openai_compatible, from_callable
+from agentdescent import LLMAgent
 
 evolve(tasks, reward, agent=LLMAgent(claude(model="claude-haiku-4-5")))        # Claude
 evolve(tasks, reward, agent=LLMAgent(openai_compatible(model="glm-4.6")))      # GLM / OpenAI-style
@@ -168,7 +168,7 @@ aggregator resolves conflicts and fusion over.
     where you interpolate it.
 
 ```python
-from agentdescent.evolution import AppendRules, KeyedRules
+from agentdescent import AppendRules, KeyedRules
 
 evolve(tasks, reward, agent=agent, strategy=AppendRules())                       # default
 evolve(tasks, reward, agent=agent, strategy=KeyedRules(categories=["route","fmt"]))
@@ -183,7 +183,7 @@ evolve(tasks, reward, agent=agent, strategy=KeyedRules(categories=["route","fmt"
 Write your own by implementing three methods (`initial` / `render` / `to_diff`):
 
 ```python
-from agentdescent.evolvable import Diff
+from agentdescent import Diff
 
 class OneValue:                       # this is `SingleSlot`, written out longhand
     def initial(self): return {}
@@ -220,7 +220,7 @@ each is a real `Strategy` you can read and reuse:
 [`agentdescent.parallel`](parallelism.md).
 
 ```python
-from agentdescent.parallel import DataParallel, TensorParallel
+from agentdescent import DataParallel, TensorParallel
 
 evolve(tasks, reward, agent=agent, parallel=DataParallel())                # default (shard tasks)
 evolve(tasks, reward, agent=agent,                                         # disjoint sections
@@ -243,7 +243,7 @@ attribution live in `agentdescent.parallel.PipelineChain`.
 Or your own — implement `plan(n_workers, round_index, keys) -> [WorkUnit]`:
 
 ```python
-from agentdescent.parallel import WorkUnit
+from agentdescent import WorkUnit
 
 class Blocks:
     name = "block"
@@ -270,7 +270,7 @@ proposal, so no diff. The same is true of a task it can *never* solve. Only task
 somewhere in between carry a usable gradient (the GRPO zero-advantage argument).
 
 ```python
-from agentdescent.sampling import DifficultyWeighted, RoundRobin
+from agentdescent import DifficultyWeighted, RoundRobin
 
 evolve(tasks, reward, agent=agent, task_sampler=RoundRobin())          # default
 evolve(tasks, reward, agent=agent, task_sampler=DifficultyWeighted())  # focus the budget
@@ -344,7 +344,7 @@ resolution → fusion → statistical acceptance → transactional commit). `agg
 tunes the reference pipeline; `aggregator_factory` swaps in your own.
 
 ```python
-from agentdescent.aggregator import AggregatorConfig, Aggregator
+from agentdescent import AggregatorConfig, Aggregator
 
 # tune: keep the pipeline, change the knobs
 evolve(tasks, reward, agent=agent,
@@ -371,7 +371,7 @@ aggregator: **[the aggregator page](aggregator.md)**.
 *Module:* the Full / Guarded / Reflective policies.
 
 ```python
-from agentdescent.staleness import get_policy
+from agentdescent import get_policy
 
 evolve(tasks, reward, agent=agent, staleness_policy=get_policy("reflective"))
 ```
@@ -615,9 +615,9 @@ The one complete, runnable example threads every block above on a real dataset
 with a real LLM:
 
 ```python
-from agentdescent.agents import claude
-from agentdescent.evolution import evolve, LLMAgent, AppendRules
-from agentdescent.parallel import DataParallel
+from agentdescent import claude
+from agentdescent import evolve, LLMAgent, AppendRules
+from agentdescent import DataParallel
 
 result = evolve(
     tasks, reward,

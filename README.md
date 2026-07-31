@@ -72,7 +72,7 @@ your data, how to score it, and which model.
 
 ```python
 from agentdescent import evolve_skill
-from agentdescent.agents import openai_compatible
+from agentdescent import openai_compatible
 from agentdescent.dataloader import hf_rows
 
 rows = hf_rows("hotpotqa/hotpot_qa", "validation", config="distractor", limit=40)
@@ -94,7 +94,7 @@ it does not express.
 <summary>The same thing without the wrapper. Runnable as-is — no API key, no dependencies.</summary>
 
 ```python
-from agentdescent.evolution import Task, evolve
+from agentdescent import Task, evolve
 
 tasks = [Task(id=f"t{i}", prompt=f"item {i}") for i in range(12)]
 
@@ -118,7 +118,7 @@ Swap in a real model or agent by passing `agent=` instead of `run`/`propose` —
 they are all the same contract:
 
 ```python
-from agentdescent.agents import LLMAgent, claude, openai_compatible, claude_code
+from agentdescent import LLMAgent, claude, openai_compatible, claude_code
 
 evolve(tasks, reward, agent=LLMAgent(claude(model="claude-haiku-4-5")))
 evolve(tasks, reward, agent=LLMAgent(openai_compatible(model="deepseek-v4-flash")))
@@ -167,7 +167,7 @@ top: describe **what evolves** (a `Strategy`) and the **rules of evolution**
 (`run` / `reward` / `propose`), and it runs the parallel, merge-based loop.
 
 ```python
-from agentdescent.evolution import evolve, AppendRules
+from agentdescent import evolve, AppendRules
 
 result = evolve(
     tasks, reward,

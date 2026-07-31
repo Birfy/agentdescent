@@ -7,6 +7,60 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **The published version drifted five minor releases behind the code.**
+  `__version__` said `0.7.0`; `pyproject.toml` said `0.2.0`, and the build backend
+  reads the latter -- so every wheel, the PyPI page and the README badge were
+  wrong. The version is now single-sourced from `agentdescent.__version__` via
+  `dynamic = ["version"]`, and a test refuses a static version in `pyproject.toml`.
+- **The README imported `LLMAgent` from the wrong module** (`agentdescent.agents`;
+  it lives in `agentdescent.evolution`). Found by the new docs-import test the
+  moment it was written, which is the point of it.
+- **Trust-region rejections were counted as `all-stale`.** "My reflector emits
+  500 KB values and every one is dropped" and "my lag budget is too tight" are
+  opposite fixes, and only the second had a name. New `oversized` outcome.
+
+### Added
+- **`MergeOutcome`** -- a declared vocabulary for `MergeReport.category`, the keys
+  of `result.outcomes()`. They were bare string literals written at six different
+  return sites, so learning them meant reading `aggregator.py`; nothing could
+  validate a typo, and a custom aggregator had no contract to meet. Subclasses
+  `str`, so every existing lookup, comparison and format string is unchanged.
+- **`evolve(solved_threshold=)`** and the `SOLVED` constant. `0.999` was written
+  out four times -- twice in the drivers, once in a docstring, once as
+  `DifficultyWeighted`'s default, whose own docstring says it "mirrors the engine".
+  Right for a binary scorer; for a graded one (ROUGE, an LLM judge) nothing ever
+  reaches it, so *every* rollout asks the reflector to fix an answer that scored
+  0.95 and the run reports `below-threshold` as if the reflector were at fault.
+- **`AggregatorConfig.anneal_half_life` and `accept_samples`.** `base_delta` was
+  tunable but the half-life that turns it into the actual acceptance threshold was
+  a default argument buried in `stats.annealed_delta`, unreachable from the object
+  the docs call "tuning for the reference aggregator" -- and it sets the shape of a
+  whole run (the threshold goes 0.505 at v1, 0.875 at v128, floors at 0.99).
+- **A much wider top-level API.** `tasks_from` (documented, but importable only
+  from `agentdescent.evolution`), the whole error hierarchy (`ContractError` and
+  friends -- `evolve()` tells callers to distinguish a caller bug from a backend
+  failure, and the base class was not reachable from the package that says so),
+  the extension primitives `diffs_contradict` / `fuse_diffs` / `stable_hash` /
+  `assign_key_sections`, and `GitError` / `LedgerFailure` / `FAST_MAX` /
+  `FROZEN_IDS`.
+
+### Changed
+- **`domains.router.Task` is now `RouterTask`** (`Task` kept as an alias). It
+  shadowed `agentdescent.Task` -- disjoint fields, no relationship, same name --
+  and `orchestrator.py` and `worker.py` imported the other one, so a reader
+  following `AgentDescent -> Worker -> Task` from the architecture page landed on
+  the wrong class with no signal.
+- **The docs now use the top-level API**: 53 `from agentdescent import ...`
+  against 14 submodule imports, up from 3 against 63. `evolve` was never once
+  shown as `from agentdescent import evolve`, which is why the top-level surface
+  went untested and gaps in it went unnoticed. The remaining submodule imports are
+  the deliberately module-scoped ones (`dataloader`, `rewards`, `backends`,
+  `domains.router`).
+- A new test resolves **every** `from agentdescent... import` across all 70 doc
+  code blocks. 68 of them were executed by nothing at all, so a rename, a typo or
+  an unexported name was invisible.
+
+### Fixed
 - **The DGM port ran a staged-eval rung upstream does not have.** `DGM_outer.py`
   passes exactly two subsets to each self-improve attempt -- `small` (10) and
   `medium` (50), one `test_more_threshold = 0.4` -- and `big.json` (140) belongs
