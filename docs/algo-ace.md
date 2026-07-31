@@ -108,6 +108,17 @@ for 8 rounds over 57 tasks — well under a cent at `deepseek-v4-flash` prices.
     and it is why [`DifficultyWeighted` task sampling](evolution.md#task-selection-which-rollout-to-spend)
     exists — it steers rollouts toward the tasks that still fail.
 
+!!! note "Difficulty is set by `--top-k`, and the default is easy"
+    Those runs used the **40** most frequent concepts. At the default
+    `--top-k 10` the same example loads 37 tasks over a 10-way choice, and
+    `deepseek-v4-flash` scores **1.000 before and after** — nothing for the Curator
+    to add, so it curates one bullet and commits no change (42 calls, 2 min).
+
+    That is not a different result, it is a different problem: a 10-way
+    classification is far easier than a 40-way one. Raise `--top-k` if you want a
+    run with headroom. See [Measured results](results.md) for how many of the
+    shipped ports are saturated for a strong model at small sample sizes.
+
 ## Run it
 
 ```bash

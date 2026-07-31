@@ -135,9 +135,11 @@ Full docs live in [`docs/`](https://github.com/Birfy/agentdescent/tree/main/docs
 | Page | What's in it |
 |---|---|
 | [Home](https://github.com/Birfy/agentdescent/blob/main/docs/index.md) | Overview and 30-second tour |
+| **[Quickstart — dataset to skill](https://github.com/Birfy/agentdescent/blob/main/docs/quickstart-skill.md)** | **Start here.** One call: your data, how to score it, which model |
+| **[Measured results](https://github.com/Birfy/agentdescent/blob/main/docs/results.md)** | Every empirical claim with the setup that produced it — including where there was nothing to learn |
 | [Architecture](https://github.com/Birfy/agentdescent/blob/main/docs/architecture.md) | Components, data-flow diagram, the two runtimes, concurrency model |
 | [Concepts](https://github.com/Birfy/agentdescent/blob/main/docs/concepts.md) | The training↔RSI analogy, staleness, the aggregator, the three long tails, governance |
-| [Usage & extending](https://github.com/Birfy/agentdescent/blob/main/docs/usage.md) | Running the demos, config reference, **plugging in your own `Evolvable` domain** |
+|  [Install, run, extend](https://github.com/Birfy/agentdescent/blob/main/docs/usage.md) | Running the demos, config reference, **plugging in your own `Evolvable` domain** |
 | [Evolving anything](https://github.com/Birfy/agentdescent/blob/main/docs/evolution.md) | The general engine — evolve any artifact by writing its `Strategy` + `run`/`reward`/`propose` |
 | [Connecting agents & LLMs](https://github.com/Birfy/agentdescent/blob/main/docs/agents.md) | The provider-agnostic completion layer |
 | [Loading datasets](https://github.com/Birfy/agentdescent/blob/main/docs/dataloader.md) | The `agentdescent.dataloader` data layer — HF datasets-server + raw-file fetch, cached, dependency-free |
@@ -225,10 +227,24 @@ boundary is documented, never hidden.
 
 ## Efficiency (measured)
 
-[`examples/efficiency.py`](https://github.com/Birfy/agentdescent/blob/main/examples/efficiency.py) — **parallel scaling** is
-near-linear through 8 workers (~8.1x, efficiency ≈1.0), and the
-**async pipeline** is **~2.6-2.9× faster than a sync barrier** under heavy-tailed
-rollout latency (100% vs 40% worker utilization). See
+Two different numbers, and the difference is the point.
+
+**Worker scaling alone** ([`examples/efficiency.py`](https://github.com/Birfy/agentdescent/blob/main/examples/efficiency.py))
+is near-linear through 8 workers (~8.1×, efficiency ≈1.0), and the async pipeline
+is **~2.6–2.9× faster than a sync barrier** under heavy-tailed rollout latency.
+
+**A whole `evolve()` run** — rollouts *and* the merge gate — gets less, and how
+much less depends entirely on your latency distribution:
+
+| | overlap with `n_workers=8` |
+|---|---|
+| uniform latency | **5.9×** |
+| heavy tail (a reasoning model) | **2.4×** — the round barrier waits on the slowest worker |
+| ...same, barrier-free (`asynchronous=True`) | **3.0×** |
+
+A real HotpotQA run measured 2.0×, squarely in the heavy-tail regime. The gate is
+a separate axis: `eval_concurrency` took the same workload from **193.6 s to
+90.0 s**. Full breakdown in
 [docs/efficiency.md](https://github.com/Birfy/agentdescent/blob/main/docs/efficiency.md).
 
 ## The central analogy

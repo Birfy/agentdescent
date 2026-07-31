@@ -38,13 +38,18 @@ def test_readme_quickstart_needs_no_credentials():
         assert forbidden not in code, f"the quickstart should not require {forbidden}"
 
 
-def test_usage_guide_entry_point_example_runs():
+def test_evolution_guide_bring_your_own_agent_block_is_complete():
+    """The `evolve` page's headline snippet must at least name every plug-in.
+
+    It cannot be executed (it takes a real model), so this checks the thing that
+    actually broke before: a snippet that omits an argument the prose says is
+    required. The runnable no-credentials example is covered by the README tests.
+    """
     code = _first_python_block(
-        (ROOT / "docs" / "usage.md").read_text(),
-        "### The entry point")
-    ns: dict = {}
-    exec(compile(code, "usage-evolve", "exec"), ns)        # noqa: S102
-    assert ns["result"].final_reward > 0.0
+        (ROOT / "docs" / "evolution.md").read_text(),
+        "## Bring an agent you already have")
+    for required in ("run=", "propose=", "strategy=", "evolve("):
+        assert required in code, f"the quickstart snippet dropped {required}"
 
 
 def test_quickstart_defines_every_name_it_uses():

@@ -6,6 +6,15 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **`eval_concurrency=`** — how many held-out tasks a gate scores at once, the
+  merge half of the run's parallelism and independent of `n_workers`. It existed
+  only as a default on a private dataclass, which made it both unreachable and
+  *unmeasurable*: setting the class attribute silently did nothing, because a
+  dataclass bakes its defaults into the generated `__init__`. Measured on the same
+  workload: **193.6 s at 1, 96.7 s at 4, 90.0 s at 8**, saturating once it reaches
+  the size of the held-out set.
+
 ### Fixed
 - **The merge gate was serial, and it dominated the run.** `EvolvingArtifact.score`
   summed a generator, so every held-out evaluation ran its tasks one at a time --

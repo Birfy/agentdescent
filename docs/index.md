@@ -24,24 +24,64 @@ The one place the analogy *must* break defines the whole system:
 
 ---
 
+## Start here
+
+Have a dataset? That is the whole input.
+
+```python
+from agentdescent import evolve_skill
+from agentdescent.agents import openai_compatible
+from agentdescent.dataloader import hf_rows
+
+rows = hf_rows("hotpotqa/hotpot_qa", "validation", config="distractor", limit=40)
+
+result = evolve_skill(rows, model=openai_compatible(model="deepseek-v4-flash"),
+                      prompt="question", gold="answer", score="exact")
+
+print(result.rendered)        # the skill it learned
+```
+
+Run as written, that lifted held-out exact match from **0.167 to 0.583** and wrote
+*"Respond with only the requested answer, omitting any extra explanation or
+restatement."* — see [Quickstart](quickstart-skill.md) for the full measurement.
+
+Nothing is hidden: it builds ordinary arguments and calls
+[`evolve()`](evolution.md), which is where you go the moment you want more.
+
+```bash
+pip install agentdescent
+```
+
+---
+
 ## Where to go next
 
 <div class="grid cards" markdown>
 
--   :material-star-four-points: **[The `evolve` method](evolution.md)** — start here
+-   :material-rocket-launch: **[Quickstart — dataset to skill](quickstart-skill.md)** — start here
 
-    The one entry point. Each capability is a plug-in to one `evolve()`
-    parameter — this is the map, with an example per module.
+    One call, three decisions: your data, how to score it, which model. With the
+    measured result of running it.
+
+-   :material-star-four-points: **[The `evolve` method](evolution.md)**
+
+    The one entry point underneath. Every capability is a plug-in to one
+    `evolve()` parameter — this is the map, with an example per module.
 
 -   :material-robot: **[Complete example](skill-evolution.md)**
 
-    One end-to-end run — real dataset, real LLM, every module — evolving a skill
-    that lifts held-out accuracy.
+    The same thing written out by hand — real dataset, real LLM, every module
+    wired explicitly.
 
 -   :material-sitemap: **[Architecture](architecture.md)**
 
     How the components fit together and how a diff travels from a worker to a
     committed change.
+
+-   :material-chart-box: **[Measured results](results.md)**
+
+    Every empirical claim with the setup that produced it — including the four
+    benchmarks where the honest answer is "nothing to learn here".
 
 -   :material-lightbulb-on: **[Concepts](concepts.md)**
 
@@ -80,8 +120,8 @@ The one place the analogy *must* break defines the whole system:
 
 -   :material-speedometer: **[Efficiency experiments](efficiency.md)**
 
-    Measured parallel scaling (near-linear to 8 workers) and async tail-hiding
-    (~2.6-2.9× over a sync barrier).
+    Where the parallelism actually goes: 5.9× of 8 workers on uniform latency,
+    **2.4× on a reasoning model's heavy tail**, and which knob fixes which.
 
 </div>
 

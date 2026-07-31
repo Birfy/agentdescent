@@ -646,7 +646,8 @@ def _check_callable(fn: Callable, n_args: int, sig_hint: str) -> None:
 
 def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state,
                   blast_radius, artifact_id, held_out_frac, repo_path, agg_config,
-                  staleness_policy, aggregator_factory, oracle_budget) -> _Engine:
+                  staleness_policy, aggregator_factory, oracle_budget,
+                  eval_concurrency: int = 8) -> _Engine:
     """Wire the ledger, runtime, verifier and aggregator (shared by
     :func:`evolve` and :func:`~agentdescent.async_evolve.async_evolve`)."""
     import tempfile
@@ -694,7 +695,8 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     if not held_out:
         train, held_out = tasks[:-1], tasks[-1:]
 
-    runtime = _Runtime(run=run, reward=reward, cache=_EvalCache())
+    runtime = _Runtime(run=run, reward=reward, cache=_EvalCache(),
+                       eval_concurrency=eval_concurrency)
 
     def serialize(a: EvolvingArtifact) -> dict:
         return {"state": a.state, "blast_radius": a.blast_radius}
@@ -773,6 +775,7 @@ def evolve(
     target_reward: Optional[float] = None,
     patience: Optional[int] = None,
     max_worker_errors: int = 3,
+    eval_concurrency: int = 8,
     asynchronous: bool = False,
     async_ratio: int = 3,
     max_seconds: Optional[float] = None,
@@ -854,6 +857,12 @@ def evolve(
         Workers per round (``>= 1``).
     max_concurrency:
         How many of them actually run at once (see above).
+    eval_concurrency:
+        How many held-out tasks to score at once. Every gate goes through this --
+        each round's measurement and, far more often, the aggregator's
+        per-candidate comparisons -- so it is the merge half of the run's
+        parallelism, independent of ``n_workers``. ``1`` restores the old
+        sequential behaviour.
     max_worker_errors:
         How much total failure to tolerate before giving up -- and only while *no*
         worker has ever completed a rollout, which reads as a misconfiguration
@@ -958,6 +967,7 @@ def evolve(
             self_verify=self_verify, task_sampler=task_sampler,
             target_reward=target_reward, patience=patience,
             max_worker_errors=max_worker_errors,
+            eval_concurrency=eval_concurrency,
             on_round=on_round, verbose=verbose)
 
     if n_workers < 1:
@@ -977,7 +987,7 @@ def evolve(
         initial_state=initial_state, blast_radius=blast_radius, artifact_id=artifact_id,
         held_out_frac=held_out_frac, repo_path=repo_path, agg_config=agg_config,
         staleness_policy=staleness_policy, aggregator_factory=aggregator_factory,
-        oracle_budget=oracle_budget)
+        oracle_budget=oracle_budget, eval_concurrency=eval_concurrency)
     ledger, aggregator, strategy = eng.ledger, eng.aggregator, eng.strategy
     run, propose, reward = eng.run, eng.propose, eng.reward
     held_out, by_id, train_ids = eng.held_out, eng.by_id, eng.train_ids

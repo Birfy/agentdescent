@@ -65,6 +65,7 @@ def async_evolve(
     target_reward: Optional[float] = None,
     patience: Optional[int] = None,
     max_worker_errors: int = 3,
+    eval_concurrency: int = 8,
     held_out_frac: float = 0.4,
     repo_path: Optional[str] = None,
     agg_config=None,
@@ -115,6 +116,9 @@ def async_evolve(
         short for any sweep to finish.
     max_iters:
         Stop after this many worker rollouts in total (a budget, not a barrier).
+    eval_concurrency:
+        How many held-out tasks the merger scores at once. ``1`` restores the old
+        sequential behaviour.
     max_worker_errors:
         Consecutive failed rollouts before a worker that has *never* succeeded
         gives up. Workers that have succeeded at least once never retire; they
@@ -161,7 +165,7 @@ def async_evolve(
         initial_state=initial_state, blast_radius=blast_radius, artifact_id=artifact_id,
         held_out_frac=held_out_frac, repo_path=repo_path, agg_config=agg_config,
         staleness_policy=staleness_policy, aggregator_factory=aggregator_factory,
-        oracle_budget=oracle_budget)
+        oracle_budget=oracle_budget, eval_concurrency=eval_concurrency)
     if n_workers < 1:
         raise ValueError(f"n_workers must be >= 1, got {n_workers}")
     policy = staleness_policy or get_policy("guarded")
