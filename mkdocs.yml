@@ -41,7 +41,7 @@ nav:
     - Connecting agents & LLMs: agents.md
     - Loading datasets (the data layer): dataloader.md
     - The aggregator (the optimizer): aggregator.md
-    - Customizable parallelism (DP/TP/PP): parallelism.md
+    - Customizable parallelism (DP/TP): parallelism.md
     - Duration-aware scheduling: duration-scheduling.md
     - Efficiency experiments: efficiency.md
   - Complete example — skill evolution: skill-evolution.md

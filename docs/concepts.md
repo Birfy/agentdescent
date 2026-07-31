@@ -255,8 +255,14 @@ work is partitioned and recombined.
   structure into disjoint sections; each worker owns a section, so edits are
   conflict-free **by construction** and the merge degrades to concatenation plus
   a lightweight consistency reviewer (the all-reduce analogue). For a few
-  super-hot artifacts only.
+  super-hot artifacts only. The sections partition the **artifact's** key space,
+  which is a different thing from the tasks a worker rolls out — conflating the
+  two is what made TP silently discard most of its proposals; `route=` maps one
+  onto the other. See [Parallelism](parallelism.md).
 - **PP (pipeline parallel)** — artifacts form a dependency chain
   (`lit-review → mol-engine → hpc-submit`); each stage has its own worker, and a
   downstream failure back-propagates blame to the earliest failing upstream
-  stage (shared with the counterfactual-replay attribution).
+  stage (shared with the counterfactual-replay attribution). **Not an `evolve()`
+  mode**: the engine evolves one artifact and PP needs one per stage, so
+  `evolve(parallel=PipelineParallel(...))` raises. `PipelineChain` provides the
+  stage ordering and blame attribution as a standalone primitive.

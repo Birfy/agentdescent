@@ -239,6 +239,13 @@ class Strategy(Protocol):
     def to_diff(self, state: Dict[str, str], proposal: str, author: str,
                 base_version: int, target: str) -> Optional[Diff]: ...
 
+    # Optional. A strategy that knows, ahead of time, every key it can write should
+    # say so: that declared space is what tensor parallelism partitions into
+    # sections. A strategy that content-addresses its keys (AppendRules) has no
+    # such space, so it simply does not implement this -- and `evolve()` refuses to
+    # pair it with TP rather than silently dropping most of its proposals.
+    # def keys(self) -> Sequence[str]: ...
+
 
 @dataclass
 class AppendRules:
@@ -288,6 +295,14 @@ class SingleSlot:
     empty_render: str = "(no instruction yet)"
     min_chars: int = 1
 
+    def keys(self) -> Sequence[str]:
+        """The artifact is one slot, so the key space has exactly one member.
+
+        Declared so ``evolve()`` can reject ``TensorParallel`` up front: a single
+        key cannot be split into disjoint sections, so every worker but one would
+        be authorised for nothing."""
+        return [self.key]
+
     def initial(self) -> Dict[str, str]:
         return {self.key: self.initial_value} if self.initial_value else {}
 
@@ -313,6 +328,14 @@ class KeyedRules:
 
     categories: Sequence[str]
     title: str = "# Config (by category)"
+
+    def keys(self) -> Sequence[str]:
+        """The declared categories -- the key space tensor parallelism partitions.
+
+        Note that an *unrecognised* proposal still falls back to a content-addressed
+        key, which is outside this space; under TP those are reported as
+        ``section-violation`` rather than silently dropped."""
+        return list(self.categories)
 
     def initial(self) -> Dict[str, str]:
         return {}
@@ -538,6 +561,64 @@ def _reap_stale_scratch_repos(max_age: float = _SCRATCH_MAX_AGE) -> int:
     return removed
 
 
+def _resolve_sections(parallel, strategy) -> Dict[str, int]:
+    """Work out which artifact key belongs to which TP section, or refuse.
+
+    Tensor parallelism promises that workers edit disjoint sections of one hot
+    artifact, which is what makes the merge a conflict-free union. That is only
+    true if the sections partition the keys the **strategy actually writes** --
+    and the strategy is the only thing that knows them. A strategy that
+    content-addresses its keys (:class:`AppendRules`, whose keys are hashes of the
+    proposal text) has no fixed key space at all, so TP cannot constrain it: every
+    proposal would land in an arbitrary section and the ~(n-1)/n that missed the
+    worker's own would be discarded. That is what used to happen, silently.
+
+    Returns ``{}`` for non-TP strategies (nothing to enforce)."""
+    n_sections = getattr(parallel, "n_sections", None)
+    if n_sections is None:
+        return {}                       # not tensor-parallel
+    if n_sections < 1:
+        raise ValueError(f"n_sections must be >= 1, got {n_sections}")
+    keys = list(getattr(parallel, "keys", None) or [])
+    if not keys:
+        declared = getattr(strategy, "keys", None)
+        keys = list(declared()) if callable(declared) else []
+    name = type(strategy).__name__
+    if not keys:
+        raise ValueError(
+            f"TensorParallel needs the artifact's key space, and {name} does not "
+            f"declare one (its keys are content-addressed, so a proposal's section "
+            f"is unpredictable). Pass the keys explicitly -- "
+            f"TensorParallel(n_sections={n_sections}, keys=[...]) -- or use a "
+            f"strategy with a fixed key space (KeyedRules), or DataParallel.")
+    if n_sections > len(keys):
+        raise ValueError(
+            f"TensorParallel(n_sections={n_sections}) but {name} has only "
+            f"{len(keys)} key(s) ({sorted(keys)[:5]}), so {n_sections - len(keys)} "
+            f"section(s) would own nothing and the workers holding them could never "
+            f"commit. Lower n_sections to at most {len(keys)}, or use DataParallel.")
+    from .parallel import assign_key_sections
+    return assign_key_sections(keys, n_sections)
+
+
+def _reject_pipeline_parallel(parallel) -> None:
+    """PP is a multi-artifact paradigm; ``evolve()`` evolves exactly one artifact.
+
+    ``WorkUnit.stage`` -- the only thing distinguishing PP's units, since it hands
+    every worker the whole task list -- was never read by the driver, so passing
+    ``parallel=PipelineParallel(...)`` silently degraded to n_workers all rolling
+    out the same tasks: strictly worse than the default, with no signal. Say so."""
+    if type(parallel).__name__ == "PipelineParallel" or getattr(parallel, "name", "") == "PP":
+        raise ValueError(
+            "evolve() cannot run PipelineParallel: it evolves a single artifact_id, "
+            "while PP needs one artifact per stage. Passing it used to be accepted "
+            "and quietly ignored (every worker got the whole task list and the "
+            "stage was never read), which is worse than the DataParallel default. "
+            "The PP primitives are still usable directly -- see "
+            "agentdescent.parallel.PipelineChain for stage ordering and upstream "
+            "blame attribution.")
+
+
 def _safe_log(ledger: Ledger, limit: int = 40) -> List[str]:
     """``ledger.log()``, but never at the cost of the result.
 
@@ -679,8 +760,13 @@ class _Engine:
     scratch_repo: Optional[str] = None
 
     def cleanup(self) -> None:
-        """Remove the scratch ledger, if this call created one. Idempotent."""
+        """Remove the scratch ledger, if this call created one. Idempotent.
+
+        Close before deleting: a rollout abandoned on ``round_timeout`` keeps
+        running (Python cannot cancel a thread) and would otherwise commit into
+        the deleted directory, recreating it."""
         if self.scratch_repo:
+            self.ledger.close()
             shutil.rmtree(self.scratch_repo, ignore_errors=True)
             self.scratch_repo = None
 
@@ -872,8 +958,9 @@ def evolve(
 
     ``parallel`` (default :class:`~agentdescent.parallel.DataParallel`) is the
     parallelism method -- how each round's tasks are partitioned across the
-    ``n_workers``. Swap in ``TensorParallel`` / ``PipelineParallel`` or your own
-    :class:`~agentdescent.parallel.ParallelStrategy`.
+    ``n_workers``. Swap in :class:`~agentdescent.parallel.TensorParallel` or your
+    own :class:`~agentdescent.parallel.ParallelStrategy`. ``PipelineParallel`` is
+    refused: it needs one artifact per stage and this function evolves one.
 
     ``max_concurrency`` runs a round's ``n_workers`` **concurrently** (a thread
     pool), then the single ``aggregator.step()`` is the round barrier -- this is
@@ -904,7 +991,14 @@ def evolve(
     strategy:
         How the artifact is represented and how a proposal becomes a ``Diff``.
     parallel:
-        How a round's tasks are partitioned across workers (DP / TP / PP).
+        How a round's tasks are partitioned across workers. ``DataParallel``
+        (default) shards them; ``TensorParallel(n_sections, keys=, route=)`` also
+        gives each worker a disjoint **section of the artifact** and rejects
+        out-of-section edits -- counted as ``section-violation`` in
+        :meth:`EvolutionResult.outcomes`. The pairing is validated before the
+        first rollout: a strategy with no declared key space (``AppendRules``) or
+        fewer keys than sections is refused rather than silently dropping most of
+        its proposals. ``PipelineParallel`` raises (see above).
     task_sampler:
         **Which** task a worker rolls out next, from its shard. Defaults to
         :class:`~agentdescent.sampling.RoundRobin`; use
@@ -1051,9 +1145,14 @@ def evolve(
         raise ValueError(f"max_concurrency must be >= 1, got {max_concurrency}")
     parallel = parallel or DataParallel()
     sampler = task_sampler or RoundRobin()
-    # TP section enforcement (see _run_unit): n_sections comes from the strategy.
-    n_sections = getattr(parallel, "n_sections", 0) or 1
-    tp_rejected: List[tuple] = []
+    strategy = strategy or AppendRules()
+    # TP owns a *section of the artifact*, so it needs the artifact's key space --
+    # not the task ids `plan()` is handed. Resolve and validate it here, before any
+    # rollout: an incompatible pairing used to be discovered one diff at a time, by
+    # silently discarding it.
+    section_map = _resolve_sections(parallel, strategy)
+    _reject_pipeline_parallel(parallel)
+    section_violations = [0]
     tp_lock = threading.Lock()
     eng = _build_engine(
         tasks, reward, agent=agent, run=run, propose=propose, strategy=strategy,
@@ -1159,12 +1258,18 @@ def evolve(
             # comment: without this every worker could edit the same hot key and TP
             # degenerated into differently-sharded DP.
             if unit.section is not None:
-                from .parallel import section_of
                 outside = [k for k in diff.ops
-                           if section_of(k, n_sections) != unit.section]
+                           if section_map.get(k) != unit.section]
                 if outside:
+                    # Counted, not swallowed. These never reach the aggregator, so
+                    # no MergeReport can mention them: without this a TP run that
+                    # dropped most of its proposals was indistinguishable from one
+                    # whose reflector had nothing useful to say -- opposite fixes.
                     with tp_lock:
-                        tp_rejected.append((f"w{unit.worker}", outside[0]))
+                        section_violations[0] += 1
+                    if verbose:
+                        print(f"round {r:>3}  worker {unit.worker} proposed "
+                              f"{outside[0]!r}, outside its section {unit.section}")
                     return
             # The self-verify rollout doubles the cost of every proposal, so it is
             # opt-out here exactly as it is on the async path.
@@ -1299,8 +1404,13 @@ def evolve(
                 print(f"round {r:>3}  held-out unmeasurable, carrying last reward: "
                       f"{type(e).__name__}: {str(e)[:100]}")
             continue
+        reasons = _tally(reports)
+        with tp_lock:
+            if section_violations[0]:
+                reasons["section-violation"] = section_violations[0]
+                section_violations[0] = 0
         info = RoundInfo(r, round_reward, len(dev.state), committed, rejected,
-                         _tally(reports))
+                         reasons)
         history.append(info)
         # Early stopping: an LLM rollout costs money, so do not keep buying them
         # once the artifact has converged or clearly stalled.

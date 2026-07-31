@@ -1,12 +1,20 @@
-# Customizable parallelism (DP / TP / PP)
+# Customizable parallelism (DP / TP)
 
 > **Plugs into [`evolve`](evolution.md) via** `parallel=DataParallel()` (or
-> `TensorParallel` / `PipelineParallel` / your own).
+> `TensorParallel` / your own).
 
 The parallelism *method* — how a round of work is partitioned across workers — is
-**pluggable**. Pick one of the three classic paradigms, or implement the
-`ParallelStrategy` protocol yourself. This is the design's DP/TP/PP mapping
-(design spec §8) made selectable.
+**pluggable**. Pick a paradigm, or implement the `ParallelStrategy` protocol
+yourself. This is the design's DP/TP mapping (design spec §8) made selectable.
+
+!!! warning "PP is a standalone primitive, not an `evolve()` mode"
+    `evolve()` evolves a **single** `artifact_id`; pipeline parallelism needs one
+    artifact per stage. `evolve(parallel=PipelineParallel(...))` therefore
+    **raises** — it used to be accepted and quietly ignored, handing every worker
+    the whole task list (strictly worse than the DP default, with no signal). The
+    PP machinery is still available directly as
+    [`PipelineChain`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/parallel.py)
+    — stage ordering, `blame`, counterfactual-replay pairs.
 
 ```bash
 python -m examples.parallelism
@@ -40,28 +48,47 @@ PP/TP, which stage/section) a worker owns that round.
 | Strategy | How work is partitioned | Recombination |
 |---|---|---|
 | **`DataParallel`** (DP) | same artifact; **tasks/keys sharded** across workers, rotating each round | diffs merged (fuse) |
-| **`TensorParallel(n_sections)`** (TP) | one hot artifact **split into disjoint sections**; each worker owns a section | union — conflict-free *by construction* |
-| **`PipelineParallel(stages)`** (PP) | artifacts form a **dependency chain**; each worker drives one stage | downstream failure blames the earliest failing stage |
+| **`TensorParallel(n_sections, keys=, route=)`** (TP) | one hot artifact **split into disjoint sections**; each worker owns a section | union — conflict-free *by construction* |
+
+`TensorParallel` needs two things beyond the section count:
+
+* **`keys=`** — the artifact's key space, which is what the sections partition.
+  `evolve()` fills it in from the strategy when the strategy declares one
+  (`KeyedRules` does), so you rarely pass it by hand.
+* **`route=`** — `task_id -> artifact key`, so each worker is handed exactly the
+  tasks whose edits land in its own section. Optional but wanted: without it a
+  worker gets a data-parallel shard and most of what it proposes falls outside its
+  own section.
 
 ```python
-from agentdescent.parallel import DataParallel, TensorParallel, PipelineParallel
+from agentdescent.parallel import DataParallel, TensorParallel
 
-strategy = TensorParallel(n_sections=4)            # or DataParallel(), or ...
-plan = strategy.plan(n_workers=4, round_index=0, keys=my_keys)
+strategy = TensorParallel(n_sections=4, keys=CATEGORIES, route=category_of)
+plan = strategy.plan(n_workers=4, round_index=0, keys=task_ids)   # TASK ids
 ```
 
-Running the example (fill a `key -> value` artifact; all converge, TP has zero
-collisions by construction):
+!!! danger "`plan()` receives task ids, not artifact keys"
+    This is the distinction TP got wrong. `plan()` is handed the round's **task
+    ids**; the **section** is about the *artifact*. They used to be conflated —
+    `plan` filtered task ids through `section_of` while `evolve()` enforced the
+    section against the artifact keys the resulting diff wrote — two unrelated key
+    spaces, so **75–88% of every worker's proposals were discarded** with no
+    report at all.
+
+Running the example, through `evolve()`:
 
 ```
-              strategy  final acc  items  collisions
-     DP (DataParallel)      1.000     24           0
-   TP (TensorParallel)      1.000     24           0   static disjoint sections
- block (BlockParallel)      1.000     24           0
-
-PP (PipelineParallel): pipeline complete=1.000, 3 stages,
-    downstream-failure blame -> earliest failing stage = 'lit-review'
+                                strategy  proposed  delivered  out-of-section  keys  reward
+                          DataParallel()         4          4               0     4   1.000
+               BlockParallel()  [custom]        14         14               0     4   1.000
+             TensorParallel(4, keys=...)         8          4               4     4   1.000
+  TensorParallel(4, keys=..., route=...)         4          4               0     4   1.000
 ```
+
+The third row is TP being honest: half of what those workers proposed was for a
+section they do not own, so it was rejected **and counted**. The fourth row routes
+tasks to their section owner, so TP delivers everything DP does while keeping the
+merge a conflict-free union.
 
 ## Writing your own
 
@@ -83,7 +110,9 @@ class BlockParallel:
 anywhere a strategy is accepted.
 
 TP additionally provides [`TensorParallelMerge`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/parallel.py)
-(union + a consistency reviewer that rejects out-of-section edits), and PP
+(union + a consistency reviewer that rejects out-of-section edits) and
+`assign_key_sections` (a balanced **partition** of a declared key space — unlike
+`section_of`, which is a hash bucket and can leave a section owning nothing). PP
 provides [`PipelineChain`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/parallel.py)
 (`blame` + counterfactual-replay pairs) — see [Concepts §7](concepts.md#7-parallel-paradigms-dp-tp-pp).
 
@@ -95,22 +124,26 @@ provides [`PipelineChain`](https://github.com/Birfy/agentdescent/blob/main/agent
 | | Enforced by `evolve()` | What that means |
 |---|---|---|
 | **DP** | ✅ `keys` | workers take disjoint task shards; diffs merge |
-| **TP** | ✅ `section` | a worker's diff is **rejected if it touches a key outside its section**, which is what makes the union conflict-free. Without that check TP was only differently-sharded DP: every worker could edit the same hot key |
-| **PP** | ❌ `stage` | ignored. `evolve()` evolves **one** `artifact_id`, so there is no artifact chain for stages to walk; `PipelineParallel` there only changes task sharding |
+| **TP** | ✅ `section` | a worker's diff is **rejected if it touches a key outside its section**, which is what makes the union conflict-free — and every rejection is counted as `section-violation` in [`result.outcomes()`](evolution.md) |
+| **PP** | ⛔ refused | `evolve()` raises. It evolves **one** `artifact_id`, so there is no artifact chain for stages to walk |
 
-So `parallel=TensorParallel(n_sections=4)` genuinely gives tensor parallelism
-through `evolve()`. Pipeline parallelism does not: its `blame` /
-counterfactual-replay machinery lives in
-[`PipelineChain`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/parallel.py)
-and is exercised by `examples/parallelism.py` and the tests, not by the engine.
-Evolving a genuine dependency chain would need `evolve()` to take several
-artifacts, which it does not.
+`evolve()` also validates the TP pairing **before the first rollout**, because an
+incompatible one used to be discovered a silently-dropped diff at a time:
 
-!!! note "Out-of-section edits are dropped, not merged"
-    A rejected TP proposal is simply not turned into evidence — the worker moves
-    on. That is the intended semantics (the section owner will propose it), but it
-    does mean a strategy whose proposals ignore sections will appear to make no
-    progress under TP. Have `propose` target the keys the worker owns.
+* a strategy with **no declared key space** (`AppendRules` content-addresses its
+  keys, so a proposal's section is unpredictable) is refused, naming the fix;
+* `n_sections` greater than the number of keys is refused — a section owning
+  nothing means a worker that can never commit. `SingleSlot` has exactly one key,
+  so it cannot be tensor-parallelised at all.
+
+!!! note "Out-of-section edits are rejected — and reported"
+    A rejected TP proposal is not turned into evidence; the worker moves on and
+    the section owner will propose it instead. That is the intended semantics, but
+    it means a strategy whose proposals ignore sections spends rollouts for
+    nothing. `result.outcomes()["section-violation"]` is how you see it — without
+    that count, a TP run discarding most of its work looked exactly like one whose
+    reflector had nothing useful to say, and those need opposite fixes. Pass
+    `route=` to remove the waste entirely.
 
 ## `parallel=` vs the async runtime
 
@@ -125,8 +158,8 @@ orthogonal to **whether rounds have a barrier**:
 
 !!! warning "The async path does its own sharding"
     `async_evolve` shards the train tasks round-robin across its worker threads and
-    **ignores `parallel=`** — so DP is what you get, and `TensorParallel` /
-    `PipelineParallel` have no effect there. `max_concurrency` is likewise a
+    **ignores `parallel=`** — so DP is what you get, and `TensorParallel` has no
+    effect there. `max_concurrency` is likewise a
     sync-path knob (async concurrency is `n_workers`). Use the synchronous path
     when you want a specific partitioning.
 
