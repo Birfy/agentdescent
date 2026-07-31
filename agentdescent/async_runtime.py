@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import threading
 import time
+import warnings
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -82,6 +83,10 @@ class AsyncStats:
     conflicts_dropped: int = 0
     forced_refreshes: int = 0
     stragglers_checkpointed: int = 0
+    #: Workers that gave up after repeated failures *before any worker had ever
+    #: succeeded*. A run can finish cleanly at a fraction of its requested
+    #: concurrency, so `error` stays None while throughput quietly drops.
+    retired_workers: int = 0
     oracle_used: int = 0
     final_dev_accuracy: float = 0.0
     final_stable_accuracy: float = 0.0
@@ -95,6 +100,7 @@ class AsyncStats:
 class AsyncAgentDescent:
 
     _MAX_WORKER_ERRORS = 3
+    _MAX_MERGER_ERRORS = 3
     """Barrier-free, thread-per-worker parallel self-evolution runtime."""
 
     def __init__(
@@ -153,9 +159,10 @@ class AsyncAgentDescent:
         # nothing commits), forcing every worker to sync regardless of the ratio.
         self._refresh_epoch = 0
         self._stats_lock = threading.Lock()
-        # worker resilience: retire a worker after this many consecutive backend
-        # failures; the run ends once every worker has retired.
+        # worker resilience: retire a worker only while NO worker has ever
+        # succeeded (see _worker_loop); the run ends once every worker has retired.
         self._live_workers = len(self.workers)
+        self._any_success = False
 
     # -- shared head bookkeeping (ROLL Flash async ratio) --------------------
 
@@ -215,16 +222,36 @@ class AsyncAgentDescent:
                 with self._stats_lock:
                     if self.stats.error is None:
                         self.stats.error = f"{type(e).__name__}: {str(e)[:200]}"
-                if consecutive >= self._MAX_WORKER_ERRORS:
+                # Two situations wear the same exception and want opposite
+                # responses, and this used to treat them alike -- the blanket rule
+                # `async_evolve` removed after measuring it. Keyed on a worker's own
+                # history, an intermittent backend retires whoever loses its first
+                # few rolls even though nothing is wrong with it; and since every
+                # worker shares one backend, shedding workers cannot relieve the
+                # throttling and only guarantees the run dies. Measured there at a
+                # 1-in-3 call failure rate: all three workers retired in 22s with
+                # nothing learned. The test is global -- while NO worker has ever
+                # completed a rollout the backend is misconfigured, so give up fast;
+                # once any has, it demonstrably works and this is a transient.
+                if not self._any_success and consecutive >= self._MAX_WORKER_ERRORS:
                     with self._stats_lock:
                         self._live_workers -= 1
+                        self.stats.retired_workers += 1
                         all_dead = self._live_workers <= 0
                     if all_dead:
                         self._stop.set()      # nothing can make progress any more
                     return
-                time.sleep(min(2.0 ** consecutive, 5.0))
+                if self._any_success and consecutive == self._MAX_WORKER_ERRORS:
+                    warnings.warn(
+                        f"{worker.worker_id} has failed {consecutive} rollouts in a "
+                        f"row and is backing off, not retiring (it succeeded "
+                        f"earlier, so this reads as transient). Last error: "
+                        f"{type(e).__name__}: {str(e)[:120]}",
+                        RuntimeWarning, stacklevel=2)
+                self._stop.wait(min(2.0 ** consecutive, 5.0))
                 continue
             consecutive = 0
+            self._any_success = True     # the backend demonstrably works
             elapsed = time.time() - t0
             if self.estimator is not None:
                 self.estimator.observe(cost, elapsed)
@@ -252,17 +279,32 @@ class AsyncAgentDescent:
 
     def _aggregator_loop(self) -> None:
         no_commit_streak = 0
+        consecutive = 0
         while not self._stop.is_set():
             try:
                 reports = self.aggregator.step()
-            except Exception as e:  # noqa: BLE001 - the only writer; if it dies the
-                # workers fill a buffer nobody drains and the run spins to its
-                # deadline with no reason given.
+                consecutive = 0
+            except Exception as e:  # noqa: BLE001 - the merger is the only writer,
+                # so if it dies the workers fill a buffer nobody drains. But it also
+                # *calls the backend* every sweep (it scores held-out), so ending
+                # the run on the first exception made it a single point of failure
+                # one transient could take out permanently -- the same mistake
+                # `async_evolve` removed after measuring it end with 0 sweeps while
+                # the workers were still healthy. Tolerate, and let the run's own
+                # budget bound the wait: a truly dead backend retires every worker,
+                # which ends the run anyway.
+                consecutive += 1
                 with self._stats_lock:
                     if self.stats.error is None:
                         self.stats.error = f"{type(e).__name__}: {str(e)[:200]}"
-                self._stop.set()
-                return
+                if consecutive == self._MAX_MERGER_ERRORS:
+                    warnings.warn(
+                        f"the merger has failed {consecutive} sweeps in a row and "
+                        f"is retrying; nothing will merge until it recovers. Last "
+                        f"error: {type(e).__name__}: {str(e)[:120]}",
+                        RuntimeWarning, stacklevel=2)
+                self._stop.wait(min(2.0 ** consecutive, 30.0))
+                continue
             committed = False
             with self._stats_lock:
                 self.stats.sweeps += 1

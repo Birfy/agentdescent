@@ -29,6 +29,7 @@ from __future__ import annotations
 import threading
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import (Callable, Deque, Dict, List, Optional, Protocol, Tuple,
                     runtime_checkable)
 
@@ -51,7 +52,16 @@ class AggregatorProtocol(Protocol):
     An aggregator is the framework's *optimizer*: it receives evidence cards
     (diffs + evidence) and, on ``step()``, decides what to merge into the shared
     ledger. Implement these two methods (see :class:`Aggregator` for the
-    reference 7-stage pipeline) to swap in your own merge/acceptance logic."""
+    reference 7-stage pipeline) to swap in your own merge/acceptance logic.
+
+    **Threading contract.** ``ingest`` may be called concurrently from many worker
+    threads; ``step`` is called from one. Guard anything both touch. This was
+    unwritten, and the shipped examples all relied on ``list.append`` happening to
+    be atomic under the GIL -- which stops being true the moment ``ingest`` grows a
+    counter, a dict update or a dedup check, and is already not enough when
+    ``evolve(round_timeout=)`` abandons a straggler that keeps running and can
+    ``ingest`` in the middle of a ``step``'s drain. :class:`EvidenceBuffer` is the
+    worked example."""
 
     def ingest(self, card: EvidenceCard) -> None: ...
 
@@ -80,6 +90,50 @@ class AggregatorConfig:
     #: Real ops in the shipped ports are ~2.5k chars, so this is ~12x headroom.
     trust_region_chars: int = 32_000
     promote_after_k: int = 3        # dev->stable: regression-free ROUNDS (EMA)
+    #: Version half-life of the acceptance risk. `base_delta` is exposed but the
+    #: half-life that turns it into the actual threshold was a default argument
+    #: buried in `stats.annealed_delta`, unreachable from here or from `evolve()` --
+    #: and it sets the shape of the whole run: the threshold `P(delta>0)` must clear
+    #: goes 0.505 at v1, 0.750 at v64, 0.875 at v128, and floors at 0.99. A caller
+    #: wanting a flatter or steeper schedule had to monkeypatch the module.
+    anneal_half_life: int = 64
+    #: Monte-Carlo draws behind each acceptance decision. Also unreachable before.
+    accept_samples: int = 4000
+
+
+class MergeOutcome(str, Enum):
+    """The vocabulary of :attr:`MergeReport.category`.
+
+    ``result.outcomes()`` is the framework's primary diagnostic -- the README, the
+    quickstart and ``docs/evolution.md`` all point at it to answer "why did nothing
+    commit?" -- and its keys were bare string literals with no declared vocabulary
+    anywhere. To learn them you had to read this file and collect the sixth
+    argument of six different ``MergeReport(...)`` constructions.
+
+    Subclasses ``str``, so every existing dict key, comparison and format string
+    keeps working: ``outcomes()["below-threshold"]`` is unchanged.
+    """
+
+    #: The candidate was merged into dev.
+    COMMITTED = "committed"
+    #: Proposals reached the gate and failed to beat the baseline. The reflector is
+    #: the thing to look at.
+    BELOW_THRESHOLD = "below-threshold"
+    #: Nothing survived the staleness filter -- they never reached the gate. The
+    #: lag budget is the thing to look at.
+    ALL_STALE = "all-stale"
+    #: The diff exceeded the trust region (too many ops, or one oversized value).
+    #: Used to be folded into ``all-stale``, which pointed at the opposite fix.
+    OVERSIZED = "oversized"
+    #: The oracle overruled the cheap layer's verdict (see the audit gate).
+    ORACLE_REJECTED = "oracle-rejected"
+    #: Another writer committed first; the diff was re-filed for a later round.
+    CAS_CONFLICT = "cas-conflict"
+    #: The bucket named an artifact the ledger does not have.
+    UNKNOWN_ARTIFACT = "unknown-artifact"
+
+    def __str__(self) -> str:            # so f-strings render the value, not the name
+        return self.value
 
 
 class AggregatorContractError(ContractError, TypeError):
@@ -406,7 +460,7 @@ class Aggregator:
         for aid in set(self._survival) | set(by_id):
             rep = by_id.get(aid)
             if rep is not None and (rep.committed_version is not None
-                                    or rep.category == "oracle-rejected"):
+                                    or rep.category == MergeOutcome.ORACLE_REJECTED):
                 self._survival[aid] = 0        # changed, or measurably worse
                 continue
             self._survival[aid] += 1
@@ -445,7 +499,7 @@ class Aggregator:
         artifact = snap.get(artifact_id)
         if artifact is None:
             return MergeReport(artifact_id, None, False, len(cards), 0, 0, 0, 0.0, None,
-                               "unknown artifact", "unknown-artifact")
+                               "unknown artifact", MergeOutcome.UNKNOWN_ARTIFACT)
         assert_mutable(artifact)  # L0 guard
 
         # trust-region: reject over-large diffs up front. They were previously
@@ -467,9 +521,21 @@ class Aggregator:
         survivors, discarded = self._staleness_filter(artifact, head, cards)
         self.buffer.settle(discarded)
         if not survivors:
+            # Report the reason that dominated, rather than folding oversized
+            # diffs into the staleness count. "my reflector emits 500 KB values and
+            # every one is rejected" and "my lag budget is too tight" are opposite
+            # fixes, and the trust-region case used to be invisible in both
+            # `outcomes()` and the report.
+            if oversized and not discarded:
+                return MergeReport(artifact_id, None, False, n_considered, 0,
+                                   len(oversized), 0, 0.0, None,
+                                   f"{len(oversized)} diff(s) outside the trust "
+                                   f"region ({self.config.trust_region_ops} ops / "
+                                   f"{self.config.trust_region_chars} chars)",
+                                   MergeOutcome.OVERSIZED)
             return MergeReport(artifact_id, None, False, n_considered, 0,
                                len(discarded) + len(oversized), 0, 0.0, None,
-                               "all stale / rejected", "all-stale")
+                               "all stale / rejected", MergeOutcome.ALL_STALE)
 
         kept_cards, conflicts = self._resolve_conflicts(artifact, survivors)
         kept_diffs = [c.diff for c in kept_cards]
@@ -495,14 +561,15 @@ class Aggregator:
             if set(card.diff.ops) & set(best_diff.ops):
                 candidate_post.observe_delta(card.before_after_delta)
 
-        delta = annealed_delta(self.config.base_delta, artifact.version)
+        delta = annealed_delta(self.config.base_delta, artifact.version,
+                               half_life=self.config.anneal_half_life)
         # Seed from (version, candidate) rather than the version alone. A shared
         # seed made the ~0.003 Monte-Carlo error identical for every candidate in
         # the round, so on knife-edge cases the draw decided them as a block --
         # one stream accepted every marginal diff, another rejected all of them.
         # stable_hash keeps this reproducible across processes.
         p_improve = prob_improvement(
-            candidate_post, baseline_post,
+            candidate_post, baseline_post, samples=self.config.accept_samples,
             seed=stable_hash((artifact.version, best_diff.diff_id)) & 0x7FFFFFFF)
 
         # -- audit (section 5.3): the optimizer audits its own decision ------
@@ -535,7 +602,7 @@ class Aggregator:
                 prior.observe_delta(oracle_cand - oracle_base)
                 return MergeReport(artifact_id, None, fused, n_considered, len(survivors),
                                    len(discarded), conflicts, p_improve, None,
-                                   "oracle rejected", "oracle-rejected")
+                                   "oracle rejected", MergeOutcome.ORACLE_REJECTED)
 
         # Not settled, unlike the CAS-conflict path below -- and the asymmetry is
         # deliberate. A CAS-conflicted diff lost a race and was never judged against
@@ -547,7 +614,7 @@ class Aggregator:
             return MergeReport(artifact_id, None, fused, n_considered, len(survivors),
                                len(discarded), conflicts, p_improve, None,
                                f"P(delta>0)={p_improve:.2f} <= {1-delta:.2f}",
-                               "below-threshold")
+                               MergeOutcome.BELOW_THRESHOLD)
 
         # -- commit (section 4.1): CAS on dev --------------------------------
         base_vv = {artifact_id: head.get(artifact_id, 0)}
@@ -560,7 +627,7 @@ class Aggregator:
             self.buffer.settle(survivors)
             return MergeReport(artifact_id, None, fused, n_considered, len(survivors),
                                len(discarded), conflicts, p_improve, None,
-                               "CAS conflict", "cas-conflict")
+                               "CAS conflict", MergeOutcome.CAS_CONFLICT)
 
         prior.update(True, weight=2.0)  # a committed improvement is strong evidence.
 
@@ -570,4 +637,4 @@ class Aggregator:
 
         return MergeReport(artifact_id, best_diff, fused, n_considered, len(survivors),
                            len(discarded), conflicts, p_improve, new_version,
-                           "committed", "committed")
+                           "committed", MergeOutcome.COMMITTED)

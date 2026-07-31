@@ -39,12 +39,13 @@ from typing import Callable, Dict, List, Optional
 from .evolution import (
     _safe_log,
     Agent, EvolutionResult, Propose, Reward, RoundInfo, Run, Strategy, Task, _tally,
-    _build_engine, _checked_proposal, _checked_reward,
+    SOLVED, _build_engine, _checked_proposal, _checked_reward,
 )
 from .aggregator import AggregatorConfig, check_reports
 from .evolvable import ContractError, EvidenceCard, vv_staleness
 from .ledger import Ledger, LedgerFailure
 from .sampling import RoundRobin, TaskSampler
+from .scheduler import DurationEstimator
 from .staleness import StaleAction, StalenessPolicy, get_policy
 
 
@@ -74,10 +75,14 @@ def async_evolve(
     aggregator_factory=None,
     oracle_budget: int = 200,
     cheap_eval_tasks: Optional[int] = None,
+    solved_threshold: float = SOLVED,
     shuffle: bool = False,
     seed: int = 0,
     self_verify: bool = True,
     shutdown_grace: float = 2.0,
+    stall_patience: int = 50,
+    duration_estimator: Optional["DurationEstimator"] = None,
+    straggler_factor: float = 3.0,
     task_sampler: Optional["TaskSampler"] = None,
     on_round: Optional[Callable[[RoundInfo], None]] = None,
     verbose: bool = False,
@@ -101,6 +106,10 @@ def async_evolve(
 
     Parameters
     ----------
+    tasks, reward, agent, run, propose, strategy, initial_state, blast_radius, artifact_id, held_out_frac, repo_path, agg_config, staleness_policy, aggregator_factory, oracle_budget:
+        Exactly as in :func:`~agentdescent.evolution.evolve`, which documents them.
+        (Listed rather than left to the paragraph above: a completeness check that
+        reads prose cannot tell a documented parameter from a mentioned one.)
     n_workers:
         Producer threads (``>= 1``). The train tasks are sharded round-robin
         across them; a worker with an empty shard is not started.
@@ -138,12 +147,31 @@ def async_evolve(
     cheap_eval_tasks:
         As in :func:`evolve`: how many held-out tasks the cheap layer scores when
         ranking candidates. ``None`` scores them all.
+    solved_threshold:
+        As in :func:`evolve`: the reward at which a task counts as solved and no
+        proposal is requested. Lower it for a graded scorer.
     shuffle, seed:
         As in :func:`evolve`: shuffle before the positional train/held-out split.
         Off by default.
     self_verify:
         As in :func:`evolve`. ``False`` skips the extra per-trajectory rollout,
         which is what ports that judge candidates only on held-out want.
+    stall_patience:
+        Merger sweeps that may pass with cards arriving and nothing committing
+        before every worker is forced to resync, regardless of ``async_ratio``.
+        Without it a lag budget larger than the staleness tolerance **livelocks**
+        under the Guarded policy: workers propose against a snapshot too old for
+        the policy to accept, every card is discarded, head never moves, and the
+        lag budget therefore never triggers a refresh either.
+    duration_estimator, straggler_factor:
+        Pass a :class:`~agentdescent.scheduler.DurationEstimator` to fit
+        ``seconds ~ intercept + slope * len(prompt)`` online and count rollouts
+        that overran their own estimate by more than ``straggler_factor``
+        (``result.stragglers``). This is the design's **L-traj** mechanism, which
+        until now lived only in the reference runtime and so was unreachable from
+        the API a real workload uses. Detection only: resuming a partial rollout
+        would need it to expose its turns, and ``run(rendered, task) -> output``
+        is opaque.
     shutdown_grace:
         Total seconds to wait for the worker and merger threads after the budget
         expires -- shared across all of them, not per thread. An in-flight
@@ -211,6 +239,13 @@ def async_evolve(
     died = [False]                            # True only if the run ENDED on failure
     contract_error: List[Optional[BaseException]] = [None]   # caller bug -> re-raise
     stop_reason = ["max_seconds"]             # overwritten by whichever bound fires
+    # Backpressure: bumped when the pipeline stalls (evidence keeps arriving and
+    # nothing commits), which forces every worker to resync regardless of the ratio.
+    epoch = [0]
+    forced_refreshes = [0]
+    no_commit_sweeps = [0]
+    stragglers = [0]
+    estimator = duration_estimator
     n_live = sum(1 for s in shards if s)      # workers that will actually start
     live = [n_live]                           # workers still running
     retired = [0]                             # workers that gave up (diagnostic)
@@ -224,6 +259,7 @@ def async_evolve(
         shard_ids = [t.id for t in shard]          # the sampler works on ids
         by_shard_id = {t.id: t for t in shard}
         i = 0
+        local_epoch = epoch[0]
         consecutive = 0            # consecutive backend failures for this worker
         warned = False
         while not stop.is_set():
@@ -240,17 +276,35 @@ def async_evolve(
                     break
                 time.sleep(0.05)
             head_v = eng.ledger.head_version(Ledger.DEV).get(eng.artifact_id, 0)
-            if head_v - base_v > async_ratio:          # lag budget exceeded -> refresh
+            # Refresh on the lag budget, or when the merger has asked everyone to
+            # sync. `concepts.md` documents that backpressure guard as what keeps a
+            # mismatched `async_ratio > alpha` from livelocking under Guarded --
+            # workers keep proposing against a snapshot too old for the policy to
+            # accept, every card is discarded, head never moves, so the lag budget
+            # never triggers a refresh either. It existed only in the reference
+            # runtime, which is not the one a real workload reaches.
+            if head_v - base_v > async_ratio or epoch[0] != local_epoch:
                 snap = eng.ledger.snapshot(Ledger.DEV)
                 base_v = snap.version.get(eng.artifact_id, 0)
                 artifact = snap.get(eng.artifact_id)
+                local_epoch = epoch[0]
+                with counter_lock:
+                    forced_refreshes[0] += 1
             task = by_shard_id[sampler.pick(shard_ids, i)]
             i += 1
+            # Duration-aware straggler detection (design spec 5.1, L-traj). It
+            # existed only in the reference runtime, which accepts nothing but the
+            # synthetic router domain -- so the whole L-traj mechanism was
+            # unreachable from the API every real workload uses. Cost is the task's
+            # size, which is what correlates with agentic rollout time.
+            cost = float(len(task.prompt))
+            predicted = estimator.estimate(cost) if estimator is not None else 0.0
+            t_start = time.time()
             try:
                 output = eng.run(artifact.render(), task)
                 score = _checked_reward(eng.reward(task, output), task)
                 sampler.record(task.id, score)     # learn which tasks carry signal
-                if score < 0.999:
+                if score < solved_threshold:
                     proposal = _checked_proposal(
                         eng.propose(artifact.render(), task, output, score), task)
                     if proposal:
@@ -331,6 +385,15 @@ def async_evolve(
                 # asleep and produced no sweeps at all.
                 stop.wait(min(0.25 * 2.0 ** consecutive, 5.0))     # backoff, then retry
                 continue
+            elapsed = time.time() - t_start
+            if estimator is not None:
+                estimator.observe(cost, elapsed)
+                # A rollout that overran its own estimate is a straggler. Counted,
+                # not resumed: `run(rendered, task) -> output` is opaque, so there
+                # is no continuation state to check point (see concepts.md L-traj).
+                if predicted > 0 and elapsed > straggler_factor * predicted:
+                    with counter_lock:
+                        stragglers[0] += 1
             consecutive, warned = 0, False                    # a clean rollout resets
             any_success[0] = True
             with counter_lock:
@@ -374,6 +437,15 @@ def async_evolve(
             best[1] += 1
         history.append(RoundInfo(len(history), r, len(dev.state), committed,
                                  len(reports) - committed, _tally(reports)))
+        # A stalled pipeline: cards keep arriving and none of them commits. Under
+        # Guarded with async_ratio > alpha that is a livelock, not slow progress.
+        if committed:
+            no_commit_sweeps[0] = 0
+        elif batch:
+            no_commit_sweeps[0] += 1
+            if no_commit_sweeps[0] >= stall_patience:
+                epoch[0] += 1                  # every worker resyncs on its next loop
+                no_commit_sweeps[0] = 0
         if verbose:
             print(f"sweep {len(history):>3}  reward={r:.3f}  merged={len(batch)}  "
                   f"+{committed}  pending={len(intake)}")
@@ -518,6 +590,8 @@ def async_evolve(
                              final_reward=final_reward, history=history,
                              ledger_log=_safe_log(eng.ledger),
                              error=run_error, retired_workers=retired[0],
-                             stop_reason="error" if run_error else stop_reason[0])
+                             stop_reason="error" if run_error else stop_reason[0],
+                             forced_refreshes=forced_refreshes[0],
+                             stragglers=stragglers[0])
     eng.cleanup()          # do not hold a scratch git repo for the whole process
     return result

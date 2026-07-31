@@ -15,9 +15,9 @@ Source:
 [`examples/skill_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/skill_evolution.py).
 
 ```python
-from agentdescent.agents import claude
-from agentdescent.evolution import evolve, LLMAgent, AppendRules
-from agentdescent.parallel import DataParallel
+from agentdescent import claude
+from agentdescent import evolve, LLMAgent, AppendRules
+from agentdescent import DataParallel
 
 result = evolve(
     tasks, reward,                                   # your dataset + scorer

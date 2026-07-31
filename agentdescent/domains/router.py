@@ -29,10 +29,22 @@ from ..evolvable import Contract, Diff, EvidenceCard, stable_hash
 
 
 @dataclass(frozen=True)
-class Task:
+class RouterTask:
+    """One item of the reference domain: a text, its gold label, its keyword.
+
+    Named ``Task`` until it collided with :class:`agentdescent.evolution.Task`
+    -- ``Task(id, prompt, meta)``, the one every caller writes against. Disjoint
+    fields, no relationship, same name, and a reader following
+    ``AgentDescent -> Worker -> Task`` from the architecture page landed on this
+    one with no signal. ``Task`` remains as an alias inside this module."""
+
     text: str
     label: str
     keyword: str
+
+
+#: Back-compatible alias. Prefer :class:`RouterTask` in new code.
+Task = RouterTask
 
 
 class RouterSkill:

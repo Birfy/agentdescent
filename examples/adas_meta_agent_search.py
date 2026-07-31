@@ -55,7 +55,7 @@ from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Tuple
 
 from agentdescent.agents import Usage, claude, openai_compatible
-from agentdescent.aggregator import AggregatorProtocol, MergeReport
+from agentdescent.aggregator import AggregatorProtocol, MergeOutcome, MergeReport
 from agentdescent.dataloader import Dataset, fetch_text, split_dataset
 from agentdescent.evolvable import Diff, EvidenceCard
 from agentdescent.evolution import EvolvingArtifact, Task, evolve, rule_id
@@ -245,7 +245,7 @@ def seed_archive() -> List[dict]:
     return [
         {"name": "Chain-of-Thought", "thought": "Step-by-step reasoning.",
          "program": {"block": "cot"}},
-        {"name": "Self-Consistency with CoT",
+        {"name": "Self-Consistency with Chain-of-Thought",
          "thought": "Sample multiple CoT paths and take the majority answer.",
          "program": {"block": "cot_sc", "k": 3}},
         {"name": "Self-Refine (Reflexion)",
@@ -274,7 +274,13 @@ def seed_archive() -> List[dict]:
 
 def bootstrap_ci(correct: List[float], n_resamples: int = 2000, seed: int = 0
                  ) -> Tuple[float, float, float]:
-    """ADAS's fitness: mean accuracy with a 95% bootstrap CI (utils.py)."""
+    """ADAS's fitness: mean accuracy with a 95% bootstrap CI (`_mgsm/utils.py`).
+
+    Upstream uses ``num_bootstrap_samples=100000``; 2000 is a deliberate speed
+    trade for an example that runs in seconds. The CI half-width it produces
+    differs by well under a percentage point at these sample sizes, and the archive
+    ranks on the mean either way -- but it *is* a deviation, so it is named here
+    rather than left for a reader to diff against the repo."""
     if not correct:
         return 0.0, 0.0, 0.0
     rng = random.Random(seed)
@@ -701,6 +707,17 @@ def _weighted_sample_without_replacement(weights: List[float], k: int,
     return idxs
 
 
+#: Two outcomes the shared :class:`~agentdescent.aggregator.MergeOutcome`
+#: vocabulary has no name for, because they are specific to a keep-all archive.
+#: Both print as `+0/-1` on the driver's line and need opposite responses:
+#: ALREADY_BEST means candidates were scored and none beat the incumbent (look at
+#: the meta-prompt); NO_CANDIDATES means none was produced at all, because every
+#: trigger rollout passed and `evolve()` never asked (look at the trigger split).
+#: Plain strings, like `MergeOutcome`'s own values -- `outcomes()` keys on them.
+ALREADY_BEST = "already-best"
+NO_CANDIDATES = "no-candidates"
+
+
 @dataclass
 class AdasContext:
     select: str = "adas"
@@ -769,6 +786,7 @@ class MetaSearchAggregator(AggregatorProtocol):
         self.aid = artifact_id
         self.boot_seed = boot_seed
         self.cards: List[EvidenceCard] = []
+        self._lock = threading.Lock()   # ingest: workers; step: one thread
         self._seeded = False
 
     def _fitness(self, head, design: str) -> Tuple[float, Tuple[float, float]]:
@@ -809,7 +827,9 @@ class MetaSearchAggregator(AggregatorProtocol):
         self.ctx.best_seed = dict(self.ctx.best_agent)
 
     def ingest(self, card: EvidenceCard) -> None:
-        self.cards.append(card)
+        # ingest runs on worker threads, step on one: see AggregatorProtocol.
+        with self._lock:
+            self.cards.append(card)
 
     def _record(self, name, thought, program, fitness, ci=None, seed=False):
         agent = {"name": name, "thought": thought, "program": program,
@@ -827,7 +847,8 @@ class MetaSearchAggregator(AggregatorProtocol):
         head = snap.get(self.aid)
         base_vv = {self.aid: snap.version.get(self.aid, 0)}
 
-        cards, self.cards = self.cards, []
+        with self._lock:
+            cards, self.cards = self.cards, []
         for card in cards:
             design = card.diff.ops["design"]
             mean, ci = self._fitness(head, design)
@@ -841,17 +862,17 @@ class MetaSearchAggregator(AggregatorProtocol):
                          "name": self.ctx.best_agent["name"],
                          "thought": self.ctx.best_agent.get("thought", "")},
                     author="adas")
-        committed, category = None, "already-best"
+        committed, category = None, ALREADY_BEST
         if not cards:
-            category = "no-candidates"
+            category = NO_CANDIDATES
         if best_design != head.state.get("design"):        # keep the best design as head
             try:
                 _, committed = self.ledger.commit(
                     head.apply(diff), base_vv, branch=Ledger.DEV,
                     message="adas: keep best design")
-                category = "committed"
+                category = MergeOutcome.COMMITTED
             except CASConflict:
-                category = "cas-conflict"
+                category = MergeOutcome.CAS_CONFLICT
         # `accepted` and `category` were left at None/"" while the archive was in
         # fact committing, so the driver's own tally -- which reads
         # `committed_version` -- printed `+0/-1` for a generation whose best design

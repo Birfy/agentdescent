@@ -30,7 +30,7 @@ Have a dataset? That is the whole input.
 
 ```python
 from agentdescent import evolve_skill
-from agentdescent.agents import openai_compatible
+from agentdescent import openai_compatible
 from agentdescent.dataloader import hf_rows
 
 rows = hf_rows("hotpotqa/hotpot_qa", "validation", config="distractor", limit=40)

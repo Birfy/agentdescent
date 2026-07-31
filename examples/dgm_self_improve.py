@@ -21,7 +21,10 @@ an open-ended **archive**. This port reproduces the DGM_outer.py loop faithfully
     instances it failed), diagnoses a weakness, and proposes "the next feature to
     implement" on its own harness -> a child agent.
   * **Staged empirical validation** (`swe_bench/subsets/`): small=10, escalate to
-    medium=50 iff score > `test_more_threshold=0.4`, then big=140 for top agents.
+    medium=50 iff score > `test_more_threshold=0.4`. That is the whole ladder in
+    `DGM_outer.py`'s self-improve loop; `big.json` (140) belongs to the separate
+    full-evaluation path gated by the archive-relative `full_eval_threshold`,
+    which this surrogate does not model.
 
 It runs **through `evolve()`** like ACE/GEPA: a `HarnessStrategy` turns a proposed
 capability into a `Diff`, and a custom `aggregator_factory`
@@ -47,6 +50,8 @@ escalation, keep-all) is therefore fully runnable and testable offline; the
 """
 
 from __future__ import annotations
+
+import threading
 
 import argparse
 import hashlib
@@ -201,14 +206,33 @@ def make_surrogate_evaluator() -> Callable[[Agent, List[dict]], float]:
 
 
 def staged_evaluate(agent: Agent, evaluate_fn: Callable[[Agent, List[dict]], float],
-                    small: List[dict], medium: List[dict], big: List[dict]
-                    ) -> float:
-    """Shallow-then-deep evaluation (DGM: small always; escalate past 0.4)."""
+                    small: List[dict], medium: List[dict],
+                    big: Optional[List[dict]] = None) -> float:
+    """Shallow-then-deep evaluation, as `DGM_outer.py` runs it.
+
+    Upstream's self-improve loop escalates **small -> medium and stops**::
+
+        swe_issues_sm  = load_json_file("./swe_bench/subsets/small.json")    # 10
+        swe_issues_med = load_json_file("./swe_bench/subsets/medium.json")   # 50
+        test_more_threshold = 0.4
+        ...
+        self_improve(test_task_list=swe_issues_sm,
+                     test_more_threshold=test_more_threshold,
+                     test_task_list_more=swe_issues_med,
+                     full_eval_threshold=get_full_eval_threshold(output_dir, archive))
+
+    ``big.json`` (140) is **not** a third rung on this ladder: it belongs to the
+    separate full-evaluation path, gated by ``full_eval_threshold``, which is
+    *archive-relative* rather than the fixed 0.4. This used to run it as a third
+    rung on the same 0.4, which changed what ``agent.score`` means -- a high
+    scorer's score became a 140-instance number while a low scorer's stayed a
+    10-instance one, and both then fed the same ``dgm_parent_weights`` sigmoid. The
+    surrogate objective here does not model an archive-relative full eval, so the
+    ladder stops where upstream's loop stops; ``big`` is accepted and ignored.
+    """
     score = evaluate_fn(agent, small)
     if score > TEST_MORE_THRESHOLD and medium:
         score = evaluate_fn(agent, medium)
-        if score > TEST_MORE_THRESHOLD and big:
-            score = evaluate_fn(agent, big)
     return score
 
 
@@ -268,6 +292,7 @@ class DGMArchiveAggregator(AggregatorProtocol):
         self.ctx = ctx
         self.aid = artifact_id
         self.cards: List[EvidenceCard] = []
+        self._lock = threading.Lock()   # ingest: workers; step: one thread
         self.head_index = 0
         self._seeded = False
 
@@ -280,7 +305,9 @@ class DGMArchiveAggregator(AggregatorProtocol):
                                insts[:STAGE_SMALL], insts[:STAGE_MEDIUM], insts[:STAGE_BIG])
 
     def ingest(self, card: EvidenceCard) -> None:
-        self.cards.append(card)
+        # ingest runs on worker threads, step on one: see AggregatorProtocol.
+        with self._lock:
+            self.cards.append(card)
 
     def step(self) -> List[MergeReport]:
         snap = self.ledger.snapshot(Ledger.DEV)
@@ -298,7 +325,8 @@ class DGMArchiveAggregator(AggregatorProtocol):
 
         parent_idx = self.head_index
         parent = self.ctx.archive[parent_idx]
-        cards, self.cards = self.cards, []
+        with self._lock:
+            cards, self.cards = self.cards, []
         for card in cards:                                 # each card = a self-modification
             child_caps = _caps_of(card.diff.ops["capabilities"])
             child = Agent(tuple(sorted(child_caps)), parent=parent_idx,

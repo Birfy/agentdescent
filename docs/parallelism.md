@@ -33,7 +33,7 @@ what?
 
 ```python
 from typing import Protocol, Sequence, List
-from agentdescent.parallel import WorkUnit
+from agentdescent import WorkUnit
 
 class ParallelStrategy(Protocol):
     name: str
@@ -61,7 +61,7 @@ PP/TP, which stage/section) a worker owns that round.
   own section.
 
 ```python
-from agentdescent.parallel import DataParallel, TensorParallel
+from agentdescent import DataParallel, TensorParallel
 
 strategy = TensorParallel(n_sections=4, keys=CATEGORIES, route=category_of)
 plan = strategy.plan(n_workers=4, round_index=0, keys=task_ids)   # TASK ids
@@ -95,7 +95,7 @@ merge a conflict-free union.
 Implement `plan` and you have a new parallelism method — no other change:
 
 ```python
-from agentdescent.parallel import WorkUnit
+from agentdescent import WorkUnit
 
 class BlockParallel:
     """Give each worker a contiguous block of the key-space (good locality)."""

@@ -86,6 +86,189 @@ All notable changes to AgentDescent are documented here. The format follows
   verbose line printed it as `items=` directly beside the reward, where it reads
   as "measured on this many" — a 110-item measurement announced itself as 3. Now
   `size=`, with the held-out count printed next to the reward it belongs to.
+- **The measured worker-retirement fix existed in only one of the two async
+  pipelines.** `async_evolve` retires a worker only while *no* worker has ever
+  succeeded, with a comment recording why: keyed on a worker's own history, an
+  intermittent backend retires whoever loses its first few rolls, and since every
+  worker shares one backend, shedding workers cannot relieve the throttling and
+  only guarantees the run dies -- measured at a 1-in-3 call failure rate as all
+  three workers retiring in 22s with nothing learned. `AsyncAgentDescent` still
+  had exactly the blanket rule that paragraph describes. Ported, along with
+  `retired_workers` so a run finishing at a fraction of its concurrency is visible.
+- **The reference merger was still a single point of failure.** It ended the run
+  on its first exception -- and it *calls the backend* every sweep, since it scores
+  held-out. `async_evolve` removed that pattern after measuring a run end with 0
+  sweeps while the workers were healthy; the same tolerance now applies here.
+
+### Added
+- **Backpressure on the general async path** (`async_evolve(stall_patience=)`).
+  `concepts.md` documents this guard as what keeps a mismatched `async_ratio > α`
+  from livelocking under Guarded -- workers propose against a snapshot too old for
+  the policy to accept, every card is discarded, head never moves, so the lag
+  budget never triggers a refresh either. It existed only in the reference
+  runtime, which is not the one a real workload reaches. `result.forced_refreshes`
+  counts how often it fired.
+- **Duration-aware straggler detection on the general async path**
+  (`async_evolve(duration_estimator=, straggler_factor=)` →
+  `result.stragglers`). The design's L-traj mechanism was reachable only through
+  `AsyncAgentDescent`, which accepts nothing but a `TaskUniverse`. Detection only:
+  resuming a partial rollout would need it to expose its turns, and
+  `run(rendered, task) -> output` is opaque.
+
+### Fixed
+- **`examples/rq2_staleness` swept a parameter the run never reads.** It varied
+  `alpha_head`, which `Aggregator._alpha_for` consults only for an L1 artifact,
+  while the reference `RouterSkill` is `blast_radius=0.2` -- so the live knob was
+  `alpha_tail=min(alpha, 1)` and **three of the four published rows were the same
+  configuration**. It sweeps both bands now, and alpha=0 genuinely separates:
+  7 rounds to converge and 7 stale discards, against 4 rounds and 1 for alpha>=1.
+- **Every published sweep reported `dev_acc=1.000` for every setting.** The router
+  domain is reachable from all of them, including zero staleness tolerance, so the
+  outcome column was constant and the experiments could not answer the question
+  they were run to answer. `rq2_staleness` and `run_async` now report **cost** --
+  rounds and rollouts to converge, and the share of rollouts discarded -- which
+  does vary: `guarded` wastes 91% of its rollouts against `full`'s 0% and
+  `reflective`'s 12%. Both scripts say plainly that accuracy saturates and the
+  cost columns are the comparison.
+- **The docstring-completeness guard was a substring match.** `test_api_docs.py`
+  exists to keep `evolve` / `async_evolve` honest as their signatures grow, and
+  checked `p not in doc` against the *whole* docstring. Delete `async_evolve`'s
+  entire Parameters section and **20 of its 27 parameters still passed**, because
+  its opening paragraph names them in prose; `evolve` kept 11 of 30 the same way.
+  Substrings made it worse -- `run` matches "running", `agent` matches "agents",
+  `parallel` matches "parallelism". It now parses numpydoc entries, plus a
+  meta-test that fails if stripping the section leaves anything looking
+  documented. `async_evolve`'s 15 cross-referenced parameters got a real entry
+  rather than relying on the prose.
+
+### Changed
+- **The six custom optimizers in `examples/` take a lock.** They were safe only
+  because every `ingest` happened to be a single `list.append`, atomic under the
+  GIL -- which stops holding the moment `ingest` grows a counter or a dedup check,
+  and is already not enough when `evolve(round_timeout=)` abandons a straggler
+  that keeps running and can `ingest` mid-drain. `AggregatorProtocol` now states
+  the contract it always relied on: `ingest` may be called from many worker
+  threads, `step` from one, guard anything both touch.
+- **`tests/faults.py` gained the three fault classes that had actually caused
+  bugs.** Every primitive raised, so "the backend succeeds and returns nothing"
+  -- the failure the codebase itself calls the most insidious, with a dedicated
+  counter and warning in `LLMAgent.propose` -- had no way to be injected;
+  `returns_nothing` covers it, and the matrix pins that a mute backend cannot
+  produce a commit. Faults only ever wrapped `run`, so a reflector outage (a
+  *separate* backend call, often to a different model) was untested;
+  `flaky_propose` covers it. And nothing faulted the ledger -- the sole writer,
+  on the critical path, with no retry anywhere -- whose failure escaping as an
+  exception was found only by injecting it by hand; `ledger_dies_after` covers it.
+- **`tests/test_bbh_example.py` tested `examples/skill_evolution.py`**, a stale
+  name from a rename, so the test for that example was the one file nobody would
+  look in for it. Renamed.
+- **The five fully-offline examples had no test at all**, while all six algorithm
+  ports -- which need credentials to do anything real -- had offline tests of
+  their helpers, and CI runs `pytest` only. `tests/test_offline_examples.py`
+  covers them, including the RQ1 merge-vs-fork advantage three doc pages quote.
+- `docs/usage.md` said the algorithm ports "run offline with `--dry-run`". It
+  still downloads the benchmark, and does not run the evolution loop.
+
+### Fixed
+- **The published version drifted five minor releases behind the code.**
+  `__version__` said `0.7.0`; `pyproject.toml` said `0.2.0`, and the build backend
+  reads the latter -- so every wheel, the PyPI page and the README badge were
+  wrong. The version is now single-sourced from `agentdescent.__version__` via
+  `dynamic = ["version"]`, and a test refuses a static version in `pyproject.toml`.
+- **The README imported `LLMAgent` from the wrong module** (`agentdescent.agents`;
+  it lives in `agentdescent.evolution`). Found by the new docs-import test the
+  moment it was written, which is the point of it.
+- **Trust-region rejections were counted as `all-stale`.** "My reflector emits
+  500 KB values and every one is dropped" and "my lag budget is too tight" are
+  opposite fixes, and only the second had a name. New `oversized` outcome.
+
+### Added
+- **`MergeOutcome`** -- a declared vocabulary for `MergeReport.category`, the keys
+  of `result.outcomes()`. They were bare string literals written at six different
+  return sites, so learning them meant reading `aggregator.py`; nothing could
+  validate a typo, and a custom aggregator had no contract to meet. Subclasses
+  `str`, so every existing lookup, comparison and format string is unchanged.
+- **`evolve(solved_threshold=)`** and the `SOLVED` constant. `0.999` was written
+  out four times -- twice in the drivers, once in a docstring, once as
+  `DifficultyWeighted`'s default, whose own docstring says it "mirrors the engine".
+  Right for a binary scorer; for a graded one (ROUGE, an LLM judge) nothing ever
+  reaches it, so *every* rollout asks the reflector to fix an answer that scored
+  0.95 and the run reports `below-threshold` as if the reflector were at fault.
+- **`AggregatorConfig.anneal_half_life` and `accept_samples`.** `base_delta` was
+  tunable but the half-life that turns it into the actual acceptance threshold was
+  a default argument buried in `stats.annealed_delta`, unreachable from the object
+  the docs call "tuning for the reference aggregator" -- and it sets the shape of a
+  whole run (the threshold goes 0.505 at v1, 0.875 at v128, floors at 0.99).
+- **A much wider top-level API.** `tasks_from` (documented, but importable only
+  from `agentdescent.evolution`), the whole error hierarchy (`ContractError` and
+  friends -- `evolve()` tells callers to distinguish a caller bug from a backend
+  failure, and the base class was not reachable from the package that says so),
+  the extension primitives `diffs_contradict` / `fuse_diffs` / `stable_hash` /
+  `assign_key_sections`, and `GitError` / `LedgerFailure` / `FAST_MAX` /
+  `FROZEN_IDS`.
+
+### Changed
+- **`domains.router.Task` is now `RouterTask`** (`Task` kept as an alias). It
+  shadowed `agentdescent.Task` -- disjoint fields, no relationship, same name --
+  and `orchestrator.py` and `worker.py` imported the other one, so a reader
+  following `AgentDescent -> Worker -> Task` from the architecture page landed on
+  the wrong class with no signal.
+- **The docs now use the top-level API**: 53 `from agentdescent import ...`
+  against 14 submodule imports, up from 3 against 63. `evolve` was never once
+  shown as `from agentdescent import evolve`, which is why the top-level surface
+  went untested and gaps in it went unnoticed. The remaining submodule imports are
+  the deliberately module-scoped ones (`dataloader`, `rewards`, `backends`,
+  `domains.router`).
+- A new test resolves **every** `from agentdescent... import` across all 70 doc
+  code blocks. 68 of them were executed by nothing at all, so a rename, a typo or
+  an unexported name was invisible.
+
+### Fixed
+- **The DGM port ran a staged-eval rung upstream does not have.** `DGM_outer.py`
+  passes exactly two subsets to each self-improve attempt -- `small` (10) and
+  `medium` (50), one `test_more_threshold = 0.4` -- and `big.json` (140) belongs
+  to the separate full-evaluation path, gated by the *archive-relative*
+  `get_full_eval_threshold(...)`. The port ran `big` as a third rung on the same
+  0.4, which changed what `agent.score` means: a high scorer's became a
+  140-instance number while a low scorer's stayed a 10-instance one, and both then
+  fed the same `dgm_parent_weights` sigmoid. The example's own docstring described
+  upstream correctly ("big=140 for top agents") while its code did something else.
+- **The GEPA port's admission test was a minibatch of one.** GEPA's Algorithm 1
+  compares a child against its parent on a feedback minibatch of size *b*;
+  `evolve()` rolls out one task per worker per round, so `before_after_delta` is a
+  single-instance measurement -- exactly `{-1, 0, +1}` for a binary reward like
+  HotpotQA EM. Gating on `> 0` therefore demanded that the one sampled instance
+  flip wrong-to-right, and it is the instance the mutation was generated *from*.
+  A prompt that helps broadly but does not fix that particular question was
+  discarded before it was ever scored: rejected candidates never enter the pool,
+  never get a `_score_row`, and so can never reach the Pareto frontier -- which is
+  precisely the complementary specialist the frontier exists to keep alive. Now
+  `>= 0`, which filters obvious regressions and leaves selection to domination
+  pruning. Algorithm 2 itself is scored on the full `D_pareto` row and is
+  unaffected.
+- **EvoSkill's frontier bound was 3, upstream's is 5**
+  (`src/registry/manager.py:379`), including the `--frontier` default.
+- **ADAS seed name.** `Self-Consistency with CoT` is
+  `Self-Consistency with Chain-of-Thought` in `get_init_archive()`.
+- **Upstream citations pointed at paths that do not exist.** EvoSkill's
+  `runner.py:79` / `:319` are `src/loop/runner.py`, and `registry/manager.py` is
+  `src/registry/manager.py`. The **line numbers were exact** -- `:79` really is the
+  tolerance ladder and `:319` really is the 0.8 pass/fail -- so only the prefix was
+  missing, but it made the citations un-followable.
+
+### Changed
+- ADAS's bootstrap resample count (2 000 against upstream's 100 000) is now named
+  as a deliberate speed trade in the docstring and on the fidelity page, rather
+  than left for a reader to diff against the repo.
+
+### Added
+- `tests/test_port_fidelity.py` pins the constants and control flow that have an
+  exact upstream source: DGM's selection weights, subset sizes and where the
+  ladder stops; ADAS's seven MGSM seeds and the documented resample deviation;
+  EvoSkill's tolerance ladder, pass threshold, weight formula and frontier bound
+  (a top-K leaderboard, not the Pareto front the paper's abstract describes).
+
+### Fixed
 - **The L1/L2 boundary was defined three times, with two different numbers.**
   `governance.classify` drew it at `FAST_MAX = 0.30`; the aggregator's staleness
   tolerance re-derived it as `blast_radius > 0.5` and the audit gate as

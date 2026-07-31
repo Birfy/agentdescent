@@ -25,7 +25,7 @@ least squares, as real rollout durations arrive — the constant isn't known a
 priori, so it calibrates itself:
 
 ```python
-from agentdescent.scheduler import DurationEstimator
+from agentdescent import DurationEstimator
 
 est = DurationEstimator()
 est.observe(cost=len(task.prompt), seconds=measured)   # after each rollout
@@ -52,7 +52,7 @@ Given a batch of tasks with estimated durations, dispatch the **longest first**
 *early* keeps one long rollout from defining the whole batch's wall-clock:
 
 ```python
-from agentdescent.scheduler import lpt_schedule, fifo_makespan
+from agentdescent import lpt_schedule, fifo_makespan
 
 weights = [est.estimate(len(t.prompt)) for t in tasks]
 assignment, makespan = lpt_schedule(weights, n_workers)   # near-optimal
@@ -83,8 +83,8 @@ that overruns `duration_timeout_factor × its estimate`** to the `ResumeQueue`
 (partial rollout) instead of letting it block a worker.
 
 ```python
-from agentdescent.async_runtime import AsyncAgentDescent, AsyncConfig
-from agentdescent.scheduler import DurationEstimator
+from agentdescent import AsyncAgentDescent, AsyncConfig
+from agentdescent import DurationEstimator
 
 sys = AsyncAgentDescent(repo, universe,
                      config=AsyncConfig(duration_timeout_factor=3.0),

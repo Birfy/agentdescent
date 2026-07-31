@@ -95,7 +95,7 @@ python -m examples.adas_meta_agent_search --dry-run
 ## Adapters
 
 ```python
-from agentdescent.agents import claude, from_callable, echo, with_retries
+from agentdescent import claude, from_callable, echo, with_retries
 
 # Claude (needs: pip install anthropic + credentials / `ant auth login`)
 model = claude(model="claude-opus-4-8")           # or claude-haiku-4-5 for cheap runs
@@ -154,7 +154,7 @@ A `Completion` is `prompt -> text`, so the token counts the providers *do* retur
 would be thrown away at the adapter boundary. Pass a `Usage` and they are kept:
 
 ```python
-from agentdescent.agents import Usage, openai_compatible, metered
+from agentdescent import Usage, openai_compatible, metered
 
 usage = Usage()
 model = openai_compatible(model="deepseek-v4-flash", usage=usage)   # or claude(usage=usage)
@@ -187,7 +187,7 @@ def openai_completion(prompt: str) -> str:
         model="gpt-...", messages=[{"role": "user", "content": prompt}])
     return resp.choices[0].message.content
 
-from agentdescent.agents import from_callable
+from agentdescent import from_callable
 model = from_callable(openai_completion)
 ```
 
@@ -196,8 +196,8 @@ model = from_callable(openai_completion)
 `agentdescent.evolution` consumes a completion through `LLMAgent`:
 
 ```python
-from agentdescent.agents import claude
-from agentdescent.evolution import LLMAgent
+from agentdescent import claude
+from agentdescent import LLMAgent
 
 agent = LLMAgent(claude(model="claude-haiku-4-5"))
 ```
@@ -213,7 +213,7 @@ contract is identical**: text in, text out. So they are all `Completion`s, and
 everything that takes a completion takes all of them with no special-casing:
 
 ```python
-from agentdescent.agents import claude, openai_compatible, claude_code, codex, cli_agent
+from agentdescent import claude, openai_compatible, claude_code, codex, cli_agent
 from agentdescent.backends import openhands
 
 claude(model="claude-haiku-4-5")                    # API model
@@ -250,7 +250,7 @@ Feature-detect it rather than assuming — plain API models deliberately do not
 implement it:
 
 ```python
-from agentdescent.agents import WorkspaceAgent
+from agentdescent import WorkspaceAgent
 
 if isinstance(agent, WorkspaceAgent):
     answer = agent.in_workspace(staged_dir)(prompt)   # it can grep real files
