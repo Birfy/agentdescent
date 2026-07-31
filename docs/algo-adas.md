@@ -59,27 +59,33 @@ In [`examples/adas_meta_agent_search.py`](https://github.com/Birfy/agentdescent/
 
 ## Measured — MGSM with DeepSeek
 
-MGSM is grade-school arithmetic, and a strong model answers it directly: at the
-default `--langs en,es,fr` the seed archive already scores **1.000**, so the
-search has no gradient and the archive merge accepts nothing.
+At the default settings MGSM is **saturated**: the seed archive already scores
+1.000 on the sampled items, so Meta Agent Search has no gradient and the archive
+merge accepts nothing.
 
-Two settings give it room, and MGSM's own difficulty axis is language:
+`--hard` is the lever, and MGSM needs both of the difficulty knobs at once. Even
+restricted to its low-resource languages, `deepseek-v4-flash` answers ~95% of
+items correctly with a single structure-free call, so finding a subset with signal
+takes a large pool:
+
+| pool | items a single call gets wrong |
+|---|---|
+| `--per-lang 40` on `bn,sw,te,th` (160) | fewer than 12 — `select_hard` warns and tops up |
+| `--per-lang 150` on `bn,sw,te,th` (600) | **47** (23 train / 12 val / 11 test) |
 
 ```bash
 python -m examples.adas_meta_agent_search --hard --langs bn,sw,te,th \
-    --per-lang 150 --provider openai --model deepseek-v4-flash --generations 4 --yes
+    --per-lang 150 --generations 3 --provider openai --model deepseek-v4-flash --yes
 ```
 
-`--hard` keeps the items a **plain single call** answers incorrectly, which is the
-right filter here: what ADAS searches over *is* structure, so the items worth
-keeping are the ones a structure-free call cannot already do. Over a 600-item
-low-resource pool that leaves 47 genuinely hard questions (24 train / 12 val /
-11 test).
+!!! warning "This is by far the most expensive example"
+    Every candidate is scored on every training item, and each score is a
+    *multi-step* program — self-consistency and debate make several model calls per
+    question. One generation over 23 items is on the order of a thousand calls, so
+    a three-generation run takes hours even fully parallel. Start with a small
+    `--per-lang` and `--generations 1` to see the loop work.
 
-ADAS is also the most expensive example — the searched agents are multi-step, so
-one generation is hundreds of model calls.
-
-## Run it
+## Run it## Run it
 
 ```bash
 python -m examples.adas_meta_agent_search --dry-run
