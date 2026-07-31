@@ -6,7 +6,28 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-08-01
+
+A measurement pass. 0.2.0 made the framework's claims honest; this release makes
+the numbers behind them readable, and fixes the ports and engine paths where a
+run could look like it had measured something when it had not.
+
+The headline is that a silent failure mode ran through everything: on a reasoning
+model, too small a token budget returns **empty visible content**, which does not
+raise — it scores as a wrong answer. A starved run therefore reports a low
+accuracy indistinguishable from a model that cannot do the task. ADAS's
+meta-agent hit this on every call, so its search proposed nothing and the docs
+recorded "no lift demonstrated" for a cause that was never the algorithm.
+
 ### Fixed
+- **The single-sourced version was single-sourced onto the wrong number.**
+  0.2.0 removed the duplicate version from `pyproject.toml` so it could not
+  drift again — correctly — but pointed it at `agentdescent.__version__`, which
+  had said `0.7.0` since the Concordia → AgentDescent rename while every wheel,
+  the PyPI page and the badge said 0.2.0. Nothing surfaced it, because the value
+  is only read at build time: the next GitHub Release would have published
+  **0.7.0** to PyPI, and PyPI version numbers cannot be reused, so 0.3.0 through
+  0.7.0 would have been unusable forever. Now `0.3.0`.
 - **ADAS's meta-agent returned empty content on every call, so the search
   proposed nothing.** `deepseek-v4-flash` is a reasoning model: the token budget
   is spent on hidden reasoning first and the visible content is what is left. The
