@@ -691,6 +691,14 @@ class EvolutionResult:
     #: the sync and async paths. The ``verbose`` print lines always knew the
     #: reason; this makes it available to a non-interactive caller.
     stop_reason: str = "rounds"
+    #: Times a worker was forced to resync because the pipeline stalled -- cards
+    #: arriving, nothing committing (async path only). A non-zero count means the
+    #: lag budget and the staleness tolerance are mismatched.
+    forced_refreshes: int = 0
+    #: Rollouts that overran their own predicted duration by ``straggler_factor``
+    #: (async path, and only when a ``duration_estimator`` was given). The design's
+    #: L-traj signal; detection only, nothing is resumed.
+    stragglers: int = 0
     #: Workers that gave up after repeated backend failures (async path only). A
     #: run can finish *cleanly* at a fraction of its requested concurrency, so
     #: `error` stays `None` while throughput quietly drops -- check this to tell a
@@ -744,6 +752,8 @@ class EvolutionResult:
                 for h in self.history
             ],
             "retired_workers": self.retired_workers,
+            "forced_refreshes": self.forced_refreshes,
+            "stragglers": self.stragglers,
             "stop_reason": self.stop_reason,
             "ledger_log": list(self.ledger_log),
         }
@@ -763,6 +773,8 @@ class EvolutionResult:
             history=[RoundInfo(**h) for h in d.get("history", [])],
             ledger_log=d.get("ledger_log", []), error=d.get("error"),
             retired_workers=d.get("retired_workers", 0),
+            forced_refreshes=d.get("forced_refreshes", 0),
+            stragglers=d.get("stragglers", 0),
             stop_reason=d.get("stop_reason", "rounds"),
         )
 
