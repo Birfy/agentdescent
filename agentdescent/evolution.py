@@ -782,11 +782,13 @@ def evolve(
     max_concurrency:
         How many of them actually run at once (see above).
     max_worker_errors:
-        Async only. Consecutive failed rollouts before a worker gives up -- and
-        only while *no* worker has ever succeeded, which reads as a
-        misconfiguration. Once any worker has completed a rollout the backend
-        demonstrably works, so failures are treated as transient and nobody
-        retires. See ``result.retired_workers``.
+        How much total failure to tolerate before giving up -- and only while *no*
+        worker has ever completed a rollout, which reads as a misconfiguration
+        (wrong key, dead endpoint). Once any worker has succeeded the backend
+        demonstrably works, so failures are treated as transient and the run
+        continues on whatever evidence it did gather. Counts consecutive failed
+        rollouts per worker on the async path (see ``result.retired_workers``) and
+        consecutive rounds in which *every* worker failed on the sync path.
     target_reward:
         Stop as soon as held-out reward reaches this. Without it a run always
         spends all ``rounds``, including after it has converged -- measured at 43%
@@ -912,6 +914,10 @@ def evolve(
     straggler_rounds = 0
     best_reward = float('-inf')
     stalled = 0
+    unit_lock = threading.Lock()
+    first_error: List[Optional[str]] = [None]
+    any_success = [False]      # has ANY worker ever completed a rollout?
+    dead_rounds = 0            # consecutive rounds where every worker failed
     deadline = time.time() + max_seconds if max_seconds else None
     for r in range(rounds):
         if deadline is not None and time.time() >= deadline:
@@ -922,15 +928,39 @@ def evolve(
         artifact = snap.get(artifact_id)
         base_v = snap.version.get(artifact_id, 0)
         assert_mutable(artifact)
+        ok_units, failed_units = [0], [0]      # this round's tally
 
         def _run_unit(unit) -> None:
-            """One worker: rollout -> propose -> ingest evidence (against `snap`)."""
+            """One worker: rollout -> propose -> ingest evidence (against `snap`).
+
+            A backend failure here is this worker's problem, not the round's. It
+            used to be the round's: the first exception propagated out of
+            `f.result()` and broke the loop, so a *single* transient ended the whole
+            run -- measured, one 429 on call 5 turned a 20-round run into 0 rounds.
+            """
+            try:
+                _run_unit_inner(unit)
+            except ContractError:
+                raise                     # a caller bug: the run is meaningless
+            except Exception as e:  # noqa: BLE001 - a backend failure
+                with unit_lock:
+                    if first_error[0] is None:
+                        first_error[0] = f"{type(e).__name__}: {str(e)[:200]}"
+                    failed_units[0] += 1
+                if verbose:
+                    print(f"round {r:>3}  worker {unit.worker} failed: "
+                          f"{type(e).__name__}: {str(e)[:100]}")
+
+        def _run_unit_inner(unit) -> None:
             if not unit.keys:
                 return
             task = by_id[sampler.pick(unit.keys, r)]     # a task from this worker's shard
             output = run(artifact.render(), task)
             score = _checked_reward(reward(task, output), task)
             sampler.record(task.id, score)               # learn which tasks carry signal
+            with unit_lock:
+                ok_units[0] += 1
+                any_success[0] = True
             if score >= 0.999:
                 return
             proposal = _checked_proposal(
@@ -993,6 +1023,23 @@ def evolve(
                 for unit in units:
                     _run_unit(unit)
 
+            # Decide on the round's tally rather than on the first exception. The
+            # same global signal the async path uses: while NO worker has ever
+            # completed a rollout, repeated total failure means the backend is
+            # misconfigured, so give up quickly and loudly. Once any worker has
+            # succeeded the backend demonstrably works, so failures are transient
+            # and the run keeps going on the evidence it did gather.
+            if failed_units[0] and not ok_units[0]:
+                dead_rounds += 1
+                if not any_success[0] and dead_rounds >= max_worker_errors:
+                    run_error = first_error[0]
+                    if verbose:
+                        print(f"round {r:>3}  giving up: {dead_rounds} rounds with no "
+                              f"worker ever succeeding ({run_error})")
+                    break
+            else:
+                dead_rounds = 0
+
             reports = check_reports(aggregator.step(), aggregator)
         except ContractError:
             raise            # a caller-contract violation: the run is meaningless
@@ -1005,7 +1052,29 @@ def evolve(
         committed = sum(1 for x in reports if x.committed_version is not None)
         rejected = sum(1 for x in reports if x.committed_version is None)
         dev = ledger.snapshot(Ledger.DEV).get(artifact_id)
-        info = RoundInfo(r, dev.score(held_out), len(dev.state), committed, rejected,
+        # Scoring held-out runs the agent, so it is a backend call like any other and
+        # must not raise out of the driver -- that would discard everything already
+        # committed. Treat an unmeasurable round like a failed one: keep the last
+        # known reward so early stopping still has something to compare.
+        try:
+            round_reward = dev.score(held_out)
+        except ContractError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            if first_error[0] is None:
+                first_error[0] = f"{type(e).__name__}: {str(e)[:200]}"
+            dead_rounds += 1
+            if not any_success[0] and dead_rounds >= max_worker_errors:
+                run_error = first_error[0]
+                if verbose:
+                    print(f"round {r:>3}  giving up: held-out unmeasurable "
+                          f"({run_error})")
+                break
+            if verbose:
+                print(f"round {r:>3}  held-out unmeasurable, carrying last reward: "
+                      f"{type(e).__name__}: {str(e)[:100]}")
+            continue
+        info = RoundInfo(r, round_reward, len(dev.state), committed, rejected,
                          _tally(reports))
         history.append(info)
         # Early stopping: an LLM rollout costs money, so do not keep buying them

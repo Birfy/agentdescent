@@ -7,6 +7,19 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **A single transient ended a whole *synchronous* run** — the default path, and
+  the one every shipped example uses. A worker's exception propagated out of its
+  future and broke the round loop, with no retry or tolerance anywhere: measured,
+  one 429 on call 5 turned a 20-round run into **0 rounds**. A failing worker now
+  costs its own evidence and nothing more, and the round merges what the others
+  gathered; the give-up rule is the same global signal used on the async path,
+  counting consecutive rounds in which *every* worker failed. A genuinely dead
+  backend still ends the run in under a second. Contract violations still
+  propagate.
+- **A failing per-round held-out score raised out of `evolve()`.** It sat outside
+  the round's error handling although it runs the agent like any other backend
+  call, so a blip discarded every commit the run had already made. It is now
+  treated as a failed round, carrying the last known reward forward.
 - **A flaky backend killed the whole async run.** Measured against a real endpoint
   refusing 1 call in 3 (~56% per rollout — an ordinary 429 storm): the run ended
   after **22 s with 0 sweeps and nothing learned**, while two thirds of calls were

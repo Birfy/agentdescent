@@ -147,3 +147,70 @@ def test_a_caller_bug_in_the_merger_still_propagates():
                    strategy=SingleSlot(initial_value="v"), asynchronous=True,
                    n_workers=2, rounds=20, held_out_frac=0.5, max_seconds=10.0,
                    aggregator_factory=lambda *a, **kw: BadAggregator())
+
+
+# --- the synchronous path, which had the same disease in a worse form -----------
+
+def _sync(run, reward=lambda t, o: 0.5, **kw):
+    return evolve(TASKS, reward, run=run, propose=lambda *a: "tweak",
+                  strategy=SingleSlot(initial_value="v"), rounds=20,
+                  n_workers=3, max_concurrency=3, held_out_frac=0.5, **kw)
+
+
+def test_one_transient_does_not_end_a_sync_run():
+    """It used to end it outright: `f.result()` re-raised the first worker's
+    exception and the round loop broke. Measured: one 429 on call 5 turned a
+    20-round run into 0 rounds."""
+    counter, lock = itertools.count(), threading.Lock()
+
+    def run(rendered, task):
+        with lock:
+            i = next(counter)
+        if i == 5:
+            raise RuntimeError("429 rate limited")
+        return "wrong"
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        res = _sync(run)
+    assert len(res.history) == 20, f"ran only {len(res.history)} rounds"
+    assert res.error is None
+
+
+def test_a_dead_backend_still_ends_a_sync_run_quickly():
+    """Tolerating transients must not mean burning the whole budget on a dead key."""
+    def run(rendered, task):
+        raise RuntimeError("401 unauthorized")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        res = _sync(run)
+    assert res.error is not None and "401" in res.error
+    assert len(res.history) == 0
+
+
+def test_a_failing_held_out_score_does_not_escape_the_driver():
+    """Per-round scoring runs the agent, so it is a backend call too.
+
+    It sat outside the round's error handling and raised straight out of evolve(),
+    discarding everything already committed.
+    """
+    counter, lock = itertools.count(), threading.Lock()
+
+    def reward(task, output):
+        with lock:
+            i = next(counter)
+        if 20 < i < 24:            # a blip during a round's held-out measurement
+            raise RuntimeError("503 transient")
+        return 0.5
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        res = _sync(lambda rendered, t: "wrong", reward=reward)   # must not raise
+    assert res.history, "the run produced nothing despite a recoverable blip"
+
+
+def test_a_caller_bug_still_propagates_from_a_sync_worker():
+    """Tolerating backend failures must not swallow contract violations."""
+    from agentdescent.evolution import RewardContractError
+    with pytest.raises(RewardContractError):
+        _sync(lambda rendered, t: "wrong", reward=lambda t, o: "not a number")

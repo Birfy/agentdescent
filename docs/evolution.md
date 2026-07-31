@@ -110,7 +110,7 @@ nothing else in the call changes.
 | `self_verify=` | [`async_evolve`](#the-barrier-free-runtime-async_evolve) | async only: a worker re-runs its trajectory with the diff applied for a local before/after signal; faithful ports that score the candidate on held-out only pass `False` | `True` |
 | `on_round=` | driver | **progress callback** — fires per round / merger sweep | `None` |
 | `target_reward=`, `patience=` | driver | **early stopping** — stop at a reward, or after N rounds without improvement | `None`, `None` |
-| `max_worker_errors=` | [async driver](#the-barrier-free-runtime-async_evolve) | consecutive failures before a worker gives up — only while *no* worker has ever succeeded | `3` |
+| `max_worker_errors=` | driver | how much total failure to tolerate — only while *no* worker has ever succeeded | `3` |
 | `blast_radius`, `oracle_budget` | governance + verifier | audit budget for L1 merges | `0.2`, `200` |
 
 The building blocks in detail:
@@ -500,6 +500,19 @@ failure rate that is about 30% of workers, none of which were faulty.
     throughput without relieving the limit, and then ends the run. Measured against
     a backend refusing 1 call in 3 (~56% per rollout, an ordinary 429 storm), the
     old blanket rule retired all three workers in **22 s with nothing learned**.
+
+**The synchronous path had the same disease in a worse form.** A worker's
+exception propagated out of its future and broke the round loop, so a *single*
+transient ended the run — measured, one 429 on call 5 turned a 20-round run into
+**0 rounds**, and sync is the default. A failing worker now costs its own
+evidence and nothing more; the round merges what the others gathered. The
+give-up rule is the same global one, counting consecutive rounds in which
+*every* worker failed. A dead backend still ends the run in well under a second.
+
+The per-round held-out scoring sat *outside* that handling, and it runs the agent
+too — so a blip there raised straight out of `evolve()`, discarding everything
+already committed. It is now treated like a failed round: the last known reward
+carries forward so early stopping still has something to compare.
 
 The **merger** gets the same tolerance, and this matters more than it sounds: it
 scores the held-out set every sweep, so it calls the backend too. A single
