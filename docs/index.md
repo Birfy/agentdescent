@@ -20,17 +20,18 @@ The one place the analogy *must* break defines the whole system:
 !!! warning "Gradients add, diffs do not"
     Aggregation is therefore **not averaging** but **conflict resolution +
     statistical acceptance + transactional commit**. That merge is what
-    [`aggregator.py`](architecture.md#3-component-responsibilities) implements.
+    [`aggregator.py`](aggregator.md) implements.
 
 ---
 
 ## Start here
 
-Have a dataset? That is the whole input.
+### Have a dataset
+
+That is the whole input.
 
 ```python
-from agentdescent import evolve_skill
-from agentdescent import openai_compatible
+from agentdescent import evolve_skill, openai_compatible
 from agentdescent.dataloader import hf_rows
 
 rows = hf_rows("hotpotqa/hotpot_qa", "validation", config="distractor", limit=40)
@@ -45,12 +46,29 @@ Run as written, that lifted held-out exact match from **0.167 to 0.583** and wro
 *"Respond with only the requested answer, omitting any extra explanation or
 restatement."* — see [Quickstart](quickstart-skill.md) for the full measurement.
 
-Nothing is hidden: it builds ordinary arguments and calls
-[`evolve()`](evolution.md), which is where you go the moment you want more.
+### Have a directory
 
-Have a **directory** instead — a skill folder, a folder of subagent definitions,
-or the agent's own code? [`evolve_skill_dir()`](directory-evolution.md) evolves
-that, with each rollout performed by a real agent that reads the files off disk.
+A skill folder, a folder of subagent definitions, or the agent's own code:
+
+```python
+from agentdescent import evolve_skill_dir
+from agentdescent.agents import claude_code, openai_compatible
+
+result = evolve_skill_dir(
+    "~/.claude/skills/pdf-audit", rows,
+    agent=claude_code(extra_args=["--permission-mode", "acceptEdits"]),
+    reflect_with=openai_compatible(model="deepseek-v4-flash"),
+    prompt="question", gold="answer", score="contains")
+
+result.write_to("~/.claude/skills/pdf-audit")     # opt in; backs up first
+```
+
+Each rollout materialises the candidate into a throwaway workspace and a **real
+agent reads the files off disk**. See
+[Quickstart — a directory](quickstart-directory.md).
+
+Neither is a separate system: both build ordinary arguments and call
+[`evolve()`](evolution.md), which is where you go the moment you want more.
 
 ```bash
 pip install agentdescent
@@ -62,35 +80,48 @@ pip install agentdescent
 
 <div class="grid cards" markdown>
 
--   :material-rocket-launch: **[Quickstart — dataset to skill](quickstart-skill.md)** — start here
+-   :material-download: **[Install and first run](install.md)** — start here
+
+    Install, then reproduce the central claim in seconds with no API key.
+
+-   :material-rocket-launch: **[Quickstart — dataset to skill](quickstart-skill.md)**
 
     One call, three decisions: your data, how to score it, which model. With the
     measured result of running it.
+
+-   :material-folder-cog: **[Quickstart — a directory](quickstart-directory.md)**
+
+    A skill folder, an agent folder, or its code — evolved by an agent that reads
+    the files.
 
 -   :material-star-four-points: **[The `evolve` method](evolution.md)**
 
     The one entry point underneath. Every capability is a plug-in to one
     `evolve()` parameter — this is the map, with an example per module.
 
--   :material-robot: **[Complete example](skill-evolution.md)**
+-   :material-lightbulb-on: **[Concepts](concepts.md)**
 
-    The same thing written out by hand — real dataset, real LLM, every module
-    wired explicitly.
+    The *why*: the training↔RSI analogy, staleness, the aggregator as a
+    discrete-space optimizer, the three long tails, governance.
 
 -   :material-sitemap: **[Architecture](architecture.md)**
 
     How the components fit together and how a diff travels from a worker to a
     committed change.
 
+-   :material-view-grid-plus: **[Module map](modules.md)**
+
+    Every module, what it is for, and a reading order for whatever you are doing.
+
+-   :material-api: **[API reference](api.md)**
+
+    All 125 exported names with real signatures — generated from the code, and
+    tested against it.
+
 -   :material-chart-box: **[Measured results](results.md)**
 
-    Every empirical claim with the setup that produced it — including the four
+    Every empirical claim with the setup that produced it — including the
     benchmarks where the honest answer is "nothing to learn here".
-
--   :material-lightbulb-on: **[Concepts](concepts.md)**
-
-    The *why*: the training↔RSI analogy, staleness, the aggregator as a
-    discrete-space optimizer, the three long tails, governance.
 
 </div>
 
@@ -98,36 +129,35 @@ pip install agentdescent
 
 <div class="grid cards" markdown>
 
--   :material-connection: **[Connecting agents & LLMs](agents.md)** → `agent=`
+-   :material-connection: **[Agents & LLMs](agents.md)** → `agent=`
 
-    Any `prompt -> text` is a completion: Claude, GLM/OpenAI-compatible, a
-    callable, a stub.
+    Any `prompt -> text` is a completion: Claude, GLM/OpenAI-compatible, a CLI
+    coding agent, a callable, a stub.
 
--   :material-database-arrow-down: **[Loading datasets](dataloader.md)** → the data layer
+-   :material-file-tree: **[Strategies](strategies.md)** → `strategy=`
 
-    `agentdescent.dataloader` — pull any benchmark (HF datasets-server + raw files),
-    cached, dependency-free. Feeds `tasks` to `evolve`.
+    What the artifact *is*: one slot, a playbook, keyed categories, or a
+    directory. The key space is the design decision.
 
--   :material-cog-sync: **[The aggregator](aggregator.md)** → `agg_config=` / `aggregator_factory=`
+-   :material-cog-sync: **[The aggregator](aggregator.md)** → `aggregator_factory=`
 
     The optimizer — tune the reference merge/acceptance pipeline, or swap in your
     own.
 
--   :material-vector-triangle: **[Customizable parallelism](parallelism.md)** → `parallel=`
+-   :material-vector-triangle: **[Parallelism](parallelism.md)** → `parallel=`
 
-    Pluggable DP / TP methods — or write your own `ParallelStrategy`. (PP needs
-    one artifact per stage, so it is a standalone primitive, not an `evolve()`
-    mode.)
+    Pluggable DP / TP methods, plus [sampling](sampling.md) for which rollout to
+    spend and [scheduling](duration-scheduling.md) for when.
 
--   :material-timer-sand: **[Duration-aware scheduling](duration-scheduling.md)**
+-   :material-source-branch-sync: **[Async](async.md)** → `asynchronous=True`
 
-    Estimate rollout cost from task size, then dispatch (LPT) and checkpoint
-    stragglers (async runtime).
+    Barrier-free workers, a lag budget, and the
+    [staleness policies](staleness.md) that keep it safe.
 
--   :material-speedometer: **[Efficiency experiments](efficiency.md)**
+-   :material-shield-lock: **[Governance](governance.md)** → `blast_radius=`
 
-    Where the parallelism actually goes: 5.9× of 8 workers on uniform latency,
-    **2.4× on a reasoning model's heavy tail**, and which knob fixes which.
+    L2 skills merge freely, L1 harnesses are oracle-gated, L0 is frozen — and
+    frozen *paths* for a directory.
 
 </div>
 
@@ -137,15 +167,15 @@ pip install agentdescent
 
 | Model training | AgentDescent (parallel RSI) |
 |---|---|
-| parameter tensor θ | library of `Evolvable` artifacts |
-| gradient *g* | `Diff` + `EvidenceCard` |
-| parameter server | git-backed, version-vectored `Ledger` |
-| optimizer step | `Aggregator` merge decision |
+| parameter tensor θ | library of [`Evolvable`](data-model.md) artifacts |
+| gradient *g* | [`Diff` + `EvidenceCard`](data-model.md) |
+| parameter server | git-backed, version-vectored [`Ledger`](ledger.md) |
+| optimizer step | [`Aggregator`](aggregator.md) merge decision |
 | per-param adaptive LR (Adam) | per-artifact Beta-posterior test |
-| staleness / decoupled PPO | per-diff η + rebase re-verify |
-| partial rollout | straggler detection (`ResumeQueue`; resume not implemented) |
-| EMA (weight averaging) | `stable`/`dev` dual branch |
-| training code (not self-modifiable) | L0 frozen layer |
+| staleness / decoupled PPO | [per-diff η + rebase re-verify](staleness.md) |
+| partial rollout | [straggler detection](duration-scheduling.md) (`ResumeQueue`; resume not implemented) |
+| EMA (weight averaging) | [`stable`/`dev` dual branch](ledger.md#two-branches-dev-and-stable) |
+| training code (not self-modifiable) | [L0 frozen layer](governance.md) |
 
 ---
 
@@ -154,16 +184,18 @@ pip install agentdescent
 ```bash
 pip install -e ".[dev]"
 
-python -m examples.run_demo      # RQ1: merge vs fork (synchronous DP)
-python -m examples.run_async     # FlashEvolve-style async + staleness policies
-python -m examples.rq2_staleness # RQ2: staleness tolerance sweep
-pytest                           #  tests, no external services
+python -m examples.run_demo            # RQ1: merge vs fork (synchronous DP)
+python -m examples.run_async           # FlashEvolve-style async + staleness policies
+python -m examples.skill_dir_evolution # evolve a skill directory a real agent reads
+python -m examples.rq2_staleness       # RQ2: staleness tolerance sweep
+pytest                                 # the suite, no external services
 ```
 
-No LLM or external service is required: the reference domain is a fully
-deterministic keyword-router skill, so the entire parallel loop runs in-process
-and is unit-tested — while still producing genuine diffs that measurably improve
-a held-out metric.
+No LLM or external service is required: the
+[reference domain](orchestrator.md#why-a-synthetic-domain-exists-at-all) is a
+fully deterministic keyword-router skill, so the entire parallel loop runs
+in-process and is unit-tested — while still producing genuine diffs that
+measurably improve a held-out metric.
 
 !!! note "Scope"
     This is a **research reference implementation**, faithful to the design's

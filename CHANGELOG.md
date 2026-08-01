@@ -6,6 +6,37 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Documentation
+- **The documentation site was rebuilt as a reference, not a tour.** It had 23
+  pages covering 7 of 21 modules and no API reference at all: a reader who wanted
+  `Ledger`, `ThreeLayerVerifier`, `StalenessPolicy`, `DifficultyWeighted` or the
+  scorers had nowhere to go but the source. Now 38 pages on a
+  concepts → quickstarts → module reference → API structure, with a page per
+  module.
+
+  - **New: [`docs/api.md`](docs/api.md), generated.** Every public name with its
+    real signature, produced by `python -m tools.gen_api_docs` from the package's
+    own signatures and docstrings. A hand-written reference is wrong the moment a
+    signature changes and nobody notices until a reader copies a call that no
+    longer exists — so `tests/test_api_reference.py` runs the generator's
+    `--check` mode and fails when the page and the code disagree. It also proves
+    every exported name appears, which is how the `evolve_skill` gap below was
+    found.
+  - **New module pages** for the parts that had none: the data model, ledger,
+    verifier, governance, staleness, strategies, sampling, rewards, async,
+    backends, and the reference orchestrator/domain.
+  - **New entry pages**: install-and-first-run, a directory quickstart, and a
+    module map with a reading order per goal.
+  - `duration-scheduling.md` gained the **audit scheduler**, which was
+    undocumented despite being half of `scheduler.py`.
+
+### Fixed
+- **`evolve_skill` was importable but missing from `agentdescent.__all__`.**
+  `from agentdescent import evolve_skill` worked — it is what the README and the
+  quickstart use — but `import *` and any tooling reading `__all__` did not see
+  it. Found by the generated API reference, which asserts that every exported
+  name is documented and had nothing to document.
+
 ### Added
 - **Evolving a directory: a skill folder, an agent folder, or its code.** Until
   now every artifact was text that ended up *in a prompt*. A skill directory is

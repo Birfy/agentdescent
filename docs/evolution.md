@@ -20,6 +20,11 @@ print(result.final_reward)    # held-out reward
 
 That's the minimum. Everything below is optional and swappable.
 
+!!! tip "Three companion pages"
+    [Module map](modules.md) is the index of every module and a reading
+    order; [API reference](api.md) has every signature, generated from the
+    code; [Concepts](concepts.md) is why any of it is shaped this way.
+
 ## Bring an agent you already have
 
 The common case is not "write an agent for the framework" — it is "I have an
@@ -96,13 +101,13 @@ nothing else in the call changes.
 | `evolve(...)` parameter | Module | What it plugs in | Default |
 |---|---|---|---|
 | `agent=` / `run=`+`propose=` | [`agentdescent.agents`](agents.md) + `LLMAgent` | the actor: solve a task, propose a change | — (required) |
-| `strategy=` | `Strategy` (`AppendRules` / `KeyedRules` / yours) | the **evolution rule** — how a proposal becomes a diff | `AppendRules()` |
+| `strategy=` | [`Strategy`](strategies.md) (`SingleSlot` / `AppendRules` / `KeyedRules` / [`FileTree`](directory-evolution.md) / yours) | the **evolution rule** — what the artifact is and how a proposal becomes a diff | `AppendRules()` |
 | `parallel=` | [`agentdescent.parallel`](parallelism.md) | the **parallelism method** — DP / TP / PP | `DataParallel()` |
-| `task_sampler=` | [`agentdescent.sampling`](#task-selection-which-rollout-to-spend) | **which task** a worker rolls out next | `RoundRobin()` |
-| `blast_radius=` | governance | which layer (L2 skill vs L1 harness/verifier) | `0.2` (L2) |
+| `task_sampler=` | [`agentdescent.sampling`](sampling.md) | **which task** a worker rolls out next | `RoundRobin()` |
+| `blast_radius=` | [governance](governance.md) | which layer (L2 skill vs L1 harness/verifier) | `0.2` (L2) |
 | `agg_config=` | `AggregatorConfig` | merge & acceptance **tuning** | sensible defaults |
 | `aggregator_factory=` | `AggregatorProtocol` | **swap the whole optimizer** (custom merge/acceptance) | reference `Aggregator` |
-| `staleness_policy=` | staleness (`get_policy(...)`) | how stale diffs are handled | `guarded` |
+| `staleness_policy=` | [staleness](staleness.md) (`get_policy(...)`) | how stale diffs are handled | `guarded` |
 | `rounds=`, `n_workers=` | driver | loop size, parallel worker count | `15`, `4` |
 | `max_concurrency=` | driver | run a round's workers **concurrently** (thread pool); aggregator = barrier (synchronous DP) | `1` (sequential) |
 | `round_timeout=` | driver | cap how long a round waits for its workers — abandons stragglers | `None` (wait forever) |
@@ -111,7 +116,9 @@ nothing else in the call changes.
 | `on_round=` | driver | **progress callback** — fires per round / merger sweep | `None` |
 | `target_reward=`, `patience=` | driver | **early stopping** — stop at a reward, or after N rounds without improvement | `None`, `None` |
 | `max_worker_errors=` | driver | how much total failure to tolerate — only while *no* worker has ever succeeded | `3` |
-| `blast_radius`, `oracle_budget` | governance + verifier | audit budget for L1 merges | `0.2`, `200` |
+| `oracle_budget=`, `cheap_eval_tasks=` | [verifier](verifier.md) | audit budget for L1 merges, and how many held-out tasks the *ranking* passes score | `200`, all |
+| `repo_path=` | [ledger](ledger.md) | where the git-backed store lives — pass the same path again to **resume** | scratch, removed on return |
+| `reward` | [rewards](rewards.md) | `(task, output) -> [0, 1]` — ready-made scorers for the common cases | — (required) |
 
 The building blocks in detail:
 

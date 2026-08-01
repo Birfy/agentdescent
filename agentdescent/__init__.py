@@ -238,6 +238,7 @@ __all__ = [
     "tasks_from",
     "RoundInfo",
     "evolve",
+    "evolve_skill",
     "TreeError",
     "TreeSpec",
     "canonical",

@@ -129,3 +129,16 @@ reward = last_number()
 `tasks_from` numbers the rows, puts the gold in `meta` (where
 [the reflector reads it](evolution.md#bring-an-agent-you-already-have)), and maps
 any extra columns you name into `meta` too.
+
+---
+
+## Next
+
+* **Have a folder rather than a dataset?**
+  [Quickstart — evolve a directory](quickstart-directory.md) does the same thing
+  for a skill folder, an agent folder, or its code, with a real agent reading the
+  files off disk.
+* **Want the knobs?** [The `evolve` method](evolution.md) — `evolve_skill` is a
+  thin wrapper over it and every extra argument passes straight through.
+* **Want to know why it works?** [Concepts](concepts.md), then
+  [the aggregator](aggregator.md).
