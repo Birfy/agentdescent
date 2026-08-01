@@ -366,7 +366,7 @@ class Aggregator:
             elif action is StaleAction.REBASE:
                 # cheaply re-verify the delta still holds on the current head.
                 candidate = artifact.apply(card.diff)
-                if artifact.cheap_eval(card) <= candidate.cheap_eval(card):
+                if artifact.evidence_eval(card) <= candidate.evidence_eval(card):
                     survivors.append(card.rebased_onto(head))
                 else:
                     discarded.append(card)
@@ -553,6 +553,16 @@ class Aggregator:
         base_score = self.verifier.cheap_eval(artifact)
         cand_score = self.verifier.cheap_eval(best_state)
 
+        # The full held-out rates. The regression guard below must use *these*
+        # rather than `cand_score`/`base_score`: those come from the cheap layer,
+        # which `cheap_eval_tasks` sub-samples -- so a 4-task sample could veto a
+        # commit the full-set Beta test had just approved, while three comments and
+        # two doc pages promised sub-sampling "never affects commit safety". It was
+        # the promise that was wrong, not the intent; the guard is meant to stop a
+        # measured regression, and ground truth is what measures one.
+        base_full = base_s / max(1e-9, base_s + base_f)
+        cand_full = cand_s / max(1e-9, cand_s + cand_f)
+
         baseline_post = BetaPosterior(prior.successes + base_s, prior.failures + base_f)
         candidate_post = BetaPosterior(prior.successes + cand_s, prior.failures + cand_f)
         # fold each contributing worker's local before/after delta as extra
@@ -588,8 +598,6 @@ class Aggregator:
         # The signal is free here: `eval_counts` already scored base and candidate
         # on the full held-out set for the Beta test above, so comparing its verdict
         # with the cheap layer's costs nothing and happens on every merge.
-        base_full = base_s / max(1e-9, base_s + base_f)
-        cand_full = cand_s / max(1e-9, cand_s + cand_f)
         if cand_full != base_full or cand_score != base_score:
             self.audit.update_trust(
                 artifact_id, (cand_full > base_full) == (cand_score > base_score))
@@ -609,11 +617,18 @@ class Aggregator:
         # the new head, so it deserves another look; one rejected here was judged and
         # lost, and its tournament rivals scored below it on the same held-out set.
         # Re-filing them would just buy the same rejection again.
-        if p_improve <= 1.0 - delta or cand_score < base_score:
-            prior.observe_delta(cand_score - base_score)
+        regressed = cand_full < base_full
+        if p_improve <= 1.0 - delta or regressed:
+            prior.observe_delta(cand_full - base_full)
+            # Name the gate that actually fired. Reporting the posterior either way
+            # printed lines like `P(delta>0)=0.97 <= 0.50` when the regression guard
+            # was the real cause -- self-contradictory to anyone reading `outcomes()`
+            # to find out why nothing committed, which is the one job it has.
+            reason = (f"held-out regression {base_full:.3f} -> {cand_full:.3f}"
+                      if regressed else
+                      f"P(delta>0)={p_improve:.2f} <= {1-delta:.2f}")
             return MergeReport(artifact_id, None, fused, n_considered, len(survivors),
-                               len(discarded), conflicts, p_improve, None,
-                               f"P(delta>0)={p_improve:.2f} <= {1-delta:.2f}",
+                               len(discarded), conflicts, p_improve, None, reason,
                                MergeOutcome.BELOW_THRESHOLD)
 
         # -- commit (section 4.1): CAS on dev --------------------------------

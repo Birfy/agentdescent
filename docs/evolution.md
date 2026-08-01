@@ -270,16 +270,16 @@ Details + the DP/TP/PP semantics: [Customizable parallelism](parallelism.md).
 
 ---
 
-## Task selection — which rollout to spend
+## Task selection — `task_sampler=`
 
-*What:* which task a worker rolls out next. *Module:*
-[`agentdescent.sampling`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/sampling.py).
+*What:* which task a worker rolls out next, from the shard
+[`parallel=`](parallelism.md) gave it. *Module:*
+[`agentdescent.sampling`](sampling.md).
 
-A rollout is the expensive unit of work — one LLM call, or an entire tool-using
-agent trajectory that can run for minutes. Spending it on a task the agent
-**already solves** teaches the system nothing: there is no failure, so no
-proposal, so no diff. The same is true of a task it can *never* solve. Only tasks
-somewhere in between carry a usable gradient (the GRPO zero-advantage argument).
+A rollout is the expensive unit of work. Spending it on a task the agent already
+solves teaches the system nothing — no failure, no proposal, no diff — and the
+same is true of one it can never solve. Only tasks in between carry a usable
+gradient (the GRPO zero-advantage argument).
 
 ```python
 from agentdescent import DifficultyWeighted, RoundRobin
@@ -291,40 +291,11 @@ evolve(tasks, reward, agent=agent, task_sampler=DifficultyWeighted())  # focus t
 | Sampler | Rule |
 |---|---|
 | **`RoundRobin`** (default) | cycle through the shard — deterministic, but spends rollouts uniformly |
-| **`DifficultyWeighted`** | track each task's pass rate; prefer those away from the all-pass / all-fail extremes, with a UCB bonus so untried tasks are still explored |
+| **`DifficultyWeighted`** | weight by `4·p·(1−p)`, plus a UCB bonus so untried tasks are still explored |
 
-Measured on a 40-task workload where only 6 tasks carry signal — the share of
-rollouts that landed on an informative task:
-
-| | round-robin | difficulty-weighted |
-|---|---|---|
-| clean reward | 14.5% | **23.4%** |
-| 15% reward noise | 7.3% | **16.3%** |
-
-!!! warning "That is a targeting measurement, not an accuracy claim"
-    Landing more rollouts on failing tasks does **not** automatically produce a
-    better artifact. On real [ACE / FiNER-139 runs](algo-ace.md#empirical-results-finer-139-with-deepseek)
-    the difficulty-weighted sampler reached a lesson sooner (round 0 versus round
-    2) but did not score better — and two runs of the *same* round-robin
-    configuration differed by 4.8 points, so at that sample size neither sampler
-    is distinguishable from the other. Concentrating on the hardest tasks can also
-    yield lessons that fit those tasks and generalise worse. Treat this sampler as
-    **worth trying and worth measuring on your own data**, not as a free win;
-    `RoundRobin` stays the default.
-
-Where it should help most is a *strong* base agent on a large task pool: failures
-are sparse, so round-robin spends most of its budget re-solving solved tasks.
-Write your own by implementing `pick` + `record`:
-
-```python
-class PreferRecentFailures:
-    def pick(self, keys, round_index): ...      # -> one task id
-    def record(self, task_id, score): ...       # learn from the outcome
-```
-
-!!! note "Default stays deterministic"
-    `RoundRobin` remains the default so existing runs and the RQ experiments stay
-    bit-reproducible. `DifficultyWeighted` is opt-in.
+The `c` sweep, the `pass_threshold` trap for graded scorers, how to write your
+own, and the **caveat that the measured gain is a targeting number rather than an
+accuracy claim** are all on [the sampling page](sampling.md).
 
 ---
 
@@ -396,8 +367,8 @@ evolve(tasks, reward, agent=agent, staleness_policy=get_policy("reflective"))
 
 Staleness bites when workers lag head — which is most visible in the **async
 runtime** (`async_ratio`), below. In synchronous `evolve()` each round proposes
-against the current head, so η is usually 0. Deep dive:
-[staleness in concepts](concepts.md#3-staleness).
+against the current head, so η is usually 0. Deep dive: [staleness policies](staleness.md) for the module,
+[concepts §3](concepts.md#3-staleness) for why it is the heart of the async story.
 
 ---
 
@@ -717,41 +688,32 @@ evolve(tasks, reward, agent=agent, asynchronous=True, async_ratio=3, max_seconds
 
 ## The barrier-free runtime: `async_evolve()`
 
-`evolve()`'s round barrier means the aggregator waits for all workers each round.
-[`async_evolve()`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/async_evolve.py)
-removes it while accepting the identical `run`/`reward`/`propose`/`strategy`/
-`aggregator_factory` plug-ins — so **any** task that runs under `evolve()` (ACE,
-GEPA, EvoSkill, SkillOpt, ADAS, DGM) also runs async:
-
-* **Workers** (`n_workers` threads) hold a snapshot and keep producing evidence
-  against it, refreshing only once head drifts past **`async_ratio`** (the lag
-  budget) — so staleness (η > 0) genuinely arises. The lag budget bounds
-  **un-merged** work too: a worker won't pile up more than `async_ratio`
-  candidates ahead of the merger. This matters at **cold start** — before the
-  first commit, head hasn't advanced, so a version-only budget can't engage and
-  workers would flood the buffer while the merger is busy on the first slow
-  held-out eval; gating on pending intake prevents that.
-* **One merger** drains a thread-safe buffer, runs each card through the
-  **staleness policy** (`accept η=0` / `rebase`+re-verify / `discard`), then
-  `ingest` + `step`. It is the only writer, so there are no CAS conflicts and
-  every custom optimizer sees only rebased cards — async-safe unchanged.
-* **`self_verify`** controls whether a worker, after producing a diff, re-runs
-  its own trajectory with the diff applied to record a local before/after signal
-  (`before_after_delta`, used by the staleness gate's cheap re-verify). Ports
-  that only score the *candidate* on held-out — e.g. [EvoSkill](algo-evoskill.md),
-  whose repo evaluates the child on the validation set and never re-runs the
-  sampled task — pass `self_verify=False` to skip that extra rollout.
+`evolve()`'s round barrier makes the aggregator wait for every worker each round.
+[`async_evolve()`](async.md) removes it while accepting the identical
+`run` / `reward` / `propose` / `strategy` / `aggregator_factory` plug-ins — so
+**any** task that runs under `evolve()` (ACE, GEPA, EvoSkill, SkillOpt, ADAS, DGM)
+also runs async:
 
 ```python
-from agentdescent import async_evolve
+from agentdescent import async_evolve, get_policy
+
 result = async_evolve(tasks, reward, agent=agent,
-                      n_workers=4, async_ratio=3, max_seconds=30,   # or max_iters / target_reward
+                      n_workers=4, async_ratio=3, max_seconds=30,
                       staleness_policy=get_policy("reflective"))
 ```
 
 Reach it via `evolve(asynchronous=True)` or directly. Small `async_ratio` →
 near-synchronous, few stale diffs; large → highly asynchronous, many stale diffs
-the policy must rebase or discard.
+for the policy to rebase or discard.
+
+!!! warning "Five arguments change meaning under `asynchronous=True`"
+    Three are ignored (`parallel`, `max_concurrency`, `round_timeout`) and two are
+    **redefined**: `rounds` becomes a budget of `rounds × n_workers` rollouts, and
+    `max_seconds=None` becomes 20 seconds where it meant "no limit". Each warns,
+    but check `result.stop_reason` — a budget expiry otherwise looks exactly like
+    convergence. The full table, the pipeline's cold-start and backpressure
+    behaviour, and what only the async path can report are on
+    [the async page](async.md).
 
 ### More async / parallel recipes
 
@@ -784,12 +746,11 @@ An aggregator can amortise the expensive held-out eval on the async path — app
 each diff as a cheap step and only validate every *N* steps, rolling back on no
 gain (SGD-style). See [the async optimizer variant](aggregator.md#the-async-optimizer-variant-sgd-style-descent).
 
-### The reference async orchestrator: `AsyncAgentDescent`
+### The reference async orchestrator
 
 For the router reference domain there is also `AsyncAgentDescent` — the original
-stage-orchestration runtime with duration-aware straggler checkpointing, where
-the staleness policies,
-[`async_ratio`](concepts.md#34-async_ratio-roll-flash-the-global-lag-budget), and
-[duration-aware straggler checkpointing](duration-scheduling.md) come into their
-own — use `AsyncAgentDescent` (same aggregator, staleness, and governance
-underneath). Measured trade-offs: [efficiency experiments](efficiency.md).
+stage-orchestration runtime, with duration-aware straggler checkpointing, and the
+thing the parallelism claims were measured with. Same aggregator, staleness and
+governance underneath. See [async](async.md#asyncagentdescent-the-reference-runtime),
+[the reference orchestrator and domain](orchestrator.md), and the measured
+trade-offs in [efficiency experiments](efficiency.md).

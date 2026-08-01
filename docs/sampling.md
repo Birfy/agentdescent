@@ -61,6 +61,19 @@ keeping twice the exploration of the empirical optimum, which matters when your
 reward is noisier than the workloads measured here. Lower it to focus harder,
 raise it to explore more.
 
+!!! warning "That is a targeting measurement, not an accuracy claim"
+    Landing more rollouts on failing tasks does **not** automatically produce a
+    better artifact. On real
+    [ACE / FiNER-139 runs](algo-ace.md#empirical-results-finer-139-with-deepseek)
+    the difficulty-weighted sampler reached a lesson sooner (round 0 versus round
+    2) but did not score better — and two runs of the *same* round-robin
+    configuration differed by 4.8 points, so at that sample size neither sampler
+    is distinguishable from the other.
+
+    Concentrating on the hardest tasks can also yield lessons that fit those tasks
+    and generalise worse. Treat this sampler as **worth trying and worth measuring
+    on your own data**, not as a free win.
+
 ### `pass_threshold` mirrors the engine
 
 A rollout counts as a pass when its reward reaches this, defaulting to the

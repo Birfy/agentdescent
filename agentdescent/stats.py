@@ -89,6 +89,22 @@ def annealed_delta(base_delta: float, version: int, half_life: int = 64) -> floa
     return max(0.01, base_delta * factor)
 
 
+def difficulty_weight(pass_rate: float, floor: float = 0.0) -> float:
+    """`4*p*(1-p)` -- how much learning signal an item still carries.
+
+    Peaks at `p = 0.5` and vanishes at both extremes: something that always
+    passes yields no gradient, and neither does something that never passes
+    whatever the artifact says (the GRPO zero-advantage argument).
+
+    Lives here because two schedulers need it at two granularities --
+    :class:`~agentdescent.sampling.DifficultyWeighted` over *tasks* and
+    :class:`~agentdescent.scheduler.TaskScheduler` over task *clusters* -- and
+    they had written it out separately, which is one formula and two places for
+    it to drift."""
+    p = min(1.0, max(0.0, pass_rate))
+    return 4.0 * p * (1.0 - p) + floor
+
+
 def ucb_score(value: float, n_s: float, total: float, c: float = 1.4) -> float:
     """UCB1 acquisition used by the TaskScheduler (design doc, section 5.2).
 

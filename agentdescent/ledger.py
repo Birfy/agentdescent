@@ -32,7 +32,7 @@ import os
 import subprocess
 import threading
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from .evolvable import Diff, Evolvable, VersionVector
 
@@ -42,7 +42,12 @@ class CASConflict(Exception):
 
 
 class ContractRejected(Exception):
-    """Raised when the ledger refuses a diff bound to a superseded major."""
+    """Raised when a commit would change an artifact's contract major.
+
+    An artifact's :class:`~agentdescent.evolvable.Contract` is what *other*
+    artifacts depend on. Bumping its major is a breaking change, and letting one
+    through the ordinary commit path would silently invalidate every dependant --
+    so it is refused here and has to go through a deliberate re-registration."""
 
 
 # A serializer turns an Evolvable into a JSON-friendly dict; the deserializer
@@ -151,6 +156,9 @@ class Ledger:
         self._author = author
         self._lock = threading.RLock()
         self._current_branch: Optional[str] = None   # see _checkout()
+        #: artifact id -> the Contract it was registered with. Commits are checked
+        #: against it, which is the only place the contract mechanism is enforced.
+        self._contracts: Dict[str, Any] = {}
         self._closed = False
         self._init_repo()
 
@@ -232,7 +240,12 @@ class Ledger:
     # -- public API -----------------------------------------------------------
 
     def register(self, artifact: Evolvable, branch: str = DEV) -> None:
-        """Add a brand-new artifact at version 1 on both branches."""
+        """Add a brand-new artifact at version 1 on both branches.
+
+        Also records the artifact's contract, which :meth:`commit` then enforces.
+        Re-registering an existing artifact is a no-op for its state, and is the
+        one supported way to move a contract to a new major."""
+        self._contracts[artifact.id] = getattr(artifact, "contract", None)
         with self._lock:
             self._ensure_open()
             for br in (self.STABLE, self.DEV):
@@ -310,12 +323,31 @@ class Ledger:
                 raise CASConflict(
                     f"{aid}: head={head} but diff based on {expected}"
                 )
+            self._assert_contract(new_state)
             new_version = head + 1
             self._dump_artifact(new_state, new_version)
             vv[aid] = new_version
             self._write_versions(vv)
             commit_hash = self._commit(message or f"update {aid} -> v{new_version}")
             return commit_hash, new_version
+
+    def _assert_contract(self, new_state: Evolvable) -> None:
+        """Refuse a commit that would change the registered contract major.
+
+        The check the design calls for and the codebase never made: `Contract`,
+        `Contract.is_compatible_with` and `ContractRejected` all existed, nothing
+        called any of them, and the docstrings described an enforcement that was
+        not there. Comparing against the contract recorded at
+        :meth:`register` needs no change to any serializer."""
+        known = self._contracts.get(new_state.id)
+        incoming = getattr(new_state, "contract", None)
+        if known is None or incoming is None:
+            return
+        if not known.is_compatible_with(incoming):
+            raise ContractRejected(
+                f"{new_state.id}: contract major {incoming.major} is incompatible "
+                f"with the registered major {known.major}. A breaking contract "
+                "change must be re-registered deliberately, not merged.")
 
     def commit_atomic(
         self,
@@ -325,6 +357,10 @@ class Ledger:
         message: str = "",
     ) -> Tuple[str, VersionVector]:
         """Two-phase, all-or-nothing commit of several artifacts.
+
+        **Not in any engine path.** `evolve()` and both async runtimes register a
+        single artifact, so there is never a second one to commit with. Provided
+        and tested for the multi-artifact library the design targets.
 
         Used for contract-breaking diffs that must land together with their
         adapter diffs (design doc, section 6, "atomic adaptation transaction").

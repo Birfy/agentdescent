@@ -162,17 +162,17 @@ that verdict with the cheap layer's is free and happens on every merge.
 re-deriving it. A third hand-written threshold here (`>= 0.5`) meant an artifact
 at 0.4 was L1 by governance and audited like an L2 skill: never.
 
-### The queue is bounded, and says when it sheds
+### The queue is opt-in, because nothing drains it
 
-`submit` keeps a heap capped at `MAX_QUEUED` (4096), dropping the
-lowest-priority tail — which is the lowest-value work by construction — and
-counting what it dropped in `audit.dropped`.
+```python
+AuditScheduler()                  # computes priorities, queues nothing (default)
+AuditScheduler(collect=True)      # keeps the heap for an out-of-band auditor
+```
 
-!!! note "Nothing drains the queue today"
-    `force_oracle` is the part in the engine's path; the priority queue itself
-    has no consumer in the shipped runtimes. It is the mechanism for an
-    out-of-band audit process, and it is bounded and counted so that using it
-    later does not require re-reading a run's worth of accumulated state. The
-    [architecture page](architecture.md#3-component-responsibilities) lists it
-    that way too — a queue that looks wired in and is not would be worse than no
-    queue.
+`force_oracle` and the trust update are the parts in the engine's path, and both
+work either way. The priority *queue* has no consumer in the shipped runtimes —
+so maintaining a heap plus a periodic rebuild, once per merge decision, bought
+nothing and cost work on the merge path. It is now off unless asked for.
+
+With `collect=True` the heap is capped at `MAX_QUEUED` (4096), sheds the
+lowest-priority tail, and reports what it shed in `audit.dropped`.

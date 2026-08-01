@@ -105,7 +105,7 @@ for 8 rounds over 57 tasks — well under a cent at `deepseek-v4-flash` prices.
     actually fails: widen `--top-k` (rarer, more confusable concepts) until the
     baseline leaves headroom. The same effect is visible in
     [EvoSkill](algo-evoskill.md#empirical-results-real-openhands-agent-deepseek-on-officeqa),
-    and it is why [`DifficultyWeighted` task sampling](evolution.md#task-selection-which-rollout-to-spend)
+    and it is why [`DifficultyWeighted` task sampling](sampling.md)
     exists — it steers rollouts toward the tasks that still fail.
 
 ### `--top-k` sets the difficulty

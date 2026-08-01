@@ -43,7 +43,11 @@ class RouterTask:
     keyword: str
 
 
-#: Back-compatible alias. Prefer :class:`RouterTask` in new code.
+#: Back-compatible alias, kept only because it is a published name. It collides
+#: with :class:`agentdescent.evolution.Task` -- the one every caller writes
+#: against -- and the two share no fields and no relationship, so a reader who
+#: followed `AgentDescent -> Worker -> Task` landed on the wrong class with no
+#: signal. Nothing inside the package uses it any more; prefer `RouterTask`.
 Task = RouterTask
 
 
@@ -89,7 +93,7 @@ class RouterSkill:
         new_table.update(diff.ops)
         return RouterSkill(self.id, new_table, self.version + 1, self.blast_radius)
 
-    def cheap_eval(self, evidence: EvidenceCard) -> float:
+    def evidence_eval(self, evidence: EvidenceCard) -> float:
         """Accuracy on the tasks the evidence card carries.
 
         The card's ``trajectory_refs`` hold the failing :class:`Task` objects
@@ -97,6 +101,11 @@ class RouterSkill:
         (design doc, section 4.2)."""
         tasks = [t for t in evidence.trajectory_refs if isinstance(t, Task)]
         return self.accuracy(tasks)
+
+
+    #: Back-compatible alias for :meth:`evidence_eval`, which it was called until
+    #: the name collided with the verifier's `cheap_eval(artifact)`.
+    cheap_eval = evidence_eval
 
     def full_eval(self, task_set: Sequence[Task]) -> Mapping[str, float]:
         return {"accuracy": self.accuracy(task_set)}

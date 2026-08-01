@@ -150,6 +150,8 @@ with tempfile.TemporaryDirectory() as repo:
 | `alpha_head` | 5 | staleness tolerance α for hot artifacts |
 | `alpha_tail` | 1 | staleness tolerance α for cold artifacts |
 | `trust_region_ops` | 6 | max edits per diff (trust region) |
+| `trust_region_chars` | 32 000 | max characters in **one** op's value — for a [`FileTree`](directory-evolution.md) that is a per-file cap, and `TreeSpec.max_file_bytes` must stay under it |
+| `anneal_half_life` | 64 | versions over which the acceptance risk decays |
 | `promote_after_k` | 3 | dev→stable survival rounds (EMA) |
 
 ### `AsyncConfig` ([async](async.md))

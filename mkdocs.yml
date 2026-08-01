@@ -60,6 +60,7 @@ nav:
     - Async — no round barrier: async.md
     - Reference orchestrator & domain: orchestrator.md
   - API reference: api.md
+  - Run everything, and extend it: usage.md
   - Examples and results:
     - Complete example — skill evolution: skill-evolution.md
     - Efficiency experiments: efficiency.md
@@ -74,7 +75,6 @@ nav:
     - DGM — Darwin Gödel Machine (harness): algo-dgm.md
   - Design records:
     - Evolving a directory: design-directory-evolution.md
-  - Run everything, and extend it: usage.md
 
 markdown_extensions:
   - admonition

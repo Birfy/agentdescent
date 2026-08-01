@@ -26,6 +26,8 @@ from __future__ import annotations
 import math
 import threading
 from collections import defaultdict
+
+from .stats import difficulty_weight
 from typing import Dict, Optional, Protocol, Sequence, Tuple, runtime_checkable
 
 
@@ -116,8 +118,11 @@ class DifficultyWeighted:
 
     @staticmethod
     def _signal(pass_rate: float) -> float:
-        """Learning signal: peaks at pass_rate 0.5, ~0 when always/never solved."""
-        return 4.0 * pass_rate * (1.0 - pass_rate) + 1e-3
+        """Learning signal: peaks at pass_rate 0.5, ~0 when always/never solved.
+
+        Shared with :class:`~agentdescent.scheduler.TaskScheduler`, which applies
+        the same weight one granularity up (clusters rather than tasks)."""
+        return difficulty_weight(pass_rate, floor=1e-3)
 
     def pick(self, keys: Sequence[str], round_index: int) -> str:
         if not keys:

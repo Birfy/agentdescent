@@ -46,6 +46,7 @@ from .evolvable import ContractError, EvidenceCard, vv_staleness
 from .ledger import Ledger, LedgerFailure
 from .sampling import RoundRobin, TaskSampler
 from .scheduler import DurationEstimator
+from .pipeline import WorkerHealth
 from .staleness import StaleAction, StalenessPolicy, get_policy
 
 
@@ -249,7 +250,9 @@ def async_evolve(
     n_live = sum(1 for s in shards if s)      # workers that will actually start
     live = [n_live]                           # workers still running
     retired = [0]                             # workers that gave up (diagnostic)
-    any_success = [False]                     # has ANY worker ever completed one?
+    # Retirement policy is shared with AsyncAgentDescent (`pipeline.WorkerHealth`),
+    # which is what keeps the two barrier-free runtimes from drifting apart again.
+    health = WorkerHealth(max_errors=max_worker_errors)
     max_merger_errors = max(3, max_worker_errors)   # sweeps it may fail in a row
 
     def _worker(wid: int, shard: List[Task]) -> None:
@@ -361,7 +364,7 @@ def async_evolve(
                 # only guarantees the run dies. Measured: at a 1-in-3 call failure
                 # rate (~56% per rollout, an ordinary 429 storm) the old blanket
                 # rule retired all three workers in 22s with nothing learned.
-                if not any_success[0] and consecutive >= max_worker_errors:
+                if health.should_retire(consecutive):
                     with counter_lock:
                         retired[0] += 1
                         live[0] -= 1
@@ -369,7 +372,7 @@ def async_evolve(
                             died[0] = True
                             stop.set()
                     return
-                if any_success[0] and consecutive >= max_worker_errors and not warned:
+                if health.should_warn(consecutive) and not warned:
                     warned = True   # a backend that dies mid-run must not look idle
                     warnings.warn(
                         f"async_evolve: worker {wid} has failed {consecutive} "
@@ -395,7 +398,7 @@ def async_evolve(
                     with counter_lock:
                         stragglers[0] += 1
             consecutive, warned = 0, False                    # a clean rollout resets
-            any_success[0] = True
+            health.record_success()
             with counter_lock:
                 counter[0] += 1
                 if max_iters is not None and counter[0] >= max_iters:
@@ -418,7 +421,7 @@ def async_evolve(
                 eng.aggregator.ingest(card if eta == 0 else card.rebased_onto(head_vv))
             elif action is StaleAction.REBASE:
                 cand = head_art.apply(card.diff)         # cheap re-verify on current head
-                if head_art.cheap_eval(card) <= cand.cheap_eval(card):
+                if head_art.evidence_eval(card) <= cand.evidence_eval(card):
                     eng.aggregator.ingest(card.rebased_onto(head_vv))
             # DISCARD -> drop the card
         reports = check_reports(eng.aggregator.step(), eng.aggregator)

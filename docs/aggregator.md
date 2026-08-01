@@ -97,7 +97,8 @@ evolve(tasks, reward, agent=agent, agg_config=AggregatorConfig(
     avoid buying.
 
     `cheap_eval_tasks=N` scores N held-out tasks for ranking. The acceptance test
-    still uses the full set, so this trades ranking precision, never commit safety.
+    still uses the full set — as does the regression guard beside it — so this
+    trades ranking precision, never commit safety.
     The sample is **fixed for the run** — it used to be redrawn on every call,
     which is harmless only while the "sample" is the whole set, and silently scores
     candidate A on `{1,3,5}` against candidate B on `{2,4,6}` the moment it is not.

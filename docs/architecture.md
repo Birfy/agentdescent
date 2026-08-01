@@ -4,7 +4,7 @@ This document explains how AgentDescent's components fit together and how a diff
 travels from a worker to a committed change in the shared artifact library.
 
 For the *why* behind each mechanism see [concepts.md](concepts.md); for how to
-run and extend the system see [usage.md](usage.md).
+run the system see [install and first run](install.md); for extending it, [run everything, and extend it](usage.md).
 
 ---
 
@@ -137,7 +137,7 @@ the Aggregator calls at steps 1–3 and 5 (cheap) and at step 4 (oracle, budgete
     `Aggregator`, staleness policies, governance and `AuditScheduler`, but **not**
     the `TaskScheduler`, `EvidenceBuffer`, `ResumeQueue` or `DurationEstimator`.
     It does its own sharding, keeps its own intake buffer, and selects tasks via a
-    [`task_sampler`](evolution.md#task-selection-which-rollout-to-spend).
+    [`task_sampler`](sampling.md).
 
     They are still **two implementations**, which is a known wart rather than a
     design intent. What no longer differs is *behaviour*: the worker-retirement
@@ -152,7 +152,7 @@ the Aggregator calls at steps 1–3 and 5 (cheap) and at step 4 (oracle, budgete
     One capability remains reference-only: **UCB task-cluster leasing** (§5.2 /
     L-task), because it partitions a `TaskUniverse` into clusters and `evolve()`
     takes a flat task list. `evolve()`'s
-    [`task_sampler`](evolution.md#task-selection-which-rollout-to-spend) covers the
+    [`task_sampler`](sampling.md) covers the
     same idea at task granularity. Partial-rollout **resume** is unimplemented on
     both paths — `run(rendered, task) -> output` is opaque, so there is no
     continuation state to check point; both now *detect* and count stragglers.

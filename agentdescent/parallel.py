@@ -27,10 +27,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
-from .domains.router import RouterSkill
-from .evolvable import Diff, stable_hash
+from .evolvable import Diff, Evolvable, stable_hash
 
 
+#: Names for the three paradigms. Descriptive -- nothing dispatches on it; the
+#: strategy objects below are what `evolve(parallel=...)` takes.
 class ParallelMode(Enum):
     DP = "data_parallel"
     TP = "tensor_parallel"
@@ -87,21 +88,40 @@ class TensorParallelMerge:
 
     Because sections are disjoint, there is no conflict to resolve -- the merge
     is a union.  The consistency reviewer only asserts the no-overlap invariant
-    that makes that union sound (the cheap all-reduce analogue)."""
+    that makes that union sound (the cheap all-reduce analogue).
+
+    ``keys`` is the artifact's declared key space, and passing it matters: with it
+    the ownership map is :func:`assign_key_sections`, **the same partition
+    `TensorParallel` and `evolve()` enforce**. Without it this falls back to
+    :func:`section_of`, a hash bucket -- which is a different answer to the same
+    question, so a diff legal on the `evolve()` path could be rejected here and
+    vice versa. That divergence is why the argument exists."""
 
     n_sections: int
+    keys: Optional[Sequence[str]] = None
+
+    def owner_of(self, key: str) -> int:
+        """Which section owns ``key`` -- via the declared partition when there is one."""
+        if self.keys:
+            return assign_key_sections(self.keys, self.n_sections).get(
+                key, section_of(key, self.n_sections))
+        return section_of(key, self.n_sections)
 
     def validate(self, diff: Diff, section: int) -> None:
         for key in diff.ops:
-            if section_of(key, self.n_sections) != section:
+            if self.owner_of(key) != section:
                 raise SectionViolation(
                     f"diff {diff.diff_id} touches {key!r} outside section {section}"
                 )
 
     def merge(
-        self, base: RouterSkill, section_diffs: List[Tuple[int, Diff]]
-    ) -> Tuple[RouterSkill, bool]:
-        """Return (merged_skill, consistency_ok)."""
+        self, base: Evolvable, section_diffs: List[Tuple[int, Diff]]
+    ) -> Tuple[Evolvable, bool]:
+        """Return (merged_artifact, consistency_ok).
+
+        Any :class:`~agentdescent.evolvable.Evolvable` works -- this used to be
+        typed to the reference domain's ``RouterSkill``, which made a general
+        parallelism primitive depend on the demo domain."""
         seen_keys: Dict[str, int] = {}
         merged = base
         for section, diff in section_diffs:
