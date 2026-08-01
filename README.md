@@ -196,6 +196,45 @@ The one complete end-to-end run — real dataset, real LLM, every module — is
 Guides: [the engine](https://github.com/Birfy/agentdescent/blob/main/docs/evolution.md) · [skill example](https://github.com/Birfy/agentdescent/blob/main/docs/skill-evolution.md)
 · [agents](https://github.com/Birfy/agentdescent/blob/main/docs/agents.md).
 
+## Evolve a **directory** — a skill folder, an agent folder, its code
+
+Everything above evolves text that ends up *in a prompt*. `evolve_skill_dir`
+evolves a **directory**, and each rollout is performed by a real agent that reads
+those files off disk with its own tools:
+
+```python
+from agentdescent import evolve_skill_dir
+from agentdescent.agents import claude_code, openai_compatible
+
+result = evolve_skill_dir(
+    "~/.claude/skills/pdf-audit", rows,
+    agent=claude_code(extra_args=["--permission-mode", "acceptEdits"]),
+    reflect_with=openai_compatible(model="deepseek-v4-flash"),
+    prompt="question", gold="answer", score="contains")
+
+result.write_to("~/.claude/skills/pdf-audit")     # opt in; backs up first
+```
+
+Each rollout materialises the candidate into a throwaway workspace at
+`.claude/skills/<name>/`, stages the task's fixtures beside it and runs the agent
+there. The optimizer is untouched: **state keys are file paths**, so two workers
+editing different files *fuse* and two editing the same file are *resolved* on
+held-out score — the same machinery as every other strategy.
+
+Three entry points, differing only in governance and what guards them:
+`evolve_skill_dir` (L2), `evolve_agent_dir` (L1 — an agent definition is a
+harness, so every merge also passes the oracle), and `evolve_agent_code`, where
+the tree is **executed** behind a frozen test suite that the candidate cannot
+rewrite (pristine files are overlaid after materialisation, so weakening the
+tests at run time does not work either).
+
+```bash
+python -m examples.skill_dir_evolution        # offline, no API key
+```
+
+Guide: [evolving a directory](https://github.com/Birfy/agentdescent/blob/main/docs/directory-evolution.md)
+· [design record](https://github.com/Birfy/agentdescent/blob/main/docs/design-directory-evolution.md).
+
 ## Faithful ports of the latest self-evolution algorithms
 
 To show the engine is faithful to the field, AgentDescent ships one runnable example
@@ -272,6 +311,9 @@ python -m examples.run_async
 
 # The flagship: evolve a skill on a real dataset with a real LLM (--dry-run: no API)
 python -m examples.skill_evolution --dry-run
+
+# Evolve a skill DIRECTORY that a real agent reads off disk (offline by default)
+python -m examples.skill_dir_evolution
 
 # Efficiency: parallel throughput scaling + async vs sync-barrier tail-hiding
 python -m examples.efficiency

@@ -23,7 +23,7 @@ which differs from some paper-level claims -- flagged inline:
   * **Skill = a folder of Markdown files** with YAML frontmatter; the active skill
     set is injected into the agent by concatenation.
 
-It runs **through `evolve()`** like ACE/GEPA: a `SkillLibraryStrategy` turns a
+It runs **through `evolve()`** like ACE/GEPA: a `SkillLibraryTree` turns a
 proposed `SKILL.md` into a `Diff`, and a custom `aggregator_factory`
 (`TopKFrontierAggregator`) is the bounded top-K frontier. A skill is an **L2**
 artifact -> `blast_radius=0.2` (via `classify`).
@@ -56,6 +56,8 @@ from agentdescent.dataloader import (Dataset, fetch_text, hf_rows,
                                      load_gated_hf, split_dataset)
 from agentdescent.evolvable import Diff, EvidenceCard
 from agentdescent.evolution import EvolvingArtifact, Task, evolve
+from agentdescent.filetree import parse_tree
+from agentdescent.treestrategy import FileTree
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
 
@@ -358,12 +360,30 @@ class EvoSkillContext:
     lock: threading.Lock = field(default_factory=threading.Lock)   # workers run concurrently
 
 
-def _parse_rendered_skills(rendered: str) -> Dict[str, str]:
-    skills: Dict[str, str] = {}
-    for chunk in rendered.split("### skill: ")[1:]:
-        name, _, body = chunk.partition("\n")
-        skills[name.strip()] = body.strip()
-    return skills
+#: Where a skill lives inside the artifact. The library was always a set of
+#: `SKILL.md` files -- until now it only existed in memory, keyed by name. Keyed
+#: by *path* it is a real directory, which is what lets a tool-using agent read
+#: one skill at a time instead of carrying the whole library in every prompt.
+SKILL_ROOT = "skills"
+
+
+def skill_path(name: str) -> str:
+    return f"{SKILL_ROOT}/{_slug(name)}/SKILL.md"
+
+
+def skill_name(path: str) -> str:
+    parts = path.split("/")
+    return parts[1] if len(parts) >= 3 and parts[0] == SKILL_ROOT else path
+
+
+def skills_of(state: Dict[str, str]) -> Dict[str, str]:
+    """`{path: body}` (the artifact) -> `{name: body}` (what the algorithm reads)."""
+    return {skill_name(p): body for p, body in state.items()}
+
+
+def skills_from_rendered(rendered: str) -> Dict[str, str]:
+    """The artifact as the algorithm wants it, from what `run`/`propose` are handed."""
+    return skills_of(parse_tree(rendered))
 
 
 def agent_answer(complete: Completion, docs: Dict[str, str],
@@ -376,22 +396,37 @@ def agent_answer(complete: Completion, docs: Dict[str, str],
     return (m.group(1) if m else text).strip()
 
 
-class SkillLibraryStrategy:
-    """The artifact is a library of SKILL.md files; a proposal is `name :: body`."""
+class SkillLibraryTree(FileTree):
+    """The artifact is a **directory** of `SKILL.md` files -- one per skill.
 
-    def initial(self):
-        return {}
+    The same library EvoSkill always evolved; what changed is that a state key is
+    now a real path (`skills/<name>/SKILL.md`), so the library can be materialised
+    into an agent's workspace and read file by file (`--backend claude-code`)
+    instead of being inlined in every prompt.
 
-    def render(self, state):
-        return render_skills(state)
+    Two deliberate departures from stock :class:`~agentdescent.treestrategy.FileTree`:
+
+    * ``to_diff`` keeps the repo's ``name :: body`` proposal protocol rather than
+      FileTree's ``<EDITS>`` JSON. What is faithful about EvoSkill is the
+      two-role Proposer/Generator induction, not the separator between a name and
+      a body -- switching protocols would change the Generator's prompt and with
+      it the thing being measured.
+    * ``max_files_per_diff=1``: the repo induces exactly one skill per iteration.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(initial_files={}, max_files_per_diff=1)
 
     def to_diff(self, state, proposal, author, base_version, target):
         name, _, body = proposal.partition(" :: ")
         name, body = name.strip(), body.strip()
-        if not (name and body) or state.get(name) == body:
+        if not (name and body):
+            return None
+        path = skill_path(name)
+        if state.get(path) == body:
             return None
         return Diff(diff_id=f"{author}:{name}:{base_version}", target=target,
-                    ops={name: body}, author=author)
+                    ops={path: body}, author=author)
 
 
 def make_propose(ctx: EvoSkillContext, complete: Completion):
@@ -413,7 +448,7 @@ def make_propose(ctx: EvoSkillContext, complete: Completion):
                 return None                                # batch not full yet -> keep collecting
             ctx.last_propose_at = len(ctx.recent_failures)
             batch = list(ctx.recent_failures[-ctx.batch_size:])
-        skills = _parse_rendered_skills(rendered)          # Proposer + Generator over the batch
+        skills = skills_from_rendered(rendered)            # Proposer + Generator over the batch
         proposed = propose_and_generate(complete, skills, batch, ctx.feedback)
         if not proposed:
             return None
@@ -473,8 +508,8 @@ class TopKFrontierAggregator(AggregatorProtocol):
             admitted = self.ctx.frontier.update(dict(candidate.state), score)
             self.ctx.best_score = max(self.ctx.best_score, score)
             self.ctx.feedback.append(
-                f"{list(card.diff.ops)[0]}: {'admitted' if admitted else 'discarded'} "
-                f"(val {score:.3f})")
+                f"{skill_name(list(card.diff.ops)[0])}: "
+                f"{'admitted' if admitted else 'discarded'} (val {score:.3f})")
 
         parent_state, _ = self.ctx.frontier.select_parent()   # strategy="best"
         report_diff = committed = None
@@ -603,6 +638,10 @@ class EvoResult:
     seed_score: float
     best_score: float
     iterations: int
+    #: The same library as a file tree (`{path: body}`) -- what
+    #: :func:`agentdescent.filetree.materialize` or
+    #: :meth:`~agentdescent.evolution.EvolutionResult.write_to` install.
+    tree: Dict[str, str] = field(default_factory=dict)
 
 
 def run_evoskill(complete: Completion, docs: Dict[str, str],
@@ -631,10 +670,17 @@ def run_evoskill(complete: Completion, docs: Dict[str, str],
                           val_every=val_every)
 
     def run(rendered, task):
+        # `rendered` is now the artifact's lossless serialisation (a file tree), not
+        # the prompt text -- so this is where it becomes a prompt again. The
+        # framework never injects an artifact into a prompt; `run` does, and that
+        # is what keeps the retriever path's prompt byte-identical to before the
+        # library moved to a path-keyed state.
+        tree = parse_tree(rendered)
+        rendered_skills = render_skills(skills_of(tree))
         if backend is not None:                    # tool-using base agent (OpenHands / grep-loop)
             return backend.answer(task.prompt, ctx.docs.get(task.meta["source_files"], ""),
-                                  skills=rendered)
-        return agent_answer(complete, ctx.docs, rendered, task)
+                                  skills=rendered_skills, skill_files=tree)
+        return agent_answer(complete, ctx.docs, rendered_skills, task)
 
     def reward(task, output):
         return score_multi_tolerance(output, task.meta["answer"])
@@ -648,7 +694,7 @@ def run_evoskill(complete: Completion, docs: Dict[str, str],
 
     workers = min(3, len(train))
     result = evolve(tasks, reward, run=run, propose=make_propose(ctx, complete),
-                    strategy=SkillLibraryStrategy(), blast_radius=0.2,
+                    strategy=SkillLibraryTree(), blast_radius=0.2,
                     artifact_id="skill_library", rounds=iterations,
                     n_workers=workers,
                     # sync-path knob: under asynchronous=True concurrency is n_workers
@@ -663,7 +709,9 @@ def run_evoskill(complete: Completion, docs: Dict[str, str],
     if eval_at_end and val:
         # single held-out eval of the FINAL accumulated skill library (concurrent).
         val_tasks = tasks[len(train):]
-        rendered = SkillLibraryStrategy().render(dict(result.state))
+        # `run` takes the artifact's serialisation and turns it into a prompt
+        # itself, so hand it the rendered *tree*, not the rendered skills.
+        rendered = SkillLibraryTree().render(dict(result.state))
         from concurrent.futures import ThreadPoolExecutor
         n = max(1, min(eval_concurrency, len(val_tasks)))
         with ThreadPoolExecutor(max_workers=n) as pool:
@@ -671,7 +719,9 @@ def run_evoskill(complete: Completion, docs: Dict[str, str],
         best = sum(scores) / len(scores)
         if verbose:
             print(f"\n[eval-at-end] final held-out score over {len(val_tasks)} items: {best:.3f}")
-    return EvoResult(dict(result.state), ctx.seed_score, best, iterations)
+    # the artifact is path-keyed; the algorithm's own vocabulary is names.
+    return EvoResult(skills_of(dict(result.state)), ctx.seed_score, best,
+                     iterations, tree=dict(result.state))
 
 
 # ===========================================================================

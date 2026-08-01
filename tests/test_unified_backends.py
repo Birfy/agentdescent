@@ -185,3 +185,57 @@ def test_a_workspace_agent_never_truncates():
         out = document_agent(reader).answer("q?", "y" * 400_000)
     assert int(out.strip()) == 400_000, "the whole document must reach the workspace"
     assert not [x for x in w if "inlining" in str(x.message)]
+
+
+# ---------------------------------------------------------------------------
+# skills as FILES, not as prompt text
+# ---------------------------------------------------------------------------
+
+
+def test_a_workspace_agent_receives_the_skill_library_on_disk():
+    """The point of a skill *directory*: the agent opens what it needs.
+
+    Inlining the whole library in every prompt is exactly what this avoids, so the
+    prompt must carry a pointer and the files must actually be there."""
+    import sys
+
+    reader = cli_agent([sys.executable, "-c",
+                        "print(open('.claude/skills/lookup/SKILL.md').read().strip())"])
+    backend = document_agent(reader)
+    out = backend.answer("q", "the document", skills="ignored when files are given",
+                         skill_files={"lookup/SKILL.md": "read the header row first"})
+    assert out == "read the header row first"
+
+
+def test_the_prompt_points_at_the_skills_instead_of_carrying_them():
+    seen = {}
+
+    class _Recorder:
+        def __call__(self, prompt):
+            seen["prompt"] = prompt
+            return "ok"
+
+        def in_workspace(self, path):
+            seen["ws"] = path
+            return self
+
+    backend = document_agent(_Recorder())
+    backend.answer("q", "doc", skill_files={"lookup/SKILL.md": "SECRET BODY"})
+    assert ".claude/skills" in seen["prompt"] and "lookup" in seen["prompt"]
+    assert "SECRET BODY" not in seen["prompt"]          # on disk, not in the prompt
+    assert os.path.exists(os.path.join(seen["ws"], ".claude/skills/lookup/SKILL.md"))
+
+
+def test_a_backend_without_a_workspace_falls_back_to_inlining_them():
+    # dropping them silently would make the skills invisible on the retriever path.
+    from agentdescent.backends import tool_loop_backend
+
+    seen = {}
+
+    def complete(prompt):
+        seen["prompt"] = prompt
+        return "ANSWER: 42"
+
+    tool_loop_backend(complete).answer(
+        "q", "doc", skill_files={"lookup/SKILL.md": "read the header row first"})
+    assert "read the header row first" in seen["prompt"]

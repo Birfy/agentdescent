@@ -64,6 +64,18 @@ from .staleness import (
 )
 from . import rewards                      # agentdescent.rewards.last_number(...)
 from .skill import evolve_skill
+from .filetree import (
+    TreeError,
+    TreeSpec,
+    canonical,
+    load_tree,
+    materialize,
+    parse_tree,
+    tree_summary,
+)
+from .treestrategy import EDIT_PROTOCOL, FileTree, parse_edits, tree_reflector
+from .runners import LAYOUTS, TEST_FAILURE_MARKER, code_runner, tree_runner
+from .skilldir import evolve_agent_code, evolve_agent_dir, evolve_skill_dir
 from .worker import Worker
 from .orchestrator import AgentDescent, RoundStat, run_fork_baseline
 from .agents import (
@@ -226,6 +238,24 @@ __all__ = [
     "tasks_from",
     "RoundInfo",
     "evolve",
+    "TreeError",
+    "TreeSpec",
+    "canonical",
+    "load_tree",
+    "materialize",
+    "parse_tree",
+    "tree_summary",
+    "EDIT_PROTOCOL",
+    "FileTree",
+    "parse_edits",
+    "tree_reflector",
+    "LAYOUTS",
+    "TEST_FAILURE_MARKER",
+    "code_runner",
+    "tree_runner",
+    "evolve_skill_dir",
+    "evolve_agent_dir",
+    "evolve_agent_code",
     "async_evolve",
     "claude_agent",
     "rule_id",

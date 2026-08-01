@@ -33,16 +33,25 @@ import os
 import re
 import tempfile
 import warnings
-from typing import Callable, Protocol, runtime_checkable
+from typing import Callable, Mapping, Optional, Protocol, runtime_checkable
 
 from .agents import Completion, WorkspaceAgent
 
 
 @runtime_checkable
 class AgentBackend(Protocol):
-    """A base agent that answers a question about a document, possibly using tools."""
+    """A base agent that answers a question about a document, possibly using tools.
 
-    def answer(self, question: str, document: str, *, skills: str = "") -> str: ...
+    ``skills`` is the learned skill library **as text**, to be inlined in the
+    prompt. ``skill_files`` is the same library **as files** (``{relpath:
+    content}``): a backend whose agent has a workspace writes them to disk and
+    tells the agent where they are, so it reads only the ones it needs instead of
+    carrying all of them in every prompt. Backends without a workspace ignore it
+    and fall back to ``skills``.
+    """
+
+    def answer(self, question: str, document: str, *, skills: str = "",
+               skill_files: Optional[Mapping[str, str]] = None) -> str: ...
 
 
 class _FnBackend:
@@ -51,8 +60,9 @@ class _FnBackend:
     def __init__(self, fn: Callable[..., str]) -> None:
         self._fn = fn
 
-    def answer(self, question: str, document: str, *, skills: str = "") -> str:
-        return self._fn(question, document, skills=skills)
+    def answer(self, question: str, document: str, *, skills: str = "",
+               skill_files: Optional[Mapping[str, str]] = None) -> str:
+        return self._fn(question, document, skills=skills, skill_files=skill_files)
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +81,13 @@ _DOC_INSTR = (
     "if the answer spans several rows (e.g. monthly values for a calendar year), "
     "compute it. Reply with ONLY the final answer value.\n\nQuestion: {q}"
 )
+#: What replaces the inlined skill text once the skills are files on disk. The
+#: point of a skill *directory* is that the agent opens what it needs -- inlining
+#: the whole library in every prompt is the thing this avoids.
+_SKILL_DIR_INSTR = (
+    "Learned skills are files under {dir}/ in this directory: {names}. "
+    "Read the ones relevant to the question before answering.\n\n"
+)
 _DOC_INSTR_INLINE = (
     "{skills}Below is a document (often large financial tables). Find the relevant "
     "rows; if the answer spans several rows, compute it. Reply with ONLY the final "
@@ -79,7 +96,8 @@ _DOC_INSTR_INLINE = (
 
 
 def document_agent(completion: Completion, *, doc_filename: str = "document.txt",
-                   inline_chars: int = 200_000) -> AgentBackend:
+                   inline_chars: int = 200_000,
+                   skills_dir: str = ".claude/skills") -> AgentBackend:
     """Turn **any** :data:`~agentdescent.agents.Completion` into an
     :class:`AgentBackend` for document questions.
 
@@ -99,12 +117,22 @@ def document_agent(completion: Completion, *, doc_filename: str = "document.txt"
         document_agent(claude_code())          # same task, different agent
         document_agent(claude(model="claude-haiku-4-5"))   # no tools: inline
     """
-    def answer(question: str, document: str, *, skills: str = "") -> str:
+    def answer(question: str, document: str, *, skills: str = "",
+               skill_files: Optional[Mapping[str, str]] = None) -> str:
         skill_block = f"Learned skills you should apply:\n{skills}\n\n" if skills.strip() else ""
         if isinstance(completion, WorkspaceAgent):
             workdir = tempfile.mkdtemp(prefix="agentdescent-doc-")
             with open(os.path.join(workdir, doc_filename), "w", encoding="utf-8") as f:
                 f.write(document)
+            if skill_files:
+                # Progressive disclosure: the library goes to disk and the prompt
+                # carries a pointer, so the agent opens the one skill it needs
+                # rather than reading all of them on every question.
+                from .filetree import materialize
+
+                materialize(skill_files, workdir, prefix=skills_dir)
+                names = ", ".join(sorted({p.split("/", 1)[0] for p in skill_files})) or "(none)"
+                skill_block = _SKILL_DIR_INSTR.format(dir=skills_dir, names=names)
             prompt = _DOC_INSTR.format(skills=skill_block, fname=doc_filename, q=question)
             return completion.in_workspace(workdir)(prompt).strip()
         if len(document) > inline_chars:
@@ -260,7 +288,12 @@ def tool_loop_backend(complete: Completion, *, max_steps: int = 5,
     plain :data:`~agentdescent.agents.Completion`, so it runs on any Python. A lighter
     local stand-in for :func:`openhands_backend`."""
 
-    def answer(question: str, document: str, *, skills: str = "") -> str:
+    def answer(question: str, document: str, *, skills: str = "",
+               skill_files=None) -> str:
+        # No workspace here, so files cannot be handed over: fold them into the
+        # inline block rather than dropping them in silence.
+        if skill_files and not skills.strip():
+            skills = "\n\n".join(f"### {p}\n{c}" for p, c in sorted(skill_files.items()))
         lines = document.splitlines()
         obs = "(none yet)"
         skill_block = f"Apply these learned skills:\n{skills}\n\n" if skills.strip() else ""

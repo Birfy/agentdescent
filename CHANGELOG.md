@@ -6,6 +6,99 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Evolving a directory: a skill folder, an agent folder, or its code.** Until
+  now every artifact was text that ended up *in a prompt*. A skill directory is
+  not that: it is only a skill directory if the agent can *read the files*, which
+  needs the candidate on disk, in the layout the agent expects, for the duration
+  of one rollout. Four new modules do that translation and nothing in the
+  optimizer changed — `aggregator.py`, `ledger.py`, `async_evolve.py`,
+  `parallel.py` and `governance.py` are untouched.
+
+  The reason it drops in so cleanly is that the engine never interprets a state
+  key: it only asks whether two diffs touch the same one. Make the keys **file
+  paths** and file-level semantics arrive for free — two workers editing
+  different files fuse, two editing the same file contradict and are resolved on
+  held-out score.
+
+  - `agentdescent.filetree` — `load_tree` / `materialize` / `canonical` /
+    `parse_tree` / `TreeSpec`. A file that matches `include` but cannot be
+    represented (binary, oversized) **raises** rather than being skipped: a
+    silently dropped file is one `write_to` would later delete by omission.
+    Paths are re-validated at every boundary, because a state key is a
+    model-authored string and `materialize` turns it into a filesystem write.
+  - `agentdescent.treestrategy` — the `FileTree` strategy, the `<EDITS>`
+    multi-file proposal protocol (`parse_edits`), and `tree_reflector`, which
+    shows the reflector the files it may change rather than the whole tree.
+  - `agentdescent.runners` — `tree_runner` / `code_runner`. One throwaway
+    workspace **per call**: `max_concurrency` worker threads and
+    `eval_concurrency` evaluation threads share a `run`, so a fixed directory
+    would let two candidates overwrite each other and produce scores that look
+    ordinary and are wrong.
+  - `agentdescent.skilldir` — `evolve_skill_dir` (L2), `evolve_agent_dir` (L1),
+    `evolve_agent_code` (L1 + a test gate).
+  - `EvolutionResult.write_to(path)` installs the evolved tree back, backing the
+    directory up first, leaving unknown files alone unless `prune=True`, and
+    refusing outright when the artifact is not a file tree.
+  - `examples/skill_dir_evolution.py` — runs offline in seconds; the "agent" is a
+    real subprocess bound to a workspace, so the staging, layout, overlay and
+    isolation logic are all exercised without an API key.
+
+- **`FileTree(frozen=[...])`, enforced twice.** `governance.py` freezes whole
+  artifacts by id, which cannot say "this skill may evolve, but not its test
+  suite" — and without that the shortest path to a high score is to weaken the
+  thing measuring it. Filtering proposals only stops the *reflector*; candidate
+  code can still rewrite `conftest.py` at run time. So the runner also **overlays
+  the pristine frozen files after materialisation**, and `code_runner` invokes
+  the gate from outside the tree. Both halves are needed; only the second is a
+  security boundary.
+
+- **`document_agent(..., skill_files=...)` — skills as files, not prompt text.**
+  A skill *directory* is only worth more than a concatenated string if the agent
+  can open one skill at a time. When the completion is a `WorkspaceAgent` the
+  library is written to `.claude/skills/` in the same scratch directory as the
+  document and the prompt carries a pointer; a backend with no workspace folds
+  them back into the inline block rather than dropping them in silence.
+
+### Changed
+- **EvoSkill's skill library is now a directory** (`SkillLibraryTree`, a
+  `FileTree` subclass): `{"defense-lookup": ...}` became
+  `{"skills/defense-lookup/SKILL.md": ...}`. This was the acceptance test for the
+  new abstraction — if the port could not be expressed in it, the shape was
+  wrong — and it passed with all 12 existing EvoSkill tests unchanged.
+
+  Two things it settled, both of which looked like blockers beforehand:
+
+  * **A port keeps its own prompt format.** `render()` has to be the lossless
+    serialisation because it is the evaluation-cache key, but `run` is where an
+    artifact becomes a prompt — so `run` parses the tree and re-renders it in
+    EvoSkill's own `### skill: <name>` format. The retriever path's prompt is
+    byte-identical to before, and a test now asserts that.
+  * **A port keeps its own proposal protocol.** `to_diff` still accepts the
+    repo's `name :: body` rather than `FileTree`'s `<EDITS>` JSON. What is
+    faithful about EvoSkill is the two-role Proposer/Generator induction, not the
+    separator; switching would have changed the Generator's prompt, which is
+    precisely the silent behaviour change a migration must not smuggle in.
+
+  With `--backend claude-code` / `openhands` the skills now reach the agent as
+  files in its workspace instead of inlined in every prompt.
+- **A `None` op now deletes a key** instead of storing `None`
+  (`EvolvingArtifact.apply`). `dict.update` could express "add" and "replace" but
+  not "remove", which is invisible for a rules playbook and disqualifying for a
+  file tree, where a key is a path and deleting a file is an ordinary edit.
+  `None` was never a legal op value, so this is backward compatible.
+- `evolve_skill_dir` / `evolve_agent_dir` / `evolve_agent_code` default to
+  `self_verify=False` and `cheap_eval_tasks=4`, unlike the plain engine. Both
+  defaults are right for a text artifact and expensive for this one: the first
+  doubles the agent calls per proposal, and the second leaves the cheap layer
+  pinned to the whole held-out set, which makes candidate *ranking* the dominant
+  cost of a run when `eval_fn` runs a real agent.
+- `TreeSpec.max_file_bytes` defaults to 28 000, below `AggregatorConfig`'s
+  32 000-char trust region, and `validate_against` refuses a mismatch up front. A
+  larger file could be loaded but never changed: every diff touching it is
+  rejected as `oversized`, which surfaces five rounds later as "my reflector
+  emits junk" rather than "that file was never editable".
+
 ## [0.3.0] — 2026-08-01
 
 A measurement pass. 0.2.0 made the framework's claims honest; this release makes

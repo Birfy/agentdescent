@@ -34,8 +34,15 @@ Traced from the repo (`src/loop/runner.py`, `src/registry/manager.py`,
 
 ## How it plugs into `evolve()`
 
-* `strategy=SkillLibraryStrategy()` — a proposed `name :: body` becomes a `Diff`
-  that appends (or edits) a skill in the library.
+* `strategy=SkillLibraryTree()` — a proposed `name :: body` becomes a `Diff`
+  that appends (or edits) a skill in the library. It is a
+  [`FileTree`](directory-evolution.md) subclass, so the library **is a directory**
+  (`skills/<name>/SKILL.md`) rather than a name→text dict: with a tool-using
+  backend the skills are written into the agent's workspace and it reads the ones
+  it needs, instead of every skill riding along in every prompt. The repo's
+  `name :: body` protocol is kept rather than `FileTree`'s `<EDITS>` JSON — what
+  is faithful here is the two-role Proposer/Generator induction, not the
+  separator, and switching protocols would change the Generator's prompt.
 * `propose` — **batch-level** failure-driven Proposer + Generator: it accumulates
   a batch of `batch_size` failures (shared across the concurrent workers) and then
   induces **one** `SKILL.md` from their shared pattern (two LLM calls) — matching
@@ -59,7 +66,7 @@ In [`examples/evoskill_skill_discovery.py`](https://github.com/Birfy/agentdescen
 
 | Plug-in | `evolve()` slot | What it does |
 |---|---|---|
-| **`SkillLibraryStrategy`** | `strategy=` | a proposed `SKILL.md` (`name :: body`) becomes a `Diff` on the skill library |
+| **`SkillLibraryTree`** | `strategy=` | a proposed `SKILL.md` (`name :: body`) becomes a `Diff` on the skill library — a [`FileTree`](directory-evolution.md), so the library is a real directory of `SKILL.md` files |
 | **`TopKFrontierAggregator`** + **`Frontier`** | `aggregator_factory=` (**sync**) | the bounded top-K aggregate frontier; scores every candidate on held-out, commits the best member as the dev head |
 | **`SgdSkillAggregator`** | `aggregator_factory=` (**async**) | SGD-style skill descent: apply updates, validate every `val_every` steps, checkpoint + roll back on no held-out gain |
 | `make_propose(...)` | `propose=` | **batch-level** failure-driven Skill Proposer + Generator — one `SKILL.md` per `batch_size` failures (shared across workers) |

@@ -279,6 +279,19 @@ document written into it (so it can genuinely grep a huge table), while a plain
 completion gets the document inline, truncated at `inline_chars`. That is why the
 same OfficeQA example runs on OpenHands, Claude Code, or a bare API model.
 
+Skills can travel as **files** instead of prompt text:
+
+```python
+backend.answer(question, document_text, skill_files={"lookup/SKILL.md": "..."})
+```
+
+For a workspace agent they are written to `.claude/skills/` in that same scratch
+directory and the prompt carries a pointer, so the agent opens the one skill it
+needs rather than reading the whole library on every question — the reason a skill
+*directory* is worth more than a concatenated string. A backend with no workspace
+has nowhere to put them, so it folds them back into the inline block rather than
+dropping them in silence. See [evolving a directory](directory-evolution.md).
+
 !!! warning "The inline path is a fallback, not an equivalent"
     Measured on three real OfficeQA items (documents of 266–390 KB) with
     `document_agent(openai_compatible(model="deepseek-v4-flash"))`: **1 of 3
