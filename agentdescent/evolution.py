@@ -463,7 +463,18 @@ class EvolvingArtifact:
 
     def apply(self, diff: Diff) -> "EvolvingArtifact":
         new_state = dict(self.state)
-        new_state.update(diff.ops)
+        # A ``None`` op *removes* the key rather than storing ``None``. Plain
+        # ``update`` had no way to express deletion at all, which is invisible for
+        # a rules playbook (a stale rule can be overwritten) and disqualifying for
+        # a file tree (:class:`~agentdescent.treestrategy.FileTree`), where a key
+        # is a path and "delete this file" is an ordinary edit. Popping rather
+        # than storing the sentinel keeps every downstream consumer -- ``render``,
+        # the ledger's JSON, the trust region -- working on ``Dict[str, str]``.
+        for key, value in diff.ops.items():
+            if value is None:
+                new_state.pop(key, None)
+            else:
+                new_state[key] = value
         return EvolvingArtifact(self.id, new_state, self.version + 1, self.blast_radius,
                                 self._rt, self._strategy)
 
@@ -776,6 +787,85 @@ class EvolutionResult:
         }
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, indent=2, ensure_ascii=False)
+
+    def write_to(self, path: str, *, backup: bool = True, prune: bool = False,
+                 dry_run: bool = False) -> Dict[str, List[str]]:
+        """Install a file-tree artifact back into a real directory.
+
+        Only meaningful when the artifact was evolved as a
+        :class:`~agentdescent.treestrategy.FileTree` -- every state key must be a
+        relative path. Returns the plan: ``{"written": [...], "extra": [...],
+        "deleted": [...], "backup": [...]}``.
+
+        Deliberately conservative, because this is the one call in the whole
+        package that writes into a directory the user cares about:
+
+        * ``backup=True`` (default) copies the existing directory to
+          ``<path>.bak-N`` first;
+        * files present in the target but **not** in the artifact are reported as
+          ``extra`` and left alone unless ``prune=True`` -- the run only ever knew
+          about the files its ``TreeSpec`` selected, so deleting by omission would
+          take out anything the spec excluded;
+        * ``dry_run=True`` returns the same plan without touching the disk.
+        """
+        import os
+        import shutil
+
+        from .filetree import TreeError, materialize, parse_tree, safe_relpath
+
+        # `rendered` is the strategy's own serialisation, so it is the one
+        # reliable signal that this artifact really is a tree. Without the check,
+        # an `AppendRules` result would happily be written out as a directory of
+        # files named after rule hashes -- every key of every strategy is a
+        # *syntactically* valid relative path.
+        try:
+            parse_tree(self.rendered)
+        except TreeError as e:
+            raise TreeError(
+                "write_to() only applies to an artifact evolved as a FileTree; "
+                f"this result does not render as one ({e}). Use save() for a "
+                "text artifact.") from None
+
+        bad = []
+        for key in self.state:
+            try:
+                safe_relpath(key)
+            except TreeError as e:
+                bad.append(str(e))
+        if bad:
+            raise TreeError(
+                "write_to() needs a file-tree artifact (every state key a relative "
+                "path); this result has keys that are not paths:\n  "
+                + "\n  ".join(bad[:5]))
+
+        dest = os.path.abspath(os.path.expanduser(path))
+        planned = sorted(self.state)
+        existing: List[str] = []
+        walker = os.walk(dest) if os.path.isdir(dest) else ()
+        for dirpath, dirnames, filenames in walker:
+            dirnames[:] = [d for d in dirnames if d not in (".git", "__pycache__")]
+            for fname in filenames:
+                rel = os.path.relpath(os.path.join(dirpath, fname), dest)
+                existing.append(rel.replace(os.sep, "/"))
+        extra = sorted(set(existing) - set(planned))
+        plan = {"written": planned, "extra": [] if prune else extra,
+                "deleted": extra if prune else [], "backup": []}
+        if dry_run:
+            return plan
+        if backup and os.path.isdir(dest):
+            n = 0
+            while os.path.exists(f"{dest}.bak-{n}"):
+                n += 1
+            shutil.copytree(dest, f"{dest}.bak-{n}", symlinks=True)
+            plan["backup"] = [f"{dest}.bak-{n}"]
+        materialize(self.state, dest)
+        if prune:
+            for rel in extra:
+                try:
+                    os.remove(os.path.join(dest, rel.replace("/", os.sep)))
+                except OSError:
+                    pass
+        return plan
 
     @classmethod
     def load(cls, path: str) -> "EvolutionResult":

@@ -139,3 +139,57 @@ def test_eval_at_end_scores_final_library():
     assert res.seed_score == 0.0
     assert res.best_score > 0.0                       # final eval sees the applied skills
     assert len(res.skills) >= 1
+
+
+# ---------------------------------------------------------------------------
+# The library is a real directory now (SkillLibraryTree)
+# ---------------------------------------------------------------------------
+
+
+def test_the_library_is_keyed_by_path_and_installs_as_a_directory():
+    """The migration's point: the artifact is a directory, not a name->text dict."""
+    import tempfile
+
+    from agentdescent.filetree import load_tree, materialize
+
+    from examples.evoskill_skill_discovery import skills_of
+
+    train, val = _tasks()
+    res = run_evoskill(_skill_helps_stub(), {}, train, val, iterations=4, seed=0,
+                       eval_concurrency=1, batch_size=2)
+    assert res.skills, "nothing was learned, so there is nothing to install"
+    # every state key is a real relative path, one directory per skill
+    assert all(p.startswith("skills/") and p.endswith("/SKILL.md") for p in res.tree)
+    assert skills_of(res.tree) == res.skills
+
+    dest = tempfile.mkdtemp()
+    materialize(res.tree, dest)
+    assert load_tree(dest) == res.tree            # round-trips as a directory
+
+
+def test_the_retriever_prompt_is_unchanged_by_the_move_to_paths():
+    """A faithful port's prompt is part of what it reproduces.
+
+    `render()` is now the artifact's lossless serialisation rather than the prompt
+    text, so `run` reassembles the prompt -- and it has to come out identical, or
+    the port measures something else than it did before."""
+    from agentdescent.filetree import parse_tree
+
+    from examples.evoskill_skill_discovery import (
+        SkillLibraryTree, render_skills, skill_path, skills_of)
+
+    skills = {"defense-lookup": "Find the national defense row.\n- report millions",
+              "table-headers": "Locate the nearest header row first."}
+    tree = {skill_path(n): b for n, b in skills.items()}
+    rendered = SkillLibraryTree().render(tree)
+    assert render_skills(skills_of(parse_tree(rendered))) == render_skills(skills)
+
+
+def test_one_skill_per_proposal_and_the_name_protocol_survives():
+    from examples.evoskill_skill_discovery import SkillLibraryTree
+
+    s = SkillLibraryTree()
+    d = s.to_diff({}, "defense lookup :: find the row", "w0", 1, "skill_library")
+    assert d.ops == {"skills/defense-lookup/SKILL.md": "find the row"}
+    assert s.to_diff(d.ops, "defense lookup :: find the row", "w0", 1, "a") is None
+    assert s.to_diff({}, "no separator here", "w0", 1, "a") is None

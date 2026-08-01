@@ -59,6 +59,18 @@ Compares the three staleness policies and sweeps the `async_ratio` lag budget.
 python -m examples.rq2_staleness
 ```
 
+### Evolving a directory (a skill folder a real agent reads)
+
+```bash
+python -m examples.skill_dir_evolution
+```
+
+Materialises a candidate skill directory into a throwaway workspace at
+`.claude/skills/csv-total/` and lets a real (sub)process agent read it. Runs
+offline in seconds; `--agent claude-code` swaps in the real CLI agent, and
+`--install-to <dir>` writes the evolved skill back. See
+[evolving a directory](directory-evolution.md).
+
 ### Self-evolution algorithm ports (real datasets)
 
 Faithful ports of the latest skill- and harness-self-evolution algorithms — ACE,

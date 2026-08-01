@@ -48,6 +48,10 @@ restatement."* — see [Quickstart](quickstart-skill.md) for the full measuremen
 Nothing is hidden: it builds ordinary arguments and calls
 [`evolve()`](evolution.md), which is where you go the moment you want more.
 
+Have a **directory** instead — a skill folder, a folder of subagent definitions,
+or the agent's own code? [`evolve_skill_dir()`](directory-evolution.md) evolves
+that, with each rollout performed by a real agent that reads the files off disk.
+
 ```bash
 pip install agentdescent
 ```

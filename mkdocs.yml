@@ -45,6 +45,9 @@ nav:
     - Duration-aware scheduling: duration-scheduling.md
     - Efficiency experiments: efficiency.md
   - Complete example — skill evolution: skill-evolution.md
+  - Evolving a directory (skill / agent / code):
+    - Guide: directory-evolution.md
+    - Design record: design-directory-evolution.md
   - Self-evolution algorithms (faithful ports):
     - Overview: self-evolution-examples.md
     - ACE — context evolution: algo-ace.md

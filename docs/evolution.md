@@ -179,6 +179,11 @@ evolve(tasks, reward, agent=agent, strategy=KeyedRules(categories=["route","fmt"
 | **`SingleSlot`** | the artifact **is one value** (a system prompt, an instruction) and each accepted proposal replaces it — the most common case |
 | `AppendRules` | each proposal → a content-addressed rule; identical ones dedupe, complementary ones **fuse** (append-only) |
 | `KeyedRules(categories)` | one entry per category; competing proposals for the same category **contradict** and are resolved on held-out score |
+| `FileTree(files)` | the artifact **is a directory**: one entry per *file*, so two workers editing different files fuse and two editing the same file are resolved — see [evolving a directory](directory-evolution.md) |
+
+`FileTree` is the one strategy whose artifact does not reach the model through the
+prompt: the rendered tree is written to a throwaway workspace and a real agent
+reads it off disk (`tree_runner`). Everything else on this page applies unchanged.
 
 Write your own by implementing three methods (`initial` / `render` / `to_diff`):
 
@@ -207,7 +212,7 @@ each is a real `Strategy` you can read and reuse:
 |---|---|---|
 | `ACEPlaybook` | [ACE](algo-ace.md) | an itemised, incremental-delta context playbook (append-only + grow-and-refine de-dup) |
 | `InstructionSlot` | [GEPA](algo-gepa.md) | one instruction prompt each proposal replaces |
-| `SkillLibraryStrategy` | [EvoSkill](algo-evoskill.md) | a library of `SKILL.md` skills (a proposal appends one) |
+| `SkillLibraryTree` | [EvoSkill](algo-evoskill.md) | a **directory** of `SKILL.md` skills, one per subdirectory (a `FileTree` subclass keeping the repo's `name :: body` proposal protocol) |
 | `SkillDocStrategy` | [SkillOpt](algo-skillopt.md) | one markdown skill doc mutated by bounded `append/insert_after/replace/delete` edits |
 | `AgentDesignStrategy` | [ADAS](algo-adas.md) | one agentic-system design (a control-flow program) each proposal replaces |
 | `HarnessStrategy` | [DGM](algo-dgm.md) | a coding-agent harness's capability set (a proposal adds one) |
