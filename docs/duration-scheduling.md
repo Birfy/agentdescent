@@ -113,3 +113,66 @@ the latest ledger, rather than defining the wall-clock of its worker.
     [the async runtime](evolution.md#the-barrier-free-runtime-async_evolve), which
     the [efficiency experiments](efficiency.md) measure at ~2.8x over a sync
     barrier under heavy-tailed latency.
+
+---
+
+## 4. The audit scheduler — allocating oracle budget
+
+The same module holds the other scheduler: the one that decides **which merge
+decisions are worth checking with ground truth**, given a budget that runs out.
+
+```
+priority(d) = blast_radius(d) * uncertainty(d) / trust(artifact)
+```
+
+High blast radius means a mistake is expensive; high uncertainty means the cheap
+layers do not know; low trust means the cheap layers have been *wrong here
+before*. The aggregator enqueues its own merge decisions, which closes the audit
+loop over the optimizer itself.
+
+```python
+from agentdescent import AuditScheduler
+
+audit = AuditScheduler()
+audit.submit(diff_id, artifact_id, blast_radius=0.6, uncertainty=0.1)
+audit.force_oracle(blast_radius, artifact_id)   # -> bool
+audit.update_trust(artifact_id, oracle_agreed=True)
+```
+
+### Trust has to be measurable for free
+
+`force_oracle` fires on `blast_radius > FAST_MAX` **or** `trust < 0.75`, and
+trust rises by `+0.25` when the cheap layer agreed with the oracle, halving when
+it did not.
+
+That signal must be obtainable without spending oracle budget, or the rule is
+circular — and it was: the only writer of trust sat inside the `force_oracle`
+branch, so for any artifact below the L1 boundary the condition could never
+become true and the audit never ran at all. Measured on the default
+`blast_radius=0.2`: `oracle_calls_used == 0` for a whole run, trust pinned at its
+initial 1.0.
+
+The fix costs nothing: the [verifier](verifier.md)'s `eval_counts` already scored
+base and candidate on the full held-out set for the acceptance test, so comparing
+that verdict with the cheap layer's is free and happens on every merge.
+
+### The boundary lives in one place
+
+`force_oracle` reads `FAST_MAX` from [`governance`](governance.md) rather than
+re-deriving it. A third hand-written threshold here (`>= 0.5`) meant an artifact
+at 0.4 was L1 by governance and audited like an L2 skill: never.
+
+### The queue is bounded, and says when it sheds
+
+`submit` keeps a heap capped at `MAX_QUEUED` (4096), dropping the
+lowest-priority tail — which is the lowest-value work by construction — and
+counting what it dropped in `audit.dropped`.
+
+!!! note "Nothing drains the queue today"
+    `force_oracle` is the part in the engine's path; the priority queue itself
+    has no consumer in the shipped runtimes. It is the mechanism for an
+    out-of-band audit process, and it is bounded and counted so that using it
+    later does not require re-reading a run's worth of accumulated state. The
+    [architecture page](architecture.md#3-component-responsibilities) lists it
+    that way too — a queue that looks wired in and is not would be worse than no
+    queue.

@@ -32,22 +32,38 @@ theme:
 
 nav:
   - Home: index.md
-  - Quickstart — dataset to skill: quickstart-skill.md
-  - Measured results: results.md
-  - Architecture: architecture.md
-  - Concepts: concepts.md
+  - Getting started:
+    - Install and first run: install.md
+    - Quickstart — dataset to skill: quickstart-skill.md
+    - Quickstart — evolve a directory: quickstart-directory.md
+  - Core concepts:
+    - Concepts: concepts.md
+    - Architecture: architecture.md
+    - The data model: data-model.md
+    - Governance (L0 / L1 / L2): governance.md
   - The evolve method: evolution.md
-  - Building blocks (plug into evolve):
-    - Connecting agents & LLMs: agents.md
-    - Loading datasets (the data layer): dataloader.md
+  - Modules — design and usage:
+    - Module map: modules.md
+    - Strategies — what evolves: strategies.md
+    - Evolving a directory: directory-evolution.md
+    - Agents & LLMs: agents.md
+    - Document backends: backends.md
     - The aggregator (the optimizer): aggregator.md
-    - Customizable parallelism (DP/TP): parallelism.md
+    - The ledger: ledger.md
+    - The verifier: verifier.md
+    - Staleness policies: staleness.md
+    - Parallelism (DP / TP): parallelism.md
+    - Task sampling: sampling.md
     - Duration-aware scheduling: duration-scheduling.md
+    - The data layer: dataloader.md
+    - Rewards: rewards.md
+    - Async — no round barrier: async.md
+    - Reference orchestrator & domain: orchestrator.md
+  - API reference: api.md
+  - Examples and results:
+    - Complete example — skill evolution: skill-evolution.md
     - Efficiency experiments: efficiency.md
-  - Complete example — skill evolution: skill-evolution.md
-  - Evolving a directory (skill / agent / code):
-    - Guide: directory-evolution.md
-    - Design record: design-directory-evolution.md
+    - Measured results: results.md
   - Self-evolution algorithms (faithful ports):
     - Overview: self-evolution-examples.md
     - ACE — context evolution: algo-ace.md
@@ -56,7 +72,9 @@ nav:
     - SkillOpt — skill-document training: algo-skillopt.md
     - ADAS — meta agent search (harness): algo-adas.md
     - DGM — Darwin Gödel Machine (harness): algo-dgm.md
-  - Install, run, extend: usage.md
+  - Design records:
+    - Evolving a directory: design-directory-evolution.md
+  - Run everything, and extend it: usage.md
 
 markdown_extensions:
   - admonition

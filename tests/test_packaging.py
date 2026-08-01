@@ -38,7 +38,9 @@ def test_readme_tells_pip_users_the_examples_need_a_checkout():
 
 def test_usage_guide_repeats_the_caveat_before_the_demos():
     usage = (ROOT / "docs" / "usage.md").read_text()
-    demos_at = usage.index("## 2. Run the demos")
+    # Match the heading, not its number: the page is renumbered whenever a
+    # section is added, and this test is about the caveat's *position*.
+    demos_at = usage.index("Run the demos")
     caveat_at = usage.index("checkout", demos_at)
     assert caveat_at - demos_at < 400, "warn before listing commands that need a clone"
 

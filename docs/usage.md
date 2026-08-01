@@ -1,23 +1,15 @@
-# Install, run, extend
+# Run everything, and extend it
 
-How to install, run the demos, tune the knobs, and — most importantly — plug in
-your own `Evolvable` domain.
+[Install and first run](install.md) covers getting set up. This page is the
+complete list of what you can run, the configuration reference, and how to plug
+your own domain into the loop.
 
----
+!!! tip "Looking for something specific?"
+    [Module map](modules.md) indexes every module and its page ·
+    [API reference](api.md) has every signature ·
+    [The `evolve` method](evolution.md) is the entry point's own page.
 
-## 1. Install
-
-```bash
-git clone https://github.com/Birfy/agentdescent
-cd agentdescent
-pip install -e ".[dev]"
-```
-
-No external services or model APIs are needed. Requires Python ≥ 3.9.
-
----
-
-## 2. Run the demos
+## 1. Run the demos
 
 !!! note "The demos need a checkout, not just `pip install`"
     The `examples/` directory ships with the **repository**, not the wheel, so
@@ -95,7 +87,7 @@ pytest -q tests/test_async.py   # just the async runtime
 
 ---
 
-## 3. Programmatic use
+## 2. Programmatic use
 
 ### The entry point — `evolve()`
 
@@ -146,9 +138,9 @@ with tempfile.TemporaryDirectory() as repo:
 
 ---
 
-## 4. Configuration reference
+## 3. Configuration reference
 
-### `AggregatorConfig` (agentdescent/aggregator.py)
+### `AggregatorConfig` ([aggregator](aggregator.md))
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -160,7 +152,7 @@ with tempfile.TemporaryDirectory() as repo:
 | `trust_region_ops` | 6 | max edits per diff (trust region) |
 | `promote_after_k` | 3 | dev→stable survival rounds (EMA) |
 
-### `AsyncConfig` (agentdescent/async_runtime.py)
+### `AsyncConfig` ([async](async.md))
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -176,7 +168,7 @@ with tempfile.TemporaryDirectory() as repo:
 
 `AsyncStats.error` is `None` on a clean run and carries the backend failure that ended it otherwise — check it, since a run whose workers all died otherwise returns normal-looking zeros.
 
-### Staleness policy
+### Staleness policy ([staleness](staleness.md))
 
 ```python
 from agentdescent import get_policy
@@ -187,12 +179,18 @@ get_policy("reflective")  # always rebase + re-verify
 
 ---
 
-## 5. Plug in your own domain
+## 4. Plug in your own domain
+
+!!! note "Most callers never need this"
+    A [strategy](strategies.md) over a flat `{key: value}` state covers nearly
+    everything — including a whole [directory](directory-evolution.md). Implement
+    [`Evolvable`](data-model.md) yourself only when your artifact genuinely is not
+    that shape; [`domains/router.py`](orchestrator.md) is the worked example.
 
 The whole framework is domain-agnostic: **what evolves is decided by
 registration, not hard-coded.** To evolve something new, provide four things.
 
-### 5.1 An `Evolvable`
+### 4.1 An `Evolvable`
 
 Implement the protocol from `agentdescent/evolvable.py`
 ([reference: `RouterSkill`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/domains/router.py)):
@@ -223,7 +221,7 @@ class MyArtifact:
     `self`. The aggregator relies on this to test candidates without side
     effects.
 
-### 5.2 Serialize / deserialize for the Ledger
+### 4.2 Serialize / deserialize for the Ledger
 
 The Ledger stores artifacts as JSON blobs in git, so give it two functions:
 
@@ -238,7 +236,7 @@ ledger = Ledger(repo_path, serialize_mine, deserialize_mine)
 ledger.register(MyArtifact("my-art", initial_state))
 ```
 
-### 5.3 An eval function for the verifier
+### 4.3 An eval function for the verifier
 
 Ground-truth scorer over a held-out task set:
 
@@ -249,7 +247,7 @@ def my_eval(artifact, tasks) -> float:    # accuracy / reward in [0, 1]
 verifier = ThreeLayerVerifier(eval_fn=my_eval, held_out=held_out_tasks)
 ```
 
-### 5.4 A worker that proposes diffs
+### 4.4 A worker that proposes diffs
 
 Workers turn observed failures into a `Diff` + `EvidenceCard`. The reference
 `Worker` (agentdescent/worker.py) is a deterministic corrector; in a real system
@@ -263,7 +261,7 @@ paradigms — works unchanged.
 
 ---
 
-## 6. Building the documentation site
+## 5. Building the documentation site
 
 These docs render as a website via [MkDocs](https://www.mkdocs.org/):
 

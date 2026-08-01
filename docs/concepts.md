@@ -308,3 +308,30 @@ work is partitioned and recombined.
   mode**: the engine evolves one artifact and PP needs one per stage, so
   `evolve(parallel=PipelineParallel(...))` raises. `PipelineChain` provides the
   stage ordering and blame attribution as a standalone primitive.
+
+## 8. A directory as a parameter
+
+The analogy has one more consequence that is easy to miss. The aggregator never
+interprets a state key — it only asks whether two diffs touch the same one. So
+the **choice of key space is the choice of what can be improved in parallel**:
+
+| keys are | two workers collide when | parallelism |
+|---|---|---|
+| a content hash (`AppendRules`) | they learn the identical lesson | maximal — almost everything fuses |
+| one slot (`SingleSlot`) | always | none — every round is a tournament |
+| named categories (`KeyedRules`) | they edit the same category | bounded by category count |
+| **file paths** (`FileTree`) | they edit the same file | bounded by file count |
+
+The last row is what makes a *directory* an ordinary parameter: a skill folder,
+a folder of subagent definitions, or a small codebase. Nothing in the optimizer
+changes; the artifact is simply materialised onto disk for each rollout so a real
+agent can read it with its own tools. See
+[Directory evolution](directory-evolution.md), and
+[Strategies](strategies.md#the-key-space-is-the-design-decision) for how to pick.
+
+It also puts a hole in governance in plain sight. `FROZEN_IDS` freezes an
+*artifact*; it cannot say "this skill may evolve, but not its test suite". For a
+directory that distinction is the difference between a measured improvement and a
+self-graded one, which is why frozen **paths** exist and are enforced both at
+proposal time and at run time — see
+[Governance](governance.md#freezing-paths-not-just-artifacts).
