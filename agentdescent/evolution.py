@@ -217,144 +217,18 @@ def claude_agent(model: str = "claude-opus-4-8", max_tokens: int = 1024) -> LLMA
 # ---------------------------------------------------------------------------
 # Strategy: what evolves and how a proposal becomes a change
 # ---------------------------------------------------------------------------
+# Strategies -- what evolves. They live in their own modules, one per family:
+# `strategies` (text) and `treestrategy` (a directory). Re-exported here because
+# `from agentdescent.evolution import AppendRules` is a published import path.
+# ---------------------------------------------------------------------------
 
-
-def rule_id(text: str) -> str:
-    """Content-address a proposal so identical proposals dedupe automatically."""
-    return "r" + hashlib.sha1(text.strip().lower().encode()).hexdigest()[:10]
-
-
-@runtime_checkable
-class Strategy(Protocol):
-    """Defines *what evolves and how* -- the representation and the merge rule.
-
-    An artifact's state is a flat ``{key: value}`` dict (the diff op-space the
-    aggregator resolves conflicts and fusion over). A strategy decides the
-    initial state, how it renders, and how a proposal becomes a :class:`Diff`."""
-
-    def initial(self) -> Dict[str, str]: ...
-
-    def render(self, state: Dict[str, str]) -> str: ...
-
-    def to_diff(self, state: Dict[str, str], proposal: str, author: str,
-                base_version: int, target: str) -> Optional[Diff]: ...
-
-    # Optional. A strategy that knows, ahead of time, every key it can write should
-    # say so: that declared space is what tensor parallelism partitions into
-    # sections. A strategy that content-addresses its keys (AppendRules) has no
-    # such space, so it simply does not implement this -- and `evolve()` refuses to
-    # pair it with TP rather than silently dropping most of its proposals.
-    # def keys(self) -> Sequence[str]: ...
-
-
-@dataclass
-class AppendRules:
-    """Accumulate a deduped list of rules/lessons (append-only, content-addressed).
-
-    Identical proposals from different workers collapse to one; complementary
-    rules are *fused* by the aggregator."""
-
-    title: str = "# Playbook"
-
-    def initial(self) -> Dict[str, str]:
-        return {}
-
-    def render(self, state: Dict[str, str]) -> str:
-        if not state:
-            return f"{self.title}\n(empty)"
-        return "\n".join([self.title] + [f"- {state[k]}" for k in sorted(state)])
-
-    def to_diff(self, state, proposal, author, base_version, target) -> Optional[Diff]:
-        rid = rule_id(proposal)
-        if rid in state:
-            return None
-        return Diff(diff_id=f"{author}:{rid}:{base_version}", target=target,
-                    ops={rid: proposal}, author=author)
-
-
-@dataclass
-class SingleSlot:
-    """The artifact **is one value**, and each accepted proposal replaces it.
-
-    The most common thing anyone evolves -- a system prompt, an instruction, one
-    document -- and until now every caller wrote this themselves (three of the
-    shipped algorithm ports each rolled their own variant). Competing proposals
-    contradict on the same key, so the aggregator resolves them on held-out score
-    and the best replacement wins:
-
-        evolve(tasks, reward, agent=agent,
-               strategy=SingleSlot(initial_value="Answer concisely."))
-
-    ``key`` names the slot in the artifact state and ``initial_value`` seeds it.
-    ``min_chars`` is the shortest proposal worth taking, which guards against a
-    reflector that replies with a terse non-answer; ``empty_render`` is what the
-    artifact renders as before anything has been accepted."""
-
-    initial_value: str = ""
-    key: str = "value"
-    empty_render: str = "(no instruction yet)"
-    min_chars: int = 1
-
-    def keys(self) -> Sequence[str]:
-        """The artifact is one slot, so the key space has exactly one member.
-
-        Declared so ``evolve()`` can reject ``TensorParallel`` up front: a single
-        key cannot be split into disjoint sections, so every worker but one would
-        be authorised for nothing."""
-        return [self.key]
-
-    def initial(self) -> Dict[str, str]:
-        return {self.key: self.initial_value} if self.initial_value else {}
-
-    def render(self, state: Dict[str, str]) -> str:
-        return state.get(self.key) or self.empty_render
-
-    def to_diff(self, state, proposal, author, base_version, target) -> Optional[Diff]:
-        text = (proposal or "").strip()
-        if len(text) < self.min_chars or state.get(self.key) == text:
-            return None
-        return Diff(diff_id=f"{author}:{self.key}:{base_version}", target=target,
-                    ops={self.key: text}, author=author)
-
-
-@dataclass
-class KeyedRules:
-    """One entry per *category*: competing proposals contradict and are resolved.
-
-    Proposals look like ``"category: text"``. A new proposal for an existing
-    category **overwrites** it, so two workers proposing different text for the
-    same category produce a contradiction the aggregator resolves (keeping the
-    one that scores better). Unknown categories fall back to append behaviour."""
-
-    categories: Sequence[str]
-    title: str = "# Config (by category)"
-
-    def keys(self) -> Sequence[str]:
-        """The declared categories -- the key space tensor parallelism partitions.
-
-        Note that an *unrecognised* proposal still falls back to a content-addressed
-        key, which is outside this space; under TP those are reported as
-        ``section-violation`` rather than silently dropped."""
-        return list(self.categories)
-
-    def initial(self) -> Dict[str, str]:
-        return {}
-
-    def render(self, state: Dict[str, str]) -> str:
-        if not state:
-            return f"{self.title}\n(empty)"
-        return "\n".join([self.title] + [f"## {k}\n{state[k]}" for k in sorted(state)])
-
-    def to_diff(self, state, proposal, author, base_version, target) -> Optional[Diff]:
-        m = re.match(r"\s*([\w\- ]+?)\s*:\s*(.+)", proposal, re.DOTALL)
-        if m and m.group(1).strip().lower() in {c.lower() for c in self.categories}:
-            key, value = m.group(1).strip().lower(), m.group(2).strip()
-        else:
-            key, value = rule_id(proposal), proposal.strip()
-        if state.get(key) == value:
-            return None
-        return Diff(diff_id=f"{author}:{key}:{base_version}", target=target,
-                    ops={key: value}, author=author)
+from .strategies import (  # noqa: E402
+    AppendRules,
+    KeyedRules,
+    SingleSlot,
+    Strategy,
+    rule_id,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -458,7 +332,13 @@ class EvolvingArtifact:
         return self._strategy.render(self.state)
 
     def diff(self, other: "EvolvingArtifact") -> Diff:
-        ops = {k: v for k, v in other.state.items() if self.state.get(k) != v}
+        ops: Dict[str, Optional[str]] = {
+            k: v for k, v in other.state.items() if self.state.get(k) != v}
+        # A key `other` no longer has is a *deletion*, and leaving it out made
+        # `a.apply(a.diff(b))` differ from `b` -- silently, and only for the case
+        # that matters most to a file tree, where a key is a path. `apply` learned
+        # the `None` sentinel; this is the other half of it.
+        ops.update({k: None for k in self.state if k not in other.state})
         return Diff(diff_id=f"{self.id}:diff", target=self.id, ops=ops)
 
     def apply(self, diff: Diff) -> "EvolvingArtifact":
@@ -514,11 +394,19 @@ class EvolvingArtifact:
             scores = list(pool.map(lambda t: self._rt.eval_one(self, t), tasks))
         return sum(scores) / len(scores)
 
-    def cheap_eval(self, evidence: EvidenceCard) -> float:
+    def evidence_eval(self, evidence: EvidenceCard) -> float:
         return self.score([t for t in evidence.trajectory_refs if isinstance(t, Task)])
 
     def full_eval(self, task_set: Sequence[Task]) -> Dict[str, float]:
+        """Score on a task set. No longer part of the `Evolvable` protocol -- the
+        engine reaches ground truth through the verifier's `eval_fn` -- and kept
+        because it is a convenient thing for a caller to have."""
         return {"reward": self.score(task_set)}
+
+    #: Back-compatible alias for :meth:`evidence_eval`, which it was called until
+    #: the name collided with the verifier's `cheap_eval(artifact)`.
+    cheap_eval = evidence_eval
+
 
 
 @dataclass
@@ -1078,9 +966,11 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     # `oracle_budget` capped nothing (its documented fallback, `rule_eval`, returned
     # the same value it was trying to avoid buying).
     #
-    # Ranking is what the cheap layer is for; committing is not. `eval_counts` --
-    # the Beta-posterior acceptance test -- still uses the whole held-out set, so
-    # sub-sampling trades tournament precision, never commit safety. Noise stays at
+    # Ranking is what the cheap layer is for; committing is not. Both gates that
+    # decide a commit -- the Beta-posterior test and the regression guard beside it
+    # -- read the FULL held-out set via `eval_counts`, so sub-sampling trades
+    # tournament precision and nothing else. (The guard used to read the cheap
+    # layer, which made that claim false; see `Aggregator._process`.) Noise stays at
     # zero: `eval_fn` is deterministic, so the sub-sample is the only approximation
     # and inventing more would just make the ranking worse.
     cheap = (len(held_out) if cheap_eval_tasks is None
@@ -1313,10 +1203,12 @@ def evolve(
         tournament, which run once per candidate. ``None`` (default) scores the
         whole held-out set, which is exact but means a full sweep of real agent
         calls per candidate. Set it to trade ranking precision for cost; the
-        acceptance test always scores the full set, so this never affects whether
-        a change is safe to commit, only which candidate is put forward. The
+        commit gates always score the full set, so this never affects whether a
+        change is safe to commit, only which candidate is put forward. The
         sample is fixed for the run, so candidates are always compared
-        like-for-like.
+        like-for-like. Both commit gates -- the acceptance test and the regression
+        guard -- score the full set, so this never decides whether a change is
+        committed, only which candidate is put forward.
     on_round:
         Called with each :class:`RoundInfo` as the round completes -- progress
         for a long run, which otherwise reports nothing until it returns. An

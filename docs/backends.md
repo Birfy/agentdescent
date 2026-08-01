@@ -13,7 +13,7 @@ computed**. A single completion cannot do that; an agent with tools can.
 AgentBackend.answer(question, document, *, skills="", skill_files=None) -> str
 ```
 
-That signature has three *domain* concepts baked in, which is why it is kept
+Every argument there is a *domain* concept, which is why the shape is kept
 deliberately **separate** from the general contract: it is a domain adapter built
 on `Completion`, not a competitor to it.
 

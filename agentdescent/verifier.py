@@ -52,8 +52,9 @@ class ThreeLayerVerifier:
     eval_fn: EvalFn
     held_out: Sequence
     #: How many held-out items the *cheap* layers score. Smaller is cheaper and
-    #: noisier; the acceptance test (:meth:`eval_counts`) always uses the full set,
-    #: so this trades tournament precision, not commit safety.
+    #: noisier. Everything that decides a *commit* -- the Beta-posterior acceptance
+    #: test and the regression guard beside it -- goes through :meth:`eval_counts`
+    #: on the full set, so this trades ranking precision and nothing else.
     rule_subset: int = 8
     learned_noise: float = 0.04
     seed: int = 0

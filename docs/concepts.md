@@ -2,7 +2,7 @@
 
 The ideas behind AgentDescent, in the order you need them. This is the *why*; for
 the *what fits where* see [architecture.md](architecture.md), and for the *how
-to run* see [usage.md](usage.md).
+to run* see [install and first run](install.md).
 
 ---
 
@@ -93,9 +93,14 @@ individual. η = 0 means "proposed against the current head".
 
 α is how much staleness the aggregator will try to salvage before giving up:
 
-- α is larger for **hot** artifacts (they iterate fast, so lag is expected).
+- α is larger for **hot** artifacts (they iterate fast, so lag is expected):
+  `alpha_head=5` versus `alpha_tail=1`. The selector is `classify(artifact)`, so
+  in practice *hot* means [L1](governance.md) — the boundary lives in exactly one
+  place, and re-deriving it elsewhere is a bug the aggregator has already had.
 - α is `0` for **contract-breaking** diffs (a cross-contract rebase costs more
   than re-proposing).
+
+Full detail: [staleness policies](staleness.md).
 
 ### 3.3 Staleness policies (FlashEvolve: Full / Guarded / Reflective)
 
@@ -220,7 +225,7 @@ mechanism:
   flow to all parameters but diffs only to triggered artifacts). Handled by
   **UCB over task clusters** and a difficulty filter (GRPO zero-advantage
   groups) — both implemented, the latter also reachable from
-  `evolve()` as [`DifficultyWeighted`](evolution.md#task-selection-which-rollout-to-spend)
+  `evolve()` as [`DifficultyWeighted`](sampling.md)
   task sampling. The design's cross-product **(task-cluster × artifact)** is
   **not implemented**: `TaskCluster` has no artifact dimension, and both reference
   runtimes register exactly one artifact, as does `evolve()` — so the second axis

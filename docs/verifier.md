@@ -20,9 +20,10 @@ default mistake, and it is expensive in exactly the case that matters:
     On an LLM workload every held-out evaluation is a full sweep of real model
     calls. `cheap_eval_tasks=None` (the default) pins the cheap layer to the
     *whole* held-out set, so ranking N candidates costs N full sweeps. Set
-    `evolve(cheap_eval_tasks=4)` and ranking becomes cheap; the acceptance test
-    still uses the full set, so this trades tournament precision, never commit
-    safety. The [directory entry points](directory-evolution.md) default it to 4
+    `evolve(cheap_eval_tasks=4)` and ranking becomes cheap. Both gates that decide
+    a *commit* — the Beta-posterior acceptance test and the regression guard
+    beside it — read the full held-out set, so this trades ranking precision and
+    nothing else. The [directory entry points](directory-evolution.md) default it to 4
     for this reason.
 
 ## The three methods that matter
@@ -36,6 +37,14 @@ verifier.oracle_eval(artifact)    # ground truth, spends budget
 `eval_counts` is what feeds the Beta-posterior acceptance test, and it never
 sub-samples: the acceptance decision has to rest on an honest sample size, or the
 posterior is confident about noise.
+
+!!! note "It also feeds the regression guard, and that used to be a real hole"
+    The aggregator refuses a candidate that scores *worse* than the incumbent even
+    when the posterior likes it. That guard read the **cheap** layer until
+    recently, so with `cheap_eval_tasks=4` a four-task sample could veto a commit
+    the full-set test had just approved — while three source comments and two doc
+    pages promised sub-sampling could not touch commit safety. It now reads the
+    full-set rates `eval_counts` has already produced.
 
 ## The sample is fixed, and that is a correctness property
 

@@ -36,15 +36,36 @@ A **contract-breaking** diff is the exception in all three: once stale it is
 discarded rather than rebased, because a cross-contract rebase costs more than
 re-proposing.
 
-`alpha` is the tolerance, and it widens for a **cold** artifact — one that few
-diffs touch — because the odds that an unrelated merge invalidated this proposal
-are lower. The [aggregator](aggregator.md) supplies it.
+`alpha` is the tolerance, and the [aggregator](aggregator.md) picks it **by
+governance layer**, not by measured traffic:
+
+```python
+alpha_head = 5     # L1 -- a harness, a verifier: iterating fast, lag expected
+alpha_tail = 1     # L2 -- a local skill: a moved head more likely invalidates it
+```
+
+The config calls them *hot* and *cold*, which is the intent; the selector is
+`classify(artifact)`, which is the [one definition of the
+boundary](governance.md#the-l1l2-boundary-is-measured-not-declared). That
+substitution has bitten before: while the aggregator re-derived the layer with a
+different threshold, an artifact at 0.4 was L1 by governance and got the *cold*
+tolerance meant for an L2 skill.
 
 ## The trade-off, measured
 
-From [`examples/rq2_staleness.py`](https://github.com/Birfy/agentdescent/blob/main/examples/rq2_staleness.py)
-and [`examples/run_async.py`](async.md) on the reference domain, at the same
-`async_ratio`:
+Measured on the reference domain at `async_ratio=4`, where all three converge to
+1.000 ([the numbers](concepts.md#34-async_ratio-roll-flash-the-global-lag-budget)):
+
+| policy | rollouts | stale discarded | wall-clock |
+|---|---|---|---|
+| Full | ~8k | 0 | ~3.2s |
+| Reflective | ~7.8k | ~0.7k | ~3.3s |
+| Guarded | ~20k | ~17k | ~5.1s |
+
+Reproduce with
+[`examples/rq2_staleness.py`](https://github.com/Birfy/agentdescent/blob/main/examples/rq2_staleness.py)
+and [`examples/run_async.py`](https://github.com/Birfy/agentdescent/blob/main/examples/run_async.py).
+What the table says:
 
 * **Guarded discards more work than Reflective** — that is the claim under test,
   and it holds regardless of machine speed.

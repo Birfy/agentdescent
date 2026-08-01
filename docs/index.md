@@ -115,7 +115,7 @@ pip install agentdescent
 
 -   :material-api: **[API reference](api.md)**
 
-    All 125 exported names with real signatures — generated from the code, and
+    Every public name with its real signature — generated from the code, and
     tested against it.
 
 -   :material-chart-box: **[Measured results](results.md)**
@@ -190,6 +190,9 @@ python -m examples.skill_dir_evolution # evolve a skill directory a real agent r
 python -m examples.rq2_staleness       # RQ2: staleness tolerance sweep
 pytest                                 # the suite, no external services
 ```
+
+Step by step: [install and first run](install.md). Everything runnable, with the
+output each one produces: [run everything](usage.md).
 
 No LLM or external service is required: the
 [reference domain](orchestrator.md#why-a-synthetic-domain-exists-at-all) is a

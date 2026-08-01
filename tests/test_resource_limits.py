@@ -45,7 +45,7 @@ def test_oracle_eval_degrades_instead_of_raising_when_exhausted():
 
 
 def test_audit_queue_is_bounded():
-    a = AuditScheduler(max_queued=100)
+    a = AuditScheduler(max_queued=100, collect=True)
     for i in range(5000):
         a.submit(f"d{i}", "art", 0.5, (i % 97) / 97)
     assert len(a._items) <= 200          # cap, with the 2x amortisation headroom
@@ -67,7 +67,7 @@ def test_audit_submit_is_not_quadratic():
 
 
 def test_audit_pops_highest_priority_first():
-    a = AuditScheduler()
+    a = AuditScheduler(collect=True)
     a.submit("low", "art", 0.1, 0.1)
     a.submit("high", "art", 0.9, 0.9)
     a.submit("mid", "art", 0.5, 0.5)
@@ -75,7 +75,7 @@ def test_audit_pops_highest_priority_first():
 
 
 def test_audit_scheduler_is_thread_safe():
-    a = AuditScheduler()
+    a = AuditScheduler(collect=True)
 
     def submit_many(n):
         for i in range(n):
@@ -141,3 +141,16 @@ def test_resume_queue_is_thread_safe():
     while q.pop() is not None:
         drained += 1
     assert drained == 800
+
+
+def test_the_default_scheduler_queues_nothing():
+    """Nothing in the engines drains the queue, so nothing should fill it.
+
+    `submit` runs once per merge decision; maintaining a heap plus a periodic
+    rebuild for a queue no caller reads is work on the merge path that buys
+    nothing. The priority itself is still computed and returned -- `force_oracle`
+    and the trust update are what the engine actually uses."""
+    a = AuditScheduler()
+    priority = a.submit("d", "art", blast_radius=0.6, uncertainty=0.5)
+    assert priority > 0                  # still computed and returned
+    assert len(a) == 0 and a.pop() is None and a.dropped == 0

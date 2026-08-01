@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence
 
 from .evolvable import Diff, EvidenceCard, VersionVector, stable_hash
-from .domains.router import RouterSkill, Task
+from .domains.router import RouterSkill, RouterTask
 
 
 @dataclass
@@ -42,7 +42,7 @@ class Worker:
         self,
         skill: RouterSkill,
         base_version: VersionVector,
-        tasks: Sequence[Task],
+        tasks: Sequence[RouterTask],
     ) -> Optional[EvidenceCard]:
         """One rollout: classify tasks, propose a corrective diff for failures."""
         if self.rollout_latency is not None:
@@ -52,7 +52,7 @@ class Worker:
             return None
 
         # choose up to max_ops distinct failing keywords to fix this round.
-        seen: Dict[str, Task] = {}
+        seen: Dict[str, RouterTask] = {}
         for t in failures:
             if t.keyword not in seen:
                 seen[t.keyword] = t

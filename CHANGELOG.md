@@ -6,6 +6,85 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **`cheap_eval_tasks` could veto a commit, while four places promised it could
+  not.** The aggregator's acceptance step refuses a candidate that scores worse
+  than the incumbent — a guard worth having — but it read the *cheap* layer,
+  which `cheap_eval_tasks` sub-samples. So a four-task sample could overturn a
+  decision the full held-out Beta test had just approved, and the three
+  `evolve()` entry points for directories default that knob to 4. The guard now
+  reads the full-set rates `eval_counts` has already computed, which is what it
+  meant all along; two source comments, one docstring and two doc pages that
+  asserted the opposite are corrected.
+
+  Its rejection message is also honest now. Both gates reported
+  `P(delta>0)=… <= …`, so a regression rejection printed something like
+  `P(delta>0)=0.97 <= 0.50` — self-contradictory to anyone reading `outcomes()`
+  to find out why nothing committed, which is that method's only job.
+
+- **`EvolvingArtifact.diff()` could not express a deletion**, so
+  `a.apply(a.diff(b))` differed from `b` whenever `b` had dropped a key —
+  silently, and for exactly the case a file tree cares about, where a key is a
+  path. `apply` learned the `None` sentinel last release; `diff` now emits it.
+
+- **The contract mechanism was declared and never enforced.** `Contract`,
+  `Contract.is_compatible_with` and `ContractRejected` all existed, nothing
+  called any of them, and the docstrings described the enforcement as if it were
+  there. `Ledger.register` now records an artifact's contract and `commit`
+  refuses a state whose major disagrees.
+
+- **`domains.router.Task`** — the alias colliding with `evolution.Task` — is no
+  longer used inside the package (`worker.py` takes `RouterTask`). The alias
+  stays, marked deprecated.
+
+### Changed
+- **The two barrier-free runtimes share their policies.** `async_evolve` and
+  `AsyncAgentDescent` implemented the same shape independently; a previous
+  release had to hand-port two measured fixes between them. The parts that are
+  *policy* rather than plumbing now live in `agentdescent.pipeline`
+  (`WorkerHealth`, `StallGuard`) and both call them, so the next fix lands in
+  both. The runtimes themselves are still separate — unifying them would move
+  every measured result's reproduction path, which is a decision, not a cleanup.
+- **One difficulty-weight formula.** `4·p·(1−p)` was written out in both
+  `sampling.DifficultyWeighted` (over tasks) and `scheduler.TaskScheduler` (over
+  clusters); it now lives in `stats.difficulty_weight`. The exploration constants
+  still differ (0.2 vs 1.4) and the docstring says why: the sweep that produced
+  0.2 was measured at task granularity and has not been repeated at cluster
+  granularity.
+- **One definition of which section owns a key.** `TensorParallelMerge` used the
+  `section_of` hash bucket while `TensorParallel` and `evolve()` used the
+  `assign_key_sections` partition — two answers to the same question, so a diff
+  legal on one path could be rejected on the other. `TensorParallelMerge(keys=…)`
+  now uses the same partition.
+- **`AuditScheduler` queues only when asked** (`collect=True`). Nothing in the
+  shipped runtimes calls `pop()`, so every `submit` was a heap push plus a
+  periodic rebuild — once per merge decision — for a queue no one reads. The
+  priority is still computed and returned; `force_oracle` and the trust update
+  are unaffected.
+- **`Evolvable` requires one method fewer.** `full_eval` was in the protocol and
+  called by nothing: ground truth reaches the aggregator through the verifier's
+  `eval_fn`, which the domain supplies. Implementations keep theirs.
+- **`Evolvable.cheap_eval` is now `evidence_eval`**, because it collided with
+  `ThreeLayerVerifier.cheap_eval` — different argument, different meaning, both
+  called from the same forty lines of the aggregator. `cheap_eval` remains an
+  alias.
+- **The text strategies moved out of the engine** into `agentdescent.strategies`,
+  so the rule is now "one module per strategy family, none of them in
+  `evolution.py`" — `FileTree` already had its own. All three import paths still
+  work.
+- `parallel.py` no longer imports `RouterSkill`: a general primitive was typed to
+  the reference domain.
+
+### Documentation
+- A consistency pass over the new site found 14 problems and fixed them. The ones
+  worth naming: `staleness.md` had the `alpha` tolerance **backwards** (it widens
+  for L1/hot artifacts, not cold) and contradicted `concepts.md`; `sampling.md`
+  had dropped the caveat `evolution.md` carried, that the difficulty-weighted
+  numbers are a *targeting* measurement and not an accuracy claim; `evolution.md`
+  kept full copies of sections that now have their own pages while linking away
+  to them; and the `AggregatorConfig` reference omitted `trust_region_chars`,
+  which is the per-file cap a `FileTree` caller has to know about.
+
 ### Documentation
 - **The documentation site was rebuilt as a reference, not a tour.** It had 23
   pages covering 7 of 21 modules and no API reference at all: a reader who wanted

@@ -139,7 +139,7 @@ Full docs live in [`docs/`](https://github.com/Birfy/agentdescent/tree/main/docs
 | **[Measured results](https://github.com/Birfy/agentdescent/blob/main/docs/results.md)** | Every empirical claim with the setup that produced it — including where there was nothing to learn |
 | [Architecture](https://github.com/Birfy/agentdescent/blob/main/docs/architecture.md) | Components, data-flow diagram, the two runtimes, concurrency model |
 | [Concepts](https://github.com/Birfy/agentdescent/blob/main/docs/concepts.md) | The training↔RSI analogy, staleness, the aggregator, the three long tails, governance |
-|  [Install, run, extend](https://github.com/Birfy/agentdescent/blob/main/docs/usage.md) | Running the demos, config reference, **plugging in your own `Evolvable` domain** |
+|  [Run everything, and extend it](https://github.com/Birfy/agentdescent/blob/main/docs/usage.md) | Every demo with its output, config reference, **plugging in your own `Evolvable` domain** |
 | [Evolving anything](https://github.com/Birfy/agentdescent/blob/main/docs/evolution.md) | The general engine — evolve any artifact by writing its `Strategy` + `run`/`reward`/`propose` |
 | [Connecting agents & LLMs](https://github.com/Birfy/agentdescent/blob/main/docs/agents.md) | The provider-agnostic completion layer |
 | [Loading datasets](https://github.com/Birfy/agentdescent/blob/main/docs/dataloader.md) | The `agentdescent.dataloader` data layer — HF datasets-server + raw-file fetch, cached, dependency-free |

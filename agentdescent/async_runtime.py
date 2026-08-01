@@ -49,6 +49,7 @@ from .scheduler import (
     TaskCluster,
     TaskScheduler,
 )
+from .pipeline import WorkerHealth
 from .staleness import StalenessPolicy, get_policy
 from .verifier import ThreeLayerVerifier, VerifierBudget
 from .worker import Worker
@@ -159,10 +160,10 @@ class AsyncAgentDescent:
         # nothing commits), forcing every worker to sync regardless of the ratio.
         self._refresh_epoch = 0
         self._stats_lock = threading.Lock()
-        # worker resilience: retire a worker only while NO worker has ever
-        # succeeded (see _worker_loop); the run ends once every worker has retired.
+        # Worker resilience, shared with the general pipeline so the two cannot
+        # drift apart again: the run ends once every worker has retired.
         self._live_workers = len(self.workers)
-        self._any_success = False
+        self._health = WorkerHealth(max_errors=self._MAX_WORKER_ERRORS)
 
     # -- shared head bookkeeping (ROLL Flash async ratio) --------------------
 
@@ -222,18 +223,10 @@ class AsyncAgentDescent:
                 with self._stats_lock:
                     if self.stats.error is None:
                         self.stats.error = f"{type(e).__name__}: {str(e)[:200]}"
-                # Two situations wear the same exception and want opposite
-                # responses, and this used to treat them alike -- the blanket rule
-                # `async_evolve` removed after measuring it. Keyed on a worker's own
-                # history, an intermittent backend retires whoever loses its first
-                # few rolls even though nothing is wrong with it; and since every
-                # worker shares one backend, shedding workers cannot relieve the
-                # throttling and only guarantees the run dies. Measured there at a
-                # 1-in-3 call failure rate: all three workers retired in 22s with
-                # nothing learned. The test is global -- while NO worker has ever
-                # completed a rollout the backend is misconfigured, so give up fast;
-                # once any has, it demonstrably works and this is a transient.
-                if not self._any_success and consecutive >= self._MAX_WORKER_ERRORS:
+                # Retirement policy is shared with `async_evolve` -- see
+                # `agentdescent.pipeline.WorkerHealth` for why it is global rather
+                # than per-worker, and what was measured when it was not.
+                if self._health.should_retire(consecutive):
                     with self._stats_lock:
                         self._live_workers -= 1
                         self.stats.retired_workers += 1
@@ -241,17 +234,17 @@ class AsyncAgentDescent:
                     if all_dead:
                         self._stop.set()      # nothing can make progress any more
                     return
-                if self._any_success and consecutive == self._MAX_WORKER_ERRORS:
+                if self._health.should_warn(consecutive):
                     warnings.warn(
                         f"{worker.worker_id} has failed {consecutive} rollouts in a "
                         f"row and is backing off, not retiring (it succeeded "
                         f"earlier, so this reads as transient). Last error: "
                         f"{type(e).__name__}: {str(e)[:120]}",
                         RuntimeWarning, stacklevel=2)
-                self._stop.wait(min(2.0 ** consecutive, 5.0))
+                self._stop.wait(self._health.backoff(consecutive))
                 continue
             consecutive = 0
-            self._any_success = True     # the backend demonstrably works
+            self._health.record_success()   # the backend demonstrably works
             elapsed = time.time() - t0
             if self.estimator is not None:
                 self.estimator.observe(cost, elapsed)

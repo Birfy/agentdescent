@@ -1,7 +1,8 @@
 # Strategies — what evolves, and how a proposal becomes a diff
 
-*Module:* [`agentdescent.evolution`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/evolution.py)
-· [`agentdescent.treestrategy`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/treestrategy.py)
+*Modules:* [`agentdescent.strategies`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/strategies.py)
+(text) · [`agentdescent.treestrategy`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/treestrategy.py)
+(a directory) — one module per strategy family, none of them inside the engine
 · *API:* [`Strategy`, `SingleSlot`, `AppendRules`, `KeyedRules`](api.md#the-loop), [`FileTree`](api.md#the-file-tree-strategy)
 
 A strategy answers two questions and nothing else:

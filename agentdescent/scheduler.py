@@ -15,8 +15,12 @@ mechanism:
   budget to high-blast-radius, high-uncertainty, low-trust diffs, and audits the
   aggregator's own merges to prevent self-pollution (design doc, section 5.3).
 * :class:`ResumeQueue` -- L-traj (system layer): turn-level checkpoints of
-  timed-out rollouts, resumed against the *latest* ledger, yielding a free A/B
-  signal across versions (design doc, section 5.1).
+  timed-out rollouts (design doc, section 5.1). **Detection only.** The design
+  calls for resuming them against the *latest* ledger, which would yield a free
+  A/B signal across versions; nothing in the library pops this queue, so a
+  checkpoint is a record that a straggler happened, not work that continues.
+  :class:`~agentdescent.async_runtime.AsyncAgentDescent` pushes;
+  ``AsyncStats.stragglers_checkpointed`` counts.
 """
 
 from __future__ import annotations
@@ -27,7 +31,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from .stats import ucb_score
+from .stats import difficulty_weight, ucb_score
 
 
 @dataclass
@@ -42,7 +46,19 @@ class TaskCluster:
 
 
 class TaskScheduler:
-    """UCB over task clusters, with a difficulty (zero-advantage) filter."""
+    """UCB over task clusters, with a difficulty (zero-advantage) filter.
+
+    The same shape as :class:`~agentdescent.sampling.DifficultyWeighted`, one
+    granularity up: that one picks a **task** inside a worker's shard for
+    ``evolve()``, this one leases a **cluster** to a worker in the reference
+    runtimes. They share :func:`~agentdescent.stats.difficulty_weight`.
+
+    The exploration constants differ on purpose. ``DifficultyWeighted`` defaults
+    to ``c=0.2`` because a sweep at *task* granularity measured 1.4 as worse than
+    round-robin (15.5% vs 14.5% of rollouts landing on an informative task, versus
+    23.4% at 0.2). That sweep has not been repeated at *cluster* granularity,
+    where there are far fewer arms and each carries many tasks, so the textbook
+    ``1.4`` is kept here rather than transplanting a number measured elsewhere."""
 
     def __init__(self, clusters: List[TaskCluster], c: float = 1.4) -> None:
         self.clusters: Dict[str, TaskCluster] = {cl.id: cl for cl in clusters}
@@ -54,8 +70,7 @@ class TaskScheduler:
 
     def _difficulty_weight(self, cl: TaskCluster) -> float:
         """Down-weight clusters with no learning signal (GRPO zero-advantage)."""
-        # peaks at pass_rate ~0.5, ~0 at the all-pass / all-fail extremes.
-        return 4.0 * cl.pass_rate * (1.0 - cl.pass_rate) + 1e-3
+        return difficulty_weight(cl.pass_rate, floor=1e-3)
 
     def _ranked(self) -> List[TaskCluster]:
         self._t += 1
@@ -137,14 +152,24 @@ class AuditScheduler:
     audit loop over the optimizer itself.
     """
 
-    #: Cap on queued audits. Nothing in the engines drains this queue, so an
-    #: unbounded list would grow for the whole run; keep the highest-priority
-    #: items and drop the tail, which is the lowest-value work anyway.
+    #: Cap on queued audits, when queuing is on at all.
     MAX_QUEUED = 4096
 
-    def __init__(self, max_queued: int = MAX_QUEUED) -> None:
+    def __init__(self, max_queued: int = MAX_QUEUED, collect: bool = False) -> None:
+        """``collect=False`` (the default) computes priorities without queuing.
+
+        Nothing in the shipped runtimes calls :meth:`pop`, so every ``submit``
+        was a heap push plus a periodic rebuild for a queue no one would ever
+        read -- work done on the merge path, once per merge decision, for nothing.
+        The priority itself is *not* wasted: it is returned, and `force_oracle`
+        and the trust update are the parts the engine actually uses.
+
+        Pass ``collect=True`` to keep the queue for an out-of-band audit process;
+        then :meth:`pop` returns the highest-priority items and :attr:`dropped`
+        reports what the cap shed."""
         self._items: List[_AuditItem] = []          # a heap (see submit)
         self._trust: Dict[str, float] = defaultdict(lambda: 1.0)
+        self._collect = collect
         self._max_queued = max_queued
         self._dropped = 0
         self._lock = threading.Lock()               # submitted from worker threads
@@ -170,6 +195,8 @@ class AuditScheduler:
     ) -> float:
         with self._lock:
             priority = blast_radius * uncertainty / max(0.25, self._trust[artifact_id])
+            if not self._collect:
+                return priority          # see __init__: nothing drains the queue
             # heapq is a min-heap; negate so the highest priority pops first.
             # heappush is O(log n) -- a full sort per submit was O(n log n), which
             # made a long run quadratic overall.
@@ -220,7 +247,11 @@ class ResumeItem:
 
 
 class ResumeQueue:
-    """Turn-level checkpoints of timed-out rollouts (partial rollout)."""
+    """Turn-level checkpoints of timed-out rollouts (partial rollout).
+
+    Write-only in every shipped path: the runtimes push, nothing pops. Kept as
+    the primitive the resume path would need, and counted so a run reports how
+    much work it abandoned -- see the module docstring."""
 
     def __init__(self, p90_multiplier: float = 2.0) -> None:
         self.p90_multiplier = p90_multiplier

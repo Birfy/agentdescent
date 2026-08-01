@@ -36,7 +36,7 @@ staleness trade:
 | `async_ratio` | behaviour |
 |---|---|
 | small (1–2) | near-synchronous: few stale diffs, workers resync often |
-| **3** (default) | the measured sweet spot on the reference domain |
+| **3** (default) | the shipped default; the reference domain is measured at 4, [here](concepts.md#34-async_ratio-roll-flash-the-global-lag-budget) |
 | large (8+) | highly asynchronous: many stale diffs for the [staleness policy](staleness.md) to rebase or discard |
 
 The two knobs are one decision. A tight staleness tolerance with a large lag
@@ -74,6 +74,36 @@ result = async_evolve(tasks, reward, agent=agent,
                       max_seconds=120, max_iters=200)
 ```
 
+## How the pipeline holds together
+
+Three properties are worth knowing before you tune anything:
+
+* **The lag budget bounds un-merged work, not just version drift.** A worker will
+  not pile up more than `async_ratio` candidates ahead of the merger. That matters
+  at **cold start**: before the first commit the head has not advanced, so a
+  version-only budget cannot engage, and workers would flood the buffer while the
+  merger is busy with the first slow held-out evaluation. Gating on pending intake
+  prevents it.
+* **There is exactly one merger,** so it is the only writer — there are no CAS
+  conflicts on this path, and a custom
+  [`aggregator_factory`](aggregator.md) sees only already-rebased cards. Every
+  optimizer that works synchronously works here unchanged.
+* **A backpressure guard forces a global sync if the pipeline stalls** (evidence
+  arriving, nothing committing). Without it a mismatched `async_ratio > alpha`
+  livelocks under Guarded: workers propose against a snapshot too old to accept,
+  every card is discarded, the head never moves, so the lag budget never triggers
+  a refresh either. `stall_patience=` tunes it; `result.forced_refreshes` counts
+  how often it fired.
+
+`self_verify` controls whether a worker, after producing a diff, re-runs its own
+trajectory with the diff applied to record a local before/after signal
+(`before_after_delta`, which the staleness gate's cheap re-verify uses). Ports
+that score only the *candidate* on held-out — [EvoSkill](algo-evoskill.md),
+whose repo evaluates the child on the validation set and never re-runs the sampled
+task — pass `self_verify=False` to skip that extra rollout. So do the
+[directory entry points](directory-evolution.md), where it would double the agent
+calls per proposal.
+
 ## What the async path adds
 
 Beyond the barrier removal, three signals only it can report:
@@ -100,7 +130,7 @@ orchestrator it grew out of: it runs the same barrier-free pipeline over the
 which is what makes the parallelism claims testable offline.
 
 ```python
-from agentdescent import AsyncAgentDescent, AsyncConfig
+from agentdescent import AsyncAgentDescent, AsyncConfig, get_policy
 from agentdescent.domains.router import make_task_universe
 
 cfg = AsyncConfig(n_workers=6, async_ratio=4, noise=0.12,

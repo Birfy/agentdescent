@@ -33,9 +33,20 @@ class Evolvable(Protocol):
 
     def diff(self, other) -> Diff: ...
     def apply(self, diff: Diff) -> "Evolvable": ...
-    def cheap_eval(self, evidence: EvidenceCard) -> float: ...
-    def full_eval(self, task_set) -> Mapping[str, float]: ...
+    def evidence_eval(self, evidence: EvidenceCard) -> float: ...
 ```
+
+`evidence_eval` scores the artifact against the trajectories an evidence card
+carries. It was `cheap_eval` until that collided with
+[`ThreeLayerVerifier.cheap_eval`](verifier.md), which takes an *artifact* and
+means something else — and both are called from the same forty lines of the
+aggregator. The old name survives as an alias.
+
+A fourth method, `full_eval(task_set)`, used to be required here and was called
+by nothing: ground truth reaches the aggregator through the verifier's `eval_fn`,
+which the *domain* supplies, so an artifact never had to know how to score itself.
+Requiring a method the engine does not use is a tax on everyone implementing the
+protocol, so it is gone.
 
 `apply` returns a **new** artifact rather than mutating — the aggregator scores
 candidates side by side, and in-place mutation would make that impossible.
@@ -85,9 +96,11 @@ content-addressing.
     which is why two workers editing different files merge for free. Same
     machinery, three very different concurrency profiles.
 
-A `None` value **deletes** the key. `dict.update` could express add and replace
-but not remove — invisible for a rules playbook, disqualifying for a file tree
-where a key is a path.
+A `None` value **deletes** the key, on both sides: `apply` pops it, and `diff`
+emits one for every key the target no longer has. `dict.update` could express add
+and replace but not remove — invisible for a rules playbook, disqualifying for a
+file tree where a key is a path, and it left `a.apply(a.diff(b))` quietly
+different from `b`.
 
 `Diff.size()` is `len(ops)`, which is what the aggregator's trust region caps
 (`trust_region_ops`, default 6), alongside `trust_region_chars` (32 000) per
@@ -140,9 +153,16 @@ Contract(input_schema="task", output_schema="text", side_effects=(), major=1)
 ```
 
 Artifacts depend on each other's *interfaces*, not their contents. A change that
-breaks one is a semver-major event, and the ledger refuses a diff declaring a
-dependency on a superseded major. In a single-artifact `evolve()` run this rarely
-fires; it exists for the multi-artifact library the design targets.
+breaks one is a semver-major event, so the [ledger](ledger.md) records the
+contract an artifact was **registered** with and refuses any later commit whose
+major disagrees — a breaking change has to be re-registered deliberately rather
+than merged like an ordinary diff.
+
+In a single-artifact `evolve()` run this never fires; it exists for the
+multi-artifact library the design targets. Until recently it never fired at all:
+`Contract`, `is_compatible_with` and `ContractRejected` all existed and nothing
+called any of them, while the docstrings described the enforcement as if it were
+there.
 
 ## `stable_hash`
 

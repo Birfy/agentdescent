@@ -58,7 +58,7 @@ from agentdescent import AgentDescent
 from agentdescent.domains.router import make_task_universe
 
 system = AgentDescent(repo_path, make_task_universe(seed=7),
-                      n_workers=6, noise=0.15, refresh_interval=3, seed=0)
+                      n_workers=6, noise=0.15, refresh_interval=2, seed=0)
 stats = system.run(rounds=40)          # -> List[RoundStat]
 ```
 
@@ -67,7 +67,7 @@ Each `RoundStat` carries `round`, `dev_accuracy`, `stable_accuracy`,
 curve plus the reason it has that shape.
 
 Staleness arises **naturally** rather than being injected: workers refresh their
-ledger snapshot only every `refresh_interval` rounds, so between refreshes their
+ledger snapshot only every `refresh_interval` rounds (default 2), so between refreshes their
 `base_version` lags the head and the [staleness policy](staleness.md) has real
 work to do.
 

@@ -8,7 +8,7 @@ page and the code disagree, so a signature here is the signature you get.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-135 public names across 23 modules.
+135 public names across 24 modules.
 
 ---
 
@@ -19,10 +19,6 @@ way it is; this page is the *what*.
 ### `Agent`
 
 Convenience actor: bundles running a task and proposing an improvement.
-
-### `AppendRules(title: str = '# Playbook') -> None`
-
-Accumulate a deduped list of rules/lessons (append-only, content-addressed).
 
 ### `EvolutionResult(...)`
 
@@ -38,15 +34,8 @@ An `Evolvable`: flat state + a strategy.
 
 | method | what it does |
 |---|---|
+| `full_eval(task_set: Sequence[Task]) -> Dict[str, float]` | Score on a task set. No longer part of the `Evolvable` protocol -- the engine reaches ground truth through the verifier's `eval_fn` -- and kept because it is a convenient thing for a caller to have. |
 | `score(tasks: Sequence[Task]) -> float` | Mean reward over `tasks`, evaluated concurrently. |
-
-### `KeyedRules(categories: Sequence[str], title: str = '# Config (by category)') -> None`
-
-One entry per *category*: competing proposals contradict and are resolved.
-
-| method | what it does |
-|---|---|
-| `keys() -> Sequence[str]` | The declared categories -- the key space tensor parallelism partitions. |
 
 ### `LLMAgent(...)`
 
@@ -61,18 +50,6 @@ Adapt a `Completion` (from `agents`) into an `Agent`.
 The caller's `reward` returned something outside the documented contract.
 
 ### `RoundInfo(...)`
-
-### `SingleSlot(...)`
-
-The artifact **is one value**, and each accepted proposal replaces it.
-
-| method | what it does |
-|---|---|
-| `keys() -> Sequence[str]` | The artifact is one slot, so the key space has exactly one member. |
-
-### `Strategy`
-
-Defines *what evolves and how* -- the representation and the merge rule.
 
 ### `Task(id: str, prompt: str, meta: Dict[str, Any] = <factory>) -> None`
 
@@ -89,10 +66,6 @@ Evolve an artifact. Provide either `agent` (with `solve`/`propose`) or the `run`
 ### `reflector(...)`
 
 Use any model as the *reflector* for an agent you already have.
-
-### `rule_id(text: str) -> str`
-
-Content-address a proposal so identical proposals dedupe automatically.
 
 ### `tasks_from(...)`
 
@@ -379,7 +352,7 @@ Raised when a commit's declared base version is stale.
 
 ### `ContractRejected`
 
-Raised when the ledger refuses a diff bound to a superseded major.
+Raised when a commit would change an artifact's contract major.
 
 ### `GitError`
 
@@ -533,13 +506,14 @@ TP -- one hot artifact is split into `n_sections` disjoint sections; each worker
 |---|---|
 | `section_map() -> Dict[str, int]` | `artifact key -> section`. Empty when no key space was declared. |
 
-### `TensorParallelMerge(n_sections: int) -> None`
+### `TensorParallelMerge(n_sections: int, keys: Optional[Sequence[str]] = None) -> None`
 
 Merge section-scoped diffs into one artifact (concatenation + review).
 
 | method | what it does |
 |---|---|
-| `merge(base: RouterSkill, section_diffs: List[Tuple[int, Diff]]) -> Tuple[RouterSkill, bool]` | Return (merged_skill, consistency_ok). |
+| `merge(base: Evolvable, section_diffs: List[Tuple[int, Diff]]) -> Tuple[Evolvable, bool]` | Return (merged_artifact, consistency_ok). |
+| `owner_of(key: str) -> int` | Which section owns `key` -- via the declared partition when there is one. |
 
 ### `WorkUnit(worker: int, keys: List[str], stage: int = 0, section: Optional[int] = None) -> None`
 
@@ -594,7 +568,7 @@ Chooses the next task id for a worker, and learns from the outcome.
 
 Duration-aware dispatch, straggler handling, and the oracle audit queue. &nbsp;·&nbsp; `agentdescent.scheduler` &nbsp;·&nbsp; [guide](duration-scheduling.md)
 
-### `AuditScheduler(max_queued: int = 4096) -> None`
+### `AuditScheduler(max_queued: int = 4096, collect: bool = False) -> None`
 
 Allocates oracle budget by estimated value G-hat (design doc, 5.3).
 
@@ -757,6 +731,10 @@ Values rather than classes or functions.
 
 `(ledger, verifier, audit, config, policy) -> AggregatorProtocol` — how a custom optimizer is installed.
 
+### `AppendRules`
+
+Accumulate a deduped list of rules/lessons (append-only, content-addressed).
+
 ### `Completion`
 
 `Callable[[str], str]` — the one contract every model and agent satisfies.
@@ -773,6 +751,10 @@ The L2/L1 blast-radius boundary (`0.30`).
 
 Artifact ids the loop may read but never mutate (L0).
 
+### `KeyedRules`
+
+One entry per *category*: competing proposals contradict and are resolved.
+
 ### `LAYOUTS`
 
 Where a runner writes the evolving tree inside a workspace (`claude_skill`, `skill_library`, `claude_agent`, `root`).
@@ -784,6 +766,14 @@ The exception tuple a caller catches to treat any ledger problem as recoverable.
 ### `SOLVED`
 
 Reward at or above which a task counts as solved (`0.999`). Lower it for a graded scorer, or every rollout asks the reflector to fix an answer that was already good.
+
+### `SingleSlot`
+
+The artifact **is one value**, and each accepted proposal replaces it.
+
+### `Strategy`
+
+Defines *what evolves and how* -- the representation and the merge rule.
 
 ### `TEST_FAILURE_MARKER`
 
@@ -800,3 +790,7 @@ Agentic backends -- a base agent that *navigates documents with tools*, not just
 ### `dataloader`
 
 Dependency-free dataset loading -- the *data layer* for examples/experiments.
+
+### `rule_id`
+
+Content-address a proposal so identical proposals dedupe automatically.

@@ -60,6 +60,9 @@ python -m examples.skill_dir_evolution    # evolve a skill DIRECTORY a real agen
 python -m examples.efficiency             # parallel scaling + async tail-hiding
 ```
 
+The complete list — every demo, every algorithm port, and what each one prints —
+is in [run everything](usage.md#1-run-the-demos).
+
 ## First real run — with a model
 
 Point the provider layer at whatever you have. Credentials are read from the

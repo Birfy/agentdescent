@@ -51,7 +51,10 @@ VersionVector = Dict[str, int]
 
 
 def vv_dominates(a: VersionVector, b: VersionVector) -> bool:
-    """Return True if ``a`` is at least as new as ``b`` on every shared key."""
+    """Return True if ``a`` is at least as new as ``b`` on every shared key.
+
+    A primitive, not part of a path: the engines compare versions through
+    :func:`vv_staleness`, which answers *how* stale rather than *whether*."""
     return all(a.get(k, 0) >= v for k, v in b.items())
 
 
@@ -149,6 +152,13 @@ class Evolvable(Protocol):
     Anything implementing this protocol can be registered into the evolution
     loop.  ``blast_radius`` drives automatic layering into L0/L1/L2 (design
     doc, section 6) -- it is *estimated*, not human-annotated.
+
+    ``evidence_eval`` scores this artifact against the trajectories an evidence
+    card carries. It was called ``cheap_eval`` until it collided with
+    :meth:`~agentdescent.verifier.ThreeLayerVerifier.cheap_eval`, which takes an
+    *artifact* and means something else -- and both are called from the same forty
+    lines of the aggregator. ``cheap_eval`` remains as an alias on the shipped
+    implementations so existing code keeps working.
     """
 
     id: str
@@ -158,8 +168,14 @@ class Evolvable(Protocol):
 
     def diff(self, other: "Evolvable") -> Diff: ...
     def apply(self, diff: Diff) -> "Evolvable": ...
-    def cheap_eval(self, evidence: EvidenceCard) -> float: ...
-    def full_eval(self, task_set: Any) -> Mapping[str, float]: ...
+    def evidence_eval(self, evidence: EvidenceCard) -> float: ...
+
+    # `full_eval(task_set) -> Mapping[str, float]` used to sit here as a fourth
+    # requirement. Nothing ever called it: ground truth reaches the aggregator
+    # through the verifier's `eval_fn`, which the *domain* supplies, so the
+    # artifact never had to know how to score itself on a task set. Requiring a
+    # method the engine does not use is a tax on everyone who implements this
+    # protocol, so it is gone; implementations are free to keep one.
 
 
 # A convenience alias for factory functions that reconstruct an Evolvable from
