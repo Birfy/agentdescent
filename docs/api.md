@@ -339,9 +339,19 @@ Cards bucketed by target artifact (design doc, section 4.1).
 |---|---|
 | `settle(cards: List[EvidenceCard]) -> None` | Keep discarded-diff evidence addressable, under a hard bound. |
 
-### `MergeOutcome(...)`
+### `MergeOutcome`
 
 The vocabulary of `category`.
+
+| member | value |
+|---|---|
+| `COMMITTED` | `'committed'` |
+| `BELOW_THRESHOLD` | `'below-threshold'` |
+| `ALL_STALE` | `'all-stale'` |
+| `OVERSIZED` | `'oversized'` |
+| `ORACLE_REJECTED` | `'oracle-rejected'` |
+| `CAS_CONFLICT` | `'cas-conflict'` |
+| `UNKNOWN_ARTIFACT` | `'unknown-artifact'` |
 
 ### `MergeReport(...)`
 
@@ -428,9 +438,13 @@ Raised when the evolution loop tries to mutate a frozen (L0) artifact.
 
 Enforces "at most one L1 diff in evaluation at a time" (section 6).
 
-### `Layer(value, names = None, *, module = None, *, qualname = None, *, type = None, *, start = 1)`
+### `Layer`
 
-An enumeration.
+| member | value |
+|---|---|
+| `L2_FAST` | `2` |
+| `L1_SLOW` | `1` |
+| `L0_FROZEN` | `0` |
 
 ### `assert_mutable(artifact: Evolvable) -> None`
 
@@ -458,13 +472,17 @@ Version-gated with rebase in the middle band (AgentDescent's default).
 
 Always rebase + re-verify; discard only if the improvement no longer holds.
 
-### `StaleAction(...)`
+### `StaleAction`
 
 What the aggregator should do with a (possibly stale) evidence card.
 
-### `StalenessPolicy`
+| member | value |
+|---|---|
+| `ACCEPT` | `'accept'` |
+| `REBASE` | `'rebase'` |
+| `DISCARD` | `'discard'` |
 
-Base class for protocol classes.
+### `StalenessPolicy`
 
 ### `get_policy(name: str) -> StalenessPolicy`
 
@@ -478,9 +496,13 @@ How a round's work is split across workers: DP / TP / PP. &nbsp;·&nbsp; `agentd
 
 DP -- every worker holds the same artifact; the *tasks* (keys) are sharded across workers and their diffs are merged. Coverage rotates each round.
 
-### `ParallelMode(...)`
+### `ParallelMode`
 
-An enumeration.
+| member | value |
+|---|---|
+| `DP` | `'data_parallel'` |
+| `TP` | `'tensor_parallel'` |
+| `PP` | `'pipeline_parallel'` |
 
 ### `ParallelStrategy`
 

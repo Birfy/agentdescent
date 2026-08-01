@@ -16,6 +16,7 @@ that is not regenerated fails the suite rather than shipping a stale page.
 from __future__ import annotations
 
 import argparse
+import enum
 import inspect
 import os
 import re
@@ -128,12 +129,30 @@ def _clean(text: str) -> str:
     return text.replace("|", r"\|")          # tables
 
 
+def _is_enum(obj: Any) -> bool:
+    return inspect.isclass(obj) and issubclass(obj, enum.Enum)
+
+
 def _summary(obj: Any) -> str:
     """The first paragraph of a docstring, collapsed to one line."""
     doc = inspect.getdoc(obj) or ""
     # A dataclass with no docstring inherits an auto-generated one that is just
     # its own repr -- noise, and it duplicates the signature directly above it.
     if inspect.isclass(obj) and doc.startswith(f"{obj.__name__}("):
+        return ""
+    # `getdoc` walks the MRO, so a class with no docstring of its own reports its
+    # parent's -- which says nothing about *this* class, and for enums is
+    # version-dependent boilerplate ("An enumeration." on 3.9, "Enum where
+    # members are also (and must be) ints" on 3.12). Either would make the page's
+    # contents depend on the interpreter that generated it, which the sync test
+    # then reports as the page being stale. `vars()` sees only what the class
+    # itself defines.
+    if inspect.isclass(obj) and vars(obj).get("__doc__") is None:
+        return ""
+    # Python 3.9's EnumMeta goes further and *writes* a docstring onto an enum
+    # that has none, so `vars()` cannot see the difference there. It is the same
+    # non-information, so drop it by name.
+    if _is_enum(obj) and doc.strip() == "An enumeration.":
         return ""
     para: List[str] = []
     for line in doc.splitlines():
@@ -147,6 +166,14 @@ def _signature(name: str, obj: Any) -> str:
     # A Protocol's __init__ is `(*args, **kwargs)`: true, and useless. What a
     # reader needs is the method set, which is listed underneath.
     if inspect.isclass(obj) and getattr(obj, "_is_protocol", False):
+        return name
+    # An enum's "constructor" is `EnumMeta.__call__`, whose signature changes
+    # between Python versions (`(value, names=None, *, module=None, ...)` on 3.9,
+    # `(*values)` on 3.12) -- so rendering it makes the page differ by
+    # interpreter, which the sync test then reports as the page being stale. It
+    # is also not what anyone wants to read: the members are, and they are listed
+    # underneath.
+    if _is_enum(obj):
         return name
     try:
         sig = inspect.signature(obj)
@@ -275,6 +302,11 @@ def render() -> str:
             summary = _summary(obj)
             if summary:
                 lines += [summary, ""]
+            if _is_enum(obj):
+                lines += ["| member | value |", "|---|---|"]
+                lines += [f"| `{m.name}` | `{m.value!r}` |" for m in obj]
+                lines += [""]
+                continue
             if kind == "class":
                 methods = _methods(obj)
                 if methods:
