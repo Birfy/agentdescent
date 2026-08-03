@@ -35,6 +35,11 @@ from .evolution import EvolutionResult, Task, evolve, tasks_from
 from .filetree import TreeSpec, load_tree
 from .runners import TEST_FAILURE_MARKER, code_runner, tree_runner
 from .skill import SCORERS
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:                               # pragma: no cover
+    from .sandbox import SandboxPool
+
 from .treestrategy import FileTree, tree_reflector
 
 __all__ = ["evolve_skill_dir", "evolve_agent_dir", "evolve_agent_code"]
@@ -114,6 +119,8 @@ def evolve_skill_dir(
     prompt_template: Optional[str] = None,
     fixtures: Optional[Callable[[Task], Mapping[str, str]]] = None,
     answer_file: Optional[str] = None,
+    workspace_root: Optional[str] = None,
+    sandbox_pool: Optional["SandboxPool"] = None,
     blast_radius: float = SKILL_BLAST_RADIUS,
     **evolve_kwargs: Any,
 ) -> EvolutionResult:
@@ -147,7 +154,8 @@ def evolve_skill_dir(
         runner_kwargs["prompt_template"] = prompt_template
     run = tree_runner(agent, layout=layout, name=aid,
                       overlay=strategy.frozen_files(tree), fixtures=fixtures,
-                      answer_file=answer_file, **runner_kwargs)
+                      answer_file=answer_file, workspace_root=workspace_root,
+                      sandbox_pool=sandbox_pool, **runner_kwargs)
     _defaults(evolve_kwargs, len(tasks))
     evolve_kwargs.setdefault("propose", tree_reflector(reflect_with or agent,
                                                        strategy=strategy))
@@ -194,6 +202,8 @@ def evolve_agent_code(
     test_cmd: Optional[Sequence[str]] = ("python", "-m", "pytest", "-q"),
     fixtures: Optional[Callable[[Task], Mapping[str, str]]] = None,
     timeout: float = 120.0,
+    workspace_root: Optional[str] = None,
+    sandbox_pool: Optional["SandboxPool"] = None,
     **evolve_kwargs: Any,
 ) -> EvolutionResult:
     """Evolve **agent code**: the tree is executed, and a test gate guards it.
@@ -219,7 +229,8 @@ def evolve_agent_code(
                                  agg_config=evolve_kwargs.pop("agg_config", None))
     run = code_runner(entrypoint, layout="root", name=aid, setup_cmd=setup_cmd,
                       test_cmd=test_cmd, overlay=strategy.frozen_files(tree),
-                      fixtures=fixtures, timeout=timeout)
+                      fixtures=fixtures, timeout=timeout,
+                      workspace_root=workspace_root, sandbox_pool=sandbox_pool)
     base_reward = _as_reward(score)
 
     def reward(task: Task, output: str) -> float:

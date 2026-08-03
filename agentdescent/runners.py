@@ -28,14 +28,22 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import subprocess
 import tempfile
 import time
-from typing import Callable, Dict, Mapping, Optional, Sequence
+import warnings
+from typing import (
+    TYPE_CHECKING, Callable, Dict, Mapping, Optional, Sequence, Tuple,
+)
 
 from .agents import AgentError, Completion, WorkspaceAgent
 from .evolution import Task
 from .filetree import TreeError, materialize, parse_tree
+
+if TYPE_CHECKING:                                   # pragma: no cover
+    from .policies import SandboxSpec
+    from .sandbox import SandboxPool
 
 __all__ = [
     "LAYOUTS",
@@ -59,8 +67,11 @@ LAYOUTS: Dict[str, str] = {
 #: signal a reflector needs -- so it is reported in-band and scored 0.
 TEST_FAILURE_MARKER = "AGENTDESCENT_GATE_FAILED"
 
-_WS_PREFIX = "agentdescent-ws-"
-_WS_MAX_AGE = 6 * 3600.0
+#: How many workspaces a runner that was given no pool will allow at once.
+#: Matches `evolve`'s default `eval_concurrency`, which is the larger of the two
+#: concurrencies that reach a runner today -- so the default ceiling does not
+#: bind on any configuration that worked before.
+_DEFAULT_MAX_SANDBOXES = 8
 
 _DEFAULT_PROMPT = (
     "{prompt}\n\n"
@@ -75,52 +86,55 @@ def layout_prefix(layout: str, name: str) -> str:
     return template.format(name=name) if "{name}" in template else template
 
 
-def _reap_stale_workspaces(max_age: float = _WS_MAX_AGE) -> int:
-    """Collect workspaces left behind by a killed process.
+def _pool_for(pool: Optional["SandboxPool"],
+              workspace_root: Optional[str]) -> "Tuple[SandboxPool, SandboxSpec]":
+    """The pool this runner will lease from, and the spec it asks for.
 
-    ``evolve()`` reaps its own scratch *ledgers* the same way
-    (``_reap_stale_scratch_repos``) and for the same reason: ``atexit`` does not
-    run on SIGKILL or an OOM kill, and a long sweep otherwise leaves one
-    directory per rollout in ``$TMPDIR``. Best-effort and silent -- reclaiming
-    disk must never fail a run."""
-    root, now, n = tempfile.gettempdir(), time.time(), 0
+    A runner given no pool makes its own, so the common single-`evolve()` case
+    needs no wiring. Sharing one across runners is what puts rollouts and
+    evaluations under a single ceiling, which is the point of having one."""
+    from .policies import SandboxSpec
+    from .sandbox import SandboxPool, WorkspaceProvider
+
+    spec = SandboxSpec(workspace_root=workspace_root)
+    if pool is not None:
+        return pool, spec
+    provider = WorkspaceProvider()
+    provider.reap()                 # collect what earlier killed processes left
+    return SandboxPool(provider, max_sandboxes=_DEFAULT_MAX_SANDBOXES), spec
+
+
+def _preserve(ws: str) -> Optional[str]:
+    """Copy a workspace out before the pool reclaims it (`keep_failed`).
+
+    Holding the sandbox itself would be the easy implementation and the wrong
+    one: the ceiling exists to bound what is on the machine, and a debugging
+    flag must not be able to raise it one failed rollout at a time."""
     try:
-        names = os.listdir(root)
+        dest = tempfile.mkdtemp(prefix="agentdescent-failed-")
+        shutil.rmtree(dest, ignore_errors=True)
+        shutil.copytree(ws, dest, symlinks=True)
+        return dest
     except OSError:
-        return 0
-    for name in names:
-        if not name.startswith(_WS_PREFIX):
-            continue
-        path = os.path.join(root, name)
-        try:
-            if now - os.path.getmtime(path) < max_age:
-                continue
-            shutil.rmtree(path, ignore_errors=True)
-            n += 1
-        except OSError:
-            pass
-    return n
+        return None
 
 
-def _stage(rendered: str, task: Task, *, prefix: str,
-           overlay: Optional[Mapping[str, str]],
-           fixtures: Optional[Callable[[Task], Mapping[str, str]]],
-           workspace_root: Optional[str]) -> str:
-    """Build one workspace for one rollout and return its path."""
+def _stage_into(ws: str, rendered: str, task: Task, *, prefix: str,
+                overlay: Optional[Mapping[str, str]],
+                fixtures: Optional[Callable[[Task], Mapping[str, str]]]) -> None:
+    """Lay one rollout's files out inside an already-acquired workspace.
+
+    Splitting this from *making* the directory is what lets the pool own the
+    lifetime: staging can fail, and when it does the sandbox still has to go
+    back through the same release path as a successful rollout."""
     tree = parse_tree(rendered)
-    ws = tempfile.mkdtemp(prefix=_WS_PREFIX, dir=workspace_root)
-    try:
-        materialize(tree, ws, prefix=prefix)
-        if overlay:
-            # after the candidate, so the candidate cannot win the race.
-            materialize(overlay, ws, prefix=prefix)
-        staged = fixtures(task) if fixtures else (task.meta or {}).get("fixtures")
-        if staged:
-            materialize(staged, ws)
-    except Exception:
-        shutil.rmtree(ws, ignore_errors=True)
-        raise
-    return ws
+    materialize(tree, ws, prefix=prefix)
+    if overlay:
+        # after the candidate, so the candidate cannot win the race.
+        materialize(overlay, ws, prefix=prefix)
+    staged = fixtures(task) if fixtures else (task.meta or {}).get("fixtures")
+    if staged:
+        materialize(staged, ws)
 
 
 def tree_runner(agent: Completion, *, layout: str = "claude_skill",
@@ -130,7 +144,8 @@ def tree_runner(agent: Completion, *, layout: str = "claude_skill",
                 fixtures: Optional[Callable[[Task], Mapping[str, str]]] = None,
                 answer_file: Optional[str] = None,
                 keep_failed: bool = False,
-                workspace_root: Optional[str] = None) -> Callable[[str, Task], str]:
+                workspace_root: Optional[str] = None,
+                sandbox_pool: Optional["SandboxPool"] = None) -> Callable[[str, Task], str]:
     """Build a ``run(rendered, task)`` that gives ``agent`` the evolving directory.
 
     ``agent`` should be a :class:`~agentdescent.agents.WorkspaceAgent`
@@ -151,26 +166,30 @@ def tree_runner(agent: Completion, *, layout: str = "claude_skill",
             "would only ever see the prompt. Use claude_code(), codex(), "
             "cli_agent([...]) or openhands().")
     prefix = layout_prefix(layout, name)
-    _reap_stale_workspaces()
+    pool, spec = _pool_for(sandbox_pool, workspace_root)
 
     def run(rendered: str, task: Task) -> str:
-        ws = _stage(rendered, task, prefix=prefix, overlay=overlay,
-                    fixtures=fixtures, workspace_root=workspace_root)
-        ok = False
-        try:
-            prompt = prompt_template.format(prompt=task.prompt, name=name,
-                                            tree_dir=prefix or ".")
-            out = agent.in_workspace(ws)(prompt)
-            if answer_file:
-                path = os.path.join(ws, answer_file)
-                if os.path.exists(path):
-                    with open(path, encoding="utf-8", errors="replace") as fh:
-                        out = fh.read()
-            ok = True
-            return (out or "").strip()
-        finally:
-            if ok or not keep_failed:
-                shutil.rmtree(ws, ignore_errors=True)
+        with pool.lease(spec) as sandbox:
+            ws, ok = sandbox.root, False
+            try:
+                _stage_into(ws, rendered, task, prefix=prefix, overlay=overlay,
+                            fixtures=fixtures)
+                prompt = prompt_template.format(prompt=task.prompt, name=name,
+                                                tree_dir=prefix or ".")
+                out = agent.in_workspace(ws)(prompt)
+                if answer_file:
+                    path = os.path.join(ws, answer_file)
+                    if os.path.exists(path):
+                        with open(path, encoding="utf-8", errors="replace") as fh:
+                            out = fh.read()
+                ok = True
+                return (out or "").strip()
+            finally:
+                if keep_failed and not ok:
+                    kept = _preserve(ws)
+                    if kept:
+                        warnings.warn(f"kept the failed workspace at {kept}",
+                                      RuntimeWarning, stacklevel=2)
 
     return run
 
@@ -198,8 +217,62 @@ def _child_env(ws: str, extra: Optional[Mapping[str, str]]) -> Dict[str, str]:
 
 def _sh(cmd: Sequence[str], ws: str, timeout: float,
         env: Mapping[str, str]) -> subprocess.CompletedProcess:
-    return subprocess.run(list(cmd), cwd=ws, capture_output=True, text=True,
-                          timeout=timeout, env=dict(env))
+    """Run one gate command, and on timeout kill **everything it started**.
+
+    ``subprocess.run(timeout=)`` kills the process it launched and nothing else.
+    That is fine for a leaf command and wrong for every command here: ``pytest``
+    forks, ``pip install`` forks, an agent CLI forks. On a timeout the direct
+    child dies, the run continues, and the grandchildren keep going -- still
+    burning CPU, still holding open a workspace the ``finally`` has already
+    deleted. Eight workers hitting a timeout leave eight of them behind, and
+    nothing in the run reports it.
+
+    So the child gets its own process group (``start_new_session``) and the
+    timeout path signals the **group**. ``SIGTERM`` first, because a test runner
+    given the chance will remove its own temporary files; ``SIGKILL`` for
+    whatever is left.
+
+    POSIX-only: Windows has no process groups in this sense, so there the
+    behaviour is what it always was -- documented rather than silently different.
+    """
+    posix = os.name != "nt"
+    proc = subprocess.Popen(list(cmd), cwd=ws, env=dict(env), text=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            start_new_session=posix)
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_group(proc, posix)
+        # Drain after killing: the pipes may hold output that explains the hang,
+        # and not reading them can leave the child blocked on a full pipe.
+        try:
+            out, err = proc.communicate(timeout=5.0)
+        except subprocess.TimeoutExpired:                    # pragma: no cover
+            out, err = "", ""
+        raise subprocess.TimeoutExpired(cmd, timeout, output=out, stderr=err)
+    return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+
+
+def _kill_group(proc: "subprocess.Popen", posix: bool) -> None:
+    """Terminate the process group ``proc`` leads, then make sure it is gone."""
+    if not posix:
+        proc.kill()
+        return
+    try:
+        pgid = os.getpgid(proc.pid)
+    except OSError:                      # already reaped
+        return
+    for sig, grace in ((signal.SIGTERM, 0.5), (signal.SIGKILL, 0.0)):
+        try:
+            os.killpg(pgid, sig)
+        except OSError:                  # the group is gone; nothing left to do
+            return
+        if grace:
+            deadline = time.time() + grace
+            while time.time() < deadline:
+                if proc.poll() is not None:
+                    return
+                time.sleep(0.02)
 
 
 def code_runner(entrypoint: Sequence[str], *, layout: str = "root",
@@ -210,7 +283,8 @@ def code_runner(entrypoint: Sequence[str], *, layout: str = "root",
                 fixtures: Optional[Callable[[Task], Mapping[str, str]]] = None,
                 timeout: float = 120.0,
                 env: Optional[Mapping[str, str]] = None,
-                workspace_root: Optional[str] = None) -> Callable[[str, Task], str]:
+                workspace_root: Optional[str] = None,
+                sandbox_pool: Optional["SandboxPool"] = None) -> Callable[[str, Task], str]:
     """Run **candidate code** on a task: materialise, gate, execute.
 
     ``entrypoint`` is argv; the task prompt is appended as the last argument and
@@ -229,38 +303,41 @@ def code_runner(entrypoint: Sequence[str], *, layout: str = "root",
     hand.
     """
     prefix = layout_prefix(layout, name)
-    _reap_stale_workspaces()
+    pool, spec = _pool_for(sandbox_pool, workspace_root)
 
     def run(rendered: str, task: Task) -> str:
-        ws = _stage(rendered, task, prefix=prefix, overlay=overlay,
-                    fixtures=fixtures, workspace_root=workspace_root)
+        with pool.lease(spec) as sandbox:
+            ws = sandbox.root
+            _stage_into(ws, rendered, task, prefix=prefix, overlay=overlay,
+                        fixtures=fixtures)
+            return _gate_and_run(ws, task)
+
+    def _gate_and_run(ws: str, task: Task) -> str:
+        """Gate first, then the entrypoint. A failing gate speaks in-band."""
         child = _child_env(ws, env)
-        try:
-            for label, cmd in (("setup", setup_cmd), ("tests", test_cmd)):
-                if not cmd:
-                    continue
-                try:
-                    proc = _sh(cmd, ws, timeout, child)
-                except subprocess.TimeoutExpired:
-                    return (f"{TEST_FAILURE_MARKER} ({label} timed out after "
-                            f"{timeout:g}s)")
-                except FileNotFoundError as e:
-                    raise AgentError(f"{cmd[0]!r} is not installed or not on PATH") from e
-                if proc.returncode != 0:
-                    detail = (proc.stdout or "") + (proc.stderr or "")
-                    return f"{TEST_FAILURE_MARKER} ({label}):\n{detail.strip()[:2000]}"
+        for label, cmd in (("setup", setup_cmd), ("tests", test_cmd)):
+            if not cmd:
+                continue
             try:
-                proc = _sh([*entrypoint, task.prompt], ws, timeout, child)
+                proc = _sh(cmd, ws, timeout, child)
             except subprocess.TimeoutExpired:
-                return f"{TEST_FAILURE_MARKER} (entrypoint timed out after {timeout:g}s)"
+                return (f"{TEST_FAILURE_MARKER} ({label} timed out after "
+                        f"{timeout:g}s)")
             except FileNotFoundError as e:
-                raise AgentError(
-                    f"{entrypoint[0]!r} is not installed or not on PATH") from e
+                raise AgentError(f"{cmd[0]!r} is not installed or not on PATH") from e
             if proc.returncode != 0:
-                detail = (proc.stderr or proc.stdout or "").strip()[:2000]
-                return f"{TEST_FAILURE_MARKER} (entrypoint exited {proc.returncode}):\n{detail}"
-            return (proc.stdout or "").strip()
-        finally:
-            shutil.rmtree(ws, ignore_errors=True)
+                detail = (proc.stdout or "") + (proc.stderr or "")
+                return f"{TEST_FAILURE_MARKER} ({label}):\n{detail.strip()[:2000]}"
+        try:
+            proc = _sh([*entrypoint, task.prompt], ws, timeout, child)
+        except subprocess.TimeoutExpired:
+            return f"{TEST_FAILURE_MARKER} (entrypoint timed out after {timeout:g}s)"
+        except FileNotFoundError as e:
+            raise AgentError(
+                f"{entrypoint[0]!r} is not installed or not on PATH") from e
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout or "").strip()[:2000]
+            return f"{TEST_FAILURE_MARKER} (entrypoint exited {proc.returncode}):\n{detail}"
+        return (proc.stdout or "").strip()
 
     return run
