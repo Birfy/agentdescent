@@ -84,8 +84,9 @@ The same flow, with the design-doc section numbers annotated:
                      dev branch (fast)   stable branch (EMA-confirmed)
                                      │
                     broadcast changed artifact → Workers refresh
-                                     │
-                    AuditScheduler (Ĝ) → Oracle spot-checks         §5.3
+
+           (step 4 above submits the candidate to the AuditScheduler,
+            which spends the oracle budget by Ĝ and may VETO it)      §5.3
 ```
 
 The three-layer **verifier** (rule / learned / oracle) is the evaluation backend

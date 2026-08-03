@@ -118,9 +118,11 @@ Beyond the barrier removal, three signals only it can report:
 of its requested concurrency, so `error` stays `None` while throughput quietly
 drops. Check it to tell a fast run from a lucky one.
 
-`stall_patience` (default 50) is how many empty merger sweeps pass before a
-worker is forced to refresh; `shutdown_grace` is how long the runtime waits for
-in-flight rollouts when it stops.
+`stall_patience` (default 50) is how many merger sweeps may pass **with cards in
+them and nothing committing** before every worker is forced to refresh — a sweep
+that had no evidence to merge is neither progress nor a stall, and is not
+counted. `shutdown_grace` is how long the runtime waits for in-flight rollouts
+when it stops.
 
 ## `AsyncAgentDescent` — the reference runtime
 

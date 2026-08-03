@@ -374,16 +374,20 @@ optimizer step:
    keeping the better of the pair on a shared subset.
 3. **Fusion tournament (§4.3)** — complementary diffs are fused (model-soup
    analogy) and run against the individual candidates on held-out data.
-4. **Statistical acceptance (§4.4)** — commit only if
+4. **Audit gate (§5.3)** — the merge decision is itself submitted to the
+   `AuditScheduler`; high-blast-radius / low-trust merges are forced through the
+   oracle, which can **veto outright** (`oracle-rejected`) *before* the
+   acceptance test runs. The optimizer audits itself.
+5. **Statistical acceptance (§4.4)** — commit only if
    `P(Δ > 0) > 1 − δ` under a per-artifact Beta posterior, not a point threshold.
    `δ` anneals with version (LR decay); a trust-region caps diff size.
-5. **Commit (§4.1)** — compare-and-swap on `dev`, one artifact per merge
+6. **Commit (§4.1)** — compare-and-swap on `dev`, one artifact per merge
    (`commit_atomic`/2PC exists in the Ledger but no engine path calls it).
-6. **Dual-branch promotion (§4.5)** — `dev → stable` every *K* accepted commits
-   (EMA-style confirmation; it counts commits, not rounds).
-7. **Audit (§5.3)** — the merge decision is itself submitted to the
-   `AuditScheduler`; high-blast-radius / low-trust merges are forced through the
-   oracle. The optimizer audits itself.
+7. **Dual-branch promotion (§4.5)** — `dev → stable` after *K* **regression-free
+   rounds** on dev (EMA-style confirmation; one round is one `step()`, and a
+   commit *restarts* the clock rather than advancing it — so the artifact most
+   likely to be promoted is the one that stopped changing because nothing beat
+   it). A clean run publishes its head on the way out.
 
 ## Parallelism & asynchrony
 
@@ -429,6 +433,11 @@ to 1.000, but at `async_ratio=4`:
 | Full | ~8k | 0 | ~3.2s |
 | Reflective | ~7.8k | ~0.7k | ~3.3s |
 | Guarded | ~20k | ~17k | ~5.1s |
+
+The **ratios** are the result; the absolute counts scale with the machine (a
+slower host fits fewer rollouts into the same wall-clock window), so rerun it
+rather than quoting these — same caveat as
+[the efficiency numbers](https://github.com/Birfy/agentdescent/blob/main/docs/efficiency.md).
 
 ### DP / TP / PP ([`parallel.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/parallel.py), §8)
 

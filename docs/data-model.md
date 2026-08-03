@@ -117,15 +117,25 @@ class EvidenceCard:
     base_version: VersionVector     # what it was proposed against
     touched: List[str]
     before_after_delta: float = 0.0 # the proposer's own local measurement
-    trajectory_refs: List[str] = () # the failures that justify it
+    trajectory_refs: List[Any] = () # the failing work units that justify it
     cost_tokens: int = 0
     cost_wallclock: float = 0.0
 ```
 
-The card outlives the diff it justifies. When a diff is discarded for staleness
-the card settles back into the evidence pool and can be reused — the rollout that
-produced it was expensive, and the *observation* is still true even when the
-patch no longer applies.
+!!! warning "`trajectory_refs` holds task *objects*, not ids"
+    Whatever you put here is what your artifact's `evidence_eval` will be asked to
+    score, and that is how the staleness policy re-verifies a rebased diff. Store
+    ids instead and `evidence_eval` scores an empty list, so the REBASE branch
+    compares `0.0 <= 0.0` and keeps everything — the cheap re-verification
+    silently becomes a no-op and a diff that makes the artifact *worse* survives
+    it. The field was annotated `List[str]`, which invited exactly that.
+
+The card outlives the diff it justifies: when a diff is discarded for staleness
+the card is `settle()`d rather than dropped, because the rollout that produced it
+was expensive and the *observation* stays true even when the patch no longer
+applies. **Nothing in the library reads that pool back yet** — it is a bounded
+diagnostic ring of recent rejections, not a queue that feeds later rounds (see
+[concepts](concepts.md#33-staleness-policies-flashevolve-full-guarded-reflective)).
 
 `before_after_delta` is folded into the acceptance test as extra evidence for the
 candidate: it is the closest thing here to a gradient magnitude. It is populated

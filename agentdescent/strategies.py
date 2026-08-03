@@ -144,10 +144,17 @@ class KeyedRules:
     def keys(self) -> Sequence[str]:
         """The declared categories -- the key space tensor parallelism partitions.
 
+        Lower-cased, because that is what :meth:`to_diff` writes: matching is
+        case-insensitive and the key it stores is the *folded* one. Returning the
+        declared spelling meant that ``categories=["Routing"]`` under tensor
+        parallelism built a section map keyed on ``"Routing"`` while every diff
+        wrote ``"routing"`` -- so no key had an owner, and every proposal in the
+        run was rejected as a ``section-violation``.
+
         Note that an *unrecognised* proposal still falls back to a content-addressed
         key, which is outside this space; under TP those are reported as
         ``section-violation`` rather than silently dropped."""
-        return list(self.categories)
+        return [c.strip().lower() for c in self.categories]
 
     def initial(self) -> Dict[str, str]:
         return {}

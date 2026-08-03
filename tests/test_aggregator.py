@@ -182,3 +182,45 @@ def test_oversized_diffs_are_counted_and_settled(tmp_path):
         f"the oversized diff should still be counted, got {reports[0].considered}")
     assert any(c.diff.diff_id == "huge" for c in agg.buffer.settled), \
         "the oversized diff's evidence should be settled back into the pool"
+
+
+def test_a_rebased_diff_that_no_longer_holds_is_discarded(tmp_path):
+    """The REBASE branch is only a gate if `evidence_eval` can see the failures.
+
+    `EvidenceCard.trajectory_refs` was annotated `List[str]`, and a card built to
+    that annotation scores an *empty* task list -- so the re-verification compares
+    `0.0 <= 0.0`, keeps everything, and a diff that makes the artifact worse
+    survives the rebase it was supposed to be caught by. This pins the behaviour
+    the annotation described away.
+    """
+    from agentdescent.staleness import get_policy
+
+    held = [Task(f"t-kw00-{i}", "acidbase", "kw00") for i in range(8)]
+    led, agg = _build(tmp_path, held)
+    agg.staleness_policy = get_policy("reflective")     # every stale card rebases
+    artifact = led.snapshot(Ledger.DEV).get("s").apply(
+        Diff("seed", "s", {"kw00": "acidbase"}))        # a head that already works
+    tasks = [Task("t-kw00-0", "acidbase", "kw00")]
+
+    # eta > 0, and the diff replaces the correct label with a wrong one.
+    harmful = _card("s", {"kw00": "thermo"}, 0, tasks, -1.0, "bad")
+    helpful = _card("s", {"kw01": "kinetics"}, 0, tasks, 1.0, "good")
+    survivors, discarded = agg._staleness_filter(artifact, {"s": 3}, [harmful, helpful])
+
+    assert [c.diff.author for c in discarded] == ["bad"], (
+        "a rebased diff whose improvement no longer holds must be discarded; "
+        f"discarded={[c.diff.author for c in discarded]}")
+    assert [c.diff.author for c in survivors] == ["good"]
+
+
+def test_evidence_eval_reads_the_task_objects_on_the_card():
+    """What a card carries has to be what the artifact can score."""
+    skill = RouterSkill("s", table={"kw00": "acidbase"})
+    tasks = [Task("t-kw00-0", "acidbase", "kw00")]
+    scored = EvidenceCard(diff=Diff("d", "s", {}), base_version={"s": 1},
+                          touched=["s"], trajectory_refs=tasks)
+    unscorable = EvidenceCard(diff=Diff("d", "s", {}), base_version={"s": 1},
+                              touched=["s"], trajectory_refs=["t-kw00-0"])   # ids
+    assert skill.evidence_eval(scored) == 1.0
+    assert skill.evidence_eval(unscorable) == 0.0, (
+        "ids are not scorable, which is why the field takes task objects")

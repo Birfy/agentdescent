@@ -81,7 +81,7 @@ python -m examples.dgm_self_improve                    # DGM   / SWE-bench Verif
 ### Tests
 
 ```bash
-pytest            #  tests
+pytest                          # the whole suite, no external services
 pytest -q tests/test_async.py   # just the async runtime
 ```
 
@@ -160,7 +160,7 @@ with tempfile.TemporaryDirectory() as repo:
 |---|---|---|
 | `n_workers` | 6 | worker threads |
 | `async_ratio` | 3 | ROLL Flash lag budget: max head-drift before a worker refreshes |
-| `noise` | 0.15 | fraction of workers that inject contradictory proposals |
+| `noise` | 0.15 | per-op probability that a *noisy* worker proposes a wrong label (every third worker is noisy; the rest are clean) |
 | `target_accuracy` | 0.98 | stop early when the dev branch reaches this |
 | `max_seconds` | 20.0 | wall-clock safety bound |
 | `aggregator_interval` | 0.002 | sleep between aggregator sweeps |

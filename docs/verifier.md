@@ -111,9 +111,20 @@ ThreeLayerVerifier(eval_fn=lambda artifact, tasks: artifact.score(tasks),
                    budget=VerifierBudget(oracle_calls_remaining=200))
 ```
 
-Anything with `cheap_eval` / `eval_counts` / `oracle_eval` works, and an
-[`aggregator_factory`](aggregator.md#replacing-aggregator_factory-aggregatorprotocol) receives the
-verifier so a custom optimizer can use its own.
+The reference aggregator calls **four** methods, so a substitute needs all four —
+building to the three above raises `AttributeError` from inside the merge, after
+the run has already spent its rollouts:
+
+```python
+cheap_eval(artifact) -> float                 # ranking
+learned_eval(artifact) -> (score, uncertainty) # the audit priority's uncertainty term
+eval_counts(artifact) -> (successes, failures) # the acceptance test, full set
+oracle_eval(artifact) -> float                 # ground truth, spends budget
+```
+
+An [`aggregator_factory`](aggregator.md#replacing-aggregator_factory-aggregatorprotocol)
+receives the verifier, so a custom optimizer that does not want an audit gate can
+ignore whichever of these it never calls.
 
 A learned verifier is itself an evolvable artifact — and one that must never
 evolve itself. That is what the [L0 frozen layer](governance.md#l0-is-a-list-not-a-threshold)

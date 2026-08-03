@@ -8,10 +8,22 @@ different substrates, and for a while they implemented it *independently*: two
 measured fixes lived in whichever pipeline they had been written for, and the
 repair was to hand-port them rather than to share them. Hand-porting works once.
 
-So the parts that are **policy** rather than plumbing live here, and both
-runtimes call them. Nothing in this module touches a ledger, a thread or a task:
-it is arithmetic over counters, which is exactly why it can be shared by two
-pipelines that agree on nothing else.
+So the parts that are **policy** rather than plumbing live here. Nothing in this
+module touches a ledger, a thread or a task: it is arithmetic over counters,
+which is exactly why it can be shared by two pipelines that agree on nothing
+else.
+
+What is actually shared, so this page cannot claim more than the code does:
+
+* :class:`WorkerHealth` -- both runtimes call ``should_retire`` /
+  ``should_warn`` / ``record_success``, which is the rule that was hand-ported
+  and the one that matters. ``backoff`` is used by
+  :class:`~agentdescent.async_runtime.AsyncAgentDescent`; ``async_evolve``
+  deliberately waits a quarter of it and says so at the call site.
+* :class:`StallGuard` -- both runtimes count their no-commit sweeps through it.
+  Each decides for itself *which* sweeps count (a sweep with no evidence in it
+  is neither progress nor a stall, and the two express "no evidence"
+  differently), and hands the counting itself here.
 """
 
 from __future__ import annotations

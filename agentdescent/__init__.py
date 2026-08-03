@@ -6,8 +6,10 @@ recursive self-improvement, where the "parameters" are a library of evolvable
 artifacts (skills, prompts, harness modules, verifiers) and the "gradients" are
 diffs carrying evidence cards.
 
-See ``agentdescent_design.md`` for the full design; each module cites the section
-it implements.
+Every module cites the design-spec section it implements ("design doc, section
+4.2"). The spec itself is **not shipped in this repository**; ``docs/`` is written
+against the code that came out of it, so read ``docs/concepts.md`` for the *why*
+and ``docs/architecture.md`` for how the sections map onto the modules.
 """
 
 from .evolvable import (

@@ -191,9 +191,20 @@ def main() -> None:
     print("\n=== evolved skill playbook ===")
     print(result.rendered)
     label = "held-out accuracy" if mc else "held-out score"
-    print(f"\n{label}: {result.history[0].held_out_reward:.3f} "
-          f"-> {result.final_reward:.3f}")
+    # `history[0]` is the score after round 0 has already merged, not the score
+    # of the seed playbook -- so say "round 0", not "before". And index it only
+    # if it exists: the whole point of the engine returning a partial result is
+    # that a run killed by a rate limit still has something to show, and
+    # `history[0]` on an empty history turned that into an IndexError.
+    if result.history:
+        print(f"\n{label}: {result.history[0].held_out_reward:.3f} (round 0) "
+              f"-> {result.final_reward:.3f} (final)")
+    else:
+        print(f"\n{label}: {result.final_reward:.3f} (no round completed)")
     print(f"lessons learned: {len(result.state)}")
+    print(f"stop reason: {result.stop_reason}")
+    if result.error:
+        print(f"WARNING: the run did not finish cleanly -- {result.error}")
     print(f"model usage: {usage.summary()}")
 
 

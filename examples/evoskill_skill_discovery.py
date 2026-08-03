@@ -642,6 +642,12 @@ class EvoResult:
     #: :func:`agentdescent.filetree.materialize` or
     #: :meth:`~agentdescent.evolution.EvolutionResult.write_to` install.
     tree: Dict[str, str] = field(default_factory=dict)
+    #: Carried straight through from the underlying
+    #: :class:`~agentdescent.evolution.EvolutionResult`. Dropping them made a run
+    #: that died on a rate limit print the same confident "seed -> best" line as
+    #: one that converged, on the longest and most expensive path in the repo.
+    error: Optional[str] = None
+    stop_reason: str = "rounds"
 
 
 def run_evoskill(complete: Completion, docs: Dict[str, str],
@@ -721,7 +727,8 @@ def run_evoskill(complete: Completion, docs: Dict[str, str],
             print(f"\n[eval-at-end] final held-out score over {len(val_tasks)} items: {best:.3f}")
     # the artifact is path-keyed; the algorithm's own vocabulary is names.
     return EvoResult(skills_of(dict(result.state)), ctx.seed_score, best,
-                     iterations, tree=dict(result.state))
+                     iterations, tree=dict(result.state),
+                     error=result.error, stop_reason=result.stop_reason)
 
 
 # ===========================================================================
@@ -880,6 +887,9 @@ def main() -> None:
     print(f"\nval score : {result.seed_score:.3f} -> {result.best_score:.3f}")
     print(f"test score: {test_score:.3f}  (held out, never seen by the frontier)")
     print(f"skills discovered: {len(result.skills)}")
+    print(f"stopped   : {result.stop_reason}")
+    if result.error:
+        print(f"WARNING: the run did not finish cleanly -- {result.error}")
 
 
 if __name__ == "__main__":

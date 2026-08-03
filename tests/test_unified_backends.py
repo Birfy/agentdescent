@@ -213,6 +213,11 @@ def test_the_prompt_points_at_the_skills_instead_of_carrying_them():
     class _Recorder:
         def __call__(self, prompt):
             seen["prompt"] = prompt
+            # Checked *during* the call, because that is the only moment the
+            # promise has to hold -- the workspace is one question's scratch
+            # directory and is removed once the agent has answered.
+            seen["staged"] = os.path.exists(
+                os.path.join(seen["ws"], ".claude/skills/lookup/SKILL.md"))
             return "ok"
 
         def in_workspace(self, path):
@@ -223,7 +228,8 @@ def test_the_prompt_points_at_the_skills_instead_of_carrying_them():
     backend.answer("q", "doc", skill_files={"lookup/SKILL.md": "SECRET BODY"})
     assert ".claude/skills" in seen["prompt"] and "lookup" in seen["prompt"]
     assert "SECRET BODY" not in seen["prompt"]          # on disk, not in the prompt
-    assert os.path.exists(os.path.join(seen["ws"], ".claude/skills/lookup/SKILL.md"))
+    assert seen["staged"], "the agent must find the skill files while it runs"
+    assert not os.path.exists(seen["ws"]), "the scratch workspace must not be left behind"
 
 
 def test_a_backend_without_a_workspace_falls_back_to_inlining_them():
