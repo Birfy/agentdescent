@@ -36,9 +36,11 @@ import time
 import warnings
 from typing import Callable, Dict, List, Optional
 
+from .agents import Usage
 from .evolution import (
     _publish_stable, _safe_log,
-    Agent, EvolutionResult, Propose, Reward, RoundInfo, Run, Strategy, Task, _tally,
+    Agent, EvolutionResult, Propose, Reward, RoundInfo, Run, Strategy, Task,
+    _cost_fields, _tally,
     SOLVED, _build_engine, _checked_proposal, _checked_reward,
 )
 from .aggregator import AggregatorConfig, check_reports
@@ -87,6 +89,10 @@ def async_evolve(
     task_sampler: Optional["TaskSampler"] = None,
     on_round: Optional[Callable[[RoundInfo], None]] = None,
     verbose: bool = False,
+    #: Share one `Usage` with your model adapters (`claude(usage=u)`) and the
+    #: result's token counts become real; without it only calls and seconds are
+    #: known, because an opaque `run` cannot report tokens.
+    usage: Optional[Usage] = None,
 ) -> EvolutionResult:
     """Evolve an artifact **without a round barrier**.
 
@@ -184,6 +190,13 @@ def async_evolve(
         Called with each :class:`~agentdescent.evolution.RoundInfo` as a merger
         sweep completes -- progress for a long run. It runs on the merger thread
         and must be cheap and thread-safe; an exception is reported, not fatal.
+    usage:
+        Share one :class:`~agentdescent.agents.Usage` with your model adapters
+        (``claude(usage=u)``, ``openai_compatible(usage=u)``) and the result's
+        token counts become real. Without it the run still reports calls,
+        seconds and failures -- ``run`` is ``(rendered, task) -> str``, so an
+        opaque actor has no way to surface tokens, and inventing a number would
+        be worse than reporting zero.
     verbose:
         Print one line per merger sweep.
 
@@ -207,7 +220,9 @@ def async_evolve(
         held_out_frac=held_out_frac, repo_path=repo_path, agg_config=agg_config,
         staleness_policy=staleness_policy, aggregator_factory=aggregator_factory,
         oracle_budget=oracle_budget, eval_concurrency=eval_concurrency,
-        cheap_eval_tasks=cheap_eval_tasks, shuffle=shuffle, seed=seed)
+        cheap_eval_tasks=cheap_eval_tasks, shuffle=shuffle, seed=seed,
+        usage=usage)
+    eng.meter.start()
     if n_workers < 1:
         raise ValueError(f"n_workers must be >= 1, got {n_workers}")
     policy = staleness_policy or get_policy("guarded")
@@ -316,6 +331,8 @@ def async_evolve(
             try:
                 output = eng.run(artifact.render(), task)
                 score = _checked_reward(eng.reward(task, output), task)
+                eng.meter.add("rollouts")
+                eng.meter.add("rollout_seconds", time.time() - t_start)
                 sampler.record(task.id, score)     # learn which tasks carry signal
                 if score < solved_threshold:
                     proposal = _checked_proposal(
@@ -450,8 +467,10 @@ def async_evolve(
             best[0], best[1] = r, 0
         else:
             best[1] += 1
+        _m = eng.meter.snapshot()
         history.append(RoundInfo(len(history), r, len(dev.state), committed,
-                                 len(reports) - committed, _tally(reports)))
+                                 len(reports) - committed, _tally(reports),
+                                 elapsed_s=_m.elapsed_s, rollouts=_m.rollouts))
         # A stalled pipeline: cards keep arriving and none of them commits. Under
         # Guarded with async_ratio > alpha that is a livelock, not slow progress.
         # A sweep with no cards in it is neither, so it is not counted -- and this
@@ -612,6 +631,7 @@ def async_evolve(
                              error=run_error, retired_workers=retired[0],
                              stop_reason="error" if run_error else stop_reason[0],
                              forced_refreshes=forced_refreshes[0],
-                             stragglers=stragglers[0])
+                             stragglers=stragglers[0],
+                             **_cost_fields(eng.meter))
     eng.cleanup()          # do not hold a scratch git repo for the whole process
     return result

@@ -39,6 +39,7 @@ from .evolvable import (
 )
 from .governance import Layer, classify, assert_mutable
 from .ledger import CASConflict, Ledger
+from .metrics import Meter
 from .scheduler import AuditScheduler
 from .staleness import StaleAction, StalenessPolicy, get_policy
 from .stats import BetaPosterior, annealed_delta, prob_improvement
@@ -332,12 +333,17 @@ class Aggregator:
         audit: AuditScheduler,
         config: Optional[AggregatorConfig] = None,
         staleness_policy: Optional[StalenessPolicy] = None,
+        meter: Optional["Meter"] = None,
     ) -> None:
         self.ledger = ledger
         self.verifier = verifier
         self.audit = audit
         # swap Full / Guarded / Reflective without touching the merge pipeline.
         self.staleness_policy = staleness_policy or get_policy("guarded")
+        #: Where the staleness ratio is recorded. `None` for a hand-built
+        #: aggregator, which then simply reports nothing -- a missing counter is
+        #: better than one that counts a fraction of the run.
+        self.meter = meter
         self.config = config or AggregatorConfig()
         self.buffer = EvidenceBuffer()
         self._posteriors: Dict[str, BetaPosterior] = defaultdict(BetaPosterior)
@@ -385,6 +391,13 @@ class Aggregator:
                     discarded.append(card)
             else:  # DISCARD
                 discarded.append(card)
+        if self.meter is not None:
+            # The denominator has to come from here: `MergeReport` records what
+            # was discarded, and without "out of how many" a stale ratio cannot
+            # be computed at all -- 3 discards out of 4 and out of 400 need
+            # opposite fixes.
+            self.meter.add("stale_considered", len(cards))
+            self.meter.add("stale_discarded", len(discarded))
         return survivors, discarded
 
     # -- conflict resolution (section 4.3) -----------------------------------
