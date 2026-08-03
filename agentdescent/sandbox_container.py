@@ -41,15 +41,17 @@ import tempfile
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from .policies import SandboxSpec
 
 __all__ = [
     "CONTAINER_WORKDIR",
+    "ENGINES",
     "ContainerProvider",
     "ContainerSandbox",
     "EngineError",
+    "detect_engine",
     "engine_available",
 ]
 
@@ -66,6 +68,26 @@ class EngineError(RuntimeError):
     """The container engine failed, with its own stderr attached."""
 
 
+#: Engines tried, in order, when none is named. Docker first because it is what
+#: most machines and CI images have; podman is a drop-in with the same CLI.
+ENGINES: Tuple[str, ...] = ("docker", "podman")
+
+
+def detect_engine(preferred: Optional[str] = None) -> Optional[str]:
+    """The first engine that is installed *and* answering, or ``None``.
+
+    Both halves matter. `docker` is on the PATH of plenty of machines where
+    nothing is listening -- Docker Desktop quit, a rootless daemon never
+    started -- and a provider built against a binary that cannot talk to a
+    daemon fails at the first rollout rather than at construction, by which time
+    a run is underway.
+    """
+    for engine in ((preferred,) if preferred else ENGINES):
+        if engine and engine_available(engine):
+            return engine
+    return None
+
+
 def engine_available(engine: str = "docker") -> bool:
     """Is this engine installed *and* talking to a daemon?
 
@@ -75,8 +97,12 @@ def engine_available(engine: str = "docker") -> bool:
     if shutil.which(engine) is None:
         return False
     try:
-        out = subprocess.run([engine, "info", "--format", "{{.Host.Arch}}"],
-                             capture_output=True, timeout=30)
+        # `info` with no template on purpose. The two engines answer the same
+        # questions with different Go structures -- `{{.Host.Arch}}` is podman's
+        # and renders empty on docker -- so a probe that formats anything is a
+        # probe that reports whichever engine it was written against. The exit
+        # code means the same thing on both.
+        out = subprocess.run([engine, "info"], capture_output=True, timeout=30)
         return out.returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False
@@ -133,13 +159,25 @@ class ContainerProvider:
     this is the check on it.
     """
 
-    def __init__(self, image: str, *, engine: str = "docker",
+    def __init__(self, image: str, *, engine: Optional[str] = None,
                  ttl: float = 300.0, pids_limit: int = 512,
                  runner: Optional[Callable[..., str]] = None) -> None:
         if not image:
             raise ValueError("a container sandbox needs an image to run")
         self.image = image
-        self.engine = engine
+        # `None` means "whichever is here". Naming one is for the case where both
+        # are installed and the choice matters; being made to name one when only
+        # one exists is friction with no payoff.
+        if engine is None and runner is None:
+            engine = detect_engine()
+            if engine is None:
+                raise EngineError(
+                    "no container engine is available: tried "
+                    f"{', '.join(ENGINES)}. Install one, or start the daemon -- "
+                    "the binary being on PATH is not enough. Without one, the "
+                    "default local provider still works, but it is not a "
+                    "boundary (see docs/directory-evolution.md).")
+        self.engine = engine or "docker"
         self.ttl = ttl
         self.pids_limit = pids_limit
         self._run = runner or _run
@@ -169,7 +207,7 @@ class ContainerProvider:
                "--read-only",
                "--tmpfs", "/tmp:rw,exec,size=256m",
                "--cap-drop", "ALL",
-               "--security-opt", "no-new-privileges",
+               "--security-opt", "no-new-privileges:true",
                f"--pids-limit={self.pids_limit}"]
 
         # Network is off unless asked for. A candidate that can reach the network
@@ -207,12 +245,17 @@ class ContainerProvider:
 
     def acquire(self, spec: SandboxSpec) -> ContainerSandbox:
         ws = tempfile.mkdtemp(prefix=_WS_PREFIX, dir=spec.workspace_root)
+        # A file to look for from the inside. Staging has not happened yet, so
+        # without one the workspace and a failed mount are both empty.
+        with open(os.path.join(ws, ".agentdescent-mount"), "w") as fh:
+            fh.write("ok")
         lease_id = uuid.uuid4().hex
         try:
             container_id = self._run(self.run_command(spec, ws, lease_id))
         except Exception:
             shutil.rmtree(ws, ignore_errors=True)
             raise
+        self._verify_mount(container_id, ws)
         self._n += 1
         sandbox = ContainerSandbox(
             id=f"{self.engine}-{os.getpid()}-{self._n}", root=ws,
@@ -221,6 +264,36 @@ class ContainerProvider:
             acquired_at=time.time())
         sandbox._killer = lambda: self.kill(sandbox)
         return sandbox
+
+    def _verify_mount(self, container_id: str, ws: str) -> None:
+        """Fail now, with an explanation, if the workspace did not arrive.
+
+        On Linux any host path can be bind-mounted. On macOS and Windows the
+        engine runs in a VM that shares only some of the host, so a workspace
+        under `$TMPDIR` -- which is where one goes by default -- is frequently
+        outside it. The container starts happily and `/work` is simply empty, so
+        the first symptom is the candidate's own `FileNotFoundError`, blamed on
+        the candidate.
+        """
+        try:
+            self._run([self.engine, "exec", container_id,
+                       "test", "-f", f"{CONTAINER_WORKDIR}/.agentdescent-mount"],
+                      timeout=30.0)
+            return
+        except Exception:
+            pass
+        try:
+            self._run([self.engine, "rm", "--force", container_id], timeout=60.0)
+        except Exception:
+            pass
+        raise EngineError(
+            f"the workspace {ws} did not appear inside the container. On macOS "
+            "and Windows the engine runs in a VM that shares only part of the "
+            "host filesystem, and the system temporary directory is usually "
+            "outside it. Point the run at a shared location -- "
+            "`SandboxSpec(workspace_root=...)` under your home directory is the "
+            "usual answer -- or add the path to the VM's mounts "
+            "(`colima start --mount <path>:w`, or Docker Desktop's File Sharing).")
 
     def release(self, sandbox: ContainerSandbox) -> None:
         """Stop the container and remove the workspace. Never raises.

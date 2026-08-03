@@ -284,14 +284,25 @@ appropriate for code you would run yourself; it is not a boundary.
 from agentdescent.sandbox import SandboxPool
 from agentdescent.sandbox_container import ContainerProvider
 
-pool = SandboxPool(ContainerProvider("python:3.11-slim", engine="podman"),
-                   max_sandboxes=8)
+pool = SandboxPool(ContainerProvider("python:3.11-slim"), max_sandboxes=8)
 run = code_runner(["python", "main.py"], test_cmd=["pytest", "-q"],
                   sandbox_pool=pool)
 ```
 
-Needs `docker` or `podman` on the machine — no Python dependency, and the core
-still installs with none. Staging is unchanged: the tree is materialised on the
+**Docker or podman, whichever is there.** The engine is detected unless you name
+one (`engine="podman"`); the flags used are the ones both accept, and the test
+suite runs the same isolation assertions against each engine that is installed.
+No Python dependency — the core still installs with none.
+
+!!! warning "macOS and Windows: the workspace must be in a shared path"
+    The engine runs inside a VM there, and it shares only part of the host. The
+    system temporary directory — where a workspace goes by default — is usually
+    outside it, and the container then starts with an empty `/work`, so the first
+    symptom is the candidate failing to open its own files.
+
+    The provider checks for this at acquire time and says so. Stage under your
+    home directory (`workspace_root=`), or add the path to the VM
+    (`colima start --mount <path>:w`, or Docker Desktop's File Sharing). Staging is unchanged: the tree is materialised on the
 host and bind-mounted at `/work`, so `FileTree`, the frozen overlay and fixtures
 all behave exactly as before. Only execution moves.
 

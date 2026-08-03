@@ -13,7 +13,9 @@ the second half's failures obvious rather than to stand in for it.
 """
 
 import os
+import shutil
 import subprocess
+import tempfile
 
 import pytest
 
@@ -23,9 +25,79 @@ from agentdescent.sandbox_container import (
 )
 
 IMAGE = os.environ.get("AGENTDESCENT_TEST_IMAGE", "docker.io/library/python:3.11-slim")
-ENGINE = next((e for e in ("podman", "docker") if engine_available(e)), None)
+
+#: Every engine actually present. The behaviour tests run against each of them
+#: rather than against "whichever was found first": the two CLIs are compatible
+#: in the flags used here, and the only way that claim stays true is if both are
+#: exercised. Machines with neither skip the lot.
+LIVE_ENGINES = [e for e in ("docker", "podman") if engine_available(e)]
+ENGINE = LIVE_ENGINES[0] if LIVE_ENGINES else None
 needs_engine = pytest.mark.skipif(
-    ENGINE is None, reason="no container engine with a live daemon")
+    not LIVE_ENGINES, reason="no container engine with a live daemon")
+every_engine = pytest.mark.parametrize("engine", LIVE_ENGINES or [None])
+
+
+@pytest.fixture
+def shared_root(tmp_path_factory):
+    """A workspace root the engine's VM can actually see.
+
+    On macOS the engine runs in a VM that shares only part of the host, and the
+    system temporary directory -- where `tmp_path` lives -- is usually outside
+    it. Home is shared by every common setup, so the behaviour tests stage there
+    rather than exercising the VM's mount configuration by accident."""
+    root = os.path.join(os.path.expanduser("~"), ".agentdescent-tests")
+    os.makedirs(root, exist_ok=True)
+    d = tempfile.mkdtemp(prefix="ws-", dir=root)
+    try:
+        yield d
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _neutral_engine_config(tmp_path_factory):
+    """Give the engine CLI a config directory with no credential helper in it.
+
+    Not a workaround for the code under test. A developer machine often carries a
+    `credsStore` for a helper that is not installed -- a removed Docker Desktop
+    leaves one behind -- and the engine then fails to pull *public* images that
+    need no credentials at all. The sandbox has no opinion about registry auth and
+    the tests should not inherit one.
+
+    The endpoint is carried over explicitly, because contexts live inside
+    `DOCKER_CONFIG`: replacing that directory silently loses the daemon along
+    with the credential helper, and the symptom is "cannot connect to the docker
+    API", which points nowhere near the cause.
+    """
+    endpoint = _current_endpoint()
+    cfg = tmp_path_factory.mktemp("engine-config")
+    saved = {k: os.environ.get(k) for k in ("DOCKER_CONFIG", "DOCKER_HOST")}
+    os.environ["DOCKER_CONFIG"] = str(cfg)
+    if endpoint:
+        os.environ["DOCKER_HOST"] = endpoint
+    try:
+        yield
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def _current_endpoint():
+    """Where docker is listening right now, asked before the config is swapped."""
+    if "docker" not in LIVE_ENGINES:
+        return None
+    if os.environ.get("DOCKER_HOST"):
+        return os.environ["DOCKER_HOST"]
+    try:
+        out = subprocess.run(
+            ["docker", "context", "inspect", "--format", "{{.Endpoints.docker.Host}}"],
+            capture_output=True, text=True, timeout=30)
+        return out.stdout.strip() or None
+    except (OSError, subprocess.SubprocessError):
+        return None
 
 
 def provider(**kw):
@@ -65,7 +137,9 @@ def test_a_spec_that_asks_for_nothing_gets_everything_locked_down():
     assert ["--network", "none"] == cmd[cmd.index("--network"):cmd.index("--network") + 2]
     assert "--read-only" in cmd
     assert ["--cap-drop", "ALL"] == cmd[cmd.index("--cap-drop"):cmd.index("--cap-drop") + 2]
-    assert flag_value(cmd, "--security-opt") == "no-new-privileges"
+    # The `:true` form is what docker documents; podman accepts it too, and one
+    # spelling that both take beats branching on the engine.
+    assert flag_value(cmd, "--security-opt") == "no-new-privileges:true"
     assert any(a.startswith("--pids-limit") for a in cmd), "a fork bomb is cheap"
 
 
@@ -220,13 +294,14 @@ def test_the_provider_satisfies_the_protocol_without_extra_methods():
 
 
 @needs_engine
-def test_the_host_home_directory_is_not_visible(tmp_path):
+@every_engine
+def test_the_host_home_directory_is_not_visible(engine, shared_root):
     """The reason this provider exists.
 
     The local provider fails this: `HOME` is redirected but absolute paths are
     not, so candidate code reading `~/.ssh/id_rsa` by full path gets it."""
-    p = ContainerProvider(IMAGE, engine=ENGINE)
-    sb = p.acquire(SandboxSpec(workspace_root=str(tmp_path)))
+    p = ContainerProvider(IMAGE, engine=engine)
+    sb = p.acquire(SandboxSpec(workspace_root=shared_root))
     try:
         probe = f"import os; print(os.path.exists({os.path.expanduser('~')!r}))"
         out = subprocess.run([*sb.exec_prefix(), "python", "-c", probe],
@@ -239,7 +314,8 @@ def test_the_host_home_directory_is_not_visible(tmp_path):
 
 
 @needs_engine
-def test_the_local_provider_does_not_stop_what_this_one_does(tmp_path):
+@every_engine
+def test_the_local_provider_does_not_stop_what_this_one_does(engine, shared_root):
     """The contrast, run side by side, because it is the whole justification.
 
     `HOME` redirection changes where a *lookup* goes; it does not change what a
@@ -251,7 +327,7 @@ def test_the_local_provider_does_not_stop_what_this_one_does(tmp_path):
     probe = f"import os; print(os.path.exists({home!r}))"
 
     local = WorkspaceProvider()
-    sb = local.acquire(SandboxSpec(workspace_root=str(tmp_path)))
+    sb = local.acquire(SandboxSpec(workspace_root=shared_root))
     try:
         env = dict(os.environ, HOME=sb.root, TMPDIR=sb.root)
         out = subprocess.run(["python3", "-c", probe], cwd=sb.root, env=env,
@@ -262,8 +338,8 @@ def test_the_local_provider_does_not_stop_what_this_one_does(tmp_path):
     finally:
         local.release(sb)
 
-    contained = ContainerProvider(IMAGE, engine=ENGINE)
-    csb = contained.acquire(SandboxSpec(workspace_root=str(tmp_path)))
+    contained = ContainerProvider(IMAGE, engine=engine)
+    csb = contained.acquire(SandboxSpec(workspace_root=shared_root))
     try:
         out = subprocess.run([*csb.exec_prefix(), "python", "-c", probe],
                              capture_output=True, text=True, timeout=120)
@@ -273,14 +349,15 @@ def test_the_local_provider_does_not_stop_what_this_one_does(tmp_path):
 
 
 @needs_engine
-def test_the_network_is_off_by_default_and_on_when_asked(tmp_path):
-    p = ContainerProvider(IMAGE, engine=ENGINE)
+@every_engine
+def test_the_network_is_off_by_default_and_on_when_asked(engine, shared_root):
+    p = ContainerProvider(IMAGE, engine=engine)
     probe = ("import socket;"
              "socket.setdefaulttimeout(4);"
              "socket.create_connection(('1.1.1.1', 80));"
              "print('connected')")
 
-    closed = p.acquire(SandboxSpec(workspace_root=str(tmp_path)))
+    closed = p.acquire(SandboxSpec(workspace_root=shared_root))
     try:
         out = subprocess.run([*closed.exec_prefix(), "python", "-c", probe],
                      capture_output=True, text=True, timeout=120)
@@ -288,7 +365,7 @@ def test_the_network_is_off_by_default_and_on_when_asked(tmp_path):
     finally:
         p.release(closed)
 
-    opened = p.acquire(SandboxSpec(workspace_root=str(tmp_path), network="inherit"))
+    opened = p.acquire(SandboxSpec(workspace_root=shared_root, network="inherit"))
     try:
         out = subprocess.run([*opened.exec_prefix(), "python", "-c", probe],
                      capture_output=True, text=True, timeout=120)
@@ -299,9 +376,10 @@ def test_the_network_is_off_by_default_and_on_when_asked(tmp_path):
 
 
 @needs_engine
-def test_files_written_inside_belong_to_the_host_user(tmp_path):
-    p = ContainerProvider(IMAGE, engine=ENGINE)
-    sb = p.acquire(SandboxSpec(workspace_root=str(tmp_path)))
+@every_engine
+def test_files_written_inside_belong_to_the_host_user(engine, shared_root):
+    p = ContainerProvider(IMAGE, engine=engine)
+    sb = p.acquire(SandboxSpec(workspace_root=shared_root))
     try:
         subprocess.run([*sb.exec_prefix(), "python", "-c",
                 "open('made-inside.txt','w').write('hi')"],
@@ -315,9 +393,10 @@ def test_files_written_inside_belong_to_the_host_user(tmp_path):
 
 
 @needs_engine
-def test_the_root_filesystem_is_read_only(tmp_path):
-    p = ContainerProvider(IMAGE, engine=ENGINE)
-    sb = p.acquire(SandboxSpec(workspace_root=str(tmp_path)))
+@every_engine
+def test_the_root_filesystem_is_read_only(engine, shared_root):
+    p = ContainerProvider(IMAGE, engine=engine)
+    sb = p.acquire(SandboxSpec(workspace_root=shared_root))
     try:
         out = subprocess.run([*sb.exec_prefix(), "python", "-c",
                       "open('/etc/passwd','a').write('x')"],
@@ -332,9 +411,10 @@ def test_the_root_filesystem_is_read_only(tmp_path):
 
 
 @needs_engine
-def test_reap_collects_orphans_and_leaves_the_living(tmp_path):
-    p = ContainerProvider(IMAGE, engine=ENGINE, ttl=3600.0)
-    alive = p.acquire(SandboxSpec(workspace_root=str(tmp_path)))
+@every_engine
+def test_reap_collects_orphans_and_leaves_the_living(engine, shared_root):
+    p = ContainerProvider(IMAGE, engine=engine, ttl=3600.0)
+    alive = p.acquire(SandboxSpec(workspace_root=shared_root))
     try:
         assert p.reap() == 0, "reap removed a container that had just started"
         p.ttl = 0.0                     # everything is now older than the TTL
@@ -349,7 +429,8 @@ def test_reap_collects_orphans_and_leaves_the_living(tmp_path):
 
 
 @needs_engine
-def test_a_rollout_runs_inside_the_container(tmp_path):
+@every_engine
+def test_a_rollout_runs_inside_the_container(engine, shared_root):
     """The whole path: pool -> lease -> stage on the host -> execute inside.
 
     Staging is deliberately still a host operation, so `materialize` and the
@@ -359,8 +440,9 @@ def test_a_rollout_runs_inside_the_container(tmp_path):
     from agentdescent.runners import code_runner
     from agentdescent.sandbox import SandboxPool
 
-    pool = SandboxPool(ContainerProvider(IMAGE, engine=ENGINE), max_sandboxes=2)
-    run = code_runner(["python", "main.py"], sandbox_pool=pool)
+    pool = SandboxPool(ContainerProvider(IMAGE, engine=engine), max_sandboxes=2)
+    run = code_runner(["python", "main.py"], sandbox_pool=pool,
+                      workspace_root=shared_root)
     try:
         tree = canonical({"main.py": "import sys; print(sys.argv[1].upper())"})
         assert run(tree, Task("t", "hello")) == "HELLO"
@@ -369,7 +451,8 @@ def test_a_rollout_runs_inside_the_container(tmp_path):
 
 
 @needs_engine
-def test_a_candidate_cannot_read_the_host_from_inside_a_rollout(tmp_path):
+@every_engine
+def test_a_candidate_cannot_read_the_host_from_inside_a_rollout(engine, shared_root):
     """The same guarantee, reached through the runner rather than the provider --
     because that is the path a real run takes."""
     from agentdescent.evolution import Task
@@ -378,8 +461,9 @@ def test_a_candidate_cannot_read_the_host_from_inside_a_rollout(tmp_path):
     from agentdescent.sandbox import SandboxPool
 
     home = os.path.expanduser("~")
-    pool = SandboxPool(ContainerProvider(IMAGE, engine=ENGINE), max_sandboxes=1)
-    run = code_runner(["python", "main.py"], sandbox_pool=pool)
+    pool = SandboxPool(ContainerProvider(IMAGE, engine=engine), max_sandboxes=1)
+    run = code_runner(["python", "main.py"], sandbox_pool=pool,
+                      workspace_root=shared_root)
     try:
         tree = canonical({"main.py": f"import os; print(os.path.exists({home!r}))"})
         assert run(tree, Task("t", "x")) == "False"
@@ -388,7 +472,8 @@ def test_a_candidate_cannot_read_the_host_from_inside_a_rollout(tmp_path):
 
 
 @needs_engine
-def test_the_frozen_test_gate_still_runs_and_still_gates(tmp_path):
+@every_engine
+def test_the_frozen_test_gate_still_runs_and_still_gates(engine, shared_root):
     """`frozen` is the reason a candidate cannot weaken its own tests, and it has
     to keep working when the tests run in a container."""
     from agentdescent.evolution import Task
@@ -396,13 +481,33 @@ def test_the_frozen_test_gate_still_runs_and_still_gates(tmp_path):
     from agentdescent.runners import TEST_FAILURE_MARKER, code_runner
     from agentdescent.sandbox import SandboxPool
 
-    pool = SandboxPool(ContainerProvider(IMAGE, engine=ENGINE), max_sandboxes=1)
+    pool = SandboxPool(ContainerProvider(IMAGE, engine=engine), max_sandboxes=1)
     run = code_runner(["python", "main.py"], test_cmd=["python", "check.py"],
                       overlay={"check.py": "raise SystemExit(1)"},
-                      sandbox_pool=pool)
+                      sandbox_pool=pool, workspace_root=shared_root)
     try:
         # the candidate ships a permissive check.py; the overlay restores the real one
         tree = canonical({"main.py": "print('x')", "check.py": "raise SystemExit(0)"})
         assert run(tree, Task("t", "x")).startswith(TEST_FAILURE_MARKER)
     finally:
         pool.close(strict=True)
+
+
+@needs_engine
+@every_engine
+def test_an_unmounted_workspace_says_so_instead_of_looking_like_a_missing_file(
+        engine, tmp_path):
+    """The macOS trap, as a test.
+
+    A workspace the VM cannot see produces an empty `/work`, so the first
+    symptom is the candidate failing to open its own files -- which reads as the
+    candidate's bug. Only reproducible where the engine is in a VM, so it accepts
+    either outcome and asserts the *message* when it does fail."""
+    p = ContainerProvider(IMAGE, engine=engine)
+    try:
+        sb = p.acquire(SandboxSpec(workspace_root=str(tmp_path)))
+    except Exception as e:
+        assert "did not appear inside the container" in str(e)
+        assert "workspace_root" in str(e), "the error must say what to do"
+        return
+    p.release(sb)          # this host shares the whole filesystem; nothing to test
