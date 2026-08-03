@@ -46,7 +46,7 @@ from .evolvable import Contract, ContractError, Diff, EvidenceCard
 from .governance import FROZEN_IDS, GovernanceError, assert_mutable
 from .ledger import Ledger, LedgerFailure
 from .metrics import Meter, measured
-from .pipeline import WorkerHealth
+from .pipeline import EarlyStop, FirstError, WorkerHealth
 from .policies import Policies
 from .sampling import RoundRobin, TaskSampler
 from .scheduler import AuditScheduler
@@ -1659,11 +1659,12 @@ def evolve(
     #: read fails there is still a real result to hand back instead of an exception.
     last_good: Optional[EvolvingArtifact] = None
     straggler_rounds = 0
-    best_reward = float('-inf')
-    stalled = 0
+    # Shared with the barrier-free loop: the same two questions, the same
+    # tracker, and now the same epsilon (they had two).
+    early = EarlyStop(target_reward=target_reward, patience=patience)
     unit_lock = threading.Lock()
     first_error: List[Optional[str]] = [None]
-    contract_error: List[Optional[BaseException]] = [None]   # caller bug -> re-raise
+    contract_error = FirstError()          # caller bug -> re-raise on this thread
     # The retirement rule lives in `pipeline.WorkerHealth`, shared with the
     # barrier-free runtimes. It used to be re-implemented here from the same
     # description, which is the arrangement `pipeline.py`'s docstring records as
@@ -1724,9 +1725,7 @@ def evolve(
                 # A caller bug: the run is meaningless. It has to travel back to the
                 # main thread by hand -- an exception raised in a plain worker thread
                 # goes to the thread excepthook and is lost, not propagated.
-                with unit_lock:
-                    if contract_error[0] is None:
-                        contract_error[0] = e
+                contract_error.record(e)          # its own lock; first one wins
             except Exception as e:  # noqa: BLE001 - a backend failure
                 with unit_lock:
                     if first_error[0] is None:
@@ -1833,8 +1832,7 @@ def evolve(
             # letting it propagate directly, because on the threaded path a raise
             # inside a worker never reaches here. Re-raise before any evidence is
             # read: a broken contract makes the round meaningless.
-            if contract_error[0] is not None:
-                raise contract_error[0]
+            contract_error.raise_if_set()
 
             # Decide on the round's tally rather than on the first exception. The
             # same global signal the async path uses: while NO worker has ever
@@ -1923,27 +1921,22 @@ def evolve(
         history.append(info)
         # Early stopping: an LLM rollout costs money, so do not keep buying them
         # once the artifact has converged or clearly stalled.
-        if info.held_out_reward > best_reward + 1e-9:
-            best_reward, stalled = info.held_out_reward, 0
-        else:
-            stalled += 1
+        early_stop = early.observe(info.held_out_reward)
         if verbose:
             print(f"round {r:>3}  reward={info.held_out_reward:.3f} on "
                   f"{len(held_out)}  size={info.n_items}  +{committed}/-{rejected}")
-        if target_reward is not None and info.held_out_reward >= target_reward:
-            stop_reason = "target_reward"
+        if early_stop is not None:
+            stop_reason = early_stop
             if verbose:
-                print(f"round {r:>3}  target_reward={target_reward} reached, stopping")
-            if on_round is not None:
+                print(f"round {r:>3}  "
+                      + (f"target_reward={target_reward} reached, stopping"
+                         if early_stop == "target_reward" else
+                         f"no improvement for {early.stalled} rounds, stopping"))
+            if early_stop == "target_reward" and on_round is not None:
                 try:
                     on_round(info)
                 except Exception:  # noqa: BLE001 - reported below on the normal path
                     pass
-            break
-        if patience is not None and stalled >= patience:
-            stop_reason = "patience"
-            if verbose:
-                print(f"round {r:>3}  no improvement for {stalled} rounds, stopping")
             break
         if on_round is not None:
             # A reporting callback must never take the run down with it.
