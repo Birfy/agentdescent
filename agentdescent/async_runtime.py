@@ -49,7 +49,7 @@ from .scheduler import (
     TaskCluster,
     TaskScheduler,
 )
-from .pipeline import WorkerHealth
+from .pipeline import StallGuard, WorkerHealth
 from .staleness import StalenessPolicy, get_policy
 from .verifier import ThreeLayerVerifier, VerifierBudget
 from .worker import Worker
@@ -200,13 +200,19 @@ class AsyncAgentDescent:
             epoch = self._epoch()
             # refresh when the ratio budget is exceeded, or when a pipeline stall
             # forced a global sync (backpressure).
-            if drift > self.cfg.async_ratio or epoch != local_epoch:
+            forced = epoch != local_epoch
+            if drift > self.cfg.async_ratio or forced:
                 snap = self.ledger.snapshot(Ledger.DEV)
                 local = snap.get(self.skill_id)
                 local_v = snap.version.get(self.skill_id, 0)
                 local_epoch = epoch
-                with self._stats_lock:
-                    self.stats.forced_refreshes += 1
+                # Only the backpressure-forced half is counted -- see the same
+                # comment in `async_evolve._worker`: a lag-budget refresh is
+                # ordinary progress, and counting it made the stall diagnostic
+                # non-zero on every healthy run.
+                if forced:
+                    with self._stats_lock:
+                        self.stats.forced_refreshes += 1
 
             cluster = self.scheduler.lease_round_robin()
             # estimate this rollout's cost from task size, time it, and calibrate.
@@ -271,7 +277,8 @@ class AsyncAgentDescent:
     # -- aggregator thread ---------------------------------------------------
 
     def _aggregator_loop(self) -> None:
-        no_commit_streak = 0
+        # Backpressure policy is shared with `async_evolve` (`pipeline.StallGuard`).
+        stall = StallGuard(patience=self.cfg.stall_patience)
         consecutive = 0
         while not self._stop.is_set():
             try:
@@ -310,7 +317,7 @@ class AsyncAgentDescent:
                         if rep.fused:
                             self.stats.fused += 1
             if committed:
-                no_commit_streak = 0
+                stall.note_sweep(True)
                 self._publish_head()
                 acc = self._dev_accuracy()
                 with self._stats_lock:
@@ -318,14 +325,15 @@ class AsyncAgentDescent:
                 if acc >= self.cfg.target_accuracy:
                     self._stop.set()
                     return
-            else:
+            elif self.buffer_pending() > 0:
                 # pipeline is producing evidence but nothing commits (all stale /
-                # rejected) -> apply backpressure and force a global sync.
-                if self.buffer_pending() > 0:
-                    no_commit_streak += 1
-                    if no_commit_streak >= self.cfg.stall_patience:
-                        self._bump_epoch()
-                        no_commit_streak = 0
+                # rejected) -> apply backpressure and force a global sync. A sweep
+                # with an empty buffer is neither progress nor a stall, so it is
+                # not counted either way.
+                stall.note_sweep(False)
+                if stall.should_force_refresh():
+                    self._bump_epoch()
+                    stall.force()
             time.sleep(self.cfg.aggregator_interval)
 
     def buffer_pending(self) -> int:

@@ -554,6 +554,33 @@ def _safe_log(ledger: Ledger, limit: int = 40) -> List[str]:
         return []
 
 
+def _publish_stable(aggregator) -> None:
+    """Publish the run's dev head to ``stable``, if the aggregator knows how.
+
+    Promotion is confirmation-based -- ``promote_after_k`` regression-free rounds
+    -- and a run can legitimately end before that many elapse: ``target_reward``
+    fires on the very commit that reaches it, and ``patience`` / ``rounds`` /
+    ``max_seconds`` can all stop a converged run one round short. Both reference
+    runtimes therefore call ``Aggregator.finalize()`` on the way out, and the two
+    engines a real workload actually reaches -- :func:`evolve` and
+    :func:`~agentdescent.async_evolve.async_evolve` -- did not, so a clean run that
+    hit its target left ``stable`` holding the *seed* artifact while ``dev`` held
+    the one the run was for. ``docs/ledger.md`` documented the call that was not
+    being made.
+
+    Optional on purpose: ``finalize`` is not part of
+    :class:`~agentdescent.aggregator.AggregatorProtocol`, so a custom optimizer
+    need not have one. And it is a courtesy like ``_safe_log`` -- a git failure
+    while publishing must not discard a run that has already finished."""
+    fn = getattr(aggregator, "finalize", None)
+    if not callable(fn):
+        return
+    try:
+        fn()
+    except LedgerFailure:
+        pass
+
+
 def _tally(reports) -> Dict[str, int]:
     """Count merge outcomes by stable category (see ``MergeReport.category``)."""
     out: Dict[str, int] = {}
@@ -1095,7 +1122,7 @@ def evolve(
         ``target_reward``, ``final_reward``) would then be measured against it.
     reward:
         ``(task, output) -> [0, 1]``. Scores in ``[0, 1]``; the engine treats
-``>= solved_threshold`` as a pass (no proposal is requested).
+        ``>= solved_threshold`` as a pass (no proposal is requested).
     agent:
         An object with ``solve`` + ``propose``. Provide this **or** ``run`` and
         ``propose``; both signatures are checked before the first rollout.
@@ -1600,6 +1627,11 @@ def evolve(
                 warnings.warn(f"on_round callback raised: {type(e).__name__}: {e}",
                               RuntimeWarning, stacklevel=2)
 
+    if run_error is None:
+        # A clean run publishes the head it produced (see `_publish_stable`);
+        # a run that died leaves `stable` where it was, which is the point of
+        # having a confirmed branch at all.
+        _publish_stable(aggregator)
     try:
         final = ledger.snapshot(Ledger.DEV).get(artifact_id)
     except LedgerFailure as e:

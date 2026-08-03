@@ -15,6 +15,15 @@ so you can reproduce it.
 | **[DGM](algo-dgm.md)** | surrogate | `--generations 4` | resolve-rate **0.000 → 0.300**; test 0.200 | offline |
 | **[ADAS](algo-adas.md)** | MGSM | `--hard`, all 11 languages | direct **0.919** → 222-item hard subset; lift **not yet measured** | ~2 h, 6k–17k calls |
 
+!!! note "What the *before* number is, per row"
+    GEPA, EvoSkill and SkillOpt score the **seed** artifact explicitly before
+    evolving it, so their "before" is a true baseline. ACE's is the **first round's**
+    held-out measurement, which is taken *after* that round's merge — the seed is
+    never scored on its own, because doing so would buy an extra val sweep of real
+    model calls and change the cost column. Read it as "where the run started
+    reporting", not "what the seed scored"; if round 0 committed, the real lift is
+    slightly larger than the row shows.
+
 !!! warning "ADAS is the exception: the lift row is still empty"
     Everything else in this table is a completed before → after. ADAS is not, and
     the honest reason is that no run against the current code has finished.

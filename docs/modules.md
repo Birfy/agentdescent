@@ -34,7 +34,7 @@ and *how*, that is *what*.
 
 | module | what it is | page |
 |---|---|---|
-| `evolution` (strategies) | `SingleSlot`, `AppendRules`, `KeyedRules` | [Strategies](strategies.md) |
+| `strategies` | `SingleSlot`, `AppendRules`, `KeyedRules` — the text strategies (re-exported from `evolution`, which is the published import path) | [Strategies](strategies.md) |
 | `filetree` | a directory ↔ artifact state, path safety, `TreeSpec` | [Directory evolution](directory-evolution.md) |
 | `treestrategy` | `FileTree`, the `<EDITS>` proposal protocol, `tree_reflector` | [Directory evolution](directory-evolution.md) |
 
@@ -61,8 +61,10 @@ and *how*, that is *what*.
 | module | what it is | page |
 |---|---|---|
 | `aggregator` | the optimizer: staleness → conflict → fusion → acceptance → commit | [Aggregator](aggregator.md) |
+| `stats` | the acceptance maths: Beta posterior, `P(Δ>0)`, annealed δ, UCB, difficulty weight | [Aggregator](aggregator.md) |
 | `verifier` | rule / learned / oracle, and the budget on the expensive one | [Verifier](verifier.md) |
 | `staleness` | what to do with a diff whose base version moved | [Staleness](staleness.md) |
+| `pipeline` | the retirement and backpressure policies the two barrier-free runtimes share | [Async](async.md) |
 | `ledger` | the git-backed, compare-and-swap artifact store | [Ledger](ledger.md) |
 | `governance` | L0 frozen / L1 slow / L2 fast, by blast radius | [Governance](governance.md) |
 

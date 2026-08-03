@@ -135,6 +135,19 @@ class MergeOutcome(str, Enum):
     def __str__(self) -> str:            # so f-strings render the value, not the name
         return self.value
 
+    def __repr__(self) -> str:
+        """Render as the plain string, which is what every reader is shown.
+
+        ``outcomes()`` is a *dict*, and printing a dict uses ``repr`` on its keys
+        -- so the diagnostic the README, both quickstarts, ``evolution.md`` and
+        this class's own docstring all print as ``{'committed': 1}`` actually came
+        out as ``{<MergeOutcome.COMMITTED: 'committed'>: 1}``. The value is the
+        identity here (the enum subclasses ``str`` precisely so callers can use
+        the bare string), so the enum repr showed the reader nothing they needed
+        and contradicted every example of it. ``enum.StrEnum`` does this for free
+        on 3.11+; this package supports 3.9."""
+        return repr(self.value)
+
 
 class AggregatorContractError(ContractError, TypeError):
     """A custom aggregator returned something ``step()`` may not return."""

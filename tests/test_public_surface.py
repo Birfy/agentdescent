@@ -96,6 +96,19 @@ def test_merge_outcomes_are_str_so_existing_lookups_keep_working():
     assert {agentdescent.MergeOutcome.COMMITTED: 1}["committed"] == 1
 
 
+def test_outcomes_print_the_way_every_doc_shows_them():
+    """`outcomes()` is a dict, and printing a dict uses `repr` on its keys.
+
+    The README, both quickstarts, `evolution.md` and `MergeOutcome`'s own
+    docstring all show `{'committed': 1}`; the enum repr printed
+    `{<MergeOutcome.COMMITTED: 'committed'>: 1}` instead — noise in the one
+    diagnostic a user is told to read first.
+    """
+    printed = str({agentdescent.MergeOutcome.COMMITTED: 2,
+                   agentdescent.MergeOutcome.BELOW_THRESHOLD: 7})
+    assert printed == "{'committed': 2, 'below-threshold': 7}", printed
+
+
 def test_every_category_the_aggregator_emits_is_in_the_vocabulary():
     """The keys of `result.outcomes()` were bare literals written at six
     different return sites; to learn them you had to read the file."""

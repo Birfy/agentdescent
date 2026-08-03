@@ -25,12 +25,10 @@ Evidence cards are bucketed by artifact; a bucket fires on batch size `B` or a
 1. **Staleness filter** — per-diff `η` vs `α`; the [staleness policy](evolution.md#6-staleness-staleness_policy) decides `ACCEPT / REBASE / DISCARD`.
 2. **Conflict resolution** — contradictory diffs (same key, different value) are projected out PCGrad-style; keep the better of the pair, iterating until no surviving pair contradicts. Key *overlap* alone is not a conflict — identical proposals are duplicates and dedupe.
 3. **Fusion tournament** — complementary diffs are fused (model-soup style) and run against the singles on held-out; the best wins.
-4. **Statistical acceptance** — commit only if `P(Δ > 0) > 1 − δ` under a Beta posterior (not a point threshold); `δ` anneals with version.
-5. **Commit** — compare-and-swap on `dev`, one artifact per merge. The `Ledger` *also* offers `commit_atomic` (2PC across several artifacts, for a contract-breaking diff that must land with its adapters), but the reference aggregator buckets by artifact and never needs it — no engine path calls it today.
 4. **Audit gate** — the candidate is submitted to the `AuditScheduler`; a high-blast-radius / low-trust merge is forced through the oracle, which can **veto it outright** (`oracle-rejected`) before the acceptance test runs. *The optimizer audits itself.* This is a blocking gate on the accept path, not a post-commit spot-check.
-5. **Statistical acceptance** — `P(Δ > 0) > 1 − δ` under a Beta posterior comparison, not a point threshold.
-6. **Commit** — compare-and-swap on `dev`, one artifact per merge.
-7. **Dual-branch promotion** — `dev → stable` after *K* **regression-free rounds** on dev. One round is one `step()`. A commit restarts the clock (the new version has survived nothing yet) and so does an oracle rejection. So a *converged* artifact — one that stopped committing because nothing beats it — is the one most likely to be promoted, which is the point.
+5. **Statistical acceptance** — commit only if `P(Δ > 0) > 1 − δ` under a Beta posterior comparison (not a point threshold); `δ` anneals with version.
+6. **Commit** — compare-and-swap on `dev`, one artifact per merge. The `Ledger` *also* offers `commit_atomic` (2PC across several artifacts, for a contract-breaking diff that must land with its adapters), but the reference aggregator buckets by artifact and never needs it — no engine path calls it today.
+7. **Dual-branch promotion** — `dev → stable` after *K* **regression-free rounds** on dev. One round is one `step()`. A commit restarts the clock (the new version has survived nothing yet) and so does an oracle rejection. So a *converged* artifact — one that stopped committing because nothing beats it — is the one most likely to be promoted, which is the point. A run that ends cleanly also publishes its head via `finalize()`, so stopping on `target_reward` does not leave `stable` a confirmation short.
 
 Deep dive on the *why*: [concepts §4](concepts.md#4-the-aggregator-a-discrete-space-optimizer).
 

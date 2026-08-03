@@ -113,8 +113,22 @@ def split_dataset(items: Sequence[Any], *, ratios: Tuple[float, float, float] = 
             if shuffle:
                 rng.shuffle(g)
             a, b = _cut_points(len(g), ratios)
+            # A group too small for the ratios has to give val an item from
+            # somewhere -- but by *moving* one, not copying it. `g[a:b] or
+            # g[a:a+1]` did the latter: for a two-item class the cut points
+            # collapse to a == b == 1, so val borrowed g[1] while test still took
+            # g[b:] == [g[1]]. The same item then sat in the split the optimizer
+            # gates on *and* in the one this class documents as "fully held out,
+            # never seen by the optimizer", which is the one promise a test split
+            # makes. Rare classes are exactly where this bites, and stratifying is
+            # what you do when you have them (FiNER tags, MGSM languages).
+            if a == b:
+                if b < len(g):
+                    b += 1              # take val's item from test
+                elif a > 0:
+                    a -= 1              # nothing left there: take it from train
             train += g[:a]
-            val += g[a:b] or g[a:a + 1]        # guarantee a non-empty val per class
+            val += g[a:b]
             test += g[b:]
         for split in (train, val, test):
             if shuffle:

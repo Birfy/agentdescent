@@ -53,7 +53,8 @@ from agentdescent.agents import Usage, claude, openai_compatible
 from agentdescent.aggregator import AggregatorProtocol, MergeReport
 from agentdescent.dataloader import Dataset, hf_rows, split_dataset
 from agentdescent.evolvable import Diff, EvidenceCard
-from agentdescent.evolution import LLMAgent, Task, evolve, rule_id
+from agentdescent.evolution import EvolvingArtifact, LLMAgent, Task, evolve, rule_id
+from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
 
 HOTPOTQA = ("hotpotqa/hotpot_qa", "validation", "distractor")   # (dataset, split, config)
@@ -409,7 +410,10 @@ def main() -> None:
     reward = make_reward()
 
     ntr, nva, nte = ds.sizes()
+    art = EvolvingArtifact("gepa_prompt", blast_radius=0.2)
     print(f"Loaded   : {len(ds)} tasks -> {ntr} train / {nva} val (D_pareto) / {nte} test")
+    # The layer this run landed in, as every other port reports it.
+    print(f"Governance: instruction blast_radius={art.blast_radius} -> {classify(art).name}")
     print("\nExample problem:")
     print("  Q:", ds.train[0].prompt.split('Question: ')[-1][:160])
     print("  A:", ds.train[0].meta["target"])
@@ -448,15 +452,19 @@ def main() -> None:
     factory = pareto_aggregator_factory(artifact_id="gepa_prompt", seed=args.seed)
     print("\nEvolving instruction (reflective mutation + Pareto selection, L2)...\n")
     # fit on train, Pareto-select on val (D_pareto); test stays fully held out.
-    evolve(ds.trainval, reward, agent=agent,
-           strategy=InstructionSlot(), initial_state={"instruction": _SEED_INSTRUCTION},
-           blast_radius=0.2, artifact_id="gepa_prompt",
-           rounds=args.rounds, n_workers=args.workers,
-           max_concurrency=1 if args.asynchronous else args.workers,
-           asynchronous=args.asynchronous, async_ratio=args.async_ratio,
-           max_seconds=args.max_seconds if args.asynchronous else None,
-           held_out_frac=ds.val_frac,
-           aggregator_factory=factory, verbose=True)
+    # Keep the result: `error` is the engine's one signal that a long, paid run
+    # ended on a rate limit rather than converging, and dropping it on the floor
+    # is exactly what its docstring tells callers not to do.
+    result = evolve(ds.trainval, reward, agent=agent,
+                    strategy=InstructionSlot(),
+                    initial_state={"instruction": _SEED_INSTRUCTION},
+                    blast_radius=0.2, artifact_id="gepa_prompt",
+                    rounds=args.rounds, n_workers=args.workers,
+                    max_concurrency=1 if args.asynchronous else args.workers,
+                    asynchronous=args.asynchronous, async_ratio=args.async_ratio,
+                    max_seconds=args.max_seconds if args.asynchronous else None,
+                    held_out_frac=ds.val_frac,
+                    aggregator_factory=factory, verbose=True)
 
     agg: ParetoAggregator = factory.holder["agg"]  # type: ignore[attr-defined]
     best = agg.best_state.get("instruction", _SEED_INSTRUCTION)
@@ -464,9 +472,19 @@ def main() -> None:
     print("\n=== GEPA-optimised instruction (best average on D_pareto) ===")
     print(best)
     print(f"\ncandidates explored: {len(agg.states)}")
-    print(f"seed D_pareto EM   : {agg.scores[0] and sum(agg.scores[0]) / len(agg.scores[0]):.3f}")
+    # The seed row exists only once the aggregator has stepped at least once, and
+    # `scores[0] and .../len(...)` did not guard it: on an empty row that formats
+    # a *list* with `:.3f` (TypeError), and with no row at all it is an IndexError
+    # -- both raised in the final print of a run the engine had deliberately kept
+    # alive to report.
+    seed_row = agg.scores[0] if agg.scores else []
+    seed_em = f"{sum(seed_row) / len(seed_row):.3f}" if seed_row else "n/a (no round completed)"
+    print(f"seed D_pareto EM   : {seed_em}")
     print(f"best D_pareto EM   : {agg.best_avg:.3f}")
     print(f"test EM            : {test_em:.3f}  (held out, never seen by the optimizer)")
+    print(f"stopped            : {result.stop_reason}")
+    if result.error:
+        print(f"WARNING: the run did not finish cleanly -- {result.error}")
     print(f"model usage: {usage.summary()}")
 
 

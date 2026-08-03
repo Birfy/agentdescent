@@ -159,6 +159,11 @@ Observed trade-off at `async_ratio=4` (all three converge to 1.000):
 | Reflective | ~7.8k | ~0.7k | ~3.3s |
 | Guarded | ~20k | ~17k | ~5.1s |
 
+The ratios between the rows are the result; the absolute counts scale with the
+machine, since each run is bounded by wall-clock. Rerun
+`python -m examples.run_async` rather than quoting these — the same caveat
+[the efficiency page](efficiency.md) attaches to its own numbers.
+
 ---
 
 ## 4. The aggregator: a discrete-space optimizer
@@ -209,10 +214,15 @@ mechanism:
 
 - **L-traj (system layer)** — heavy-tailed rollout durations. Handled today by
   the duration estimator + LPT dispatch and by **detecting** stragglers: a
-  rollout that overruns its prediction is counted. Reachable from `evolve()` /
-  `async_evolve` as `duration_estimator=` → `result.stragglers`; it used to exist
-  only in the reference runtime, which accepts nothing but the synthetic domain,
-  so the mechanism was unreachable from the API a real workload uses.
+  rollout that overruns its prediction is counted. Reachable from
+  [`async_evolve`](async.md) as `duration_estimator=` → `result.stragglers`; it
+  used to exist only in the reference runtime, which accepts nothing but the
+  synthetic domain, so the mechanism was unreachable from the API a real workload
+  uses. It is **not** a parameter of `evolve()` — not even with
+  `asynchronous=True`, which forwards only the knobs it declares — so reach for
+  `async_evolve` directly when you want it. The synchronous path bounds a slow
+  rollout with `round_timeout=` instead, which abandons the straggler rather than
+  measuring it.
   **The resume half is not implemented** — nothing pops that queue, and the
   recorded item carries no continuation state, because a resumable rollout would
   have to expose its turns and `run(rendered, task) -> output` is opaque. The
@@ -243,12 +253,16 @@ mechanism:
   never earn an audit — measured at the default 0.2, `oracle_calls_used` was 0 for
   a whole run.
 
-    !!! warning "The priority queue has no consumer"
-        `AuditScheduler.submit` ranks merges by `Ĝ` into a bounded heap, and
-        nothing in the engines pops it. The audit that actually runs is the inline
-        `force_oracle` gate in the merge pipeline, which reads trust but not the
-        queue. Treat the queue as a priority *model* — the ordering a fuller
-        system would spend a background budget against — not as work in flight.
+    !!! warning "The priority queue has no consumer — and is off by default"
+        `AuditScheduler.submit` computes `Ĝ` for every merge, but with the default
+        `collect=False` it does not queue anything: nothing in the engines would
+        pop that heap, so building it would be work done on the merge path for a
+        reader who never arrives. Pass `collect=True` to keep it for an
+        out-of-band audit process. The audit that actually runs either way is the
+        inline `force_oracle` gate in the merge pipeline, which reads trust but
+        not the queue. Treat the ranking as a priority *model* — the ordering a
+        fuller system would spend a background budget against — not as work in
+        flight.
 
 ---
 

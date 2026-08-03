@@ -37,6 +37,73 @@ All notable changes to AgentDescent are documented here. The format follows
   longer used inside the package (`worker.py` takes `RouterTask`). The alias
   stays, marked deprecated.
 
+- **`stable` never received the artifact a run produced.** Both reference
+  runtimes call `Aggregator.finalize()` on a clean exit, and `docs/ledger.md`
+  documents it — but `evolve()` and `async_evolve()`, the two engines a real
+  workload actually reaches, did not. Promotion needs `promote_after_k`
+  regression-free rounds and `target_reward` stops the run on the very commit
+  that reaches it, so a clean run that hit its target left `stable` holding the
+  *seed* artifact while `dev` held the one the run was for. Both engines now
+  publish their head on a clean exit (and only on a clean one: a run that died
+  leaves the confirmed branch where it was).
+
+- **`result.forced_refreshes` was non-zero on every healthy async run.** The
+  field, `docs/async.md`, `docs/staleness.md` and `concepts.md` all say a
+  non-zero count means the lag budget and the staleness tolerance disagree — but
+  it counted *every* snapshot refresh, including the ordinary lag-budget one that
+  happens all run long. A converged three-second run reported 3. Only
+  backpressure-forced resyncs are counted now, in both barrier-free runtimes, so
+  the diagnostic is quiet when there is nothing to diagnose.
+
+- **A stratified split could put the same item in `val` and `test`.** For a class
+  too small for the ratios the cut points collapse, and `g[a:b] or g[a:a+1]`
+  *copied* an item into `val` while `test` still took it — so the split
+  `Dataset` documents as "fully held out, never seen by the optimizer" contained
+  an item the acceptance gate had already scored. Rare classes are exactly what
+  stratifying is for (a thin FiNER tag, a low-resource MGSM language), and three
+  shipped ports stratify. The item is now *moved*, not copied.
+
+- **`KeyedRules.keys()` returned a key space the strategy never writes.**
+  Matching is case-insensitive and `to_diff` stores the folded key, so
+  `categories=["Routing"]` under tensor parallelism built a section map on
+  `"Routing"` while every diff wrote `"routing"`: no key had an owner and every
+  proposal in the run was rejected as `section-violation`.
+
+- **`document_agent` and `openhands()` leaked a workspace per call.** Each staged
+  a fresh temp directory — with a copy of the document, routinely a megabyte of
+  financial tables — and never removed it, while every other staging path in the
+  package cleans up after itself. Both now do, and `openhands()` still leaves a
+  caller-supplied `in_workspace()` directory alone, since that one holds the
+  caller's files.
+
+- **`EvidenceCard.trajectory_refs` was annotated `List[str]`, which quietly
+  disables the staleness gate.** Every producer in the package puts task
+  *objects* there and both consumers `isinstance`-filter for them, so a custom
+  domain that follows the annotation and stores ids gets an `evidence_eval` over
+  an empty list — the REBASE branch then compares `0.0 <= 0.0`, keeps every
+  rebased diff, and a diff that makes the artifact *worse* survives the
+  re-verification meant to catch it. Annotated `List[Any]`, documented, and
+  pinned by a test that a harmful rebased diff is discarded.
+
+- **`result.outcomes()` did not print the way any of its documentation shows.**
+  It is a dict, and printing a dict calls `repr` on its keys, so the `MergeOutcome`
+  enum rendered `{<MergeOutcome.COMMITTED: 'committed'>: 1}` where the README,
+  both quickstarts, `evolution.md` and the enum's own docstring all show
+  `{'committed': 1}`. `__repr__` is now the value's, as `enum.StrEnum` does on
+  3.11+; equality, `str()`, f-strings and lookups by bare string are unchanged.
+
+- **Three algorithm ports could crash in their final report, and three discarded
+  `error`.** GEPA indexed `agg.scores[0]` (an `IndexError` when no round
+  completed) behind a guard that would itself have raised `TypeError`
+  (`f"{[]:.3f}"`), and ACE and `skill_evolution` indexed `history[0]` — all on
+  the exact partial result the engine goes to lengths to return. GEPA also
+  dropped `evolve()`'s return value entirely, and `EvoResult` / `SkillOptResult`
+  carried no `error` or `stop_reason`, so a run killed by a rate limit printed
+  the same confident "seed → best" line as one that converged. Every port now
+  reports both. ACE and `skill_evolution` also label that first number "round 0"
+  rather than implying it is the seed's score — it is measured *after* round 0's
+  merge.
+
 ### Changed
 - **The two barrier-free runtimes share their policies.** `async_evolve` and
   `AsyncAgentDescent` implemented the same shape independently; a previous
@@ -45,6 +112,13 @@ All notable changes to AgentDescent are documented here. The format follows
   (`WorkerHealth`, `StallGuard`) and both call them, so the next fix lands in
   both. The runtimes themselves are still separate — unifying them would move
   every measured result's reproduction path, which is a decision, not a cleanup.
+
+  `StallGuard` was the half of that sentence which was not yet true: both
+  runtimes still counted their no-commit sweeps inline, so the module documented
+  a convergence it had not reached. Both now count through it, on identical
+  conditions to before — each still decides *which* sweeps count, because a sweep
+  with no evidence in it is neither progress nor a stall and the two runtimes
+  express "no evidence" differently.
 - **One difficulty-weight formula.** `4·p·(1−p)` was written out in both
   `sampling.DifficultyWeighted` (over tasks) and `scheduler.TaskScheduler` (over
   clusters); it now lives in `stats.difficulty_weight`. The exploration constants
@@ -76,6 +150,45 @@ All notable changes to AgentDescent are documented here. The format follows
   the reference domain.
 
 ### Documentation
+- A second pass, this time reading the docs *against* the code they describe:
+  - `docs/aggregator.md`'s stage list was mangled — steps 4 and 5 appeared twice
+    and the commit came *before* the audit gate, which is the one thing
+    `aggregator.py`'s own docstring insists on ("it holds a veto"). The README's
+    copy had the same inversion, and additionally said promotion counts
+    *commits* — it counts regression-free **rounds**, and a commit restarts the
+    clock.
+  - `concepts.md` said `duration_estimator=` is reachable from `evolve()`; it is
+    an `async_evolve` parameter and `evolve()` raises `TypeError` on it. It also
+    described the audit priority queue as always built, when `collect=False` (the
+    default) computes the priority without queuing anything.
+  - `docs/async.md` described `stall_patience` as counting *empty* merger sweeps
+    — it counts sweeps that had cards and committed nothing, the opposite
+    condition. `docs/usage.md` described `AsyncConfig.noise` as a fraction of
+    workers; it is the per-op probability that one of the (every third) noisy
+    workers proposes a wrong label.
+  - `docs/evolution.md`'s "why did nothing commit?" table was missing `oversized`
+    and `section-violation`, two of the eight categories `outcomes()` can return
+    — and `oversized` points at the opposite fix from the `all-stale` it used to
+    be folded into.
+  - `docs/modules.md` claims to list every module and omitted `strategies`,
+    `stats` and `pipeline`, still filing the text strategies under `evolution`
+    after they moved out.
+  - The `run_async` policy table in the README and `concepts.md` now carries the
+    same caveat `efficiency.md` already gave its own numbers: the ratios are the
+    result, the absolute counts scale with the machine.
+  - `agentdescent/__init__.py` pointed readers at `agentdescent_design.md`, which
+    is not in the repository.
+  - `docs/verifier.md` advertised a three-method interface for a custom verifier
+    (`cheap_eval` / `eval_counts` / `oracle_eval`); the aggregator also calls
+    `learned_eval`, so building to the page raised `AttributeError` from inside a
+    merge, after the run had spent its rollouts.
+  - `docs/duration-scheduling.md` said an overrunning rollout is "set aside and
+    resumed" and does not "block a worker" — contradicting its own warning three
+    paragraphs later, which is the accurate one: the record is written *after*
+    the rollout returns, and nothing resumes it. Its header also pointed only at
+    `AsyncAgentDescent`, though `async_evolve` takes `duration_estimator=` too.
+  - `docs/governance.md` says every algorithm port prints its governance layer at
+    startup; ACE and GEPA did not, so they now do.
 - A consistency pass over the new site found 14 problems and fixed them. The ones
   worth naming: `staleness.md` had the `alpha` tolerance **backwards** (it widens
   for L1/hot artifacts, not cold) and contradicted `concepts.md`; `sampling.md`

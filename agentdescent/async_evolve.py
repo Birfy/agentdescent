@@ -37,7 +37,7 @@ import warnings
 from typing import Callable, Dict, List, Optional
 
 from .evolution import (
-    _safe_log,
+    _publish_stable, _safe_log,
     Agent, EvolutionResult, Propose, Reward, RoundInfo, Run, Strategy, Task, _tally,
     SOLVED, _build_engine, _checked_proposal, _checked_reward,
 )
@@ -46,7 +46,7 @@ from .evolvable import ContractError, EvidenceCard, vv_staleness
 from .ledger import Ledger, LedgerFailure
 from .sampling import RoundRobin, TaskSampler
 from .scheduler import DurationEstimator
-from .pipeline import WorkerHealth
+from .pipeline import StallGuard, WorkerHealth
 from .staleness import StaleAction, StalenessPolicy, get_policy
 
 
@@ -244,15 +244,16 @@ def async_evolve(
     # nothing commits), which forces every worker to resync regardless of the ratio.
     epoch = [0]
     forced_refreshes = [0]
-    no_commit_sweeps = [0]
     stragglers = [0]
     estimator = duration_estimator
     n_live = sum(1 for s in shards if s)      # workers that will actually start
     live = [n_live]                           # workers still running
     retired = [0]                             # workers that gave up (diagnostic)
-    # Retirement policy is shared with AsyncAgentDescent (`pipeline.WorkerHealth`),
-    # which is what keeps the two barrier-free runtimes from drifting apart again.
+    # Retirement and backpressure policy are shared with AsyncAgentDescent
+    # (`pipeline.WorkerHealth` / `pipeline.StallGuard`), which is what keeps the
+    # two barrier-free runtimes from drifting apart again.
     health = WorkerHealth(max_errors=max_worker_errors)
+    stall = StallGuard(patience=stall_patience)
     max_merger_errors = max(3, max_worker_errors)   # sweeps it may fail in a row
 
     def _worker(wid: int, shard: List[Task]) -> None:
@@ -286,13 +287,22 @@ def async_evolve(
             # accept, every card is discarded, head never moves, so the lag budget
             # never triggers a refresh either. It existed only in the reference
             # runtime, which is not the one a real workload reaches.
-            if head_v - base_v > async_ratio or epoch[0] != local_epoch:
+            forced = epoch[0] != local_epoch
+            if head_v - base_v > async_ratio or forced:
                 snap = eng.ledger.snapshot(Ledger.DEV)
                 base_v = snap.version.get(eng.artifact_id, 0)
                 artifact = snap.get(eng.artifact_id)
                 local_epoch = epoch[0]
-                with counter_lock:
-                    forced_refreshes[0] += 1
+                # Only the *forced* half is counted. Refreshing on one's own lag
+                # budget is what an async worker does all run long -- counting it
+                # made `forced_refreshes` non-zero on every healthy run, while the
+                # field, `docs/async.md`, `docs/staleness.md` and `concepts.md` all
+                # say a non-zero count means the lag budget and the staleness
+                # tolerance disagree. It is a diagnostic, so it has to be quiet
+                # when there is nothing to diagnose.
+                if forced:
+                    with counter_lock:
+                        forced_refreshes[0] += 1
             task = by_shard_id[sampler.pick(shard_ids, i)]
             i += 1
             # Duration-aware straggler detection (design spec 5.1, L-traj). It
@@ -380,12 +390,14 @@ def async_evolve(
                         f"(it succeeded earlier, so this reads as transient). "
                         f"Last error: {type(e).__name__}: {str(e)[:120]}",
                         RuntimeWarning, stacklevel=2)
-                # Cap the backoff well above the retirement threshold so a throttled
-                # run waits the limit out instead of hammering it.
-                # A short backoff on purpose: unlike a worker, the merger blocks
-                # the whole run while it waits, and its work is memoised, so a
-                # retry is cheap. A worker-sized backoff spent an entire short run
-                # asleep and produced no sweeps at all.
+                # Exponential, capped: a throttled run waits the limit out instead
+                # of hammering it, while staying short enough that a worker which
+                # recovers has time left to produce something. (The paragraph that
+                # used to sit here described the *merger's* backoff -- "unlike a
+                # worker, the merger blocks the whole run" -- and had been copied
+                # onto the worker path, where it contradicts both its own first
+                # sentence and the code: the merger below waits up to 30s, this
+                # waits up to 5.)
                 stop.wait(min(0.25 * 2.0 ** consecutive, 5.0))     # backoff, then retry
                 continue
             elapsed = time.time() - t_start
@@ -442,13 +454,12 @@ def async_evolve(
                                  len(reports) - committed, _tally(reports)))
         # A stalled pipeline: cards keep arriving and none of them commits. Under
         # Guarded with async_ratio > alpha that is a livelock, not slow progress.
-        if committed:
-            no_commit_sweeps[0] = 0
-        elif batch:
-            no_commit_sweeps[0] += 1
-            if no_commit_sweeps[0] >= stall_patience:
-                epoch[0] += 1                  # every worker resyncs on its next loop
-                no_commit_sweeps[0] = 0
+        # A sweep with no cards in it is neither, so it is not counted -- and this
+        # function has already returned in that case.
+        stall.note_sweep(committed)
+        if stall.should_force_refresh():
+            epoch[0] += 1                      # every worker resyncs on its next loop
+            stall.force()
         if verbose:
             print(f"sweep {len(history):>3}  reward={r:.3f}  merged={len(batch)}  "
                   f"+{committed}  pending={len(intake)}")
@@ -541,6 +552,12 @@ def async_evolve(
 
     if contract_error[0] is not None:
         raise contract_error[0]
+    if not died[0]:
+        # Same reason as the synchronous path: confirmation takes
+        # `promote_after_k` sweeps and `target_reward` stops the run on the very
+        # commit that reaches it, so publish the head this run produced rather
+        # than leaving `stable` on the seed artifact.
+        _publish_stable(eng.aggregator)
     try:
         final = eng.ledger.snapshot(Ledger.DEV).get(eng.artifact_id)
     except LedgerFailure as e:

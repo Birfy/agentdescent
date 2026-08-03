@@ -49,7 +49,7 @@ import string
 import sys
 import threading
 from dataclasses import dataclass, field
-from typing import Callable, List, Tuple
+from typing import Callable, List, Optional, Tuple
 
 from agentdescent.agents import Usage, claude, openai_compatible
 from agentdescent.aggregator import AggregatorProtocol, MergeReport
@@ -396,6 +396,12 @@ class SkillOptResult:
     accepted: int
     rejected: int
     history: List[float]
+    #: Carried through from the underlying
+    #: :class:`~agentdescent.evolution.EvolutionResult`: without them a run that
+    #: ended on a backend failure reported its "seed -> best" line exactly like a
+    #: converged one, which is what `error` exists to distinguish.
+    error: Optional[str] = None
+    stop_reason: str = "rounds"
 
 
 def run_skillopt(complete: Completion, train: List[dict], val: List[dict],
@@ -435,7 +441,8 @@ def run_skillopt(complete: Completion, train: List[dict], val: List[dict],
                     aggregator_factory=factory, verbose=verbose)
     return SkillOptResult(result.rendered, ctx.seed_em, ctx.best_em,
                           ctx.accepted, ctx.rejected,
-                          [h.held_out_reward for h in result.history])
+                          [h.held_out_reward for h in result.history],
+                          error=result.error, stop_reason=result.stop_reason)
 
 
 # ===========================================================================
@@ -570,6 +577,9 @@ def main() -> None:
     print(f"\nval hard-EM : {result.seed_em:.3f} -> {result.best_em:.3f}")
     print(f"test hard-EM: {test_em:.3f}  (held out, never seen by the gate)")
     print(f"edits accepted / rejected: {result.accepted} / {result.rejected}")
+    print(f"stopped     : {result.stop_reason}")
+    if result.error:
+        print(f"WARNING: the run did not finish cleanly -- {result.error}")
     print(f"model usage: {usage.summary()}")
 
 

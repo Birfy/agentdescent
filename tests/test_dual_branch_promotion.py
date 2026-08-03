@@ -169,3 +169,89 @@ def test_the_reference_run_actually_reaches_the_stable_branch():
             "the stable branch never caught up with dev; dual-branch promotion "
             f"(design §4.5) is not firing. stable={history[-1].stable_accuracy}")
         assert system.final_accuracy(branch=Ledger.STABLE) > 0.9
+
+
+# -- and the two engines a real workload actually reaches ----------------------
+
+
+def _tasks():
+    from agentdescent.evolution import Task
+    return [Task(id=f"t{i}", prompt=f"item {i}") for i in range(12)]
+
+
+def _reward(task, output):
+    return 1.0 if "2026" in output else 0.0
+
+
+def _run(rendered, task):
+    return "answer" + (" 2026" if "year" in rendered else "")
+
+
+def _propose(rendered, task, output, reward):
+    return "always state the year"
+
+
+def _stable_state(repo):
+    """The artifact `stable` holds, straight out of git."""
+    import json
+    import subprocess
+
+    raw = subprocess.run(["git", "-C", repo, "show", "stable:artifacts/artifact.json"],
+                         capture_output=True, text=True).stdout
+    return json.loads(raw)["state"]["state"] if raw else None
+
+
+def test_evolve_publishes_its_head_to_stable(tmp_path):
+    """The reference runtimes called `finalize()`; `evolve()` did not.
+
+    So a clean run that stopped on `target_reward` -- the commit that reaches it
+    is the run's whole point -- left `stable` holding the *seed* artifact, while
+    `docs/ledger.md` documented the call that was not being made.
+    """
+    from agentdescent.evolution import evolve
+
+    repo = str(tmp_path / "ledger")
+    res = evolve(_tasks(), _reward, run=_run, propose=_propose, rounds=6,
+                 n_workers=3, repo_path=repo, target_reward=1.0)
+    assert res.error is None and res.final_reward == 1.0
+    assert _stable_state(repo), \
+        "a clean synchronous run left `stable` on the seed artifact"
+
+
+def test_async_evolve_publishes_its_head_to_stable(tmp_path):
+    """Same gap, same fix, on the barrier-free path."""
+    import warnings
+
+    from agentdescent.async_evolve import async_evolve
+
+    repo = str(tmp_path / "ledger")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        res = async_evolve(_tasks(), _reward, run=_run, propose=_propose,
+                           n_workers=2, max_seconds=6.0, repo_path=repo,
+                           target_reward=1.0)
+    assert res.error is None and res.final_reward == 1.0
+    assert _stable_state(repo), \
+        "a clean asynchronous run left `stable` on the seed artifact"
+
+
+def test_a_run_that_died_does_not_publish(tmp_path):
+    """`stable` is the confirmed branch: a run that ended on a failure keeps it.
+
+    Otherwise the branch production reads would be published by exactly the runs
+    whose evidence is least trustworthy.
+    """
+    import warnings
+
+    from agentdescent.evolution import evolve
+
+    def dead(rendered, task):
+        raise RuntimeError("backend is down")
+
+    repo = str(tmp_path / "ledger")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        res = evolve(_tasks(), _reward, run=dead, propose=_propose, rounds=6,
+                     n_workers=2, repo_path=repo, max_worker_errors=2)
+    assert res.error is not None, "premise: this run must die"
+    assert not _stable_state(repo), "a failed run must not publish to stable"

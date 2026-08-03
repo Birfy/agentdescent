@@ -55,7 +55,8 @@ from typing import Dict, List, Optional, Tuple
 from agentdescent.agents import Usage, claude, openai_compatible
 from agentdescent.dataloader import Dataset, hf_feature_names, hf_rows, split_dataset
 from agentdescent.evolvable import Diff
-from agentdescent.evolution import LLMAgent, Task, evolve, rule_id
+from agentdescent.evolution import EvolvingArtifact, LLMAgent, Task, evolve, rule_id
+from agentdescent.governance import classify
 from agentdescent.parallel import DataParallel
 from agentdescent.sampling import DifficultyWeighted, RoundRobin
 
@@ -317,7 +318,12 @@ def main() -> None:
     reward = make_reward()
 
     ntr, nva, nte = ds.sizes()
+    art = EvolvingArtifact("ace_context", blast_radius=0.2)
     print(f"Loaded   : {len(ds)} single-entity tasks, top-{args.top_k} concepts")
+    # Which governance layer this run actually landed in -- the line that tells a
+    # configuration mistake from a result, and which `docs/governance.md` says
+    # every port prints.
+    print(f"Governance: context blast_radius={art.blast_radius} -> {classify(art).name}")
     print(f"Splits   : {ntr} train / {nva} val / {nte} test")
     print(f"Concepts : {', '.join(ds.train[0].meta['candidates'])}")
     print("\nExample problem:")
@@ -372,10 +378,20 @@ def main() -> None:
     test_acc = evaluate(agent, result.rendered, ds.test, reward)
     print("\n=== evolved ACE playbook ===")
     print(result.rendered)
-    print(f"\nval accuracy : {result.history[0].held_out_reward:.3f} "
-          f"-> {result.final_reward:.3f}")
+    # Round 0's score, not the seed playbook's: by the time `history[0]` is
+    # recorded that round's merge has already happened. And guarded, because a
+    # run that died before finishing a round still returns a usable result --
+    # indexing an empty history turned that into an IndexError.
+    if result.history:
+        print(f"\nval accuracy : {result.history[0].held_out_reward:.3f} (round 0) "
+              f"-> {result.final_reward:.3f} (final)")
+    else:
+        print(f"\nval accuracy : {result.final_reward:.3f} (no round completed)")
     print(f"test accuracy: {test_acc:.3f}  (held out, never seen by the Curator)")
     print(f"bullets curated: {len(result.state)}")
+    print(f"stop reason  : {result.stop_reason}")
+    if result.error:
+        print(f"WARNING: the run did not finish cleanly -- {result.error}")
     print(f"model usage  : {usage.summary()}")
 
 

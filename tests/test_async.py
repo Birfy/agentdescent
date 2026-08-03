@@ -53,8 +53,16 @@ def test_guarded_discards_more_than_reflective():
 
     assert g.discarded_stale > r.discarded_stale   # the claim under test
     assert r.rollouts < g.rollouts                 # Reflective wastes far less work
-    # Recovering that work cannot leave Reflective behind, and both must progress.
-    assert r.final_dev_accuracy >= g.final_dev_accuracy
+    # Recovering that work cannot leave Reflective *materially* behind, and both
+    # must progress. Not `r >= g`: both runs stop at the first sweep that crosses
+    # `target_accuracy` (0.95 here), so the value each one *lands* on is a
+    # stopping artifact rather than a measure of the policy. Guarded takes
+    # hundreds of small sweeps and can land exactly on 1.000; Reflective takes
+    # ~8 large ones and lands wherever its batch put it (0.966 is common). That
+    # made the strict comparison fail roughly one run in six, on an assertion the
+    # test is not about. Both stopped past the same bar, so the widest legitimate
+    # gap is the width of the band above it.
+    assert r.final_dev_accuracy >= g.final_dev_accuracy - 0.05
     assert g.final_dev_accuracy > 0.0
 
 

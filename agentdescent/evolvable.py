@@ -126,8 +126,18 @@ class EvidenceCard:
     touched: List[str]
     # local before/after measurement made by the proposing worker.
     before_after_delta: float = 0.0
-    # trajectory references / failure traces that justify the diff.
-    trajectory_refs: List[str] = field(default_factory=list)
+    #: The failing work units that justify the diff -- **whatever the owning
+    #: artifact's** :meth:`Evolvable.evidence_eval` **can score**. Every producer
+    #: in the package puts task *objects* here (``evolution.Task`` /
+    #: ``RouterTask``) and both consumers filter for them with ``isinstance``.
+    #:
+    #: It was annotated ``List[str]``, which is a trap rather than a cosmetic
+    #: slip: a custom domain that follows the annotation and stores ids gets an
+    #: ``evidence_eval`` over an empty task list, so the staleness policy's
+    #: REBASE branch compares ``0.0 <= 0.0`` and keeps *every* rebased diff --
+    #: the cheap re-verification silently becomes a no-op, and a diff that makes
+    #: the artifact worse survives it.
+    trajectory_refs: List[Any] = field(default_factory=list)
     # per-turn version annotations, used when the ledger hot-updates mid-rollout.
     version_annotations: List[VersionVector] = field(default_factory=list)
     cost_tokens: int = 0

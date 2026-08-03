@@ -397,9 +397,11 @@ every round by a stable category:
 | `committed` | accepted and written to the dev branch | — |
 | `below-threshold` | reached the acceptance gate and failed to beat the baseline | the **reflector** — its proposals do not help. Check it can see enough (`Task.meta`), and that it is not returning empty (`max_tokens`) |
 | `all-stale` | never reached the gate; the world moved on first | the **lag budget** — lower `async_ratio`, or use the sync path |
+| `oversized` | outside the trust region: too many ops, or one value too long | the **reflector** again, but the opposite fix — it is emitting whole documents where a rule was wanted. Raise `trust_region_ops` / `trust_region_chars` only if the size is genuinely intended |
 | `cas-conflict` | lost a commit race; the evidence is re-filed for retry | usually self-correcting; persistent means too many workers on one artifact |
 | `oracle-rejected` | the audit's oracle disagreed with the cheap evaluator | the **cheap evaluator** is miscalibrated |
 | `unknown-artifact` | diffs targeted an id the ledger does not hold | a caller bug in `artifact_id`/strategy |
+| `section-violation` | tensor parallelism only: a worker edited a key outside its own section | the strategy/`route=` pairing — see [§3](#3-the-parallelism-method-parallel) |
 
 `RoundInfo.reasons` is the same tally per round. A custom aggregator sees the
 underlying `MergeReport`, which carries both `category` and a human-readable

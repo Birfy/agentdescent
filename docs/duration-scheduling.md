@@ -1,8 +1,11 @@
 # Duration-aware scheduling
 
-> **Belongs to the async runtime**, not synchronous [`evolve`](evolution.md):
-> pass a `DurationEstimator` to `AsyncAgentDescent` for straggler checkpointing. The
-> `DurationEstimator` / `lpt_schedule` primitives are usable on their own too.
+> **Belongs to the async paths**, not synchronous [`evolve`](evolution.md), which
+> has no `duration_estimator=` parameter at all and bounds a slow rollout with
+> `round_timeout=` instead. Pass a `DurationEstimator` to `AsyncAgentDescent`
+> (reference runtime) or to [`async_evolve`](async.md) (the general one, where it
+> reports `result.stragglers`). The `DurationEstimator` / `lpt_schedule`
+> primitives are usable on their own too.
 
 Agentic rollouts are heavy-tailed and their cost correlates with task size. This
 module **estimates a rollout's duration from the task's length**, then uses that
@@ -78,9 +81,10 @@ guarantee is 4/3); round-robin is 28% over.
 ## 3. Straggler checkpointing in the async runtime
 
 Pass a `DurationEstimator` to `AsyncAgentDescent` and it becomes duration-aware: it
-times every rollout, calibrates the estimator, and **checkpoints any rollout
-that overruns `duration_timeout_factor × its estimate`** to the `ResumeQueue`
-(partial rollout) instead of letting it block a worker.
+times every rollout, calibrates the estimator, and **records any rollout that
+overran `duration_timeout_factor × its estimate`** into the `ResumeQueue`. The
+record is written once the rollout returns, so this measures the tail rather than
+cutting it short — see the warning below.
 
 ```python
 from agentdescent import AsyncAgentDescent, AsyncConfig
@@ -97,9 +101,11 @@ stats.stragglers_checkpointed        # overrunning rollouts DETECTED (see the no
 rollouts=727, learned base≈0.006s, stragglers detected=108
 ```
 
-This is the design's partial-rollout mechanism (§5.1) driven by a live estimate:
-a rollout predicted to be short but running long is set aside and resumed against
-the latest ledger, rather than defining the wall-clock of its worker.
+This is the *detection* half of the design's partial-rollout mechanism (§5.1),
+driven by a live estimate: a rollout predicted to be short but running long is
+identified and counted, so it shows up in the stats instead of silently setting
+the pace. The design's other half — setting it aside and resuming it against the
+latest ledger — is where the mechanism stops:
 
 !!! warning "Straggler *resume* is not implemented"
     A rollout that overruns its predicted cost is flagged into `ResumeQueue` and
@@ -127,8 +133,10 @@ priority(d) = blast_radius(d) * uncertainty(d) / trust(artifact)
 
 High blast radius means a mistake is expensive; high uncertainty means the cheap
 layers do not know; low trust means the cheap layers have been *wrong here
-before*. The aggregator enqueues its own merge decisions, which closes the audit
-loop over the optimizer itself.
+before*. The aggregator submits its own merge decisions here, which closes the
+audit loop over the optimizer itself — "submits", not "enqueues": with the
+default `collect=False` the priority is computed and returned without a queue
+being built (see below).
 
 ```python
 from agentdescent import AuditScheduler

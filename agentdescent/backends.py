@@ -31,11 +31,15 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import tempfile
 import warnings
 from typing import Callable, Mapping, Optional, Protocol, runtime_checkable
 
 from .agents import Completion, WorkspaceAgent
+
+#: Prefix of the per-question scratch directory a workspace agent is given.
+_DOC_WS_PREFIX = "agentdescent-doc-"
 
 
 @runtime_checkable
@@ -63,11 +67,6 @@ class _FnBackend:
     def answer(self, question: str, document: str, *, skills: str = "",
                skill_files: Optional[Mapping[str, str]] = None) -> str:
         return self._fn(question, document, skills=skills, skill_files=skill_files)
-
-
-# ---------------------------------------------------------------------------
-# OpenHands backend -- a real tool-using agent (Read/Grep/Bash over the doc)
-# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------
@@ -121,20 +120,30 @@ def document_agent(completion: Completion, *, doc_filename: str = "document.txt"
                skill_files: Optional[Mapping[str, str]] = None) -> str:
         skill_block = f"Learned skills you should apply:\n{skills}\n\n" if skills.strip() else ""
         if isinstance(completion, WorkspaceAgent):
-            workdir = tempfile.mkdtemp(prefix="agentdescent-doc-")
-            with open(os.path.join(workdir, doc_filename), "w", encoding="utf-8") as f:
-                f.write(document)
-            if skill_files:
-                # Progressive disclosure: the library goes to disk and the prompt
-                # carries a pointer, so the agent opens the one skill it needs
-                # rather than reading all of them on every question.
-                from .filetree import materialize
+            workdir = tempfile.mkdtemp(prefix=_DOC_WS_PREFIX)
+            try:
+                with open(os.path.join(workdir, doc_filename), "w", encoding="utf-8") as f:
+                    f.write(document)
+                if skill_files:
+                    # Progressive disclosure: the library goes to disk and the prompt
+                    # carries a pointer, so the agent opens the one skill it needs
+                    # rather than reading all of them on every question.
+                    from .filetree import materialize
 
-                materialize(skill_files, workdir, prefix=skills_dir)
-                names = ", ".join(sorted({p.split("/", 1)[0] for p in skill_files})) or "(none)"
-                skill_block = _SKILL_DIR_INSTR.format(dir=skills_dir, names=names)
-            prompt = _DOC_INSTR.format(skills=skill_block, fname=doc_filename, q=question)
-            return completion.in_workspace(workdir)(prompt).strip()
+                    materialize(skill_files, workdir, prefix=skills_dir)
+                    names = ", ".join(sorted({p.split("/", 1)[0] for p in skill_files})) or "(none)"
+                    skill_block = _SKILL_DIR_INSTR.format(dir=skills_dir, names=names)
+                prompt = _DOC_INSTR.format(skills=skill_block, fname=doc_filename, q=question)
+                return completion.in_workspace(workdir)(prompt).strip()
+            finally:
+                # One workspace per *question*, and a document here is routinely a
+                # megabyte of financial tables -- so without this a benchmark run
+                # leaves one copy of it in $TMPDIR per rollout, forever. Every other
+                # place in the package that stages a directory for an agent cleans
+                # up after itself (`runners._stage`, `evolution._Engine.cleanup`);
+                # this one did not. The agent has already answered by here, so
+                # nothing still needs the files.
+                shutil.rmtree(workdir, ignore_errors=True)
         if len(document) > inline_chars:
             # Never drop half a document in silence: the answer may be in the part
             # the agent never saw, and an empty or wrong reply then looks like a
@@ -192,21 +201,32 @@ class _OpenHandsAgent:
 
     def __call__(self, prompt: str) -> str:
         llm, Agent, Conversation, Tool, max_iterations = self._load()
-        workdir = self.workspace or tempfile.mkdtemp(prefix="agentdescent-oh-")
-        agent = Agent(llm=llm, tools=[Tool(name="terminal"), Tool(name="file_editor")])
-        conv = Conversation(agent=agent, workspace=workdir,
-                           max_iteration_per_run=max_iterations)
-        conv.send_message(prompt)
-        conv.run()
-        texts = []
-        for ev in conv.state.events:
-            m = getattr(ev, "llm_message", None) or getattr(ev, "message", None)
-            if m is not None and getattr(m, "role", "") == "assistant":
-                for c in getattr(m, "content", []) or []:
-                    t = getattr(c, "text", None)
-                    if t:
-                        texts.append(t)
-        return texts[-1].strip() if texts else ""
+        # Clean up only the scratch directory *we* made: a workspace handed in
+        # through `in_workspace()` belongs to the caller (it is how a runner
+        # stages the candidate tree) and deleting it would delete their files.
+        # Without this the anonymous one leaked a directory per call, which on
+        # an agent that writes files is not a small directory.
+        workdir, ours = self.workspace, False
+        if workdir is None:
+            workdir, ours = tempfile.mkdtemp(prefix="agentdescent-oh-"), True
+        try:
+            agent = Agent(llm=llm, tools=[Tool(name="terminal"), Tool(name="file_editor")])
+            conv = Conversation(agent=agent, workspace=workdir,
+                               max_iteration_per_run=max_iterations)
+            conv.send_message(prompt)
+            conv.run()
+            texts = []
+            for ev in conv.state.events:
+                m = getattr(ev, "llm_message", None) or getattr(ev, "message", None)
+                if m is not None and getattr(m, "role", "") == "assistant":
+                    for c in getattr(m, "content", []) or []:
+                        t = getattr(c, "text", None)
+                        if t:
+                            texts.append(t)
+            return texts[-1].strip() if texts else ""
+        finally:
+            if ours:
+                shutil.rmtree(workdir, ignore_errors=True)
 
 
 def openhands(model: str = "openai/deepseek-v4-pro", *,

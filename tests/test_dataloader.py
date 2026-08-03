@@ -137,6 +137,26 @@ def test_split_dataset_stratified_keeps_classes_in_each_split():
         assert classes == {"a", "b"}           # both classes present in each split
 
 
+def test_a_stratified_split_never_puts_an_item_in_both_val_and_test():
+    """`test` is documented as never seen by the optimizer; `val` is what it gates on.
+
+    A class too small for the ratios used to have its item *copied* into val
+    while test kept it too -- and a rare class is exactly what stratifying is
+    for (a thin FiNER tag, a low-resource MGSM language).
+    """
+    for rare_n in (1, 2, 3):
+        items = ([{"c": "rare", "i": i} for i in range(rare_n)]
+                 + [{"c": "common", "i": i} for i in range(10)])
+        ds = dl.split_dataset(items, ratios=(0.6, 0.2, 0.2), seed=0,
+                              stratify_key=lambda x: x["c"])
+        ids = [{(x["c"], x["i"]) for x in s} for s in (ds.train, ds.val, ds.test)]
+        train, val, test = ids
+        assert not (val & test), f"rare_n={rare_n}: {sorted(val & test)} is in val AND test"
+        assert not (train & val) and not (train & test)
+        assert len(train | val | test) == len(items), "an item was dropped"
+        assert "rare" in {c for c, _ in val}, "stratification must still reach val"
+
+
 def test_dataset_from_splits():
     ds = dl.dataset_from_splits([1, 2], [3], [4, 5], name="x")
     assert ds.sizes() == (2, 1, 2) and ds.name == "x"
