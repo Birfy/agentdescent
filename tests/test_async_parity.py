@@ -188,3 +188,25 @@ def test_the_new_diagnostics_survive_save_and_load(tmp_path):
     loaded = EvolutionResult.load(str(path))
     assert loaded.forced_refreshes == res.forced_refreshes
     assert loaded.stragglers == res.stragglers
+
+
+def test_both_loops_retire_workers_through_the_same_object():
+    """The rule that was hand-ported once must not be re-implemented again.
+
+    `pipeline.py`'s module docstring records that these two runtimes implemented
+    the same shape independently, and that a measured fix had to be carried
+    across by hand. The synchronous loop had re-grown its own copy
+    (`any_success` + `dead_rounds >= max_worker_errors`); this asserts there is
+    one implementation, by name, in both.
+    """
+    import re
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parent.parent / "agentdescent"
+    for module in ("evolution.py", "async_evolve.py"):
+        text = (src / module).read_text(encoding="utf-8")
+        assert "WorkerHealth" in text, f"{module} does not use the shared rule"
+        assert "should_retire" in text, f"{module} does not ask it the question"
+        # the shape of the re-implementation, so it cannot come back quietly
+        assert not re.search(r"any_success\[0\]\s*and", text), (
+            f"{module} has re-implemented the retirement rule inline")

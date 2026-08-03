@@ -46,6 +46,7 @@ from .evolvable import Contract, ContractError, Diff, EvidenceCard
 from .governance import FROZEN_IDS, GovernanceError, assert_mutable
 from .ledger import Ledger, LedgerFailure
 from .metrics import Meter, measured
+from .pipeline import WorkerHealth
 from .policies import Policies
 from .sampling import RoundRobin, TaskSampler
 from .scheduler import AuditScheduler
@@ -1663,7 +1664,11 @@ def evolve(
     unit_lock = threading.Lock()
     first_error: List[Optional[str]] = [None]
     contract_error: List[Optional[BaseException]] = [None]   # caller bug -> re-raise
-    any_success = [False]      # has ANY worker ever completed a rollout?
+    # The retirement rule lives in `pipeline.WorkerHealth`, shared with the
+    # barrier-free runtimes. It used to be re-implemented here from the same
+    # description, which is the arrangement `pipeline.py`'s docstring records as
+    # having already cost one hand-ported fix.
+    health = WorkerHealth(max_errors=max_worker_errors)
     dead_rounds = 0            # consecutive rounds where every worker failed
     deadline = time.time() + max_seconds if max_seconds else None
     stop_reason = "rounds"
@@ -1681,6 +1686,14 @@ def evolve(
             # the one guarantee the result contract makes ("a run that died still
             # returns a partial result"). Treat it like an unmeasurable round: the
             # same tally decides whether to keep going or give up.
+            #
+            # Note the tally is shared but the *rule* is not: a repeatedly failing
+            # ledger gives up after `max_worker_errors` rounds whether or not
+            # workers have succeeded, while a repeatedly failing worker gives up
+            # only while nothing ever has (`health.should_retire`). Defensible --
+            # a ledger that cannot be read is not going to start working because a
+            # rollout succeeded -- but it is a second rule, and this comment is
+            # here because the sentence above claims there is one.
             if first_error[0] is None:
                 first_error[0] = f"ledger read failed: {type(e).__name__}: {str(e)[:200]}"
             dead_rounds += 1
@@ -1735,7 +1748,7 @@ def evolve(
             sampler.record(task.id, score)               # learn which tasks carry signal
             with unit_lock:
                 ok_units[0] += 1
-                any_success[0] = True
+                health.record_success()
             if score >= solved_threshold:
                 return
             proposal = _checked_proposal(
@@ -1831,7 +1844,7 @@ def evolve(
             # and the run keeps going on the evidence it did gather.
             if failed_units[0] and not ok_units[0]:
                 dead_rounds += 1
-                if not any_success[0] and dead_rounds >= max_worker_errors:
+                if health.should_retire(dead_rounds):
                     run_error = first_error[0]
                     if verbose:
                         print(f"round {r:>3}  giving up: {dead_rounds} rounds with no "
@@ -1887,7 +1900,9 @@ def evolve(
             if first_error[0] is None:
                 first_error[0] = f"{type(e).__name__}: {str(e)[:200]}"
             dead_rounds += 1
-            if not any_success[0] and dead_rounds >= max_worker_errors:
+            # Same rule as the worker path: scoring held-out runs the agent, so an
+            # unmeasurable round is a backend failure like any other.
+            if health.should_retire(dead_rounds):
                 run_error = first_error[0]
                 if verbose:
                     print(f"round {r:>3}  giving up: held-out unmeasurable "

@@ -13,6 +13,10 @@ module touches a ledger, a thread or a task: it is arithmetic over counters,
 which is exactly why it can be shared by two pipelines that agree on nothing
 else.
 
+Both loops now ask :class:`WorkerHealth` the retirement question rather than
+describing it twice: `evolve` had re-grown its own copy (`any_success` plus a
+round counter), which is the arrangement this page was written to record.
+
 What is actually shared, so this page cannot claim more than the code does:
 
 * :class:`WorkerHealth` -- both runtimes call ``should_retire`` /
