@@ -287,8 +287,16 @@ class SandboxSpec:
     #: Names of environment variables to pass through. Names only.
     env_allowlist: Tuple[str, ...] = ()
     workspace_root: Optional[str] = None
-    #: ``"inherit"`` or ``"none"``.
-    network: str = "inherit"
+    #: ``None`` leaves it to the provider, ``"none"`` forbids it, ``"inherit"``
+    #: asks for the host's network.
+    #:
+    #: Three states rather than two, because "the default" means opposite things
+    #: to the two providers. A local workspace cannot restrict the network at
+    #: all, so for it the honest description is "inherited"; a container can, and
+    #: for it the only safe default is off -- a candidate that can reach the
+    #: network can send whatever it managed to read. With a two-state field the
+    #: shared default had to be wrong for one of them.
+    network: Optional[str] = None
     cpu: Optional[float] = None
     memory_mb: Optional[int] = None
     timeout_s: Optional[float] = None
