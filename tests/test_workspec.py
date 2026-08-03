@@ -42,9 +42,15 @@ def test_the_things_a_caller_actually_passes_cannot_be_pickled():
     for name, obj in (("reward factory", rewards.last_number()),
                       ("reflector", reflector(echo())),
                       ("lambda", lambda rendered, task: "x")):
+        # The *fact* is asserted, not the wording. CPython raises
+        # `PicklingError` or `AttributeError` depending on the case, and 3.12
+        # rephrased "Can't pickle local object" to "Can't get local object" --
+        # an assertion on the sentence goes red on an upgrade and says nothing
+        # about whether the premise still holds.
         with pytest.raises(Exception) as excinfo:
             pickle.dumps(obj)
-        assert "pickle" in str(excinfo.value).lower(), (name, excinfo.value)
+        assert isinstance(excinfo.value, (pickle.PicklingError, AttributeError,
+                                          TypeError)), (name, excinfo.value)
 
 
 # ---------------------------------------------------------------------------
