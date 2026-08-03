@@ -8,7 +8,7 @@ page and the code disagree, so a signature here is the signature you get.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-153 public names across 26 modules.
+160 public names across 29 modules.
 
 ---
 
@@ -760,6 +760,10 @@ Which of a batch of mutually contradictory changes survive.
 
 The multi-file proposal format a `FileTree` reflector is told to emit.
 
+### `Executor`
+
+Runs rollouts somewhere. Threads here, processes and hosts later.
+
 ### `FAST_MAX`
 
 The L2/L1 blast-radius boundary (`0.30`).
@@ -800,6 +804,10 @@ Everything an `AcceptancePolicy` is allowed to look at.
 
 Every replaceable piece, in one argument.
 
+### `ProcessExecutor`
+
+Persistent worker processes, with re-dispatch when one dies.
+
 ### `Promotion`
 
 One artifact the `PromotionPolicy` believes `stable` should hold.
@@ -815,6 +823,22 @@ What a `ProposalPolicy` is given for one rollout.
 ### `ProposalPolicy`
 
 How a rollout becomes candidate changes.
+
+### `Ref`
+
+A callable named rather than sent: `"module:attribute"` plus config.
+
+### `RefError`
+
+A reference could not be resolved, and why -- never a bare ImportError.
+
+### `Result`
+
+What one rollout produced, or why it did not.
+
+### `RolloutSpec`
+
+One rollout, described completely enough to run somewhere else.
 
 ### `SOLVED`
 
@@ -847,6 +871,10 @@ Defines *what evolves and how* -- the representation and the merge rule.
 ### `TEST_FAILURE_MARKER`
 
 Prefix of the output `code_runner` produces when the frozen gate fails, so the failure scores 0 and the reflector can read it.
+
+### `ThreadExecutor`
+
+The default: a bounded pool of threads in this process.
 
 ### `VerifierProtocol`
 
