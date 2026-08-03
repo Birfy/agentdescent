@@ -161,6 +161,7 @@ class ContainerProvider:
 
     def __init__(self, image: str, *, engine: Optional[str] = None,
                  ttl: float = 300.0, pids_limit: int = 512,
+                 rootless: Optional[bool] = None,
                  runner: Optional[Callable[..., str]] = None) -> None:
         if not image:
             raise ValueError("a container sandbox needs an image to run")
@@ -180,8 +181,36 @@ class ContainerProvider:
         self.engine = engine or "docker"
         self.ttl = ttl
         self.pids_limit = pids_limit
+        self._rootless = rootless
         self._run = runner or _run
         self._n = 0
+
+    def is_rootless(self) -> bool:
+        """Does this engine map the host user to root inside the container?
+
+        Asked once and remembered. Both engines answer `info --format json`;
+        their keys differ, so both are checked rather than guessing from the
+        engine's name -- docker has a rootless mode too.
+        """
+        if self._rootless is None:
+            self._rootless = self._detect_rootless()
+        return self._rootless
+
+    def _detect_rootless(self) -> bool:
+        try:
+            raw = self._run([self.engine, "info", "--format", "json"], timeout=30.0)
+            info = json.loads(raw)
+        except Exception:
+            # Unknown means "do not add --user": omitting it is correct under a
+            # rootless engine and merely means root-owned files under a rootful
+            # one, which is recoverable. The other way round the mount is
+            # unreadable and the run cannot proceed at all.
+            return True
+        security = (info.get("host") or {}).get("security") or {}
+        if "rootless" in security:                      # podman
+            return bool(security["rootless"])
+        options = info.get("SecurityOptions") or []     # docker
+        return any("rootless" in str(o) for o in options)
 
     # -- command construction -------------------------------------------------
 
@@ -218,8 +247,15 @@ class ContainerProvider:
             cmd += ["--network", "none"]
 
         # Run as the host user, so files written into the bind mount belong to
-        # whoever started the run. As root, the host cannot even delete them.
-        if os.name != "nt":
+        # whoever started the run -- as root, the host cannot even delete them.
+        #
+        # Only when the engine is rootful. A rootless engine already maps the
+        # host user to root *inside* the container, so naming a uid there maps it
+        # to a subuid instead, and a subuid has no access to files owned by the
+        # host user: the bind mount reads as empty. It looks exactly like a mount
+        # that did not happen, which is how this survived local testing on macOS,
+        # where the VM's mount layer rewrites ownership anyway.
+        if os.name != "nt" and not self.is_rootless():
             cmd += ["--user", f"{os.getuid()}:{os.getgid()}"]
 
         if spec.memory_mb:
@@ -275,13 +311,33 @@ class ContainerProvider:
         the first symptom is the candidate's own `FileNotFoundError`, blamed on
         the candidate.
         """
+        detail = ""
         try:
             self._run([self.engine, "exec", container_id,
-                       "test", "-f", f"{CONTAINER_WORKDIR}/.agentdescent-mount"],
+                       "cat", f"{CONTAINER_WORKDIR}/.agentdescent-mount"],
                       timeout=30.0)
             return
+        except Exception as e:
+            detail = str(e)[:300]
+        # Distinguish "nothing is mounted" from "mounted but unreadable": the
+        # second is a uid mapping problem and points somewhere completely
+        # different from the first.
+        try:
+            listing = self._run([self.engine, "exec", container_id,
+                                 "ls", "-a", CONTAINER_WORKDIR], timeout=30.0)
         except Exception:
-            pass
+            listing = ""
+        if ".agentdescent-mount" in listing:
+            try:
+                self._run([self.engine, "rm", "--force", container_id], timeout=60.0)
+            except Exception:
+                pass
+            raise EngineError(
+                f"the workspace {ws} is mounted but unreadable from inside the "
+                f"container ({detail}). This is a uid mapping problem: a rootless "
+                "engine maps your user to root inside, so forcing a uid maps it "
+                "to a subuid with no access to your files. Leave `--user` off "
+                "under a rootless engine.")
         try:
             self._run([self.engine, "rm", "--force", container_id], timeout=60.0)
         except Exception:
