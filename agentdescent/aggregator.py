@@ -34,15 +34,21 @@ from typing import (Callable, Deque, Dict, List, Optional, Protocol, Tuple,
                     runtime_checkable)
 
 from .evolvable import (
-    ContractError, Diff, EvidenceCard, Evolvable, VersionVector, stable_hash,
-    vv_staleness,
+    ContractError, Diff, EvidenceCard, Evolvable, VersionVector, vv_staleness,
+)
+from .defaults import (
+    DefaultAcceptance, DefaultConflict, DefaultFusion, DefaultPromotion,
 )
 from .governance import Layer, classify, assert_mutable
 from .ledger import CASConflict, Ledger
 from .metrics import Meter
+from .policies import (
+    AcceptancePolicy, ConflictPolicy, FusionPolicy, MergeContext,
+    PromotionPolicy,
+)
 from .scheduler import AuditScheduler
 from .staleness import StaleAction, StalenessPolicy, get_policy
-from .stats import BetaPosterior, annealed_delta, prob_improvement
+from .stats import BetaPosterior
 from .verifier import ThreeLayerVerifier
 
 
@@ -334,6 +340,10 @@ class Aggregator:
         config: Optional[AggregatorConfig] = None,
         staleness_policy: Optional[StalenessPolicy] = None,
         meter: Optional["Meter"] = None,
+        conflict: Optional["ConflictPolicy"] = None,
+        fusion: Optional["FusionPolicy"] = None,
+        acceptance: Optional["AcceptancePolicy"] = None,
+        promotion: Optional["PromotionPolicy"] = None,
     ) -> None:
         self.ledger = ledger
         self.verifier = verifier
@@ -345,10 +355,22 @@ class Aggregator:
         #: better than one that counts a fraction of the run.
         self.meter = meter
         self.config = config or AggregatorConfig()
+        # The decisions, as objects. Swapping one is the point; the defaults are
+        # the code that used to be inline here, moved rather than rewritten.
+        self.conflict_policy = conflict or DefaultConflict(verifier)
+        self.fusion_policy = fusion or DefaultFusion(verifier)
+        cfg = self.config
+        self.acceptance_policy = acceptance or DefaultAcceptance(
+            cfg.base_delta, cfg.anneal_half_life, cfg.accept_samples)
+        self.promotion_policy = promotion or DefaultPromotion(cfg.promote_after_k)
         self.buffer = EvidenceBuffer()
         self._posteriors: Dict[str, BetaPosterior] = defaultdict(BetaPosterior)
         # dev-branch survival counter for EMA-style promotion.
-        self._survival: Dict[str, int] = defaultdict(int)
+        # Artifacts this aggregator has seen, so `finalize` knows what to publish.
+        # The survival *counter* belongs to the promotion policy; this is only the
+        # set of ids, which the aggregator needs whether or not that policy keeps
+        # one.
+        self._seen: "set" = set()
         # dev version last copied onto stable, so an unchanged head is not re-promoted.
         self._promoted_at: Dict[str, int] = {}
 
@@ -400,54 +422,23 @@ class Aggregator:
             self.meter.add("stale_discarded", len(discarded))
         return survivors, discarded
 
-    # -- conflict resolution (section 4.3) -----------------------------------
+    # -- conflict resolution and fusion (section 4.3) ------------------------
+    #
+    # Both live in `agentdescent.defaults` now. These stay as one-line
+    # delegations rather than being inlined at the call site because the call
+    # site is `_process`, which is already the longest method here, and because
+    # a named seam is easier to find than a policy attribute used once.
 
     def _resolve_conflicts(
         self, artifact: Evolvable, cards: List[EvidenceCard]
     ) -> Tuple[List[EvidenceCard], int]:
         """Drop contradicting diffs (PCGrad-style) and return surviving cards."""
-        dropped = 0
-        kept: List[EvidenceCard] = []
-        for card in cards:
-            # Resolve against everything already kept, and keep going after a win:
-            # a card that displaces one survivor may contradict another (it can
-            # touch several keys). Stopping at the first conflict left mutually
-            # contradicting cards in `kept`, which then made the tournament's
-            # "no contradictions" guard false and silently skipped the fusion.
-            survivor: Optional[EvidenceCard] = card
-            while survivor is not None:
-                idx = next((i for i, k in enumerate(kept)
-                            if diffs_contradict(survivor.diff, k.diff)), None)
-                if idx is None:
-                    break
-                # project out the worse of the two on the held-out subset.
-                d_score = self.verifier.cheap_eval(artifact.apply(survivor.diff))
-                k_score = self.verifier.cheap_eval(artifact.apply(kept[idx].diff))
-                dropped += 1
-                if d_score > k_score:
-                    kept.pop(idx)          # the newcomer wins; re-check the rest
-                else:
-                    survivor = None        # the newcomer loses; drop it
-            if survivor is not None:
-                kept.append(survivor)
-        return kept, dropped
+        return self.conflict_policy.resolve(artifact, cards)
 
-    # -- fusion tournament (section 4.3) -------------------------------------
-
-    def _tournament(self, artifact: Evolvable, diffs: List[Diff]) -> Tuple[Diff, Evolvable, bool]:
+    def _tournament(self, artifact: Evolvable,
+                    diffs: List[Diff]) -> Tuple[Diff, Evolvable, bool]:
         """Run candidates (plus their fusion) in a held-out tournament."""
-        candidates: List[Tuple[Diff, Evolvable, bool]] = []
-        for d in diffs:
-            candidates.append((d, artifact.apply(d), False))
-        # add a fused candidate if the survivors are mutually complementary.
-        if len(diffs) > 1 and not any(
-            diffs_contradict(a, b) for i, a in enumerate(diffs) for b in diffs[i + 1:]
-        ):
-            fused = fuse_diffs(diffs)
-            candidates.append((fused, artifact.apply(fused), True))
-
-        best = max(candidates, key=lambda c: self.verifier.cheap_eval(c[1]))
-        return best
+        return self.fusion_policy.select(artifact, diffs)
 
     # -- public entry points -------------------------------------------------
 
@@ -466,33 +457,13 @@ class Aggregator:
     # -- dual-branch EMA promotion (section 4.5) -----------------------------
 
     def _age_and_promote(self, reports: List[MergeReport]) -> None:
-        """Promote dev -> stable after K **regression-free rounds** on dev.
+        """Ask the promotion policy what has proved itself, and publish it.
 
-        The counter used to be bumped on the *commit* path, so it measured how many
-        times an artifact had **changed**, not how long it had held up -- the exact
-        opposite of what every description of it says ("survival rounds",
-        "regression-free rounds", "EMA confirmation rounds"). The incentive was
-        inverted: an artifact that converged, which is the success state, stopped
-        committing and could therefore never be promoted, while one that thrashed
-        promoted every K commits. In the shipped demo the artifact reached 1.000
-        held-out accuracy after two commits and then sat there for 36 rounds with
-        `stable` stuck at 0.000 for the entire run.
-
-        So: one round is one ``step()``. A commit restarts the clock (the new
-        version has survived nothing yet) and so does an oracle rejection (a
-        measured regression). Everything else is a round survived.
-        """
-        by_id = {r.artifact_id: r for r in reports}
-        for aid in set(self._survival) | set(by_id):
-            rep = by_id.get(aid)
-            if rep is not None and (rep.committed_version is not None
-                                    or rep.category == MergeOutcome.ORACLE_REJECTED):
-                self._survival[aid] = 0        # changed, or measurably worse
-                continue
-            self._survival[aid] += 1
-            if self._survival[aid] >= self.config.promote_after_k:
-                self._promote(aid)
-                self._survival[aid] = 0
+        The rule lives in `agentdescent.defaults.DefaultPromotion`; the git work
+        stays here, because "which artifact deserves stable" is an algorithm
+        decision and "copy a branch without doing redundant git work" is not."""
+        for promotion in self.promotion_policy.observe(reports):
+            self._promote(promotion.artifact_id)
 
     def _promote(self, artifact_id: str) -> None:
         """Copy dev onto stable, skipping the git work when they already agree.
@@ -516,10 +487,93 @@ class Aggregator:
         commit that reaches it, so the artifact the run was *for* would otherwise
         never reach the branch production reads. Only ever called when a run
         finishes without an error, and never in place of the round-based rule."""
-        for aid in list(self._survival):
+        for aid in list(self._known_artifacts()):
             self._promote(aid)
 
+    @property
+    def _survival(self) -> Dict[str, int]:
+        """Rounds survived per artifact -- now owned by the promotion policy.
+
+        Kept under the old name because it is what the promotion tests and any
+        diagnostic reach for, and because moving where a number lives is not a
+        reason to make callers hunt for it. Read-only: the policy decides when it
+        moves."""
+        return getattr(self.promotion_policy, "survival", {})
+
+    def _apply_trust_region(self, cards):
+        """Split cards into (within budget, oversized), settling the rejects.
+
+        Oversized diffs used to be dropped *before* `considered` was computed and
+        never settled, so a runaway reflector vanished from the report and from
+        the evidence pool at once -- the most expensive failure to diagnose is
+        the one that leaves no trace."""
+        def within(card) -> bool:
+            if card.diff.size() > self.config.trust_region_ops:
+                return False
+            return all(len(str(v)) <= self.config.trust_region_chars
+                       for v in card.diff.ops.values())
+
+        kept = [c for c in cards if within(c)]
+        oversized = [c for c in cards if not within(c)]
+        if oversized:
+            self.buffer.settle(oversized)
+        return kept, oversized
+
+    def _audit(self, artifact, artifact_id, best_state, best_diff,
+               base_full, cand_full, base_score, cand_score, prior) -> bool:
+        """The optimizer audits its own decision. True means the oracle refused.
+
+        Not an `AcceptancePolicy`: acceptance asks "is this candidate better",
+        and this asks "is the cheap layer still trustworthy" -- a question about
+        the *measuring instrument*, which is the infrastructure's to answer and
+        not the algorithm's to replace.
+"""
+        _, uncertainty = self.verifier.learned_eval(best_state)
+        self.audit.submit(best_diff.diff_id, artifact_id, artifact.blast_radius,
+                          uncertainty, payload=best_diff)
+        # Trust is "how often does the cheap layer agree with the full held-out
+        # set", and it has to be measurable WITHOUT spending oracle budget --
+        # otherwise it is circular. It was: `force_oracle` fires on
+        # `blast_radius >= 0.5 or trust < 0.75`, and the only writer of trust sat
+        # inside that branch, so for any artifact below 0.5 the condition could
+        # never become true and the audit never ran at all. Measured on the default
+        # blast_radius=0.2: oracle_calls_used == 0 for the whole run, trust pinned
+        # at its initial 1.0.
+        #
+        # The signal is free here: `eval_counts` already scored base and candidate
+        # on the full held-out set for the Beta test above, so comparing its verdict
+        # with the cheap layer's costs nothing and happens on every merge.
+        if cand_full != base_full or cand_score != base_score:
+            self.audit.update_trust(
+                artifact_id, (cand_full > base_full) == (cand_score > base_score))
+        if self.audit.force_oracle(artifact.blast_radius, artifact_id):
+            oracle_base = self.verifier.oracle_eval(artifact)
+            oracle_cand = self.verifier.oracle_eval(best_state)
+            agreed = (oracle_cand > oracle_base) == (cand_score > base_score)
+            self.audit.update_trust(artifact_id, agreed)
+            if oracle_cand <= oracle_base:
+                prior.observe_delta(oracle_cand - oracle_base)
+                return True
+        return False
+
+        # Not settled, unlike the CAS-conflict path below -- and the asymmetry is
+        # deliberate. A CAS-conflicted diff lost a race and was never judged against
+        # the new head, so it deserves another look; one rejected here was judged and
+        # lost, and its tournament rivals scored below it on the same held-out set.
+        # Re-filing them would just buy the same rejection again.
+
+    def _known_artifacts(self):
+        """Every artifact id this aggregator has merged for.
+
+        Taken from the promotion policy when it tracks them (the default does),
+        and from the aggregator's own record otherwise -- a replacement policy is
+        not obliged to keep a survival table, and `finalize` still has to know
+        what to publish."""
+        tracked = getattr(self.promotion_policy, "survival", None)
+        return set(tracked) | self._seen if tracked is not None else set(self._seen)
+
     def _process(self, artifact_id: str) -> MergeReport:
+        self._seen.add(artifact_id)
         cards = self.buffer.drain(artifact_id)
         snap = self.ledger.snapshot(Ledger.DEV)
         artifact = snap.get(artifact_id)
@@ -532,16 +586,7 @@ class Aggregator:
         # dropped *before* `considered` was computed and never settled, so they
         # vanished from both the report and the evidence pool -- silently.
         n_considered = len(cards)
-        def _within_trust_region(card) -> bool:
-            if card.diff.size() > self.config.trust_region_ops:
-                return False
-            return all(len(str(v)) <= self.config.trust_region_chars
-                       for v in card.diff.ops.values())
-
-        oversized = [c for c in cards if not _within_trust_region(c)]
-        cards = [c for c in cards if _within_trust_region(c)]
-        if oversized:
-            self.buffer.settle(oversized)
+        cards, oversized = self._apply_trust_region(cards)
 
         head = snap.version
         survivors, discarded = self._staleness_filter(artifact, head, cards)
@@ -578,6 +623,12 @@ class Aggregator:
         cand_s, cand_f = self.verifier.eval_counts(best_state)
         base_score = self.verifier.cheap_eval(artifact)
         cand_score = self.verifier.cheap_eval(best_state)
+        decision = self.acceptance_policy.accept(MergeContext(
+            artifact=artifact, candidate=best_state, cards=kept_cards,
+            base_counts=(base_s, base_f), cand_counts=(cand_s, cand_f),
+            diff=best_diff, base_cheap=base_score, cand_cheap=cand_score,
+            prior=prior, trust_radius=artifact.blast_radius))
+        p_improve = decision.p_improve
 
         # The full held-out rates. The regression guard below must use *these*
         # rather than `cand_score`/`base_score`: those come from the cheap layer,
@@ -586,76 +637,21 @@ class Aggregator:
         # two doc pages promised sub-sampling "never affects commit safety". It was
         # the promise that was wrong, not the intent; the guard is meant to stop a
         # measured regression, and ground truth is what measures one.
-        base_full = base_s / max(1e-9, base_s + base_f)
-        cand_full = cand_s / max(1e-9, cand_s + cand_f)
+        base_full = MergeContext.rate((base_s, base_f))
+        cand_full = MergeContext.rate((cand_s, cand_f))
 
-        baseline_post = BetaPosterior(prior.successes + base_s, prior.failures + base_f)
-        candidate_post = BetaPosterior(prior.successes + cand_s, prior.failures + cand_f)
-        # fold each contributing worker's local before/after delta as extra
-        # evidence for the candidate (the "gradient magnitude").
-        for card in kept_cards:
-            if set(card.diff.ops) & set(best_diff.ops):
-                candidate_post.observe_delta(card.before_after_delta)
-
-        delta = annealed_delta(self.config.base_delta, artifact.version,
-                               half_life=self.config.anneal_half_life)
-        # Seed from (version, candidate) rather than the version alone. A shared
-        # seed made the ~0.003 Monte-Carlo error identical for every candidate in
-        # the round, so on knife-edge cases the draw decided them as a block --
-        # one stream accepted every marginal diff, another rejected all of them.
-        # stable_hash keeps this reproducible across processes.
-        p_improve = prob_improvement(
-            candidate_post, baseline_post, samples=self.config.accept_samples,
-            seed=stable_hash((artifact.version, best_diff.diff_id)) & 0x7FFFFFFF)
-
-        # -- audit (section 5.3): the optimizer audits its own decision ------
-        _, uncertainty = self.verifier.learned_eval(best_state)
-        self.audit.submit(best_diff.diff_id, artifact_id, artifact.blast_radius,
-                          uncertainty, payload=best_diff)
-        # Trust is "how often does the cheap layer agree with the full held-out
-        # set", and it has to be measurable WITHOUT spending oracle budget --
-        # otherwise it is circular. It was: `force_oracle` fires on
-        # `blast_radius >= 0.5 or trust < 0.75`, and the only writer of trust sat
-        # inside that branch, so for any artifact below 0.5 the condition could
-        # never become true and the audit never ran at all. Measured on the default
-        # blast_radius=0.2: oracle_calls_used == 0 for the whole run, trust pinned
-        # at its initial 1.0.
-        #
-        # The signal is free here: `eval_counts` already scored base and candidate
-        # on the full held-out set for the Beta test above, so comparing its verdict
-        # with the cheap layer's costs nothing and happens on every merge.
-        if cand_full != base_full or cand_score != base_score:
-            self.audit.update_trust(
-                artifact_id, (cand_full > base_full) == (cand_score > base_score))
-        if self.audit.force_oracle(artifact.blast_radius, artifact_id):
-            oracle_base = self.verifier.oracle_eval(artifact)
-            oracle_cand = self.verifier.oracle_eval(best_state)
-            agreed = (oracle_cand > oracle_base) == (cand_score > base_score)
-            self.audit.update_trust(artifact_id, agreed)
-            if oracle_cand <= oracle_base:
-                prior.observe_delta(oracle_cand - oracle_base)
-                return MergeReport(artifact_id, None, fused, n_considered, len(survivors),
-                                   len(discarded), conflicts, p_improve, None,
-                                   "oracle rejected", MergeOutcome.ORACLE_REJECTED)
-
-        # Not settled, unlike the CAS-conflict path below -- and the asymmetry is
-        # deliberate. A CAS-conflicted diff lost a race and was never judged against
-        # the new head, so it deserves another look; one rejected here was judged and
-        # lost, and its tournament rivals scored below it on the same held-out set.
-        # Re-filing them would just buy the same rejection again.
-        regressed = cand_full < base_full
-        if p_improve <= 1.0 - delta or regressed:
-            prior.observe_delta(cand_full - base_full)
-            # Name the gate that actually fired. Reporting the posterior either way
-            # printed lines like `P(delta>0)=0.97 <= 0.50` when the regression guard
-            # was the real cause -- self-contradictory to anyone reading `outcomes()`
-            # to find out why nothing committed, which is the one job it has.
-            reason = (f"held-out regression {base_full:.3f} -> {cand_full:.3f}"
-                      if regressed else
-                      f"P(delta>0)={p_improve:.2f} <= {1-delta:.2f}")
+        rejected = self._audit(artifact, artifact_id, best_state, best_diff,
+                               base_full, cand_full, base_score, cand_score, prior)
+        if rejected:
             return MergeReport(artifact_id, None, fused, n_considered, len(survivors),
-                               len(discarded), conflicts, p_improve, None, reason,
-                               MergeOutcome.BELOW_THRESHOLD)
+                               len(discarded), conflicts, p_improve, None,
+                               "oracle rejected", MergeOutcome.ORACLE_REJECTED)
+
+        if not decision.accept:
+            prior.observe_delta(decision.observed_delta)
+            return MergeReport(artifact_id, None, fused, n_considered, len(survivors),
+                               len(discarded), conflicts, p_improve, None,
+                               decision.detail, MergeOutcome(decision.category))
 
         # -- commit (section 4.1): CAS on dev --------------------------------
         base_vv = {artifact_id: head.get(artifact_id, 0)}
@@ -671,10 +667,6 @@ class Aggregator:
                                "CAS conflict", MergeOutcome.CAS_CONFLICT)
 
         prior.update(True, weight=2.0)  # a committed improvement is strong evidence.
-
-        # Promotion is decided in `_age_and_promote`, per round, not per commit:
-        # a commit restarts the survival clock rather than advancing it.
-        self._survival[artifact_id] = 0
 
         return MergeReport(artifact_id, best_diff, fused, n_considered, len(survivors),
                            len(discarded), conflicts, p_improve, new_version,

@@ -75,11 +75,36 @@ def test_acceptance_mc_seed_varies_per_candidate_but_stays_reproducible():
     assert ests == again
 
 
-def test_aggregator_seeds_acceptance_from_the_candidate():
-    import inspect
+def test_acceptance_seeds_its_draw_from_the_candidate():
+    """Two candidates in one round must not share a Monte-Carlo draw.
 
-    from agentdescent.aggregator import Aggregator
+    Seeding from the version alone made the ~0.003 sampling error identical for
+    every candidate in a round, so on knife-edge cases the draw decided them as a
+    block: one stream accepted every marginal diff, another rejected all of them.
 
-    src = inspect.getsource(Aggregator._process)
-    assert "stable_hash" in src, "the MC seed must include the candidate identity"
-    assert "seed=artifact.version)" not in src
+    Asserted behaviourally rather than by reading the source for `stable_hash`:
+    the seeding used to live in `Aggregator._process` and now lives in
+    `DefaultAcceptance`, and a test that greps one method goes green the moment
+    the logic moves -- whether or not it survived the move.
+    """
+    from agentdescent.defaults import DefaultAcceptance
+    from agentdescent.evolvable import Diff
+    from agentdescent.policies import MergeContext
+
+    class _Art:
+        version = 3
+        blast_radius = 0.2
+
+    policy = DefaultAcceptance(base_delta=0.5, anneal_half_life=64,
+                               accept_samples=400)
+
+    def draw(diff_id):
+        ctx = MergeContext(artifact=_Art(), candidate=_Art(), cards=[],
+                           base_counts=(5.0, 5.0), cand_counts=(6.0, 4.0),
+                           diff=Diff(diff_id=diff_id, target="a", ops={"k": "v"}))
+        return policy.accept(ctx).p_improve
+
+    assert draw("cand-A") == draw("cand-A"), "the same candidate must be reproducible"
+    assert draw("cand-A") != draw("cand-B"), (
+        "two candidates in one round shared a draw -- the seed is not "
+        "candidate-specific")

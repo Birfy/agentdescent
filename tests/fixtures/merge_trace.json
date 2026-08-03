@@ -1,0 +1,373 @@
+{
+  "append": {
+    "final_reward": 1.0,
+    "merges": [
+      {
+        "category": "committed",
+        "committed_version": 2,
+        "conflicts_dropped": 0,
+        "considered": 3,
+        "discarded_stale": 0,
+        "fused": true,
+        "prob_improve": 0.99175,
+        "survived_staleness": 3
+      },
+      {
+        "category": "committed",
+        "committed_version": 3,
+        "conflicts_dropped": 0,
+        "considered": 3,
+        "discarded_stale": 0,
+        "fused": true,
+        "prob_improve": 0.98525,
+        "survived_staleness": 3
+      },
+      {
+        "category": "committed",
+        "committed_version": 4,
+        "conflicts_dropped": 0,
+        "considered": 2,
+        "discarded_stale": 0,
+        "fused": true,
+        "prob_improve": 0.98425,
+        "survived_staleness": 2
+      }
+    ],
+    "outcomes": {
+      "committed": 3
+    },
+    "rounds": [
+      {
+        "committed": 1,
+        "reasons": {
+          "committed": 1
+        },
+        "rejected": 0,
+        "reward": 0.25,
+        "round": 0,
+        "size": 3
+      },
+      {
+        "committed": 1,
+        "reasons": {
+          "committed": 1
+        },
+        "rejected": 0,
+        "reward": 0.666667,
+        "round": 1,
+        "size": 6
+      },
+      {
+        "committed": 1,
+        "reasons": {
+          "committed": 1
+        },
+        "rejected": 0,
+        "reward": 1.0,
+        "round": 2,
+        "size": 8
+      },
+      {
+        "committed": 0,
+        "reasons": {},
+        "rejected": 0,
+        "reward": 1.0,
+        "round": 3,
+        "size": 8
+      },
+      {
+        "committed": 0,
+        "reasons": {},
+        "rejected": 0,
+        "reward": 1.0,
+        "round": 4,
+        "size": 8
+      },
+      {
+        "committed": 0,
+        "reasons": {},
+        "rejected": 0,
+        "reward": 1.0,
+        "round": 5,
+        "size": 8
+      },
+      {
+        "committed": 0,
+        "reasons": {},
+        "rejected": 0,
+        "reward": 1.0,
+        "round": 6,
+        "size": 8
+      },
+      {
+        "committed": 0,
+        "reasons": {},
+        "rejected": 0,
+        "reward": 1.0,
+        "round": 7,
+        "size": 8
+      },
+      {
+        "committed": 0,
+        "reasons": {},
+        "rejected": 0,
+        "reward": 1.0,
+        "round": 8,
+        "size": 8
+      },
+      {
+        "committed": 0,
+        "reasons": {},
+        "rejected": 0,
+        "reward": 1.0,
+        "round": 9,
+        "size": 8
+      },
+      {
+        "committed": 0,
+        "reasons": {},
+        "rejected": 0,
+        "reward": 1.0,
+        "round": 10,
+        "size": 8
+      },
+      {
+        "committed": 0,
+        "reasons": {},
+        "rejected": 0,
+        "reward": 1.0,
+        "round": 11,
+        "size": 8
+      },
+      {
+        "committed": 0,
+        "reasons": {},
+        "rejected": 0,
+        "reward": 1.0,
+        "round": 12,
+        "size": 8
+      },
+      {
+        "committed": 0,
+        "reasons": {},
+        "rejected": 0,
+        "reward": 1.0,
+        "round": 13,
+        "size": 8
+      }
+    ],
+    "stop_reason": "rounds"
+  },
+  "slot": {
+    "final_reward": 0.333333,
+    "merges": [
+      {
+        "category": "committed",
+        "committed_version": 2,
+        "conflicts_dropped": 2,
+        "considered": 3,
+        "discarded_stale": 0,
+        "fused": false,
+        "prob_improve": 0.95,
+        "survived_staleness": 3
+      },
+      {
+        "category": "committed",
+        "committed_version": 3,
+        "conflicts_dropped": 2,
+        "considered": 3,
+        "discarded_stale": 0,
+        "fused": false,
+        "prob_improve": 0.567,
+        "survived_staleness": 3
+      },
+      {
+        "category": "committed",
+        "committed_version": 4,
+        "conflicts_dropped": 2,
+        "considered": 3,
+        "discarded_stale": 0,
+        "fused": false,
+        "prob_improve": 0.57825,
+        "survived_staleness": 3
+      },
+      {
+        "category": "committed",
+        "committed_version": 5,
+        "conflicts_dropped": 2,
+        "considered": 3,
+        "discarded_stale": 0,
+        "fused": false,
+        "prob_improve": 0.5575,
+        "survived_staleness": 3
+      },
+      {
+        "category": "committed",
+        "committed_version": 6,
+        "conflicts_dropped": 2,
+        "considered": 3,
+        "discarded_stale": 0,
+        "fused": false,
+        "prob_improve": 0.5575,
+        "survived_staleness": 3
+      },
+      {
+        "category": "committed",
+        "committed_version": 7,
+        "conflicts_dropped": 2,
+        "considered": 3,
+        "discarded_stale": 0,
+        "fused": false,
+        "prob_improve": 0.55075,
+        "survived_staleness": 3
+      },
+      {
+        "category": "committed",
+        "committed_version": 8,
+        "conflicts_dropped": 2,
+        "considered": 3,
+        "discarded_stale": 0,
+        "fused": false,
+        "prob_improve": 0.54725,
+        "survived_staleness": 3
+      },
+      {
+        "category": "committed",
+        "committed_version": 9,
+        "conflicts_dropped": 2,
+        "considered": 3,
+        "discarded_stale": 0,
+        "fused": false,
+        "prob_improve": 0.54375,
+        "survived_staleness": 3
+      },
+      {
+        "category": "below-threshold",
+        "committed_version": null,
+        "conflicts_dropped": 2,
+        "considered": 3,
+        "discarded_stale": 0,
+        "fused": false,
+        "prob_improve": 0.52725,
+        "survived_staleness": 3
+      },
+      {
+        "category": "below-threshold",
+        "committed_version": null,
+        "conflicts_dropped": 1,
+        "considered": 2,
+        "discarded_stale": 0,
+        "fused": false,
+        "prob_improve": 0.3945,
+        "survived_staleness": 2
+      }
+    ],
+    "outcomes": {
+      "below-threshold": 2,
+      "committed": 8
+    },
+    "rounds": [
+      {
+        "committed": 1,
+        "reasons": {
+          "committed": 1
+        },
+        "rejected": 0,
+        "reward": 0.333333,
+        "round": 0,
+        "size": 1
+      },
+      {
+        "committed": 1,
+        "reasons": {
+          "committed": 1
+        },
+        "rejected": 0,
+        "reward": 0.333333,
+        "round": 1,
+        "size": 1
+      },
+      {
+        "committed": 1,
+        "reasons": {
+          "committed": 1
+        },
+        "rejected": 0,
+        "reward": 0.333333,
+        "round": 2,
+        "size": 1
+      },
+      {
+        "committed": 1,
+        "reasons": {
+          "committed": 1
+        },
+        "rejected": 0,
+        "reward": 0.333333,
+        "round": 3,
+        "size": 1
+      },
+      {
+        "committed": 1,
+        "reasons": {
+          "committed": 1
+        },
+        "rejected": 0,
+        "reward": 0.333333,
+        "round": 4,
+        "size": 1
+      },
+      {
+        "committed": 1,
+        "reasons": {
+          "committed": 1
+        },
+        "rejected": 0,
+        "reward": 0.333333,
+        "round": 5,
+        "size": 1
+      },
+      {
+        "committed": 1,
+        "reasons": {
+          "committed": 1
+        },
+        "rejected": 0,
+        "reward": 0.333333,
+        "round": 6,
+        "size": 1
+      },
+      {
+        "committed": 1,
+        "reasons": {
+          "committed": 1
+        },
+        "rejected": 0,
+        "reward": 0.333333,
+        "round": 7,
+        "size": 1
+      },
+      {
+        "committed": 0,
+        "reasons": {
+          "below-threshold": 1
+        },
+        "rejected": 1,
+        "reward": 0.333333,
+        "round": 8,
+        "size": 1
+      },
+      {
+        "committed": 0,
+        "reasons": {
+          "below-threshold": 1
+        },
+        "rejected": 1,
+        "reward": 0.333333,
+        "round": 9,
+        "size": 1
+      }
+    ],
+    "stop_reason": "rounds"
+  }
+}

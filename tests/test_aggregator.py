@@ -93,6 +93,7 @@ def test_conflict_resolution_leaves_no_contradictions():
     model-soup benefit the aggregator is built around.
     """
     from agentdescent.aggregator import Aggregator, diffs_contradict
+    from agentdescent.defaults import DefaultConflict
     from agentdescent.evolvable import Diff, EvidenceCard
     from agentdescent.evolution import EvolvingArtifact, KeyedRules
 
@@ -113,7 +114,7 @@ def test_conflict_resolution_leaves_no_contradictions():
     # A and B are complementary (different keys); C contradicts BOTH.
     cards = [card("A", {"k1": "x"}), card("B", {"k2": "y"}),
              card("C", {"k1": "z", "k2": "w"})]
-    kept, dropped = Aggregator._resolve_conflicts(agg, art, cards)
+    kept, dropped = DefaultConflict(agg.verifier).resolve(art, cards)
 
     residual = [(a.diff.diff_id, b.diff.diff_id)
                 for i, a in enumerate(kept) for b in kept[i + 1:]
@@ -124,7 +125,7 @@ def test_conflict_resolution_leaves_no_contradictions():
 
 def test_conflict_resolution_keeps_complementary_cards():
     """Cards touching different keys must both survive -- that is what fusion needs."""
-    from agentdescent.aggregator import Aggregator
+    from agentdescent.defaults import DefaultConflict
     from agentdescent.evolvable import Diff, EvidenceCard
     from agentdescent.evolution import EvolvingArtifact, KeyedRules
 
@@ -139,10 +140,8 @@ def test_conflict_resolution_keeps_complementary_cards():
         def cheap_eval(self, artifact):
             return 0.5
 
-    agg = Aggregator.__new__(Aggregator)
-    agg.verifier = _Stub()
-    kept, dropped = Aggregator._resolve_conflicts(
-        agg, art, [card("A", {"k1": "x"}), card("B", {"k2": "y"})])
+    kept, dropped = DefaultConflict(_Stub()).resolve(
+        art, [card("A", {"k1": "x"}), card("B", {"k2": "y"})])
     assert len(kept) == 2 and dropped == 0
 
 

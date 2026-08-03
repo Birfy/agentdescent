@@ -610,7 +610,35 @@ def _publish_stable(aggregator) -> None:
 #: What `evolve` / `async_evolve` can honour from a `Policies` bundle today.
 #: Everything else raises rather than being accepted and ignored -- see
 #: `Policies.require_supported`. The set grows as the implementations land.
-_WIRED_POLICIES = ("task_sampler", "staleness", "aggregator_factory")
+_WIRED_POLICIES = ("task_sampler", "proposal", "conflict", "fusion", "acceptance",
+                   "promotion", "staleness", "verifier", "ledger",
+                   "aggregator_factory")
+
+
+def _propose_via_policy(policy):
+    """Adapt a `ProposalPolicy` back to the engine's one-proposal contract.
+
+    A policy that returns several is refused rather than truncated: the engine
+    turns one proposal into one diff per rollout, so quietly keeping the first
+    would discard work the policy did and make a k-sampling algorithm look like
+    it ran when only a fraction of it did."""
+    from .policies import ProposalContext
+
+    def propose(rendered, task, output, reward):
+        out = list(policy.propose(ProposalContext(
+            rendered=rendered, task=task, output=output, reward=reward)))
+        if len(out) > 1:
+            # A caller-contract violation, not a backend failure: raised as one so
+            # it travels the channel the engine already has for "this run is
+            # meaningless" rather than being folded into `error` as a transient
+            # and retried.
+            raise ProposalContractError(
+                f"the engine consumes one proposal per rollout; this policy "
+                f"returned {len(out)}, and keeping the first would silently drop "
+                f"{len(out) - 1}. Batched rollouts are what makes k > 1 usable.")
+        return out[0] if out else None
+
+    return propose
 
 
 def _resolve_policies(policies: Optional[Policies], where: str, **shortcuts) -> Policies:
@@ -1073,7 +1101,10 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
                   eval_concurrency: int = 8,
                   cheap_eval_tasks: Optional[int] = None,
                   shuffle: bool = False, seed: int = 0,
-                  usage: Optional[Usage] = None) -> _Engine:
+                  usage: Optional[Usage] = None,
+                  verifier: Optional[Any] = None,
+                  ledger_impl: Optional[Any] = None,
+                  policies_bundle: Optional[Policies] = None) -> _Engine:
     """Wire the ledger, runtime, verifier and aggregator (shared by
     :func:`evolve` and :func:`~agentdescent.async_evolve.async_evolve`)."""
     import tempfile
@@ -1084,6 +1115,8 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
         propose = propose or agent.propose
     if run is None or propose is None:
         raise ValueError("provide agent=, or both run= and propose=")
+    if policies_bundle is not None and policies_bundle.proposal is not None:
+        propose = _propose_via_policy(policies_bundle.proposal)
     # Check the actor's signatures once, before any rollout. Otherwise a plain
     # typo (a `propose` missing the reward parameter, say) surfaces as a
     # TypeError inside the round body, where the backend-failure handler turns it
@@ -1188,7 +1221,13 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
         _reap_stale_scratch_repos()
         repo = scratch = tempfile.mkdtemp(prefix=_SCRATCH_PREFIX)
         atexit.register(shutil.rmtree, repo, True)
-    ledger = Ledger(repo, serialize, deserialize)
+    if ledger_impl is not None:
+        # A caller-supplied ledger owns its own storage, so the scratch repo this
+        # call may have just made is not its home -- drop the claim to it rather
+        # than deleting a directory the ledger is not using.
+        ledger, scratch = ledger_impl, None
+    else:
+        ledger = Ledger(repo, serialize, deserialize)
     # `register` is a no-op when the artifact already exists, which is what makes
     # re-using a repo_path resume the run -- but it also means a supplied
     # initial_state would be discarded without a word. Say so.
@@ -1220,14 +1259,17 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     # and inventing more would just make the ranking worse.
     cheap = (len(held_out) if cheap_eval_tasks is None
              else max(1, min(int(cheap_eval_tasks), len(held_out))))
-    verifier = ThreeLayerVerifier(
+    verifier = verifier if verifier is not None else ThreeLayerVerifier(
         eval_fn=lambda a, ts: a.score(ts), held_out=held_out,
         rule_subset=cheap, learned_noise=0.0,
         budget=VerifierBudget(oracle_calls_remaining=oracle_budget))
 
+    pol = policies_bundle or Policies()
+
     def _default_aggregator(ledger, verifier, audit, config, policy):
         return Aggregator(ledger, verifier, audit, config, staleness_policy=policy,
-                          meter=meter)
+                          meter=meter, conflict=pol.conflict, fusion=pol.fusion,
+                          acceptance=pol.acceptance, promotion=pol.promotion)
 
     aggregator = (aggregator_factory or _default_aggregator)(
         ledger, verifier, AuditScheduler(),
@@ -1601,7 +1643,8 @@ def evolve(
         staleness_policy=staleness_policy, aggregator_factory=aggregator_factory,
         oracle_budget=oracle_budget, eval_concurrency=eval_concurrency,
         cheap_eval_tasks=cheap_eval_tasks, shuffle=shuffle, seed=seed,
-        usage=usage)
+        usage=usage, verifier=_pol.verifier, ledger_impl=_pol.ledger,
+        policies_bundle=_pol)
     # Start the clock after the wiring, before the first unit of work: setup
     # is not what a time-to-quality number is asking about.
     eng.meter.start()

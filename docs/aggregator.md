@@ -17,6 +17,48 @@ shared ledger goes through it.
 [staleness](staleness.md) decides what to do with an out-of-date diff ·
 [governance](governance.md) decides how hard to gate.
 
+## Replacing a decision
+
+The seven decisions a merge makes are objects, and each can be swapped without
+touching `Aggregator`:
+
+```python
+from agentdescent import Policies, evolve
+from agentdescent.policies import AcceptDecision
+
+class AcceptEverything:
+    def accept(self, ctx):
+        return AcceptDecision(True, "committed")
+
+evolve(tasks, reward, agent=agent, policies=Policies(acceptance=AcceptEverything()))
+```
+
+| decision | default | what it is given |
+|---|---|---|
+| task sampling | `RoundRobin` | the shard's task ids and the round index |
+| proposal generation | your `propose=` callable | a `ProposalContext` |
+| conflict | `DefaultConflict` | the artifact and the surviving cards |
+| fusion | `DefaultFusion` | the artifact and the kept diffs |
+| staleness | `GuardedStaleness` | `eta`, `alpha`, whether the diff breaks a contract |
+| acceptance | `DefaultAcceptance` | a `MergeContext` |
+| promotion | `DefaultPromotion` | this round's `MergeReport`s |
+
+Two things the defaults know that a replacement should be told:
+
+* **Acceptance reads the full held-out set, never the cheap layer.**
+  `MergeContext` carries both (`base_counts` vs `base_cheap`) because the
+  regression guard once read the cheap one, which `cheap_eval_tasks`
+  sub-samples -- so a four-task sample could veto a commit the full-set test had
+  just approved.
+* **Promotion counts rounds *survived*, not commits.** Counting commits inverts
+  the incentive: an artifact that converges stops committing and so can never be
+  promoted, while one that thrashes promotes every K commits.
+
+Not replaceable, deliberately: the audit gate. It asks whether the cheap layer is
+still trustworthy -- a question about the measuring instrument, which belongs to
+the infrastructure rather than the algorithm.
+
+
 ## What it does (per artifact bucket)
 
 Evidence cards are bucketed by artifact; a bucket fires on batch size `B` or a

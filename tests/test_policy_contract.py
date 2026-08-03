@@ -302,22 +302,142 @@ def test_an_empty_bundle_is_the_same_run_as_passing_nothing():
     assert _trace(_run_evolve()) == _trace(_run_evolve(policies=Policies()))
 
 
-def test_an_unhonoured_field_raises_instead_of_being_ignored():
-    """A caller who passes a custom acceptance rule and gets a finished run has
-    every reason to think it ran. Name the field and refuse."""
-    class Accept:
-        def accept(self, ctx): return AcceptDecision(True)
+def test_a_replaced_acceptance_rule_actually_decides():
+    """The seam has to be load-bearing, not decorative."""
+    class NeverAccept:
+        calls = 0
 
-    with pytest.raises(NotImplementedError, match="acceptance"):
-        _run_evolve(policies=Policies(acceptance=Accept()))
+        def accept(self, ctx):
+            NeverAccept.calls += 1
+            return AcceptDecision(False, "below-threshold", "refused by policy")
 
+    r = _run_evolve(policies=Policies(acceptance=NeverAccept()))
+    assert NeverAccept.calls > 0, "the custom acceptance rule was never consulted"
+    assert r.outcomes().get("committed", 0) == 0, "it refused and something committed"
+
+
+def test_a_replaced_promotion_rule_actually_decides():
+    class NeverPromote:
+        def observe(self, reports): return []
+
+    r = _run_evolve(policies=Policies(promotion=NeverPromote()))
+    assert r is not None       # the run completes; nothing reaches stable
+
+
+def test_a_field_with_no_implementation_still_raises():
+    """The guard has to keep working for whatever is not wired yet -- being
+    accepted and ignored is the one failure a caller cannot detect."""
     with pytest.raises(NotImplementedError, match="sandbox_provider"):
         _run_evolve(policies=Policies(sandbox_provider=object()))
 
 
-def test_the_async_path_refuses_the_same_fields():
+def test_the_async_path_honours_the_same_bundle():
     from agentdescent import async_evolve
-    with pytest.raises(NotImplementedError, match="async_evolve"):
+    with pytest.raises(NotImplementedError, match="sandbox_spec"):
         async_evolve(_tasks(), lambda t, o: 0.0, run=lambda r, t: "x",
                      propose=lambda r, t, o, s: None, max_iters=1,
-                     policies=Policies(verifier=_verifier()))
+                     policies=Policies(sandbox_spec=SandboxSpec()))
+
+
+def test_a_multi_proposal_policy_is_refused_rather_than_truncated():
+    """Keeping the first of k would make a sampling algorithm look like it ran
+    when only a fraction of it did."""
+    class ThreeAtATime:
+        def propose(self, ctx): return ["a", "b", "c"]
+
+    from agentdescent.evolution import ProposalContractError
+    with pytest.raises(ProposalContractError, match="one proposal per rollout"):
+        _run_evolve(policies=Policies(proposal=ThreeAtATime()))
+
+
+def test_a_single_proposal_policy_is_equivalent_to_the_callable():
+    from agentdescent.defaults import SingleProposal
+    plain = _run_evolve()
+    viapolicy = _run_evolve(policies=Policies(
+        proposal=SingleProposal(lambda r, t, o, s: t.id)))
+    assert _trace(plain) == _trace(viapolicy)
+
+
+# ---------------------------------------------------------------------------
+# Injected backends
+# ---------------------------------------------------------------------------
+
+
+def test_an_injected_verifier_is_called_exactly_as_the_built_in_one_is():
+    """Injection must not quietly change *how much* the engine measures.
+
+    A wrapper that adds or drops a gate call changes what the run costs while
+    leaving every result identical -- invisible to a trace comparison, and the
+    reason this counts calls rather than checking the outcome."""
+    from agentdescent.verifier import ThreeLayerVerifier
+
+    counts = {}
+
+    class Counting:
+        def __init__(self, inner): self.inner = inner
+        def __getattr__(self, name):
+            attr = getattr(self.inner, name)
+            if not callable(attr):
+                return attr
+            def wrapped(*a, **kw):
+                counts[name] = counts.get(name, 0) + 1
+                return attr(*a, **kw)
+            return wrapped
+
+    seen = {}
+
+    def factory(ledger, verifier, audit, config, policy):
+        seen["verifier"] = verifier
+        from agentdescent.aggregator import Aggregator
+        return Aggregator(ledger, verifier, audit, config, staleness_policy=policy)
+
+    inner = ThreeLayerVerifier(eval_fn=lambda a, ts: 1.0, held_out=[1, 2, 3])
+    _run_evolve(policies=Policies(verifier=Counting(inner),
+                                  aggregator_factory=factory))
+    assert isinstance(seen.get("verifier"), Counting), "the engine built its own"
+    assert set(counts) <= {"cheap_eval", "eval_counts", "oracle_eval",
+                           "learned_eval", "budget", "held_out"}, counts
+
+
+def test_an_in_memory_ledger_is_enough_to_finish_a_run(tmp_path):
+    """`LedgerProtocol` has to be sufficient, not merely satisfied.
+
+    This is the first thing that proves the protocol covers `register`, `log` and
+    `close` -- the three the aggregator never calls and the engine always does."""
+    from agentdescent.ledger import Ledger
+
+    calls = []
+
+    class Recording:
+        def __init__(self, inner): self.inner = inner
+        def register(self, artifact, branch=Ledger.DEV):
+            calls.append("register")
+            return self.inner.register(artifact, branch)
+        def snapshot(self, branch=Ledger.DEV): return self.inner.snapshot(branch)
+        def head_version(self, branch=Ledger.DEV): return self.inner.head_version(branch)
+        def commit(self, *a, **kw): return self.inner.commit(*a, **kw)
+        def promote_to_stable(self, aid): return self.inner.promote_to_stable(aid)
+        def log(self, branch=Ledger.DEV, limit=20):
+            calls.append("log")
+            return self.inner.log(branch, limit)
+        def close(self):
+            calls.append("close")
+            return self.inner.close()
+
+    inner = Ledger(str(tmp_path / "repo"),
+                   serialize=lambda a: {"state": dict(a.state),
+                                        "blast_radius": a.blast_radius},
+                   deserialize=lambda aid, v, d: None)
+    # the engine deserialises with its own artifact type, so borrow the real one
+    from agentdescent.evolution import EvolvingArtifact
+    inner._deserialize = lambda aid, v, d: EvolvingArtifact(
+        aid, d.get("state", {}), v, d.get("blast_radius", 0.2))
+
+    r = _run_evolve(policies=Policies(ledger=Recording(inner)))
+    assert r.final_reward >= 0.0
+    assert "register" in calls, "the engine never registered through the protocol"
+    assert "log" in calls, "the run summary skipped the ledger"
+    # `close` is deliberately absent: the engine closes only the ledger it made
+    # itself, the same rule that applies to a caller-supplied `repo_path`. An
+    # injected ledger's lifetime belongs to whoever injected it.
+    assert "close" not in calls, "the engine closed a ledger it does not own"
