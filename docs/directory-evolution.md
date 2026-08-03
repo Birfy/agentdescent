@@ -207,10 +207,10 @@ reflector something concrete to fix.
     a timeout takes its children with it. It still runs **as your user, with
     your network**. Use a container for anything you would not run by hand.
 
-    There is a module called `sandbox.py`, and it does not change that sentence.
-    It manages the *lifetime* of a workspace -- how many exist, who owns one, who
-    cleans up when an owner dies. Isolation strength is a property of the
-    provider, and the only provider shipped today is a local directory.
+    `sandbox.py` manages the *lifetime* of a workspace -- how many exist, who
+    owns one, who cleans up when an owner dies. Isolation strength is a separate
+    axis, and it is a property of the **provider**. For a real boundary, use the
+    container provider below.
 
 Both halves of `frozen` are needed and they do different jobs:
 
@@ -263,6 +263,55 @@ recycled pid cannot keep a dead run's directory alive forever.
     automatically needs the engine to know a rollout's environment, which is
     what `RolloutSpec` is for — until then the fields on a default `evolve()`
     run stay zero rather than being quietly approximate.
+
+## Isolation strength — three levels
+
+Lifetime and isolation are different questions. The pool answers the first for
+every provider; which provider you choose answers the second.
+
+| provider | filesystem | network | privileges | limits |
+|---|---|---|---|---|
+| `WorkspaceProvider` (default) | **the whole host** | **the host's** | your user's | timeout only (POSIX: rlimits) |
+| `ContainerProvider` | the workspace only | off unless asked | no capabilities, not root | memory / CPU, every platform |
+| remote / microVM | — | — | — | not implemented |
+
+**What the default does not stop.** A trimmed environment redirects a *lookup*,
+not a *path*. `HOME` points inside the workspace, so `~/.aws/credentials` misses
+— and `open("/Users/you/.aws/credentials")` does not. The default provider is
+appropriate for code you would run yourself; it is not a boundary.
+
+```python
+from agentdescent.sandbox import SandboxPool
+from agentdescent.sandbox_container import ContainerProvider
+
+pool = SandboxPool(ContainerProvider("python:3.11-slim", engine="podman"),
+                   max_sandboxes=8)
+run = code_runner(["python", "main.py"], test_cmd=["pytest", "-q"],
+                  sandbox_pool=pool)
+```
+
+Needs `docker` or `podman` on the machine — no Python dependency, and the core
+still installs with none. Staging is unchanged: the tree is materialised on the
+host and bind-mounted at `/work`, so `FileTree`, the frozen overlay and fixtures
+all behave exactly as before. Only execution moves.
+
+Defaults are closed and opened one field at a time:
+
+| `SandboxSpec` field | effect |
+|---|---|
+| `network` | `None`/`"none"` → `--network none`. Only `"inherit"` connects it |
+| `memory_mb` / `cpu` | `--memory` / `--cpus`; unset means no flag, not a default ceiling |
+| `env_allowlist` | variable **names**; values are read on the host and passed one at a time. Nothing is inherited in bulk |
+| `image` | overrides the provider's image per rollout |
+
+Always on: read-only root with a writable `/work` and `/tmp`, `--cap-drop ALL`,
+`no-new-privileges`, a pids limit, and the container runs as your uid so the
+files it writes are yours to delete.
+
+!!! warning "Stronger, not absolute"
+    Containers share the host kernel and escapes exist. This is a large step up
+    from a trimmed environment and it is not a licence to run deliberately
+    hostile code. For that you want a VM boundary, which this does not provide.
 
 ## Cost — the first-order design constraint
 

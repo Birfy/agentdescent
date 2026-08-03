@@ -216,7 +216,8 @@ def _child_env(ws: str, extra: Optional[Mapping[str, str]]) -> Dict[str, str]:
 
 
 def _sh(cmd: Sequence[str], ws: str, timeout: float,
-        env: Mapping[str, str]) -> subprocess.CompletedProcess:
+        env: Mapping[str, str],
+        sandbox: Optional[object] = None) -> subprocess.CompletedProcess:
     """Run one gate command, and on timeout kill **everything it started**.
 
     ``subprocess.run(timeout=)`` kills the process it launched and nothing else.
@@ -235,13 +236,33 @@ def _sh(cmd: Sequence[str], ws: str, timeout: float,
     POSIX-only: Windows has no process groups in this sense, so there the
     behaviour is what it always was -- documented rather than silently different.
     """
+    # A sandbox that runs the command elsewhere says so by offering a prefix.
+    # The local one does not, so this is `[] + cmd` and the default path is
+    # exactly what it was.
+    prefix = list(getattr(sandbox, "exec_prefix", list)() or ())
+    if prefix:
+        # The prefix runs on the *host* -- it is the engine's own CLI, and it
+        # needs the host's environment to find its socket. The trimmed
+        # environment is for the candidate, which is on the far side of the
+        # prefix, so the sandbox injects it there instead. Handing the engine a
+        # `HOME` inside the workspace makes it look for its socket in a directory
+        # that is about to be deleted.
+        env, cwd = os.environ, None
+    else:
+        cwd = ws
     posix = os.name != "nt"
-    proc = subprocess.Popen(list(cmd), cwd=ws, env=dict(env), text=True,
+    proc = subprocess.Popen(prefix + list(cmd), cwd=cwd, env=dict(env), text=True,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             start_new_session=posix)
     try:
         out, err = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
+        # Killing the local process group does nothing to a process running
+        # inside a container -- the exec dies and its child keeps going. A
+        # sandbox that can stop its own contents is asked to.
+        stop = getattr(sandbox, "kill", None)
+        if prefix and callable(stop):
+            stop()
         _kill_group(proc, posix)
         # Drain after killing: the pipes may hold output that explains the hang,
         # and not reading them can leave the child blocked on a full pipe.
@@ -310,16 +331,16 @@ def code_runner(entrypoint: Sequence[str], *, layout: str = "root",
             ws = sandbox.root
             _stage_into(ws, rendered, task, prefix=prefix, overlay=overlay,
                         fixtures=fixtures)
-            return _gate_and_run(ws, task)
+            return _gate_and_run(ws, task, sandbox)
 
-    def _gate_and_run(ws: str, task: Task) -> str:
+    def _gate_and_run(ws: str, task: Task, sandbox=None) -> str:
         """Gate first, then the entrypoint. A failing gate speaks in-band."""
         child = _child_env(ws, env)
         for label, cmd in (("setup", setup_cmd), ("tests", test_cmd)):
             if not cmd:
                 continue
             try:
-                proc = _sh(cmd, ws, timeout, child)
+                proc = _sh(cmd, ws, timeout, child, sandbox)
             except subprocess.TimeoutExpired:
                 return (f"{TEST_FAILURE_MARKER} ({label} timed out after "
                         f"{timeout:g}s)")
@@ -329,7 +350,7 @@ def code_runner(entrypoint: Sequence[str], *, layout: str = "root",
                 detail = (proc.stdout or "") + (proc.stderr or "")
                 return f"{TEST_FAILURE_MARKER} ({label}):\n{detail.strip()[:2000]}"
         try:
-            proc = _sh([*entrypoint, task.prompt], ws, timeout, child)
+            proc = _sh([*entrypoint, task.prompt], ws, timeout, child, sandbox)
         except subprocess.TimeoutExpired:
             return f"{TEST_FAILURE_MARKER} (entrypoint timed out after {timeout:g}s)"
         except FileNotFoundError as e:
