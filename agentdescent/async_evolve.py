@@ -49,7 +49,7 @@ from .evolvable import ContractError, EvidenceCard, vv_staleness
 from .ledger import Ledger, LedgerFailure
 from .sampling import RoundRobin, TaskSampler
 from .scheduler import DurationEstimator
-from .pipeline import StallGuard, WorkerHealth
+from .pipeline import EarlyStop, FirstError, StallGuard, WorkerHealth
 from .staleness import StaleAction, StalenessPolicy, get_policy
 
 
@@ -267,13 +267,14 @@ def async_evolve(
     history: List[RoundInfo] = []
     # [best held-out reward so far, sweeps since it last improved] -- a list so
     # the merger closure can mutate it without a `nonlocal` per field.
-    best: List[float] = [float('-inf'), 0]
+    # Shared with the barrier-free loop's sibling: one tracker, one epsilon.
+    early = EarlyStop(target_reward=target_reward, patience=patience)
     errors: List[Optional[str]] = [None]      # first backend failure seen (diagnostic)
     # Most recent artifact read from the ledger, so a failing final read still
     # yields a result instead of an exception (same reasoning as the sync path).
     last_good: List[object] = [None]
     died = [False]                            # True only if the run ENDED on failure
-    contract_error: List[Optional[BaseException]] = [None]   # caller bug -> re-raise
+    contract_error = FirstError()          # caller bug -> re-raise on this thread
     stop_reason = ["max_seconds"]             # overwritten by whichever bound fires
     # Backpressure: bumped when the pipeline stalls (evidence keeps arriving and
     # nothing commits), which forces every worker to resync regardless of the ratio.
@@ -383,7 +384,7 @@ def async_evolve(
                     if errors[0] is None:
                         errors[0] = f"{type(e).__name__}: {e}"
                     died[0] = True
-                    contract_error[0] = e
+                contract_error.record(e)      # first one wins; this site overwrote
                 stop.set()
                 return
             except Exception as e:  # noqa: BLE001 - a backend failure (API error,
@@ -483,10 +484,7 @@ def async_evolve(
         # is not a redundant eval -- `_Runtime.eval_one` memoises on
         # (artifact signature, task id), so re-scoring an unchanged head is free.
         r = dev.score(eng.held_out)
-        if r > best[0] + 1e-12:
-            best[0], best[1] = r, 0
-        else:
-            best[1] += 1
+        early_stop = early.observe(r)
         _m = eng.meter.snapshot()
         history.append(RoundInfo(len(history), r, len(dev.state), committed,
                                  len(reports) - committed, _tally(reports),
@@ -508,11 +506,8 @@ def async_evolve(
             except Exception as e:  # noqa: BLE001
                 warnings.warn(f"on_round callback raised: {type(e).__name__}: {e}",
                               RuntimeWarning, stacklevel=2)
-        if target_reward is not None and r >= target_reward:
-            stop_reason[0] = "target_reward"
-            stop.set()
-        elif patience is not None and best[1] >= patience:
-            stop_reason[0] = "patience"
+        if early_stop is not None:
+            stop_reason[0] = early_stop
             stop.set()
 
     def _merger() -> None:
@@ -534,9 +529,7 @@ def async_evolve(
             except ContractError as e:
                 # A caller bug (a broken aggregator, a bad reward) must propagate,
                 # not be absorbed and reported as if the provider had failed.
-                with counter_lock:
-                    if contract_error[0] is None:
-                        contract_error[0] = e
+                contract_error.record(e)
                 stop.set()
                 return
             except Exception as e:  # noqa: BLE001 - surface, don't hang
@@ -589,8 +582,7 @@ def async_evolve(
             "rollouts are abandoned (results already merged are kept)",
             RuntimeWarning, stacklevel=2)
 
-    if contract_error[0] is not None:
-        raise contract_error[0]
+    contract_error.raise_if_set()
     if not died[0]:
         # Same reason as the synchronous path: confirmation takes
         # `promote_after_k` sweeps and `target_reward` stops the run on the very
