@@ -81,6 +81,7 @@ from .policies import (
     SandboxSpec,
     VerifierProtocol,
 )
+from .sandbox import LocalWorkspaceSandbox, SandboxPool, WorkspaceProvider
 from . import rewards                      # agentdescent.rewards.last_number(...)
 from .skill import evolve_skill
 from .filetree import (
@@ -221,6 +222,9 @@ __all__ = [
     "VerifierProtocol",
     "LedgerProtocol",
     "SandboxSpec",
+    "SandboxPool",
+    "WorkspaceProvider",
+    "LocalWorkspaceSandbox",
     "SandboxProvider",
     "Sandbox",
     "Worker",

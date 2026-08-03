@@ -203,14 +203,66 @@ reflector something concrete to fix.
 !!! danger "Isolation, not a sandbox"
     Candidate code runs in a throwaway workspace, with a trimmed environment
     (`HOME` and `TMPDIR` point inside the workspace, so it cannot read
-    `~/.claude` or `~/.aws`), under a hard timeout. It still runs as your user,
-    with your network. Use a container for anything you would not run by hand.
+    `~/.claude` or `~/.aws`), under a hard timeout, in its own process group so
+    a timeout takes its children with it. It still runs **as your user, with
+    your network**. Use a container for anything you would not run by hand.
+
+    There is a module called `sandbox.py`, and it does not change that sentence.
+    It manages the *lifetime* of a workspace -- how many exist, who owns one, who
+    cleans up when an owner dies. Isolation strength is a property of the
+    provider, and the only provider shipped today is a local directory.
 
 Both halves of `frozen` are needed and they do different jobs:
 
 * the **proposal filter** stops the reflector from editing the test suite;
 * the **overlay** stops the *candidate* from rewriting it at run time
   (a `conftest.py`, a monkeypatched assertion, an early `exit(0)`).
+
+## How workspaces are managed
+
+Every rollout leases a workspace from a pool and gives it back. That is a change
+of ownership rather than of behaviour: the default is still one fresh directory
+per call, deleted afterwards.
+
+```python
+from agentdescent.sandbox import SandboxPool, WorkspaceProvider
+
+pool = SandboxPool(WorkspaceProvider(), max_sandboxes=8)
+run = code_runner([...], sandbox_pool=pool)     # share it, and the cap is shared
+```
+
+**One ceiling, not two.** `max_concurrency` worker threads and
+`eval_concurrency` scoring threads both stage workspaces. Sharing one pool is
+what makes the limit a limit; with a pool each, the real ceiling is their sum.
+`acquire` blocks when the pool is full — failing would push retry logic into
+every caller, and growing would make the ceiling a suggestion.
+
+**Reuse is opt-in.** `SandboxSpec(reuse=True)` hands back a warm workspace,
+reset to empty first. The default is a fresh one because `code_runner`'s frozen
+overlay assumes a clean directory: a workspace still holding the previous
+candidate's files produces a score that looks entirely ordinary and is wrong.
+
+**Reclaiming what an owner abandoned.** Each workspace holds a
+`.agentdescent-lease.json` naming its owner, and the owner renews it while
+working. `WorkspaceProvider.reap()` deletes the ones nobody is renewing.
+
+That replaces "delete anything older than six hours", which was wrong in both
+directions. A directory's mtime does not change while a process works *inside*
+it, so a long rollout looked abandoned; and on a shared `$TMPDIR` — a parameter
+sweep, several containers on one volume — one run's live workspace looked
+collectable to every other run on the machine. Renewal is a statement by the
+owner; its absence is the thing worth acting on.
+
+A live owner gets one grace period: between one and two TTLs, an expired lease
+whose process is still running is left alone. Past that it goes regardless, so a
+recycled pid cannot keep a dead run's directory alive forever.
+
+!!! note "Where the numbers are"
+    `sandbox_wait_s`, `sandbox_setup_s` and the created/reused/failure counts
+    reach `EvolutionResult` when you pass the pool a `Meter`. Wiring that
+    automatically needs the engine to know a rollout's environment, which is
+    what `RolloutSpec` is for — until then the fields on a default `evolve()`
+    run stay zero rather than being quietly approximate.
 
 ## Cost — the first-order design constraint
 

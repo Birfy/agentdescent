@@ -8,7 +8,7 @@ page and the code disagree, so a signature here is the signature you get.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-150 public names across 25 modules.
+153 public names across 26 modules.
 
 ---
 
@@ -788,6 +788,10 @@ The exception tuple a caller catches to treat any ledger problem as recoverable.
 
 Seven methods: four the aggregator calls, three more the engine calls.
 
+### `LocalWorkspaceSandbox`
+
+A throwaway directory on this machine -- what a rollout has always got.
+
 ### `MergeContext`
 
 Everything an `AcceptancePolicy` is allowed to look at.
@@ -820,6 +824,10 @@ Reward at or above which a task counts as solved (`0.999`). Lower it for a grade
 
 One acquired execution environment.
 
+### `SandboxPool`
+
+The single gate on how many sandboxes exist at once.
+
 ### `SandboxProvider`
 
 Where sandboxes come from and go back to.
@@ -847,6 +855,10 @@ Four methods, from `grep 'self\.verifier\.' agentdescent/aggregator.py`.
 ### `VersionVector`
 
 `Dict[str, int]` — artifact id to version.
+
+### `WorkspaceProvider`
+
+Provisions `LocalWorkspaceSandbox` -- `mkdtemp`, plus a lease file.
 
 ### `backends`
 
