@@ -69,6 +69,8 @@ and *how*, that is *what*.
 | `pipeline` | the retirement and backpressure policies the two barrier-free runtimes share | [Async](async.md) |
 | `ledger` | the git-backed, compare-and-swap artifact store | [Ledger](ledger.md) |
 | `governance` | L0 frozen / L1 slow / L2 fast, by blast radius | [Governance](governance.md) |
+| `workspec` | a rollout as data: named callables instead of closures | [Parallelism](parallelism.md#where-rollouts-run-the-execution-plane) |
+| `executor` · `supervisor` | where rollouts run: threads, or supervised worker processes | [Parallelism](parallelism.md#where-rollouts-run-the-execution-plane) |
 | `sandbox` | workspace leases: one ceiling, one release path, reclaim what an owner abandoned | [Directory evolution](directory-evolution.md#how-workspaces-are-managed) |
 | `defaults` | the shipped algorithm as replaceable pieces: conflict, fusion, acceptance, promotion | [Aggregator](aggregator.md) |
 | `sandbox_container` | the provider that makes a sandbox an actual boundary (needs docker/podman) | [Directory evolution](directory-evolution.md#isolation-strength-three-levels) |
