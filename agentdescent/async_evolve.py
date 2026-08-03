@@ -240,7 +240,8 @@ def async_evolve(
         staleness_policy=staleness_policy, aggregator_factory=aggregator_factory,
         oracle_budget=oracle_budget, eval_concurrency=eval_concurrency,
         cheap_eval_tasks=cheap_eval_tasks, shuffle=shuffle, seed=seed,
-        usage=usage)
+        usage=usage, verifier=_pol.verifier, ledger_impl=_pol.ledger,
+        policies_bundle=_pol)
     eng.meter.start()
     if n_workers < 1:
         raise ValueError(f"n_workers must be >= 1, got {n_workers}")

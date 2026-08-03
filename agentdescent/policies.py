@@ -91,9 +91,16 @@ class MergeContext:
     artifact: "Evolvable"
     candidate: "Evolvable"
     cards: Sequence["EvidenceCard"]
-    #: (successes, trials) over the whole held-out set -- what the commit gates read.
+    #: ``(successes, failures)`` over the whole held-out set -- what
+    #: ``verifier.eval_counts`` returns, and what the commit gates read. Not
+    #: ``(successes, trials)``: this contract was written from the aggregator's
+    #: call and the call's meaning, and a policy that divides by the second
+    #: element gets a rate that is wrong and plausible.
     base_counts: Tuple[float, float]
     cand_counts: Tuple[float, float]
+    #: The diff under consideration. Needed for a reproducible acceptance draw
+    #: (the sampler is seeded per candidate) and to tell which cards contributed.
+    diff: Optional["Diff"] = None
     #: Cheap-layer scores over a sub-sample -- ranking only.
     base_cheap: float = 0.0
     cand_cheap: float = 0.0
@@ -107,6 +114,12 @@ class MergeContext:
     #: difference as a quality change -- in either direction.
     base_env: str = ""
     cand_env: str = ""
+
+    @staticmethod
+    def rate(counts: Tuple[float, float]) -> float:
+        """Success rate from ``(successes, failures)``, guarding the empty case."""
+        successes, failures = counts
+        return successes / max(1e-9, successes + failures)
 
     def comparable(self) -> bool:
         """Were both sides measured in the same environment?"""
@@ -125,6 +138,13 @@ class AcceptDecision:
     accept: bool
     category: str = ""
     detail: str = ""
+    #: The posterior the decision rested on, carried out so the caller can report
+    #: it without recomputing -- the draw is sampled, so recomputing gives a
+    #: different number than the one that decided.
+    p_improve: float = 0.0
+    #: Measured change in the full held-out rate. The aggregator folds this back
+    #: into the artifact's running prior when a candidate is refused.
+    observed_delta: float = 0.0
 
 
 @dataclass(frozen=True)
