@@ -24,8 +24,13 @@ Convenience actor: bundles running a task and proposing an improvement.
 
 | method | what it does |
 |---|---|
+| `cost_summary() -> str` | One line: what the run cost. Complements `outcomes()`, which says why it went as it did. |
+| `cost_to_quality(target: float) -> Optional[int]` | Rollouts spent up to the first round that reached `target`. |
+| `duplicate_rate() -> float` | Cache hits as a fraction of lookups -- work that did *not* have to be redone. In one process this is memoisation working; across processes it is the figure that says how much a shared cache would be worth. |
 | `outcomes() -> Dict[str, int]` | Merge outcomes for the whole run, by category -- *why* it went as it did. |
 | `save(path: str) -> None` | Write the evolved artifact and its run summary to a JSON file. |
+| `stale_rate() -> float` | Discarded evidence as a fraction of evidence considered; 0.0 if none. |
+| `time_to_quality(target: float) -> Optional[float]` | Wall-clock at the first round whose held-out reward reached `target`. |
 | `write_to(...)` | Install a file-tree artifact back into a real directory. |
 
 ### `EvolvingArtifact(...)`

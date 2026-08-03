@@ -101,6 +101,51 @@ Covered in full elsewhere, and not repeated here:
   including tool-using CLI agents.
 * **[Measured results](results.md)** — every empirical claim with its setup.
 
+### What a run cost
+
+`EvolutionResult` carries the artifact *and* the bill. Every field below defaults
+to zero and is read back with `.get`, so a result saved before they existed still
+loads.
+
+```python
+r = evolve(tasks, reward, agent=agent)
+
+r.cost_summary()          # one line: rollouts, wall-clock, model calls, ratios
+r.time_to_quality(0.9)    # seconds to the first round at >= 0.9, or None
+r.cost_to_quality(0.9)    # rollouts to that same round, or None
+r.stale_rate()            # discarded / considered -- the ratio needs both
+r.duplicate_rate()        # evaluation cache hit rate
+```
+
+| what | field |
+|---|---|
+| time | `wallclock`, and `RoundInfo.elapsed_s` per round |
+| work | `rollouts`, `rollout_seconds` (a **sum** across workers, so it exceeds `wallclock` when they overlap), `eval_seconds` |
+| model | `usage.calls` / `.seconds` / `.failures` |
+| staleness | `stale_considered`, `stale_discarded` |
+| recomputation | `cache_hits`, `cache_misses` |
+| sandboxes | `sandbox_wait_s`, `sandbox_setup_s`, `sandboxes_created` / `_reused` / `_failures` |
+
+Two things worth knowing before reading these numbers:
+
+* **`usage.calls` counts actor invocations** — one `run` or `propose` — not
+  provider requests. A `cli_agent` rollout is one call here and many requests to
+  the model.
+* **Token counts need a shared `Usage`.** `run` is `(rendered, task) -> str`, so
+  an opaque actor cannot report tokens. Pass the same object to both and they
+  accumulate together:
+
+```python
+from agentdescent import Usage
+u = Usage()
+r = evolve(tasks, reward, agent=LLMAgent(claude(usage=u)), usage=u)
+print(r.usage.total_tokens, r.usage.estimated_cost(3.0, 15.0))
+```
+
+The sandbox fields are zero on the default path: one throwaway workspace per
+rollout, nothing to queue for and no image to warm. They exist so that when a
+pool does, "8 workers only bought 2x" can be attributed rather than guessed at.
+
 ### The reference stack — `AgentDescent` / `AsyncAgentDescent`
 
 A **separate** runtime used by the RQ1/RQ2 and efficiency experiments on the

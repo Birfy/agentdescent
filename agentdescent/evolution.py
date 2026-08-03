@@ -37,7 +37,7 @@ import warnings
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Protocol, Sequence, runtime_checkable
 
-from .agents import Completion, claude
+from .agents import Completion, Usage, claude
 from .aggregator import (
     Aggregator, AggregatorConfig, AggregatorFactory, AggregatorContractError,
     check_reports,
@@ -45,6 +45,7 @@ from .aggregator import (
 from .evolvable import Contract, ContractError, Diff, EvidenceCard
 from .governance import FROZEN_IDS, GovernanceError, assert_mutable
 from .ledger import Ledger, LedgerFailure
+from .metrics import Meter, measured
 from .sampling import RoundRobin, TaskSampler
 from .scheduler import AuditScheduler
 from .staleness import StalenessPolicy
@@ -296,14 +297,26 @@ def _checked_reward(value, task: "Task") -> float:
 
 
 class _EvalCache:
-    def __init__(self) -> None:
+    """Memoised evaluations, and the only place that can tell a hit from a miss.
+
+    The counters live here rather than in `_Runtime` because by the time
+    `eval_one` has a value back it no longer knows whether the work happened:
+    that is precisely the "duplicate computation" figure a multi-process run
+    needs to report."""
+
+    def __init__(self, meter: Optional["Meter"] = None) -> None:
         self._d: Dict[Any, float] = {}
         self._lock = threading.Lock()
+        self._meter = meter
 
     def get_or_eval(self, key: Any, fn: Callable[[], float]) -> float:
         with self._lock:
             if key in self._d:
+                if self._meter is not None:
+                    self._meter.add("cache_hits")
                 return self._d[key]
+        if self._meter is not None:
+            self._meter.add("cache_misses")
         value = fn()
         with self._lock:
             self._d[key] = value
@@ -427,6 +440,10 @@ class _Runtime:
     #: result is memoised, so a retry re-runs only what actually failed.
     ATTEMPTS = 3
 
+    #: Where evaluation time and cache hits are recorded. Optional so a
+    #: hand-built `_Runtime` (several tests do this) needs no changes.
+    meter: Optional["Meter"] = None
+
     def eval_one(self, artifact: EvolvingArtifact, task: Task) -> float:
         key = (artifact._signature(), task.id)
 
@@ -443,7 +460,15 @@ class _Runtime:
                     time.sleep(0.2 * (attempt + 1))
             raise AssertionError("unreachable")
 
-        return self.cache.get_or_eval(key, _measure)
+        if self.meter is None:
+            return self.cache.get_or_eval(key, _measure)
+        t0 = time.time()
+        try:
+            return self.cache.get_or_eval(key, _measure)
+        finally:
+            # Includes hits (near-zero) on purpose: `eval_seconds` is what the
+            # gate cost the run, and a hit costing nothing is the point.
+            self.meter.add("eval_seconds", time.time() - t0)
 
 
 # ---------------------------------------------------------------------------
@@ -581,6 +606,31 @@ def _publish_stable(aggregator) -> None:
         pass
 
 
+def _cost_fields(meter: Meter) -> Dict[str, Any]:
+    """The meter's counters, keyed as :class:`EvolutionResult` fields.
+
+    One mapping shared by both drivers: they assemble their results separately,
+    and a field added to one and forgotten in the other is invisible -- the
+    result still constructs, the number is just always zero."""
+    m = meter.snapshot()
+    return {
+        "usage": meter.usage,
+        "wallclock": m.elapsed_s,
+        "rollouts": m.rollouts,
+        "rollout_seconds": m.rollout_seconds,
+        "eval_seconds": m.eval_seconds,
+        "stale_considered": m.stale_considered,
+        "stale_discarded": m.stale_discarded,
+        "cache_hits": m.cache_hits,
+        "cache_misses": m.cache_misses,
+        "sandbox_wait_s": m.sandbox_wait_s,
+        "sandbox_setup_s": m.sandbox_setup_s,
+        "sandboxes_created": m.sandboxes_created,
+        "sandboxes_reused": m.sandboxes_reused,
+        "sandbox_failures": m.sandbox_failures,
+    }
+
+
 def _tally(reports) -> Dict[str, int]:
     """Count merge outcomes by stable category (see ``MergeReport.category``)."""
     out: Dict[str, int] = {}
@@ -607,6 +657,15 @@ class RoundInfo:
     #: way to tell "the gate says my proposals do not help" from "they never
     #: reached the gate" -- which need opposite fixes.
     reasons: Dict[str, int] = field(default_factory=dict)
+    #: Cumulative wall-clock at the end of this round, in seconds. This is the
+    #: x-axis for time-to-quality: paired with ``held_out_reward`` it says when a
+    #: quality bar was reached, which a round index cannot -- rounds are not the
+    #: same length, and across parallel configurations they are not comparable.
+    elapsed_s: float = 0.0
+    #: Rollouts completed by the end of this round, cumulative. The other
+    #: denominator: a configuration that reaches the same reward having spent
+    #: twice the rollouts has not done as well.
+    rollouts: int = 0
 
 
 @dataclass
@@ -648,6 +707,46 @@ class EvolutionResult:
     #: fast run from a lucky one.
     retired_workers: int = 0
 
+    # -- what the run cost ----------------------------------------------------
+    #
+    # Every field below defaults, and `load` reads them with `.get`, so a result
+    # written before they existed still loads.
+
+    #: Model spend. ``calls`` counts actor invocations (``run`` and ``propose``);
+    #: token counts appear only when the same :class:`~agentdescent.agents.Usage`
+    #: was also passed to an adapter that reports them -- pass ``usage=`` to both
+    #: ``evolve`` and ``claude``/``openai_compatible`` and they accumulate
+    #: together.
+    usage: Usage = field(default_factory=Usage)
+    #: Total wall-clock of the run, in seconds.
+    wallclock: float = 0.0
+    #: Rollouts completed, and their summed duration. The sum exceeds
+    #: ``wallclock`` whenever workers overlapped -- that is the point of it.
+    rollouts: int = 0
+    rollout_seconds: float = 0.0
+    #: Wall-clock inside the gate (held-out scoring and every acceptance
+    #: measurement). Measured against ``wallclock`` this is what says whether a
+    #: run was spent exploring or verifying.
+    eval_seconds: float = 0.0
+    #: Staleness, with its denominator: ``discarded / considered``. Without the
+    #: denominator a stale count cannot be read at all.
+    stale_considered: int = 0
+    stale_discarded: int = 0
+    #: Evaluation cache. ``misses`` is the number of evaluations actually
+    #: performed; the ratio is the duplicate-computation figure a multi-process
+    #: run has to report.
+    cache_hits: int = 0
+    cache_misses: int = 0
+    #: Sandbox accounting. Zero on the default single-workspace path: there is
+    #: no pool to wait for and no image to warm. They exist here so that when a
+    #: pool does appear, "8 workers only bought 2x" can be attributed to queueing
+    #: or cold starts rather than guessed at.
+    sandbox_wait_s: float = 0.0
+    sandbox_setup_s: float = 0.0
+    sandboxes_created: int = 0
+    sandboxes_reused: int = 0
+    sandbox_failures: int = 0
+
     def outcomes(self) -> Dict[str, int]:
         """Merge outcomes for the whole run, by category -- *why* it went as it did.
 
@@ -676,6 +775,56 @@ class EvolutionResult:
                 out[k] = out.get(k, 0) + v
         return out
 
+    def time_to_quality(self, target: float) -> Optional[float]:
+        """Wall-clock at the first round whose held-out reward reached ``target``.
+
+        ``None`` when the run never got there -- which is a result, not an error:
+        a configuration that never reaches the bar has no time-to-quality, and
+        reporting its total wall-clock instead would flatter it."""
+        for h in self.history:
+            if h.held_out_reward >= target:
+                return h.elapsed_s
+        return None
+
+    def cost_to_quality(self, target: float) -> Optional[int]:
+        """Rollouts spent up to the first round that reached ``target``.
+
+        Rollouts rather than tokens, because tokens are only known when a
+        token-reporting adapter shares this result's :class:`Usage`; rollouts are
+        always counted. Use ``usage.total_tokens`` when you have them."""
+        for h in self.history:
+            if h.held_out_reward >= target:
+                return h.rollouts
+        return None
+
+    def stale_rate(self) -> float:
+        """Discarded evidence as a fraction of evidence considered; 0.0 if none."""
+        return (self.stale_discarded / self.stale_considered
+                if self.stale_considered else 0.0)
+
+    def duplicate_rate(self) -> float:
+        """Cache hits as a fraction of lookups -- work that did *not* have to be
+        redone. In one process this is memoisation working; across processes it
+        is the figure that says how much a shared cache would be worth."""
+        total = self.cache_hits + self.cache_misses
+        return self.cache_hits / total if total else 0.0
+
+    def cost_summary(self) -> str:
+        """One line: what the run cost. Complements ``outcomes()``, which says why
+        it went as it did."""
+        parts = [f"{self.rollouts} rollouts in {self.wallclock:.1f}s",
+                 self.usage.summary()]
+        if self.eval_seconds:
+            parts.append(f"{self.eval_seconds:.1f}s in the gate")
+        if self.stale_considered:
+            parts.append(f"stale {self.stale_rate():.0%}")
+        if self.cache_hits + self.cache_misses:
+            parts.append(f"cache {self.duplicate_rate():.0%} hit")
+        if self.sandboxes_created:
+            parts.append(f"{self.sandboxes_created} sandboxes, "
+                         f"{self.sandbox_wait_s:.1f}s waiting")
+        return " | ".join(parts)
+
     def save(self, path: str) -> None:
         """Write the evolved artifact and its run summary to a JSON file.
 
@@ -691,7 +840,8 @@ class EvolutionResult:
             "history": [
                 {"round": h.round, "held_out_reward": h.held_out_reward,
                  "n_items": h.n_items, "committed": h.committed,
-                 "rejected": h.rejected, "reasons": h.reasons}
+                 "rejected": h.rejected, "reasons": h.reasons,
+                 "elapsed_s": h.elapsed_s, "rollouts": h.rollouts}
                 for h in self.history
             ],
             "retired_workers": self.retired_workers,
@@ -699,6 +849,24 @@ class EvolutionResult:
             "stragglers": self.stragglers,
             "stop_reason": self.stop_reason,
             "ledger_log": list(self.ledger_log),
+            "usage": {"calls": self.usage.calls,
+                      "prompt_tokens": self.usage.prompt_tokens,
+                      "completion_tokens": self.usage.completion_tokens,
+                      "seconds": self.usage.seconds,
+                      "failures": self.usage.failures},
+            "wallclock": self.wallclock,
+            "rollouts": self.rollouts,
+            "rollout_seconds": self.rollout_seconds,
+            "eval_seconds": self.eval_seconds,
+            "stale_considered": self.stale_considered,
+            "stale_discarded": self.stale_discarded,
+            "cache_hits": self.cache_hits,
+            "cache_misses": self.cache_misses,
+            "sandbox_wait_s": self.sandbox_wait_s,
+            "sandbox_setup_s": self.sandbox_setup_s,
+            "sandboxes_created": self.sandboxes_created,
+            "sandboxes_reused": self.sandboxes_reused,
+            "sandbox_failures": self.sandbox_failures,
         }
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, indent=2, ensure_ascii=False)
@@ -789,6 +957,7 @@ class EvolutionResult:
 
         with open(path, encoding="utf-8") as fh:
             d = json.load(fh)
+        u = d.get("usage") or {}
         return cls(
             state=d["state"], rendered=d["rendered"],
             final_reward=d["final_reward"],
@@ -798,6 +967,26 @@ class EvolutionResult:
             forced_refreshes=d.get("forced_refreshes", 0),
             stragglers=d.get("stragglers", 0),
             stop_reason=d.get("stop_reason", "rounds"),
+            # Every cost field is `.get` with a default, so a file written before
+            # they existed loads as a run that simply did not measure them.
+            usage=Usage(calls=u.get("calls", 0),
+                        prompt_tokens=u.get("prompt_tokens", 0),
+                        completion_tokens=u.get("completion_tokens", 0),
+                        seconds=u.get("seconds", 0.0),
+                        failures=u.get("failures", 0)),
+            wallclock=d.get("wallclock", 0.0),
+            rollouts=d.get("rollouts", 0),
+            rollout_seconds=d.get("rollout_seconds", 0.0),
+            eval_seconds=d.get("eval_seconds", 0.0),
+            stale_considered=d.get("stale_considered", 0),
+            stale_discarded=d.get("stale_discarded", 0),
+            cache_hits=d.get("cache_hits", 0),
+            cache_misses=d.get("cache_misses", 0),
+            sandbox_wait_s=d.get("sandbox_wait_s", 0.0),
+            sandbox_setup_s=d.get("sandbox_setup_s", 0.0),
+            sandboxes_created=d.get("sandboxes_created", 0),
+            sandboxes_reused=d.get("sandboxes_reused", 0),
+            sandbox_failures=d.get("sandbox_failures", 0),
         )
 
 
@@ -820,6 +1009,10 @@ class _Engine:
     train_ids: List[str]
     artifact_id: str
     blast_radius: float
+    #: Every counter this run accumulates. Always present: an optional meter
+    #: would mean every recording site grows an `if`, and the sites are the hot
+    #: path.
+    meter: Meter = field(default_factory=Meter)
     #: Set only when the ledger lives in a throwaway directory this call created;
     #: ``None`` when the caller passed ``repo_path`` (theirs to keep, and how a run
     #: is resumed).
@@ -861,7 +1054,8 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
                   staleness_policy, aggregator_factory, oracle_budget,
                   eval_concurrency: int = 8,
                   cheap_eval_tasks: Optional[int] = None,
-                  shuffle: bool = False, seed: int = 0) -> _Engine:
+                  shuffle: bool = False, seed: int = 0,
+                  usage: Optional[Usage] = None) -> _Engine:
     """Wire the ledger, runtime, verifier and aggregator (shared by
     :func:`evolve` and :func:`~agentdescent.async_evolve.async_evolve`)."""
     import tempfile
@@ -945,8 +1139,14 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
             "rollouts. Pass more tasks or raise held_out_frac.",
             RuntimeWarning, stacklevel=3)
 
-    runtime = _Runtime(run=run, reward=reward, cache=_EvalCache(),
-                       eval_concurrency=eval_concurrency)
+    # Wrap the actors before anything else can capture them: `run` is closed over
+    # by the runtime, by every worker and by the verifier's `eval_fn`, so a later
+    # wrap would miss whichever reference was taken first.
+    meter = Meter(usage=usage) if usage is not None else Meter()
+    run, propose = measured(run, meter), measured(propose, meter)
+
+    runtime = _Runtime(run=run, reward=reward, cache=_EvalCache(meter),
+                       eval_concurrency=eval_concurrency, meter=meter)
 
     def serialize(a: EvolvingArtifact) -> dict:
         return {"state": a.state, "blast_radius": a.blast_radius}
@@ -1008,12 +1208,24 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
         budget=VerifierBudget(oracle_calls_remaining=oracle_budget))
 
     def _default_aggregator(ledger, verifier, audit, config, policy):
-        return Aggregator(ledger, verifier, audit, config, staleness_policy=policy)
+        return Aggregator(ledger, verifier, audit, config, staleness_policy=policy,
+                          meter=meter)
 
     aggregator = (aggregator_factory or _default_aggregator)(
         ledger, verifier, AuditScheduler(),
         agg_config or AggregatorConfig(batch_trigger=2, max_wait_rounds=1),
         staleness_policy)
+    # A custom factory cannot know about the meter -- its signature predates it
+    # and is part of the public surface. Attach it to whatever came back if that
+    # object has the slot and left it empty, so an `aggregator_factory` returning
+    # a plain `Aggregator` (or a subclass of one) still reports staleness. A
+    # factory returning something else simply reports nothing, which is the
+    # honest outcome.
+    if getattr(aggregator, "meter", None) is None:
+        try:
+            aggregator.meter = meter
+        except AttributeError:      # slots, or a read-only property
+            pass
     # A custom aggregator is the main extension point and is user code. Check the
     # contract here rather than letting it fail three frames deep in the driver
     # with something like "'MissingMethods' object has no attribute 'ingest'".
@@ -1026,7 +1238,8 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
 
     return _Engine(ledger, runtime, verifier, aggregator, strategy, run, reward,
                    propose, train, held_out, {t.id: t for t in train},
-                   [t.id for t in train], artifact_id, blast_radius, scratch)
+                   [t.id for t in train], artifact_id, blast_radius,
+                   meter=meter, scratch_repo=scratch)
 
 
 def evolve(
@@ -1066,6 +1279,10 @@ def evolve(
     seed: int = 0,
     on_round: Optional[Callable[["RoundInfo"], None]] = None,
     verbose: bool = False,
+    #: Share one `Usage` with your model adapters (`claude(usage=u)`) and the
+    #: result's token counts become real; without it only calls and seconds
+    #: are known, because an opaque `run` cannot report tokens.
+    usage: Optional[Usage] = None,
 ) -> EvolutionResult:
     """Evolve an artifact. Provide either ``agent`` (with ``solve``/``propose``)
     or the ``run`` / ``propose`` callables directly.
@@ -1240,6 +1457,13 @@ def evolve(
         Called with each :class:`RoundInfo` as the round completes -- progress
         for a long run, which otherwise reports nothing until it returns. An
         exception raised here is reported but does not abort the run.
+    usage:
+        Share one :class:`~agentdescent.agents.Usage` with your model adapters
+        (``claude(usage=u)``, ``openai_compatible(usage=u)``) and the result's
+        token counts become real. Without it the run still reports calls,
+        seconds and failures -- ``run`` is ``(rendered, task) -> str``, so an
+        opaque actor has no way to surface tokens, and inventing a number would
+        be worse than reporting zero.
     verbose:
         Print a line per round. Independent of the ``RuntimeWarning`` emitted
         when a run ends early -- that always fires.
@@ -1315,7 +1539,7 @@ def evolve(
             target_reward=target_reward, patience=patience,
             max_worker_errors=max_worker_errors,
             eval_concurrency=eval_concurrency,
-            on_round=on_round, verbose=verbose)
+            on_round=on_round, verbose=verbose, usage=usage)
 
     if n_workers < 1:
         raise ValueError(f"n_workers must be >= 1, got {n_workers}")
@@ -1340,7 +1564,11 @@ def evolve(
         held_out_frac=held_out_frac, repo_path=repo_path, agg_config=agg_config,
         staleness_policy=staleness_policy, aggregator_factory=aggregator_factory,
         oracle_budget=oracle_budget, eval_concurrency=eval_concurrency,
-        cheap_eval_tasks=cheap_eval_tasks, shuffle=shuffle, seed=seed)
+        cheap_eval_tasks=cheap_eval_tasks, shuffle=shuffle, seed=seed,
+        usage=usage)
+    # Start the clock after the wiring, before the first unit of work: setup
+    # is not what a time-to-quality number is asking about.
+    eng.meter.start()
     ledger, aggregator, strategy = eng.ledger, eng.aggregator, eng.strategy
     run, propose, reward = eng.run, eng.propose, eng.reward
     held_out, by_id, train_ids = eng.held_out, eng.by_id, eng.train_ids
@@ -1420,8 +1648,11 @@ def evolve(
             if not unit.keys:
                 return
             task = by_id[sampler.pick(unit.keys, r)]     # a task from this worker's shard
+            _t0 = time.time()
             output = run(artifact.render(), task)
             score = _checked_reward(reward(task, output), task)
+            eng.meter.add("rollouts")
+            eng.meter.add("rollout_seconds", time.time() - _t0)
             sampler.record(task.id, score)               # learn which tasks carry signal
             with unit_lock:
                 ok_units[0] += 1
@@ -1592,8 +1823,9 @@ def evolve(
             if section_violations[0]:
                 reasons["section-violation"] = section_violations[0]
                 section_violations[0] = 0
+        _m = eng.meter.snapshot()
         info = RoundInfo(r, round_reward, len(dev.state), committed, rejected,
-                         reasons)
+                         reasons, elapsed_s=_m.elapsed_s, rollouts=_m.rollouts)
         history.append(info)
         # Early stopping: an LLM rollout costs money, so do not keep buying them
         # once the artifact has converged or clearly stalled.
@@ -1665,6 +1897,7 @@ def evolve(
     result = EvolutionResult(state=dict(final.state), rendered=final.render(),
                              final_reward=final_reward, history=history,
                              ledger_log=_safe_log(ledger), error=run_error,
-                             stop_reason="error" if run_error else stop_reason)
+                             stop_reason="error" if run_error else stop_reason,
+                             **_cost_fields(eng.meter))
     eng.cleanup()
     return result
