@@ -16,7 +16,7 @@ and *how*, that is *what*.
  treestrategy       sampling                            verifier
                     parallel                            staleness
                     scheduler                           governance
-                    dataloader / rewards                  metrics
+                    dataloader / rewards                  metrics · policies
 ```
 
 ## The loop
@@ -67,6 +67,7 @@ and *how*, that is *what*.
 | `pipeline` | the retirement and backpressure policies the two barrier-free runtimes share | [Async](async.md) |
 | `ledger` | the git-backed, compare-and-swap artifact store | [Ledger](ledger.md) |
 | `governance` | L0 frozen / L1 slow / L2 fast, by blast radius | [Governance](governance.md) |
+| `policies` | the contracts: which decisions are replaceable, and what each is given | [Architecture](architecture.md#35-what-the-infrastructure-owns-and-what-the-algorithm-owns) |
 | `metrics` | what the run cost: time, calls, staleness ratio, cache hits, sandbox waits | [Usage](usage.md#what-a-run-cost) |
 
 ## Reading order
