@@ -114,6 +114,7 @@ def provider(**kw):
 
 
 def command_for(spec=None, **kw):
+    kw.setdefault("rootless", False)      # command construction, not this machine
     p = provider(**kw)
     return p.run_command(spec or SandboxSpec(), "/host/ws", "lease-1")
 
@@ -153,10 +154,21 @@ def test_the_workspace_is_bind_mounted_and_is_the_working_directory():
 
 
 @pytest.mark.skipif(os.name == "nt", reason="uid/gid are POSIX")
-def test_it_runs_as_the_host_user():
+def test_a_rootful_engine_runs_as_the_host_user():
     """Root inside the container writes root-owned files into the bind mount,
     and then the host cannot even delete its own workspace."""
     assert flag_value(command_for(), "--user") == f"{os.getuid()}:{os.getgid()}"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="uid/gid are POSIX")
+def test_a_rootless_engine_gets_no_user_flag():
+    """It already maps the host user to root inside. Naming a uid there maps it
+    to a *subuid*, which cannot read files owned by the host user -- so the bind
+    mount reads as empty, indistinguishable from a mount that never happened.
+
+    Found on CI: every podman case failed and every docker case passed, because
+    the runner's podman is rootless and its docker is not."""
+    assert "--user" not in command_for(rootless=True)
 
 
 def test_the_lease_is_a_label_so_orphans_can_be_found_later():
