@@ -37,10 +37,11 @@ import warnings
 from typing import Callable, Dict, List, Optional
 
 from .agents import Usage
+from .policies import Policies
 from .evolution import (
     _publish_stable, _safe_log,
     Agent, EvolutionResult, Propose, Reward, RoundInfo, Run, Strategy, Task,
-    _cost_fields, _tally,
+    _cost_fields, _resolve_policies, _tally,
     SOLVED, _build_engine, _checked_proposal, _checked_reward,
 )
 from .aggregator import AggregatorConfig, check_reports
@@ -93,6 +94,7 @@ def async_evolve(
     #: result's token counts become real; without it only calls and seconds are
     #: known, because an opaque `run` cannot report tokens.
     usage: Optional[Usage] = None,
+    policies: Optional["Policies"] = None,
 ) -> EvolutionResult:
     """Evolve an artifact **without a round barrier**.
 
@@ -199,6 +201,18 @@ def async_evolve(
         be worse than reporting zero.
     verbose:
         Print one line per merger sweep.
+    policies:
+        Bundle of replaceable pieces (:class:`~agentdescent.policies.Policies`).
+        Every field defaults to ``None`` meaning "current behaviour", so
+        ``Policies()`` and passing nothing are the same run. The individual
+        keyword arguments -- ``task_sampler``, ``staleness_policy``,
+        ``aggregator_factory`` -- are shortcuts onto its fields and keep working;
+        an explicit argument wins over a bundle default rather than being
+        silently ignored. Fields whose implementations have not landed yet raise
+        rather than being accepted and ignored: a caller who passes a custom
+        acceptance rule and sees a finished run would reasonably conclude it ran.
+        New capabilities go here rather than adding another parameter to a
+        function that already has thirty-five.
 
     Returns
     -------
@@ -214,6 +228,11 @@ def async_evolve(
         ``RoundInfo.round`` is the sweep index. Compare ``final_reward`` across the
         sync and async paths, not ``len(history)``.
     """
+    _pol = _resolve_policies(policies, "async_evolve()", task_sampler=task_sampler,
+                             staleness=staleness_policy,
+                             aggregator_factory=aggregator_factory)
+    task_sampler, staleness_policy = _pol.task_sampler, _pol.staleness
+    aggregator_factory = _pol.aggregator_factory
     eng = _build_engine(
         tasks, reward, agent=agent, run=run, propose=propose, strategy=strategy,
         initial_state=initial_state, blast_radius=blast_radius, artifact_id=artifact_id,

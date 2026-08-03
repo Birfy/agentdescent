@@ -46,6 +46,7 @@ from .evolvable import Contract, ContractError, Diff, EvidenceCard
 from .governance import FROZEN_IDS, GovernanceError, assert_mutable
 from .ledger import Ledger, LedgerFailure
 from .metrics import Meter, measured
+from .policies import Policies
 from .sampling import RoundRobin, TaskSampler
 from .scheduler import AuditScheduler
 from .staleness import StalenessPolicy
@@ -604,6 +605,23 @@ def _publish_stable(aggregator) -> None:
         fn()
     except LedgerFailure:
         pass
+
+
+#: What `evolve` / `async_evolve` can honour from a `Policies` bundle today.
+#: Everything else raises rather than being accepted and ignored -- see
+#: `Policies.require_supported`. The set grows as the implementations land.
+_WIRED_POLICIES = ("task_sampler", "staleness", "aggregator_factory")
+
+
+def _resolve_policies(policies: Optional[Policies], where: str, **shortcuts) -> Policies:
+    """Fold the legacy keyword arguments into a bundle and check it is honourable.
+
+    The keyword arguments are shortcuts onto bundle fields, so an explicit
+    argument has to beat a bundle default -- being silently dropped is the one
+    outcome a caller cannot detect."""
+    merged = (policies or Policies()).merged_with(**shortcuts)
+    merged.require_supported(_WIRED_POLICIES, where)
+    return merged
 
 
 def _cost_fields(meter: Meter) -> Dict[str, Any]:
@@ -1283,6 +1301,7 @@ def evolve(
     #: result's token counts become real; without it only calls and seconds
     #: are known, because an opaque `run` cannot report tokens.
     usage: Optional[Usage] = None,
+    policies: Optional["Policies"] = None,
 ) -> EvolutionResult:
     """Evolve an artifact. Provide either ``agent`` (with ``solve``/``propose``)
     or the ``run`` / ``propose`` callables directly.
@@ -1467,6 +1486,18 @@ def evolve(
     verbose:
         Print a line per round. Independent of the ``RuntimeWarning`` emitted
         when a run ends early -- that always fires.
+    policies:
+        Bundle of replaceable pieces (:class:`~agentdescent.policies.Policies`).
+        Every field defaults to ``None`` meaning "current behaviour", so
+        ``Policies()`` and passing nothing are the same run. The individual
+        keyword arguments -- ``task_sampler``, ``staleness_policy``,
+        ``aggregator_factory`` -- are shortcuts onto its fields and keep working;
+        an explicit argument wins over a bundle default rather than being
+        silently ignored. Fields whose implementations have not landed yet raise
+        rather than being accepted and ignored: a caller who passes a custom
+        acceptance rule and sees a finished run would reasonably conclude it ran.
+        New capabilities go here rather than adding another parameter to a
+        function that already has thirty-five.
 
     Returns
     -------
@@ -1539,7 +1570,7 @@ def evolve(
             target_reward=target_reward, patience=patience,
             max_worker_errors=max_worker_errors,
             eval_concurrency=eval_concurrency,
-            on_round=on_round, verbose=verbose, usage=usage)
+            on_round=on_round, verbose=verbose, usage=usage, policies=policies)
 
     if n_workers < 1:
         raise ValueError(f"n_workers must be >= 1, got {n_workers}")
@@ -1548,6 +1579,11 @@ def evolve(
     if max_concurrency < 1:
         raise ValueError(f"max_concurrency must be >= 1, got {max_concurrency}")
     parallel = parallel or DataParallel()
+    _pol = _resolve_policies(policies, "evolve()", task_sampler=task_sampler,
+                             staleness=staleness_policy,
+                             aggregator_factory=aggregator_factory)
+    task_sampler, staleness_policy = _pol.task_sampler, _pol.staleness
+    aggregator_factory = _pol.aggregator_factory
     sampler = task_sampler or RoundRobin()
     strategy = strategy or AppendRules()
     # TP owns a *section of the artifact*, so it needs the artifact's key space --

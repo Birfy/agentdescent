@@ -123,6 +123,44 @@ the Aggregator calls at steps 1–3 and 5 (cheap) and at step 4 (oracle, budgete
 
 ---
 
+## 3.5 What the infrastructure owns, and what the algorithm owns
+
+An evolution algorithm decides *what to try and what to keep*. Everything else --
+where a rollout runs, how many run at once, what happens when one dies -- is
+machinery. `agentdescent/policies.py` is where that line is written down, as
+`Protocol` definitions with no implementations.
+
+| | owns |
+|---|---|
+| **the algorithm** | task sampling · proposal generation · conflict resolution · fusion · staleness · acceptance · promotion |
+| **the infrastructure** | sandbox provisioning, placement, reuse and reclamation · quotas and admission · processes and re-dispatch · secret injection · environment fingerprints · all measurement |
+
+And one thing neither owns, stated as a rule because it is easy to violate by
+accident:
+
+> **The algorithm may not see sandbox, process or host identity.** A policy that
+> decides differently because a candidate came from worker 3 makes the run
+> irreproducible, and makes any comparison between parallel configurations
+> meaningless.
+
+The testable form of that rule is purity: the default policies are functions of
+`(artifact, cards, versions)` and read no ambient process state -- not
+`os.environ`, not the working directory, not the clock. Multiple agents running
+the same algorithm in different sandboxes is only a coherent idea if this holds.
+
+Two consequences worth knowing when you write a policy:
+
+* **Contracts are written from the call sites, not from these docs.** This page
+  once described the verifier as three methods when the merge path calls four; a
+  verifier written from the page raised `AttributeError` half an hour into a run.
+  `tests/test_policy_contract.py` now greps the call sites and fails if the
+  contract drifts.
+* **Everything replaceable arrives in one argument.** `evolve(policies=...)`
+  takes a [`Policies`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/policies.py)
+  bundle; the individual keyword arguments are shortcuts onto its fields and keep
+  working. A field whose implementation has not landed raises rather than being
+  accepted and ignored.
+
 ## 4. The two runtimes
 
 !!! warning "Two stacks — know which one you are reading about"

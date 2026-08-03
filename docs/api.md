@@ -8,7 +8,7 @@ page and the code disagree, so a signature here is the signature you get.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-135 public names across 24 modules.
+150 public names across 25 modules.
 
 ---
 
@@ -732,6 +732,14 @@ The reward functions everyone writes, with the details right. &nbsp;·&nbsp; `ag
 
 Values rather than classes or functions.
 
+### `AcceptDecision`
+
+Commit or not, and -- when not -- which of the merge categories it was.
+
+### `AcceptancePolicy`
+
+Whether a candidate is committed.
+
 ### `AggregatorFactory`
 
 `(ledger, verifier, audit, config, policy) -> AggregatorProtocol` — how a custom optimizer is installed.
@@ -743,6 +751,10 @@ Accumulate a deduped list of rules/lessons (append-only, content-addressed).
 ### `Completion`
 
 `Callable[[str], str]` — the one contract every model and agent satisfies.
+
+### `ConflictPolicy`
+
+Which of a batch of mutually contradictory changes survive.
 
 ### `EDIT_PROTOCOL`
 
@@ -756,6 +768,10 @@ The L2/L1 blast-radius boundary (`0.30`).
 
 Artifact ids the loop may read but never mutate (L0).
 
+### `FusionPolicy`
+
+How complementary diffs become one candidate.
+
 ### `KeyedRules`
 
 One entry per *category*: competing proposals contradict and are resolved.
@@ -768,9 +784,49 @@ Where a runner writes the evolving tree inside a workspace (`claude_skill`, `ski
 
 The exception tuple a caller catches to treat any ledger problem as recoverable.
 
+### `LedgerProtocol`
+
+Seven methods: four the aggregator calls, three more the engine calls.
+
+### `MergeContext`
+
+Everything an `AcceptancePolicy` is allowed to look at.
+
+### `Policies`
+
+Every replaceable piece, in one argument.
+
+### `Promotion`
+
+One artifact the `PromotionPolicy` believes `stable` should hold.
+
+### `PromotionPolicy`
+
+Which artifacts `dev` has proved well enough to copy onto `stable`.
+
+### `ProposalContext`
+
+What a `ProposalPolicy` is given for one rollout.
+
+### `ProposalPolicy`
+
+How a rollout becomes candidate changes.
+
 ### `SOLVED`
 
 Reward at or above which a task counts as solved (`0.999`). Lower it for a graded scorer, or every rollout asks the reflector to fix an answer that was already good.
+
+### `Sandbox`
+
+One acquired execution environment.
+
+### `SandboxProvider`
+
+Where sandboxes come from and go back to.
+
+### `SandboxSpec`
+
+What environment one rollout needs. Must survive JSON: it crosses processes.
 
 ### `SingleSlot`
 
@@ -783,6 +839,10 @@ Defines *what evolves and how* -- the representation and the merge rule.
 ### `TEST_FAILURE_MARKER`
 
 Prefix of the output `code_runner` produces when the frozen gate fails, so the failure scores 0 and the reflector can read it.
+
+### `VerifierProtocol`
+
+Four methods, from `grep 'self\.verifier\.' agentdescent/aggregator.py`.
 
 ### `VersionVector`
 
