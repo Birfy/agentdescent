@@ -91,9 +91,78 @@ def test_a_distrusted_artifact_opens_the_gate_below_the_blast_radius_threshold()
 
 
 def test_a_high_blast_radius_artifact_is_still_audited_unconditionally():
-    """The other half of the condition must keep working."""
+    """The other half of the condition must keep working.
+
+    This used to assert `oracle_calls_used > 0`, which stopped being the same
+    question once the audit began reusing the full-set measurement the
+    acceptance test had already taken: the gate opens, the audit runs, and no
+    budget moves. `AuditScheduler.audits` counts the thing being asserted.
+    """
     _, agg = _run(blast_radius=0.6)
-    assert agg.verifier.budget.oracle_calls_used > 0
+    assert agg.audit.audits > 0
+
+
+def test_an_l1_audit_reuses_the_measurement_instead_of_re_buying_it():
+    """`oracle_eval` and `eval_counts` are the same sweep over the same set.
+
+    Buying it twice was never free of consequence -- see the sub-sample veto
+    below -- and the budget it consumed made `oracle_budget` look like a cost cap
+    that was doing something.
+    """
+    _, agg = _run(blast_radius=0.6)
+    assert agg.audit.audits > 0, "premise: an L1 artifact is audited every merge"
+    assert agg.verifier.budget.oracle_calls_used == 0, (
+        "the audit re-bought a full held-out sweep the acceptance test had "
+        "already paid for")
+
+
+def test_the_audit_gate_never_vetoes_on_the_cheap_sub_sample():
+    """The hole that reuse closes, stated as the invariant it broke.
+
+    Past `oracle_budget`, `oracle_eval` degrades to `rule_eval` -- a sub-sample.
+    The gate then vetoed on it: measured, a candidate that took the full-set rate
+    from 0.5 to 1.0 came back `oracle-rejected` because a two-task sample scored
+    both sides at 0.5. Two sections of the verifier page promise sub-sampling can
+    never decide a commit.
+    """
+    from agentdescent.aggregator import Aggregator, AggregatorConfig
+    from agentdescent.evolvable import Diff
+    from agentdescent.ledger import Ledger
+    from agentdescent.stats import BetaPosterior
+
+    held_out = list(range(10))
+
+    class _Art:
+        id, blast_radius, version, state = "a", 0.6, 1, {}
+
+        def __init__(self, name):
+            self.name = name
+
+    base, cand = _Art("base"), _Art("cand")
+
+    def eval_fn(artifact, tasks):
+        if len(tasks) < len(held_out):
+            return 0.5                       # the sub-sample cannot see it
+        return 1.0 if artifact.name == "cand" else 0.5
+
+    verifier = ThreeLayerVerifier(
+        eval_fn=eval_fn, held_out=held_out, rule_subset=2, learned_noise=0.0,
+        budget=VerifierBudget(oracle_calls_remaining=0))     # already exhausted
+
+    import tempfile
+
+    ledger = Ledger(tempfile.mkdtemp() + "/repo", lambda a: {},
+                    lambda i, v, s: _Art("base"))
+    agg = Aggregator(ledger, verifier, AuditScheduler(), AggregatorConfig())
+
+    rejected = agg._audit(base, "a", cand, Diff("d", "a", {"k": "v"}),
+                          base_full=0.5, cand_full=1.0,
+                          base_score=verifier.cheap_eval(base),
+                          cand_score=verifier.cheap_eval(cand),
+                          prior=BetaPosterior())
+    assert not rejected, (
+        "the audit vetoed a candidate that doubled the full held-out rate, "
+        "because an exhausted budget turned the oracle into a 2-task sample")
 
 
 # -- the cheap layer is actually cheap ------------------------------------------

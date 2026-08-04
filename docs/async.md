@@ -88,6 +88,24 @@ Three properties are worth knowing before you tune anything:
   conflicts on this path, and a custom
   [`aggregator_factory`](aggregator.md) sees only already-rebased cards. Every
   optimizer that works synchronously works here unchanged.
+
+    Two consequences follow from "only writer", and both used to be paid for
+    rather than used:
+
+    * **The head is published, not fetched.** A worker measures its drift against
+      a version the merger publishes after each sweep, not against the ledger. It
+      used to read the ledger on *every rollout*, and a ledger read is a
+      `git checkout` behind a process-wide file lock plus an RLock the whole run
+      queues on — so the cost of asking "am I far enough behind?" grew with the
+      concurrency it exists to support (measured: 46 reads for a 21-rollout run,
+      22 after). The published head can lag by one sweep, which delays a refresh
+      by at most one rollout; the refresh itself still takes a real snapshot.
+    * **The staleness denominator is split.** This gate sees every card and
+      forwards only the survivors, and `Aggregator` then counts those survivors
+      on the same meter — so each survivor was counted as "considered" twice, and
+      `result.stale_rate()` came out at roughly half the truth (20 cards
+      reporting `stale_considered = 40`). Each side now counts what only it can
+      see: the discards here, the survivors there.
 * **A backpressure guard forces a global sync if the pipeline stalls** (evidence
   arriving, nothing committing). Without it a mismatched `async_ratio > alpha`
   livelocks under Guarded: workers propose against a snapshot too old to accept,

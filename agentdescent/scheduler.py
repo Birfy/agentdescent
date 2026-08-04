@@ -172,6 +172,7 @@ class AuditScheduler:
         self._collect = collect
         self._max_queued = max_queued
         self._dropped = 0
+        self._audits = 0
         self._lock = threading.Lock()               # submitted from worker threads
 
     def trust(self, artifact_id: str) -> float:
@@ -218,9 +219,20 @@ class AuditScheduler:
         "High-impact" means L1, and the boundary belongs to
         :func:`~agentdescent.governance.classify` -- a third hand-written
         threshold here (``>= 0.5``) meant an artifact at 0.4 was L1 by governance
-        and audited like an L2 skill: never."""
+        and audited like an L2 skill: never.
+
+        Counts the audits it opens (:attr:`audits`). The obvious way to ask "did
+        the gate ever open" used to be ``verifier.budget.oracle_calls_used``, and
+        that stopped being the same question once the aggregator started reusing
+        a full-set measurement it had already paid for: the gate opens, the audit
+        runs, and no budget moves. A counter here answers it directly instead of
+        inferring it from what was spent."""
         from .governance import FAST_MAX
-        return blast_radius > FAST_MAX or self._trust[artifact_id] < 0.75
+        with self._lock:
+            opened = blast_radius > FAST_MAX or self._trust[artifact_id] < 0.75
+            if opened:
+                self._audits += 1
+            return opened
 
     def pop(self) -> Optional[_AuditItem]:
         with self._lock:
@@ -232,6 +244,12 @@ class AuditScheduler:
     def dropped(self) -> int:
         """How many low-priority audits were shed to stay under the cap."""
         return self._dropped
+
+    @property
+    def audits(self) -> int:
+        """How many times the oracle gate opened. See :meth:`force_oracle`."""
+        with self._lock:
+            return self._audits
 
     def __len__(self) -> int:
         return len(self._items)

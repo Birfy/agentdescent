@@ -559,20 +559,32 @@ class Aggregator:
             self.audit.update_trust(
                 artifact_id, (cand_full > base_full) == (cand_score > base_score))
         if self.audit.force_oracle(artifact.blast_radius, artifact_id):
-            oracle_base = self.verifier.oracle_eval(artifact)
-            oracle_cand = self.verifier.oracle_eval(best_state)
+            # A verifier whose oracle scores the same set `eval_counts` does has
+            # already been paid for: `base_full` / `cand_full` ARE that
+            # measurement. Re-buying it was not merely wasteful -- `oracle_eval`
+            # degrades to `rule_eval` once the budget is gone, so past that point
+            # the gate vetoed on the cheap SUB-SAMPLE. Measured: a candidate that
+            # took the full-set rate from 0.5 to 1.0 came back `oracle-rejected`
+            # because the two-task sample scored both at 0.5. The verifier page
+            # promises in two places that sub-sampling can never decide a commit;
+            # this was the path that made it false.
+            if getattr(self.verifier, "oracle_shares_full_set", False):
+                oracle_base, oracle_cand = base_full, cand_full
+            else:
+                oracle_base = self.verifier.oracle_eval(artifact)
+                oracle_cand = self.verifier.oracle_eval(best_state)
             agreed = (oracle_cand > oracle_base) == (cand_score > base_score)
             self.audit.update_trust(artifact_id, agreed)
             if oracle_cand <= oracle_base:
                 prior.observe_delta(oracle_cand - oracle_base)
+                # Not settled, unlike the CAS-conflict path below -- and the
+                # asymmetry is deliberate. A CAS-conflicted diff lost a race and
+                # was never judged against the new head, so it deserves another
+                # look; one rejected here was judged and lost, and its tournament
+                # rivals scored below it on the same held-out set. Re-filing them
+                # would just buy the same rejection again.
                 return True
         return False
-
-        # Not settled, unlike the CAS-conflict path below -- and the asymmetry is
-        # deliberate. A CAS-conflicted diff lost a race and was never judged against
-        # the new head, so it deserves another look; one rejected here was judged and
-        # lost, and its tournament rivals scored below it on the same held-out set.
-        # Re-filing them would just buy the same rejection again.
 
     def _commit_with_retry(self, artifact_id, candidate, diff, head):
         """CAS, rebasing onto whatever landed first. ``None`` when it kept losing.

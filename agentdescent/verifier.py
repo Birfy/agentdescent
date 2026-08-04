@@ -61,6 +61,25 @@ class ThreeLayerVerifier:
     budget: VerifierBudget = field(default_factory=VerifierBudget)
     _rng: random.Random = field(init=False, repr=False)
 
+    #: Does :meth:`oracle_eval` score exactly the set :meth:`eval_counts` scores?
+    #:
+    #: For this class it always does -- both are ``eval_fn(artifact, held_out)``,
+    #: which ``docs/verifier.md`` already noted when it explained that an L1 audit
+    #: costs no extra model calls. The aggregator reads this and **reuses** the
+    #: full-set rates it has already measured instead of buying them again.
+    #:
+    #: That is not only a saving. Re-buying them goes through :meth:`oracle_eval`,
+    #: which degrades to :meth:`rule_eval` once the budget is gone -- so an
+    #: exhausted budget silently turned the audit gate into a *sub-sample* veto,
+    #: which is the one thing sub-sampling is documented never to do. See
+    #: :meth:`oracle_eval`.
+    #:
+    #: Not annotated, so it is a plain class attribute rather than a
+    #: constructor field: it is a statement about how this class is written, not
+    #: a knob. A custom verifier whose oracle really is an independent
+    #: measurement simply does not define it, and keeps being called.
+    oracle_shares_full_set = True
+
     def __post_init__(self) -> None:
         self._rng = random.Random(self.seed)
         self._subsets: Dict[int, Sequence] = {}
@@ -124,7 +143,17 @@ class ThreeLayerVerifier:
         The budget is a real cap, not a counter: ``eval_fn`` is the caller's
         scorer, so on an LLM workload every oracle call is a full held-out sweep
         of real model calls. Once the budget is exhausted this falls back to the
-        cheap layer rather than spending money it was told not to spend."""
+        cheap layer rather than spending money it was told not to spend.
+
+        **That fallback is a downgrade, so the result must not decide a commit.**
+        Past the budget this returns a *sub-sample* score, and the aggregator's
+        audit gate used to veto on it: measured, a candidate that doubled the
+        full-set rate (0.5 -> 1.0) was reported ``oracle-rejected`` because a
+        two-task sample could not see the difference. The merge path no longer
+        reaches here at all -- see :attr:`oracle_shares_full_set` -- and a
+        substitute whose oracle degrades the same way should either set that
+        attribute or keep the measurement exact.
+        """
         if not self.budget.can_spend():
             return self.rule_eval(artifact)
         self.budget.spend()
