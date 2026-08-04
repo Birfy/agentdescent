@@ -653,18 +653,47 @@ def _resolve_policies(policies: Optional[Policies], where: str, **shortcuts) -> 
     return merged
 
 
-def _spec_for(engine: "_Engine", artifact, task: Task):
-    """Describe one rollout so an executor can run it anywhere.
+def undescribable_actor(which: str = "run"):
+    """The ``Ref`` a spec carries when ``evolve()`` cannot name the caller's actor.
 
-    The `Ref`s name this package's own entry points, which is enough for an
-    in-process executor (it holds the actors directly) and is what a
-    cross-process one resolves on the far side."""
+    Module-level and public because a `Ref` is resolved *by name*, including on
+    the far side of a process boundary -- which is exactly the case this exists
+    to report.
+
+    `evolve()` is handed `run` and `reward` as callables. In this process that is
+    all an executor needs, and `ThreadExecutor` is given them directly. There is
+    no way to turn a closure back into `Ref("module:factory", {...})`, so a spec
+    built here cannot describe them for anybody else, and the honest thing for
+    the spec to carry is a reference that says so when it is resolved.
+    """
+    from .workspec import RefError
+
+    raise RefError(
+        f"evolve() cannot describe its `{which}` argument as a Ref: it was passed "
+        "as a callable, and a closure has no name to resolve on the other side. "
+        "The built-in ThreadExecutor is handed the callables directly and never "
+        "reaches this. An executor that resolves the spec instead -- anything "
+        "across a process boundary -- needs the rollout described as data; build "
+        "the RolloutSpecs yourself and drive the executor directly (see "
+        "docs/execution.md).")
+
+
+def _spec_for(engine: "_Engine", artifact, task: Task):
+    """Describe one rollout, as completely as `evolve()`'s arguments allow.
+
+    Everything the far side needs is here except the two things `evolve()` was
+    given as closures. Those are carried as a reference that raises when it is
+    resolved, rather than as a plausible-looking default: a spec that quietly
+    names *some* actor turns "this executor cannot be driven from `evolve()`"
+    into a finished run measuring the wrong thing.
+    """
     from .policies import SandboxSpec
     from .workspec import Ref, RolloutSpec
 
     return RolloutSpec(
         rendered=artifact.render(), task=task,
-        run=Ref("agentdescent.agents:echo"), reward=Ref("agentdescent.rewards:contains"),
+        run=Ref("agentdescent.evolution:undescribable_actor", {"which": "run"}),
+        reward=Ref("agentdescent.evolution:undescribable_actor", {"which": "reward"}),
         sandbox=engine.sandbox_spec or SandboxSpec())
 
 
@@ -1426,11 +1455,29 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     # In-process by default, taking the actors directly: a closure crosses no
     # boundary here, and resolving a `Ref` per rollout would rebuild a model
     # client every time.
-    executor = (policies_bundle.executor
-                if policies_bundle is not None and policies_bundle.executor is not None
-                else ThreadExecutor(max(1, eval_concurrency), meter=meter,
-                                    run=run, reward=reward))
-    # A supplied executor was built before this run existed, so it has no meter.
+    supplied = (policies_bundle.executor
+                if policies_bundle is not None else None)
+    executor = supplied if supplied is not None else ThreadExecutor(
+        max(1, eval_concurrency), meter=meter, run=run, reward=reward)
+    if supplied is not None:
+        # A supplied executor was built before this run existed, so it has
+        # neither the meter nor the actors. The meter is optional -- an executor
+        # that cannot report simply reports nothing. The actors are not: without
+        # them the executor falls back to resolving the spec, and `evolve()`
+        # cannot describe a closure as a `Ref`, so every rollout would fail. That
+        # was the behaviour, and it produced a finished run with `rollouts=0` and
+        # a plausible reward from the gate -- a wrong answer wearing the shape of
+        # a right one. Refuse instead, and say what would work.
+        if not callable(getattr(supplied, "attach_actors", None)):
+            raise TypeError(
+                f"policies.executor is a {type(supplied).__name__}, which cannot "
+                "be driven by evolve(): it has no attach_actors(run, reward), so "
+                "it would have to resolve the rollout spec -- and evolve() is "
+                "given `run` and `reward` as callables, which have no name to "
+                "resolve. Pass an in-process executor (ThreadExecutor), or "
+                "describe the rollouts yourself as RolloutSpecs and drive the "
+                "executor directly (see docs/execution.md).")
+        supplied.attach_actors(run, reward)
     attach = getattr(executor, "attach_meter", None)
     if callable(attach):
         attach(meter)

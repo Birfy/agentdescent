@@ -7,6 +7,24 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **`policies=Policies(executor=...)` produced a finished run that measured
+  nothing.** `evolve()` describes each rollout as a `RolloutSpec`, and the
+  `Ref`s in it named `agents:echo` / `rewards:contains` as stand-ins — the
+  caller's `run` and `reward` are closures and cannot be named. The built-in
+  `ThreadExecutor` holds the actors directly and never resolved them, so nothing
+  noticed; a *supplied* executor resolved the stand-ins, failed every rollout on
+  an argument-count mismatch, and returned `rollouts=0` with a plausible
+  `final_reward` from the gate and no exception raised.
+
+  A supplied executor is now handed the run's actors via `attach_actors(run,
+  reward)` — `evolve()`'s win over any passed to the constructor, so which actor
+  runs does not depend on how the executor was built. One that cannot accept
+  them (any cross-process executor: a closure does not cross a boundary) is
+  **refused at build time** naming the fix, rather than producing a wrong answer
+  in the shape of a right one. The spec's placeholder `Ref`s now point at
+  `evolution:undescribable_actor`, which raises and explains itself if anything
+  else resolves them.
+
 - **`cheap_eval_tasks` could veto a commit, while four places promised it could
   not.** The aggregator's acceptance step refuses a candidate that scores worse
   than the incumbent — a guard worth having — but it read the *cheap* layer,

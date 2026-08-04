@@ -176,6 +176,26 @@ class ThreadExecutor:
         evaluation cache made, in the next seam along."""
         self.meter = meter
 
+    def attach_actors(self, run: Callable[[str, Any], str],
+                      reward: Callable[[Any, str], float]) -> None:
+        """Take the run's actors directly, rather than from the spec.
+
+        Same reason as `attach_meter`: an executor passed to `evolve()` was built
+        before the run existed, so it has neither. Without this it would fall
+        back to resolving the spec's `Ref`s -- and `evolve()` is handed its actors
+        as closures, which have no name to resolve, so every rollout would fail
+        for a reason that has nothing to do with the caller's code.
+
+        Only in-process executors can accept this. A closure does not cross a
+        boundary, which is the whole reason `workspec` exists.
+
+        `evolve()`'s actors **win** over any passed to the constructor. Which
+        actor a rollout uses would otherwise depend on how the executor happened
+        to be built, which is not something a reader of the `evolve()` call can
+        see.
+        """
+        self._run, self._reward = run, reward
+
     def rollout(self, spec: RolloutSpec) -> Result:
         """One rollout in this process. Same path `map_rollouts` takes."""
         return self._one(spec)

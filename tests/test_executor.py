@@ -372,3 +372,70 @@ def test_a_caller_contract_failure_still_stops_the_run():
         assert "range" in str(excinfo.value).lower() or "0, 1" in str(excinfo.value)
     finally:
         ex.shutdown()
+
+
+def test_a_supplied_executor_runs_the_callers_actors():
+    """`evolve()` hands its actors to whatever executor it was given.
+
+    Without that the executor falls back to resolving the spec's `Ref`s -- and
+    `evolve()` is handed `run` and `reward` as closures, which have no name to
+    resolve. The failure was silent in the worst way: every rollout failed, the
+    gate still scored the artifact, and the run returned `rollouts=0` with a
+    plausible `final_reward` and no exception.
+    """
+    from agentdescent import AppendRules, Policies, evolve
+    from agentdescent.executor import ThreadExecutor
+
+    calls = []
+    tasks = [Task(id=f"t{i}", prompt=f"q{i}", meta={"gold": str(i)}) for i in range(6)]
+
+    def run(rendered, task):
+        calls.append(task.id)
+        return task.meta["gold"]
+
+    ex = ThreadExecutor(2)                    # no actors: only evolve() has them
+    try:
+        result = evolve(tasks, lambda t, o: 1.0 if o == t.meta["gold"] else 0.0,
+                        run=run, propose=lambda r, t, o, s: t.id,
+                        strategy=AppendRules(), rounds=3, n_workers=2,
+                        held_out_frac=0.5, seed=0, policies=Policies(executor=ex))
+    finally:
+        ex.shutdown()
+    assert calls, "the caller's `run` was never invoked through the executor"
+    assert result.rollouts > 0, "a supplied executor produced no rollouts at all"
+    assert result.error is None, result.error
+
+
+def test_an_executor_evolve_cannot_drive_is_refused_not_run():
+    """A cross-process executor cannot take closures, and `evolve()` has nothing
+    else to give it. Refusing at build time is the only honest answer: the run it
+    would otherwise produce measures nothing and says so nowhere."""
+    from agentdescent import AppendRules, Policies, evolve
+    from agentdescent.supervisor import ProcessExecutor
+
+    tasks = [Task(id=f"t{i}", prompt=f"q{i}", meta={"gold": str(i)}) for i in range(6)]
+    with pytest.raises(TypeError) as excinfo:
+        evolve(tasks, lambda t, o: 1.0, run=lambda r, t: "x",
+               propose=lambda r, t, o, s: None, strategy=AppendRules(),
+               rounds=1, n_workers=1, held_out_frac=0.5, seed=0,
+               policies=Policies(executor=ProcessExecutor(1)))
+    assert "attach_actors" in str(excinfo.value)
+
+
+def test_a_spec_built_by_evolve_refuses_to_resolve_its_actors():
+    """The spec carries a reference that raises, not a plausible default.
+
+    It used to name `agents:echo` and `rewards:contains` -- real callables with
+    the wrong signature -- so the failure arrived as a `TypeError` about argument
+    counts, naming neither the cause nor the fix.
+    """
+    from agentdescent.evolution import undescribable_actor
+    from agentdescent.workspec import Ref, RefError
+
+    ref = Ref("agentdescent.evolution:undescribable_actor", {"which": "reward"})
+    with pytest.raises(RefError) as excinfo:
+        ref.resolve()
+    assert "reward" in str(excinfo.value)
+    assert "closure" in str(excinfo.value)
+    with pytest.raises(RefError):
+        undescribable_actor("run")

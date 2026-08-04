@@ -266,7 +266,7 @@ class Ledger:
     def _exclusive(self):
         """Hold the repository against other **processes**, not just threads.
 
-        `self._lock` is a `threading.Lock`: it makes one process's workers take
+        `self._lock` is a `threading.RLock`: it makes one process's workers take
         turns and says nothing to a second process. Two of those interleave a
         read-modify-write of `versions.json` and one commit disappears -- the
         lost update CAS exists to prevent, arriving by a route CAS cannot see,
@@ -281,13 +281,20 @@ class Ledger:
         `fcntl` where there is one, an atomically-created directory where there
         is not -- `mkdir` is atomic on every filesystem worth running this on,
         which is the only property required.
+
+        **This section does not nest.** `self._lock` is an `RLock` and would let
+        the same thread back in, but `flock` is held by an *open file
+        description*: a second `open()` from this process is a different one, so
+        a nested acquire blocks against itself and fails after the timeout rather
+        than deadlocking outright. Every public method holds it exactly once and
+        calls no other public method, which is what keeps that unreachable.
         """
         # Inside `.git/`, not the working tree: a lock file in the tree gets
         # committed by `add -A`, and then blocks the next `checkout` as an
         # untracked file that would be overwritten. `.git/` is git's own space
         # and is never part of a branch.
         path = os.path.join(self.repo_path, ".git", _LOCK_NAME)
-        with self._lock:                      # threads first: cheaper, and nested
+        with self._lock:                      # threads first, and cheaper
             handle = None
             try:
                 handle = _acquire_file_lock(path)
