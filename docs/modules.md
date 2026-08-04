@@ -75,6 +75,7 @@ and *how*, that is *what*.
 | `executor` · `supervisor` | where rollouts run: threads, or supervised worker processes | [Parallelism](parallelism.md#where-rollouts-run-the-execution-plane) |
 | `sandbox` | workspace leases: one ceiling, one release path, reclaim what an owner abandoned | [Directory evolution](directory-evolution.md#how-workspaces-are-managed) |
 | `defaults` | the shipped algorithm as replaceable pieces: conflict, fusion, acceptance, promotion | [Aggregator](aggregator.md) |
+| `sandbox_shared` | one ceiling across processes, counted from the lease directory | [Directory evolution](directory-evolution.md#one-ceiling-across-processes) |
 | `sandbox_container` | the provider that makes a sandbox an actual boundary (needs docker/podman) | [Directory evolution](directory-evolution.md#isolation-strength-three-levels) |
 | `policies` | the contracts: which decisions are replaceable, and what each is given | [Architecture](architecture.md#35-what-the-infrastructure-owns-and-what-the-algorithm-owns) |
 | `metrics` | what the run cost: time, calls, staleness ratio, cache hits, sandbox waits | [Usage](usage.md#what-a-run-cost) |

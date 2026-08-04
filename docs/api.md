@@ -8,7 +8,7 @@ page and the code disagree, so a signature here is the signature you get.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-163 public names across 30 modules.
+164 public names across 31 modules.
 
 ---
 
@@ -871,6 +871,10 @@ Where sandboxes come from and go back to.
 ### `SandboxSpec`
 
 What environment one rollout needs. Must survive JSON: it crosses processes.
+
+### `SharedSandboxPool`
+
+A pool whose ceiling is the machine's, not this process's.
 
 ### `SingleSlot`
 
