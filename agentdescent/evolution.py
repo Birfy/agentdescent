@@ -664,6 +664,8 @@ def _cost_fields(meter: Meter) -> Dict[str, Any]:
         "eval_seconds": m.eval_seconds,
         "stale_considered": m.stale_considered,
         "stale_discarded": m.stale_discarded,
+        "redispatched": m.redispatched,
+        "duplicates_dropped": m.duplicates_dropped,
         "cache_hits": m.cache_hits,
         "cache_misses": m.cache_misses,
         "sandbox_wait_s": m.sandbox_wait_s,
@@ -775,6 +777,12 @@ class EvolutionResult:
     #: denominator a stale count cannot be read at all.
     stale_considered: int = 0
     stale_discarded: int = 0
+    #: Task-level recovery: tasks sent out again after their worker was presumed
+    #: lost, and results that arrived for a task already answered. The second
+    #: being non-zero means re-dispatch is firing on workers that were still
+    #: alive -- correct, and paid for twice.
+    redispatched: int = 0
+    duplicates_dropped: int = 0
     #: Evaluation cache. ``misses`` is the number of evaluations actually
     #: performed; the ratio is the duplicate-computation figure a multi-process
     #: run has to report.
@@ -903,6 +911,8 @@ class EvolutionResult:
             "eval_seconds": self.eval_seconds,
             "stale_considered": self.stale_considered,
             "stale_discarded": self.stale_discarded,
+            "redispatched": self.redispatched,
+            "duplicates_dropped": self.duplicates_dropped,
             "cache_hits": self.cache_hits,
             "cache_misses": self.cache_misses,
             "sandbox_wait_s": self.sandbox_wait_s,
@@ -1023,6 +1033,8 @@ class EvolutionResult:
             eval_seconds=d.get("eval_seconds", 0.0),
             stale_considered=d.get("stale_considered", 0),
             stale_discarded=d.get("stale_discarded", 0),
+            redispatched=d.get("redispatched", 0),
+            duplicates_dropped=d.get("duplicates_dropped", 0),
             cache_hits=d.get("cache_hits", 0),
             cache_misses=d.get("cache_misses", 0),
             sandbox_wait_s=d.get("sandbox_wait_s", 0.0),

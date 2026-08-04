@@ -123,6 +123,7 @@ r.duplicate_rate()        # evaluation cache hit rate
 | work | `rollouts`, `rollout_seconds` (a **sum** across workers, so it exceeds `wallclock` when they overlap), `eval_seconds` |
 | model | `usage.calls` / `.seconds` / `.failures` |
 | staleness | `stale_considered`, `stale_discarded` |
+| recovery | `redispatched`, `duplicates_dropped` |
 | recomputation | `cache_hits`, `cache_misses` |
 | sandboxes | `sandbox_wait_s`, `sandbox_setup_s`, `sandboxes_created` / `_reused` / `_failures` |
 

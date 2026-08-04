@@ -363,26 +363,37 @@ def test_the_local_provider_does_not_stop_what_this_one_does(engine, shared_root
 @needs_engine
 @every_engine
 def test_the_network_is_off_by_default_and_on_when_asked(engine, shared_root):
+    """Asserted on the network namespace, not by dialling out.
+
+    An earlier version connected to 1.1.1.1. That made the test depend on the
+    machine having working egress, so it went red when this laptop's DNS dropped
+    and would go red in any CI without outbound access -- reporting "isolation is
+    broken" when the isolation was fine and the internet was not.
+
+    `--network none` leaves a container with loopback and nothing else. That is
+    the property being claimed, and it is observable from inside without a single
+    packet leaving."""
     p = ContainerProvider(IMAGE, engine=engine)
     probe = ("import socket;"
-             "socket.setdefaulttimeout(4);"
-             "socket.create_connection(('1.1.1.1', 80));"
-             "print('connected')")
+             "print(sorted(i[1] for i in socket.if_nameindex()))")
 
     closed = p.acquire(SandboxSpec(workspace_root=shared_root))
     try:
         out = subprocess.run([*closed.exec_prefix(), "python", "-c", probe],
-                     capture_output=True, text=True, timeout=120)
-        assert out.returncode != 0, "the default sandbox reached the network"
+                             capture_output=True, text=True, timeout=120)
+        assert out.returncode == 0, out.stderr
+        assert out.stdout.strip() == "['lo']", (
+            f"a container with --network none had more than loopback: {out.stdout}")
     finally:
         p.release(closed)
 
     opened = p.acquire(SandboxSpec(workspace_root=shared_root, network="inherit"))
     try:
         out = subprocess.run([*opened.exec_prefix(), "python", "-c", probe],
-                     capture_output=True, text=True, timeout=120)
-        assert "connected" in out.stdout, (
-            f"network=inherit did not connect: {out.stderr[-300:]}")
+                             capture_output=True, text=True, timeout=120)
+        assert out.returncode == 0, out.stderr
+        assert out.stdout.strip() != "['lo']", (
+            "network=inherit gave the container no interface but loopback")
     finally:
         p.release(opened)
 
