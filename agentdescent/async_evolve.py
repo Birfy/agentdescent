@@ -41,7 +41,7 @@ from .policies import Policies
 from .evolution import (
     _publish_stable, _safe_log,
     Agent, EvolutionResult, Propose, Reward, RoundInfo, Run, Strategy, Task,
-    _ASYNC_WIRED_POLICIES, _cost_fields, _resolve_policies, _tally,
+    _ASYNC_WIRED_POLICIES, _cost_fields, _resolve_policies,
     SOLVED, _build_engine, _checked_proposal, _checked_reward,
 )
 from .aggregator import AggregatorConfig, check_reports
@@ -537,9 +537,7 @@ def async_evolve(
         # here and a barrier there, which is the only part that differs.
         _info, early_stop = eng.record_round(
             index=len(history), reward=r, n_items=len(dev.state),
-            committed=committed, rejected=len(reports) - committed,
-            reasons=_tally(reports), history=history, early=early,
-            on_round=on_round)
+            reports=reports, history=history, early=early, on_round=on_round)
         # A stalled pipeline: cards keep arriving and none of them commits. Under
         # Guarded with async_ratio > alpha that is a livelock, not slow progress.
         # A sweep with no cards in it is neither, so it is not counted -- and this

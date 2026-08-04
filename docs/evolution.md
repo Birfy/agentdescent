@@ -108,6 +108,7 @@ nothing else in the call changes.
 | `agg_config=` | `AggregatorConfig` | merge & acceptance **tuning** | sensible defaults |
 | `aggregator_factory=` | `AggregatorProtocol` | **swap the whole optimizer** (custom merge/acceptance) | reference `Aggregator` |
 | `staleness_policy=` | [staleness](staleness.md) (`get_policy(...)`) | how stale diffs are handled | `guarded` |
+| `refresh_interval=` | driver | rounds a worker keeps its snapshot — what *creates* staleness on the synchronous path | `1` (no staleness) |
 | `rounds=`, `n_workers=` | driver | loop size, parallel worker count | `15`, `4` |
 | `max_concurrency=` | driver | run a round's workers **concurrently** (thread pool); aggregator = barrier (synchronous DP) | `1` (sequential) |
 | `round_timeout=` | driver | cap how long a round waits for its workers — abandons stragglers | `None` (wait forever) |
@@ -356,8 +357,17 @@ aggregator: **[the aggregator page](aggregator.md)**.
 ```python
 from agentdescent import get_policy
 
-evolve(tasks, reward, agent=agent, staleness_policy=get_policy("reflective"))
+evolve(tasks, reward, agent=agent, staleness_policy=get_policy("reflective"),
+       refresh_interval=3)          # <- without this there is no staleness to handle
 ```
+
+!!! warning "On the synchronous path, `refresh_interval` is what makes this knob do anything"
+    `evolve()` snapshots at the top of every round, so by default every worker
+    proposes against the current head and `η` is 0 by construction — all three
+    policies then behave identically. `refresh_interval=N` lets a worker keep its
+    snapshot for N rounds, staggered by worker id, which is what produces a spread
+    of `η`. On the barrier-free path `async_ratio` already does this. See
+    [staleness](staleness.md).
 
 | Policy | Behaviour |
 |---|---|
@@ -380,7 +390,7 @@ result = evolve(tasks, reward, agent=agent, rounds=6, verbose=True)
 result.rendered       # the evolved artifact, rendered to text
 result.state          # its {key: value} state
 result.final_reward   # held-out reward of the final artifact
-result.history        # RoundInfo(round, held_out_reward, n_items, committed, rejected, reasons)
+result.history        # RoundInfo per round — reward, size, and what the merge did
 result.outcomes()     # {'below-threshold': 7, 'committed': 2} — why the run went as it did
 result.ledger_log     # the git commit log of accepted merges
 result.error          # None on a clean run; "<ExcType>: <msg>" if a backend failure ended it
@@ -407,6 +417,27 @@ every round by a stable category:
 underlying `MergeReport`, which carries both `category` and a human-readable
 `reason` with the measured values (`"P(delta>0)=0.42 <= 0.75"`) — good for a log
 line, but it interpolates numbers, so count on `category`.
+
+### What the merge did, per round
+
+Categories say *why* a round ended as it did; these four say *how it got there*.
+They come straight off the `MergeReport`s the round produced.
+
+| field | question it answers |
+|---|---|
+| `considered` | how many evidence cards the merge looked at — the **denominator** for the next two |
+| `discarded_stale` | how many the staleness filter dropped. Rising, with a flat reward, is the lag budget rather than the reflector |
+| `conflicts_dropped` | how often two workers proposed different values for one key. Zero under `AppendRules` (content-addressed keys rarely collide), interesting under `KeyedRules` / `SingleSlot` / `FileTree` |
+| `fused` | commits whose winning candidate was the **fusion** of several diffs rather than any single one — the model-soup question. Counted only when it committed: the tournament builds a fused candidate whenever the survivors are complementary, so counting the ones it *built* says nothing about whether combining beat picking |
+
+```python
+for h in result.history:
+    print(h.round, h.considered, h.discarded_stale, h.conflicts_dropped, h.fused)
+```
+
+They were computed all along and thrown away — the reference runtimes reported
+them (`RoundStat.fused`, `AsyncStats.conflicts_dropped`) and the engine every
+real workload uses did not.
 
 Watch a long run as it happens — an LLM run can take hours, and `history` is only
 available once it returns:

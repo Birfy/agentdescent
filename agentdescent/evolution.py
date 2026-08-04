@@ -47,7 +47,7 @@ from .aggregator import (
 )
 from .evalcache import CacheProtocol, MemoryCache, cache_key
 from .evaluator import EvaluatorGroup
-from .evolvable import Contract, ContractError, Diff, EvidenceCard
+from .evolvable import Contract, ContractError, Diff, EvidenceCard, stable_hash
 from .governance import FROZEN_IDS, GovernanceError, assert_mutable
 from .ledger import Ledger, LedgerFailure
 from .metrics import Meter, measured
@@ -855,6 +855,33 @@ class RoundInfo:
     #: calls", which needs the number at every round rather than only at the end.
     calls: int = 0
 
+    # -- what the merge did, this round --------------------------------------
+    #
+    # `MergeReport` computes all four and the driver used to throw them away, so
+    # a `evolve()` user could see *that* nothing committed and never *how* the
+    # merge got there. The reference runtimes reported them all along
+    # (`RoundStat.fused`, `AsyncStats.conflicts_dropped`), which is the shape of
+    # gap this seam exists to close.
+
+    #: Evidence cards this round's merge looked at, before any filter. The
+    #: denominator: `discarded_stale=3` needs "out of how many" to mean anything,
+    #: and shipping a numerator without one is a mistake this codebase has
+    #: already made once, on the async path's stale rate.
+    considered: int = 0
+    #: Cards the staleness filter dropped. Rising here with a flat
+    #: `held_out_reward` is the lag budget, not the reflector.
+    discarded_stale: int = 0
+    #: Diffs dropped because they contradicted a better-scoring one. Non-zero
+    #: means the workers are genuinely disagreeing about the same key, which is
+    #: the case `KeyedRules` and `SingleSlot` are for and `AppendRules` avoids.
+    conflicts_dropped: int = 0
+    #: Commits whose winning candidate was the **fusion** of several diffs rather
+    #: than any single one -- the model-soup question, per round. Counted only
+    #: when it committed: the tournament builds a fused candidate whenever the
+    #: survivors are complementary, so counting the ones it built says nothing
+    #: about whether combining them beat taking the best single diff.
+    fused: int = 0
+
 
 @dataclass
 class EvolutionResult:
@@ -1039,7 +1066,9 @@ class EvolutionResult:
                  "n_items": h.n_items, "committed": h.committed,
                  "rejected": h.rejected, "reasons": h.reasons,
                  "elapsed_s": h.elapsed_s, "rollouts": h.rollouts,
-                 "calls": h.calls}
+                 "calls": h.calls, "considered": h.considered,
+                 "discarded_stale": h.discarded_stale,
+                 "conflicts_dropped": h.conflicts_dropped, "fused": h.fused}
                 for h in self.history
             ],
             "retired_workers": self.retired_workers,
@@ -1229,9 +1258,10 @@ class _Engine:
     scratch_repo: Optional[str] = None
 
     def record_round(self, *, index: int, reward: float, n_items: int,
-                     committed: int, rejected: int, reasons: Dict[str, int],
+                     reports: Sequence[Any],
                      history: List["RoundInfo"], early: "EarlyStop",
                      on_round: Optional[Callable[["RoundInfo"], None]],
+                     extra_reasons: Optional[Dict[str, int]] = None,
                      ) -> Tuple["RoundInfo", Optional[str]]:
         """Close out one round: record it, ask whether to stop, tell the caller.
 
@@ -1239,13 +1269,40 @@ class _Engine:
         a merger sweep in the other -- and agreed on everything that happens once
         one has finished. That agreement was written twice.
 
+        It now takes the ``MergeReport``s rather than a pre-chewed
+        ``committed`` / ``rejected`` / ``reasons``, because deriving those was the
+        *other* thing both loops were doing separately -- and one of them counted
+        ``rejected`` as ``len(reports) - committed`` while the other re-scanned for
+        a missing ``committed_version``. Same answer, two spellings, and the
+        numbers below could have been added to one loop and not the other in
+        exactly the way this whole seam exists to stop.
+
+        ``extra_reasons`` is for a category the aggregator cannot know about --
+        today only tensor parallelism's ``section-violation``, which is counted in
+        the round body because those diffs never reach a bucket.
+
         Returns the round and a stop reason, or `None` to continue. The caller
         stops; this does not, because "should we stop" and "how do we stop" are
         different questions and only the loop knows the second.
         """
+        reports = list(reports)
+        committed = sum(1 for x in reports if x.committed_version is not None)
+        reasons = _tally(reports)
+        if extra_reasons:
+            reasons.update(extra_reasons)
         m = self.meter.snapshot()
-        info = RoundInfo(index, reward, n_items, committed, rejected, reasons,
-                         elapsed_s=m.elapsed_s, rollouts=m.rollouts, calls=m.calls)
+        info = RoundInfo(
+            index, reward, n_items, committed, len(reports) - committed, reasons,
+            elapsed_s=m.elapsed_s, rollouts=m.rollouts, calls=m.calls,
+            considered=sum(x.considered for x in reports),
+            discarded_stale=sum(x.discarded_stale for x in reports),
+            conflicts_dropped=sum(x.conflicts_dropped for x in reports),
+            # A fusion that *won*, which is the question worth asking -- the
+            # tournament builds a fused candidate whenever the survivors are
+            # complementary, so counting the ones it built says nothing about
+            # whether combining them beat taking the best single diff.
+            fused=sum(1 for x in reports
+                      if x.fused and x.committed_version is not None))
         history.append(info)
         stop_reason = early.observe(info.held_out_reward)
         notify(on_round, info)
@@ -1559,6 +1616,7 @@ def evolve(
     rounds: int = 15,
     n_workers: int = 4,
     max_concurrency: int = 1,
+    refresh_interval: int = 1,
     round_timeout: Optional[float] = None,
     target_reward: Optional[float] = None,
     patience: Optional[int] = None,
@@ -1679,6 +1737,22 @@ def evolve(
         Workers per round (``>= 1``).
     max_concurrency:
         How many of them actually run at once (see above).
+    refresh_interval:
+        How many rounds a worker keeps its ledger snapshot before taking the
+        round's fresh one. ``1`` (default) is what this loop always did: every
+        worker proposes against the current head, so a diff's staleness ``eta``
+        is **0 by construction** -- and that made ``staleness_policy=`` a knob
+        with nothing to decide on this path (measured over an 8-round run: all
+        15 staleness decisions saw ``eta=0`` and returned ACCEPT, so Full,
+        Guarded and Reflective were indistinguishable).
+
+        Above ``1``, workers hold a spread of versions -- the refresh is
+        staggered by worker id -- so their diffs arrive with a spread of ``eta``
+        and the staleness policy, the ``alpha`` tolerances in ``agg_config`` and
+        the ``all-stale`` outcome all become reachable synchronously. Costs no
+        extra ledger read: a worker either adopts the snapshot the round already
+        took, or keeps the older one it has. Ignored under ``asynchronous=True``,
+        where the lag budget is ``async_ratio``.
     eval_concurrency:
         How many held-out tasks to score at once. Every gate goes through this --
         each round's measurement and, far more often, the aggregator's
@@ -1812,6 +1886,9 @@ def evolve(
              "it bounds the round barrier, and the async path has no barrier -- "
              "bound a rollout with your backend's own timeout= instead, and the "
              "run with max_seconds"),
+            ("refresh_interval", None if refresh_interval == 1 else refresh_interval,
+             "it staggers snapshot refresh across round barriers, and the async "
+             "path has none -- async_ratio is its lag budget"),
         ):
             if value is not None:
                 warnings.warn(
@@ -1875,6 +1952,11 @@ def evolve(
     # silently discarding it.
     section_map = _resolve_sections(parallel, strategy)
     _reject_pipeline_parallel(parallel)
+    # Resolved once: the round body is the hot path, and a strategy either has
+    # the hook for the whole run or does not.
+    observe_plan = getattr(parallel, "observe", None)
+    if not callable(observe_plan):
+        observe_plan = None
     section_violations = [0]
     tp_lock = threading.Lock()
     eng = _build_engine(
@@ -1903,6 +1985,9 @@ def evolve(
     # tracker, and now the same epsilon (they had two).
     early = EarlyStop(target_reward=target_reward, patience=patience)
     unit_lock = threading.Lock()
+    # Per-worker snapshots, when `refresh_interval > 1`. See `_snapshot_for`.
+    worker_snaps: Dict[int, Tuple["EvolvingArtifact", int]] = {}
+    snap_lock = threading.Lock()
     first_error: List[Optional[str]] = [None]
     contract_error = FirstError()          # caller bug -> re-raise on this thread
     # The retirement rule lives in `pipeline.WorkerHealth`, shared with the
@@ -1951,6 +2036,35 @@ def evolve(
         assert_mutable(artifact)
         ok_units, failed_units = [0], [0]      # this round's tally
 
+        def _snapshot_for(worker: int):
+            """The artifact this worker proposes against, and the version it read.
+
+            With ``refresh_interval=1`` -- the default, and what this loop always
+            did -- every worker takes the round's fresh snapshot, so a diff is
+            always proposed against the current head and ``eta`` is **0 by
+            construction**. That made ``evolve(staleness_policy=)`` a knob that
+            could not decide anything: measured over an 8-round run, every one of
+            the 15 staleness decisions saw ``eta=0`` and returned ACCEPT, so Full,
+            Guarded and Reflective were indistinguishable.
+
+            Above 1, a worker keeps its snapshot for that many rounds and the
+            refresh is **staggered** by worker id, so at any moment the workers
+            hold a spread of versions and their diffs arrive with a spread of
+            ``eta``. That is the same mechanism
+            :class:`~agentdescent.orchestrator.AgentDescent` uses to make the
+            staleness sweep meaningful, expressed against the round's existing
+            snapshot rather than a fresh one -- so it costs no extra ledger read;
+            a worker either adopts the snapshot this round already took, or keeps
+            the older one it has.
+            """
+            if refresh_interval <= 1:
+                return artifact, base_v
+            with snap_lock:
+                due = (r % refresh_interval) == (stable_hash(worker) % refresh_interval)
+                if worker not in worker_snaps or due:
+                    worker_snaps[worker] = (artifact, base_v)
+                return worker_snaps[worker]
+
         def _run_unit(unit) -> None:
             """One worker: rollout -> propose -> ingest evidence (against `snap`).
 
@@ -1978,26 +2092,36 @@ def evolve(
         def _run_unit_inner(unit) -> None:
             if not unit.keys:
                 return
+            # This worker's own view of the artifact. Identical to the round's
+            # under the default `refresh_interval=1`; older, by design, above it.
+            mine, mine_v = _snapshot_for(unit.worker)
             task = by_id[sampler.pick(unit.keys, r)]     # a task from this worker's shard
             # The rollout is the part that can move elsewhere. Everything around
             # it -- which task, what the output implies, who is told about it --
             # reads or writes state that has to stay in this process.
-            outcome = eng.executor.rollout(_spec_for(eng, artifact, task))
+            outcome = eng.executor.rollout(_spec_for(eng, mine, task))
             if not outcome.ok:
                 raise _rollout_failure(outcome)
             output = outcome.output
             score = _checked_reward(outcome.reward, task)
             sampler.record(task.id, score)               # learn which tasks carry signal
+            if observe_plan is not None:
+                # ...and let the parallel strategy learn too, if it wants to.
+                # `plan` alone is a pure function of its arguments, which is
+                # enough to shard and not enough to schedule: UCB over task
+                # clusters had nowhere to receive an outcome, so it lived only in
+                # the reference runtime. Optional, so DP and TP are untouched.
+                observe_plan(unit, task.id, score)
             with unit_lock:
                 ok_units[0] += 1
                 health.record_success()
             if score >= solved_threshold:
                 return
             proposal = _checked_proposal(
-                propose(artifact.render(), task, output, score), task)
+                propose(mine.render(), task, output, score), task)
             if not proposal:
                 return
-            diff = strategy.to_diff(artifact.state, proposal, f"w{unit.worker}", base_v, artifact_id)
+            diff = strategy.to_diff(mine.state, proposal, f"w{unit.worker}", mine_v, artifact_id)
             if diff is None:
                 return
             # Tensor parallelism means each worker owns a disjoint *section* of the
@@ -2023,12 +2147,12 @@ def evolve(
             # opt-out here exactly as it is on the async path.
             if self_verify:
                 after = _checked_reward(
-                    reward(task, run(artifact.apply(diff).render(), task)), task)
+                    reward(task, run(mine.apply(diff).render(), task)), task)
                 delta = after - score
             else:
                 delta = 0.0
             aggregator.ingest(EvidenceCard(
-                diff=diff, base_version={artifact_id: base_v}, touched=[artifact_id],
+                diff=diff, base_version={artifact_id: mine_v}, touched=[artifact_id],
                 before_after_delta=delta, trajectory_refs=[task]))
 
         try:
@@ -2103,8 +2227,6 @@ def evolve(
             if verbose:
                 print(f"round {r:>3}  stopped early: {run_error[:140]}")
             break
-        committed = sum(1 for x in reports if x.committed_version is not None)
-        rejected = sum(1 for x in reports if x.committed_version is None)
         try:
             dev = ledger.snapshot(Ledger.DEV).get(artifact_id)
         except LedgerFailure as e:      # as at the round head: skip, do not raise
@@ -2153,20 +2275,19 @@ def evolve(
                 print(f"round {r:>3}  held-out unmeasurable, carrying last reward: "
                       f"{type(e).__name__}: {str(e)[:100]}")
             continue
-        reasons = _tally(reports)
         with tp_lock:
-            if section_violations[0]:
-                reasons["section-violation"] = section_violations[0]
-                section_violations[0] = 0
+            extra = ({"section-violation": section_violations[0]}
+                     if section_violations[0] else None)
+            section_violations[0] = 0
         # Recording the round, deciding whether to stop, and telling the caller
         # are the same three steps in both loops; only "what is a round" differs.
         info, early_stop = eng.record_round(
-            index=r, reward=round_reward, n_items=len(dev.state),
-            committed=committed, rejected=rejected, reasons=reasons,
-            history=history, early=early, on_round=on_round)
+            index=r, reward=round_reward, n_items=len(dev.state), reports=reports,
+            history=history, early=early, on_round=on_round, extra_reasons=extra)
         if verbose:
             print(f"round {r:>3}  reward={info.held_out_reward:.3f} on "
-                  f"{len(held_out)}  size={info.n_items}  +{committed}/-{rejected}")
+                  f"{len(held_out)}  size={info.n_items}  "
+                  f"+{info.committed}/-{info.rejected}")
         if early_stop is not None:
             stop_reason = early_stop
             if verbose:

@@ -7,6 +7,24 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **`evolve(staleness_policy=...)` could not decide anything on the synchronous
+  path.** The loop snapshots the ledger at the top of every round and every
+  worker proposes against that snapshot, so a diff's staleness `eta` is **0 by
+  construction** -- measured over an 8-round run, all 15 staleness decisions saw
+  `eta = 0` and returned ACCEPT, which makes Full, Guarded and Reflective
+  identical runs. The `alpha` tolerances in `AggregatorConfig` and the
+  `all-stale` outcome were equally unreachable there. The whole mechanism only
+  ever bit on `async_evolve`, where `async_ratio` produces the drift.
+
+  `evolve(refresh_interval=N)` is the missing half: a worker keeps its snapshot
+  for N rounds, **staggered by worker id**, so the workers hold a spread of
+  versions and their diffs arrive with a spread of `eta`. `1` is the default and
+  is exactly the old behaviour. It costs no extra ledger read -- a worker either
+  adopts the snapshot the round already took, or keeps the older one it has --
+  and it is the same mechanism `AgentDescent` uses to make the staleness sweep
+  meaningful, which is the first thing the general engine was missing before the
+  two loops can be merged.
+
 - **The async path counted every surviving card twice, so `stale_rate()` read
   about half the truth.** `async_evolve` runs its own staleness gate — it has to,
   because a custom `aggregator_factory` is promised only already-rebased cards —
@@ -349,6 +367,54 @@ All notable changes to AgentDescent are documented here. The format follows
   name is documented and had nothing to document.
 
 ### Added
+- **`ClusterParallel`, and the feedback channel that makes it possible.**
+  `ParallelStrategy.plan(n_workers, round_index, keys)` was a pure function of
+  its arguments, so a strategy could not learn anything from the rollouts it
+  dispatched -- enough to *shard*, not enough to *schedule*. That is why UCB over
+  task clusters (design section 5.2, L-task) existed only in the reference
+  runtime's `TaskScheduler`, which `evolve()` cannot reach, and why the general
+  engine's answer to the task tail stopped at `DifficultyWeighted` over
+  individual tasks.
+
+  `ParallelStrategy` gains an **optional** `observe(unit, task_id, score)`;
+  `evolve()` calls it after every rollout when the strategy defines one, so
+  `DataParallel` and `TensorParallel` are untouched. `ClusterParallel` is the
+  consumer -- it groups tasks by `cluster_of(task_id)`, leases whole clusters
+  UCB-ordered with the same difficulty filter (all-pass and all-fail clusters
+  carry no gradient), and feeds each rollout's reward back into the estimate. It
+  composes with `task_sampler` rather than replacing it: one picks the cluster,
+  the other picks the task inside it, and they share
+  `stats.difficulty_weight`.
+
+  Two stated differences from the reference scheduler: it learns from a
+  rollout's **reward** rather than the before/after delta of the diff it produced
+  (that delta needs `self_verify`, which the directory entry points turn off, so
+  a scheduler depending on it would silently stop learning exactly there), and it
+  learns per task rather than per lease.
+
+- **`RoundInfo` reports what the merge *did*, not only what category it landed
+  in.** Four numbers `MergeReport` computed all along and the driver threw away:
+  `considered` (the denominator), `discarded_stale`, `conflicts_dropped`, and
+  `fused` -- commits whose winning candidate was the fusion of several diffs
+  rather than any single one, which is the model-soup question asked per round.
+  The reference runtimes reported them (`RoundStat.fused`,
+  `AsyncStats.conflicts_dropped`) and the engine every real workload uses did
+  not, so a caller could see *that* nothing committed and never *how* the merge
+  got there. `save`/`load` round-trip them, and a file written before they
+  existed still loads.
+
+  `fused` counts only fusions that **committed**: the tournament builds a fused
+  candidate whenever the survivors are complementary, so counting the ones it
+  built says nothing about whether combining them beat taking the best single
+  diff.
+
+  `_Engine.record_round` now takes the reports rather than a pre-chewed
+  `committed` / `rejected` / `reasons`. Deriving those was the other thing both
+  loops were doing separately -- and they disagreed on spelling, one counting
+  `rejected` as `len(reports) - committed` and the other re-scanning for a
+  missing `committed_version`. Same answer, two places for the next number to be
+  added to one and not the other.
+
 - **Evolving a directory: a skill folder, an agent folder, or its code.** Until
   now every artifact was text that ended up *in a prompt*. A skill directory is
   not that: it is only a skill directory if the agent can *read the files*, which

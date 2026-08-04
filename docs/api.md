@@ -8,7 +8,7 @@ page and the code disagree, so a signature here is the signature you get.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-164 public names across 31 modules.
+165 public names across 31 modules.
 
 ---
 
@@ -471,6 +471,14 @@ What the aggregator should do with a (possibly stale) evidence card.
 ## Parallelism methods
 
 How a round's work is split across workers: DP / TP / PP. &nbsp;·&nbsp; `agentdescent.parallel` &nbsp;·&nbsp; [guide](parallelism.md)
+
+### `ClusterParallel(...)`
+
+DP over task **clusters**, leased by UCB instead of sharded round-robin.
+
+| method | what it does |
+|---|---|
+| `observe(unit: WorkUnit, task_id: str, score: float) -> None` | Feed one rollout's outcome back into the cluster's UCB estimate. |
 
 ### `DataParallel(name: str = 'DP') -> None`
 
