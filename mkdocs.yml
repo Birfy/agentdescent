@@ -52,13 +52,16 @@ nav:
     - The ledger: ledger.md
     - The verifier: verifier.md
     - Staleness policies: staleness.md
-    - Parallelism (DP / TP): parallelism.md
-    - Task sampling: sampling.md
-    - Duration-aware scheduling: duration-scheduling.md
     - The data layer: dataloader.md
     - Rewards: rewards.md
-    - Async — no round barrier: async.md
     - Reference orchestrator & domain: orchestrator.md
+  - Running at scale:
+    - Parallelism (DP / TP): parallelism.md
+    - Where rollouts run: execution.md
+    - Sandboxes: sandboxes.md
+    - Async — no round barrier: async.md
+    - Task sampling: sampling.md
+    - Duration-aware scheduling: duration-scheduling.md
   - API reference: api.md
   - Run everything, and extend it: usage.md
   - Examples and results:

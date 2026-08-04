@@ -218,102 +218,19 @@ Both halves of `frozen` are needed and they do different jobs:
 * the **overlay** stops the *candidate* from rewriting it at run time
   (a `conftest.py`, a monkeypatched assertion, an early `exit(0)`).
 
-## How workspaces are managed
+## Where a candidate runs
 
-Every rollout leases a workspace from a pool and gives it back. That is a change
-of ownership rather than of behaviour: the default is still one fresh directory
-per call, deleted afterwards.
+A candidate that is code needs somewhere to run, and that is its own subject:
+lifetime (who owns a workspace, when it comes back, what happens if its owner
+dies) and isolation (what the candidate can reach while it runs) are independent
+questions with different answers. Both are on the [Sandboxes](sandboxes.md) page:
 
-```python
-from agentdescent.sandbox import SandboxPool, WorkspaceProvider
-
-pool = SandboxPool(WorkspaceProvider(), max_sandboxes=8)
-run = code_runner([...], sandbox_pool=pool)     # share it, and the cap is shared
-```
-
-**One ceiling, not two.** `max_concurrency` worker threads and
-`eval_concurrency` scoring threads both stage workspaces. Sharing one pool is
-what makes the limit a limit; with a pool each, the real ceiling is their sum.
-`acquire` blocks when the pool is full — failing would push retry logic into
-every caller, and growing would make the ceiling a suggestion.
-
-**Reuse is opt-in.** `SandboxSpec(reuse=True)` hands back a warm workspace,
-reset to empty first. The default is a fresh one because `code_runner`'s frozen
-overlay assumes a clean directory: a workspace still holding the previous
-candidate's files produces a score that looks entirely ordinary and is wrong.
-
-**Reclaiming what an owner abandoned.** Each workspace holds a
-`.agentdescent-lease.json` naming its owner, and the owner renews it while
-working. `WorkspaceProvider.reap()` deletes the ones nobody is renewing.
-
-That replaces "delete anything older than six hours", which was wrong in both
-directions. A directory's mtime does not change while a process works *inside*
-it, so a long rollout looked abandoned; and on a shared `$TMPDIR` — a parameter
-sweep, several containers on one volume — one run's live workspace looked
-collectable to every other run on the machine. Renewal is a statement by the
-owner; its absence is the thing worth acting on.
-
-A live owner gets one grace period: between one and two TTLs, an expired lease
-whose process is still running is left alone. Past that it goes regardless, so a
-recycled pid cannot keep a dead run's directory alive forever.
-
-!!! note "Where the numbers are"
-    `sandbox_wait_s`, `sandbox_setup_s` and the created/reused/failure counts
-    reach `EvolutionResult` when you pass the pool a `Meter`. Wiring that
-    automatically needs the engine to know a rollout's environment, which is
-    what `RolloutSpec` is for — until then the fields on a default `evolve()`
-    run stay zero rather than being quietly approximate.
-
-## One ceiling across processes
-
-`SandboxPool` bounds what a **process** creates. Two runs on one machine each
-respect their own limit and together exceed the machine's — the same mistake
-`max_concurrency` and `eval_concurrency` made before they shared a gate, one
-level up.
-
-```python
-from agentdescent.sandbox_shared import SharedSandboxPool
-
-pool = SharedSandboxPool(root="/var/tmp/agentdescent-pool",
-                         capacity=8,      # the machine's ceiling
-                         holders=2)       # how many runs expect to share it
-```
-
-No server. Every sandbox already carries a lease file naming its owner and when
-it was last renewed — the file `reap` reads to decide what is abandoned. Counting
-those answers a different question with the same data: how many sandboxes are
-alive on this machine right now.
-
-**Quota, not just capacity.** A ceiling alone lets whoever asks first take
-everything, so a long run starves a short one. Each holder is guaranteed
-`capacity // holders` (at least one) and may exceed it only while others are
-under theirs. Without that, sharing a ceiling is worse than not sharing: the runs
-interfere and none of them can tell.
-
-**A dead holder's slot comes back.** Its lease stops being renewed and stops
-being counted — the same rule that reclaims its directory.
-
-!!! note "One machine, verified; several, not"
-    Nothing here assumes a single machine, and nothing here has been run on two.
-    The lease directory would have to be somewhere both can see, and shared
-    filesystems have their own opinions about atomicity. That is the work a
-    cross-machine claim needs, and it has not been done.
-
-## Isolation strength — three levels
-
-Lifetime and isolation are different questions. The pool answers the first for
-every provider; which provider you choose answers the second.
-
-| provider | filesystem | network | privileges | limits |
-|---|---|---|---|---|
-| `WorkspaceProvider` (default) | **the whole host** | **the host's** | your user's | timeout only (POSIX: rlimits) |
-| `ContainerProvider` | the workspace only | off unless asked | no capabilities, not root | memory / CPU, every platform |
-| remote / microVM | — | — | — | not implemented |
-
-**What the default does not stop.** A trimmed environment redirects a *lookup*,
-not a *path*. `HOME` points inside the workspace, so `~/.aws/credentials` misses
-— and `open("/Users/you/.aws/credentials")` does not. The default provider is
-appropriate for code you would run yourself; it is not a boundary.
+* [leases rather than deletion by age](sandboxes.md#lifetime-leases-not-deletion-by-age),
+  and one ceiling shared by rollouts and the gate;
+* [one ceiling across processes](sandboxes.md#one-ceiling-across-processes), read
+  from the lease directory rather than from a server;
+* [three isolation levels](sandboxes.md#isolation-strength-three-levels) — a
+  trimmed environment is **not** a boundary; `ContainerProvider` is.
 
 ```python
 from agentdescent.sandbox import SandboxPool
@@ -323,41 +240,6 @@ pool = SandboxPool(ContainerProvider("python:3.11-slim"), max_sandboxes=8)
 run = code_runner(["python", "main.py"], test_cmd=["pytest", "-q"],
                   sandbox_pool=pool)
 ```
-
-**Docker or podman, whichever is there.** The engine is detected unless you name
-one (`engine="podman"`); the flags used are the ones both accept, and the test
-suite runs the same isolation assertions against each engine that is installed.
-No Python dependency — the core still installs with none.
-
-!!! warning "macOS and Windows: the workspace must be in a shared path"
-    The engine runs inside a VM there, and it shares only part of the host. The
-    system temporary directory — where a workspace goes by default — is usually
-    outside it, and the container then starts with an empty `/work`, so the first
-    symptom is the candidate failing to open its own files.
-
-    The provider checks for this at acquire time and says so. Stage under your
-    home directory (`workspace_root=`), or add the path to the VM
-    (`colima start --mount <path>:w`, or Docker Desktop's File Sharing). Staging is unchanged: the tree is materialised on the
-host and bind-mounted at `/work`, so `FileTree`, the frozen overlay and fixtures
-all behave exactly as before. Only execution moves.
-
-Defaults are closed and opened one field at a time:
-
-| `SandboxSpec` field | effect |
-|---|---|
-| `network` | `None`/`"none"` → `--network none`. Only `"inherit"` connects it |
-| `memory_mb` / `cpu` | `--memory` / `--cpus`; unset means no flag, not a default ceiling |
-| `env_allowlist` | variable **names**; values are read on the host and passed one at a time. Nothing is inherited in bulk |
-| `image` | overrides the provider's image per rollout |
-
-Always on: read-only root with a writable `/work` and `/tmp`, `--cap-drop ALL`,
-`no-new-privileges`, a pids limit, and the container runs as your uid so the
-files it writes are yours to delete.
-
-!!! warning "Stronger, not absolute"
-    Containers share the host kernel and escapes exist. This is a large step up
-    from a trimmed environment and it is not a licence to run deliberately
-    hostile code. For that you want a VM boundary, which this does not provide.
 
 ## Cost — the first-order design constraint
 

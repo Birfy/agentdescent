@@ -195,6 +195,9 @@ Two consequences worth knowing when you write a policy:
     same idea at task granularity. Partial-rollout **resume** is unimplemented on
     both paths — `run(rendered, task) -> output` is opaque, so there is no
     continuation state to check point; both now *detect* and count stragglers.
+    What does exist is recovery one level coarser: a
+    [task whose worker is lost is re-dispatched whole](execution.md#recovery-is-at-task-granularity),
+    under the same lease id so a late answer from the original can be dropped.
 
 AgentDescent separates *what to merge* (the Aggregator, identical in both) from
 *when workers and the aggregator run relative to each other* (the runtime).

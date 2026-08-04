@@ -129,6 +129,20 @@ at from the other direction.
     question needs a real port against a real model, which is the step that has
     not been run.
 
+### What the matrix does not vary yet
+
+`Config` carries `executor=` and `sandbox=` fields, and `bench.run`'s workload
+reads neither: every row is the in-process default on a local workspace. They are
+there because the matrix is the right place for those dimensions, not because
+they have been measured — and a row for "processes" produced by ignoring the
+field would be the worst kind of number in this table.
+
+For the same reason the `fingerprint` and `env_mismatch` columns are populated by
+`harness.run_config` but not by the `bench.run` entry point, which runs one
+environment and says so by leaving them empty. The ⚠︎ marker that flags a
+mixed-environment row is machinery waiting for a comparison that has more than
+one environment in it.
+
 ### One thing the harness found about the engine
 
 The async path filters staleness inline and never reaches `Aggregator`'s filter,
