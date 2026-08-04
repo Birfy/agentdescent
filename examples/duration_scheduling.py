@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import random
 import tempfile
+import time
 
 from agentdescent.async_runtime import AsyncAgentDescent, AsyncConfig
 from agentdescent.domains.router import make_task_universe
@@ -86,12 +87,17 @@ def experiment_stragglers(seed=3):
         return 0.04 if spike else 0.004
 
     universe = make_task_universe(seed=7)
-    cfg = AsyncConfig(n_workers=4, noise=0.1, worker_pause=0.0, async_ratio=10_000,
+    from agentdescent.domains.router import router_run
+
+    def rollout(rendered, task):        # the domain's work, plus a real wait
+        time.sleep(latency())
+        return router_run(rendered, task)
+
+    cfg = AsyncConfig(n_workers=4, noise=0.1, async_ratio=10_000,
                       target_accuracy=2.0, max_seconds=2.0, duration_timeout_factor=3.0)
     with tempfile.TemporaryDirectory() as repo:
-        sys = AsyncAgentDescent(repo, universe, config=cfg, estimator=DurationEstimator())
-        for w in sys.workers:
-            w.rollout_latency = latency
+        sys = AsyncAgentDescent(repo, universe, config=cfg,
+                                estimator=DurationEstimator(), rollout=rollout)
         stats = sys.run()
     b, m = sys.estimator.params
     print(f"rollouts={stats.rollouts}, learned base≈{b:.3f}s, "

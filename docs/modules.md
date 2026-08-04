@@ -32,8 +32,8 @@ and *how*, that is *what*.
 | `evolvable` | `Evolvable`, `Diff`, `EvidenceCard`, `Contract` — the data model | [Data model](data-model.md) |
 | `skill` | `evolve_skill()` — dataset in, instruction out | [Quickstart](quickstart-skill.md) |
 | `skilldir` | `evolve_skill_dir()` / `_agent_dir()` / `_agent_code()` | [Directory evolution](directory-evolution.md) |
-| `async_evolve`, `async_runtime` | the same loop without the round barrier | [Async](async.md) |
-| `orchestrator`, `worker`, `domains.router` | the reference loop the results were measured with | [Orchestrator](orchestrator.md) |
+| `async_evolve` | the same loop without the round barrier | [Async](async.md) |
+| `orchestrator`, `async_runtime`, `domains.router` | the reference domain the results were measured with — adapters over the engine above, not a second loop | [Orchestrator](orchestrator.md) |
 
 ## What evolves
 
@@ -132,7 +132,7 @@ class at a time. They are all in one table instead:
 | [`ResumeQueue`](duration-scheduling.md) | turn-level checkpoints of a timed-out rollout | a rollout that exposes its turns; `run(rendered, task) -> output` is opaque, which is what lets any agent be plugged in |
 | [`AuditScheduler.pop`](duration-scheduling.md) | draining the Ĝ-ordered audit queue out of band | `AuditScheduler(collect=True)`; the default computes priorities without queuing, because nothing drains it |
 | [`EvidenceBuffer.settled`](aggregator.md) | discarded evidence stays addressable — the structural advantage of artifacts over gradients | re-filing settled cards into the trajectory pool; today it is a bounded diagnostic ring |
-| `TaskScheduler` × artifact axis | the design's L-task is `(task cluster × artifact)` | more than one artifact; `TaskCluster` has no artifact dimension |
+| `TaskScheduler` × artifact axis | the design's L-task is `(task cluster × artifact)` | more than one artifact; `TaskCluster` has no artifact dimension. The *cluster* axis is reachable from `evolve()` via [`ClusterParallel`](parallelism.md) |
 | [`PipelineParallel`](parallelism.md) | one artifact per stage, with upstream blame | a multi-artifact run; `evolve()` **refuses** it rather than degrading to DP in silence |
 
 The rule they share: a primitive that is implemented and unreachable is honest;

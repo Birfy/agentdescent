@@ -8,7 +8,7 @@ page and the code disagree, so a signature here is the signature you get.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-165 public names across 31 modules.
+164 public names across 30 modules.
 
 ---
 
@@ -656,6 +656,12 @@ The reference barrier-free runtime and its statistics. &nbsp;·&nbsp; `agentdesc
 
 ### `AsyncAgentDescent(...)`
 
+Barrier-free reference runtime, on the general engine.
+
+| method | what it does |
+|---|---|
+| `buffer_pending() -> int` | Cards waiting in the aggregator's buckets, or 0 before a run. |
+
 ### `AsyncConfig(...)`
 
 ### `AsyncStats(...)`
@@ -668,25 +674,13 @@ The round loop the research results were measured with. &nbsp;·&nbsp; `agentdes
 
 ### `AgentDescent(...)`
 
-The merge-based parallel self-evolution system.
+The merge-based parallel self-evolution system, on the general engine.
 
 ### `RoundStat(...)`
 
 ### `run_fork_baseline(...)`
 
 DGM-style archive/fork control: parallel but never merged (RQ1).
-
----
-
-## The worker
-
-One worker's rollout and proposal. &nbsp;·&nbsp; `agentdescent.worker` &nbsp;·&nbsp; [guide](orchestrator.md)
-
-### `Worker(...)`
-
-| method | what it does |
-|---|---|
-| `run(...)` | One rollout: classify tasks, propose a corrective diff for failures. |
 
 ---
 

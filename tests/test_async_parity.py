@@ -27,7 +27,8 @@ import pytest
 
 from agentdescent import AppendRules, Task, async_evolve
 from agentdescent.async_runtime import AsyncAgentDescent, AsyncConfig
-from agentdescent.domains.router import make_task_universe
+from agentdescent.aggregator import Aggregator
+from agentdescent.domains.router import make_task_universe, router_run
 from agentdescent.scheduler import DurationEstimator
 
 
@@ -54,21 +55,21 @@ def test_the_reference_runtime_no_longer_sheds_workers_over_a_transient():
     universe = make_task_universe(seed=7)
     cfg = AsyncConfig(n_workers=4, max_seconds=3.0, seed=1)
     with tempfile.TemporaryDirectory() as repo:
-        system = AsyncAgentDescent(repo, universe, config=cfg)
-        original = [w.run for w in system.workers]
         calls = {"n": 0}
 
-        def flaky(w, orig):
-            def run(*a, **kw):
-                calls["n"] += 1
-                if calls["n"] % 3:            # ~2 in 3 fail, after a first success
-                    if calls["n"] > 1:
-                        raise RuntimeError("429 rate limited")
-                return orig(*a, **kw)
-            return run
+        def flaky(rendered, task):
+            calls["n"] += 1
+            if calls["n"] > 2 and calls["n"] % 3:   # ~2 in 3, once it has worked
+                raise RuntimeError("429 rate limited")
+            return router_run(rendered, task)
 
-        for w, orig in zip(system.workers, original):
-            w.run = flaky(w, orig)
+        # This used to patch `system.workers[i].run`. The runtime is an adapter
+        # over `async_evolve` now, so the seam is the rollout itself -- and the
+        # merger's held-out scoring goes through it too, which the old seam
+        # bypassed. Hence the two guaranteed successes: the invariant under test
+        # is "once the backend has demonstrably worked, do not shed workers", so
+        # the run has to reach that state before the failures start.
+        system = AsyncAgentDescent(repo, universe, config=cfg, rollout=flaky)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             stats = system.run()
@@ -82,9 +83,10 @@ def test_a_misconfigured_backend_still_retires_every_worker_fast():
     universe = make_task_universe(seed=7)
     cfg = AsyncConfig(n_workers=3, max_seconds=20.0, seed=1)
     with tempfile.TemporaryDirectory() as repo:
-        system = AsyncAgentDescent(repo, universe, config=cfg)
-        for w in system.workers:
-            w.run = lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("401 unauthorized"))
+        def dead(rendered, task):
+            raise RuntimeError("401 unauthorized")
+
+        system = AsyncAgentDescent(repo, universe, config=cfg, rollout=dead)
         t0 = time.time()
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -104,16 +106,26 @@ def test_the_reference_merger_survives_a_transient():
     # would be half of a short run and would test the clock, not the tolerance.
     cfg = AsyncConfig(n_workers=2, max_seconds=12.0, target_accuracy=2.0, seed=1)
     with tempfile.TemporaryDirectory() as repo:
-        system = AsyncAgentDescent(repo, universe, config=cfg)
-        original, calls = system.aggregator.step, {"n": 0}
+        calls = {"n": 0}
 
-        def flaky_step():
-            calls["n"] += 1
-            if calls["n"] == 2:
-                raise RuntimeError("503 transient")
-            return original()
+        def factory(ledger, verifier, audit, config, policy):
+            # The aggregator is built by the run now, so the injection point is
+            # the factory rather than an attribute patched before it starts.
+            agg = Aggregator(ledger, verifier, audit, config,
+                             staleness_policy=policy)
+            original = agg.step
 
-        system.aggregator.step = flaky_step
+            def flaky_step():
+                calls["n"] += 1
+                if calls["n"] == 2:
+                    raise RuntimeError("503 transient")
+                return original()
+
+            agg.step = flaky_step
+            return agg
+
+        system = AsyncAgentDescent(repo, universe, config=cfg,
+                                   aggregator_factory=factory)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             stats = system.run()

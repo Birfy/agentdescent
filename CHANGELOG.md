@@ -507,6 +507,48 @@ All notable changes to AgentDescent are documented here. The format follows
   rejected as `oversized`, which surfaces five rounds later as "my reflector
   emits junk" rather than "that file was never editable".
 
+### Changed
+- **The two reference runtimes are adapters, not a second implementation of the
+  loop.** `AgentDescent` and `AsyncAgentDescent` had their own round barrier,
+  worker dispatch, snapshot staggering, merger thread, published head and
+  backpressure, all feeding the shared `Ledger` and `Aggregator`.
+  `docs/architecture.md` called that "a known wart rather than a design intent",
+  and it kept costing: two measured fixes that had to be hand-ported, two
+  early-stop epsilons nobody chose, and three mechanisms the general engine
+  re-derived -- and got wrong -- because the reference stack already had them.
+
+  They now describe the reference domain in the vocabulary `evolve()` and
+  `async_evolve()` speak and run that. The public surface is unchanged
+  (`RoundStat`, `AsyncStats`, `final_accuracy`, `buffer_pending`,
+  `run_fork_baseline`), the sequential barrier is preserved so a seeded run stays
+  reproducible, and both paths still converge on the same table with merge
+  beating fork:
+
+      AgentDescent (adapter)   first 0.604   final 1.000
+      evolve() directly        first 0.604   final 1.000
+      fork baseline (RQ1)      0.379
+
+  Three things the translation does not preserve exactly, listed in
+  `agentdescent/domains/router.py` rather than left to be discovered:
+  `before_after_delta` and `evidence_eval` are measured over the whole cluster
+  rather than the failing subset, and noise is per proposal rather than per
+  worker -- the general engine has one `propose` for every worker and, by design,
+  no worker identity to branch on. `run_fork_baseline` keeps per-fork noise,
+  because a fork is one actor for its whole run.
+
+  `AsyncAgentDescent` gains `rollout=` and `aggregator_factory=`, which are the
+  seams `Worker.run` and a patched `aggregator.step` used to be: the resilience
+  tests inject a failing rollout and a flaky merger through them.
+
+### Removed
+- **`agentdescent.worker.Worker`.** It modelled a rollout for a loop that no
+  longer exists. What it did lives in
+  `agentdescent.domains.router.router_propose` (the corrector) and `rollout=`
+  (the latency injection the efficiency experiments need).
+- **`AsyncConfig.aggregator_interval` and `AsyncConfig.worker_pause`.** They
+  paced threads this module no longer owns; `async_evolve` owns its own sleeps.
+  Nothing in the tests or examples set either.
+
 ### Removed
 - **`EvidenceCard.version_annotations`**, described as "per-turn version
   annotations, used when the ledger hot-updates mid-rollout". Nothing wrote one

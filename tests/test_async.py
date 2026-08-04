@@ -73,31 +73,33 @@ def test_stable_branch_promotes_under_async():
 
 
 def _failing_run(policy_name="full", n_fail=None, seconds=20.0):
-    """Run the reference stack with workers whose rollouts raise."""
+    """Run the reference stack with a rollout that raises.
+
+    This used to patch `system.workers[i].run`. There are no `Worker` objects any
+    more -- the runtime is an adapter over `async_evolve` -- so it replaces the
+    rollout itself, which is the same seam under its new name.
+    """
     import tempfile
 
     from agentdescent.async_runtime import AsyncAgentDescent, AsyncConfig
+    from agentdescent.domains.router import router_run
 
     universe = make_task_universe(seed=7)
     cfg = AsyncConfig(n_workers=4, async_ratio=4, target_accuracy=0.95,
                       max_seconds=seconds, seed=1)
+    state = {"n": 0}
+
+    def flaky(rendered, task):
+        state["n"] += 1
+        if n_fail is None or state["n"] <= n_fail:
+            raise RuntimeError("backend down")
+        return router_run(rendered, task)
+
     with tempfile.TemporaryDirectory() as repo:
-        sysm = AsyncAgentDescent(repo, universe, config=cfg,
-                                 staleness_policy=get_policy(policy_name))
-        state = {"n": 0}
-        original = [w.run for w in sysm.workers]
-
-        def make(idx):
-            def run(*a, **k):
-                state["n"] += 1
-                if n_fail is None or state["n"] <= n_fail:
-                    raise RuntimeError("backend down")
-                return original[idx](*a, **k)
-            return run
-
-        for i, w in enumerate(sysm.workers):
-            w.run = make(i)
-        return sysm.run()
+        system = AsyncAgentDescent(repo, universe, config=cfg,
+                                   staleness_policy=get_policy(policy_name),
+                                   rollout=flaky)
+        return system.run()
 
 
 def test_dead_backend_is_reported_not_silent():

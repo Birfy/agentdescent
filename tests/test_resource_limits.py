@@ -89,14 +89,22 @@ def test_audit_scheduler_is_thread_safe():
     assert len(a._items) + a.dropped == 800
 
 
-def test_async_runtime_threads_are_daemon():
-    """Non-daemon threads kept the interpreter alive past run()'s return."""
+def test_the_barrier_free_threads_are_daemon():
+    """Non-daemon threads kept the interpreter alive past the run's return.
+
+    The threads moved: `AsyncAgentDescent` is an adapter now and `async_evolve`
+    owns the worker and merger threads, so that is where the invariant lives.
+    Checked at the source rather than by observation because a leaked non-daemon
+    thread shows up as a hang at interpreter exit, which no assertion can catch.
+    """
     import inspect
 
-    from agentdescent import async_runtime
+    # `agentdescent.async_evolve` is rebound to the *function* by `__init__`,
+    # so reach for it by name rather than through the module attribute.
+    from agentdescent.async_evolve import async_evolve
 
-    src = inspect.getsource(async_runtime.AsyncAgentDescent.run)
-    assert src.count("daemon=True") >= 2, "worker and aggregator threads must be daemon"
+    src = inspect.getsource(async_evolve)
+    assert src.count("daemon=True") >= 2, "worker and merger threads must be daemon"
 
 
 def test_l1_serial_gate_admits_exactly_one_under_contention():
