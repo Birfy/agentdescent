@@ -666,6 +666,7 @@ def _cost_fields(meter: Meter) -> Dict[str, Any]:
         "stale_discarded": m.stale_discarded,
         "redispatched": m.redispatched,
         "duplicates_dropped": m.duplicates_dropped,
+        "cas_conflicts": m.cas_conflicts,
         "cache_hits": m.cache_hits,
         "cache_misses": m.cache_misses,
         "sandbox_wait_s": m.sandbox_wait_s,
@@ -789,6 +790,9 @@ class EvolutionResult:
     #: alive -- correct, and paid for twice.
     redispatched: int = 0
     duplicates_dropped: int = 0
+    #: Commits that lost a compare-and-swap race and rebased. Zero with one
+    #: writer by construction.
+    cas_conflicts: int = 0
     #: Evaluation cache. ``misses`` is the number of evaluations actually
     #: performed; the ratio is the duplicate-computation figure a multi-process
     #: run has to report.
@@ -920,6 +924,7 @@ class EvolutionResult:
             "stale_discarded": self.stale_discarded,
             "redispatched": self.redispatched,
             "duplicates_dropped": self.duplicates_dropped,
+            "cas_conflicts": self.cas_conflicts,
             "cache_hits": self.cache_hits,
             "cache_misses": self.cache_misses,
             "sandbox_wait_s": self.sandbox_wait_s,
@@ -1042,6 +1047,7 @@ class EvolutionResult:
             stale_discarded=d.get("stale_discarded", 0),
             redispatched=d.get("redispatched", 0),
             duplicates_dropped=d.get("duplicates_dropped", 0),
+            cas_conflicts=d.get("cas_conflicts", 0),
             cache_hits=d.get("cache_hits", 0),
             cache_misses=d.get("cache_misses", 0),
             sandbox_wait_s=d.get("sandbox_wait_s", 0.0),
