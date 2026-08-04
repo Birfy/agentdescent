@@ -30,6 +30,8 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
+from contextlib import contextmanager
 import threading
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
@@ -137,6 +139,64 @@ def _git(repo: str, *args: str) -> str:
     return out.stdout.strip()
 
 
+#: Guards the repository between processes. Lives in `.git/` -- see `_exclusive`
+#: -- and is named so a human who finds it knows what left it behind.
+_LOCK_NAME = ".agentdescent-repo.lock"
+
+
+def _acquire_file_lock(path: str, timeout: float = 120.0):
+    """Block until this process owns the repository."""
+    try:
+        import fcntl
+    except ImportError:                       # pragma: no cover -- Windows
+        return _acquire_dir_lock(path, timeout)
+    handle = open(path, "w")
+    deadline = time.time() + timeout
+    while True:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return handle
+        except OSError:
+            if time.time() >= deadline:
+                handle.close()
+                raise LedgerFailure(
+                    f"could not lock {path} within {timeout:g}s; another process "
+                    "is holding the ledger. If none is running, remove the file.")
+            time.sleep(0.01)
+
+
+def _release_file_lock(handle, path: str) -> None:
+    if handle is None:
+        return
+    if isinstance(handle, str):               # the directory fallback
+        try:
+            os.rmdir(handle)
+        except OSError:
+            pass
+        return
+    try:
+        import fcntl
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    except (ImportError, OSError):            # pragma: no cover
+        pass
+    handle.close()
+
+
+def _acquire_dir_lock(path: str, timeout: float) -> str:  # pragma: no cover
+    """`mkdir` is atomic everywhere; that is the whole requirement."""
+    directory = path + ".d"
+    deadline = time.time() + timeout
+    while True:
+        try:
+            os.mkdir(directory)
+            return directory
+        except FileExistsError:
+            if time.time() >= deadline:
+                raise LedgerFailure(
+                    f"could not lock {directory} within {timeout:g}s")
+            time.sleep(0.01)
+
+
 class Ledger:
     """A git-backed, version-vectored artifact store with dual branches."""
 
@@ -202,6 +262,39 @@ class Ledger:
 
     # -- low-level version bookkeeping ---------------------------------------
 
+    @contextmanager
+    def _exclusive(self):
+        """Hold the repository against other **processes**, not just threads.
+
+        `self._lock` is a `threading.Lock`: it makes one process's workers take
+        turns and says nothing to a second process. Two of those interleave a
+        read-modify-write of `versions.json` and one commit disappears -- the
+        lost update CAS exists to prevent, arriving by a route CAS cannot see,
+        because both writers read the same head and both were right when they
+        read it.
+
+        An advisory file lock, held across read-check-write-commit, makes the
+        section atomic between processes. CAS still does its job: a writer that
+        read the head before the other's commit finds it advanced and is told to
+        rebase.
+
+        `fcntl` where there is one, an atomically-created directory where there
+        is not -- `mkdir` is atomic on every filesystem worth running this on,
+        which is the only property required.
+        """
+        # Inside `.git/`, not the working tree: a lock file in the tree gets
+        # committed by `add -A`, and then blocks the next `checkout` as an
+        # untracked file that would be overwritten. `.git/` is git's own space
+        # and is never part of a branch.
+        path = os.path.join(self.repo_path, ".git", _LOCK_NAME)
+        with self._lock:                      # threads first: cheaper, and nested
+            handle = None
+            try:
+                handle = _acquire_file_lock(path)
+                yield
+            finally:
+                _release_file_lock(handle, path)
+
     def _versions_path(self) -> str:
         return os.path.join(self.repo_path, "versions.json")
 
@@ -213,8 +306,17 @@ class Ledger:
             return {}
 
     def _write_versions(self, vv: VersionVector) -> None:
-        with open(self._versions_path(), "w") as f:
+        """Write, then rename. A truncated `versions.json` is a lost ledger.
+
+        `open(..., "w")` truncates first and fills after, so a reader in another
+        process -- or the same one after a crash -- can see an empty or partial
+        file where the version vector should be. Renaming over the target is
+        atomic on POSIX, so a reader sees the old vector or the new one."""
+        path = self._versions_path()
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w") as f:
             json.dump(vv, f, indent=2, sort_keys=True)
+        os.replace(tmp, path)
 
     def _artifact_path(self, artifact_id: str) -> str:
         return os.path.join(self.repo_path, "artifacts", f"{artifact_id}.json")
@@ -228,9 +330,13 @@ class Ledger:
         matter how many workers were running. All callers hold the lock, so this
         instance is the only writer of the working tree and can track it.
 
-        The cached branch assumes this ``Ledger`` owns ``repo_path``; two
-        instances sharing one path already race over the working tree (use one
-        ``Ledger`` per repo).
+        The cache is safe because every caller reaches this inside
+        :meth:`_exclusive`, which holds the repository against other processes as
+        well as other threads -- so while this instance is looking at the working
+        tree, it is the only thing that is. Before that lock existed, two
+        instances sharing a path raced over the tree and lost commits to git
+        rather than to CAS: `index.lock`, or a checkout refusing to overwrite a
+        file the other had just written.
         """
         if self._current_branch == branch:
             return
@@ -246,7 +352,7 @@ class Ledger:
         Re-registering an existing artifact is a no-op for its state, and is the
         one supported way to move a contract to a new major."""
         self._contracts[artifact.id] = getattr(artifact, "contract", None)
-        with self._lock:
+        with self._exclusive():
             self._ensure_open()
             for br in (self.STABLE, self.DEV):
                 self._checkout(br)
@@ -272,7 +378,7 @@ class Ledger:
 
     def snapshot(self, branch: str = DEV) -> Snapshot:
         """Materialize every artifact on ``branch`` into live Evolvables."""
-        with self._lock:
+        with self._exclusive():
             self._ensure_open()
             self._checkout(branch)
             vv = self._read_versions()
@@ -286,7 +392,7 @@ class Ledger:
             return Snapshot(artifacts=artifacts, version=dict(vv))
 
     def head_version(self, branch: str = DEV) -> VersionVector:
-        with self._lock:
+        with self._exclusive():
             self._ensure_open()
             self._checkout(branch)
             return self._read_versions()
@@ -308,7 +414,7 @@ class Ledger:
         the current head would make the check unfalsifiable, so a writer that
         declared no base would always win -- precisely the lost update CAS
         exists to prevent."""
-        with self._lock:
+        with self._exclusive():
             self._ensure_open()
             self._checkout(branch)
             vv = self._read_versions()
@@ -366,7 +472,7 @@ class Ledger:
         adapter diffs (design doc, section 6, "atomic adaptation transaction").
         Phase 1 validates every CAS precondition; phase 2 writes and commits in
         a single git commit."""
-        with self._lock:
+        with self._exclusive():
             self._ensure_open()
             self._checkout(branch)
             vv = self._read_versions()
@@ -400,7 +506,7 @@ class Ledger:
         regression (design doc, section 4.5). A commit restarts that clock -- the
         new version has survived nothing yet -- so a *converged* artifact is the
         one most likely to be promoted, which is the point."""
-        with self._lock:
+        with self._exclusive():
             self._ensure_open()
             self._checkout(self.DEV)
             dev_vv = self._read_versions()
@@ -421,7 +527,7 @@ class Ledger:
             return nv
 
     def log(self, branch: str = DEV, limit: int = 20) -> List[str]:
-        with self._lock:
+        with self._exclusive():
             self._ensure_open()
             self._checkout(branch)
             out = _git(
