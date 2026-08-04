@@ -263,6 +263,29 @@ def async_evolve(
 
     intake: List[EvidenceCard] = []
     intake_lock = threading.Lock()
+    # The head every worker measures its drift against, published by the merger.
+    #
+    # Workers used to read it from the ledger on **every rollout**, and a ledger
+    # read is a `git checkout` guarded by a process-wide file lock and an RLock
+    # that every worker and the merger queue behind -- so the cost of asking "am I
+    # far enough behind to resync?" grew with the concurrency it was there to
+    # support. The merger is the only writer, so it can simply say. This is what
+    # `AsyncAgentDescent._publish_head` has always done; the general engine reached
+    # for git instead.
+    #
+    # A published head can lag by at most one sweep, which delays a refresh by one
+    # rollout at worst. The refresh itself still takes a real `ledger.snapshot()`,
+    # so nothing downstream reads a cached version.
+    head_pub = [eng.ledger.head_version(Ledger.DEV).get(eng.artifact_id, 0)]
+    head_lock = threading.Lock()
+
+    def _publish_head(version: int) -> None:
+        with head_lock:
+            head_pub[0] = version
+
+    def _published_head() -> int:
+        with head_lock:
+            return head_pub[0]
     stop = threading.Event()
     counter = [0]
     counter_lock = threading.Lock()
@@ -317,7 +340,7 @@ def async_evolve(
                 if pending <= async_ratio:
                     break
                 time.sleep(0.05)
-            head_v = eng.ledger.head_version(Ledger.DEV).get(eng.artifact_id, 0)
+            head_v = _published_head()
             # Refresh on the lag budget, or when the merger has asked everyone to
             # sync. `concepts.md` documents that backpressure guard as what keeps a
             # mismatched `async_ratio > alpha` from livelocking under Guarded --
@@ -463,16 +486,28 @@ def async_evolve(
         if not batch:
             time.sleep(0.005)
             return
-        head_vv = eng.ledger.head_version(Ledger.DEV)
-        head_art = eng.ledger.snapshot(Ledger.DEV).get(eng.artifact_id)
+        snap = eng.ledger.snapshot(Ledger.DEV)
+        head_vv, head_art = snap.version, snap.get(eng.artifact_id)
+
+        def _discarded() -> None:
+            """Record a card this gate is dropping, denominator included.
+
+            The denominator is split between here and `Aggregator`, and it has to
+            be: this gate sees every card but forwards only survivors, while the
+            aggregator sees only survivors and counts them on the **same meter**.
+            Counting the whole batch here as well counted every survivor twice --
+            measured, 20 cards reported `stale_considered = 40`, so a true 50%
+            stale rate came out as 33% and the "you are discarding most of your
+            evidence" warning at the end of this function needed a *67%* true rate
+            to fire at its documented 50% threshold.
+
+            So each side counts what only it can see: the discards here, the
+            survivors there. `D + (N - D) = N`.
+            """
+            eng.meter.add("stale_considered")
+            eng.meter.add("stale_discarded")
+
         # staleness gate: hand the aggregator only rebased (η=0) cards.
-        #
-        # Counted here because this path never reaches `Aggregator`'s own filter,
-        # which is where the synchronous loop's ratio comes from. Without these
-        # two lines the async rows of any comparison report a stale rate of 0% --
-        # not "no staleness", but "not measured", and the two look identical in a
-        # table.
-        eng.meter.add("stale_considered", len(batch))
         for card in batch:
             eta = vv_staleness(head_vv, card.base_version)
             action = policy.decide(eta, alpha, card.diff.contract_breaking)
@@ -483,12 +518,14 @@ def async_evolve(
                 if head_art.evidence_eval(card) <= cand.evidence_eval(card):
                     eng.aggregator.ingest(card.rebased_onto(head_vv))
                 else:
-                    eng.meter.add("stale_discarded")
+                    _discarded()
             else:
-                eng.meter.add("stale_discarded")         # DISCARD -> drop the card
+                _discarded()                             # DISCARD -> drop the card
         reports = check_reports(eng.aggregator.step(), eng.aggregator)
         committed = sum(1 for x in reports if x.committed_version is not None)
-        dev = eng.ledger.snapshot(Ledger.DEV).get(eng.artifact_id)
+        after = eng.ledger.snapshot(Ledger.DEV)
+        dev = after.get(eng.artifact_id)
+        _publish_head(after.version.get(eng.artifact_id, 0))
         last_good[0] = dev
         # Must be the real held-out reward: MergeReport.prob_improve is P(Δ>0)
         # from the Beta posterior, a *probability*, and reporting it here would

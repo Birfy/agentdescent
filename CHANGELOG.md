@@ -7,6 +7,26 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **The async path counted every surviving card twice, so `stale_rate()` read
+  about half the truth.** `async_evolve` runs its own staleness gate — it has to,
+  because a custom `aggregator_factory` is promised only already-rebased cards —
+  and then `Aggregator` runs its own over the survivors, on the same `Meter`.
+  Measured: 20 cards reported `stale_considered = 40`. A true 50% stale rate read
+  as 33%, and the end-of-run "you are discarding most of your evidence" warning,
+  which fires at `discarded/considered > 0.5`, needed a *67%* true rate to trip.
+  Each side now counts only what the other cannot see: the gate's discards, the
+  aggregator's survivors.
+
+- **An async worker read the ledger once per rollout to measure its drift.** A
+  ledger read is a `git checkout` behind a process-wide file lock and an RLock
+  every worker and the merger queue on, so the cost of asking "am I far enough
+  behind to resync?" grew with the concurrency it exists to support. The merger
+  is the only writer, so it now publishes the head after each sweep and workers
+  read that — which is what `AsyncAgentDescent` has always done, and what the
+  general engine reached for git to do instead. Measured on a 21-rollout run: 46
+  ledger reads before, 22 after. A published head can lag by one sweep, delaying
+  a refresh by at most one rollout; the refresh still takes a real snapshot.
+
 - **An exhausted `oracle_budget` turned the audit gate into a sub-sample veto.**
   `oracle_eval` degrades to `rule_eval` once the budget is gone — by design, so a
   run cannot spend money it was told not to — but `rule_eval` is the
@@ -420,6 +440,23 @@ All notable changes to AgentDescent are documented here. The format follows
   larger file could be loaded but never changed: every diff touching it is
   rejected as `oversized`, which surfaces five rounds later as "my reflector
   emits junk" rather than "that file was never editable".
+
+### Removed
+- **`EvidenceCard.version_annotations`**, described as "per-turn version
+  annotations, used when the ledger hot-updates mid-rollout". Nothing wrote one
+  and nothing read one -- no producer in the package, no consumer, no test, no
+  doc page. A field on the object every worker constructs is not free: it reads
+  as a capability, and the mid-rollout hot-update it names does not exist (a
+  worker holds one snapshot for a whole rollout, by construction).
+
+### Documentation
+- **One table of everything provided, tested, and not in any engine path**, in
+  `docs/modules.md`: `Ledger.commit_atomic`, `L1SerialGate`, `ResumeQueue`,
+  `AuditScheduler.pop`, `EvidenceBuffer.settled`, `TaskScheduler`'s missing
+  artifact axis, `PipelineParallel`. Each already said so in its own docstring,
+  so finding out cost a read of the source, one class at a time. The rule they
+  share is worth stating once: a primitive that is implemented and unreachable is
+  honest, one that is reachable and silently does nothing is not.
 
 ## [0.3.0] — 2026-08-01
 

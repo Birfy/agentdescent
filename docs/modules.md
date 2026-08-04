@@ -117,6 +117,28 @@ were measured) → [Results](results.md).
 [algorithm ports](self-evolution-examples.md), each of which replaces a different
 piece.
 
+## Provided, tested, and not in any engine path
+
+Some of what `import agentdescent` gives you is a **primitive for a
+configuration that does not ship yet** — the design calls for it, it is
+implemented and tested in isolation, and no loop reaches it today. Each one says
+so in its own docstring, which meant finding out cost a read of the source, one
+class at a time. They are all in one table instead:
+
+| name | why it exists | what would reach it |
+|---|---|---|
+| [`Ledger.commit_atomic`](ledger.md) | 2PC across several artifacts, for a contract-breaking diff that must land with its adapters | a multi-artifact library; `evolve()` registers exactly one |
+| [`L1SerialGate`](governance.md) | "at most one L1 diff in evaluation anywhere" | concurrent merging; every shipped runtime merges on one thread, so the guarantee already holds by construction |
+| [`ResumeQueue`](duration-scheduling.md) | turn-level checkpoints of a timed-out rollout | a rollout that exposes its turns; `run(rendered, task) -> output` is opaque, which is what lets any agent be plugged in |
+| [`AuditScheduler.pop`](duration-scheduling.md) | draining the Ĝ-ordered audit queue out of band | `AuditScheduler(collect=True)`; the default computes priorities without queuing, because nothing drains it |
+| [`EvidenceBuffer.settled`](aggregator.md) | discarded evidence stays addressable — the structural advantage of artifacts over gradients | re-filing settled cards into the trajectory pool; today it is a bounded diagnostic ring |
+| `TaskScheduler` × artifact axis | the design's L-task is `(task cluster × artifact)` | more than one artifact; `TaskCluster` has no artifact dimension |
+| [`PipelineParallel`](parallelism.md) | one artifact per stage, with upstream blame | a multi-artifact run; `evolve()` **refuses** it rather than degrading to DP in silence |
+
+The rule they share: a primitive that is implemented and unreachable is honest;
+one that is *reachable and silently does nothing* is not, which is why
+`PipelineParallel` raises and `Policies` refuses a field it cannot honour.
+
 ## Dependency shape
 
 Nothing in the framework imports a provider SDK at module level, and the core

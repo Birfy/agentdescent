@@ -138,8 +138,14 @@ class EvidenceCard:
     #: the cheap re-verification silently becomes a no-op, and a diff that makes
     #: the artifact worse survives it.
     trajectory_refs: List[Any] = field(default_factory=list)
-    # per-turn version annotations, used when the ledger hot-updates mid-rollout.
-    version_annotations: List[VersionVector] = field(default_factory=list)
+    # `version_annotations: List[VersionVector]` used to sit here, described as
+    # "per-turn version annotations, used when the ledger hot-updates
+    # mid-rollout". Nothing ever wrote one and nothing ever read one -- not a
+    # producer in the package, not a consumer, not a test, not a doc page. A field
+    # on the object every worker constructs is not free: it is read as a
+    # capability, and the mid-rollout hot-update it names does not exist (a worker
+    # holds one snapshot for a whole rollout, by construction). It would come back
+    # with the code that needs it.
     cost_tokens: int = 0
     cost_wallclock: float = 0.0
 
