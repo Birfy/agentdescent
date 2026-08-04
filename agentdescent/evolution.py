@@ -43,6 +43,7 @@ from .aggregator import (
     check_reports,
 )
 from .evalcache import CacheProtocol, MemoryCache, cache_key
+from .evaluator import EvaluatorGroup
 from .evolvable import Contract, ContractError, Diff, EvidenceCard
 from .governance import FROZEN_IDS, GovernanceError, assert_mutable
 from .ledger import Ledger, LedgerFailure
@@ -384,10 +385,7 @@ class EvolvingArtifact:
             return 0.0
         if len(tasks) == 1 or self._rt.eval_concurrency <= 1:
             return sum(self._rt.eval_one(self, t) for t in tasks) / len(tasks)
-        from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(
-                min(self._rt.eval_concurrency, len(tasks))) as pool:
-            scores = list(pool.map(lambda t: self._rt.eval_one(self, t), tasks))
+        scores = self._rt.evaluator().map(lambda t: self._rt.eval_one(self, t), tasks)
         return sum(scores) / len(scores)
 
     def evidence_eval(self, evidence: EvidenceCard) -> float:
@@ -426,6 +424,17 @@ class _Runtime:
     #: Where evaluation time and cache hits are recorded. Optional so a
     #: hand-built `_Runtime` (several tests do this) needs no changes.
     meter: Optional["Meter"] = None
+    #: The evaluation group. Built on first use and kept, because `score()` is
+    #: called once per gate and used to build a fresh `ThreadPoolExecutor` every
+    #: time -- 83 of them in a six-round run of twelve tasks. A pool created per
+    #: call also has no identity: nothing can bound it, observe it, or hand it a
+    #: different one.
+    eval_group: Optional["EvaluatorGroup"] = None
+
+    def evaluator(self) -> "EvaluatorGroup":
+        if self.eval_group is None:
+            self.eval_group = EvaluatorGroup(self.eval_concurrency)
+        return self.eval_group
 
     #: Identifies the environment measurements are taken in. Empty while there is
     #: one, which is why a default run's keys are unchanged; the moment there are
@@ -600,7 +609,7 @@ def _publish_stable(aggregator) -> None:
 #: `Policies.require_supported`. The set grows as the implementations land.
 _WIRED_POLICIES = ("task_sampler", "proposal", "conflict", "fusion", "acceptance",
                    "promotion", "staleness", "verifier", "ledger",
-                   "aggregator_factory", "eval_cache", "sandbox_spec")
+                   "aggregator_factory", "eval_cache", "sandbox_spec", "evaluator")
 
 
 def _propose_via_policy(policy):
@@ -1058,6 +1067,11 @@ class _Engine:
         Close before deleting: a rollout abandoned on ``round_timeout`` keeps
         running (Python cannot cancel a thread) and would otherwise commit into
         the deleted directory, recreating it."""
+        group = getattr(self.runtime, "eval_group", None)
+        if group is not None:
+            # Not waiting: an evaluation still in flight is holding a rollout
+            # that cannot be cancelled, and the run is already over.
+            group.shutdown(wait=False)
         if self.scratch_repo:
             self.ledger.close()
             shutil.rmtree(self.scratch_repo, ignore_errors=True)
@@ -1194,6 +1208,10 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
         attach(meter)
     runtime = _Runtime(run=run, reward=reward, cache=cache,
                        eval_concurrency=eval_concurrency, meter=meter,
+                       eval_group=(policies_bundle.evaluator
+                                   if policies_bundle is not None
+                                   and policies_bundle.evaluator is not None
+                                   else EvaluatorGroup(eval_concurrency, meter=meter)),
                        env_fingerprint=(policies_bundle.sandbox_spec.fingerprint()
                                         if policies_bundle is not None
                                         and policies_bundle.sandbox_spec is not None

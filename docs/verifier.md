@@ -27,6 +27,34 @@ default mistake, and it is expensive in exactly the case that matters:
     for this reason.
 
 
+## The evaluation group
+
+Evaluation and exploration call the same function and are different workloads. A
+rollout is long-tailed, frequently fails, and is one opinion among many — losing
+one costs a little evidence. An evaluation is batched, cacheable, and decides
+whether a change is committed — losing one costs the decision. Sizing them
+together means sizing them for whichever matters less.
+
+```python
+from agentdescent import Policies, evolve
+from agentdescent.evaluator import EvaluatorGroup
+
+evolve(tasks, reward, agent=agent,
+       n_workers=8,                                    # exploration
+       policies=Policies(evaluator=EvaluatorGroup(4)))  # the gate
+```
+
+`eval_concurrency=` still works and builds the group for you; the injectable one
+exists so evaluation can be bounded, observed (`group.stats()`) and eventually
+given a different substrate from rollouts.
+
+!!! note "It used to be a pool per call"
+    `score()` is called once per gate — each round's held-out measurement and,
+    far more often, every per-candidate comparison — and built a fresh
+    `ThreadPoolExecutor` each time: **83 of them in a six-round run over twelve
+    tasks**. A pool created per call has a size and nothing else: nothing to
+    bound, nothing to observe, nothing to replace.
+
 ## The evaluation cache
 
 Evaluation is the expensive half of a run — the gate measures 193.6s against
