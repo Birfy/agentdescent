@@ -68,9 +68,9 @@ offline in seconds; `--agent claude-code` swaps in the real CLI agent, and
 Faithful ports of the latest skill- and harness-self-evolution algorithms — ACE,
 GEPA, EvoSkill, SkillOpt, ADAS, DGM (see
 [the catalog](self-evolution-examples.md)). Each loads a real benchmark through
-the [`agentdescent.dataloader`](dataloader.md) data layer. `--dry-run` previews
-the dataset and estimates the API cost **without calling a model** — note that it
-still downloads the benchmark, and does not run the evolution loop:
+the [`agentdescent.dataloader`](dataloader.md) data layer on a real run.
+`--dry-run` prints the requested dataset and runtime configuration, then returns
+before loading data or models: it needs no network and no API key.
 
 ```bash
 python -m examples.ace_context_evolution --dry-run     # ACE   / FiNER-139

@@ -28,7 +28,7 @@ proposed `SKILL.md` into a `Diff`, and a custom `aggregator_factory`
 (`TopKFrontierAggregator`) is the bounded top-K frontier. A skill is an **L2**
 artifact -> `blast_radius=0.2` (via `classify`).
 
-    python -m examples.evoskill_skill_discovery --dry-run     # dataset + scorer, no API
+    python -m examples.evoskill_skill_discovery --dry-run     # plan only, zero network
     python -m examples.evoskill_skill_discovery --model claude-haiku-4-5
 
 Dataset caveat (you asked to use the real OfficeQA): the full set is HF-**gated**
@@ -60,6 +60,7 @@ from agentdescent.filetree import parse_tree
 from agentdescent.treestrategy import FileTree
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
+from examples._common import add_standard_args
 
 RAW = "https://raw.githubusercontent.com/sentient-agi/EvoSkill/main/examples/officeqa/data"
 Completion = Callable[[str], str]
@@ -785,11 +786,9 @@ def evaluate(complete: Completion, docs: Dict[str, str], skills: Dict[str, str],
 # ===========================================================================
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--provider", default="claude",
-                   choices=["claude", "openai", "glm"], help="claude, or any OpenAI-compatible endpoint (DeepSeek, GLM, vLLM, ...) via OPENAI_BASE_URL + OPENAI_API_KEY; 'glm' is a legacy alias")
-    p.add_argument("--model", default="claude-haiku-4-5")
+    add_standard_args(p, max_seconds_default=40.0)
     p.add_argument("--iterations", type=int, default=6)
     p.add_argument("--frontier", type=int, default=5,
                    help="bounded top-K frontier size "
@@ -804,16 +803,27 @@ def main() -> None:
                         "(OpenHands SDK, Claude Code CLI, Codex CLI) -- all of which "
                         "are the same Completion contract, staged into a workspace "
                         "by backends.document_agent")
-    p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--async", dest="asynchronous", action="store_true",
-                   help="run barrier-free (async_evolve)")
-    p.add_argument("--async-ratio", type=int, default=3, help="staleness lag budget")
-    p.add_argument("--max-seconds", type=float, default=40.0, help="async wall-clock budget")
-    p.add_argument("--dry-run", action="store_true")
-    p.add_argument("--yes", action="store_true")
-    args = p.parse_args()
+    return p
+
+
+def main(argv=None) -> None:
+    args = build_parser().parse_args(argv)
 
     print("Algorithm: EvoSkill -- failure-driven skill discovery (top-K frontier)")
+    print(f"Dataset  : selection={args.dataset} (OfficeQA preferred; FinQA fallback)")
+    print(f"\nPlan     : model={args.model}, iterations={args.iterations}, "
+          f"frontier={args.frontier}")
+    if args.asynchronous:
+        print(f"Async    : up to 3 workers, barrier-free (async_ratio={args.async_ratio}, "
+              f"max {args.max_seconds:.0f}s); the frontier rebases/discards stale skills")
+    else:
+        print("Parallel : up to 3 workers run concurrently each round "
+              "(synchronous DP; the frontier merge is the barrier)")
+    if args.dry_run:
+        print("Data     : deferred (dry-run performs no network access)")
+        print("\n[dry-run] plan only; no dataset or model API was accessed.")
+        return
+
     ds, docs, src = load_dataset(seed=args.seed, dataset=args.dataset)
     print(f"Dataset  : {ds.name} (financial documents, deterministic numeric scorer)")
     art = EvolvingArtifact("skill_library", blast_radius=0.2)
@@ -826,18 +836,8 @@ def main() -> None:
     print("  A:", ds.train[0]["answer"], f"(difficulty={ds.train[0]['difficulty']})")
 
     calls = args.iterations * (3 + 2 + nva) + nte
-    print(f"\nPlan     : model={args.model}, iterations={args.iterations}, frontier={args.frontier}")
-    if args.asynchronous:
-        print(f"Async    : {min(3, ntr)} workers, barrier-free (async_ratio={args.async_ratio}, "
-              f"max {args.max_seconds:.0f}s); the frontier rebases/discards stale skills")
-    else:
-        print(f"Parallel : {min(3, ntr)} workers run concurrently each round "
-              f"(synchronous DP; the frontier merge is the barrier)")
+    print(f"Workers  : dataset provides {min(3, ntr)} active workers")
     print(f"Budget   : up to ~{calls} model calls")
-
-    if args.dry_run:
-        print("\n[dry-run] not calling the API. Drop --dry-run to discover skills.")
-        return
 
     if not args.yes and sys.stdin.isatty():
         if input("\nProceed with real API calls? [y/N] ").strip().lower() not in ("y", "yes"):

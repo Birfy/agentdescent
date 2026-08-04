@@ -36,7 +36,7 @@ archive; `--select dgm` instead samples which prior agents to surface using the
 setting (a self-modifying coding agent on SWE-bench) needs Docker and is out of
 scope, but its open-ended selection rule ports directly and is unit-tested.
 
-    python -m examples.adas_meta_agent_search --dry-run       # dataset + seeds, no API
+    python -m examples.adas_meta_agent_search --dry-run       # plan only, zero network
     python -m examples.adas_meta_agent_search --model claude-haiku-4-5 --generations 6
     python -m examples.adas_meta_agent_search --select dgm --langs en,es
 """
@@ -61,6 +61,7 @@ from agentdescent.evolvable import Diff, EvidenceCard
 from agentdescent.evolution import EvolvingArtifact, Task, evolve, rule_id
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
+from examples._common import add_standard_args
 
 MGSM_URL = "https://raw.githubusercontent.com/ShengranHu/ADAS/main/dataset/mgsm/mgsm_{lang}.tsv"
 # ADAS's MGSM language set (utils.ALL_LANGUAGES).
@@ -963,22 +964,15 @@ def run_meta_agent_search(complete: Completion, val: List[Tuple[str, str]],
 # ===========================================================================
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--provider", default="claude",
-                   choices=["claude", "openai", "glm"], help="claude, or any OpenAI-compatible endpoint (DeepSeek, GLM, vLLM, ...) via OPENAI_BASE_URL + OPENAI_API_KEY; 'glm' is a legacy alias")
-    p.add_argument("--model", default="claude-haiku-4-5")
+    add_standard_args(p, max_seconds_default=60.0)
     p.add_argument("--generations", type=int, default=6)
     p.add_argument("--langs", default="en,es,fr",
                    help=f"comma-separated MGSM languages (of {','.join(ALL_LANGUAGES)})")
     p.add_argument("--per-lang", type=int, default=8, help="validation examples per language")
     p.add_argument("--select", default="adas", choices=["adas", "dgm"],
                    help="archive conditioning: adas (whole archive) or dgm (sampled)")
-    p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--async", dest="asynchronous", action="store_true",
-                   help="run barrier-free (async_evolve)")
-    p.add_argument("--async-ratio", type=int, default=3, help="staleness lag budget")
-    p.add_argument("--max-seconds", type=float, default=60.0, help="async wall-clock budget")
     p.add_argument("--hard-keep", type=int, default=None,
                    help="cap the hard subset -- evaluation cost is candidates x "
                         "items x (multi-step calls), so this is the strongest lever "
@@ -1015,9 +1009,12 @@ def main() -> None:
                         "else -- everything left over measures fitness instead")
     p.add_argument("--test-frac", type=float, default=0.35,
                    help="share of the pool held out for the final number")
-    p.add_argument("--dry-run", action="store_true")
-    p.add_argument("--yes", action="store_true")
-    args = p.parse_args()
+    return p
+
+
+def main(argv=None) -> None:
+    p = build_parser()
+    args = p.parse_args(argv)
 
     langs = [l.strip() for l in args.langs.split(",") if l.strip() in ALL_LANGUAGES]
     if not 0.0 < args.train_frac and 0.0 < args.test_frac and args.train_frac + args.test_frac < 1.0:
@@ -1025,6 +1022,21 @@ def main() -> None:
     ratios = (args.train_frac, 1.0 - args.train_frac - args.test_frac, args.test_frac)
     print("Algorithm: ADAS Meta Agent Search -- harness (agentic-system) self-evolution")
     print("Dataset  : MGSM (Multilingual Grade-School Math)")
+    print(f"\nPlan     : model={args.model}, generations={args.generations}, "
+          f"select={args.select}")
+    if args.asynchronous:
+        print(f"Async    : {args.workers} meta-agents, barrier-free "
+              f"(async_ratio={args.async_ratio}, max {args.max_seconds:.0f}s); "
+              f"the archive rebases/discards stale designs")
+    else:
+        print(f"Parallel : {args.workers} meta-agents propose concurrently each "
+              "generation (synchronous DP; the archive merge is the barrier)")
+    if args.dry_run:
+        print(f"Data     : langs={langs}, per-lang={args.per_lang}; deferred "
+              "(dry-run performs no network access)")
+        print("\n[dry-run] plan only; no dataset or model API was accessed.")
+        return
+
     langmap = language_of(langs, args.per_lang, seed=args.seed)
     pool = build_examples(langs, args.per_lang, seed=args.seed)
     ds = split_dataset(pool, ratios=ratios, seed=args.seed, name="MGSM",
@@ -1037,21 +1049,6 @@ def main() -> None:
     print("\nExample problem:")
     print("  Q:", ds.train[0][0][:150])
     print("  A:", ds.train[0][1])
-    print(f"\nPlan     : model={args.model}, generations={args.generations}, select={args.select}")
-    if args.asynchronous:
-        print(f"Async    : {args.workers} meta-agents, barrier-free "
-              f"(async_ratio={args.async_ratio}, max {args.max_seconds:.0f}s); "
-              f"the archive rebases/discards stale designs")
-    else:
-        print(f"Parallel : {args.workers} meta-agents propose concurrently each "
-              "generation (synchronous DP; the archive merge is the barrier)")
-
-    if args.dry_run:
-        lo, hi = estimate_calls(args.generations, *ds.sizes(), args.workers)
-        print(f"\nBudget   : ~{lo}-{hi} model calls on this (unfiltered) split")
-        print("\n[dry-run] not calling the API. Drop --dry-run to run Meta Agent Search.")
-        return
-
     if not args.yes and sys.stdin.isatty():
         if input("\nProceed with real API calls? [y/N] ").strip().lower() not in ("y", "yes"):
             print("aborted.")

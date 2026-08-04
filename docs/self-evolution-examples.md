@@ -33,18 +33,19 @@ python -m examples.ace_context_evolution --model claude-haiku-4-5           # sy
 python -m examples.ace_context_evolution --model claude-haiku-4-5 --async   # barrier-free
 ```
 
-| Algorithm | Kind | Dataset (faithful) | `evolve()` plug-ins | Page |
-|---|---|---|---|---|
-| **ACE** (Agentic Context Engineering) | skill / context | FiNER-139 (XBRL tagging) | `strategy=ACEPlaybook`; Curator = default aggregator | [→](algo-ace.md) |
-| **GEPA** (Reflective Prompt Evolution) | skill / prompt | HotpotQA (EM) | `aggregator_factory=` Pareto optimizer | [→](algo-gepa.md) |
-| **EvoSkill** (Automated Skill Discovery) | skill library | OfficeQA (Treasury) | `strategy` + `aggregator_factory=` top-K frontier (sync) / SGD descent (async) | [→](algo-evoskill.md) |
-| **SkillOpt** (ReflACT) | skill document | SearchQA (EM/F1) | `strategy` (edits) + `aggregator_factory=` strict gate | [→](algo-skillopt.md) |
-| **ADAS** (Meta Agent Search) | harness (L1) | MGSM | `strategy` + `aggregator_factory=` keep-all archive | [→](algo-adas.md) |
-| **DGM** (Darwin Gödel Machine) | harness (L1) | SWE-bench Verified | `strategy` + `aggregator_factory=` archive + selection | [→](algo-dgm.md) |
+| Algorithm | Port author | Kind | Dataset (faithful) | `evolve()` plug-ins | Page |
+|---|---|---|---|---|---|
+| **ACE** (Agentic Context Engineering) | chendanyang | skill / context | FiNER-139 (XBRL tagging) | `strategy=ACEPlaybook`; Curator = default aggregator | [→](algo-ace.md) |
+| **GEPA** (Reflective Prompt Evolution) | chendanyang | skill / prompt | HotpotQA (EM) | `aggregator_factory=` Pareto optimizer | [→](algo-gepa.md) |
+| **EvoSkill** (Automated Skill Discovery) | chendanyang | skill library | OfficeQA (Treasury) | `strategy` + `aggregator_factory=` top-K frontier (sync) / SGD descent (async) | [→](algo-evoskill.md) |
+| **SkillOpt** (ReflACT) | chendanyang | skill document | SearchQA (EM/F1) | `strategy` (edits) + `aggregator_factory=` strict gate | [→](algo-skillopt.md) |
+| **ADAS** (Meta Agent Search) | chendanyang | harness (L1) | MGSM | `strategy` + `aggregator_factory=` keep-all archive | [→](algo-adas.md) |
+| **DGM** (Darwin Gödel Machine) | chendanyang | harness (L1) | SWE-bench Verified | `strategy` + `aggregator_factory=` archive + selection | [→](algo-dgm.md) |
 
-Every example takes `--dry-run` (load the dataset, print the plan, **no API
-calls**) and has an offline test suite (`tests/test_<name>_example.py`) exercising
-its pure logic. Datasets load through the shared
+Every example takes `--dry-run`, which prints its configuration and returns with
+**zero network access and no API key**, and has an offline test suite
+(`tests/test_<name>_example.py`) exercising its pure logic. Real runs load their
+datasets through the shared
 [**`agentdescent.dataloader`**](dataloader.md) data layer — dependency-free
 (`urllib` only), cached under `~/.cache/agentdescent/`, from each benchmark's
 canonical source. Where a paper's full setup needs heavy infrastructure, the
@@ -217,7 +218,25 @@ python -m examples.dgm_self_improve --generations 12 --archive keep_all
 
 ---
 
-## Not yet ported
+## Candidate ports
+
+The backlog is organised by missing mechanism, not paper popularity. Assign an
+owner before implementation so fidelity questions have a person who read the
+released code.
+
+| Mechanism | Candidates | Existing coverage | Owner |
+|---|---|---|---|
+| Evolution / program search | AlphaEvolve (OpenEvolve), PromptBreeder, AFlow | none | TBD |
+| Reflection / textual gradients | TextGrad, Reflexion, Self-Refine | partial (GEPA is reflective, not textual-gradient) | TBD |
+| Skills / lifelong learning | Voyager, SkillWeaver | adjacent (EvoSkill) | TBD |
+| Self-play / unlabeled data | Absolute Zero, R-Zero, Agent0 | **none; highest priority** | TBD |
+| Self-modifying code | SICA, Gödel Agent | DGM | TBD |
+
+The unlabeled path is the most important gap: all six current ports derive reward
+from a benchmark with gold labels, although `evolve()` only requires a score in
+`[0, 1]` and does not require labels.
+
+### Deferred pending released code
 
 * **CoEvoSkills** (arXiv:2604.01687, "Self-Evolving Agent Skills via
   Co-Evolutionary Verification") — the Skill Generator + co-evolving Surrogate
@@ -228,6 +247,8 @@ python -m examples.dgm_self_improve --generations 12 --archive keep_all
   release code, rather than reconstructed and mislabelled as faithful.
 
 ## Fidelity principles
+
+Use the short [porting checklist](porting-checklist.md) before adding a row here.
 
 1. **Faithful to the repo, not just the paper.** Where the released code diverges
    from the paper's claims (e.g. EvoSkill's frontier is top-K aggregate, not

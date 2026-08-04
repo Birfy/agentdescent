@@ -32,7 +32,7 @@ ACE's per-bullet *helpful / harmful* counters become the aggregator's per-diff
 reward (evidence it was helpful), and rejected otherwise -- the discrete-space
 analogue ACE's counters approximate. Skill layer -> `blast_radius=0.2` (L2).
 
-    python -m examples.ace_context_evolution --dry-run          # dataset + estimate, no API
+    python -m examples.ace_context_evolution --dry-run          # plan only, zero network
     python -m examples.ace_context_evolution --model claude-haiku-4-5
     python -m examples.ace_context_evolution --top-k 10 --rounds 6
 
@@ -59,6 +59,7 @@ from agentdescent.evolution import EvolvingArtifact, LLMAgent, Task, evolve, rul
 from agentdescent.governance import classify
 from agentdescent.parallel import DataParallel
 from agentdescent.sampling import DifficultyWeighted, RoundRobin
+from examples._common import add_standard_args
 
 FINER = ("nlpaueb/finer-139", "validation", "finer-139")   # (dataset, split, config)
 
@@ -282,11 +283,9 @@ def evaluate(agent, rendered: str, tasks: List[Task], reward) -> float:
 # ===========================================================================
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--provider", default="claude",
-                   choices=["claude", "openai", "glm"], help="claude, or any OpenAI-compatible endpoint (DeepSeek, GLM, vLLM, ...) via OPENAI_BASE_URL + OPENAI_API_KEY; 'glm' is a legacy alias")
-    p.add_argument("--model", default="claude-haiku-4-5")
+    add_standard_args(p, max_seconds_default=30.0)
     p.add_argument("--rounds", type=int, default=6)
     p.add_argument("--workers", type=int, default=2)
     p.add_argument("--top-k", type=int, default=120,
@@ -297,20 +296,29 @@ def main() -> None:
                         "bullet beats the baseline); at 120 it goes 0.844 -> 0.889")
     p.add_argument("--pool", type=int, default=800,
                    help="FiNER validation rows to scan for single-entity sentences")
-    p.add_argument("--seed", type=int, default=0)
     p.add_argument("--sampler", choices=["round-robin", "difficulty"],
                    default="round-robin",
                    help="which task a worker rolls out next (agentdescent.sampling)")
-    p.add_argument("--async", dest="asynchronous", action="store_true",
-                   help="run barrier-free (async_evolve): workers never wait for the merge")
-    p.add_argument("--async-ratio", type=int, default=3, help="staleness lag budget")
-    p.add_argument("--max-seconds", type=float, default=30.0, help="async wall-clock budget")
-    p.add_argument("--dry-run", action="store_true")
-    p.add_argument("--yes", action="store_true")
-    args = p.parse_args()
+    return p
+
+
+def main(argv=None) -> None:
+    args = build_parser().parse_args(argv)
 
     print("Algorithm: ACE (Agentic Context Engineering) -- skill/context self-evolution")
     print("Dataset  : FiNER-139 (financial XBRL tagging)")
+    print(f"\nPlan     : model={args.model}, rounds={args.rounds}, workers={args.workers}")
+    if args.asynchronous:
+        print(f"Async    : {args.workers} workers, barrier-free (async_ratio={args.async_ratio}, "
+              f"max {args.max_seconds:.0f}s); staleness policy rebases/discards stale diffs")
+    else:
+        print(f"Parallel : {args.workers} workers run concurrently each round "
+              f"(synchronous DP; the aggregator merge is the barrier)")
+    if args.dry_run:
+        print("Data     : deferred (dry-run performs no network access)")
+        print("\n[dry-run] plan only; no dataset or model API was accessed.")
+        return
+
     ds = load_dataset(args.pool, args.top_k, seed=args.seed)
     if len(ds) < 4:
         print(f"Only {len(ds)} single-entity tasks in the pool; raise --pool.")
@@ -331,18 +339,7 @@ def main() -> None:
     print("  A:", ds.train[0].meta["target"])
 
     est = estimate_calls(args.rounds, args.workers, nva) + nte
-    print(f"\nPlan     : model={args.model}, rounds={args.rounds}, workers={args.workers}")
-    if args.asynchronous:
-        print(f"Async    : {args.workers} workers, barrier-free (async_ratio={args.async_ratio}, "
-              f"max {args.max_seconds:.0f}s); staleness policy rebases/discards stale diffs")
-    else:
-        print(f"Parallel : {args.workers} workers run concurrently each round "
-              f"(synchronous DP; the aggregator merge is the barrier)")
     print(f"Budget   : up to ~{est} model calls (cached repeats are free)")
-
-    if args.dry_run:
-        print("\n[dry-run] not calling the API. Drop --dry-run to evolve the playbook.")
-        return
 
     if not args.yes and sys.stdin.isatty():
         if input("\nProceed with real API calls? [y/N] ").strip().lower() not in ("y", "yes"):

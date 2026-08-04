@@ -75,9 +75,9 @@ python -m examples.adas_meta_agent_search --provider claude --model claude-haiku
 ```
 
 Put the `export` lines in your shell profile to keep them across sessions. Every
-example also takes `--dry-run`, which loads the dataset and prints the plan
-**without a single API call** — the cheapest way to confirm your setup before
-paying for a run:
+faithful algorithm port also takes a zero-network `--dry-run`, which prints the
+configuration without reading these credentials — the cheapest way to inspect a
+run before paying for it:
 
 ```bash
 python -m examples.adas_meta_agent_search --dry-run

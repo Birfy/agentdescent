@@ -116,9 +116,9 @@ python -m examples.gepa_prompt_evolution --provider openai --model deepseek-v4-f
     --rounds 5 --fetch 40 --yes
 ```
 
-Every example takes `--dry-run` (loads the dataset, prints the plan, no API calls)
-and `--provider openai` for any OpenAI-compatible endpoint via `OPENAI_BASE_URL` +
-`OPENAI_API_KEY`. Sample sizes are deliberately small so a run costs minutes; they
+Every faithful port takes a zero-network `--dry-run` and `--provider openai` for
+any OpenAI-compatible endpoint via `OPENAI_BASE_URL` + `OPENAI_API_KEY`. Sample
+sizes are deliberately small so a run costs minutes; they
 are **not** the papers' full setups, and where a full setup needs heavy
 infrastructure (SWE-bench in Docker, gated data) the boundary is stated on the
 algorithm's page.
