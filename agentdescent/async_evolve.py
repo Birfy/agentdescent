@@ -494,12 +494,13 @@ def async_evolve(
         # is not a redundant eval -- `_Runtime.eval_one` memoises on
         # (artifact signature, task id), so re-scoring an unchanged head is free.
         r = dev.score(eng.held_out)
-        early_stop = early.observe(r)
-        _m = eng.meter.snapshot()
-        history.append(RoundInfo(len(history), r, len(dev.state), committed,
-                                 len(reports) - committed, _tally(reports),
-                                 elapsed_s=_m.elapsed_s, rollouts=_m.rollouts,
-                                 calls=_m.calls))
+        # Same three steps as the barrier loop; the round index is a merger sweep
+        # here and a barrier there, which is the only part that differs.
+        _info, early_stop = eng.record_round(
+            index=len(history), reward=r, n_items=len(dev.state),
+            committed=committed, rejected=len(reports) - committed,
+            reasons=_tally(reports), history=history, early=early,
+            on_round=on_round)
         # A stalled pipeline: cards keep arriving and none of them commits. Under
         # Guarded with async_ratio > alpha that is a livelock, not slow progress.
         # A sweep with no cards in it is neither, so it is not counted -- and this
@@ -511,12 +512,6 @@ def async_evolve(
         if verbose:
             print(f"sweep {len(history):>3}  reward={r:.3f}  merged={len(batch)}  "
                   f"+{committed}  pending={len(intake)}")
-        if on_round is not None:
-            try:                       # a reporting callback must not kill the merger
-                on_round(history[-1])
-            except Exception as e:  # noqa: BLE001
-                warnings.warn(f"on_round callback raised: {type(e).__name__}: {e}",
-                              RuntimeWarning, stacklevel=2)
         if early_stop is not None:
             stop_reason[0] = early_stop
             stop.set()

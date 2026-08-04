@@ -70,3 +70,29 @@ def test_evolve_forwards_on_round_to_the_async_path():
            asynchronous=True, n_workers=2, max_seconds=3.0, rounds=3,
            on_round=seen.append)
     assert seen, "on_round must survive the delegation to async_evolve"
+
+
+def test_a_callback_that_raises_on_the_last_round_is_still_reported():
+    """The one case that used to be silent.
+
+    `evolve`'s target-reached path swallowed the exception with a comment saying
+    the normal path would report it -- and that path `break`s immediately after,
+    so nothing ever did. A callback failing on the final round of a *successful*
+    run was the single place the user heard nothing."""
+    import warnings as _warnings
+
+    from agentdescent import AppendRules, Task, evolve
+
+    tasks = [Task(id=f"t{i}", prompt=f"q{i}", meta={"gold": str(i)}) for i in range(6)]
+
+    def boom(info):
+        raise RuntimeError("callback exploded")
+
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        evolve(tasks, lambda t, o: 1.0,          # everything scores 1.0
+               run=lambda r, t: t.meta["gold"], propose=lambda r, t, o, s: None,
+               strategy=AppendRules(), rounds=5, n_workers=1, held_out_frac=0.5,
+               target_reward=0.5, on_round=boom, seed=0)
+    messages = [str(w.message) for w in caught if "callback exploded" in str(w.message)]
+    assert messages, "the callback failed on the target round and nothing said so"
