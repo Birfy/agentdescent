@@ -69,6 +69,7 @@ and *how*, that is *what*.
 | `pipeline` | the retirement and backpressure policies the two barrier-free runtimes share | [Async](async.md) |
 | `ledger` | the git-backed, compare-and-swap artifact store | [Ledger](ledger.md) |
 | `governance` | L0 frozen / L1 slow / L2 fast, by blast radius | [Governance](governance.md) |
+| `bench` | the configuration matrix and the rules that make comparing them mean something | [Efficiency](efficiency.md#the-configuration-matrix-bench) |
 | `evaluator` | the gate's own bounded, reusable concurrency, separate from the rollouts' | [Verifier](verifier.md#the-evaluation-group) |
 | `evalcache` | memoised evaluations: single-flight, environment-aware, shareable across processes | [Verifier](verifier.md) |
 | `workspec` | a rollout as data: named callables instead of closures | [Parallelism](parallelism.md#where-rollouts-run-the-execution-plane) |

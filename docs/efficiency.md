@@ -62,6 +62,62 @@ raise it if yours is large and your provider allows the concurrency.
     that, the barrier is meeting a heavy tail, which is what `asynchronous=True`
     addresses.
 
+
+## The configuration matrix — `bench/`
+
+```bash
+python -m bench.run --config sync-1 --config sync-4 --config sync-8                     --config async-4 --seeds 0,1,2
+```
+
+Fixed data, fixed actors, fixed semantics; only the configuration varies. Three
+seeds, reported as the spread that was observed rather than a point estimate —
+this repository has published one that moved 4.8 points between two runs of one
+configuration. Quality is scored on a split `evolve()`'s gate never saw.
+
+| config | seeds | reached | time-to-quality (min/med/max) | cost-to-quality | test quality | stale% |
+|---|---|---|---|---|---|---|
+| sync-1 | 3 | 2/3 | 1.06 / 1.10 / 1.13 | 21 / 22 / 22 | 0.793 / 0.862 / 0.897 | 0% |
+| sync-4 | 3 | 3/3 | 0.42 / 0.50 / 0.70 | 24 / 24 / 40 | 0.862 / 1.000 / 1.000 | 0% |
+| sync-8 | 3 | 3/3 | 0.25 / 0.26 / 0.42 | 24 / 24 / 40 | 0.931 / 1.000 / 1.000 | 0% |
+| async-4 | 3 | **0/3** | — | — | 0.379 / 0.414 / 0.448 | **83%** |
+
+### What it says
+
+**Parallelism buys time, not rollouts.** Time-to-quality falls 1.10 → 0.50 →
+0.26 from 1 to 4 to 8 workers, while cost-to-quality *rises* slightly (22 → 24).
+More workers reach the bar sooner and more reliably (2/3 → 3/3), and they spend
+marginally more rollouts doing it. Anyone hoping parallelism reduces total work
+should read the second column.
+
+**The barrier-free path is worse here, and the reason is in the table.** 83% of
+its evidence is stale. Its whole advantage is that workers never wait for the
+merge — and on this domain a rollout is instant string matching, so there is no
+waiting to avoid. It pays the coordination cost and collects none of the benefit.
+
+That is a property of the domain, not a verdict on the async path. It is also the
+sharpest possible illustration of the caveat below.
+
+!!! danger "These numbers are not an answer to the parallelism question"
+    **No model was called.** The router domain's rollout is a dictionary lookup,
+    so a rollout costs microseconds where a real one costs seconds. Parallelism
+    exists to hide rollout latency; a benchmark with no latency to hide measures
+    the cost of coordination and none of what it buys.
+
+    Read this table as evidence that the *harness* works — deterministic, budget
+    matched in calls, quality on an unseen split, spread rather than point
+    estimates. Answering [#52](https://github.com/Birfy/agentdescent/issues/52)'s
+    question needs a real port against a real model, which is the step that has
+    not been run.
+
+### One thing the harness found about the engine
+
+The async path filters staleness inline and never reaches `Aggregator`'s filter,
+which is where the synchronous ratio is counted. Its stale column read **0%** —
+not "no staleness" but "not measured", and the two are indistinguishable in a
+table. Now counted at the inline gate, it reads 83%, which is the explanation for
+the row above it.
+
+
 ## Threads and the GIL — is this *really* parallel?
 
 Yes, for this workload, and no amount of arguing about the GIL settles it — so

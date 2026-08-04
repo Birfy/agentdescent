@@ -464,6 +464,13 @@ def async_evolve(
         head_vv = eng.ledger.head_version(Ledger.DEV)
         head_art = eng.ledger.snapshot(Ledger.DEV).get(eng.artifact_id)
         # staleness gate: hand the aggregator only rebased (η=0) cards.
+        #
+        # Counted here because this path never reaches `Aggregator`'s own filter,
+        # which is where the synchronous loop's ratio comes from. Without these
+        # two lines the async rows of any comparison report a stale rate of 0% --
+        # not "no staleness", but "not measured", and the two look identical in a
+        # table.
+        eng.meter.add("stale_considered", len(batch))
         for card in batch:
             eta = vv_staleness(head_vv, card.base_version)
             action = policy.decide(eta, alpha, card.diff.contract_breaking)
@@ -473,7 +480,10 @@ def async_evolve(
                 cand = head_art.apply(card.diff)         # cheap re-verify on current head
                 if head_art.evidence_eval(card) <= cand.evidence_eval(card):
                     eng.aggregator.ingest(card.rebased_onto(head_vv))
-            # DISCARD -> drop the card
+                else:
+                    eng.meter.add("stale_discarded")
+            else:
+                eng.meter.add("stale_discarded")         # DISCARD -> drop the card
         reports = check_reports(eng.aggregator.step(), eng.aggregator)
         committed = sum(1 for x in reports if x.committed_version is not None)
         dev = eng.ledger.snapshot(Ledger.DEV).get(eng.artifact_id)
@@ -488,7 +498,8 @@ def async_evolve(
         _m = eng.meter.snapshot()
         history.append(RoundInfo(len(history), r, len(dev.state), committed,
                                  len(reports) - committed, _tally(reports),
-                                 elapsed_s=_m.elapsed_s, rollouts=_m.rollouts))
+                                 elapsed_s=_m.elapsed_s, rollouts=_m.rollouts,
+                                 calls=_m.calls))
         # A stalled pipeline: cards keep arriving and none of them commits. Under
         # Guarded with async_ratio > alpha that is a livelock, not slow progress.
         # A sweep with no cards in it is neither, so it is not counted -- and this
