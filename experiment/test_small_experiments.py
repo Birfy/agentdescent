@@ -7,6 +7,7 @@ import json
 import pytest
 
 from experiment import openevolve_program_search as oe
+from experiment import parallel_async_time_to_quality as pa
 from experiment import textgrad_prompt_optimization as tg
 
 
@@ -91,3 +92,69 @@ def test_openevolve_dry_run_needs_no_key(monkeypatch, capsys):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     assert oe.main(["--dry-run", "--model", "glm-5.2"]) == 0
     assert "iterations/calls=6" in capsys.readouterr().out
+
+
+def test_parallel_async_tasks_keep_train_and_held_out_categories_aligned():
+    tasks = pa.make_tasks([0.01, 0.02, 0.03, 0.04])
+    assert [task.meta["category"] for task in tasks[:4]] == [
+        task.meta["category"] for task in tasks[4:]
+    ]
+    assert all(not task.meta["held_out"] for task in tasks[:4])
+    assert all(task.meta["held_out"] for task in tasks[4:])
+    assert tasks[2].meta["proposal_categories"] == ["c2"]
+
+    groups = pa.make_transferable_proposal_groups(workers=4, slow_workers=1)
+    transferable = pa.make_tasks([0.01, 0.01, 0.01, 0.15], groups)
+    assert transferable[0].meta["proposal_categories"] == ["c0", "c1", "c2"]
+    assert transferable[3].meta["proposal_categories"] == ["c3"]
+
+
+def test_parallel_and_async_reduce_time_to_quality_on_controlled_latency():
+    uniform = [0.04] * 4
+    serial = pa.run_sync_observation(
+        uniform,
+        scenario="test-uniform",
+        repeat=0,
+        concurrency=1,
+        target=1.0,
+        rounds=2,
+        max_seconds=3.0,
+    )
+    parallel = pa.run_sync_observation(
+        uniform,
+        scenario="test-uniform",
+        repeat=0,
+        concurrency=4,
+        target=1.0,
+        rounds=2,
+        max_seconds=3.0,
+    )
+    assert parallel.final_reward == serial.final_reward == 1.0
+    assert parallel.cost_to_quality_rollouts == serial.cost_to_quality_rollouts == 4
+    assert parallel.time_to_quality_s < serial.time_to_quality_s * 0.65
+
+    heavy = [0.01, 0.01, 0.01, 0.15]
+    proposal_groups = pa.make_transferable_proposal_groups(workers=4, slow_workers=1)
+    sync = pa.run_sync_observation(
+        heavy,
+        scenario="test-heavy",
+        repeat=0,
+        concurrency=4,
+        target=0.75,
+        rounds=2,
+        max_seconds=3.0,
+        proposal_groups=proposal_groups,
+    )
+    asynchronous = pa.run_async_observation(
+        heavy,
+        scenario="test-heavy",
+        repeat=0,
+        target=0.75,
+        rounds=2,
+        async_ratio=3,
+        max_seconds=3.0,
+        proposal_groups=proposal_groups,
+    )
+    assert sync.final_reward >= 0.75
+    assert asynchronous.final_reward >= 0.75
+    assert asynchronous.time_to_quality_s < sync.time_to_quality_s * 0.65

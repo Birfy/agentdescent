@@ -43,6 +43,12 @@ value”，它与 word sorting 的字符串列表答案明显不匹配。因此 
 - [`openevolve-small-result.json`](openevolve-small-result.json)
 - [`openevolve-thinking-enabled-partial.json`](openevolve-thinking-enabled-partial.json)，仅用于延迟诊断，不计入正式结果
 
+并行与异步能力另有独立的 time-to-quality 报告：
+
+- [`parallel-async-time-to-quality.md`](parallel-async-time-to-quality.md)
+- [`parallel-async-time-to-quality-result.json`](parallel-async-time-to-quality-result.json)
+- [`parallel-async-incremental-stress-result.json`](parallel-async-incremental-stress-result.json)
+
 ## 3. 公共运行设置
 
 两个实验都从 `~/.bashrc` 读取 `OPENAI_API_KEY` 和 `OPENAI_BASE_URL`，Key 没有写入代码、
@@ -302,8 +308,9 @@ Bubblewrap 启动成本，因此仅用于确认算法没有用运行时间换分
 pytest -q experiment/test_small_experiments.py
 ```
 
-结果：`7 passed`。覆盖答案解析、官方 positional split、dry-run 零网络、AST 安全门、
-官方评分公式、Bubblewrap 确定性执行和无 Key dry-run。
+结果：`9 passed`。覆盖答案解析、官方 positional split、dry-run 零网络、AST 安全门、
+官方评分公式、Bubblewrap 确定性执行、无 Key dry-run，以及并行/异步任务构造和
+time-to-quality 加速断言。
 
 正式运行前后的 dry-run：
 
