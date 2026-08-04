@@ -648,6 +648,27 @@ def async_evolve(
             print(f"async run ended with a backend failure: {run_error[:140]}")
         warnings.warn(f"async_evolve() ended with a backend failure: {run_error}",
                       RuntimeWarning, stacklevel=2)
+    # A run that discarded most of its evidence is misconfigured, and every
+    # number it reports is a number about the fraction that survived. `stale_rate`
+    # makes that visible to anyone who looks; this says it to anyone who does not.
+    #
+    # Not a reason to lower the default: `async_ratio` is a lag budget in
+    # *versions*, and how much wall-clock a version represents depends entirely on
+    # how long a rollout takes. Three is sensible when a rollout is a model call
+    # taking seconds; on a workload where rollouts are near-instant, a worker
+    # drifts three versions behind almost immediately and stays there.
+    _considered = eng.meter.snapshot().stale_considered
+    _discarded = eng.meter.snapshot().stale_discarded
+    if _considered >= 20 and _discarded / _considered > 0.5:
+        warnings.warn(
+            f"async_evolve discarded {_discarded}/{_considered} "
+            f"({_discarded / _considered:.0%}) of its evidence as stale. "
+            f"async_ratio={async_ratio} is a lag budget in artifact versions, so "
+            "it is too high whenever a worker finishes several rollouts in the "
+            "time the merger takes one sweep. Lower it (0 resyncs every rollout) "
+            "or use a staleness policy that rebases rather than discards.",
+            RuntimeWarning, stacklevel=2)
+
     result = EvolutionResult(state=dict(final.state), rendered=final.render(),
                              final_reward=final_reward, history=history,
                              ledger_log=_safe_log(eng.ledger),

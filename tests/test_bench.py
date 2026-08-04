@@ -196,3 +196,32 @@ def test_staleness_is_measured_on_both_paths():
     assert sync.stale_considered > 0, "the synchronous path stopped counting"
     assert asyn.stale_considered > 0, (
         "the async path reports a stale rate it never measured")
+
+
+def test_the_lag_budget_is_what_made_the_async_row_look_broken():
+    """The first version of this matrix reported `async-4` as 0/3 and concluded
+    the barrier-free path was worse. The path was fine; its default lag budget is
+    a budget in *versions*, and a version is worth no wall-clock at all when a
+    rollout is a dictionary lookup.
+
+    Pinned because the conclusion in `docs/efficiency.md` rests on it."""
+    default = workload(CONFIGS["async-4"], 0)
+    tight = workload(CONFIGS["async-4-lag1"], 0)
+    assert default.stale_rate() > 0.5, (
+        "the default lag budget no longer produces chronic staleness here; the "
+        "documented explanation needs re-checking")
+    assert tight.stale_rate() < default.stale_rate()
+    assert tight.final_reward > default.final_reward
+
+
+def test_a_run_that_discards_most_of_its_evidence_says_so():
+    """Every number such a run reports is a number about the fraction that
+    survived, and it used to say nothing."""
+    import warnings as _warnings
+
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        workload(CONFIGS["async-4"], 0)
+    messages = [str(w.message) for w in caught if "stale" in str(w.message)]
+    assert messages, "a run discarding most of its evidence reported nothing"
+    assert "async_ratio" in messages[0], "the warning must name the knob"

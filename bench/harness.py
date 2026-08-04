@@ -57,6 +57,12 @@ class Config:
     executor: Optional[str] = None
     #: Which sandbox provider. `None` is a local workspace.
     sandbox: Optional[str] = None
+    #: The barrier-free path's lag budget, in **versions**. How much wall-clock a
+    #: version represents depends entirely on how long a rollout takes, so a
+    #: value tuned for one workload is not a value at all for another -- which is
+    #: why it is a dimension of the matrix rather than a constant in it.
+    async_ratio: int = 3
+    staleness: str = "guarded"
 
     def as_row(self) -> Dict[str, Any]:
         return asdict(self)

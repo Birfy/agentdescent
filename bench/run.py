@@ -18,7 +18,7 @@ import sys
 import time
 from typing import Callable, Dict, List, Optional, Sequence
 
-from agentdescent import AppendRules, EvolutionResult, Task, evolve
+from agentdescent import AppendRules, EvolutionResult, Task, evolve, get_policy
 
 from .harness import Config, Measurement, run_config, summarise, to_markdown
 
@@ -30,6 +30,16 @@ CONFIGS: Dict[str, Config] = {
     "sync-8": Config("sync-8", n_workers=8, eval_concurrency=8),
     "async-4": Config("async-4", n_workers=4, eval_concurrency=4, asynchronous=True),
     "async-8": Config("async-8", n_workers=8, eval_concurrency=8, asynchronous=True),
+    # The lag budget is a dimension, not a constant. Reporting one arbitrary
+    # value for the barrier-free path while the synchronous one runs at its
+    # natural setting is not a comparison between paths, it is a comparison
+    # between one path and a misconfiguration of the other.
+    "async-4-lag1": Config("async-4-lag1", n_workers=4, eval_concurrency=4,
+                           asynchronous=True, async_ratio=1),
+    "async-4-lag0": Config("async-4-lag0", n_workers=4, eval_concurrency=4,
+                           asynchronous=True, async_ratio=0),
+    "async-8-lag1": Config("async-8-lag1", n_workers=8, eval_concurrency=8,
+                           asynchronous=True, async_ratio=1),
 }
 
 #: The quality bar time- and cost-to-quality are measured against. A bar every
@@ -97,7 +107,8 @@ def workload(config: Config, seed: int) -> EvolutionResult:
         rounds=30, n_workers=config.n_workers,
         max_concurrency=config.n_workers,
         eval_concurrency=config.eval_concurrency,
-        asynchronous=config.asynchronous,
+        asynchronous=config.asynchronous, async_ratio=config.async_ratio,
+        staleness_policy=get_policy(config.staleness),
         held_out_frac=0.4, seed=seed, max_seconds=60.0)
 
 

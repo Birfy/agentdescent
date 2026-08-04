@@ -77,25 +77,45 @@ configuration. Quality is scored on a split `evolve()`'s gate never saw.
 | config | seeds | reached | time-to-quality (min/med/max) | cost-to-quality | test quality | stale% |
 |---|---|---|---|---|---|---|
 | sync-1 | 3 | 2/3 | 1.06 / 1.10 / 1.13 | 21 / 22 / 22 | 0.793 / 0.862 / 0.897 | 0% |
-| sync-4 | 3 | 3/3 | 0.42 / 0.50 / 0.70 | 24 / 24 / 40 | 0.862 / 1.000 / 1.000 | 0% |
+| sync-4 | 3 | 3/3 | 0.41 / 0.50 / 0.71 | 24 / 24 / 40 | 0.862 / 1.000 / 1.000 | 0% |
 | sync-8 | 3 | 3/3 | 0.25 / 0.26 / 0.42 | 24 / 24 / 40 | 0.931 / 1.000 / 1.000 | 0% |
-| async-4 | 3 | **0/3** | — | — | 0.379 / 0.414 / 0.448 | **83%** |
+| async-4 (lag 3, the default) | 3 | **0/3** | — | — | 0.345 / 0.379 / 0.448 | **86%** |
+| async-4 (lag 1) | 3 | 3/3 | 0.49 / 0.56 / 0.59 | 35 / 38 / 76 | 0.931 / 1.000 / 1.000 | 10% |
+| async-4 (lag 0) | 3 | 3/3 | 0.59 / 0.66 / 0.83 | 21 / 23 / 35 | 0.897 / 0.931 / 1.000 | 0% |
 
 ### What it says
 
-**Parallelism buys time, not rollouts.** Time-to-quality falls 1.10 → 0.50 →
-0.26 from 1 to 4 to 8 workers, while cost-to-quality *rises* slightly (22 → 24).
-More workers reach the bar sooner and more reliably (2/3 → 3/3), and they spend
-marginally more rollouts doing it. Anyone hoping parallelism reduces total work
-should read the second column.
+**Parallelism buys time, not rollouts.** Time-to-quality falls 1.10 → 0.50 → 0.26
+from 1 to 4 to 8 workers, while cost-to-quality *rises* slightly (22 → 24). More
+workers reach the bar sooner and more reliably (2/3 → 3/3), and spend marginally
+more rollouts doing it. Anyone hoping parallelism reduces total work should read
+the second column.
 
-**The barrier-free path is worse here, and the reason is in the table.** 83% of
-its evidence is stale. Its whole advantage is that workers never wait for the
-merge — and on this domain a rollout is instant string matching, so there is no
-waiting to avoid. It pays the coordination cost and collects none of the benefit.
+**The barrier-free path's default lag budget is wrong for this domain, and the
+first version of this table blamed the path.** At `async_ratio=3` it discards 86%
+of its evidence and never reaches the bar. At 1 it matches the synchronous path
+on quality; at 0 it is the cheapest configuration in the table.
 
-That is a property of the domain, not a verdict on the async path. It is also the
-sharpest possible illustration of the caveat below.
+`async_ratio` is a lag budget in **artifact versions**, and how much wall-clock a
+version represents depends entirely on how long a rollout takes. Three is
+sensible when a rollout is a model call taking seconds. Here a rollout is a
+dictionary lookup, so a worker drifts three versions behind almost immediately
+and stays there.
+
+The default has not been changed — it is tuned for the workload this framework is
+for, not for the one that is cheap to measure. Instead, a run that discards more
+than half its evidence now says so:
+
+```
+RuntimeWarning: async_evolve discarded 110/130 (85%) of its evidence as stale.
+async_ratio=3 is a lag budget in artifact versions, so it is too high whenever a
+worker finishes several rollouts in the time the merger takes one sweep.
+```
+
+**Even correctly tuned, async does not beat sync here** — 0.56 against 0.50. Its
+advantage is that workers never wait for the merge, and on a domain with no
+rollout latency there is no waiting to avoid. That is the caveat below, arrived
+at from the other direction.
 
 !!! danger "These numbers are not an answer to the parallelism question"
     **No model was called.** The router domain's rollout is a dictionary lookup,
