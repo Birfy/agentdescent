@@ -123,6 +123,37 @@ All notable changes to AgentDescent are documented here. The format follows
   merge.
 
 ### Changed
+- **The documentation grew an execution-and-resource plane, because the code
+  had one and the pages did not.** Eight modules — `executor`, `supervisor`,
+  `workspec`, `sandbox`, `sandbox_shared`, `sandbox_container` and the two
+  evaluation ones — were reachable only through pages named for something else:
+  where a rollout runs was a section inside *Customizable parallelism*, and how a
+  sandbox is isolated was a section inside *Evolving a directory*. A reader
+  running `evolve()` against a container had no reason to open either.
+
+  There are now two pages, [Where rollouts run](docs/execution.md) and
+  [Sandboxes](docs/sandboxes.md), grouped with async and scheduling under a
+  *Running at scale* section; the pages they came from keep a pointer. The module
+  map is redrawn along the same four planes — its ASCII diagram had listed
+  `sandbox` twice and filed six execution modules under *how a change is
+  accepted*.
+
+  Also corrected against the code, rather than moved: the executors' status
+  ("not yet wired into `evolve()`'s round loop" — they were wired in #89), a
+  paragraph in the container warning that had escaped its admonition mid-sentence
+  since #67, and three docstrings that described behaviour the code does not have
+  (`Ledger._exclusive` calling its `RLock` a `Lock` and claiming the section
+  nests — `flock` is per-open-file-description, so it does not;
+  `EvaluatorGroup.map` claiming to report rather than raise; `bench.harness`
+  claiming every row carries a fingerprint when `bench.run` populates none).
+
+  Two limits that were true and unwritten are now written down: the shared
+  sandbox pool's ceiling is [advisory](docs/sandboxes.md#one-ceiling-across-processes)
+  — admission reads the lease directory and then acquires, with nothing holding it
+  still in between — and `Ledger` [initialises its repository before the lock
+  exists](docs/ledger.md#more-than-one-writer), so concurrent *creation* of one
+  path still races.
+
 - **Faithful algorithm ports now share one tested CLI contract.** Their provider,
   model, seed, async, dry-run and confirmation flags come from
   `examples._common`; upstream iteration vocabulary and per-port defaults remain
