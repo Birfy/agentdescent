@@ -47,6 +47,7 @@ from typing import (
 if TYPE_CHECKING:                                   # pragma: no cover
     from .aggregator import AggregatorFactory, MergeReport
     from .evalcache import CacheProtocol
+    from .executor import Executor
     from .evaluator import EvaluatorGroup
     from .evolvable import Diff, EvidenceCard, Evolvable
     from .sampling import TaskSampler
@@ -379,6 +380,11 @@ class Policies:
     #: Where evaluations are memoised. The default is in-process; a shared one
     #: lets separate processes stop paying twice for the same gate.
     eval_cache: Optional["CacheProtocol"] = None
+    #: Where rollouts run. `None` is in-process threads. Listed in #54's design
+    #: and missed in its implementation, which nothing noticed until the round
+    #: body tried to read it -- a bundle field that does not exist and a bundle
+    #: field that is ignored fail in opposite ways, and only one of them is loud.
+    executor: Optional["Executor"] = None
     #: The gate's own concurrency, separate from the rollouts'. Evaluation is
     #: batched, cacheable and decides commits; a rollout is long-tailed, often
     #: fails, and is one opinion among many. Sizing them together means sizing

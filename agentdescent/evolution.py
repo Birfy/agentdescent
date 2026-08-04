@@ -612,7 +612,8 @@ def _publish_stable(aggregator) -> None:
 #: `Policies.require_supported`. The set grows as the implementations land.
 _WIRED_POLICIES = ("task_sampler", "proposal", "conflict", "fusion", "acceptance",
                    "promotion", "staleness", "verifier", "ledger",
-                   "aggregator_factory", "eval_cache", "sandbox_spec", "evaluator")
+                   "aggregator_factory", "eval_cache", "sandbox_spec", "evaluator",
+                   "executor")
 
 
 def _propose_via_policy(policy):
@@ -650,6 +651,34 @@ def _resolve_policies(policies: Optional[Policies], where: str, **shortcuts) -> 
     merged = (policies or Policies()).merged_with(**shortcuts)
     merged.require_supported(_WIRED_POLICIES, where)
     return merged
+
+
+def _spec_for(engine: "_Engine", artifact, task: Task):
+    """Describe one rollout so an executor can run it anywhere.
+
+    The `Ref`s name this package's own entry points, which is enough for an
+    in-process executor (it holds the actors directly) and is what a
+    cross-process one resolves on the far side."""
+    from .policies import SandboxSpec
+    from .workspec import Ref, RolloutSpec
+
+    return RolloutSpec(
+        rendered=artifact.render(), task=task,
+        run=Ref("agentdescent.agents:echo"), reward=Ref("agentdescent.rewards:contains"),
+        sandbox=engine.sandbox_spec or SandboxSpec())
+
+
+def _rollout_failure(outcome) -> BaseException:
+    """Turn a reported failure back into the exception the round body expects.
+
+    The executor reports rather than raises, because one bad rollout is evidence
+    and not the end of a run. The round body's error handling predates that and
+    is written against exceptions -- and it distinguishes a caller's broken
+    contract, which must stop the run, from a backend transient, which must not.
+    That distinction is carried in `Result.kind`, so it survives the trip."""
+    if outcome.kind == "caller":
+        return ProposalContractError(outcome.error or "contract violation")
+    return RuntimeError(outcome.error or "rollout failed")
 
 
 def notify(on_round: Optional[Callable[["RoundInfo"], None]],
@@ -1099,6 +1128,12 @@ class _Engine:
     train_ids: List[str]
     artifact_id: str
     blast_radius: float
+    #: Where rollouts run. Always present, defaulting to this process, so the
+    #: round body has one path rather than one per substrate.
+    executor: Any = None
+    #: What environment a rollout asks for. Empty by default; it is what a
+    #: cross-process executor hands its sandbox pool.
+    sandbox_spec: Any = None
     #: Every counter this run accumulates. Always present: an optional meter
     #: would mean every recording site grows an `if`, and the sites are the hot
     #: path.
@@ -1384,10 +1419,25 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
                 f"no callable {method}(). An aggregator needs ingest(card) and "
                 "step() -> list[MergeReport] (see AggregatorProtocol).")
 
+    # Imported here rather than at module scope: `executor` reaches `workspec`,
+    # which reaches back here for `Task`.
+    from .executor import ThreadExecutor
+
+    # In-process by default, taking the actors directly: a closure crosses no
+    # boundary here, and resolving a `Ref` per rollout would rebuild a model
+    # client every time.
+    executor = (policies_bundle.executor
+                if policies_bundle is not None and policies_bundle.executor is not None
+                else ThreadExecutor(max(1, eval_concurrency), meter=meter,
+                                    run=run, reward=reward))
+    # A supplied executor was built before this run existed, so it has no meter.
+    attach = getattr(executor, "attach_meter", None)
+    if callable(attach):
+        attach(meter)
     return _Engine(ledger, runtime, verifier, aggregator, strategy, run, reward,
                    propose, train, held_out, {t.id: t for t in train},
                    [t.id for t in train], artifact_id, blast_radius,
-                   meter=meter, scratch_repo=scratch)
+                   executor=executor, meter=meter, scratch_repo=scratch)
 
 
 def evolve(
@@ -1826,11 +1876,14 @@ def evolve(
             if not unit.keys:
                 return
             task = by_id[sampler.pick(unit.keys, r)]     # a task from this worker's shard
-            _t0 = time.time()
-            output = run(artifact.render(), task)
-            score = _checked_reward(reward(task, output), task)
-            eng.meter.add("rollouts")
-            eng.meter.add("rollout_seconds", time.time() - _t0)
+            # The rollout is the part that can move elsewhere. Everything around
+            # it -- which task, what the output implies, who is told about it --
+            # reads or writes state that has to stay in this process.
+            outcome = eng.executor.rollout(_spec_for(eng, artifact, task))
+            if not outcome.ok:
+                raise _rollout_failure(outcome)
+            output = outcome.output
+            score = _checked_reward(outcome.reward, task)
             sampler.record(task.id, score)               # learn which tasks carry signal
             with unit_lock:
                 ok_units[0] += 1

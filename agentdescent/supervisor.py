@@ -308,6 +308,16 @@ class ProcessExecutor:
 
     # -- shutdown -------------------------------------------------------------
 
+    def attach_meter(self, meter: Meter) -> None:
+        """Report into this run's counters. See `ThreadExecutor.attach_meter`."""
+        self.meter = meter
+
+    def rollout(self, spec: RolloutSpec) -> Result:
+        """One rollout in a worker process, with the same recovery as a batch."""
+        for result in self.map_rollouts([spec]):
+            return result
+        raise RuntimeError("the executor returned no result for a rollout")
+
     def shutdown(self, grace: float = 5.0) -> None:
         """Stop the workers, in the one order that does not hang.
 
