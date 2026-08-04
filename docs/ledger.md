@@ -15,6 +15,47 @@ branch dev              where the loop commits
 branch stable           what production reads
 ```
 
+
+## More than one writer
+
+CAS plus a version vector was already the right primitive; what it lacked was a
+critical section that spans **processes**. `threading.Lock` makes one process's
+workers take turns and says nothing to a second process, so two of them could
+interleave a read-modify-write of `versions.json` — and lose a commit by a route
+CAS cannot see, because both writers read the same head and both were right when
+they read it.
+
+In practice the failure arrived even earlier, as git: `index.lock`, or a
+checkout refusing to overwrite a file the other process had just written.
+
+Every path that touches the repository now holds an advisory file lock —
+`fcntl` where there is one, an atomically-created directory where there is not —
+kept in `.git/` rather than the working tree, because a lock file in the tree is
+committed by `add -A` and then blocks the next checkout.
+
+`versions.json` is written to a sibling and renamed. `open(..., "w")` truncates
+first and fills after, so a reader in another process can see an empty file where
+the version vector should be.
+
+**CAS still does its job.** The lock serialises writers; it does not make them
+agree. A writer holding a version that has moved is told to rebase exactly as
+before — which is what the retry loop in any multi-writer caller is for:
+
+```python
+for _ in range(attempts):
+    head = ledger.head_version(Ledger.DEV)
+    candidate = ledger.snapshot(Ledger.DEV).get(aid).apply(diff)
+    try:
+        ledger.commit(candidate, base_version=head)
+        break
+    except CASConflict:
+        continue        # somebody committed first; rebase onto their head
+```
+
+!!! note "Keep the ledger outside the sandbox"
+    A ledger inside a sandbox is destroyed with it. Point `repo_path` at a
+    location the sandbox does not own.
+
 ## Why git, and why that is not overkill
 
 Three properties are needed and git already has all of them: an append-only
