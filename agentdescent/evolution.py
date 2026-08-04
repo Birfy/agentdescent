@@ -35,7 +35,10 @@ import threading
 import time
 import warnings
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Protocol, Sequence, runtime_checkable
+from typing import (
+    Any, Callable, Dict, List, Optional, Protocol, Sequence, Tuple,
+    runtime_checkable,
+)
 
 from .agents import Completion, Usage, claude
 from .aggregator import (
@@ -649,6 +652,25 @@ def _resolve_policies(policies: Optional[Policies], where: str, **shortcuts) -> 
     return merged
 
 
+def notify(on_round: Optional[Callable[["RoundInfo"], None]],
+           info: "RoundInfo") -> None:
+    """Run a reporting callback without letting it take the run down.
+
+    One behaviour, because there were two: every site warned except the one on
+    `evolve`'s target-reached path, which swallowed the exception with a comment
+    saying the normal path would report it -- and that path `break`s immediately
+    after, so nothing ever did. A callback that raises on the last round of a
+    successful run was the one case where the user heard nothing.
+    """
+    if on_round is None:
+        return
+    try:
+        on_round(info)
+    except Exception as e:  # noqa: BLE001
+        warnings.warn(f"on_round callback raised: {type(e).__name__}: {e}",
+                      RuntimeWarning, stacklevel=2)
+
+
 def _cost_fields(meter: Meter) -> Dict[str, Any]:
     """The meter's counters, keyed as :class:`EvolutionResult` fields.
 
@@ -1085,6 +1107,29 @@ class _Engine:
     #: ``None`` when the caller passed ``repo_path`` (theirs to keep, and how a run
     #: is resumed).
     scratch_repo: Optional[str] = None
+
+    def record_round(self, *, index: int, reward: float, n_items: int,
+                     committed: int, rejected: int, reasons: Dict[str, int],
+                     history: List["RoundInfo"], early: "EarlyStop",
+                     on_round: Optional[Callable[["RoundInfo"], None]],
+                     ) -> Tuple["RoundInfo", Optional[str]]:
+        """Close out one round: record it, ask whether to stop, tell the caller.
+
+        The two loops disagree about what a round *is* -- a barrier sweep in one,
+        a merger sweep in the other -- and agreed on everything that happens once
+        one has finished. That agreement was written twice.
+
+        Returns the round and a stop reason, or `None` to continue. The caller
+        stops; this does not, because "should we stop" and "how do we stop" are
+        different questions and only the loop knows the second.
+        """
+        m = self.meter.snapshot()
+        info = RoundInfo(index, reward, n_items, committed, rejected, reasons,
+                         elapsed_s=m.elapsed_s, rollouts=m.rollouts, calls=m.calls)
+        history.append(info)
+        stop_reason = early.observe(info.held_out_reward)
+        notify(on_round, info)
+        return info, stop_reason
 
     def cleanup(self) -> None:
         """Remove the scratch ledger, if this call created one. Idempotent.
@@ -1957,14 +2002,12 @@ def evolve(
             if section_violations[0]:
                 reasons["section-violation"] = section_violations[0]
                 section_violations[0] = 0
-        _m = eng.meter.snapshot()
-        info = RoundInfo(r, round_reward, len(dev.state), committed, rejected,
-                         reasons, elapsed_s=_m.elapsed_s, rollouts=_m.rollouts,
-                         calls=_m.calls)
-        history.append(info)
-        # Early stopping: an LLM rollout costs money, so do not keep buying them
-        # once the artifact has converged or clearly stalled.
-        early_stop = early.observe(info.held_out_reward)
+        # Recording the round, deciding whether to stop, and telling the caller
+        # are the same three steps in both loops; only "what is a round" differs.
+        info, early_stop = eng.record_round(
+            index=r, reward=round_reward, n_items=len(dev.state),
+            committed=committed, rejected=rejected, reasons=reasons,
+            history=history, early=early, on_round=on_round)
         if verbose:
             print(f"round {r:>3}  reward={info.held_out_reward:.3f} on "
                   f"{len(held_out)}  size={info.n_items}  +{committed}/-{rejected}")
@@ -1975,19 +2018,7 @@ def evolve(
                       + (f"target_reward={target_reward} reached, stopping"
                          if early_stop == "target_reward" else
                          f"no improvement for {early.stalled} rounds, stopping"))
-            if early_stop == "target_reward" and on_round is not None:
-                try:
-                    on_round(info)
-                except Exception:  # noqa: BLE001 - reported below on the normal path
-                    pass
             break
-        if on_round is not None:
-            # A reporting callback must never take the run down with it.
-            try:
-                on_round(info)
-            except Exception as e:  # noqa: BLE001
-                warnings.warn(f"on_round callback raised: {type(e).__name__}: {e}",
-                              RuntimeWarning, stacklevel=2)
 
     if run_error is None:
         # A clean run publishes the head it produced (see `_publish_stable`);
