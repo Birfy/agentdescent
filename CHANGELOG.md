@@ -7,6 +7,24 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **`evolve(staleness_policy=...)` could not decide anything on the synchronous
+  path.** The loop snapshots the ledger at the top of every round and every
+  worker proposes against that snapshot, so a diff's staleness `eta` is **0 by
+  construction** -- measured over an 8-round run, all 15 staleness decisions saw
+  `eta = 0` and returned ACCEPT, which makes Full, Guarded and Reflective
+  identical runs. The `alpha` tolerances in `AggregatorConfig` and the
+  `all-stale` outcome were equally unreachable there. The whole mechanism only
+  ever bit on `async_evolve`, where `async_ratio` produces the drift.
+
+  `evolve(refresh_interval=N)` is the missing half: a worker keeps its snapshot
+  for N rounds, **staggered by worker id**, so the workers hold a spread of
+  versions and their diffs arrive with a spread of `eta`. `1` is the default and
+  is exactly the old behaviour. It costs no extra ledger read -- a worker either
+  adopts the snapshot the round already took, or keeps the older one it has --
+  and it is the same mechanism `AgentDescent` uses to make the staleness sweep
+  meaningful, which is the first thing the general engine was missing before the
+  two loops can be merged.
+
 - **The async path counted every surviving card twice, so `stale_rate()` read
   about half the truth.** `async_evolve` runs its own staleness gate — it has to,
   because a custom `aggregator_factory` is promised only already-rebased cards —

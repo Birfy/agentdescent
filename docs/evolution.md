@@ -108,6 +108,7 @@ nothing else in the call changes.
 | `agg_config=` | `AggregatorConfig` | merge & acceptance **tuning** | sensible defaults |
 | `aggregator_factory=` | `AggregatorProtocol` | **swap the whole optimizer** (custom merge/acceptance) | reference `Aggregator` |
 | `staleness_policy=` | [staleness](staleness.md) (`get_policy(...)`) | how stale diffs are handled | `guarded` |
+| `refresh_interval=` | driver | rounds a worker keeps its snapshot — what *creates* staleness on the synchronous path | `1` (no staleness) |
 | `rounds=`, `n_workers=` | driver | loop size, parallel worker count | `15`, `4` |
 | `max_concurrency=` | driver | run a round's workers **concurrently** (thread pool); aggregator = barrier (synchronous DP) | `1` (sequential) |
 | `round_timeout=` | driver | cap how long a round waits for its workers — abandons stragglers | `None` (wait forever) |
@@ -356,8 +357,17 @@ aggregator: **[the aggregator page](aggregator.md)**.
 ```python
 from agentdescent import get_policy
 
-evolve(tasks, reward, agent=agent, staleness_policy=get_policy("reflective"))
+evolve(tasks, reward, agent=agent, staleness_policy=get_policy("reflective"),
+       refresh_interval=3)          # <- without this there is no staleness to handle
 ```
+
+!!! warning "On the synchronous path, `refresh_interval` is what makes this knob do anything"
+    `evolve()` snapshots at the top of every round, so by default every worker
+    proposes against the current head and `η` is 0 by construction — all three
+    policies then behave identically. `refresh_interval=N` lets a worker keep its
+    snapshot for N rounds, staggered by worker id, which is what produces a spread
+    of `η`. On the barrier-free path `async_ratio` already does this. See
+    [staleness](staleness.md).
 
 | Policy | Behaviour |
 |---|---|

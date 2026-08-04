@@ -99,3 +99,63 @@ def test_a_card_carrying_real_tasks_is_silent():
         warnings.simplefilter("always")
         assert art.evidence_eval(card) == 1.0
     assert not caught, [str(w.message) for w in caught]
+
+
+# ---------------------------------------------------------------------------
+# `staleness_policy=` has to have something to decide
+# ---------------------------------------------------------------------------
+
+
+def _observed_etas(refresh_interval):
+    """Run the synchronous engine and collect every eta the policy was asked about."""
+    import warnings
+
+    from agentdescent.evolution import AppendRules, Task, evolve
+
+    seen = []
+
+    class _Spy(GuardedStaleness):
+        name = "guarded"
+
+        def decide(self, eta, alpha, contract_breaking):
+            action = super().decide(eta, alpha, contract_breaking)
+            seen.append((eta, action))
+            return action
+
+    tasks = [Task(id=f"t{i}", prompt=f"q{i}", meta={"gold": str(i)}) for i in range(12)]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        result = evolve(
+            tasks, lambda t, o: 1.0 if o == t.meta["gold"] else 0.0,
+            run=lambda rendered, t: t.meta["gold"] if t.id in rendered else "?",
+            propose=lambda r, t, o, s: t.id, strategy=AppendRules(),
+            rounds=10, n_workers=4, max_concurrency=4, held_out_frac=0.5,
+            refresh_interval=refresh_interval, staleness_policy=_Spy())
+    return seen, result
+
+
+def test_the_default_synchronous_loop_has_no_staleness_to_decide():
+    """Pinned as a property, not a defect: with `refresh_interval=1` every worker
+    proposes against the round's fresh snapshot, so `eta` is 0 by construction.
+
+    Worth a test because it is *surprising*: `evolve(staleness_policy=...)` is a
+    documented knob, and on this path it could not change a single decision --
+    Full, Guarded and Reflective were indistinguishable.
+    """
+    seen, _ = _observed_etas(refresh_interval=1)
+    assert seen, "premise: the staleness filter ran at all"
+    assert {eta for eta, _ in seen} == {0}
+    assert {a for _, a in seen} == {StaleAction.ACCEPT}
+
+
+def test_a_refresh_interval_makes_every_staleness_action_reachable():
+    """Above 1, workers hold a staggered spread of versions, so their diffs
+    arrive with a spread of eta and the policy actually decides."""
+    seen, result = _observed_etas(refresh_interval=3)
+    etas = {eta for eta, _ in seen}
+    actions = {a for _, a in seen}
+    assert max(etas) > 0, f"still no staleness on the synchronous path: {sorted(etas)}"
+    assert actions == {StaleAction.ACCEPT, StaleAction.REBASE, StaleAction.DISCARD}, (
+        f"not every branch of the policy is reachable: {sorted(a.name for a in actions)}")
+    assert result.outcomes().get("committed", 0) > 0, (
+        "staggering the snapshots stopped the run from converging")

@@ -47,7 +47,7 @@ from .aggregator import (
 )
 from .evalcache import CacheProtocol, MemoryCache, cache_key
 from .evaluator import EvaluatorGroup
-from .evolvable import Contract, ContractError, Diff, EvidenceCard
+from .evolvable import Contract, ContractError, Diff, EvidenceCard, stable_hash
 from .governance import FROZEN_IDS, GovernanceError, assert_mutable
 from .ledger import Ledger, LedgerFailure
 from .metrics import Meter, measured
@@ -1559,6 +1559,7 @@ def evolve(
     rounds: int = 15,
     n_workers: int = 4,
     max_concurrency: int = 1,
+    refresh_interval: int = 1,
     round_timeout: Optional[float] = None,
     target_reward: Optional[float] = None,
     patience: Optional[int] = None,
@@ -1679,6 +1680,22 @@ def evolve(
         Workers per round (``>= 1``).
     max_concurrency:
         How many of them actually run at once (see above).
+    refresh_interval:
+        How many rounds a worker keeps its ledger snapshot before taking the
+        round's fresh one. ``1`` (default) is what this loop always did: every
+        worker proposes against the current head, so a diff's staleness ``eta``
+        is **0 by construction** -- and that made ``staleness_policy=`` a knob
+        with nothing to decide on this path (measured over an 8-round run: all
+        15 staleness decisions saw ``eta=0`` and returned ACCEPT, so Full,
+        Guarded and Reflective were indistinguishable).
+
+        Above ``1``, workers hold a spread of versions -- the refresh is
+        staggered by worker id -- so their diffs arrive with a spread of ``eta``
+        and the staleness policy, the ``alpha`` tolerances in ``agg_config`` and
+        the ``all-stale`` outcome all become reachable synchronously. Costs no
+        extra ledger read: a worker either adopts the snapshot the round already
+        took, or keeps the older one it has. Ignored under ``asynchronous=True``,
+        where the lag budget is ``async_ratio``.
     eval_concurrency:
         How many held-out tasks to score at once. Every gate goes through this --
         each round's measurement and, far more often, the aggregator's
@@ -1812,6 +1829,9 @@ def evolve(
              "it bounds the round barrier, and the async path has no barrier -- "
              "bound a rollout with your backend's own timeout= instead, and the "
              "run with max_seconds"),
+            ("refresh_interval", None if refresh_interval == 1 else refresh_interval,
+             "it staggers snapshot refresh across round barriers, and the async "
+             "path has none -- async_ratio is its lag budget"),
         ):
             if value is not None:
                 warnings.warn(
@@ -1903,6 +1923,9 @@ def evolve(
     # tracker, and now the same epsilon (they had two).
     early = EarlyStop(target_reward=target_reward, patience=patience)
     unit_lock = threading.Lock()
+    # Per-worker snapshots, when `refresh_interval > 1`. See `_snapshot_for`.
+    worker_snaps: Dict[int, Tuple["EvolvingArtifact", int]] = {}
+    snap_lock = threading.Lock()
     first_error: List[Optional[str]] = [None]
     contract_error = FirstError()          # caller bug -> re-raise on this thread
     # The retirement rule lives in `pipeline.WorkerHealth`, shared with the
@@ -1951,6 +1974,35 @@ def evolve(
         assert_mutable(artifact)
         ok_units, failed_units = [0], [0]      # this round's tally
 
+        def _snapshot_for(worker: int):
+            """The artifact this worker proposes against, and the version it read.
+
+            With ``refresh_interval=1`` -- the default, and what this loop always
+            did -- every worker takes the round's fresh snapshot, so a diff is
+            always proposed against the current head and ``eta`` is **0 by
+            construction**. That made ``evolve(staleness_policy=)`` a knob that
+            could not decide anything: measured over an 8-round run, every one of
+            the 15 staleness decisions saw ``eta=0`` and returned ACCEPT, so Full,
+            Guarded and Reflective were indistinguishable.
+
+            Above 1, a worker keeps its snapshot for that many rounds and the
+            refresh is **staggered** by worker id, so at any moment the workers
+            hold a spread of versions and their diffs arrive with a spread of
+            ``eta``. That is the same mechanism
+            :class:`~agentdescent.orchestrator.AgentDescent` uses to make the
+            staleness sweep meaningful, expressed against the round's existing
+            snapshot rather than a fresh one -- so it costs no extra ledger read;
+            a worker either adopts the snapshot this round already took, or keeps
+            the older one it has.
+            """
+            if refresh_interval <= 1:
+                return artifact, base_v
+            with snap_lock:
+                due = (r % refresh_interval) == (stable_hash(worker) % refresh_interval)
+                if worker not in worker_snaps or due:
+                    worker_snaps[worker] = (artifact, base_v)
+                return worker_snaps[worker]
+
         def _run_unit(unit) -> None:
             """One worker: rollout -> propose -> ingest evidence (against `snap`).
 
@@ -1978,11 +2030,14 @@ def evolve(
         def _run_unit_inner(unit) -> None:
             if not unit.keys:
                 return
+            # This worker's own view of the artifact. Identical to the round's
+            # under the default `refresh_interval=1`; older, by design, above it.
+            mine, mine_v = _snapshot_for(unit.worker)
             task = by_id[sampler.pick(unit.keys, r)]     # a task from this worker's shard
             # The rollout is the part that can move elsewhere. Everything around
             # it -- which task, what the output implies, who is told about it --
             # reads or writes state that has to stay in this process.
-            outcome = eng.executor.rollout(_spec_for(eng, artifact, task))
+            outcome = eng.executor.rollout(_spec_for(eng, mine, task))
             if not outcome.ok:
                 raise _rollout_failure(outcome)
             output = outcome.output
@@ -1994,10 +2049,10 @@ def evolve(
             if score >= solved_threshold:
                 return
             proposal = _checked_proposal(
-                propose(artifact.render(), task, output, score), task)
+                propose(mine.render(), task, output, score), task)
             if not proposal:
                 return
-            diff = strategy.to_diff(artifact.state, proposal, f"w{unit.worker}", base_v, artifact_id)
+            diff = strategy.to_diff(mine.state, proposal, f"w{unit.worker}", mine_v, artifact_id)
             if diff is None:
                 return
             # Tensor parallelism means each worker owns a disjoint *section* of the
@@ -2023,12 +2078,12 @@ def evolve(
             # opt-out here exactly as it is on the async path.
             if self_verify:
                 after = _checked_reward(
-                    reward(task, run(artifact.apply(diff).render(), task)), task)
+                    reward(task, run(mine.apply(diff).render(), task)), task)
                 delta = after - score
             else:
                 delta = 0.0
             aggregator.ingest(EvidenceCard(
-                diff=diff, base_version={artifact_id: base_v}, touched=[artifact_id],
+                diff=diff, base_version={artifact_id: mine_v}, touched=[artifact_id],
                 before_after_delta=delta, trajectory_refs=[task]))
 
         try:
