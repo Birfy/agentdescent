@@ -39,6 +39,8 @@ An `Evolvable`: flat state + a strategy.
 
 | method | what it does |
 |---|---|
+| `cheap_eval(evidence: EvidenceCard) -> float` | Score this artifact on the trajectories an evidence card carries. |
+| `evidence_eval(evidence: EvidenceCard) -> float` | Score this artifact on the trajectories an evidence card carries. |
 | `full_eval(task_set: Sequence[Task]) -> Dict[str, float]` | Score on a task set. No longer part of the `Evolvable` protocol -- the engine reaches ground truth through the verifier's `eval_fn` -- and kept because it is a convenient thing for a caller to have. |
 | `score(tasks: Sequence[Task]) -> float` | Mean reward over `tasks`, evaluated concurrently. |
 

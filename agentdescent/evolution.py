@@ -392,7 +392,42 @@ class EvolvingArtifact:
         return sum(scores) / len(scores)
 
     def evidence_eval(self, evidence: EvidenceCard) -> float:
-        return self.score([t for t in evidence.trajectory_refs if isinstance(t, Task)])
+        """Score this artifact on the trajectories an evidence card carries.
+
+        Says so out loud when there is nothing to score. This is the one call
+        behind the staleness policy's REBASE branch, which keeps a rebased diff
+        iff ``before <= after`` -- and :meth:`score` returns ``0.0`` for an empty
+        task list, so when the filter below empties it the branch compares
+        ``0.0 <= 0.0``, keeps *every* rebased diff, and the cheap re-verification
+        the policy is named for silently becomes a no-op. A diff that makes the
+        artifact worse survives it.
+
+        :class:`~agentdescent.evolvable.EvidenceCard.trajectory_refs` was
+        annotated ``List[str]`` for a while, so a custom domain that followed the
+        annotation and stored ids landed here with a non-empty list and nothing
+        in it to score. The annotation is fixed; this is the part that would have
+        made it visible at the time.
+        """
+        tasks = [t for t in evidence.trajectory_refs if isinstance(t, Task)]
+        if not tasks:
+            self._warn_unscorable(len(evidence.trajectory_refs))
+        return self.score(tasks)
+
+    def _warn_unscorable(self, n_refs: int) -> None:
+        """Warn once per run. The caller is a per-card loop, so once is the point."""
+        rt = self._rt
+        if rt is None or rt.warned_unscorable:
+            return
+        rt.warned_unscorable = True
+        detail = (f"its {n_refs} trajectory ref(s) are not Task objects"
+                  if n_refs else "it carries no trajectory refs")
+        warnings.warn(
+            f"an evidence card reached the staleness filter's re-verification with "
+            f"nothing to score ({detail}), so the check compares 0.0 <= 0.0 and "
+            "keeps the diff whatever it does to the artifact. Put the failing "
+            "Task objects in EvidenceCard.trajectory_refs -- ids are not enough, "
+            "the engine scores the tasks themselves.",
+            RuntimeWarning, stacklevel=3)
 
     def full_eval(self, task_set: Sequence[Task]) -> Dict[str, float]:
         """Score on a task set. No longer part of the `Evolvable` protocol -- the
@@ -444,6 +479,12 @@ class _Runtime:
     #: two, it is what stops one environment's score answering the other's
     #: question.
     env_fingerprint: str = ""
+
+    #: Has this run already reported an evidence card with nothing to score?
+    #: Lives here rather than on the artifact because artifacts are rebuilt from
+    #: the ledger constantly, and rather than at module scope because "once" has
+    #: to mean once per run, not once per interpreter.
+    warned_unscorable: bool = False
 
     def eval_one(self, artifact: EvolvingArtifact, task: Task) -> float:
         key = cache_key(artifact._signature(), task.id, self.env_fingerprint)
@@ -607,13 +648,22 @@ def _publish_stable(aggregator) -> None:
         pass
 
 
-#: What `evolve` / `async_evolve` can honour from a `Policies` bundle today.
-#: Everything else raises rather than being accepted and ignored -- see
+#: What `evolve` can honour from a `Policies` bundle today. Everything else
+#: raises rather than being accepted and ignored -- see
 #: `Policies.require_supported`. The set grows as the implementations land.
 _WIRED_POLICIES = ("task_sampler", "proposal", "conflict", "fusion", "acceptance",
                    "promotion", "staleness", "verifier", "ledger",
                    "aggregator_factory", "eval_cache", "sandbox_spec", "evaluator",
                    "executor")
+
+#: The same bundle, minus the one field the barrier-free loop does not read.
+#: `async_evolve`'s worker calls `eng.run` directly; there is no executor seam in
+#: it yet, so a supplied one was accepted and then dropped -- the exact outcome
+#: `require_supported` exists to make impossible, arriving through a *shared*
+#: constant rather than a missing check. It matters more since a supplied
+#: executor started working on the synchronous path: flipping
+#: `asynchronous=True` would otherwise silently stop honouring it.
+_ASYNC_WIRED_POLICIES = tuple(p for p in _WIRED_POLICIES if p != "executor")
 
 
 def _propose_via_policy(policy):
@@ -642,14 +692,20 @@ def _propose_via_policy(policy):
     return propose
 
 
-def _resolve_policies(policies: Optional[Policies], where: str, **shortcuts) -> Policies:
+def _resolve_policies(policies: Optional[Policies], where: str, *,
+                      supported: Optional[Sequence[str]] = None,
+                      **shortcuts) -> Policies:
     """Fold the legacy keyword arguments into a bundle and check it is honourable.
 
     The keyword arguments are shortcuts onto bundle fields, so an explicit
     argument has to beat a bundle default -- being silently dropped is the one
-    outcome a caller cannot detect."""
+    outcome a caller cannot detect.
+
+    ``supported`` is keyword-only and defaults to `evolve`'s set. The two engines
+    do not honour quite the same bundle, and sharing one constant meant the
+    narrower of them silently ignored a field."""
     merged = (policies or Policies()).merged_with(**shortcuts)
-    merged.require_supported(_WIRED_POLICIES, where)
+    merged.require_supported(supported or _WIRED_POLICIES, where)
     return merged
 
 

@@ -41,7 +41,7 @@ from .policies import Policies
 from .evolution import (
     _publish_stable, _safe_log,
     Agent, EvolutionResult, Propose, Reward, RoundInfo, Run, Strategy, Task,
-    _cost_fields, _resolve_policies, _tally,
+    _ASYNC_WIRED_POLICIES, _cost_fields, _resolve_policies, _tally,
     SOLVED, _build_engine, _checked_proposal, _checked_reward,
 )
 from .aggregator import AggregatorConfig, check_reports
@@ -228,7 +228,9 @@ def async_evolve(
         ``RoundInfo.round`` is the sweep index. Compare ``final_reward`` across the
         sync and async paths, not ``len(history)``.
     """
-    _pol = _resolve_policies(policies, "async_evolve()", task_sampler=task_sampler,
+    _pol = _resolve_policies(policies, "async_evolve()",
+                             supported=_ASYNC_WIRED_POLICIES,
+                             task_sampler=task_sampler,
                              staleness=staleness_policy,
                              aggregator_factory=aggregator_factory)
     task_sampler, staleness_policy = _pol.task_sampler, _pol.staleness

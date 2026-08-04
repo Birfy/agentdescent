@@ -7,6 +7,49 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **An exhausted `oracle_budget` turned the audit gate into a sub-sample veto.**
+  `oracle_eval` degrades to `rule_eval` once the budget is gone — by design, so a
+  run cannot spend money it was told not to — but `rule_eval` is the
+  `cheap_eval_tasks` sub-sample, and the audit gate vetoed on its verdict.
+  Measured: a candidate that took the full held-out rate from 0.5 to 1.0 came
+  back `oracle-rejected` because a two-task sample scored both sides at 0.5. Two
+  sections of `docs/verifier.md` promise sub-sampling can never decide a commit;
+  this was the path that made it false, and it is the same hole the acceptance
+  step's regression guard was fixed for one entry below.
+
+  The fix is that the audit stops buying a measurement it already has.
+  `ThreeLayerVerifier.oracle_shares_full_set` records what that class has always
+  done — `oracle_eval` and `eval_counts` are the same `eval_fn` over the same
+  held-out set — and the aggregator reuses the full-set rates the acceptance test
+  just computed. The verdict is identical while budget remains, and there is no
+  degraded path to fall onto when it does not. A custom verifier whose oracle is
+  genuinely independent leaves the attribute undefined and keeps being called.
+
+  Consequences worth knowing: with the shipped verifier an L1 run now reports
+  `oracle_calls_used == 0` — the audit ran, nothing had to be bought — so
+  `AuditScheduler.audits` was added to answer "did the gate open", which is the
+  question `oracle_calls_used` used to be a proxy for.
+
+- **`async_evolve()` accepted `Policies(executor=...)` and ignored it.** Both
+  engines shared one `_WIRED_POLICIES` tuple, and the barrier-free loop has no
+  executor seam — its worker calls `eng.run` directly. So the field was declared
+  supported for a loop that never read it: accepted, then dropped, which is the
+  single outcome `Policies.require_supported` exists to prevent. It got sharper
+  the moment a supplied executor started working under `evolve()`, because
+  flipping `asynchronous=True` would then silently stop honouring it. The async
+  path now has its own set and raises `NotImplementedError` naming the field.
+
+- **A "cheap re-verification" that verified nothing did so in silence.** The
+  staleness policies' `REBASE` branch keeps a rebased diff iff
+  `before <= after`, and `EvolvingArtifact.score` returns `0.0` for an empty task
+  list — so when an evidence card carries nothing the engine can score, the check
+  compares `0.0 <= 0.0` and keeps *every* diff, including one that makes the
+  artifact worse. `EvidenceCard.trajectory_refs` was annotated `List[str]` for a
+  while, so a domain that followed the annotation and stored ids landed here with
+  a non-empty list and nothing in it to score. The annotation was corrected
+  earlier; `evidence_eval` now warns once per run when it happens, which is what
+  would have made the original trap visible while it was running.
+
 - **`policies=Policies(executor=...)` produced a finished run that measured
   nothing.** `evolve()` describes each rollout as a `RolloutSpec`, and the
   `Ref`s in it named `agents:echo` / `rewards:contains` as stand-ins — the

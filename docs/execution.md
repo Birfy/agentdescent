@@ -99,6 +99,16 @@ resolved* and says why. So:
 | omitted | a `ThreadExecutor` sized from `eval_concurrency` |
 | a `ThreadExecutor` you built | accepted; `evolve()`'s `run`/`reward` are attached to it and **win** over any passed to its constructor |
 | anything without `attach_actors` (e.g. `ProcessExecutor`) | **refused at build time**, naming the fix |
+| any of the above under `async_evolve()` / `asynchronous=True` | **refused**: the barrier-free loop has no executor seam |
+
+!!! warning "`async_evolve()` does not take an executor"
+    Its worker calls `eng.run` directly — there is no seam to route through yet.
+    Both engines shared one list of honoured `Policies` fields, so `executor` was
+    declared supported for a loop that never read it: accepted, then dropped. That
+    is the single outcome [`require_supported`](evolution.md) exists to prevent,
+    and it got sharper once a supplied executor started working under `evolve()`,
+    because flipping `asynchronous=True` would silently stop honouring it. It now
+    raises `NotImplementedError` naming the field.
 
 !!! warning "Why the refusal, rather than a best effort"
     It used to be a best effort, and the spec named `agents:echo` /
