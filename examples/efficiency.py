@@ -49,14 +49,25 @@ def heavy_tailed_latency(base: float, spike: float, p_spike: float, seed: int):
     return lat
 
 
+def _slow_rollout(latency):
+    """The domain's rollout, plus the latency a real one would have.
+
+    `time.sleep` releases the GIL, which is the whole point: it stands in for the
+    network wait an agent rollout actually is, so the overlap being measured here
+    is the overlap a real workload gets."""
+    from agentdescent.domains.router import router_run
+
+    def rollout(rendered, task):
+        time.sleep(latency())
+        return router_run(rendered, task)
+    return rollout
+
+
 def _build(universe, n_workers, latency, seed, **cfg_kw):
-    cfg = AsyncConfig(n_workers=n_workers, noise=0.1, worker_pause=0.0,
-                      aggregator_interval=0.001, seed=seed, **cfg_kw)
+    cfg = AsyncConfig(n_workers=n_workers, noise=0.1, seed=seed, **cfg_kw)
     repo = tempfile.mkdtemp(prefix="agentdescent-eff-")
-    sys = AsyncAgentDescent(repo, universe, config=cfg)
-    for w in sys.workers:
-        w.rollout_latency = latency
-    return sys
+    return AsyncAgentDescent(repo, universe, config=cfg,
+                             rollout=_slow_rollout(latency))
 
 
 # -- Experiment 1: parallel throughput scaling -------------------------------
@@ -86,30 +97,25 @@ def experiment_parallel(universe, seconds=2.0):
 # -- Experiment 2: async vs synchronous barrier ------------------------------
 
 
-def _rollout_once(worker, skill, base, tasks):
-    worker.run(skill, base, tasks)  # sleeps (latency) + does the cheap work
-
-
-def run_barrier(workers, skill, base, tasks, rounds):
+def run_barrier(rollout, rendered, task, n_workers, rounds):
     """Barrier: each round runs N rollouts concurrently, then waits for the
     slowest before the next round -- wall-clock = sum of per-round max latency."""
-    n = len(workers)
     start = time.time()
-    with ThreadPoolExecutor(max_workers=n) as ex:
+    with ThreadPoolExecutor(max_workers=n_workers) as ex:
         for _ in range(rounds):
-            futs = [ex.submit(_rollout_once, w, skill, base, tasks) for w in workers]
+            futs = [ex.submit(rollout, rendered, task) for _ in range(n_workers)]
             for f in futs:              # <-- barrier: block on the slowest worker
                 f.result()
     return time.time() - start
 
 
-def run_free(workers, skill, base, tasks, rounds):
+def run_free(rollout, rendered, task, n_workers, rounds):
     """No barrier: each worker runs `rounds` rollouts back-to-back, never
     waiting for the others -- wall-clock = the busiest worker's own total."""
-    def loop(w):
+    def loop():
         for _ in range(rounds):
-            _rollout_once(w, skill, base, tasks)
-    threads = [threading.Thread(target=loop, args=(w,)) for w in workers]
+            rollout(rendered, task)
+    threads = [threading.Thread(target=loop) for _ in range(n_workers)]
     start = time.time()
     for t in threads:
         t.start()
@@ -122,14 +128,18 @@ def experiment_async(universe, n_workers=4, rounds=40):
     print("=== Experiment 2: async (no barrier) vs synchronous barrier ===")
     print(f"N = {n_workers} workers, heavy-tailed latency (4ms base, 12x spike @15%), "
           f"{rounds} rounds = {rounds * n_workers} rollouts each way\n")
-    sys = _build(universe, n_workers, heavy_tailed_latency(0.004, 12.0, 0.15, seed=7),
-                 seed=2, async_ratio=10_000, target_accuracy=2.0, max_seconds=1)
-    snap = sys.ledger.snapshot(Ledger.DEV)
-    skill, base, tasks = snap.get(sys.skill_id), snap.version, sys.scheduler.select().tasks
+    # Dispatch shape only: one rendered artifact, one cluster, N concurrent
+    # rollouts. Nothing here touches the ledger, which is the point -- the
+    # question is what the *barrier* costs, not what a merge costs.
+    from agentdescent.domains.router import RouterStrategy, cluster_tasks
+
+    rollout = _slow_rollout(heavy_tailed_latency(0.004, 12.0, 0.15, seed=7))
+    rendered = RouterStrategy().render({})
+    task = cluster_tasks(universe, n_clusters=max(2, n_workers))[0][0]
     total = rounds * n_workers
 
-    bt = run_barrier(sys.workers, skill, base, tasks, rounds)
-    ft = run_free(sys.workers, skill, base, tasks, rounds)
+    bt = run_barrier(rollout, rendered, task, n_workers, rounds)
+    ft = run_free(rollout, rendered, task, n_workers, rounds)
 
     print(f"{'mode':>16} {'wall-clock':>11} {'rollouts/s':>11} {'utilization':>12}")
     print(f"{'sync barrier':>16} {bt:>10.2f}s {total / bt:>11.0f} {ft / bt:>11.0%}")

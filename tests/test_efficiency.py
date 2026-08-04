@@ -1,5 +1,7 @@
 """Offline tests for the efficiency-experiment helpers (no timing assertions)."""
 
+import threading
+
 from examples.efficiency import (
     constant_latency,
     heavy_tailed_latency,
@@ -18,22 +20,33 @@ def test_heavy_tailed_latency_values_and_spread():
     assert seen == {0.01, 0.1}  # only the base and the spiked value occur
 
 
-class _CountingWorker:
-    def __init__(self):
-        self.calls = 0
+def _counting_rollout():
+    """A rollout that only records that it happened.
 
-    def run(self, skill, base, tasks):
-        self.calls += 1
-        return None
+    `run_barrier` / `run_free` used to take `Worker` objects and call
+    `w.run(skill, base, tasks)`. The runtimes are adapters over the general
+    engine now, so the microbenchmark takes the engine's rollout shape --
+    `(rendered, task) -> output` -- and this counts instead of classifying."""
+    calls = {"n": 0}
+    lock = threading.Lock()
+
+    def rollout(rendered, task):
+        with lock:
+            calls["n"] += 1
+        return ""
+    return rollout, calls
 
 
 def test_barrier_and_free_do_equal_work():
     rounds, n = 5, 3
-    bw = [_CountingWorker() for _ in range(n)]
-    run_barrier(bw, skill=None, base=None, tasks=None, rounds=rounds)
-    assert sum(w.calls for w in bw) == rounds * n
 
-    fw = [_CountingWorker() for _ in range(n)]
-    run_free(fw, skill=None, base=None, tasks=None, rounds=rounds)
-    assert sum(w.calls for w in fw) == rounds * n
-    assert all(w.calls == rounds for w in fw)  # each worker did exactly `rounds`
+    barrier, barrier_calls = _counting_rollout()
+    run_barrier(barrier, rendered="", task=None, n_workers=n, rounds=rounds)
+    assert barrier_calls["n"] == rounds * n
+
+    free, free_calls = _counting_rollout()
+    run_free(free, rendered="", task=None, n_workers=n, rounds=rounds)
+    assert free_calls["n"] == rounds * n, (
+        "the two dispatch shapes must do the same work -- the experiment is "
+        "about wall-clock, and a comparison of different amounts of work is not "
+        "a comparison of dispatch")
