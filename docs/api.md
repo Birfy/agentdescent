@@ -668,7 +668,7 @@ The round loop the research results were measured with. &nbsp;·&nbsp; `agentdes
 
 ### `AgentDescent(...)`
 
-The merge-based parallel self-evolution system.
+The merge-based parallel self-evolution system, on the general engine.
 
 ### `RoundStat(...)`
 
