@@ -84,6 +84,7 @@ from .policies import (
 from .evalcache import CacheProtocol, FileCache, MemoryCache
 from .executor import Executor, Result, ThreadExecutor
 from .sandbox import LocalWorkspaceSandbox, SandboxPool, WorkspaceProvider
+from .sandbox_shared import SharedSandboxPool
 from .supervisor import ProcessExecutor
 from .workspec import Ref, RefError, RolloutSpec
 from . import rewards                      # agentdescent.rewards.last_number(...)
@@ -227,6 +228,7 @@ __all__ = [
     "LedgerProtocol",
     "SandboxSpec",
     "SandboxPool",
+    "SharedSandboxPool",
     "Executor",
     "CacheProtocol",
     "MemoryCache",

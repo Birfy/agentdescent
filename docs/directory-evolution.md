@@ -264,6 +264,41 @@ recycled pid cannot keep a dead run's directory alive forever.
     what `RolloutSpec` is for — until then the fields on a default `evolve()`
     run stay zero rather than being quietly approximate.
 
+## One ceiling across processes
+
+`SandboxPool` bounds what a **process** creates. Two runs on one machine each
+respect their own limit and together exceed the machine's — the same mistake
+`max_concurrency` and `eval_concurrency` made before they shared a gate, one
+level up.
+
+```python
+from agentdescent.sandbox_shared import SharedSandboxPool
+
+pool = SharedSandboxPool(root="/var/tmp/agentdescent-pool",
+                         capacity=8,      # the machine's ceiling
+                         holders=2)       # how many runs expect to share it
+```
+
+No server. Every sandbox already carries a lease file naming its owner and when
+it was last renewed — the file `reap` reads to decide what is abandoned. Counting
+those answers a different question with the same data: how many sandboxes are
+alive on this machine right now.
+
+**Quota, not just capacity.** A ceiling alone lets whoever asks first take
+everything, so a long run starves a short one. Each holder is guaranteed
+`capacity // holders` (at least one) and may exceed it only while others are
+under theirs. Without that, sharing a ceiling is worse than not sharing: the runs
+interfere and none of them can tell.
+
+**A dead holder's slot comes back.** Its lease stops being renewed and stops
+being counted — the same rule that reclaims its directory.
+
+!!! note "One machine, verified; several, not"
+    Nothing here assumes a single machine, and nothing here has been run on two.
+    The lease directory would have to be somewhere both can see, and shared
+    filesystems have their own opinions about atomicity. That is the work a
+    cross-machine claim needs, and it has not been done.
+
 ## Isolation strength — three levels
 
 Lifetime and isolation are different questions. The pool answers the first for
