@@ -5,20 +5,23 @@ Every module, what it is for, and where its design is explained. The
 and *how*, that is *what*.
 
 ```
-                     evolve()  ── the one entry point
-                        │
-   ┌────────────────────┼────────────────────────────────────┐
-   │                    │                                    │
- what evolves      who does the work                  how it merges
-   │                    │                                    │
- strategy           agents / backends                   aggregator
- filetree           runners                             ledger
- treestrategy       sampling                            verifier
-                    parallel                            staleness
-                    scheduler                           governance
-                    dataloader / rewards                  metrics · policies
-                    sandbox                              defaults
-                    sandbox
+                          evolve()  ── the one entry point
+                              │
+   ┌───────────────┬──────────┴──────────┬────────────────────┐
+   │               │                     │                    │
+ what evolves   who does the work    where it runs        how it merges
+   │               │                     │                    │
+ strategies      agents               executor             aggregator
+ filetree        backends             supervisor           defaults
+ treestrategy    runners              workspec             ledger
+                 sampling             sandbox              verifier
+                 dataloader           sandbox_container    evaluator
+                 rewards              sandbox_shared       evalcache
+                 parallel             pipeline             staleness
+                 scheduler                                 governance
+
+              policies ── the contracts, across all four
+              metrics · bench ── what a run cost, and comparing runs
 ```
 
 ## The loop
@@ -57,29 +60,40 @@ and *how*, that is *what*.
 | `parallel` | DP / TP / PP — how a round's work is split | [Parallelism](parallelism.md) |
 | `sampling` | which task a worker rolls out next | [Sampling](sampling.md) |
 | `scheduler` | duration-aware dispatch, stragglers, the audit queue | [Scheduling](duration-scheduling.md) |
+| `pipeline` | the retirement, early-stop and backpressure rules both runtimes share | [Async](async.md) |
+
+## Where it runs
+
+| module | what it is | page |
+|---|---|---|
+| `executor` | the `rollout(spec) -> Result` seam, and the in-process default | [Execution](execution.md) |
+| `supervisor` | persistent worker processes, and deciding when one is gone | [Execution](execution.md#why-not-processpoolexecutor) |
+| `workspec` | a rollout as data: named callables instead of closures | [Execution](execution.md#work-has-to-be-describable-as-data-first) |
+| `sandbox` | workspace leases: one ceiling, one release path, reclaim what an owner abandoned | [Sandboxes](sandboxes.md#lifetime-leases-not-deletion-by-age) |
+| `sandbox_shared` | one ceiling across processes, counted from the lease directory | [Sandboxes](sandboxes.md#one-ceiling-across-processes) |
+| `sandbox_container` | the provider that makes a sandbox an actual boundary (needs docker/podman) | [Sandboxes](sandboxes.md#isolation-strength-three-levels) |
 
 ## How a change is accepted
 
 | module | what it is | page |
 |---|---|---|
 | `aggregator` | the optimizer: staleness → conflict → fusion → acceptance → commit | [Aggregator](aggregator.md) |
+| `defaults` | the shipped algorithm as replaceable pieces: conflict, fusion, acceptance, promotion | [Aggregator](aggregator.md) |
 | `stats` | the acceptance maths: Beta posterior, `P(Δ>0)`, annealed δ, UCB, difficulty weight | [Aggregator](aggregator.md) |
 | `verifier` | rule / learned / oracle, and the budget on the expensive one | [Verifier](verifier.md) |
+| `evaluator` | the gate's own bounded, reusable concurrency, separate from the rollouts' | [Verifier](verifier.md#the-evaluation-group) |
+| `evalcache` | memoised evaluations: single-flight, environment-aware, shareable across processes | [Verifier](verifier.md#the-evaluation-cache) |
 | `staleness` | what to do with a diff whose base version moved | [Staleness](staleness.md) |
-| `pipeline` | the retirement and backpressure policies the two barrier-free runtimes share | [Async](async.md) |
 | `ledger` | the git-backed, compare-and-swap artifact store | [Ledger](ledger.md) |
 | `governance` | L0 frozen / L1 slow / L2 fast, by blast radius | [Governance](governance.md) |
-| `bench` | the configuration matrix and the rules that make comparing them mean something | [Efficiency](efficiency.md#the-configuration-matrix-bench) |
-| `evaluator` | the gate's own bounded, reusable concurrency, separate from the rollouts' | [Verifier](verifier.md#the-evaluation-group) |
-| `evalcache` | memoised evaluations: single-flight, environment-aware, shareable across processes | [Verifier](verifier.md) |
-| `workspec` | a rollout as data: named callables instead of closures | [Parallelism](parallelism.md#where-rollouts-run-the-execution-plane) |
-| `executor` · `supervisor` | where rollouts run: threads, or supervised worker processes | [Parallelism](parallelism.md#where-rollouts-run-the-execution-plane) |
-| `sandbox` | workspace leases: one ceiling, one release path, reclaim what an owner abandoned | [Directory evolution](directory-evolution.md#how-workspaces-are-managed) |
-| `defaults` | the shipped algorithm as replaceable pieces: conflict, fusion, acceptance, promotion | [Aggregator](aggregator.md) |
-| `sandbox_shared` | one ceiling across processes, counted from the lease directory | [Directory evolution](directory-evolution.md#one-ceiling-across-processes) |
-| `sandbox_container` | the provider that makes a sandbox an actual boundary (needs docker/podman) | [Directory evolution](directory-evolution.md#isolation-strength-three-levels) |
+
+## Across all of it
+
+| module | what it is | page |
+|---|---|---|
 | `policies` | the contracts: which decisions are replaceable, and what each is given | [Architecture](architecture.md#35-what-the-infrastructure-owns-and-what-the-algorithm-owns) |
 | `metrics` | what the run cost: time, calls, staleness ratio, cache hits, sandbox waits | [Usage](usage.md#what-a-run-cost) |
+| `bench` | the configuration matrix and the rules that make comparing them mean something | [Efficiency](efficiency.md#the-configuration-matrix-bench) |
 
 ## Reading order
 

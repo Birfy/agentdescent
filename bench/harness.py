@@ -18,9 +18,11 @@ point estimate that moved 4.8 points between two runs of one configuration
 not a result.
 
 **One environment, recorded.** Two configurations measured under different
-toolchains differ by more than the variable being studied. Every row carries the
+toolchains differ by more than the variable being studied. A row can carry the
 fingerprint it ran under, and a run whose acceptance saw mixed environments is
-marked rather than averaged in.
+marked rather than averaged in. `bench.run` leaves both empty on purpose: it runs
+a single environment, and a fingerprint invented for a comparison that has only
+one of them would be decoration.
 
 None of this makes a conclusion come out positive. `docs/results.md` carries a
 row reading "lift not yet measured" for exactly that reason, and a harness whose

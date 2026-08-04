@@ -72,6 +72,13 @@ multi-writer configuration is actually producing.
     A ledger inside a sandbox is destroyed with it. Point `repo_path` at a
     location the sandbox does not own.
 
+!!! warning "The lock starts after the repository does"
+    `Ledger(...)` initialises the repo in its constructor, before there is a
+    `.git/` to put a lock file in — so two processes *creating* the same ledger
+    at the same instant race over `git init`. Every path after that is covered.
+    Create the ledger once (or let the first run create it) and share the path;
+    do not start N processes against a directory that does not exist yet.
+
 ## Why git, and why that is not overkill
 
 Three properties are needed and git already has all of them: an append-only

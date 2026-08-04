@@ -12,8 +12,16 @@ every call -- 83 of them in a six-round run over twelve tasks -- so it had a siz
 and nothing else. No identity means nothing to bound, nothing to observe, and no
 way to hand evaluation a different substrate from rollouts.
 
-This is that pool, kept. It is deliberately small: one bounded group, its own
-failure domain, and a `map` that reports rather than raises.
+This is that pool, kept. It is deliberately small: one bounded group with its own
+lifetime, and a `map` that preserves order.
+
+`map` **propagates** the first exception, deliberately. A rollout that fails is
+one opinion missing from a pool of them; a failed *evaluation* is a missing term
+in the mean a commit gate reads, and averaging over the ones that happened to
+succeed answers the gate's question with a number that is not the answer. The
+caller decides what an unmeasurable gate means -- `_Runtime.eval_one` retries,
+and `evolve()` counts the round as unmeasurable -- and it can only decide that if
+it is told.
 """
 
 from __future__ import annotations
@@ -91,6 +99,14 @@ class EvaluatorGroup:
                 self._inflight -= len(items)
 
     def stats(self) -> dict:
+        """What this group has been asked to do.
+
+        `in_flight` and `peak_inflight` count evaluations **submitted and not yet
+        returned**, which is what a caller sizing `eval_concurrency` wants to
+        know: how much work arrived at once. They are not a thread count and
+        exceed `max_workers` whenever a batch is bigger than the pool -- the
+        pool is the ceiling on how many of them are *running*.
+        """
         with self._lock:
             return {"max_workers": self.max_workers, "peak_inflight": self._peak,
                     "in_flight": self._inflight, "closed": self._closed}
