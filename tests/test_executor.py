@@ -316,3 +316,59 @@ def test_the_loop_never_blocks_forever_on_a_result_that_cannot_come():
         assert not pending, "the task stayed pending and the loop would not end"
     finally:
         ex.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# The seam, in the round body
+# ---------------------------------------------------------------------------
+
+
+def test_the_round_body_routes_its_rollout_through_the_executor():
+    """The seam is load-bearing, not decorative: a counting executor sees every
+    rollout the round performs."""
+    from agentdescent import AppendRules, Policies, evolve
+    from agentdescent.executor import ThreadExecutor
+
+    seen = []
+
+    class Counting(ThreadExecutor):
+        def rollout(self, spec):
+            seen.append(spec.task.id)
+            return super().rollout(spec)
+
+    tasks = [Task(id=f"t{i}", prompt=f"q{i}", meta={"gold": str(i)}) for i in range(6)]
+    ex = Counting(2, run=lambda r, t: t.meta["gold"] if t.id in r else "?",
+                  reward=lambda t, o: 1.0 if o == t.meta["gold"] else 0.0)
+    try:
+        result = evolve(tasks, lambda t, o: 1.0 if o == t.meta["gold"] else 0.0,
+                        run=lambda r, t: "unused", propose=lambda r, t, o, s: t.id,
+                        strategy=AppendRules(), rounds=3, n_workers=2,
+                        held_out_frac=0.5, seed=0, policies=Policies(executor=ex))
+    finally:
+        ex.shutdown()
+    assert seen, "the round body never asked the executor for a rollout"
+    assert result.rollouts == len(seen), (
+        f"{result.rollouts} rollouts counted but {len(seen)} went through the seam")
+
+
+def test_a_caller_contract_failure_still_stops_the_run():
+    """The executor reports rather than raises, because one bad rollout is
+    evidence. But a broken contract is not evidence -- it makes the whole run
+    meaningless -- and that distinction has to survive the trip through
+    `Result.kind`."""
+    from agentdescent import AppendRules, Policies, evolve
+    from agentdescent.evolution import ProposalContractError
+    from agentdescent.executor import ThreadExecutor
+
+    tasks = [Task(id=f"t{i}", prompt=f"q{i}", meta={"gold": str(i)}) for i in range(6)]
+    ex = ThreadExecutor(2, run=lambda r, t: "x",
+                        reward=lambda t, o: 5.0)      # outside [0, 1]: a caller bug
+    try:
+        with pytest.raises(Exception) as excinfo:
+            evolve(tasks, lambda t, o: 5.0, run=lambda r, t: "x",
+                   propose=lambda r, t, o, s: None, strategy=AppendRules(),
+                   rounds=2, n_workers=1, held_out_frac=0.5, seed=0,
+                   policies=Policies(executor=ex))
+        assert "range" in str(excinfo.value).lower() or "0, 1" in str(excinfo.value)
+    finally:
+        ex.shutdown()
