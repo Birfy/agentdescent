@@ -464,6 +464,13 @@ def async_evolve(
         head_vv = eng.ledger.head_version(Ledger.DEV)
         head_art = eng.ledger.snapshot(Ledger.DEV).get(eng.artifact_id)
         # staleness gate: hand the aggregator only rebased (η=0) cards.
+        #
+        # Counted here because this path never reaches `Aggregator`'s own filter,
+        # which is where the synchronous loop's ratio comes from. Without these
+        # two lines the async rows of any comparison report a stale rate of 0% --
+        # not "no staleness", but "not measured", and the two look identical in a
+        # table.
+        eng.meter.add("stale_considered", len(batch))
         for card in batch:
             eta = vv_staleness(head_vv, card.base_version)
             action = policy.decide(eta, alpha, card.diff.contract_breaking)
@@ -473,7 +480,10 @@ def async_evolve(
                 cand = head_art.apply(card.diff)         # cheap re-verify on current head
                 if head_art.evidence_eval(card) <= cand.evidence_eval(card):
                     eng.aggregator.ingest(card.rebased_onto(head_vv))
-            # DISCARD -> drop the card
+                else:
+                    eng.meter.add("stale_discarded")
+            else:
+                eng.meter.add("stale_discarded")         # DISCARD -> drop the card
         reports = check_reports(eng.aggregator.step(), eng.aggregator)
         committed = sum(1 for x in reports if x.committed_version is not None)
         dev = eng.ledger.snapshot(Ledger.DEV).get(eng.artifact_id)
@@ -488,7 +498,8 @@ def async_evolve(
         _m = eng.meter.snapshot()
         history.append(RoundInfo(len(history), r, len(dev.state), committed,
                                  len(reports) - committed, _tally(reports),
-                                 elapsed_s=_m.elapsed_s, rollouts=_m.rollouts))
+                                 elapsed_s=_m.elapsed_s, rollouts=_m.rollouts,
+                                 calls=_m.calls))
         # A stalled pipeline: cards keep arriving and none of them commits. Under
         # Guarded with async_ratio > alpha that is a livelock, not slow progress.
         # A sweep with no cards in it is neither, so it is not counted -- and this
@@ -637,6 +648,27 @@ def async_evolve(
             print(f"async run ended with a backend failure: {run_error[:140]}")
         warnings.warn(f"async_evolve() ended with a backend failure: {run_error}",
                       RuntimeWarning, stacklevel=2)
+    # A run that discarded most of its evidence is misconfigured, and every
+    # number it reports is a number about the fraction that survived. `stale_rate`
+    # makes that visible to anyone who looks; this says it to anyone who does not.
+    #
+    # Not a reason to lower the default: `async_ratio` is a lag budget in
+    # *versions*, and how much wall-clock a version represents depends entirely on
+    # how long a rollout takes. Three is sensible when a rollout is a model call
+    # taking seconds; on a workload where rollouts are near-instant, a worker
+    # drifts three versions behind almost immediately and stays there.
+    _considered = eng.meter.snapshot().stale_considered
+    _discarded = eng.meter.snapshot().stale_discarded
+    if _considered >= 20 and _discarded / _considered > 0.5:
+        warnings.warn(
+            f"async_evolve discarded {_discarded}/{_considered} "
+            f"({_discarded / _considered:.0%}) of its evidence as stale. "
+            f"async_ratio={async_ratio} is a lag budget in artifact versions, so "
+            "it is too high whenever a worker finishes several rollouts in the "
+            "time the merger takes one sweep. Lower it (0 resyncs every rollout) "
+            "or use a staleness policy that rebases rather than discards.",
+            RuntimeWarning, stacklevel=2)
+
     result = EvolutionResult(state=dict(final.state), rendered=final.render(),
                              final_reward=final_reward, history=history,
                              ledger_log=_safe_log(eng.ledger),

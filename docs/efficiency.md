@@ -62,6 +62,82 @@ raise it if yours is large and your provider allows the concurrency.
     that, the barrier is meeting a heavy tail, which is what `asynchronous=True`
     addresses.
 
+
+## The configuration matrix — `bench/`
+
+```bash
+python -m bench.run --config sync-1 --config sync-4 --config sync-8                     --config async-4 --seeds 0,1,2
+```
+
+Fixed data, fixed actors, fixed semantics; only the configuration varies. Three
+seeds, reported as the spread that was observed rather than a point estimate —
+this repository has published one that moved 4.8 points between two runs of one
+configuration. Quality is scored on a split `evolve()`'s gate never saw.
+
+| config | seeds | reached | time-to-quality (min/med/max) | cost-to-quality | test quality | stale% |
+|---|---|---|---|---|---|---|
+| sync-1 | 3 | 2/3 | 1.06 / 1.10 / 1.13 | 21 / 22 / 22 | 0.793 / 0.862 / 0.897 | 0% |
+| sync-4 | 3 | 3/3 | 0.41 / 0.50 / 0.71 | 24 / 24 / 40 | 0.862 / 1.000 / 1.000 | 0% |
+| sync-8 | 3 | 3/3 | 0.25 / 0.26 / 0.42 | 24 / 24 / 40 | 0.931 / 1.000 / 1.000 | 0% |
+| async-4 (lag 3, the default) | 3 | **0/3** | — | — | 0.345 / 0.379 / 0.448 | **86%** |
+| async-4 (lag 1) | 3 | 3/3 | 0.49 / 0.56 / 0.59 | 35 / 38 / 76 | 0.931 / 1.000 / 1.000 | 10% |
+| async-4 (lag 0) | 3 | 3/3 | 0.59 / 0.66 / 0.83 | 21 / 23 / 35 | 0.897 / 0.931 / 1.000 | 0% |
+
+### What it says
+
+**Parallelism buys time, not rollouts.** Time-to-quality falls 1.10 → 0.50 → 0.26
+from 1 to 4 to 8 workers, while cost-to-quality *rises* slightly (22 → 24). More
+workers reach the bar sooner and more reliably (2/3 → 3/3), and spend marginally
+more rollouts doing it. Anyone hoping parallelism reduces total work should read
+the second column.
+
+**The barrier-free path's default lag budget is wrong for this domain, and the
+first version of this table blamed the path.** At `async_ratio=3` it discards 86%
+of its evidence and never reaches the bar. At 1 it matches the synchronous path
+on quality; at 0 it is the cheapest configuration in the table.
+
+`async_ratio` is a lag budget in **artifact versions**, and how much wall-clock a
+version represents depends entirely on how long a rollout takes. Three is
+sensible when a rollout is a model call taking seconds. Here a rollout is a
+dictionary lookup, so a worker drifts three versions behind almost immediately
+and stays there.
+
+The default has not been changed — it is tuned for the workload this framework is
+for, not for the one that is cheap to measure. Instead, a run that discards more
+than half its evidence now says so:
+
+```
+RuntimeWarning: async_evolve discarded 110/130 (85%) of its evidence as stale.
+async_ratio=3 is a lag budget in artifact versions, so it is too high whenever a
+worker finishes several rollouts in the time the merger takes one sweep.
+```
+
+**Even correctly tuned, async does not beat sync here** — 0.56 against 0.50. Its
+advantage is that workers never wait for the merge, and on a domain with no
+rollout latency there is no waiting to avoid. That is the caveat below, arrived
+at from the other direction.
+
+!!! danger "These numbers are not an answer to the parallelism question"
+    **No model was called.** The router domain's rollout is a dictionary lookup,
+    so a rollout costs microseconds where a real one costs seconds. Parallelism
+    exists to hide rollout latency; a benchmark with no latency to hide measures
+    the cost of coordination and none of what it buys.
+
+    Read this table as evidence that the *harness* works — deterministic, budget
+    matched in calls, quality on an unseen split, spread rather than point
+    estimates. Answering [#52](https://github.com/Birfy/agentdescent/issues/52)'s
+    question needs a real port against a real model, which is the step that has
+    not been run.
+
+### One thing the harness found about the engine
+
+The async path filters staleness inline and never reaches `Aggregator`'s filter,
+which is where the synchronous ratio is counted. Its stale column read **0%** —
+not "no staleness" but "not measured", and the two are indistinguishable in a
+table. Now counted at the inline gate, it reads 83%, which is the explanation for
+the row above it.
+
+
 ## Threads and the GIL — is this *really* parallel?
 
 Yes, for this workload, and no amount of arguing about the GIL settles it — so

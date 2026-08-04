@@ -711,6 +711,12 @@ class RoundInfo:
     #: denominator: a configuration that reaches the same reward having spent
     #: twice the rollouts has not done as well.
     rollouts: int = 0
+    #: Actor invocations by the end of this round, cumulative. Recorded per round
+    #: because a budget fixed in *rounds* hands the wider configuration more
+    #: model and then reports the extra model as a win for parallelism -- so a
+    #: comparison has to be able to ask "where was each configuration after N
+    #: calls", which needs the number at every round rather than only at the end.
+    calls: int = 0
 
 
 @dataclass
@@ -892,7 +898,8 @@ class EvolutionResult:
                 {"round": h.round, "held_out_reward": h.held_out_reward,
                  "n_items": h.n_items, "committed": h.committed,
                  "rejected": h.rejected, "reasons": h.reasons,
-                 "elapsed_s": h.elapsed_s, "rollouts": h.rollouts}
+                 "elapsed_s": h.elapsed_s, "rollouts": h.rollouts,
+                 "calls": h.calls}
                 for h in self.history
             ],
             "retired_workers": self.retired_workers,
@@ -1946,7 +1953,8 @@ def evolve(
                 section_violations[0] = 0
         _m = eng.meter.snapshot()
         info = RoundInfo(r, round_reward, len(dev.state), committed, rejected,
-                         reasons, elapsed_s=_m.elapsed_s, rollouts=_m.rollouts)
+                         reasons, elapsed_s=_m.elapsed_s, rollouts=_m.rollouts,
+                         calls=_m.calls)
         history.append(info)
         # Early stopping: an LLM rollout costs money, so do not keep buying them
         # once the artifact has converged or clearly stalled.
