@@ -47,6 +47,7 @@ from typing import (
 if TYPE_CHECKING:                                   # pragma: no cover
     from .aggregator import AggregatorFactory, MergeReport
     from .evalcache import CacheProtocol
+    from .evaluator import EvaluatorGroup
     from .evolvable import Diff, EvidenceCard, Evolvable
     from .sampling import TaskSampler
     from .staleness import StalenessPolicy
@@ -378,6 +379,11 @@ class Policies:
     #: Where evaluations are memoised. The default is in-process; a shared one
     #: lets separate processes stop paying twice for the same gate.
     eval_cache: Optional["CacheProtocol"] = None
+    #: The gate's own concurrency, separate from the rollouts'. Evaluation is
+    #: batched, cacheable and decides commits; a rollout is long-tailed, often
+    #: fails, and is one opinion among many. Sizing them together means sizing
+    #: them for whichever matters less.
+    evaluator: Optional["EvaluatorGroup"] = None
 
     # the resource plane (implementations land with the sandbox pool)
     sandbox_provider: Optional[SandboxProvider] = None
