@@ -249,9 +249,19 @@ class ResumeItem:
 class ResumeQueue:
     """Turn-level checkpoints of timed-out rollouts (partial rollout).
 
-    Write-only in every shipped path: the runtimes push, nothing pops. Kept as
-    the primitive the resume path would need, and counted so a run reports how
-    much work it abandoned -- see the module docstring."""
+    Write-only in every shipped path, and only one of them writes: the reference
+    runtime pushes, nothing pops, and `async_evolve` -- the loop a real workload
+    reaches -- does not checkpoint at all.
+
+    That is deliberate, and it is not what task-level recovery uses. Recovery
+    re-dispatches the **task**: the supervisor notices a worker is gone, sends its
+    work somewhere else under the same lease id, and drops the original's answer
+    if it turns up late. Resuming a partial rollout instead would require
+    `run(rendered, task) -> output` to become an inspectable conversation, and
+    that contract is what lets any agent at all be plugged in.
+
+    So this stays the turn-level primitive it always was, unwired, rather than
+    being repurposed as a task-level channel because it happens to be a queue."""
 
     def __init__(self, p90_multiplier: float = 2.0) -> None:
         self.p90_multiplier = p90_multiplier

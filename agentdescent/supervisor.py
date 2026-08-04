@@ -222,7 +222,14 @@ class ProcessExecutor:
                     _, wid, lease, task_id, output, value, seconds = message
                     inflight.pop(lease, None)
                     if pending.pop(lease, None) is None:
-                        continue            # a re-dispatch that came back twice
+                        # A worker that was only *presumed* dead, finishing after
+                        # its task had been given to somebody else. Dropping it is
+                        # correct and invisible, so it is counted: an over-eager
+                        # re-dispatch policy otherwise looks exactly like a
+                        # well-tuned one.
+                        if self.meter is not None:
+                            self.meter.add("duplicates_dropped")
+                        continue
                     if self.meter is not None:
                         self.meter.add("rollouts")
                         self.meter.add("rollout_seconds", seconds)
@@ -233,6 +240,8 @@ class ProcessExecutor:
                     _, wid, lease, task_id, error, failure_kind, seconds = message
                     inflight.pop(lease, None)
                     if pending.pop(lease, None) is None:
+                        if self.meter is not None:
+                            self.meter.add("duplicates_dropped")
                         continue
                     if self.meter is not None and failure_kind == "infrastructure":
                         self.meter.add("sandbox_failures")
@@ -277,6 +286,8 @@ class ProcessExecutor:
                 # Same lease id on purpose: if the original worker was only
                 # presumed dead and reports later, the caller can tell the two
                 # apart and drop one.
+                if self.meter is not None:
+                    self.meter.add("redispatched")
                 to_send.append(spec)
 
         for wid in dead:

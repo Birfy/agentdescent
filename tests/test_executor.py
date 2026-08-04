@@ -250,3 +250,69 @@ def test_infrastructure_failures_are_counted_apart_from_model_failures():
     assert _classify(OSError("no space left on device")) == "infrastructure"
     assert _classify(MemoryError()) == "infrastructure"
     assert _classify(RuntimeError("the model refused")) == "model"
+
+
+# ---------------------------------------------------------------------------
+# Task-level recovery
+# ---------------------------------------------------------------------------
+
+
+def test_a_late_result_from_a_presumed_dead_worker_is_dropped_and_counted():
+    """The idempotency that makes re-dispatch safe.
+
+    A worker declared lost may simply have been slow. When it finishes, its
+    result arrives for a task somebody else has already answered -- and accepting
+    both would put two cards for one task into the evidence pool, which is a
+    quiet doubling of one worker's vote.
+
+    Dropping it is correct and invisible, so it is counted: an over-eager
+    re-dispatch policy otherwise looks exactly like a well-tuned one."""
+    from agentdescent.metrics import Meter
+
+    meter = Meter()
+    ex = ProcessExecutor(2, meter=meter)
+    try:
+        specs = [spec(i) for i in range(2)]
+        results = list(ex.map_rollouts(specs))
+        assert len(results) == 2
+
+        # the straggler reports, after its lease has already been answered
+        ex._results.put(("DONE", 0, specs[0].lease_id, specs[0].task.id,
+                         "late", 1.0, 0.1))
+        again = list(ex.map_rollouts([spec(9)]))
+        assert len(again) == 1 and again[0].task_id == "t9", (
+            "a duplicate for an answered task was reported as a result")
+    finally:
+        ex.shutdown()
+    assert meter.snapshot().duplicates_dropped >= 1
+
+
+def test_re_dispatch_is_counted():
+    ex = ProcessExecutor(2, hang_timeout=0.5)
+    from agentdescent.metrics import Meter
+    ex.meter = Meter()
+    ex.start()
+    try:
+        s = spec(3)
+        to_send = []
+        ex._reclaim({s.lease_id: s}, {s.lease_id: time.time() - 60},
+                    {s.lease_id: 0}, {}, to_send)
+        assert to_send and ex.meter.snapshot().redispatched == 1
+    finally:
+        ex.shutdown()
+
+
+def test_the_loop_never_blocks_forever_on_a_result_that_cannot_come():
+    """If a worker dies holding the only copy of a task, the run must end -- with
+    a failure for that task -- rather than wait for a message nobody will send."""
+    ex = ProcessExecutor(1, hang_timeout=0.2)
+    try:
+        s = spec(5)
+        pending, to_send = {s.lease_id: s}, []
+        out = ex._reclaim(pending, {s.lease_id: time.time() - 60},
+                          {s.lease_id: 0}, {s.lease_id: 5}, to_send)
+        assert len(out) == 1 and not out[0].ok
+        assert out[0].kind == "infrastructure"
+        assert not pending, "the task stayed pending and the loop would not end"
+    finally:
+        ex.shutdown()

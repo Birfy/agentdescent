@@ -60,6 +60,8 @@ class MeterSnapshot:
     cache_inflight_joins: int = 0
     stale_considered: int = 0
     stale_discarded: int = 0
+    redispatched: int = 0
+    duplicates_dropped: int = 0
     sandbox_wait_s: float = 0.0
     sandbox_setup_s: float = 0.0
     sandboxes_created: int = 0
@@ -75,6 +77,7 @@ _COUNTERS = frozenset({
     "rollouts", "rollout_seconds", "eval_seconds", "merge_seconds",
     "cache_hits", "cache_misses", "cache_inflight_joins",
     "stale_considered", "stale_discarded",
+    "redispatched", "duplicates_dropped",
     "sandbox_wait_s", "sandbox_setup_s", "sandboxes_created",
     "sandboxes_reused", "sandbox_failures", "env_mismatch",
 })
@@ -127,6 +130,17 @@ class Meter:
     #: lag budget is too tight" from "barely anything was proposed".
     stale_considered: int = 0
     stale_discarded: int = 0
+
+    #: Task-level recovery. `redispatched` counts tasks sent out again after
+    #: their worker was presumed lost; `duplicates_dropped` counts results that
+    #: arrived for a task already answered -- a worker that was only *presumed*
+    #: dead, finishing after its work had been given to somebody else.
+    #:
+    #: The second is the one worth watching. Dropping the duplicate is correct
+    #: and invisible, so without a counter a re-dispatch policy that is
+    #: needlessly aggressive looks exactly like one that is well tuned.
+    redispatched: int = 0
+    duplicates_dropped: int = 0
 
     #: Sandbox accounting. Zero on the default single-workspace path; filled once
     #: the sandbox pool exists. Kept here from the start so the result schema
@@ -188,6 +202,8 @@ class Meter:
                 cache_inflight_joins=self.cache_inflight_joins,
                 stale_considered=self.stale_considered,
                 stale_discarded=self.stale_discarded,
+                redispatched=self.redispatched,
+                duplicates_dropped=self.duplicates_dropped,
                 sandbox_wait_s=self.sandbox_wait_s,
                 sandbox_setup_s=self.sandbox_setup_s,
                 sandboxes_created=self.sandboxes_created,
