@@ -28,7 +28,7 @@ Only the parent-selection optimizer changes; the ledger, governance, staleness,
 and statistical-acceptance machinery are the framework's. Prompt = L2 skill ->
 `blast_radius=0.2`.
 
-    python -m examples.gepa_prompt_evolution --dry-run           # dataset + estimate, no API
+    python -m examples.gepa_prompt_evolution --dry-run           # plan only, zero network
     python -m examples.gepa_prompt_evolution --model claude-haiku-4-5
     python -m examples.gepa_prompt_evolution --rounds 10 --workers 3
 
@@ -56,6 +56,7 @@ from agentdescent.evolvable import Diff, EvidenceCard
 from agentdescent.evolution import EvolvingArtifact, LLMAgent, Task, evolve, rule_id
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
+from examples._common import add_standard_args
 
 HOTPOTQA = ("hotpotqa/hotpot_qa", "validation", "distractor")   # (dataset, split, config)
 
@@ -387,25 +388,32 @@ def evaluate(agent, instruction: str, tasks: List[Task], reward) -> float:
 # ===========================================================================
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--provider", default="claude",
-                   choices=["claude", "openai", "glm"], help="claude, or any OpenAI-compatible endpoint (DeepSeek, GLM, vLLM, ...) via OPENAI_BASE_URL + OPENAI_API_KEY; 'glm' is a legacy alias")
-    p.add_argument("--model", default="claude-haiku-4-5")
+    add_standard_args(p, max_seconds_default=45.0)
     p.add_argument("--rounds", type=int, default=10)
     p.add_argument("--workers", type=int, default=3)
     p.add_argument("--fetch", type=int, default=48, help="HotpotQA rows to fetch")
-    p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--async", dest="asynchronous", action="store_true",
-                   help="run barrier-free (async_evolve): workers never wait for the merge")
-    p.add_argument("--async-ratio", type=int, default=3, help="staleness lag budget")
-    p.add_argument("--max-seconds", type=float, default=45.0, help="async wall-clock budget")
-    p.add_argument("--dry-run", action="store_true")
-    p.add_argument("--yes", action="store_true")
-    args = p.parse_args()
+    return p
+
+
+def main(argv=None) -> None:
+    args = build_parser().parse_args(argv)
 
     print("Algorithm: GEPA (Reflective Prompt Evolution) -- skill/prompt self-evolution")
     print("Dataset  : HotpotQA (multi-hop QA, distractor), exact-match")
+    print(f"\nPlan     : model={args.model}, rounds={args.rounds}, workers={args.workers}")
+    if args.asynchronous:
+        print(f"Async    : {args.workers} workers, barrier-free (async_ratio={args.async_ratio}, "
+              f"max {args.max_seconds:.0f}s); staleness policy rebases/discards stale diffs")
+    else:
+        print(f"Parallel : {args.workers} workers run concurrently each round "
+              f"(synchronous DP; the aggregator merge is the barrier)")
+    if args.dry_run:
+        print("Data     : deferred (dry-run performs no network access)")
+        print("\n[dry-run] plan only; no dataset or model API was accessed.")
+        return
+
     ds = load_dataset(args.fetch, seed=args.seed)
     reward = make_reward()
 
@@ -419,18 +427,7 @@ def main() -> None:
     print("  A:", ds.train[0].meta["target"])
 
     est = estimate_calls(args.rounds, args.workers, nva) + nte
-    print(f"\nPlan     : model={args.model}, rounds={args.rounds}, workers={args.workers}")
-    if args.asynchronous:
-        print(f"Async    : {args.workers} workers, barrier-free (async_ratio={args.async_ratio}, "
-              f"max {args.max_seconds:.0f}s); staleness policy rebases/discards stale diffs")
-    else:
-        print(f"Parallel : {args.workers} workers run concurrently each round "
-              f"(synchronous DP; the aggregator merge is the barrier)")
     print(f"Budget   : up to ~{est} model calls (cached repeats are free)")
-
-    if args.dry_run:
-        print("\n[dry-run] not calling the API. Drop --dry-run to evolve the prompt.")
-        return
 
     if not args.yes and sys.stdin.isatty():
         if input("\nProceed with real API calls? [y/N] ").strip().lower() not in ("y", "yes"):

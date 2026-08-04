@@ -34,7 +34,7 @@ buffer. A skill doc is an **L2** artifact (`blast_radius=0.2`, via `classify`).
 The epoch-level *slow-update* and *meta-skill* stabilisers are optional in the
 repo and omitted from this minimal-but-faithful slice (noted, not hidden).
 
-    python -m examples.skillopt_skill_training --dry-run        # dataset + seed doc, no API
+    python -m examples.skillopt_skill_training --dry-run        # plan only, zero network
     python -m examples.skillopt_skill_training --model claude-haiku-4-5
     python -m examples.skillopt_skill_training --steps 8 --lr 4
 """
@@ -58,6 +58,7 @@ from agentdescent.evolvable import Diff, EvidenceCard
 from agentdescent.evolution import EvolvingArtifact, Task, evolve, rule_id
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
+from examples._common import add_standard_args
 
 SEARCHQA = ("lucadiliello/searchqa", "default")   # (dataset, config)
 Completion = Callable[[str], str]
@@ -491,32 +492,41 @@ def load_dataset(n_train: int, n_val: int, seed: int = 0, hard: bool = False,
 # ===========================================================================
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--provider", default="claude",
-                   choices=["claude", "openai", "glm"], help="claude, or any OpenAI-compatible endpoint (DeepSeek, GLM, vLLM, ...) via OPENAI_BASE_URL + OPENAI_API_KEY; 'glm' is a legacy alias")
-    p.add_argument("--model", default="claude-haiku-4-5")
+    add_standard_args(p, max_seconds_default=40.0)
     p.add_argument("--steps", type=int, default=8)
     p.add_argument("--lr", type=int, default=4, help="max edits/step (learning rate)")
     p.add_argument("--lr-mode", default="cosine", choices=["constant", "linear", "cosine"])
     p.add_argument("--minibatch", type=int, default=4)
     p.add_argument("--train", type=int, default=40)
     p.add_argument("--val", type=int, default=20)
-    p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--async", dest="asynchronous", action="store_true",
-                   help="run barrier-free (async_evolve)")
-    p.add_argument("--async-ratio", type=int, default=3, help="staleness lag budget")
-    p.add_argument("--max-seconds", type=float, default=40.0, help="async wall-clock budget")
     p.add_argument("--hard", action="store_true",
                    help="keep only questions the seed skill answers wrong -- plain "
                         "SearchQA is already ~0.900 for a strong model, so there is "
                         "nothing for a skill document to add")
-    p.add_argument("--dry-run", action="store_true")
-    p.add_argument("--yes", action="store_true")
-    args = p.parse_args()
+    return p
+
+
+def main(argv=None) -> None:
+    args = build_parser().parse_args(argv)
 
     print("Algorithm: SkillOpt / ReflACT -- skill-document self-evolution")
     print("Dataset  : SearchQA (single-turn text QA, EM/F1)")
+    print(f"\nPlan     : model={args.model}, steps={args.steps}, lr={args.lr} "
+          f"({args.lr_mode})")
+    if args.asynchronous:
+        print(f"Async    : {args.minibatch} workers, barrier-free "
+              f"(async_ratio={args.async_ratio}, max {args.max_seconds:.0f}s); "
+              "the strict gate rebases/discards stale edits")
+    else:
+        print(f"Parallel : {args.minibatch} workers run concurrently each step "
+              f"(synchronous DP; the strict-gate merge is the barrier)")
+    if args.dry_run:
+        print("Data     : deferred (dry-run performs no network access)")
+        print("\n[dry-run] plan only; no dataset or model API was accessed.")
+        return
+
     ds = load_dataset(args.train, args.val, seed=args.seed)
     art = EvolvingArtifact("skill_document", blast_radius=0.2)
     ntr, nva, nte = ds.sizes()
@@ -529,18 +539,7 @@ def main() -> None:
     print("  A:", ds.train[0]["answers"])
 
     calls = args.steps * (args.minibatch + 1 + nva) + nte
-    print(f"\nPlan     : model={args.model}, steps={args.steps}, lr={args.lr} ({args.lr_mode})")
-    if args.asynchronous:
-        print(f"Async    : {args.minibatch} workers, barrier-free (async_ratio={args.async_ratio}, "
-              f"max {args.max_seconds:.0f}s); the strict gate rebases/discards stale edits")
-    else:
-        print(f"Parallel : {args.minibatch} workers run concurrently each step "
-              f"(synchronous DP; the strict-gate merge is the barrier)")
     print(f"Budget   : up to ~{calls} model calls (rollouts dominate)")
-
-    if args.dry_run:
-        print("\n[dry-run] not calling the API. Drop --dry-run to train the skill.")
-        return
 
     if not args.yes and sys.stdin.isatty():
         if input("\nProceed with real API calls? [y/N] ").strip().lower() not in ("y", "yes"):

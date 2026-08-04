@@ -107,7 +107,8 @@ def download_hotpotqa(limit):
   the examples install nothing extra. The `datasets` library is imported lazily,
   and *only* inside `load_gated_hf`, for gated datasets that need auth.
 * **Cache-first.** Every page and file is cached under `~/.cache/agentdescent/`;
-  re-runs and `--dry-run` are offline after the first fetch.
+  real re-runs are offline after the first fetch. Faithful-port `--dry-run`
+  returns before the loader and is offline even with an empty cache.
 * **Not in the engine.** Nothing in `agentdescent.evolution` / `agentdescent.aggregator`
   imports this — it is a convenience for examples and experiments, exactly like
   `agentdescent.agents`.

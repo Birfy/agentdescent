@@ -240,8 +240,8 @@ Guide: [evolving a directory](https://github.com/Birfy/agentdescent/blob/main/do
 To show the engine is faithful to the field, AgentDescent ships one runnable example
 per representative **skill** and **harness** self-evolution algorithm — each
 faithful to the original repo's *algorithm* and *dataset choice*, each with a
-`--dry-run` (no-API) mode and an offline test suite. Every one loads its benchmark
-through the shared [`agentdescent.dataloader`](https://github.com/Birfy/agentdescent/blob/main/docs/dataloader.md) data layer
+zero-network `--dry-run` mode and an offline test suite. Real runs load their
+benchmarks through the shared [`agentdescent.dataloader`](https://github.com/Birfy/agentdescent/blob/main/docs/dataloader.md) data layer
 (HF datasets-server + raw files, cached, dependency-free). Full guide:
 [docs/self-evolution-examples.md](https://github.com/Birfy/agentdescent/blob/main/docs/self-evolution-examples.md).
 

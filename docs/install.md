@@ -90,11 +90,12 @@ For Claude, `pip install anthropic` and use `claude(model="claude-haiku-4-5")`
 instead — same call everywhere else. Full walkthrough:
 [quickstart](quickstart-skill.md).
 
-!!! tip "Every LLM-backed example has `--dry-run`"
-    It loads the dataset and estimates the API cost **without calling a model**:
+!!! tip "Inspect a faithful port with `--dry-run`"
+    The six faithful algorithm ports print their configuration with no dataset
+    download, model call, or API key. Other examples may still load or download data:
 
     ```bash
-    python -m examples.skill_evolution --dry-run
+    python -m examples.ace_context_evolution --dry-run
     python -m examples.gepa_prompt_evolution --dry-run
     ```
 

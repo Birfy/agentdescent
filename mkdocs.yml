@@ -67,6 +67,7 @@ nav:
     - Measured results: results.md
   - Self-evolution algorithms (faithful ports):
     - Overview: self-evolution-examples.md
+    - Porting checklist: porting-checklist.md
     - ACE — context evolution: algo-ace.md
     - GEPA — prompt evolution: algo-gepa.md
     - EvoSkill — skill discovery: algo-evoskill.md

@@ -148,8 +148,9 @@ export OPENAI_BASE_URL=https://api.deepseek.com     # or your gateway
 export OPENAI_API_KEY=sk-...
 ```
 
-Then confirm the setup costs nothing before it costs something — `--dry-run`
-loads MGSM, prints the plan and the budget, and makes **no API calls**:
+Inspect the setup before it costs something: `--dry-run` prints the requested
+MGSM/runtime configuration and returns before loading data or models, so it needs
+neither network nor an API key:
 
 ```bash
 python -m examples.adas_meta_agent_search --dry-run

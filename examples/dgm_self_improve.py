@@ -45,6 +45,7 @@ escalation, keep-all) is therefore fully runnable and testable offline; the
 `run_dgm` to plug in the actual Docker harness.
 
     python -m examples.dgm_self_improve                 # runs offline (surrogate objective)
+    python -m examples.dgm_self_improve --dry-run       # plan only, zero network
     python -m examples.dgm_self_improve --generations 12 --archive keep_all
     python -m examples.dgm_self_improve --model claude-haiku-4-5   # LLM proposes modifications
 """
@@ -57,6 +58,7 @@ import argparse
 import hashlib
 import math
 import random
+import sys
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Tuple
 
@@ -67,6 +69,7 @@ from agentdescent.evolvable import Diff, EvidenceCard
 from agentdescent.evolution import EvolvingArtifact, Task, evolve
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
+from examples._common import add_standard_args
 
 SWEBENCH = ("princeton-nlp/SWE-bench_Verified", "test", "default")   # (dataset, split, config)
 
@@ -427,25 +430,36 @@ def load_dataset(limit: int, seed: int = 0, ratios=(0.5, 0.25, 0.25)) -> Dataset
 # ===========================================================================
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
+    add_standard_args(p, model_default=None, max_seconds_default=15.0)
     p.add_argument("--generations", type=int, default=12)
     p.add_argument("--selfimprove-size", type=int, default=2)
     p.add_argument("--archive", default="keep_all", choices=["keep_all", "keep_better"])
-    p.add_argument("--provider", default="claude",
-                   choices=["claude", "openai", "glm"], help="claude, or any OpenAI-compatible endpoint (DeepSeek, GLM, vLLM, ...) via OPENAI_BASE_URL + OPENAI_API_KEY; 'glm' is a legacy alias")
-    p.add_argument("--model", default=None,
-                   help="optional: let an LLM propose self-modifications (else deterministic)")
-    p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--async", dest="asynchronous", action="store_true",
-                   help="run barrier-free (async_evolve)")
-    p.add_argument("--async-ratio", type=int, default=3, help="staleness lag budget")
-    p.add_argument("--max-seconds", type=float, default=15.0, help="async wall-clock budget")
-    p.add_argument("--dry-run", action="store_true", help="load dataset + show plan only")
-    args = p.parse_args()
+    return p
+
+
+def main(argv=None) -> None:
+    args = build_parser().parse_args(argv)
 
     print("Algorithm: Darwin Godel Machine (DGM) -- harness self-evolution")
     print("Dataset  : SWE-bench Verified (real instance ids; surrogate objective)")
+    print(f"Plan     : model={args.model or 'deterministic'}, "
+          f"generations={args.generations}, archive={args.archive}")
+    if args.asynchronous:
+        print(f"Async    : {args.selfimprove_size} agents, barrier-free (async_ratio="
+              f"{args.async_ratio}, max {args.max_seconds:.0f}s); "
+              "archive rebases/discards stale")
+    else:
+        print(f"Parallel : {args.selfimprove_size} agents self-modify concurrently each "
+              "generation (synchronous DP; the archive merge is the barrier)")
+    print("\nObjective: SURROGATE (capability-cover) -- real DGM runs SWE-bench in "
+          "Docker.\n           The archive + selection + staged escalation are faithful.")
+    if args.dry_run:
+        print("Data     : deferred (dry-run performs no network access)")
+        print("\n[dry-run] plan only; no dataset or model API was accessed.")
+        return
+
     ds = load_dataset(STAGE_BIG, seed=args.seed)
     art = EvolvingArtifact("coding_agent", blast_radius=0.6)
     ntr, nva, nte = ds.sizes()
@@ -454,21 +468,12 @@ def main() -> None:
     print(f"Loaded   : {len(ds)} SWE-bench Verified instances; "
           f"{ntr} train / {nva} val (staged eval) / {nte} test")
     print(f"Example  : {ds.train[0]['instance_id']} ({ds.train[0]['repo']})")
-    if args.asynchronous:
-        print(f"Async    : {args.selfimprove_size} agents, barrier-free (async_ratio="
-              f"{args.async_ratio}, max {args.max_seconds:.0f}s); archive rebases/discards stale")
-    else:
-        print(f"Parallel : {args.selfimprove_size} agents self-modify concurrently each "
-              "generation (synchronous DP; the archive merge is the barrier)")
-    print("\nObjective: SURROGATE (capability-cover) -- real DGM runs SWE-bench in "
-          "Docker.\n           The archive + selection + staged escalation are faithful.")
-
-    if args.dry_run:
-        print("\n[dry-run] not running the loop.")
-        return
-
     complete = None
     if args.model:
+        if not args.yes and sys.stdin.isatty():
+            if input("\nProceed with real API calls? [y/N] ").strip().lower() not in ("y", "yes"):
+                print("aborted.")
+                return
         complete = (openai_compatible(model=args.model) if args.provider in ("openai", "glm")
                     else claude(model=args.model))
         try:
