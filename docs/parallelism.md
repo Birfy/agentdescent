@@ -1,7 +1,7 @@
-# Customizable parallelism (DP / TP)
+# Customizable parallelism (DP / TP / CP)
 
 > **Plugs into [`evolve`](evolution.md) via** `parallel=DataParallel()` (or
-> `TensorParallel` / your own).
+> `TensorParallel` / `ClusterParallel` / your own).
 
 The parallelism *method* — how a round of work is partitioned across workers — is
 **pluggable**. Pick a paradigm, or implement the `ParallelStrategy` protocol
@@ -53,7 +53,66 @@ class ParallelStrategy(Protocol):
 A `WorkUnit(worker, keys, stage, section)` says which artifact keys (and, for
 PP/TP, which stage/section) a worker owns that round.
 
-## The three built-in paradigms
+There is one **optional** method:
+
+```python
+    def observe(self, unit: WorkUnit, task_id: str, score: float) -> None: ...
+```
+
+`evolve()` calls it after every rollout, when the strategy defines it. `plan`
+alone is a pure function of `(n_workers, round_index, keys)` — enough to *shard*,
+not enough to *schedule*, because a strategy had no way to learn anything from
+the rollouts it dispatched. That is why UCB over task clusters (design §5.2,
+L-task) lived only in the reference runtime's `TaskScheduler` and was
+inexpressible here. `DataParallel` and `TensorParallel` do not define it and are
+unaffected; [`ClusterParallel`](#clusterparallel-ucb-over-the-task-tail) is what
+uses it.
+
+## `ClusterParallel` — UCB over the task tail
+
+DP shards tasks round-robin, which spends as much on a cluster that teaches
+nothing as on one that still fails. `ClusterParallel` groups the tasks and
+**leases whole clusters**, ordered by UCB with a difficulty filter — clusters
+that are all-pass or all-fail carry no gradient and are down-weighted (the GRPO
+zero-advantage argument), while clusters with little evidence keep an exploration
+bonus.
+
+```python
+from agentdescent import ClusterParallel, evolve
+
+evolve(tasks, reward, agent=agent,
+       parallel=ClusterParallel(cluster_of=lambda task_id: task_id.split("-")[0]))
+```
+
+`cluster_of` maps a **task id** to a cluster id — by source, by topic, by
+difficulty band, by whatever axis your tail actually runs along. A worker is
+handed one cluster whole, so it sees a coherent slice of the distribution rather
+than one task from each.
+
+Two honest differences from the reference `TaskScheduler`, both in what feeds the
+estimate:
+
+* it is told a rollout's **reward**, not the before/after delta of the diff that
+  rollout produced. That delta needs `self_verify`, which the directory entry
+  points turn **off** because it doubles the cost of every proposal — a scheduler
+  depending on it would silently stop learning exactly there. `1 - score` is the
+  room a cluster still has;
+* it learns per **task**, not per lease, so an estimate moves once per rollout
+  rather than once per round.
+
+The exploration constant stays the textbook `1.4`. [`DifficultyWeighted`](sampling.md)
+uses `0.2` because a sweep at *task* granularity measured 1.4 as worse than
+round-robin; that sweep has not been repeated at cluster granularity, where there
+are far fewer arms and each carries many tasks, and transplanting a number
+measured elsewhere is how a default stops meaning anything.
+
+!!! note "It composes with `task_sampler`, it does not replace it"
+    `ClusterParallel` decides **which cluster** a worker gets;
+    [`task_sampler`](sampling.md) decides **which task inside it** the worker
+    rolls out next. Two granularities of the same idea, and they share
+    `stats.difficulty_weight`.
+
+## The classic two: DP and TP
 
 | Strategy | How work is partitioned | Recombination |
 |---|---|---|
@@ -134,6 +193,7 @@ provides [`PipelineChain`](https://github.com/Birfy/agentdescent/blob/main/agent
 | | Enforced by `evolve()` | What that means |
 |---|---|---|
 | **DP** | ✅ `keys` | workers take disjoint task shards; diffs merge |
+| **CP** | ✅ `keys` + `observe` | workers take whole clusters, leased by UCB; every rollout's reward feeds back into the lease order |
 | **TP** | ✅ `section` | a worker's diff is **rejected if it touches a key outside its section**, which is what makes the union conflict-free — and every rejection is counted as `section-violation` in [`result.outcomes()`](evolution.md) |
 | **PP** | ⛔ refused | `evolve()` raises. It evolves **one** `artifact_id`, so there is no artifact chain for stages to walk |
 

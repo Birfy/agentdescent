@@ -367,6 +367,31 @@ All notable changes to AgentDescent are documented here. The format follows
   name is documented and had nothing to document.
 
 ### Added
+- **`ClusterParallel`, and the feedback channel that makes it possible.**
+  `ParallelStrategy.plan(n_workers, round_index, keys)` was a pure function of
+  its arguments, so a strategy could not learn anything from the rollouts it
+  dispatched -- enough to *shard*, not enough to *schedule*. That is why UCB over
+  task clusters (design section 5.2, L-task) existed only in the reference
+  runtime's `TaskScheduler`, which `evolve()` cannot reach, and why the general
+  engine's answer to the task tail stopped at `DifficultyWeighted` over
+  individual tasks.
+
+  `ParallelStrategy` gains an **optional** `observe(unit, task_id, score)`;
+  `evolve()` calls it after every rollout when the strategy defines one, so
+  `DataParallel` and `TensorParallel` are untouched. `ClusterParallel` is the
+  consumer -- it groups tasks by `cluster_of(task_id)`, leases whole clusters
+  UCB-ordered with the same difficulty filter (all-pass and all-fail clusters
+  carry no gradient), and feeds each rollout's reward back into the estimate. It
+  composes with `task_sampler` rather than replacing it: one picks the cluster,
+  the other picks the task inside it, and they share
+  `stats.difficulty_weight`.
+
+  Two stated differences from the reference scheduler: it learns from a
+  rollout's **reward** rather than the before/after delta of the diff it produced
+  (that delta needs `self_verify`, which the directory entry points turn off, so
+  a scheduler depending on it would silently stop learning exactly there), and it
+  learns per task rather than per lease.
+
 - **`RoundInfo` reports what the merge *did*, not only what category it landed
   in.** Four numbers `MergeReport` computed all along and the driver threw away:
   `considered` (the denominator), `discarded_stale`, `conflicts_dropped`, and

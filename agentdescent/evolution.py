@@ -1952,6 +1952,11 @@ def evolve(
     # silently discarding it.
     section_map = _resolve_sections(parallel, strategy)
     _reject_pipeline_parallel(parallel)
+    # Resolved once: the round body is the hot path, and a strategy either has
+    # the hook for the whole run or does not.
+    observe_plan = getattr(parallel, "observe", None)
+    if not callable(observe_plan):
+        observe_plan = None
     section_violations = [0]
     tp_lock = threading.Lock()
     eng = _build_engine(
@@ -2100,6 +2105,13 @@ def evolve(
             output = outcome.output
             score = _checked_reward(outcome.reward, task)
             sampler.record(task.id, score)               # learn which tasks carry signal
+            if observe_plan is not None:
+                # ...and let the parallel strategy learn too, if it wants to.
+                # `plan` alone is a pure function of its arguments, which is
+                # enough to shard and not enough to schedule: UCB over task
+                # clusters had nowhere to receive an outcome, so it lived only in
+                # the reference runtime. Optional, so DP and TP are untouched.
+                observe_plan(unit, task.id, score)
             with unit_lock:
                 ok_units[0] += 1
                 health.record_success()

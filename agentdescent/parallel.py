@@ -204,7 +204,18 @@ class ParallelStrategy(Protocol):
     """How a round of work is partitioned across ``n_workers``.
 
     This is the customization point: implement ``plan`` to define your own
-    parallelism method. The three classic paradigms are provided below."""
+    parallelism method. The three classic paradigms are provided below.
+
+    **Optional:** ``observe(unit, task_id, score) -> None``. ``plan`` alone is a
+    pure function of ``(n_workers, round_index, keys)``, which is enough to
+    *shard* and not enough to *schedule* -- there was no way for a strategy to
+    learn anything from the rollouts it dispatched, so the design's UCB over task
+    clusters (section 5.2, L-task) was inexpressible here and lived only in the
+    reference runtime's :class:`~agentdescent.scheduler.TaskScheduler`.
+    :func:`~agentdescent.evolution.evolve` calls it after every rollout **when the
+    strategy defines it**, so :class:`DataParallel` and :class:`TensorParallel`
+    are untouched. :class:`ClusterParallel` is the consumer.
+    """
 
     name: str
 
@@ -302,4 +313,119 @@ class PipelineParallel:
         return PipelineChain(list(self.stages))
 
 
-STRATEGIES = {"DP": DataParallel, "TP": TensorParallel, "PP": PipelineParallel}
+@dataclass
+class ClusterParallel:
+    """DP over task **clusters**, leased by UCB instead of sharded round-robin.
+
+    The design's L-task (section 5.2): the tail of the task distribution starves
+    because a round-robin shard spends as much on a cluster that teaches nothing
+    as on one that still fails. UCB over clusters front-loads the clusters that
+    carry learning signal and keeps an exploration bonus on the ones with little
+    evidence, and a difficulty filter down-weights clusters that are all-pass or
+    all-fail (the GRPO zero-advantage argument).
+
+    This existed only in :class:`~agentdescent.scheduler.TaskScheduler`, which the
+    reference runtime drives and which nothing in `evolve()` could reach: `plan`
+    was a pure function of the arguments it was handed, so a strategy had no way
+    to learn from the rollouts it dispatched. :meth:`observe` is that channel, and
+    this is what uses it.
+
+        evolve(tasks, reward, agent=agent,
+               parallel=ClusterParallel(cluster_of=lambda tid: tid.split("-")[0]))
+
+    ``cluster_of`` maps a **task id** to a cluster id -- by source, by topic, by
+    difficulty band, by whatever grouping the tail runs along. Ids that map to the
+    same cluster are leased together.
+
+    Two honest differences from the reference scheduler, both in what feeds
+    :meth:`observe`:
+
+    * it is told a rollout's **reward**, not the before/after delta of the diff
+      that rollout produced. The delta needs `self_verify`, which is off by
+      default for directory workloads because it doubles the cost of every
+      proposal, so a scheduler that depended on it would silently stop learning
+      there. ``1 - score`` is the room a cluster still has;
+    * it is told this per **task**, not per lease, so a cluster's estimate moves
+      once per rollout rather than once per round.
+
+    The UCB constant stays the textbook ``1.4``. `DifficultyWeighted` defaults to
+    ``0.2`` because a sweep at *task* granularity measured 1.4 as worse than
+    round-robin -- that sweep has not been repeated at cluster granularity, where
+    there are far fewer arms and each carries many tasks, and transplanting a
+    number measured elsewhere is how a default stops meaning anything.
+    """
+
+    cluster_of: Callable[[str], str]
+    c: float = 1.4
+    #: A rollout at or above this counts as a pass for the difficulty filter.
+    #: Defaults to the engine's own `SOLVED`, resolved lazily to avoid importing
+    #: the engine from a module the engine imports.
+    pass_threshold: Optional[float] = None
+    name: str = "CP"
+
+    def __post_init__(self) -> None:
+        from .scheduler import TaskScheduler
+
+        self._scheduler: Optional[TaskScheduler] = None
+        self._known: Tuple[str, ...] = ()
+
+    # -- the protocol ---------------------------------------------------------
+
+    def plan(self, n_workers, round_index, keys) -> List[WorkUnit]:
+        scheduler = self._ensure(keys)
+        leases = scheduler.select_batch(n_workers)
+        if not leases:
+            return [WorkUnit(worker=i, keys=[]) for i in range(n_workers)]
+        return [WorkUnit(worker=i, keys=list(leases[i].tasks))
+                for i in range(n_workers)]
+
+    def observe(self, unit: WorkUnit, task_id: str, score: float) -> None:
+        """Feed one rollout's outcome back into the cluster's UCB estimate."""
+        if self._scheduler is None:
+            return
+        cluster_id = str(self.cluster_of(task_id))
+        if cluster_id not in self._scheduler.clusters:
+            return
+        self._scheduler.record(cluster_id, learning_value=max(0.0, 1.0 - score),
+                               passed=score >= self._threshold())
+
+    # -- helpers --------------------------------------------------------------
+
+    def _threshold(self) -> float:
+        if self.pass_threshold is not None:
+            return self.pass_threshold
+        from .evolution import SOLVED
+
+        return SOLVED
+
+    def _ensure(self, keys: Sequence[str]):
+        """Build the scheduler on first use, and rebuild if the key space moved.
+
+        `plan` is handed the task ids every round, and they are the same list
+        every time on today's engine -- but rebuilding only when they change
+        means a caller who shards differently between rounds gets clusters that
+        match, rather than a scheduler quietly leasing ids that no longer exist.
+        """
+        from .scheduler import TaskCluster, TaskScheduler
+
+        signature = tuple(keys)
+        if self._scheduler is not None and signature == self._known:
+            return self._scheduler
+        grouped: Dict[str, List[str]] = {}
+        for task_id in keys:
+            grouped.setdefault(str(self.cluster_of(task_id)), []).append(task_id)
+        self._scheduler = TaskScheduler(
+            [TaskCluster(id=cid, tasks=tasks) for cid, tasks in sorted(grouped.items())],
+            c=self.c)
+        self._known = signature
+        return self._scheduler
+
+    @property
+    def scheduler(self):
+        """The underlying :class:`~agentdescent.scheduler.TaskScheduler`, or
+        ``None`` before the first :meth:`plan`. For inspection, not control."""
+        return self._scheduler
+
+
+STRATEGIES = {"DP": DataParallel, "TP": TensorParallel, "PP": PipelineParallel,
+              "CP": ClusterParallel}
