@@ -367,6 +367,29 @@ All notable changes to AgentDescent are documented here. The format follows
   name is documented and had nothing to document.
 
 ### Added
+- **`RoundInfo` reports what the merge *did*, not only what category it landed
+  in.** Four numbers `MergeReport` computed all along and the driver threw away:
+  `considered` (the denominator), `discarded_stale`, `conflicts_dropped`, and
+  `fused` -- commits whose winning candidate was the fusion of several diffs
+  rather than any single one, which is the model-soup question asked per round.
+  The reference runtimes reported them (`RoundStat.fused`,
+  `AsyncStats.conflicts_dropped`) and the engine every real workload uses did
+  not, so a caller could see *that* nothing committed and never *how* the merge
+  got there. `save`/`load` round-trip them, and a file written before they
+  existed still loads.
+
+  `fused` counts only fusions that **committed**: the tournament builds a fused
+  candidate whenever the survivors are complementary, so counting the ones it
+  built says nothing about whether combining them beat taking the best single
+  diff.
+
+  `_Engine.record_round` now takes the reports rather than a pre-chewed
+  `committed` / `rejected` / `reasons`. Deriving those was the other thing both
+  loops were doing separately -- and they disagreed on spelling, one counting
+  `rejected` as `len(reports) - committed` and the other re-scanning for a
+  missing `committed_version`. Same answer, two places for the next number to be
+  added to one and not the other.
+
 - **Evolving a directory: a skill folder, an agent folder, or its code.** Until
   now every artifact was text that ended up *in a prompt*. A skill directory is
   not that: it is only a skill directory if the agent can *read the files*, which

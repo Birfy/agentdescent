@@ -855,6 +855,33 @@ class RoundInfo:
     #: calls", which needs the number at every round rather than only at the end.
     calls: int = 0
 
+    # -- what the merge did, this round --------------------------------------
+    #
+    # `MergeReport` computes all four and the driver used to throw them away, so
+    # a `evolve()` user could see *that* nothing committed and never *how* the
+    # merge got there. The reference runtimes reported them all along
+    # (`RoundStat.fused`, `AsyncStats.conflicts_dropped`), which is the shape of
+    # gap this seam exists to close.
+
+    #: Evidence cards this round's merge looked at, before any filter. The
+    #: denominator: `discarded_stale=3` needs "out of how many" to mean anything,
+    #: and shipping a numerator without one is a mistake this codebase has
+    #: already made once, on the async path's stale rate.
+    considered: int = 0
+    #: Cards the staleness filter dropped. Rising here with a flat
+    #: `held_out_reward` is the lag budget, not the reflector.
+    discarded_stale: int = 0
+    #: Diffs dropped because they contradicted a better-scoring one. Non-zero
+    #: means the workers are genuinely disagreeing about the same key, which is
+    #: the case `KeyedRules` and `SingleSlot` are for and `AppendRules` avoids.
+    conflicts_dropped: int = 0
+    #: Commits whose winning candidate was the **fusion** of several diffs rather
+    #: than any single one -- the model-soup question, per round. Counted only
+    #: when it committed: the tournament builds a fused candidate whenever the
+    #: survivors are complementary, so counting the ones it built says nothing
+    #: about whether combining them beat taking the best single diff.
+    fused: int = 0
+
 
 @dataclass
 class EvolutionResult:
@@ -1039,7 +1066,9 @@ class EvolutionResult:
                  "n_items": h.n_items, "committed": h.committed,
                  "rejected": h.rejected, "reasons": h.reasons,
                  "elapsed_s": h.elapsed_s, "rollouts": h.rollouts,
-                 "calls": h.calls}
+                 "calls": h.calls, "considered": h.considered,
+                 "discarded_stale": h.discarded_stale,
+                 "conflicts_dropped": h.conflicts_dropped, "fused": h.fused}
                 for h in self.history
             ],
             "retired_workers": self.retired_workers,
@@ -1229,9 +1258,10 @@ class _Engine:
     scratch_repo: Optional[str] = None
 
     def record_round(self, *, index: int, reward: float, n_items: int,
-                     committed: int, rejected: int, reasons: Dict[str, int],
+                     reports: Sequence[Any],
                      history: List["RoundInfo"], early: "EarlyStop",
                      on_round: Optional[Callable[["RoundInfo"], None]],
+                     extra_reasons: Optional[Dict[str, int]] = None,
                      ) -> Tuple["RoundInfo", Optional[str]]:
         """Close out one round: record it, ask whether to stop, tell the caller.
 
@@ -1239,13 +1269,40 @@ class _Engine:
         a merger sweep in the other -- and agreed on everything that happens once
         one has finished. That agreement was written twice.
 
+        It now takes the ``MergeReport``s rather than a pre-chewed
+        ``committed`` / ``rejected`` / ``reasons``, because deriving those was the
+        *other* thing both loops were doing separately -- and one of them counted
+        ``rejected`` as ``len(reports) - committed`` while the other re-scanned for
+        a missing ``committed_version``. Same answer, two spellings, and the
+        numbers below could have been added to one loop and not the other in
+        exactly the way this whole seam exists to stop.
+
+        ``extra_reasons`` is for a category the aggregator cannot know about --
+        today only tensor parallelism's ``section-violation``, which is counted in
+        the round body because those diffs never reach a bucket.
+
         Returns the round and a stop reason, or `None` to continue. The caller
         stops; this does not, because "should we stop" and "how do we stop" are
         different questions and only the loop knows the second.
         """
+        reports = list(reports)
+        committed = sum(1 for x in reports if x.committed_version is not None)
+        reasons = _tally(reports)
+        if extra_reasons:
+            reasons.update(extra_reasons)
         m = self.meter.snapshot()
-        info = RoundInfo(index, reward, n_items, committed, rejected, reasons,
-                         elapsed_s=m.elapsed_s, rollouts=m.rollouts, calls=m.calls)
+        info = RoundInfo(
+            index, reward, n_items, committed, len(reports) - committed, reasons,
+            elapsed_s=m.elapsed_s, rollouts=m.rollouts, calls=m.calls,
+            considered=sum(x.considered for x in reports),
+            discarded_stale=sum(x.discarded_stale for x in reports),
+            conflicts_dropped=sum(x.conflicts_dropped for x in reports),
+            # A fusion that *won*, which is the question worth asking -- the
+            # tournament builds a fused candidate whenever the survivors are
+            # complementary, so counting the ones it built says nothing about
+            # whether combining them beat taking the best single diff.
+            fused=sum(1 for x in reports
+                      if x.fused and x.committed_version is not None))
         history.append(info)
         stop_reason = early.observe(info.held_out_reward)
         notify(on_round, info)
@@ -2158,8 +2215,6 @@ def evolve(
             if verbose:
                 print(f"round {r:>3}  stopped early: {run_error[:140]}")
             break
-        committed = sum(1 for x in reports if x.committed_version is not None)
-        rejected = sum(1 for x in reports if x.committed_version is None)
         try:
             dev = ledger.snapshot(Ledger.DEV).get(artifact_id)
         except LedgerFailure as e:      # as at the round head: skip, do not raise
@@ -2208,20 +2263,19 @@ def evolve(
                 print(f"round {r:>3}  held-out unmeasurable, carrying last reward: "
                       f"{type(e).__name__}: {str(e)[:100]}")
             continue
-        reasons = _tally(reports)
         with tp_lock:
-            if section_violations[0]:
-                reasons["section-violation"] = section_violations[0]
-                section_violations[0] = 0
+            extra = ({"section-violation": section_violations[0]}
+                     if section_violations[0] else None)
+            section_violations[0] = 0
         # Recording the round, deciding whether to stop, and telling the caller
         # are the same three steps in both loops; only "what is a round" differs.
         info, early_stop = eng.record_round(
-            index=r, reward=round_reward, n_items=len(dev.state),
-            committed=committed, rejected=rejected, reasons=reasons,
-            history=history, early=early, on_round=on_round)
+            index=r, reward=round_reward, n_items=len(dev.state), reports=reports,
+            history=history, early=early, on_round=on_round, extra_reasons=extra)
         if verbose:
             print(f"round {r:>3}  reward={info.held_out_reward:.3f} on "
-                  f"{len(held_out)}  size={info.n_items}  +{committed}/-{rejected}")
+                  f"{len(held_out)}  size={info.n_items}  "
+                  f"+{info.committed}/-{info.rejected}")
         if early_stop is not None:
             stop_reason = early_stop
             if verbose:

@@ -390,7 +390,7 @@ result = evolve(tasks, reward, agent=agent, rounds=6, verbose=True)
 result.rendered       # the evolved artifact, rendered to text
 result.state          # its {key: value} state
 result.final_reward   # held-out reward of the final artifact
-result.history        # RoundInfo(round, held_out_reward, n_items, committed, rejected, reasons)
+result.history        # RoundInfo per round — reward, size, and what the merge did
 result.outcomes()     # {'below-threshold': 7, 'committed': 2} — why the run went as it did
 result.ledger_log     # the git commit log of accepted merges
 result.error          # None on a clean run; "<ExcType>: <msg>" if a backend failure ended it
@@ -417,6 +417,27 @@ every round by a stable category:
 underlying `MergeReport`, which carries both `category` and a human-readable
 `reason` with the measured values (`"P(delta>0)=0.42 <= 0.75"`) — good for a log
 line, but it interpolates numbers, so count on `category`.
+
+### What the merge did, per round
+
+Categories say *why* a round ended as it did; these four say *how it got there*.
+They come straight off the `MergeReport`s the round produced.
+
+| field | question it answers |
+|---|---|
+| `considered` | how many evidence cards the merge looked at — the **denominator** for the next two |
+| `discarded_stale` | how many the staleness filter dropped. Rising, with a flat reward, is the lag budget rather than the reflector |
+| `conflicts_dropped` | how often two workers proposed different values for one key. Zero under `AppendRules` (content-addressed keys rarely collide), interesting under `KeyedRules` / `SingleSlot` / `FileTree` |
+| `fused` | commits whose winning candidate was the **fusion** of several diffs rather than any single one — the model-soup question. Counted only when it committed: the tournament builds a fused candidate whenever the survivors are complementary, so counting the ones it *built* says nothing about whether combining beat picking |
+
+```python
+for h in result.history:
+    print(h.round, h.considered, h.discarded_stale, h.conflicts_dropped, h.fused)
+```
+
+They were computed all along and thrown away — the reference runtimes reported
+them (`RoundStat.fused`, `AsyncStats.conflicts_dropped`) and the engine every
+real workload uses did not.
 
 Watch a long run as it happens — an LLM run can take hours, and `history` is only
 available once it returns:
