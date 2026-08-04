@@ -42,6 +42,7 @@ from .aggregator import (
     Aggregator, AggregatorConfig, AggregatorFactory, AggregatorContractError,
     check_reports,
 )
+from .evalcache import CacheProtocol, MemoryCache, cache_key
 from .evolvable import Contract, ContractError, Diff, EvidenceCard
 from .governance import FROZEN_IDS, GovernanceError, assert_mutable
 from .ledger import Ledger, LedgerFailure
@@ -298,31 +299,11 @@ def _checked_reward(value, task: "Task") -> float:
     return min(1.0, max(0.0, r))
 
 
-class _EvalCache:
-    """Memoised evaluations, and the only place that can tell a hit from a miss.
-
-    The counters live here rather than in `_Runtime` because by the time
-    `eval_one` has a value back it no longer knows whether the work happened:
-    that is precisely the "duplicate computation" figure a multi-process run
-    needs to report."""
-
-    def __init__(self, meter: Optional["Meter"] = None) -> None:
-        self._d: Dict[Any, float] = {}
-        self._lock = threading.Lock()
-        self._meter = meter
-
-    def get_or_eval(self, key: Any, fn: Callable[[], float]) -> float:
-        with self._lock:
-            if key in self._d:
-                if self._meter is not None:
-                    self._meter.add("cache_hits")
-                return self._d[key]
-        if self._meter is not None:
-            self._meter.add("cache_misses")
-        value = fn()
-        with self._lock:
-            self._d[key] = value
-        return value
+#: Kept as a name because tests and call sites use it; the implementation moved
+#: to `evalcache` when a second process made single-flight and an environment-
+#: aware key necessary. A plain dictionary is correct in one process and wasteful
+#: in the exact case caching is for.
+_EvalCache = MemoryCache
 
 
 class EvolvingArtifact:
@@ -446,8 +427,14 @@ class _Runtime:
     #: hand-built `_Runtime` (several tests do this) needs no changes.
     meter: Optional["Meter"] = None
 
+    #: Identifies the environment measurements are taken in. Empty while there is
+    #: one, which is why a default run's keys are unchanged; the moment there are
+    #: two, it is what stops one environment's score answering the other's
+    #: question.
+    env_fingerprint: str = ""
+
     def eval_one(self, artifact: EvolvingArtifact, task: Task) -> float:
-        key = (artifact._signature(), task.id)
+        key = cache_key(artifact._signature(), task.id, self.env_fingerprint)
 
         def _measure() -> float:
             for attempt in range(self.ATTEMPTS):
@@ -613,7 +600,7 @@ def _publish_stable(aggregator) -> None:
 #: `Policies.require_supported`. The set grows as the implementations land.
 _WIRED_POLICIES = ("task_sampler", "proposal", "conflict", "fusion", "acceptance",
                    "promotion", "staleness", "verifier", "ledger",
-                   "aggregator_factory")
+                   "aggregator_factory", "eval_cache", "sandbox_spec")
 
 
 def _propose_via_policy(policy):
@@ -1197,8 +1184,20 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     meter = Meter(usage=usage) if usage is not None else Meter()
     run, propose = measured(run, meter), measured(propose, meter)
 
-    runtime = _Runtime(run=run, reward=reward, cache=_EvalCache(meter),
-                       eval_concurrency=eval_concurrency, meter=meter)
+    cache = (policies_bundle.eval_cache if policies_bundle is not None
+             and policies_bundle.eval_cache is not None else MemoryCache(meter))
+    # A supplied cache was built before this run existed, so it has no meter. Ask
+    # it to take one; a cache that does not offer the hook simply reports nothing,
+    # which is better than a zero that looks like a measurement.
+    attach = getattr(cache, "attach_meter", None)
+    if callable(attach):
+        attach(meter)
+    runtime = _Runtime(run=run, reward=reward, cache=cache,
+                       eval_concurrency=eval_concurrency, meter=meter,
+                       env_fingerprint=(policies_bundle.sandbox_spec.fingerprint()
+                                        if policies_bundle is not None
+                                        and policies_bundle.sandbox_spec is not None
+                                        else ""))
 
     def serialize(a: EvolvingArtifact) -> dict:
         return {"state": a.state, "blast_radius": a.blast_radius}

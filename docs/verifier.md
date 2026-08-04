@@ -26,6 +26,43 @@ default mistake, and it is expensive in exactly the case that matters:
     nothing else. The [directory entry points](directory-evolution.md) default it to 4
     for this reason.
 
+
+## The evaluation cache
+
+Evaluation is the expensive half of a run — the gate measures 193.6s against
+90.0s for the same work at `eval_concurrency` 1 and 8, and each of those seconds
+is a real rollout. So evaluations are memoised, keyed on **what the artifact
+renders to**, the task id, and the **environment's fingerprint**.
+
+```python
+from agentdescent import FileCache, Policies, evolve
+
+evolve(tasks, reward, agent=agent,
+       policies=Policies(eval_cache=FileCache("~/.cache/agentdescent")))
+```
+
+Three things the key and the cache have to get right, each of which was wrong at
+some point:
+
+* **Not the state — what it renders to.** `eval_one` passes only `render()` to
+  `run`, so two states that render identically cannot score differently. Keying
+  on state made a strategy carrying bookkeeping beside the artifact (ADAS keeps a
+  design's name and rationale) re-evaluate the whole held-out set because a label
+  changed.
+* **Single-flight.** A plain dictionary checks, releases its lock, then computes,
+  so N concurrent callers for one uncomputed key all miss and all compute — which
+  is wasteful in exactly the case caching exists for. The first caller computes
+  and the rest wait for that result.
+* **The environment is part of the identity.** A `code_runner` score depends on
+  what `setup_cmd` installed, the python minor version, whether there was a
+  network. Sharing a cache across images without the fingerprint means one
+  environment's measurement answers another environment's question — and that
+  number is what the commit gates read.
+
+`FileCache` is a directory, so two processes on one machine stop paying twice for
+the same gate without a server between them. A network backend is the same
+protocol and belongs with the cross-machine work that would justify running one.
+
 ## The three methods that matter
 
 ```python

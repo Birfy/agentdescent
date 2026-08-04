@@ -46,6 +46,7 @@ from typing import (
 
 if TYPE_CHECKING:                                   # pragma: no cover
     from .aggregator import AggregatorFactory, MergeReport
+    from .evalcache import CacheProtocol
     from .evolvable import Diff, EvidenceCard, Evolvable
     from .sampling import TaskSampler
     from .staleness import StalenessPolicy
@@ -374,6 +375,9 @@ class Policies:
     verifier: Optional[VerifierProtocol] = None
     ledger: Optional[LedgerProtocol] = None
     aggregator_factory: Optional["AggregatorFactory"] = None
+    #: Where evaluations are memoised. The default is in-process; a shared one
+    #: lets separate processes stop paying twice for the same gate.
+    eval_cache: Optional["CacheProtocol"] = None
 
     # the resource plane (implementations land with the sandbox pool)
     sandbox_provider: Optional[SandboxProvider] = None

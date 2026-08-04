@@ -81,6 +81,7 @@ from .policies import (
     SandboxSpec,
     VerifierProtocol,
 )
+from .evalcache import CacheProtocol, FileCache, MemoryCache
 from .executor import Executor, Result, ThreadExecutor
 from .sandbox import LocalWorkspaceSandbox, SandboxPool, WorkspaceProvider
 from .supervisor import ProcessExecutor
@@ -227,6 +228,9 @@ __all__ = [
     "SandboxSpec",
     "SandboxPool",
     "Executor",
+    "CacheProtocol",
+    "MemoryCache",
+    "FileCache",
     "ThreadExecutor",
     "ProcessExecutor",
     "Result",
