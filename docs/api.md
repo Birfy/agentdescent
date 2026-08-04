@@ -8,7 +8,7 @@ page and the code disagree, so a signature here is the signature you get.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-160 public names across 29 modules.
+163 public names across 30 modules.
 
 ---
 
@@ -748,6 +748,10 @@ Whether a candidate is committed.
 
 Accumulate a deduped list of rules/lessons (append-only, content-addressed).
 
+### `CacheProtocol`
+
+Somewhere to keep evaluations. In one process, across many, or on disk.
+
 ### `Completion`
 
 `Callable[[str], str]` — the one contract every model and agent satisfies.
@@ -772,6 +776,10 @@ The L2/L1 blast-radius boundary (`0.30`).
 
 Artifact ids the loop may read but never mutate (L0).
 
+### `FileCache`
+
+A directory of evaluations, so separate processes can share them.
+
 ### `FusionPolicy`
 
 How complementary diffs become one candidate.
@@ -795,6 +803,10 @@ Seven methods: four the aggregator calls, three more the engine calls.
 ### `LocalWorkspaceSandbox`
 
 A throwaway directory on this machine -- what a rollout has always got.
+
+### `MemoryCache`
+
+In-process, single-flight, counted.
 
 ### `MergeContext`
 

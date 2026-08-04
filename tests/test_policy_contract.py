@@ -332,11 +332,13 @@ def test_a_field_with_no_implementation_still_raises():
 
 
 def test_the_async_path_honours_the_same_bundle():
+    """`sandbox_spec` became honoured when it started keying the eval cache, so
+    the refusal is asserted against a field that still has no implementation."""
     from agentdescent import async_evolve
-    with pytest.raises(NotImplementedError, match="sandbox_spec"):
+    with pytest.raises(NotImplementedError, match="sandbox_provider"):
         async_evolve(_tasks(), lambda t, o: 0.0, run=lambda r, t: "x",
                      propose=lambda r, t, o, s: None, max_iters=1,
-                     policies=Policies(sandbox_spec=SandboxSpec()))
+                     policies=Policies(sandbox_provider=object()))
 
 
 def test_a_multi_proposal_policy_is_refused_rather_than_truncated():
