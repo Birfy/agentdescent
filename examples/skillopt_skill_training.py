@@ -46,19 +46,18 @@ import collections
 import json
 import re
 import string
-import sys
 import threading
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Tuple
 
-from agentdescent.agents import Usage, claude, openai_compatible
+from agentdescent.agents import Usage
 from agentdescent.aggregator import AggregatorProtocol, MergeReport
 from agentdescent.dataloader import Dataset, hf_rows, split_dataset
 from agentdescent.evolvable import Diff, EvidenceCard
 from agentdescent.evolution import EvolvingArtifact, Task, evolve, rule_id
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
-from examples._common import add_standard_args
+from examples._common import add_standard_args, completion_for, confirm
 
 SEARCHQA = ("lucadiliello/searchqa", "default")   # (dataset, config)
 Completion = Callable[[str], str]
@@ -541,14 +540,11 @@ def main(argv=None) -> None:
     calls = args.steps * (args.minibatch + 1 + nva) + nte
     print(f"Budget   : up to ~{calls} model calls (rollouts dominate)")
 
-    if not args.yes and sys.stdin.isatty():
-        if input("\nProceed with real API calls? [y/N] ").strip().lower() not in ("y", "yes"):
-            print("aborted.")
-            return
+    if not confirm(args):
+        return
 
     usage = Usage()                       # what the run actually costs
-    completion = (openai_compatible(model=args.model, usage=usage) if args.provider in ("openai", "glm")
-                  else claude(model=args.model, usage=usage))
+    completion = completion_for(args, usage=usage)
     if args.hard:
         # Needs the model, which is built above, so the dataset is re-selected here
         # rather than at load time.

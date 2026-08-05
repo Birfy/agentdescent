@@ -12,13 +12,12 @@ the dataset loader and model adapter, so it is safe on a cold, offline machine.
 from __future__ import annotations
 
 import argparse
-import sys
 
-from agentdescent.agents import Usage, claude, openai_compatible
+from agentdescent.agents import Usage
 from agentdescent.dataloader import hf_rows
 from agentdescent.evolution import AppendRules, LLMAgent, Task, evolve
 from agentdescent.rewards import exact_match
-from examples._common import add_standard_args
+from examples._common import add_standard_args, completion_for, confirm
 
 
 PORT_NAME = "replace-with-algorithm-name"
@@ -72,17 +71,11 @@ def main(argv=None) -> None:
     tasks = load_tasks(args.limit)
     if len(tasks) < 4:
         raise ValueError("a port needs at least four tasks for train/held-out splitting")
-    if not args.yes and sys.stdin.isatty():
-        if input("\nProceed with real API calls? [y/N] ").strip().lower() not in ("y", "yes"):
-            print("aborted.")
-            return
+    if not confirm(args):
+        return
 
     usage = Usage()
-    completion = (
-        openai_compatible(model=args.model, usage=usage)
-        if args.provider in ("openai", "glm")
-        else claude(model=args.model, usage=usage)
-    )
+    completion = completion_for(args, usage=usage)
     result = evolve(
         tasks,
         REWARD,

@@ -46,17 +46,16 @@ import argparse
 import random
 import re
 import string
-import sys
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
-from agentdescent.agents import Usage, claude, openai_compatible
+from agentdescent.agents import Usage
 from agentdescent.aggregator import AggregatorProtocol, MergeReport
 from agentdescent.dataloader import Dataset, hf_rows, split_dataset
 from agentdescent.evolvable import Diff, EvidenceCard
 from agentdescent.evolution import EvolvingArtifact, LLMAgent, Task, evolve, rule_id
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
-from examples._common import add_standard_args
+from examples._common import add_standard_args, completion_for, confirm
 
 HOTPOTQA = ("hotpotqa/hotpot_qa", "validation", "distractor")   # (dataset, split, config)
 
@@ -429,14 +428,11 @@ def main(argv=None) -> None:
     est = estimate_calls(args.rounds, args.workers, nva) + nte
     print(f"Budget   : up to ~{est} model calls (cached repeats are free)")
 
-    if not args.yes and sys.stdin.isatty():
-        if input("\nProceed with real API calls? [y/N] ").strip().lower() not in ("y", "yes"):
-            print("aborted.")
-            return
+    if not confirm(args):
+        return
 
     usage = Usage()                       # what the run actually costs
-    completion = (openai_compatible(model=args.model, usage=usage) if args.provider in ("openai", "glm")
-                  else claude(model=args.model, usage=usage))
+    completion = completion_for(args, usage=usage)
     agent = gepa_agent(completion)
     try:
         agent.solve("", Task(id="probe", prompt="Reply with the single word: ok"))

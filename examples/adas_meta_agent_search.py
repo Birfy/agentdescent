@@ -48,20 +48,20 @@ import json
 import math
 import random
 import re
-import sys
 import threading
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Tuple
 
-from agentdescent.agents import Usage, claude, openai_compatible
+from agentdescent.agents import Usage
 from agentdescent.aggregator import AggregatorProtocol, MergeOutcome, MergeReport
 from agentdescent.dataloader import Dataset, fetch_text, split_dataset
 from agentdescent.evolvable import Diff, EvidenceCard
 from agentdescent.evolution import EvolvingArtifact, Task, evolve, rule_id
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
-from examples._common import add_standard_args
+from examples._common import (add_standard_args, completion_for, confirm,
+                              is_openai_compatible)
 
 MGSM_URL = "https://raw.githubusercontent.com/ShengranHu/ADAS/main/dataset/mgsm/mgsm_{lang}.tsv"
 # ADAS's MGSM language set (utils.ALL_LANGUAGES).
@@ -1017,7 +1017,11 @@ def main(argv=None) -> None:
     args = p.parse_args(argv)
 
     langs = [l.strip() for l in args.langs.split(",") if l.strip() in ALL_LANGUAGES]
-    if not 0.0 < args.train_frac and 0.0 < args.test_frac and args.train_frac + args.test_frac < 1.0:
+    # `not` binds tighter than `and`, so the guard needs its own parentheses --
+    # without them `--train-frac 0.9 --test-frac 0.5` passed and produced a
+    # negative validation ratio.
+    if not (0.0 < args.train_frac and 0.0 < args.test_frac
+            and args.train_frac + args.test_frac < 1.0):
         p.error("--train-frac and --test-frac must be positive and sum to < 1")
     ratios = (args.train_frac, 1.0 - args.train_frac - args.test_frac, args.test_frac)
     print("Algorithm: ADAS Meta Agent Search -- harness (agentic-system) self-evolution")
@@ -1049,16 +1053,14 @@ def main(argv=None) -> None:
     print("\nExample problem:")
     print("  Q:", ds.train[0][0][:150])
     print("  A:", ds.train[0][1])
-    if not args.yes and sys.stdin.isatty():
-        if input("\nProceed with real API calls? [y/N] ").strip().lower() not in ("y", "yes"):
-            print("aborted.")
-            return
+    if not confirm(args):
+        return
 
     usage = Usage()                       # what the run actually costs
-    raw = (openai_compatible(model=args.model, usage=usage,
-                             max_tokens=args.max_tokens, timeout=args.timeout)
-           if args.provider in ("openai", "glm")
-           else claude(model=args.model, usage=usage, max_tokens=args.max_tokens))
+    # --timeout is an openai_compatible-only knob; claude() takes no such
+    # parameter, so it stays a caller-side branch rather than a shared default.
+    extra = {"timeout": args.timeout} if is_openai_compatible(args) else {}
+    raw = completion_for(args, usage=usage, max_tokens=args.max_tokens, **extra)
     guard = EmptyCompletionGuard(raw)
     completion = guard
     globals()["EVAL_CONCURRENCY"] = args.eval_concurrency

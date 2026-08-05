@@ -306,9 +306,13 @@ All notable changes to AgentDescent are documented here. The format follows
   model, seed, async, dry-run and confirmation flags come from
   `examples._common`; upstream iteration vocabulary and per-port defaults remain
   local. A copyable code/test template and a short porting checklist make the
-  same contract the starting point for future ports. All six `--dry-run` paths
-  now return before dataset/model setup, so they are genuinely zero-network on a
-  cold machine, and the candidate backlog records mechanism gaps and owners.
+  same contract the starting point for future ports. The behaviour behind the
+  flags is shared too, not just their declaration: `confirm` reads `--yes` and
+  `completion_for` dispatches `--provider`, so a port cannot declare a flag it
+  never honours — which is the drift that lost DGM its `--yes`. All six
+  `--dry-run` paths now return before dataset/model setup, so they are genuinely
+  zero-network on a cold machine, and the candidate backlog records mechanism
+  gaps and owners.
 - **The two barrier-free runtimes share their policies.** `async_evolve` and
   `AsyncAgentDescent` implemented the same shape independently; a previous
   release had to hand-port two measured fixes between them. The parts that are
