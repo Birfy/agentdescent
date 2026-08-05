@@ -50,17 +50,17 @@ OpenEvolve 配对 trace 达到目标所需候选数为 serial 2、sync parallel 
 
 代码：
 
-- [`experiment/algorithm_parallel_async_benchmark.py`](../experiment/algorithm_parallel_async_benchmark.py)
-- [`experiment/textgrad_prompt_optimization.py`](../experiment/textgrad_prompt_optimization.py)
-- [`experiment/openevolve_program_search.py`](../experiment/openevolve_program_search.py)
-- [`experiment/test_small_experiments.py`](../experiment/test_small_experiments.py)
+- [`parallel_async_benchmark.py`](../parallel_async_benchmark.py)
+- [`textgrad_prompt_optimization.py`](../textgrad_prompt_optimization.py)
+- [`openevolve_program_search.py`](../openevolve_program_search.py)
+- [`experiment/test_small_experiments.py`](../../../experiment/test_small_experiments.py)
 
 结果：
 
 - [`algorithm-parallel-async-result.json`](algorithm-parallel-async-result.json)
 
 辅助的调度器隔离实验仍保留在
-[`parallel-async-time-to-quality.md`](parallel-async-time-to-quality.md)，但本报告才是“基于
+[`parallel-async-time-to-quality.md`](../../../report/parallel-async-time-to-quality.md)，但本报告才是“基于
 两个已实现算法”的主验收结果。
 
 ## 3. 三种执行语义
@@ -202,7 +202,7 @@ sync 与 async 的完整预算墙钟几乎相同，因为两者最终都执行 3
 ## 7. 复现
 
 ```bash
-bash -ic 'python -m experiment.algorithm_parallel_async_benchmark \
+bash -ic 'python -m examples.textgrad_openevolve.parallel_async_benchmark \
   --provider openai --model glm-5.2 --thinking disabled \
   --max-tokens 1024 --temperature 0 --api-timeout 180 \
   --concurrency 3 --textgrad-batch-size 2 --textgrad-val-size 3 \
@@ -210,13 +210,13 @@ bash -ic 'python -m experiment.algorithm_parallel_async_benchmark \
   --openevolve-candidates 3 --openevolve-trials 5 \
   --openevolve-objective-budget 100 --openevolve-min-score-gain 0.005 \
   --openevolve-candidate-timeout 15 --openevolve-archive-size 6 \
-  --output report/algorithm-parallel-async-result.json --yes'
+  --output examples/textgrad_openevolve/results/algorithm-parallel-async-result.json --yes'
 ```
 
 Dry-run 不需要 Key：
 
 ```bash
-python -m experiment.algorithm_parallel_async_benchmark --dry-run
+python -m examples.textgrad_openevolve.parallel_async_benchmark --dry-run
 ```
 
 离线测试：

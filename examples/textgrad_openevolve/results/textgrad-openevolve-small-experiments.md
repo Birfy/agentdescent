@@ -30,12 +30,12 @@ value”，它与 word sorting 的字符串列表答案明显不匹配。因此 
 
 代码：
 
-- [`experiment/textgrad_prompt_optimization.py`](../experiment/textgrad_prompt_optimization.py)
-- [`experiment/openevolve_program_search.py`](../experiment/openevolve_program_search.py)
-- [`experiment/_openevolve_runner.py`](../experiment/_openevolve_runner.py)
-- [`experiment/_common.py`](../experiment/_common.py)
-- [`experiment/test_small_experiments.py`](../experiment/test_small_experiments.py)
-- [`experiment/openevolve_best_program.py`](../experiment/openevolve_best_program.py)
+- [`textgrad_prompt_optimization.py`](../textgrad_prompt_optimization.py)
+- [`openevolve_program_search.py`](../openevolve_program_search.py)
+- [`_openevolve_runner.py`](../_openevolve_runner.py)
+- [`_common.py`](../_common.py)
+- [`experiment/test_small_experiments.py`](../../../experiment/test_small_experiments.py)
+- [`openevolve_best_program.py`](../openevolve_best_program.py)
 
 机器可读结果：
 
@@ -46,9 +46,9 @@ value”，它与 word sorting 的字符串列表答案明显不匹配。因此 
 并行与异步能力另有独立的 time-to-quality 报告：
 
 - [`textgrad-openevolve-parallel-async.md`](textgrad-openevolve-parallel-async.md)，真实算法主实验
-- [`parallel-async-time-to-quality.md`](parallel-async-time-to-quality.md)
-- [`parallel-async-time-to-quality-result.json`](parallel-async-time-to-quality-result.json)
-- [`parallel-async-incremental-stress-result.json`](parallel-async-incremental-stress-result.json)
+- [`parallel-async-time-to-quality.md`](../../../report/parallel-async-time-to-quality.md)
+- [`parallel-async-time-to-quality-result.json`](../../../report/parallel-async-time-to-quality-result.json)
+- [`parallel-async-incremental-stress-result.json`](../../../report/parallel-async-incremental-stress-result.json)
 
 ## 3. 公共运行设置
 
@@ -259,7 +259,7 @@ inspiration、quality-diversity archive”等核心机制。与上游默认配�
 | 6 | 坐标下降 + basin hopping | 0.993266 | 是 |
 
 第 4 轮回落并不会覆盖 archive 中的更优程序。第 5 轮是最终最佳，代码位于
-[`experiment/openevolve_best_program.py`](../experiment/openevolve_best_program.py)。人工审查
+[`openevolve_best_program.py`](../openevolve_best_program.py)。人工审查
 确认它没有写死最优坐标，平均实际使用 `199.6/200` 次 objective calls。
 
 运行时 WSL 曾在第 5、6 轮临时拒绝创建 Bubblewrap namespace。两份候选代码已经生成，
@@ -316,8 +316,8 @@ time-to-quality 加速断言，以及两个真实算法的 serial/sync/async 调
 正式运行前后的 dry-run：
 
 ```bash
-python -m experiment.textgrad_prompt_optimization --dry-run --model glm-5.2
-python -m experiment.openevolve_program_search --dry-run --model glm-5.2
+python -m examples.textgrad_openevolve.textgrad_prompt_optimization --dry-run --model glm-5.2
+python -m examples.textgrad_openevolve.openevolve_program_search --dry-run --model glm-5.2
 ```
 
 ## 7. 复现命令
@@ -327,7 +327,7 @@ python -m experiment.openevolve_program_search --dry-run --model glm-5.2
 TextGrad：
 
 ```bash
-bash -ic 'python -m experiment.textgrad_prompt_optimization \
+bash -ic 'python -m examples.textgrad_openevolve.textgrad_prompt_optimization \
   --provider openai --model glm-5.2 --thinking disabled \
   --steps 4 --batch-size 3 \
   --train-size 12 --val-size 12 --test-size 20 \
@@ -337,7 +337,7 @@ bash -ic 'python -m experiment.textgrad_prompt_optimization \
 OpenEvolve：
 
 ```bash
-bash -ic 'python -m experiment.openevolve_program_search \
+bash -ic 'python -m examples.textgrad_openevolve.openevolve_program_search \
   --provider openai --model glm-5.2 --thinking disabled \
   --iterations 6 --trials 10 --objective-budget 200 \
   --archive-size 12 --islands 3 --max-tokens 2048 --yes'

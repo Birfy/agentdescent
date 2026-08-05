@@ -29,9 +29,9 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from agentdescent.agents import Usage
 
-from experiment._common import (
+from examples.textgrad_openevolve._common import (
+    EXAMPLE_DIR,
     REPORT_DIR,
-    ROOT,
     add_model_args,
     confirm_paid_run,
     make_completion,
@@ -114,7 +114,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--best-program",
         type=Path,
-        default=ROOT / "experiment" / "openevolve_best_program.py",
+        default=EXAMPLE_DIR / "openevolve_best_program.py",
     )
     return parser
 

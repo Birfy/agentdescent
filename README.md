@@ -254,6 +254,10 @@ benchmarks through the shared [`agentdescent.dataloader`](https://github.com/Bir
 | **ADAS** (Meta Agent Search) | harness | MGSM | [`adas_meta_agent_search.py`](https://github.com/Birfy/agentdescent/blob/main/examples/adas_meta_agent_search.py) |
 | **DGM** (Darwin Gödel Machine) | harness | SWE-bench Verified | [`dgm_self_improve.py`](https://github.com/Birfy/agentdescent/blob/main/examples/dgm_self_improve.py) |
 
+The [`examples/textgrad_openevolve/`](examples/textgrad_openevolve/) bundle adds
+small TextGrad and OpenEvolve runs, recorded GLM-5.2 results, and a direct
+serial/synchronous-parallel/asynchronous time-to-quality comparison.
+
 ```bash
 python -m examples.ace_context_evolution --dry-run     # skill/context self-evolution (ACE)
 python -m examples.dgm_self_improve                    # harness self-evolution (DGM), offline

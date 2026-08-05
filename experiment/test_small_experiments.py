@@ -8,10 +8,10 @@ import time
 
 import pytest
 
-from experiment import openevolve_program_search as oe
-from experiment import algorithm_parallel_async_benchmark as ap
+from examples.textgrad_openevolve import openevolve_program_search as oe
+from examples.textgrad_openevolve import parallel_async_benchmark as ap
+from examples.textgrad_openevolve import textgrad_prompt_optimization as tg
 from experiment import parallel_async_time_to_quality as pa
-from experiment import textgrad_prompt_optimization as tg
 
 
 def test_textgrad_answer_parser_is_exact_but_format_tolerant():

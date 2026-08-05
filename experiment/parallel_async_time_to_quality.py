@@ -23,7 +23,10 @@ from agentdescent.async_evolve import async_evolve
 from agentdescent.evolution import EvolutionResult, Task, evolve
 from agentdescent.strategies import AppendRules
 
-from experiment._common import REPORT_DIR, utc_now, write_json
+from examples.textgrad_openevolve._common import ROOT, utc_now, write_json
+
+
+REPORT_DIR = ROOT / "report"
 
 
 @dataclass

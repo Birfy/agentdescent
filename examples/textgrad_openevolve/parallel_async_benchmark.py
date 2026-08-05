@@ -18,9 +18,9 @@ from typing import Any, Callable, Dict, Iterable, List, Sequence, Tuple
 
 from agentdescent.agents import Usage
 
-from experiment import openevolve_program_search as oe
-from experiment import textgrad_prompt_optimization as tg
-from experiment._common import (
+from examples.textgrad_openevolve import openevolve_program_search as oe
+from examples.textgrad_openevolve import textgrad_prompt_optimization as tg
+from examples.textgrad_openevolve._common import (
     REPORT_DIR,
     add_model_args,
     confirm_paid_run,

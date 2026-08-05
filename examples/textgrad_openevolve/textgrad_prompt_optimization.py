@@ -23,7 +23,7 @@ from typing import Any, Dict, Iterable, List, Sequence, Tuple
 from agentdescent.agents import Usage
 from agentdescent.dataloader import fetch_text
 
-from experiment._common import (
+from examples.textgrad_openevolve._common import (
     REPORT_DIR,
     add_model_args,
     confirm_paid_run,

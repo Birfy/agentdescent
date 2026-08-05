@@ -13,8 +13,11 @@ from typing import Any, Dict
 from agentdescent.agents import Usage, claude, openai_compatible
 
 
-ROOT = Path(__file__).resolve().parents[1]
-REPORT_DIR = ROOT / "report"
+ROOT = Path(__file__).resolve().parents[2]
+EXAMPLE_DIR = Path(__file__).resolve().parent
+RESULTS_DIR = EXAMPLE_DIR / "results"
+# Kept as an alias so the experiment scripts retain their existing option names.
+REPORT_DIR = RESULTS_DIR
 
 
 def add_model_args(

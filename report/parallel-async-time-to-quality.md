@@ -1,7 +1,7 @@
 # AgentDescent 并行与异步 Time-to-Quality 实验报告
 
 > 验收口径已更新为直接使用 TextGrad 与 OpenEvolve。真实 GLM-5.2 主实验见
-> [`textgrad-openevolve-parallel-async.md`](textgrad-openevolve-parallel-async.md)。本报告保留为
+> [`textgrad-openevolve-parallel-async.md`](../examples/textgrad_openevolve/results/textgrad-openevolve-parallel-async.md)。本报告保留为
 > 隔离调度器因果和重复运行稳定性的辅助证据。
 
 日期：2026-08-04
@@ -65,7 +65,7 @@
 
 这样设计是为了隔离调度器效果。它不能证明某个 LLM 更聪明，也不能替代真实 provider
 的限流测试；GLM-5.2 上的算法质量实验见
-[`textgrad-openevolve-small-experiments.md`](textgrad-openevolve-small-experiments.md)。
+[`textgrad-openevolve-small-experiments.md`](../examples/textgrad_openevolve/results/textgrad-openevolve-small-experiments.md)。
 
 ### 3.2 同步并行扩展
 
