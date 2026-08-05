@@ -195,7 +195,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if "merge" in arms and "fork" in arms:
         merge_name, fork_name = f"merge-of-{args.width}", f"fork-of-{args.width}"
-        if comparison.separates(merge_name, fork_name):
+        if comparison.underpowered(merge_name, fork_name):
+            # "We looked and found no difference" and "we could not have found
+            # one" read identically in a table and mean opposite things about
+            # what to do next.
+            print(f"\n{len(seeds)} seed(s): too few to compare {merge_name} with "
+                  f"{fork_name} at all. Not a null result -- an experiment that "
+                  "could not have produced one.")
+        elif comparison.separates(merge_name, fork_name):
             print(f"\n{merge_name} is above {fork_name} on every seed.")
         else:
             print(f"\n{merge_name} and {fork_name} overlap across seeds: this "

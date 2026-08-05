@@ -205,21 +205,41 @@ def test_arms_are_refused_below_one_worker():
 # -- reading the result ------------------------------------------------------
 
 
+def _arm(name, values):
+    return [ArmResult(arm=name, seed=i, width=1, rollouts=10, calls=10,
+                      prompt_tokens=0, completion_tokens=0, wallclock=1.0,
+                      wallclock_parallel=1.0, dev_reward=v, test_reward=v)
+            for i, v in enumerate(values)]
+
+
 def test_separates_requires_no_overlap():
     """The weakest claim a handful of seeds can support, and it must be able to
     say no."""
-    def arm(name, values):
-        return [ArmResult(arm=name, seed=i, width=1, rollouts=10, calls=10,
-                          prompt_tokens=0, completion_tokens=0, wallclock=1.0,
-                          wallclock_parallel=1.0, dev_reward=v, test_reward=v)
-                for i, v in enumerate(values)]
-
-    clear = compare(arm("a", [0.8, 0.9, 0.85]) + arm("b", [0.5, 0.6, 0.55]))
+    clear = compare(_arm("a", [0.8, 0.9, 0.85]) + _arm("b", [0.5, 0.6, 0.55]))
     assert clear.separates("a", "b")
 
-    overlapping = compare(arm("a", [0.8, 0.6, 0.7]) + arm("b", [0.5, 0.75, 0.6]))
+    overlapping = compare(_arm("a", [0.8, 0.6, 0.7]) + _arm("b", [0.5, 0.75, 0.6]))
     assert not overlapping.separates("a", "b"), \
         "overlapping spreads must not be reported as a difference"
+
+
+def test_one_seed_can_never_separate_anything():
+    """With one seed per arm, "no overlap" degenerates to a > b.
+
+    Written without this guard first, and a one-seed pilot duly printed "above on
+    every seed" from a single pair of numbers -- the exact overclaim this module
+    exists to prevent, made by the thing meant to prevent it.
+    """
+    one = compare(_arm("a", [0.9]) + _arm("b", [0.1]))
+    assert not one.separates("a", "b")
+    assert one.underpowered("a", "b")
+
+
+def test_underpowered_is_distinct_from_finding_nothing():
+    """They read the same in a table and mean opposite things about what to do."""
+    enough = compare(_arm("a", [0.8, 0.6, 0.7]) + _arm("b", [0.5, 0.75, 0.6]))
+    assert not enough.underpowered("a", "b")
+    assert not enough.separates("a", "b"), "looked, found no difference"
 
 
 def test_markdown_flags_a_partial_run_rather_than_averaging_it():

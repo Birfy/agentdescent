@@ -228,6 +228,35 @@ search. The numbers are therefore not comparable with those ports' own results.
 | fork-of-8 | — | — | *not yet measured* | — |
 | merge-of-8 | — | — | *not yet measured* | — |
 
+??? note "A one-seed pilot, which is a pipeline check and not a row of that table"
+    HotpotQA, `GLM-5.2`, 12 rollouts, `--width 3`, `--fetch 24` (12 train / 6 val
+    / 6 test), one seed, `--no-self-verify`. 182 calls, 435k tokens, ~35 minutes.
+
+    | arm | rollouts | calls | dev | test | fork oracle |
+    |---|---|---|---|---|---|
+    | serial | 12 | 39 | 0.833 | 0.500 | — |
+    | fork-of-3 | 12 | 72 | 0.833 | 0.167 | 0.500 |
+    | merge-of-3 | 12 | 39 | 0.667 | 0.333 | — |
+
+    **Nothing about merging can be read off this**, and the harness says so
+    rather than leaving it to the reader: six test tasks make every quality
+    number a count out of six, and one seed cannot separate anything at all —
+    `Comparison.separates` returns `False` below three seeds by construction.
+
+    Two things it does establish, both about the method rather than the result:
+
+    * **The confound is real and it is large.** At *identical* rollouts the fork
+      arm spent **72 calls against 39** — 1.85×. Its three forks each start from
+      nothing, so nearly every rollout of theirs fails and asks for a proposal,
+      while the merge arm shares what the others learned and more of its rollouts
+      solve outright. A table matched only on rollouts would have called that
+      equal budget. This was predicted from the mechanism before the run; the run
+      measured it.
+    * **`dev` is not `test`.** The serial arm's gate reported 0.833 and the split
+      nothing ever saw reported 0.500. Reporting `final_reward` as the result —
+      which the fork arm additionally *selects* on — would have been reporting a
+      training score twice over.
+
 The row above is empty on purpose, and stays empty until it is filled by a real
 run on HotpotQA and FiNER-139 at ≥ 3 seeds. `docs/algo-ace.md` records the same
 configuration moving 4.8 points between two runs, so a single-seed number here

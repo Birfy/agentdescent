@@ -345,15 +345,33 @@ class Comparison:
         values = sorted(r.test_reward for r in self.arms[arm])
         return values[0], statistics.median(values), values[-1]
 
-    def separates(self, a: str, b: str) -> bool:
+    def separates(self, a: str, b: str, *, min_seeds: int = 3) -> bool:
         """Whether ``a``'s seeds are all above ``b``'s, with no overlap.
 
         The weakest claim worth making from a handful of seeds, and the one this
         comparison exists to test. Overlapping spreads mean the experiment did
         not distinguish merging from selecting at this budget -- which is a
         finding, and has to be written as one.
+
+        **False below ``min_seeds``, always.** With one seed per arm "no overlap"
+        degenerates to ``a > b``, and this method would announce a separation
+        from a single pair of numbers -- the exact overclaim the module exists to
+        prevent, made by the thing meant to prevent it. It was written that way
+        first and a one-seed pilot printed "above on every seed"; the guard is
+        here because the mistake is that easy to make.
         """
+        if min(len(self.arms.get(a, ())), len(self.arms.get(b, ()))) < min_seeds:
+            return False
         return self.spread(a)[0] > self.spread(b)[2]
+
+    def underpowered(self, *arms: str, min_seeds: int = 3) -> bool:
+        """Whether any named arm has too few seeds to support a comparison.
+
+        Separate from :meth:`separates` so a caller can tell "we looked and found
+        no difference" from "we could not have found one" -- they read the same
+        in a table and mean opposite things about what to do next.
+        """
+        return any(len(self.arms.get(arm, ())) < min_seeds for arm in arms)
 
 
 def compare(results: Sequence[ArmResult], *, fixed: str = "rollouts",
