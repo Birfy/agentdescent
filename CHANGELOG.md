@@ -6,6 +6,38 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Each faithful algorithm port now owns a directory.** `examples/` had grown to
+  seven ports flat alongside six framework demos, and nothing in the name said
+  which was which: `gepa_prompt_evolution.py` and `parallelism.py` sat at the
+  same level, and OpenEvolve's two private helpers were `_openevolve_support.py`
+  and `_openevolve_runner.py` — prefixed by hand precisely because a directory
+  was not available to say it.
+
+  So `examples/<algorithm>/` now holds the entry point, a `README.md`, and any
+  helper only that port uses: `examples/ace/`, `examples/adas/`, `examples/dgm/`,
+  `examples/evoskill/`, `examples/gepa/`, `examples/openevolve/`,
+  `examples/skillopt/`. Module paths gain one segment
+  (`python -m examples.gepa.gepa_prompt_evolution`), and the ~90 references
+  across the README, docs, and tests moved with them. The framework demos
+  (`run_demo`, `run_async`, `efficiency`, `parallelism`, `rq2_staleness`,
+  `duration_scheduling`) stay at the top level, because they belong to no single
+  algorithm.
+
+  Each new `README.md` states the kind, governance layer, paper, upstream
+  revision, dataset, and `evolve()` plug-ins, and links the port's `docs/algo-*`
+  page and test file — the things a reader previously had to assemble from three
+  places.
+
+  One test needed more than a path rewrite.
+  `test_ports_table_covers_every_standardised_entrypoint` globbed
+  `examples/*.py`, so once the ports moved down a level it would have found
+  nothing and passed by vacuum — the exact failure mode it exists to prevent. It
+  walks the tree now and asserts the walk was non-empty, and a new
+  `test_every_port_owns_a_directory_with_a_readme` holds the layout itself,
+  since a port dropped back at the top level would otherwise still import, still
+  run, and go unnoticed.
+
 ### Fixed
 - **The OpenEvolve port joined the examples tree without joining the entrypoint
   contract, and `main` went red on the guard test written for exactly that.**

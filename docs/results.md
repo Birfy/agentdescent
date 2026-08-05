@@ -165,7 +165,7 @@ wants the second.
 ## Reproducing
 
 ```bash
-python -m examples.gepa_prompt_evolution --provider openai --model deepseek-v4-flash \
+python -m examples.gepa.gepa_prompt_evolution --provider openai --model deepseek-v4-flash \
     --rounds 5 --fetch 40 --yes
 ```
 

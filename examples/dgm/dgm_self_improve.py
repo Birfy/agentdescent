@@ -44,10 +44,10 @@ escalation, keep-all) is therefore fully runnable and testable offline; the
 *scores* are simulated, not SWE-bench results. Pass a real `evaluate_fn` to
 `run_dgm` to plug in the actual Docker harness.
 
-    python -m examples.dgm_self_improve                 # runs offline (surrogate objective)
-    python -m examples.dgm_self_improve --dry-run       # plan only, zero network
-    python -m examples.dgm_self_improve --generations 12 --archive keep_all
-    python -m examples.dgm_self_improve --model claude-haiku-4-5   # LLM proposes modifications
+    python -m examples.dgm.dgm_self_improve                 # runs offline (surrogate objective)
+    python -m examples.dgm.dgm_self_improve --dry-run       # plan only, zero network
+    python -m examples.dgm.dgm_self_improve --generations 12 --archive keep_all
+    python -m examples.dgm.dgm_self_improve --model claude-haiku-4-5   # LLM proposes modifications
 """
 
 from __future__ import annotations

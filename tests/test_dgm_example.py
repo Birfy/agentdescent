@@ -7,7 +7,7 @@ surrogate (real DGM needs the SWE-bench Docker harness). No network here.
 
 import random
 
-from examples.dgm_self_improve import (
+from examples.dgm.dgm_self_improve import (
     CAPABILITY_POOL,
     STAGE_MEDIUM,
     STAGE_SMALL,

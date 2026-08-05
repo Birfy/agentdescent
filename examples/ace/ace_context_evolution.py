@@ -32,9 +32,9 @@ ACE's per-bullet *helpful / harmful* counters become the aggregator's per-diff
 reward (evidence it was helpful), and rejected otherwise -- the discrete-space
 analogue ACE's counters approximate. Skill layer -> `blast_radius=0.2` (L2).
 
-    python -m examples.ace_context_evolution --dry-run          # plan only, zero network
-    python -m examples.ace_context_evolution --model claude-haiku-4-5
-    python -m examples.ace_context_evolution --top-k 10 --rounds 6
+    python -m examples.ace.ace_context_evolution --dry-run          # plan only, zero network
+    python -m examples.ace.ace_context_evolution --model claude-haiku-4-5
+    python -m examples.ace.ace_context_evolution --top-k 10 --rounds 6
 
 Faithful-but-tractable simplifications (documented, not hidden): we use FiNER's
 single-entity sentences and restrict to the `--top-k` most frequent XBRL tags so

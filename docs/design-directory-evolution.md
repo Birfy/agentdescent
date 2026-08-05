@@ -86,9 +86,9 @@ class WorkspaceAgent(Protocol):            # agents.py:113
 
 ### 1.4 已有的两个「演化 agent」示例，以及它们的诚实边界
 
-- `examples/adas_meta_agent_search.py`：演化 agent 的**控制流**，但为了安全用一个
+- `examples/adas/adas_meta_agent_search.py`：演化 agent 的**控制流**，但为了安全用一个
   受限 DSL 解释器**替代了 `exec` 模型写的代码**（文件头已注明）。
-- `examples/dgm_self_improve.py`：演化 coding agent 的 harness，但目标函数是
+- `examples/dgm/dgm_self_improve.py`：演化 coding agent 的 harness，但目标函数是
   **capability 覆盖的代理指标**，不是真跑 SWE-bench（文件头「Honesty boundary」已注明）。
 
 结论：**「演化代码 + 真跑」这条链路在仓库里从未闭合过。**
@@ -431,7 +431,7 @@ result.write_to("~/.claude/skills/pdf-audit", backup=True)   # 装回，先备�
 ### 5.2 EvoSkill —— 第一梯队，几乎是零语义改动
 
 `SkillLibraryStrategy`（已替换为 `SkillLibraryTree`）的 state 是 `{skill 名: SKILL.md 正文}`
-（[evoskill_skill_discovery.py:379](https://github.com/Birfy/agentdescent/blob/main/examples/evoskill_skill_discovery.py#L379)），
+（[evoskill_skill_discovery.py:379](https://github.com/Birfy/agentdescent/blob/main/examples/evoskill/evoskill_skill_discovery.py#L379)），
 它的 Generator 提示词里甚至直接写着「Output a SKILL.md body」。这**已经是**一个
 skill 目录，只是活在内存里、靠 `render_skills()` 拼进 prompt。迁移只是换个 key：
 

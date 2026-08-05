@@ -1,9 +1,16 @@
 """Template for a faithful self-evolution algorithm port.
 
-Copy this file to ``examples/<algorithm>.py`` and replace every ``PORT_*`` /
-``DATASET_*`` value. Keep the upstream algorithm's vocabulary for its iteration
-flag: ``--rounds``, ``--generations``, ``--iterations``, or ``--steps``. Record
-every deviation from released code in ``docs/algo-<algorithm>.md``.
+Each port owns a directory. Create ``examples/<algorithm>/`` with an
+``__init__.py`` and a ``README.md``, copy this file in as
+``examples/<algorithm>/<algorithm>_<what_it_evolves>.py``, and replace every
+``PORT_*`` / ``DATASET_*`` value. Anything the port needs and nothing else does
+-- a sandbox runner, an evaluator, fixtures -- belongs in that directory too.
+
+Keep the upstream algorithm's vocabulary for its iteration flag: ``--rounds``,
+``--generations``, ``--iterations``, or ``--steps``. Record every deviation from
+released code in ``docs/algo-<algorithm>.md``, and add the port to ``PORTS`` in
+``tests/test_example_entrypoints.py`` -- a port outside that table is outside
+the whole command-line contract.
 
 The control-flow order is part of the template: ``--dry-run`` returns before
 the dataset loader and model adapter, so it is safe on a cold, offline machine.

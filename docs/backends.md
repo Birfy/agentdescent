@@ -105,5 +105,5 @@ no extra install — the right choice for reproducing the example locally.
 | you already run Claude Code or Codex | `document_agent(claude_code())` |
 
 All four satisfy the same `AgentBackend` protocol, so
-[`examples/evoskill_skill_discovery.py --backend …`](algo-evoskill.md) switches
+[`examples/evoskill/evoskill_skill_discovery.py --backend …`](algo-evoskill.md) switches
 between them with a flag and no other change.

@@ -82,7 +82,7 @@ Each example keeps only its **dataset-specific shaping** (turning rows into
 `Task`s, building the reward) and delegates the fetch/cache to the data layer:
 
 ```python
-# examples/gepa_prompt_evolution.py
+# examples/gepa/gepa_prompt_evolution.py
 from agentdescent.dataloader import hf_rows
 
 HOTPOTQA = ("hotpotqa/hotpot_qa", "validation", "distractor")

@@ -3,7 +3,7 @@
 > **Harness self-evolution.** Evolve the *agentic system itself* — the control
 > flow that orchestrates the model. Runs through [`evolve()`](evolution.md) with a
 > custom `Strategy` + `aggregator_factory` at **L1** governance. Example:
-> [`examples/adas_meta_agent_search.py`](https://github.com/Birfy/agentdescent/blob/main/examples/adas_meta_agent_search.py).
+> [`examples/adas/adas_meta_agent_search.py`](https://github.com/Birfy/agentdescent/blob/main/examples/adas/adas_meta_agent_search.py).
 
 | | |
 |---|---|
@@ -47,7 +47,7 @@ only the agent *substrate* is a safe DSL instead of raw `exec`.
 
 ## Plug-ins implemented
 
-In [`examples/adas_meta_agent_search.py`](https://github.com/Birfy/agentdescent/blob/main/examples/adas_meta_agent_search.py):
+In [`examples/adas/adas_meta_agent_search.py`](https://github.com/Birfy/agentdescent/blob/main/examples/adas/adas_meta_agent_search.py):
 
 | Plug-in | `evolve()` slot | What it does |
 |---|---|---|
@@ -153,8 +153,8 @@ MGSM/runtime configuration and returns before loading data or models, so it need
 neither network nor an API key:
 
 ```bash
-python -m examples.adas_meta_agent_search --dry-run
-python -m examples.adas_meta_agent_search --select dgm --langs en,es
+python -m examples.adas.adas_meta_agent_search --dry-run
+python -m examples.adas.adas_meta_agent_search --select dgm --langs en,es
 ```
 
 The settings the numbers above come from — the whole benchmark, hard subset, a
@@ -162,7 +162,7 @@ split that leaves something to measure. The baseline pass is cached per
 (model, question), so only the first run pays for it:
 
 ```bash
-python -m examples.adas_meta_agent_search \
+python -m examples.adas.adas_meta_agent_search \
     --provider openai --model deepseek-v4-flash \
     --hard --langs bn,de,en,es,fr,ja,ru,sw,te,th,zh --per-lang 250 \
     --generations 4 --workers 3 --eval-concurrency 128 \

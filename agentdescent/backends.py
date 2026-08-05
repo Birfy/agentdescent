@@ -24,7 +24,7 @@ with two implementations:
   stand-in that mirrors what OpenHands does; runs anywhere.
 
 Both return a plain answer string, so they slot in wherever a base agent is
-needed (see ``examples/evoskill_skill_discovery.py --backend openhands``).
+needed (see ``examples/evoskill/evoskill_skill_discovery.py --backend openhands``).
 """
 
 from __future__ import annotations
