@@ -97,25 +97,26 @@ integers representing cents, without dollar signs or decimal points."*
 
 Full breakdown in [Efficiency](efficiency.md).
 
-| | result | re-measured? |
+| | result | how |
 |---|---|---|
-| Thread parallelism, 8 threads, real API calls | **7.1×** (pure-Python CPU work: 1.0×) | needs an API key |
-| Whole `evolve()` run, uniform latency | **5.9×** of 8 workers | needs an API key |
-| ...heavy-tailed latency (a reasoning model) | **2.4×** — the round barrier waits on the slowest worker | needs an API key |
-| ...same, barrier-free `asynchronous=True` | **3.0×** | needs an API key |
-| Gate concurrency (`eval_concurrency` 1 → 8) | **193.6 s → 90.0 s** on identical work | needs an API key |
+| Thread parallelism, 8 threads, real API calls | **5.8×** on `glm-5.2` (pure-Python CPU work: 1.1×) | `examples.efficiency --only gil --model <id>` |
+| Whole `evolve()` run, uniform latency | **1.8×** of 8 workers, end-to-end | `--only distribution` |
+| ...heavy-tailed latency (a reasoning model) | **1.7×** — the round barrier waits on the slowest worker | `--only distribution` |
+| ...same, barrier-free | **2.65×** on the dispatch microbenchmark | `--only async` |
+| Gate concurrency (`eval_concurrency` 1 → 8) | **3.6 s → 1.2 s**, saturating past the held-out size | `--only gate` |
 
-!!! note "These five were not re-measured when the reference runtimes became adapters"
-    They all come through [`evolve()`](evolution.md) against a real model, and
-    `evolve()`'s default behaviour did not change — `refresh_interval` defaults to
-    `1`, which is exactly the old snapshot discipline, and the new `RoundInfo`
-    fields are reported rather than acted on. So there is no reason to expect
-    them to have moved, and no way to confirm it without spending on the API.
+!!! warning "Every row here was re-measured, and four of them had no script"
+    The previous version of this table (7.1× / 5.9× / 2.4× / 3.0× / 193.6 s →
+    90.0 s) was produced by hand and could not be re-run: nothing in the
+    repository generated it. `examples/efficiency.py` now does, and the commands
+    above are the whole of it.
 
-    The [offline table](efficiency.md#the-configuration-matrix-bench) *was*
-    re-measured, and one column there moved for a reason worth knowing: `stale%`
-    was understated by roughly a factor of two, because two staleness gates were
-    both counting into one denominator.
+    Two of the numbers moved for reasons worth knowing rather than drift. The
+    thread-parallelism row is a *reasoning* model now, whose long-tailed latency
+    costs overlap — which is the row below it, restated. The whole-run rows are
+    **end-to-end at default settings** rather than the rollout stage in
+    isolation, and the ceiling there is the gate; see
+    [Efficiency](efficiency.md#where-the-parallelism-actually-goes).
 
 `n_workers` buys rollout parallelism and `eval_concurrency` buys gate parallelism;
 they are independent, and a run slower than its worker count suggests usually

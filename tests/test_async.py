@@ -72,57 +72,13 @@ def test_stable_branch_promotes_under_async():
     assert s.final_stable_accuracy > 0.0
 
 
-def _failing_run(policy_name="full", n_fail=None, seconds=20.0):
-    """Run the reference stack with a rollout that raises.
-
-    This used to patch `system.workers[i].run`. There are no `Worker` objects any
-    more -- the runtime is an adapter over `async_evolve` -- so it replaces the
-    rollout itself, which is the same seam under its new name.
-    """
-    import tempfile
-
-    from agentdescent.async_runtime import AsyncAgentDescent, AsyncConfig
-    from agentdescent.domains.router import router_run
-
-    universe = make_task_universe(seed=7)
-    cfg = AsyncConfig(n_workers=4, async_ratio=4, target_accuracy=0.95,
-                      max_seconds=seconds, seed=1)
-    state = {"n": 0}
-
-    def flaky(rendered, task):
-        state["n"] += 1
-        if n_fail is None or state["n"] <= n_fail:
-            raise RuntimeError("backend down")
-        return router_run(rendered, task)
-
-    with tempfile.TemporaryDirectory() as repo:
-        system = AsyncAgentDescent(repo, universe, config=cfg,
-                                   staleness_policy=get_policy(policy_name),
-                                   rollout=flaky)
-        return system.run()
-
-
-def test_dead_backend_is_reported_not_silent():
-    """Every worker raising used to print tracebacks, burn the whole budget, and
-    return normal-looking zeros with no way for the caller to tell."""
-    s = _failing_run()
-    assert s.error is not None
-    assert "backend down" in s.error
-
-
-def test_dead_backend_ends_the_run_early():
-    import time as _t
-
-    t0 = _t.time()
-    _failing_run(seconds=20.0)
-    assert _t.time() - t0 < 15.0, "should retire the workers, not spin out the budget"
-
-
-def test_transient_failures_are_survived():
-    """A few failures must not end the run -- they are retried."""
-    s = _failing_run(n_fail=2, seconds=15.0)
-    assert s.rollouts > 0, "the workers should have recovered and produced"
-
+# Failure injection used to live here, driving `AsyncAgentDescent` with a
+# rollout that raises. It was worth having when that class was a *separate*
+# implementation of the barrier-free loop; it is an adapter over `async_evolve`
+# now, so those three tests asserted `async_evolve`'s resilience through a
+# wrapper -- which `tests/test_fault_matrix.py` already asserts directly, against
+# both engines, and `tests/test_worker_resilience.py` asserts in more detail.
+# One test of the adapter's own seam survives, in `test_async_parity.py`.
 
 def test_a_healthy_run_reports_no_error():
     s = _run("full")

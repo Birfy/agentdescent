@@ -21,12 +21,32 @@ Overlap depends almost entirely on your latency *distribution*, not on your work
 count. Measured with a fixed-latency stub backend, so the only variable is the
 framework:
 
-| what changes | overlap with `n_workers=8` |
-|---|---|
-| uniform latency | **5.9×** |
-| moderate latency spread | 4.8× |
-| high spread | 3.3× |
-| heavy tail (a reasoning model) | **2.4×** |
+```bash
+python -m examples.efficiency --only distribution
+```
+
+| latency shape | sequential | 8 workers | overlap |
+|---|---|---|---|
+| uniform | 9.9 s | 5.5 s | **1.8×** |
+| moderate spread | 15.1 s | 6.3 s | 2.4× |
+| high spread | 33.3 s | 14.9 s | 2.2× |
+| heavy tail (a reasoning model) | 35.4 s | 20.6 s | **1.7×** |
+
+!!! warning "This table replaces one that had no script behind it"
+    The previous version read 5.9× / 4.8× / 3.3× / 2.4× and there was **no entry
+    point in the repository that produced it** — it isolated the rollout stage
+    under a setup nobody could re-run, and did not say what latency it used. What
+    is above is end-to-end `evolve()` at default settings, and the difference is
+    the point: subtract the columns and the *rollout* saving is exactly what eight
+    workers should buy (9.9 − 5.5 ≈ the 4.2 s of sleeping that got overlapped).
+    The speedup is smaller than that because **the ceiling is whatever in a round
+    is not a rollout** — and at default settings that is the gate, which scores
+    every candidate the aggregator ranks on the whole held-out set.
+
+    At a 20 ms latency the same table reads 1.9× / 2.1× / 2.0× / 1.3×: a fixed
+    ~1.2 s per configuration swamps 0.6 s of sleeping. Neither reading is wrong;
+    they answer different questions, and the old table did not say which one it
+    was answering.
 
 **Latency variance is the cost, and the round barrier is where you pay it.** The
 aggregator is a synchronisation point, so a round lasts as long as its *slowest*
@@ -45,12 +65,21 @@ Every gate goes through one held-out evaluation: each round's measurement and, f
 more often, the aggregator's per-candidate comparisons. That is a second pool,
 independent of `n_workers`. Same work, varying only `eval_concurrency`:
 
+```bash
+python -m examples.efficiency --only gate
+```
+
 | `eval_concurrency` | wall-clock | |
 |---|---|---|
-| 1 (serial) | 193.6 s | — |
-| 4 | 96.7 s | **2.0× faster** |
-| 8 (default) | 90.0 s | **2.2× faster** |
-| 16 | 89.0 s | saturated — the held-out set is only 12 tasks |
+| 1 (serial) | 3.6 s | — |
+| 4 | 2.2 s | **1.7× faster** |
+| 8 (default) | 1.2 s | **2.9× faster** |
+| 16 | 1.6 s | saturated — the held-out set is only 8 tasks |
+
+Also re-measured with a script rather than by hand; the previous row set (193.6 s
+→ 90.0 s → 89.0 s) came from a larger workload with no reproducible entry point.
+The shape is what carries: **serial gate, then linear, then flat past the size of
+the held-out set.**
 
 It saturates once `eval_concurrency` reaches the size of your held-out set, so
 raise it if yours is large and your provider allows the concurrency.
@@ -170,10 +199,25 @@ Yes, for this workload, and no amount of arguing about the GIL settles it — so
 here it is measured. Eight threads, one pool, two workloads: a real API round
 trip, and pure-Python arithmetic.
 
+```bash
+python -m examples.efficiency --only gil --model glm-5.2
+```
+
 | workload | sequential | 8 threads | speedup |
 |---|---|---|---|
-| **I/O** — a real `deepseek-v4-flash` call | 14.9 s | **2.1 s** | **7.1×** |
-| **CPU** — pure Python arithmetic | 1.0 s | 1.0 s | 1.0× |
+| **I/O** — a real `glm-5.2` call | 48.6 s | **8.3 s** | **5.8×** |
+| **CPU** — pure Python arithmetic | 2.3 s | 2.1 s | 1.1× |
+
+!!! note "Measured on `glm-5.2`, not on the model the old row named"
+    The previous row read **7.1×** against `deepseek-v4-flash`. This one is a
+    *reasoning* model, and the gap is the table two sections up restated: eight
+    threads finish when the slowest finishes, so a long-tailed latency costs
+    overlap. Across three runs it landed at 5.8× / 6.3× / 6.5×.
+
+    The CPU row is 1.1× rather than 1.0× because the work was too small to
+    measure at first — 25 ms a unit, where the answer is whatever the scheduler
+    did that second. It is sized to take seconds now, and 1.1× is what is left:
+    noise around "threads buy nothing here".
 
 Near-linear on I/O, exactly nothing on CPU. CPython releases the GIL around
 socket I/O and holds it around bytecode, and a rollout is almost entirely spent
