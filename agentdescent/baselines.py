@@ -70,7 +70,7 @@ from typing import (
 )
 
 from .agents import Usage
-from .evolution import EvolutionResult, Reward, Task, evolve
+from .evolution import EvolutionResult, FusionStats, Reward, Task, evolve
 
 __all__ = [
     "ArmResult",
@@ -216,11 +216,23 @@ class ArmResult:
     #: Non-empty when a run inside this arm ended on a failure. A quality number
     #: from a partial run is not a quality number.
     error: Optional[str] = None
+    #: The fusion tournament's record, summed over every run in the arm. Carried
+    #: here because the merge arm is the *only* place the fusion question can be
+    #: answered -- serial has one proposal per step and fork never merges at all
+    #: -- and because paying for a real run twice to answer two questions about
+    #: the same mechanism would be absurd. Empty for the arms that cannot fuse,
+    #: which is itself the right answer for them.
+    fusion: Optional["FusionStats"] = None
 
 
 def _tally(arm: str, seed: int, width: int, runs: Sequence[EvolutionResult],
            usages: Sequence[Usage], **extra: Any) -> ArmResult:
+    # One arm may be several runs (fork), so the trials are concatenated before
+    # being summarised -- summarising each run and averaging the rates would
+    # weight a run that held two tournaments the same as one that held twenty.
+    trials = [t for r in runs for t in r.fusion_trials]
     return ArmResult(
+        fusion=FusionStats.of(trials) if trials else None,
         arm=arm, seed=seed, width=width,
         rollouts=sum(r.rollouts for r in runs),
         calls=sum(u.calls for u in usages),
@@ -454,6 +466,23 @@ def to_markdown(comparison: Comparison) -> str:
         lines.append("Runs that ended on a failure, whose quality numbers are "
                      "from partial runs: "
                      + ", ".join(f"`{r.arm}` seed {r.seed}" for r in errored))
+
+    fused = [r for group in comparison.arms.values() for r in group
+             if r.fusion is not None and r.fusion.contested]
+    if fused:
+        lines.append("")
+        lines.append("Fusion tournaments, which only the merge arm can hold — "
+                     "serial has one proposal per step and fork never merges:")
+        lines.append("")
+        lines.append("| arm | contested | fused wins | mean gain | losses | "
+                     "below baseline |")
+        lines.append("|---|---|---|---|---|---|")
+        for r in fused:
+            f = r.fusion
+            lines.append(
+                f"| {r.arm} (seed {r.seed}) | {f.contested} | "
+                f"{f.fused_wins} ({f.win_rate:.0%}) | {f.mean_gain:+.3f} | "
+                f"{f.negative} (worst {f.worst_loss:+.3f}) | {f.below_baseline} |")
 
     if any(r.test_oracle is not None
            for group in comparison.arms.values() for r in group):

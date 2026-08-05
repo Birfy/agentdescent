@@ -255,3 +255,31 @@ def test_markdown_explains_the_oracle_column_when_it_has_one():
     table = to_markdown(compare([arm]))
     assert "fork oracle" in table
     assert "requires the answer to select" in table
+
+
+# -- one run, two questions --------------------------------------------------
+
+
+def test_the_merge_arm_carries_its_fusion_record():
+    """The merge arm is the only place the fusion question can be answered, and
+    paying for a real run twice to ask two things about the same mechanism would
+    be absurd."""
+    arm = merge_of_n(_workload(), 4, budget=BUDGET)
+    assert arm.fusion is not None
+    assert arm.fusion.trials > 0
+
+
+def test_the_arms_that_cannot_fuse_report_nothing():
+    """Serial has one proposal per step; fork never merges. An empty record is
+    the right answer for them, not a zero win rate."""
+    assert serial(_workload(), budget=BUDGET).fusion is None or \
+        serial(_workload(), budget=BUDGET).fusion.contested == 0
+
+
+def test_fusion_rows_appear_in_the_table_only_when_contested():
+    arm = merge_of_n(_workload(), 4, budget=BUDGET)
+    table = to_markdown(compare([arm]))
+    if arm.fusion.contested:
+        assert "Fusion tournaments" in table
+    else:
+        assert "Fusion tournaments" not in table
