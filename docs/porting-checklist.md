@@ -5,6 +5,7 @@ Use this before calling an algorithm example a faithful port.
 - [ ] Start from **released code**, not only the paper; follow code on conflicts and document each conflict in `docs/algo-<name>.md`.
 - [ ] Use the original repository's dataset rather than substituting an easier benchmark.
 - [ ] Build the CLI with `examples._common.add_standard_args`; keep the upstream iteration term (`rounds`, `generations`, `iterations`, or `steps`).
+- [ ] Honour the shared flags through `_common.confirm` (`--yes`) and `_common.completion_for` (`--provider`/`--model`), and add the module to `PORTS` in `tests/test_example_entrypoints.py`.
 - [ ] Load data through `agentdescent.dataloader`, never port-specific HTTP.
 - [ ] Choose an explicit `Strategy` (`AppendRules`, `KeyedRules`, `SingleSlot`, `FileTree`, or a justified custom strategy).
 - [ ] Prefer an existing scorer from `agentdescent.rewards` when it matches the benchmark.

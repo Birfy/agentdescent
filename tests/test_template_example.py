@@ -2,6 +2,9 @@
 
 Copy to ``tests/test_<algorithm>_example.py`` and change the import. Keep the
 tests offline: patch dataset rows and completions instead of using real services.
+
+The name is ``test_``-prefixed on purpose: a template pytest never collects is a
+template that rots, so this file runs on every ``pytest -q`` like any other.
 """
 
 from examples import _TEMPLATE as port
@@ -35,7 +38,6 @@ def test_dry_run_stops_before_loading_data(monkeypatch, capsys):
         raise AssertionError("dry-run must be offline")
 
     monkeypatch.setattr(port, "load_tasks", forbidden)
-    monkeypatch.setattr(port, "claude", forbidden)
-    monkeypatch.setattr(port, "openai_compatible", forbidden)
+    monkeypatch.setattr(port, "completion_for", forbidden)
     port.main(["--dry-run"])
     assert "dry-run" in capsys.readouterr().out.lower()

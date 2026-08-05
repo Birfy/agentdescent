@@ -58,18 +58,16 @@ import argparse
 import hashlib
 import math
 import random
-import sys
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Tuple
 
-from agentdescent.agents import claude, openai_compatible
 from agentdescent.aggregator import AggregatorProtocol, MergeReport
 from agentdescent.dataloader import Dataset, hf_rows, split_dataset
 from agentdescent.evolvable import Diff, EvidenceCard
 from agentdescent.evolution import EvolvingArtifact, Task, evolve
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
-from examples._common import add_standard_args
+from examples._common import add_standard_args, completion_for, confirm
 
 SWEBENCH = ("princeton-nlp/SWE-bench_Verified", "test", "default")   # (dataset, split, config)
 
@@ -432,7 +430,9 @@ def load_dataset(limit: int, seed: int = 0, ratios=(0.5, 0.25, 0.25)) -> Dataset
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
-    add_standard_args(p, model_default=None, max_seconds_default=15.0)
+    add_standard_args(
+        p, model_default=None, max_seconds_default=15.0,
+        model_help="optional: let an LLM propose self-modifications (else deterministic)")
     p.add_argument("--generations", type=int, default=12)
     p.add_argument("--selfimprove-size", type=int, default=2)
     p.add_argument("--archive", default="keep_all", choices=["keep_all", "keep_better"])
@@ -470,12 +470,9 @@ def main(argv=None) -> None:
     print(f"Example  : {ds.train[0]['instance_id']} ({ds.train[0]['repo']})")
     complete = None
     if args.model:
-        if not args.yes and sys.stdin.isatty():
-            if input("\nProceed with real API calls? [y/N] ").strip().lower() not in ("y", "yes"):
-                print("aborted.")
-                return
-        complete = (openai_compatible(model=args.model) if args.provider in ("openai", "glm")
-                    else claude(model=args.model))
+        if not confirm(args):
+            return
+        complete = completion_for(args)
         try:
             complete("Reply with the single word: ok")
         except Exception as e:  # noqa: BLE001

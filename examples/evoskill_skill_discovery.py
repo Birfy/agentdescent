@@ -45,12 +45,10 @@ import argparse
 import csv
 import os
 import re
-import sys
 import threading
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
-from agentdescent.agents import claude, openai_compatible
 from agentdescent.aggregator import AggregatorProtocol, MergeReport
 from agentdescent.dataloader import (Dataset, fetch_text, hf_rows,
                                      load_gated_hf, split_dataset)
@@ -60,7 +58,8 @@ from agentdescent.filetree import parse_tree
 from agentdescent.treestrategy import FileTree
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
-from examples._common import add_standard_args
+from examples._common import (add_standard_args, completion_for, confirm,
+                              is_openai_compatible)
 
 RAW = "https://raw.githubusercontent.com/sentient-agi/EvoSkill/main/examples/officeqa/data"
 Completion = Callable[[str], str]
@@ -839,13 +838,10 @@ def main(argv=None) -> None:
     print(f"Workers  : dataset provides {min(3, ntr)} active workers")
     print(f"Budget   : up to ~{calls} model calls")
 
-    if not args.yes and sys.stdin.isatty():
-        if input("\nProceed with real API calls? [y/N] ").strip().lower() not in ("y", "yes"):
-            print("aborted.")
-            return
+    if not confirm(args):
+        return
 
-    completion = (openai_compatible(model=args.model) if args.provider in ("openai", "glm")
-                  else claude(model=args.model))
+    completion = completion_for(args)
     try:
         completion("Reply with the single word: ok")
     except Exception as e:  # noqa: BLE001
@@ -857,7 +853,7 @@ def main(argv=None) -> None:
     if args.backend == "openhands":
         from agentdescent.backends import openhands_backend
         oh_model = args.model if args.model.startswith("openai/") else f"openai/{args.model}"
-        base = ("https://api.deepseek.com" if args.provider in ("openai", "glm")
+        base = ("https://api.deepseek.com" if is_openai_compatible(args)
                 else os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"))
         backend = openhands_backend(model=oh_model, base_url=base)
         print(f"Backend  : real OpenHands agent (terminal + file_editor) on {oh_model}")
