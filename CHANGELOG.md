@@ -7,6 +7,23 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **`claude()` was the one blocking boundary in the package with no timeout.**
+  `_git` bounds a command at 120s, `_CliAgent` at 600s, `runners._sh` takes one
+  per call, and `openai_compatible` has had `timeout=120.0` all along -- this one
+  relied on the Anthropic SDK's 600s default, which the SDK then retries
+  internally, and which `with_retries` retries again. One logical call against a
+  stalled endpoint can block for well over half an hour while the log says
+  nothing, and a run doing that is indistinguishable from a slow one.
+
+  Measured against a hosted endpoint: a GEPA run sat **51 minutes without
+  finishing five rounds** -- 1.07s of CPU across the whole time and one
+  ESTABLISHED socket -- and the same run with `timeout=120.0` finished all five
+  in **14 minutes**, 96 calls. Same model, same endpoint, same settings.
+
+  `claude(timeout=120.0)` now matches its sibling adapter and is overridable for
+  a backend that legitimately takes longer.
+
+### Fixed
 - **`evolve(staleness_policy=...)` could not decide anything on the synchronous
   path.** The loop snapshots the ledger at the top of every round and every
   worker proposes against that snapshot, so a diff's staleness `eta` is **0 by
