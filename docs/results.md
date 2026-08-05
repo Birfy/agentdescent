@@ -6,14 +6,54 @@ so you can reproduce it.
 
 ## The algorithm ports
 
-| Algorithm | Dataset | Settings | Held-out, before → after | Cost |
-|---|---|---|---|---|
-| **[GEPA](algo-gepa.md)** | HotpotQA | `--rounds 5 --fetch 40` | Pareto EM **0.500 → 0.600**; test EM **0.700** | 80 calls, 10 min |
-| **[ACE](algo-ace.md)** | FiNER-139 | `--top-k 120 --rounds 8 --workers 4` | val **0.844 → 0.889**; test **0.884**, 2 bullets | 403 calls, 20 min |
-| **[SkillOpt](algo-skillopt.md)** | SearchQA | `--hard --steps 6` | val hard-EM **0.250 → 0.500**; test **0.450** | 6 steps |
-| **[EvoSkill](algo-evoskill.md)** | FinQA | `--dataset finqa --iterations 5` | val **0.487 → 0.573**; test **0.617**, 1 skill | 115 calls, 4 min |
-| **[DGM](algo-dgm.md)** | surrogate | `--generations 4` | resolve-rate **0.000 → 0.300**; test 0.200 | offline |
-| **[ADAS](algo-adas.md)** | MGSM | `--hard`, all 11 languages | direct **0.919** → 222-item hard subset; lift **not yet measured** | ~2 h, 6k–17k calls |
+| Algorithm | Dataset | Settings | Held-out, before → after | Cost | Difficulty knob |
+|---|---|---|---|---|---|
+| **[GEPA](algo-gepa.md)** | HotpotQA | `--rounds 5 --fetch 40` | Pareto EM **0.500 → 0.600**; test EM **0.700** | 80 calls, 10 min | none |
+| **[ACE](algo-ace.md)** | FiNER-139 | `--top-k 120 --rounds 8 --workers 4` | val **0.844 → 0.889**; test **0.884**, 2 bullets | 403 calls, 20 min | ⚠︎ `--top-k` |
+| **[SkillOpt](algo-skillopt.md)** | SearchQA | `--hard --steps 6` | val hard-EM **0.250 → 0.500**; test **0.450** | 6 steps | ⚠︎ `--hard` |
+| **[EvoSkill](algo-evoskill.md)** | FinQA | `--dataset finqa --iterations 5` | val **0.487 → 0.573**; test **0.617**, 1 skill | 115 calls, 4 min | none |
+| **[DGM](algo-dgm.md)** | surrogate | `--generations 4` | resolve-rate **0.000 → 0.300**; test 0.200 | offline | none |
+| **[ADAS](algo-adas.md)** | MGSM | `--hard`, all 11 languages | direct **0.919** → 222-item hard subset; lift **not yet measured** | ~2 h, 6k–17k calls | ⚠︎ `--hard` |
+
+**Every row above was measured with `deepseek-v4-flash`.** That is stated at the
+top of this page, and it is not decoration: ⚠︎ marks a row whose *difficulty*
+comes from a knob calibrated against that model. Those rows do not transfer.
+
+!!! danger "Re-run on `glm-5.2`: the two ⚠︎ rows lost their lift entirely"
+    Not a contradiction of the numbers above — a different model, so a different
+    measurement. What it shows is which rows are portable:
+
+    | | `deepseek-v4-flash` (published) | `glm-5.2` (re-run) |
+    |---|---|---|
+    | DGM | `0.000 → 0.300`, test 0.200 | identical, to the digit |
+    | GEPA | Pareto `0.500 → 0.600` | `0.500 → 0.600`, test 0.800 |
+    | EvoSkill | val `0.487 → 0.573`, 1 skill | val `0.500 → 0.577`, test 0.613, 1 skill |
+    | **ACE** ⚠︎ | val `0.844 → 0.889`, 2 bullets | val **`0.867 → 0.867`**, 1 bullet, 8 rounds, 413 calls |
+    | **SkillOpt** ⚠︎ | val hard-EM `0.250 → 0.500` | val **`1.000 → 1.000`**, **0 edits accepted** |
+
+    The mechanism ran correctly in all five — ACE spent 413 calls against a
+    published 403, so it did the same work. What changed is that there was
+    nothing left to learn:
+
+    * **SkillOpt.** `--hard` keeps the items the seed gets wrong. `glm-5.2`
+      answers 95% of SearchQA correctly, so `select_hard` found **2 hard items in
+      40** and **1 in 20**, then padded to its 12-item floor with items the model
+      already solves. Validation was 1.000 from the first round; six rounds of
+      edits were all correctly rejected.
+    * **ACE.** `--top-k 120` sets how many XBRL concepts compete. `glm-5.2`
+      starts at 0.867 where `deepseek-v4-flash` starts at 0.844, and the residual
+      errors are not the kind one playbook bullet fixes.
+
+    The three unmarked rows reproduce because their difficulty does not depend on
+    the model: DGM's objective is a deterministic surrogate, HotpotQA's multi-hop
+    structure is hard regardless, and FinQA's decimal-place convention is a
+    *convention* — no amount of model capability guesses how many places the table
+    used.
+
+    **Re-calibrate the knob before comparing across models.** For SkillOpt that
+    means a pool large enough that `select_hard` finds genuinely hard items
+    without padding — at a 5% hard rate, roughly 240 items per split rather than
+    40.
 
 !!! note "What the *before* number is, per row"
     GEPA, EvoSkill and SkillOpt score the **seed** artifact explicitly before

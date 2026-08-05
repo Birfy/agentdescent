@@ -16,6 +16,36 @@ All notable changes to AgentDescent are documented here. The format follows
   GLM-5.2 benchmark records three paired repetitions without model responses or
   generated source.
 
+### Documentation
+- **The algorithm-port results table now says which rows survive a change of
+  model, because two of them do not.** Every row was measured with
+  `deepseek-v4-flash` -- stated in the page's opening line and nowhere in the
+  table, so a table copied out of context carried none of it.
+
+  Re-running all five ports against `glm-5.2` (real API, original datasets, the
+  published settings) reproduced three and flattened two:
+
+      DGM        0.000 -> 0.300, test 0.200   identical to the digit
+      GEPA       Pareto 0.500 -> 0.600        reproduced; test 0.800
+      EvoSkill   val 0.500 -> 0.577           against a published 0.487 -> 0.573
+      ACE        val 0.867 -> 0.867           against a published 0.844 -> 0.889
+      SkillOpt   val 1.000 -> 1.000           0 edits accepted, 6 rounds
+
+  The mechanism ran correctly in all five -- ACE spent 413 calls against a
+  published 403, so it did the same work. What differs is that the two that
+  flattened take their difficulty from a **knob calibrated against the published
+  model**: `--hard` keeps the items the seed answers wrong, and `glm-5.2` answers
+  95% of SearchQA correctly, so `select_hard` found 2 hard items in 40 and padded
+  to its floor with items the model already solves. `--top-k 120` sets how many
+  XBRL concepts compete, and `glm-5.2` starts above where the published run
+  finished.
+
+  The three that reproduce are the three whose difficulty is model-independent: a
+  deterministic surrogate, multi-hop retrieval, and a decimal-place *convention*
+  no capability can guess. The table marks the knob-dependent rows with ⚠︎ and
+  the published numbers are unchanged -- they were measured, and nothing here
+  falsifies them for the model they were measured on.
+
 ### Fixed
 - **`claude()` was the one blocking boundary in the package with no timeout.**
   `_git` bounds a command at 120s, `_CliAgent` at 600s, `runners._sh` takes one
