@@ -534,3 +534,69 @@ def test_an_unmounted_workspace_says_so_instead_of_looking_like_a_missing_file(
         assert "workspace_root" in str(e), "the error must say what to do"
         return
     p.release(sb)          # this host shares the whole filesystem; nothing to test
+
+
+# ---------------------------------------------------------------------------
+# The whole chain, against a real engine
+# ---------------------------------------------------------------------------
+
+
+@needs_engine
+def test_candidate_code_is_judged_by_real_tests_inside_a_container():
+    """The execution plane, end to end: materialise a candidate, run its frozen
+    test suite **inside the container**, then run the entrypoint there.
+
+    Every piece of this was unit-tested and the chain never was -- the ten live
+    tests above were `skipif`-ed on every machine that has run this suite, so
+    `sandbox_container.py` shipped without once being exercised against an
+    engine. What that hid is not in any one component: it is that
+    `runners._sh` has to notice `sandbox.exec_prefix()`, the workspace has to
+    appear at `CONTAINER_WORKDIR`, and a missing tool has to come back as a
+    scored failure rather than an exception.
+
+    The workspace goes under `$HOME` rather than `$TMPDIR` on purpose. On macOS
+    and Windows the engine runs in a VM that shares only part of the host
+    filesystem, and the system temp directory is usually outside it -- the
+    provider says so, with the fix, and this is the fix.
+    """
+    import os
+    import tempfile
+
+    from agentdescent.evolution import Task
+    from agentdescent.filetree import canonical, load_tree
+    from agentdescent.runners import TEST_FAILURE_MARKER, code_runner
+    from agentdescent.sandbox import SandboxPool
+
+    source = tempfile.mkdtemp(dir=os.path.expanduser("~"))
+    workspaces = tempfile.mkdtemp(dir=os.path.expanduser("~"))
+    with open(os.path.join(source, "solver.py"), "w") as fh:
+        fh.write("import sys\n\n"
+                 "def solve(expr):\n"
+                 "    return sum(int(x) for x in expr.split('+'))\n\n"
+                 "if __name__ == '__main__':\n"
+                 "    print(solve(sys.argv[1]))\n")
+    rendered = canonical(load_tree(source))
+
+    pool = SandboxPool(ContainerProvider("python:3.11-slim"), max_sandboxes=1)
+    try:
+        # No pytest in the base image, so the gate is a plain interpreter check --
+        # the point is that it runs *there*, not what runs it.
+        run = code_runner(
+            ["python", "solver.py"], layout="root", name="solver",
+            test_cmd=["python", "-c", "from solver import solve; assert solve('2+3') == 5"],
+            sandbox_pool=pool, workspace_root=workspaces)
+        out = run(rendered, Task(id="t0", prompt="2+3", meta={"gold": "5"}))
+        assert out == "5", f"the entrypoint did not run in the container: {out!r}"
+
+        # ...and a gate that fails comes back in-band, scored, not raised: "you
+        # broke the tests" is a learning signal, not a crashed run.
+        broken = code_runner(
+            ["python", "solver.py"], layout="root", name="solver",
+            test_cmd=["python", "-c", "raise SystemExit(1)"],
+            sandbox_pool=pool, workspace_root=workspaces)
+        assert broken(rendered, Task(id="t1", prompt="2+3")).startswith(
+            TEST_FAILURE_MARKER)
+    finally:
+        pool.close()
+        shutil.rmtree(source, ignore_errors=True)
+        shutil.rmtree(workspaces, ignore_errors=True)
