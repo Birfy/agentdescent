@@ -205,6 +205,23 @@ the rollouts. `compare(fixed=...)` therefore names the unit held fixed and print
 the other one's divergence as a confound beside the result. **A merge arm that
 wins at equal rollouts while spending more calls has not been shown to win.**
 
+`bench.baselines_run` is the same thing as a command, on the GEPA and ACE
+datasets. Print the plan first — a fork arm is N runs by itself, so the run count
+is not `arms × seeds`:
+
+```bash
+python -m bench.baselines_run --dataset hotpotqa --budget-rollouts 96 --width 4 --seeds 0,1,2 --plan
+```
+
+```bash
+python -m bench.baselines_run --dataset hotpotqa --budget-rollouts 96 --width 4 --seeds 0,1,2 --provider claude --model GLM-5.2 --yes --json equal-budget.json
+```
+
+It runs the **engine's default aggregator**, not GEPA's Pareto selection or ACE's
+grow-and-refine: those are search strategies, and running them would leave the
+comparison unable to say whether a difference came from merging or from the
+search. The numbers are therefore not comparable with those ports' own results.
+
 | arm | dataset | rollouts | test quality (min/med/max) | fork oracle |
 |---|---|---|---|---|
 | serial | — | — | *not yet measured* | — |
