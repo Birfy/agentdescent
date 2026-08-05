@@ -73,6 +73,16 @@ All notable changes to AgentDescent are documented here. The format follows
   advantage signal can exist at all, and is pinned by a test rather than left to
   be discovered during an A/B.
 
+- `docs/architecture.md` gains a diagram of the **two runtimes** — the barrier
+  and the barrier-free path side by side — because everything the async path has
+  to deal with follows from the barrier being gone, and the consequence that
+  costs the most to rediscover (`η` is zero by construction on the synchronous
+  path at `refresh_interval=1`, so the staleness policy cannot decide anything
+  there) is a property of the runtime rather than of the algorithm. The data-flow
+  diagram also shows the [selection seam](docs/selection.md), and names the
+  difference between "which task" (`TaskScheduler`) and "which candidate"
+  (`SelectionPolicy`), which the picture previously invited confusing.
+
 ### Changed
 
 - OpenEvolve's `--serial` now means the shared thing (one worker) rather than
