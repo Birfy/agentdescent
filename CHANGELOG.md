@@ -507,6 +507,81 @@ All notable changes to AgentDescent are documented here. The format follows
   rejected as `oversized`, which surfaces five rounds later as "my reflector
   emits junk" rather than "that file was never editable".
 
+### Added
+- **`examples/efficiency.py` now produces every number `docs/efficiency.md`
+  publishes.** Four of them had **no entry point in the repository at all** --
+  the latency-distribution table, the `eval_concurrency` table, and the
+  threads-and-the-GIL table were measured by hand and could not be re-run. Three
+  new experiments, selectable with `--only`:
+
+      --only distribution   overlap against four shapes of latency
+      --only gate           wall-clock against eval_concurrency 1/4/8/16
+      --only gil --model X  a real API round trip vs pure-Python arithmetic
+
+  The GIL one needs a model (`ANTHROPIC_BASE_URL` + `ANTHROPIC_API_KEY`, or any
+  id `agentdescent.agents.claude` can reach); the other two need nothing.
+
+### Documentation
+- **The offline measurements were re-taken on the ported runtimes, and two of
+  them were being measured wrongly.** Both flattered the result, and both were
+  found by re-measuring rather than by reading:
+
+  * **`docs/efficiency.md`'s `stale%` column was understated by roughly a factor
+    of two** — 86% and 10% for the two async rows, against a corrected 93% and
+    25%. The async path ran its own staleness gate and `Aggregator` ran another
+    over the survivors, both writing to the same meter, so every surviving card
+    was counted twice in the denominator. Nothing about the runs changed; the
+    numerator was always right.
+  * **The throughput experiment's denominator included setup and the shutdown
+    grace**, which are fixed costs and therefore fall hardest on the low-worker
+    rows — which reads as superlinear speedup (8.2–9.4x for 8 workers against
+    ~8.1x). It says "a fixed wall-clock window", so it now divides by the window
+    it asked for.
+  * **`self_verify` doubled what a counted rollout cost** in that experiment: the
+    engine re-runs a proposal's own rollout for a before/after delta and counts
+    only the first, so an injected 6 ms latency became 12 ms per counted rollout.
+    The reference loop got that delta free. `AsyncConfig.self_verify` and
+    `AgentDescent(self_verify=)` expose the knob; the throughput experiment turns
+    it off, because dispatch rate is what it measures.
+
+  Three more tables were re-measured, and two moved for reasons worth knowing
+  rather than drift:
+
+  * **the latency-distribution table** read 5.9x / 4.8x / 3.3x / 2.4x and now
+    reads 1.8x / 2.4x / 2.2x / 1.7x. The old one isolated the rollout stage under
+    a setup nobody could reproduce; the new one is end-to-end `evolve()` at
+    default settings. Subtract the columns and the rollout saving is exactly what
+    eight workers should buy -- the speedup is smaller because the ceiling is
+    whatever in a round is *not* a rollout, which at default settings is the
+    gate;
+  * **the threads-and-the-GIL row** was 7.1x on `deepseek-v4-flash` and is 5.8x
+    on `glm-5.2` (5.8 / 6.3 / 6.5 across three runs). The gap is the
+    latency-distribution table restated: eight threads finish when the slowest
+    finishes, and a reasoning model has a long tail. Its CPU row was 1.0x from a
+    25 ms unit of work -- too small to measure -- and is 1.1x from a unit sized
+    to take seconds;
+  * **the `eval_concurrency` table** keeps its shape (serial, then linear, then
+    flat past the held-out size) on a workload small enough to re-run.
+
+  The stated variance band is honest about the machine now: across five runs the
+  8-worker speedup landed between 7.83x and 9.15x, dominated by a single-worker
+  baseline that itself varied 15%.
+
+- **`docs/results.md`'s efficiency table is re-measured and says how.** Every row
+  now names the command that produces it. Only one of the five needed a model at
+  all -- the other four were stub-backend measurements that had simply never been
+  scripted.
+
+### Removed
+- **Six resilience tests that had become duplicates.** `AsyncAgentDescent` was a
+  separate implementation of the barrier-free loop when they were written, so
+  driving failures through it tested something of its own. It is an adapter now,
+  and they were asserting `async_evolve`'s behaviour through a wrapper --
+  `tests/test_fault_matrix.py` asserts the same invariants directly against both
+  engines, and `tests/test_worker_resilience.py` in more detail. One survives, as
+  the only test of the adapter's `rollout=` seam: a broken seam would otherwise
+  make every reference example quietly stop exercising failures.
+
 ### Changed
 - **The two reference runtimes are adapters, not a second implementation of the
   loop.** `AgentDescent` and `AsyncAgentDescent` had their own round barrier,

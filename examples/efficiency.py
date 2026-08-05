@@ -81,11 +81,21 @@ def experiment_parallel(universe, seconds=2.0):
     for n in (1, 2, 4, 8):
         # target unreachable -> run the full window; huge async_ratio + stall
         # patience keep workers off the ledger so we measure pure rollout rate.
+        # `self_verify=False`: this counts dispatch, and a self-verify rollout
+        # is a second sleep the counter does not see. The reference loop got its
+        # before/after delta free, so leaving it on would halve a number that is
+        # supposed to be comparable with the published table.
         sys = _build(universe, n, constant_latency(0.006), seed=1,
-                     async_ratio=10_000, stall_patience=10_000,
+                     async_ratio=10_000, stall_patience=10_000, self_verify=False,
                      target_accuracy=2.0, max_seconds=seconds)
         stats = sys.run()
-        rate = stats.rollouts / stats.wallclock
+        # The window the experiment asked for, not a measured wall-clock. This
+        # is what the description says ("a fixed wall-clock window"), and a
+        # measured one also counts setup and the shutdown grace -- fixed costs
+        # that fall hardest on the low-worker rows and read as superlinear
+        # speedup. Measured both ways: 8 workers came out at 8.2-9.4x against
+        # ~8.1x here.
+        rate = stats.rollouts / seconds
         if base_rate is None:
             base_rate = rate
         speedup = rate / base_rate
@@ -149,10 +159,182 @@ def experiment_async(universe, n_workers=4, rounds=40):
     print()
 
 
+# -- Experiment 3: where the overlap goes (latency distribution) ---------------
+
+
+def _stub_workload(latency, n_tasks=20):
+    """A minimal `evolve()` workload whose only cost is waiting.
+
+    Deterministic, no model, no ledger contention worth speaking of: the rollout
+    sleeps and returns. That is the point -- the *only* variable across the rows
+    below is the shape of the latency distribution, so what the table measures is
+    the framework rather than a provider.
+    """
+    from agentdescent import Task
+
+    tasks = [Task(id=f"t{i}", prompt=f"q{i}", meta={"gold": str(i)})
+             for i in range(n_tasks)]
+
+    def run(rendered, task):
+        time.sleep(latency())
+        return task.meta["gold"] if task.id in rendered else "?"
+
+    return tasks, run
+
+
+def _timed_evolve(tasks, run, *, concurrency, rounds=6, workers=8, eval_conc=8):
+    import warnings as _w
+
+    from agentdescent import AppendRules, evolve
+
+    start = time.time()
+    with _w.catch_warnings():
+        _w.simplefilter("ignore")
+        evolve(tasks, lambda t, o: 1.0 if o == t.meta["gold"] else 0.0,
+               run=run, propose=lambda r, t, o, s: t.id, strategy=AppendRules(),
+               rounds=rounds, n_workers=workers, max_concurrency=concurrency,
+               eval_concurrency=eval_conc, held_out_frac=0.4, self_verify=False,
+               seed=0)
+    return time.time() - start
+
+
+def experiment_distribution(rounds: int = 4) -> None:
+    """Overlap depends on the latency *distribution*, not on the worker count.
+
+    Same eight workers, same rollout budget, four shapes of latency. A round is a
+    barrier, so it lasts as long as its slowest worker -- which is why a heavy
+    tail costs more than a high mean.
+    """
+    print("=== Experiment 3: where the overlap goes ===")
+    print(f"n_workers=8, {rounds} rounds, sequential vs concurrent")
+    print("rollout latency ~150ms, chosen so the rollout dominates the round --")
+    print("see the note below the table for what happens when it does not.\n")
+    print(f"{'latency shape':>26} {'sequential':>11} {'8 workers':>10} {'overlap':>8}")
+    shapes = (
+        ("uniform", constant_latency(0.15)),
+        ("moderate spread", heavy_tailed_latency(0.15, 2.0, 0.30, seed=1)),
+        ("high spread", heavy_tailed_latency(0.15, 5.0, 0.30, seed=2)),
+        ("heavy tail (reasoning)", heavy_tailed_latency(0.075, 20.0, 0.15, seed=3)),
+    )
+    for name, latency in shapes:
+        tasks, run = _stub_workload(latency)
+        seq = _timed_evolve(tasks, run, concurrency=1, rounds=rounds)
+        par = _timed_evolve(tasks, run, concurrency=8, rounds=rounds)
+        print(f"{name:>26} {seq:>10.1f}s {par:>9.1f}s {seq / par:>7.1f}x")
+    print("\nThe ceiling is set by whatever in a round is *not* a rollout -- the")
+    print("ledger, and the gate. At a 20ms latency the same table reads 1.9x /")
+    print("2.1x / 2.0x / 1.3x, because a fixed ~1.2s per configuration swamps")
+    print("0.6s of sleeping. That is experiment 4's subject, not a smaller")
+    print("speedup.\n")
+
+
+# -- Experiment 4: the other axis, eval_concurrency ---------------------------
+
+
+def experiment_gate(rounds: int = 4) -> None:
+    """The gate is a second pool, and it is often the one that is too small.
+
+    Every round measures held-out, and the aggregator scores every candidate it
+    ranks. Same work in each row; only `eval_concurrency` moves.
+    """
+    print("=== Experiment 4: gate concurrency (eval_concurrency) ===")
+    print(f"identical work, {rounds} rounds, n_workers=8 throughout\n")
+    print(f"{'eval_concurrency':>18} {'wall-clock':>11} {'vs serial':>10}")
+    tasks, run = _stub_workload(constant_latency(0.02), n_tasks=20)
+    base = None
+    for conc in (1, 4, 8, 16):
+        secs = _timed_evolve(tasks, run, concurrency=8, rounds=rounds, eval_conc=conc)
+        base = base or secs
+        print(f"{conc:>18} {secs:>10.1f}s {base / secs:>9.1f}x")
+    print("\nIt saturates once eval_concurrency reaches the size of the held-out")
+    print("set -- raise it if yours is large and your provider allows it.\n")
+
+
+# -- Experiment 5: the GIL question, measured ---------------------------------
+
+
+def _time_pool(work, n: int, threads: int) -> float:
+    """Run `work` n times, `threads` at a time, and return the wall-clock."""
+    start = time.time()
+    if threads <= 1:
+        for i in range(n):
+            work(i)
+    else:
+        with ThreadPoolExecutor(max_workers=threads) as ex:
+            list(ex.map(work, range(n)))
+    return time.time() - start
+
+
+def _cpu_work(_i: int) -> int:
+    """Pure-Python arithmetic: the GIL is held throughout, so threads cannot help."""
+    # Sized so the sequential pass takes seconds. At 400k it took 25 ms a unit,
+    # and a 0.2s measurement against a 0.2s measurement reports whatever the
+    # scheduler did that second -- it came out at "1.2x", which reads as threads
+    # helping and is noise.
+    total = 0
+    for k in range(4_000_000):
+        total += k * k % 7
+    return total
+
+
+def experiment_gil(model: str, calls: int = 8, threads: int = 8) -> None:
+    """Is thread parallelism real here? Measured, on both kinds of work.
+
+    The answer depends entirely on whether the work *waits*. A model call spends
+    almost all of its time on a socket, and CPython releases the GIL there; pure
+    Python arithmetic never lets go of it. One pool, two workloads, same shape.
+
+    Needs a model: set `ANTHROPIC_BASE_URL` + `ANTHROPIC_API_KEY` (or run with
+    `--no-api` to see only the CPU row, which is the one that needs nothing).
+    """
+    print("=== Experiment 3: threads and the GIL ===")
+    print(f"{calls} units of work, sequential vs {threads} threads\n")
+    print(f"{'workload':>34} {'sequential':>11} {'threads':>9} {'speedup':>8}")
+
+    if model:
+        from agentdescent.agents import claude
+
+        complete = claude(model=model, max_tokens=64, retries=1)
+
+        def io_work(i: int) -> str:
+            return complete(f"Reply with exactly the number {i}.")
+
+        seq = _time_pool(io_work, calls, 1)
+        par = _time_pool(io_work, calls, threads)
+        print(f"{'I/O — a real ' + model + ' call':>34} {seq:>10.1f}s {par:>8.1f}s "
+              f"{seq / par:>7.1f}x")
+
+    seq = _time_pool(_cpu_work, calls, 1)
+    par = _time_pool(_cpu_work, calls, threads)
+    print(f"{'CPU — pure-Python arithmetic':>34} {seq:>10.1f}s {par:>8.1f}s "
+          f"{seq / par:>7.1f}x")
+    print("\nThe speedup tracks how much of the work is *waiting*. Threads buy")
+    print("nothing for an agent that burns CPU locally.\n")
+
+
 def main() -> None:
+    import argparse
+    import os
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--model", default=os.environ.get("AGENTDESCENT_MODEL", ""),
+                        help="model id for experiment 3; omitted skips the I/O row")
+    parser.add_argument("--only",
+                        choices=("parallel", "async", "distribution", "gate", "gil"),
+                        help="run one experiment instead of all of them")
+    args = parser.parse_args()
+
     universe = make_task_universe(seed=7)
-    experiment_parallel(universe)
-    experiment_async(universe)
+    if args.only in (None, "parallel"):
+        experiment_parallel(universe)
+    if args.only in (None, "async"):
+        experiment_async(universe)
+    if args.only in (None, "distribution"):
+        experiment_distribution()
+    if args.only in (None, "gate"):
+        experiment_gate()
+    if args.only == "gil":
+        experiment_gil(args.model)
 
 
 if __name__ == "__main__":
