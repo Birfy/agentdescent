@@ -28,8 +28,8 @@ proposed `SKILL.md` into a `Diff`, and a custom `aggregator_factory`
 (`TopKFrontierAggregator`) is the bounded top-K frontier. A skill is an **L2**
 artifact -> `blast_radius=0.2` (via `classify`).
 
-    python -m examples.evoskill_skill_discovery --dry-run     # plan only, zero network
-    python -m examples.evoskill_skill_discovery --model claude-haiku-4-5
+    python -m examples.evoskill.evoskill_skill_discovery --dry-run     # plan only, zero network
+    python -m examples.evoskill.evoskill_skill_discovery --model claude-haiku-4-5
 
 Dataset caveat (you asked to use the real OfficeQA): the full set is HF-**gated**
 (`databricks/officeqa`, needs `HF_TOKEN`); absent that this loads the repo's

@@ -3,7 +3,7 @@
 > **Skill-document self-evolution.** Train a single markdown skill doc as the
 > external state of a frozen agent, with optimizer discipline. Runs through
 > [`evolve()`](evolution.md) with a custom `Strategy` + `aggregator_factory`.
-> Example: [`examples/skillopt_skill_training.py`](https://github.com/Birfy/agentdescent/blob/main/examples/skillopt_skill_training.py).
+> Example: [`examples/skillopt/skillopt_skill_training.py`](https://github.com/Birfy/agentdescent/blob/main/examples/skillopt/skillopt_skill_training.py).
 
 | | |
 |---|---|
@@ -45,7 +45,7 @@ repo and omitted from this minimal-but-faithful slice.
 
 ## Plug-ins implemented
 
-In [`examples/skillopt_skill_training.py`](https://github.com/Birfy/agentdescent/blob/main/examples/skillopt_skill_training.py):
+In [`examples/skillopt/skillopt_skill_training.py`](https://github.com/Birfy/agentdescent/blob/main/examples/skillopt/skillopt_skill_training.py):
 
 | Plug-in | `evolve()` slot | What it does |
 |---|---|---|
@@ -84,7 +84,7 @@ signal: one pass of the seed skill over a wider pool, keeping only what it gets
 **wrong**.
 
 ```bash
-python -m examples.skillopt_skill_training --hard \
+python -m examples.skillopt.skillopt_skill_training --hard \
     --provider openai --model deepseek-v4-flash --steps 5 --yes
 ```
 
@@ -95,8 +95,8 @@ from the full split — say which you used. The underlying helper,
 ## Run it
 
 ```bash
-python -m examples.skillopt_skill_training --dry-run
-python -m examples.skillopt_skill_training --model claude-haiku-4-5 --lr 4
+python -m examples.skillopt.skillopt_skill_training --dry-run
+python -m examples.skillopt.skillopt_skill_training --model claude-haiku-4-5 --lr 4
 ```
 
 Offline tests: `tests/test_skillopt_example.py`.

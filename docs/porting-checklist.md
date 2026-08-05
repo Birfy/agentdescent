@@ -2,6 +2,7 @@
 
 Use this before calling an algorithm example a faithful port.
 
+- [ ] Give the port its own directory: `examples/<name>/` with `__init__.py`, a `README.md`, the entry point, and any helper only this port uses.
 - [ ] Start from **released code**, not only the paper; follow code on conflicts and document each conflict in `docs/algo-<name>.md`.
 - [ ] Use the original repository's dataset rather than substituting an easier benchmark.
 - [ ] Build the CLI with `examples._common.add_standard_args`; keep the upstream iteration term (`rounds`, `generations`, `iterations`, or `steps`).

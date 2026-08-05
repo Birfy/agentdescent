@@ -31,8 +31,8 @@ Their custom optimizers keep shared state thread-safe, so both modes work
 unchanged.
 
 ```bash
-python -m examples.ace_context_evolution --model claude-haiku-4-5           # synchronous DP
-python -m examples.ace_context_evolution --model claude-haiku-4-5 --async   # barrier-free
+python -m examples.ace.ace_context_evolution --model claude-haiku-4-5           # synchronous DP
+python -m examples.ace.ace_context_evolution --model claude-haiku-4-5 --async   # barrier-free
 ```
 
 | Algorithm | Port author | Kind | Dataset (faithful) | `evolve()` plug-ins | Page |
@@ -78,8 +78,8 @@ helpful/harmful counters become the aggregator's per-diff **Beta-posterior
 acceptance** — a bullet commits only if it raises held-out reward.
 
 ```bash
-python -m examples.ace_context_evolution --dry-run
-python -m examples.ace_context_evolution --model claude-haiku-4-5
+python -m examples.ace.ace_context_evolution --dry-run
+python -m examples.ace.ace_context_evolution --model claude-haiku-4-5
 ```
 
 ### GEPA — Reflective Prompt Evolution
@@ -109,8 +109,8 @@ domination pruning, win-frequency sampling) is scored on the full `D_pareto` row
 and is unaffected.
 
 ```bash
-python -m examples.gepa_prompt_evolution --dry-run
-python -m examples.gepa_prompt_evolution --model claude-haiku-4-5
+python -m examples.gepa.gepa_prompt_evolution --dry-run
+python -m examples.gepa.gepa_prompt_evolution --model claude-haiku-4-5
 ```
 
 ### EvoSkill — Automated Skill Discovery
@@ -139,7 +139,7 @@ one non-tool LLM on 272 KB bulletins accuracy is low — the value is the faithf
 *loop*.
 
 ```bash
-python -m examples.evoskill_skill_discovery --dry-run
+python -m examples.evoskill.evoskill_skill_discovery --dry-run
 ```
 
 ### SkillOpt — ReflACT
@@ -163,8 +163,8 @@ load-bearing invariants are reproduced faithfully from the repo:
    is the worked example of what that pool is *for*.
 
 ```bash
-python -m examples.skillopt_skill_training --dry-run
-python -m examples.skillopt_skill_training --model claude-haiku-4-5
+python -m examples.skillopt.skillopt_skill_training --dry-run
+python -m examples.skillopt.skillopt_skill_training --model claude-haiku-4-5
 ```
 
 ---
@@ -187,7 +187,7 @@ intentional substitutions, live GLM-5.2 benchmark, equal model-call budget, and
 the distinction between time to quality and full end-to-end return time.
 
 ```bash
-python -m examples.openevolve_program_evolution --dry-run
+python -m examples.openevolve.openevolve_program_evolution --dry-run
 ```
 
 ---
@@ -214,8 +214,8 @@ only the agent *substrate* is a safe DSL. `--select dgm` swaps archive
 conditioning for the DGM parent-selection rule.
 
 ```bash
-python -m examples.adas_meta_agent_search --dry-run
-python -m examples.adas_meta_agent_search --model claude-haiku-4-5 --generations 6
+python -m examples.adas.adas_meta_agent_search --dry-run
+python -m examples.adas.adas_meta_agent_search --model claude-haiku-4-5 --generations 6
 ```
 
 ### DGM — Darwin Gödel Machine
@@ -238,8 +238,8 @@ tested offline while the *scores* are simulated, not SWE-bench results. Pass a
 real `evaluate_fn` to `run_dgm` to plug in the actual harness.
 
 ```bash
-python -m examples.dgm_self_improve                      # runs offline (surrogate)
-python -m examples.dgm_self_improve --generations 12 --archive keep_all
+python -m examples.dgm.dgm_self_improve                      # runs offline (surrogate)
+python -m examples.dgm.dgm_self_improve --generations 12 --archive keep_all
 ```
 
 ---

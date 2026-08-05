@@ -36,9 +36,9 @@ archive; `--select dgm` instead samples which prior agents to surface using the
 setting (a self-modifying coding agent on SWE-bench) needs Docker and is out of
 scope, but its open-ended selection rule ports directly and is unit-tested.
 
-    python -m examples.adas_meta_agent_search --dry-run       # plan only, zero network
-    python -m examples.adas_meta_agent_search --model claude-haiku-4-5 --generations 6
-    python -m examples.adas_meta_agent_search --select dgm --langs en,es
+    python -m examples.adas.adas_meta_agent_search --dry-run       # plan only, zero network
+    python -m examples.adas.adas_meta_agent_search --model claude-haiku-4-5 --generations 6
+    python -m examples.adas.adas_meta_agent_search --select dgm --langs en,es
 """
 
 from __future__ import annotations

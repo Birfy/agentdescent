@@ -28,9 +28,9 @@ Only the parent-selection optimizer changes; the ledger, governance, staleness,
 and statistical-acceptance machinery are the framework's. Prompt = L2 skill ->
 `blast_radius=0.2`.
 
-    python -m examples.gepa_prompt_evolution --dry-run           # plan only, zero network
-    python -m examples.gepa_prompt_evolution --model claude-haiku-4-5
-    python -m examples.gepa_prompt_evolution --rounds 10 --workers 3
+    python -m examples.gepa.gepa_prompt_evolution --dry-run           # plan only, zero network
+    python -m examples.gepa.gepa_prompt_evolution --model claude-haiku-4-5
+    python -m examples.gepa.gepa_prompt_evolution --rounds 10 --workers 3
 
 Faithful-but-tractable simplifications (documented): GEPA optimises a
 multi-module compound system with a rollout budget; here the system is a single

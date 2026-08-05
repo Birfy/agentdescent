@@ -6,7 +6,7 @@ calls propose mutations, a sandboxed evaluator supplies reward, and a custom
 aggregator maintains the quality-diversity archive.
 
 The runnable port is
-[`examples/openevolve_program_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/openevolve_program_evolution.py).
+[`examples/openevolve/openevolve_program_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/openevolve/openevolve_program_evolution.py).
 It supports synchronous data parallelism through `evolve()` and barrier-free
 execution through `async_evolve()`.
 
@@ -68,13 +68,13 @@ strategy, archive, engine, and CLI tests still run.
 Preview without an API key, network access, or sandbox process:
 
 ```bash
-python -m examples.openevolve_program_evolution --dry-run
+python -m examples.openevolve.openevolve_program_evolution --dry-run
 ```
 
 Run six mutations with GLM-5.2 through an OpenAI-compatible endpoint:
 
 ```bash
-python -m examples.openevolve_program_evolution \
+python -m examples.openevolve.openevolve_program_evolution \
   --provider glm --model glm-5.2 --iterations 6 --workers 3 --yes
 ```
 

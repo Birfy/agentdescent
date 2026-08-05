@@ -72,6 +72,10 @@ mkdocs build --strict   # must pass with no warnings (CI enforces this)
   repo's *released code* (not just the paper). If code and paper disagree, follow
   the code and note it. Start from the [porting checklist](docs/porting-checklist.md)
   and `examples/_TEMPLATE.py`.
+- **One algorithm, one folder.** Each faithful port lives in
+  `examples/<algorithm>/` — entry point, `README.md`, and any helper only that
+  port uses. The framework demos (`run_demo`, `efficiency`, `parallelism`, …)
+  stay at the top of `examples/`, because they belong to no single algorithm.
 - **No hidden network in tests.** Anything requiring an API or heavy infra
   (SWE-bench Docker, gated datasets) must be gated behind a flag and documented.
 - Match the style and comment density of the surrounding code.

@@ -6,7 +6,7 @@ the DGM parent-selection formula, and the search loop. No network or LLM calls.
 
 import json
 
-from examples.adas_meta_agent_search import (
+from examples.adas.adas_meta_agent_search import (
     Interpreter,
     _extract_int,
     _majority,
@@ -104,7 +104,7 @@ def test_evaluate_agent_scores_examples_concurrently():
     import threading
     import time
 
-    from examples.adas_meta_agent_search import evaluate_agent
+    from examples.adas.adas_meta_agent_search import evaluate_agent
 
     live, peak, lock = [0], [0], threading.Lock()
 
@@ -124,14 +124,14 @@ def test_evaluate_agent_scores_examples_concurrently():
 
 
 def test_evaluate_agent_handles_an_empty_split():
-    from examples.adas_meta_agent_search import evaluate_agent
+    from examples.adas.adas_meta_agent_search import evaluate_agent
     assert evaluate_agent(Interpreter(lambda p: "Answer: 1"), {"block": "cot"}, []) == []
 
 
 def test_evaluate_agent_preserves_order():
     """Concurrency must not scramble the per-instance outcomes -- the bootstrap
     CI is computed over them."""
-    from examples.adas_meta_agent_search import evaluate_agent
+    from examples.adas.adas_meta_agent_search import evaluate_agent
 
     def echo(prompt):
         return f"Answer: {prompt.count('#')}"
@@ -167,7 +167,7 @@ def test_parse_agent_survives_prose_around_the_json():
 def test_parse_agent_rejects_a_program_it_cannot_afford():
     """Cost is multiplicative in this DSL and evaluation is candidates x items x
     cost, so one unbounded proposal outweighs the rest of the search."""
-    from examples.adas_meta_agent_search import MAX_PROGRAM_CALLS, program_cost
+    from examples.adas.adas_meta_agent_search import MAX_PROGRAM_CALLS, program_cost
 
     greedy = {"block": "ensemble", "children": [
         {"block": "debate", "roles": ["a", "b", "c"], "rounds": 2},
@@ -181,7 +181,7 @@ def test_parse_agent_rejects_a_program_it_cannot_afford():
 def test_program_cost_counts_the_calls_the_interpreter_makes():
     """The budget line and the cap both read this, so it has to match the
     interpreter rather than approximate it."""
-    from examples.adas_meta_agent_search import program_cost
+    from examples.adas.adas_meta_agent_search import program_cost
 
     for program in ([s["program"] for s in seed_archive()] +
                     [{"block": "debate", "roles": ["x", "y"], "rounds": 2}]):
@@ -198,7 +198,7 @@ def test_program_cost_counts_the_calls_the_interpreter_makes():
 def test_propose_keeps_a_valid_draft_when_a_later_round_degrades():
     """Two Reflexion rounds refine the draft; returning whatever the *last* round
     emitted throws away a good agent whenever the last one is malformed."""
-    from examples.adas_meta_agent_search import propose_agent
+    from examples.adas.adas_meta_agent_search import propose_agent
 
     good = '{"thought":"t","name":"Good","program":{"block":"step_back"}}'
     replies = iter([good] + ["not json"] * 6)
@@ -240,7 +240,7 @@ def test_merge_reports_name_the_outcome():
     best design simply did not change was reported identically to a rejection."""
     from agentdescent.evolution import Task, evolve
 
-    from examples.adas_meta_agent_search import (AdasContext, AgentDesignStrategy,
+    from examples.adas.adas_meta_agent_search import (AdasContext, AgentDesignStrategy,
                                                  MetaSearchAggregator, make_propose)
 
     ctx = AdasContext()
@@ -283,7 +283,7 @@ def test_empty_completions_are_counted_not_silently_scored_wrong():
     exactly like a model which cannot do the problems. Measured on
     deepseek-v4-flash at the library default of 4096: 0 of 4 meta-agent calls
     returned anything at all."""
-    from examples.adas_meta_agent_search import EmptyCompletionGuard
+    from examples.adas.adas_meta_agent_search import EmptyCompletionGuard
 
     replies = iter(["", "Answer: 42", "   ", "Answer: 7"])
     guard = EmptyCompletionGuard(lambda p: next(replies))
@@ -299,7 +299,7 @@ def test_empty_completions_are_counted_not_silently_scored_wrong():
 
 def test_an_empty_completion_scores_as_a_wrong_answer():
     """Why the guard has to exist: this is indistinguishable from being wrong."""
-    from examples.adas_meta_agent_search import evaluate_agent
+    from examples.adas.adas_meta_agent_search import evaluate_agent
 
     scores = evaluate_agent(Interpreter(lambda p: ""), {"block": "cot"},
                             [("q", "42"), ("q2", "7")])
@@ -312,7 +312,7 @@ def test_design_identity_ignores_key_order():
     identical design counted as new: it passed `to_diff`, was scored on every val
     item, tied the design it duplicated, failed the strict `>` test, and appeared
     as one more `+0/-1` -- having spent a full evaluation sweep to learn nothing."""
-    from examples.adas_meta_agent_search import AgentDesignStrategy, canonical
+    from examples.adas.adas_meta_agent_search import AgentDesignStrategy, canonical
 
     a = {"block": "cot_sc", "k": 3}
     b = {"k": 3, "block": "cot_sc"}
@@ -335,7 +335,7 @@ def test_a_missing_score_prints_as_missing():
     that call fails -- an account ran out of credit inside it, 79 minutes in --
     the validation numbers are still in hand, so they must still print. Formatting
     `None` with `:.3f` raises, which would discard them along with the failure."""
-    from examples.adas_meta_agent_search import fmt_score
+    from examples.adas.adas_meta_agent_search import fmt_score
 
     assert fmt_score(0.4375).strip() == "0.438"
     assert fmt_score(None).strip() == "n/a"

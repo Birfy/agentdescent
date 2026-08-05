@@ -3,7 +3,7 @@
 > **Skill / prompt self-evolution.** Evolve an instruction prompt with a genetic,
 > reflective loop whose parent selection is a **per-instance Pareto frontier**.
 > Runs through [`evolve()`](evolution.md) with a custom `aggregator_factory`.
-> Example: [`examples/gepa_prompt_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/gepa_prompt_evolution.py).
+> Example: [`examples/gepa/gepa_prompt_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/gepa/gepa_prompt_evolution.py).
 
 | | |
 |---|---|
@@ -52,7 +52,7 @@ sample (raise `--workers`). The Pareto set is the held-out split.
 
 ## Plug-ins implemented
 
-In [`examples/gepa_prompt_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/gepa_prompt_evolution.py):
+In [`examples/gepa/gepa_prompt_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/gepa/gepa_prompt_evolution.py):
 
 | Plug-in | `evolve()` slot | What it does |
 |---|---|---|
@@ -86,8 +86,8 @@ whose benchmark still has headroom for `deepseek-v4-flash` — see
 ## Run it
 
 ```bash
-python -m examples.gepa_prompt_evolution --dry-run
-python -m examples.gepa_prompt_evolution --model claude-haiku-4-5
+python -m examples.gepa.gepa_prompt_evolution --dry-run
+python -m examples.gepa.gepa_prompt_evolution --model claude-haiku-4-5
 ```
 
 Offline tests: `tests/test_gepa_example.py` (incl. the Algorithm-2 selection).

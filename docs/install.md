@@ -95,8 +95,8 @@ instead — same call everywhere else. Full walkthrough:
     download, model call, or API key. Other examples may still load or download data:
 
     ```bash
-    python -m examples.ace_context_evolution --dry-run
-    python -m examples.gepa_prompt_evolution --dry-run
+    python -m examples.ace.ace_context_evolution --dry-run
+    python -m examples.gepa.gepa_prompt_evolution --dry-run
     ```
 
 ## Running the tests
