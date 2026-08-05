@@ -55,6 +55,14 @@ class AsyncConfig:
     # duration_timeout_factor x its *estimated* cost is counted as a straggler.
     duration_timeout_factor: float = 3.0
     seed: int = 0
+    #: Re-run a proposal's own rollout with the diff applied, to record a local
+    #: before/after delta. The reference loop got that delta **free** -- it
+    #: measured accuracy directly, with no second rollout -- so a port that
+    #: leaves this on doubles what a counted rollout costs. It stays on by
+    #: default because the delta is real evidence and feeds acceptance; the
+    #: throughput experiment turns it off, because a second sleep per rollout is
+    #: not the dispatch rate it is trying to measure.
+    self_verify: bool = True
 
     # `aggregator_interval` and `worker_pause` used to live here. They paced a
     # loop that no longer exists -- `async_evolve` owns its own sleeps -- and a
@@ -150,7 +158,6 @@ class AsyncAgentDescent:
     # -- the run --------------------------------------------------------------
 
     def run(self) -> AsyncStats:
-        start = time.time()
         timeline: List[Tuple[int, float]] = []
 
         def factory(ledger, verifier, audit, config, policy):
@@ -188,6 +195,7 @@ class AsyncAgentDescent:
             stall_patience=self.cfg.stall_patience,
             duration_estimator=self.estimator,
             straggler_factor=self.cfg.duration_timeout_factor,
+            self_verify=self.cfg.self_verify,
             solved_threshold=0.999,
             seed=self.cfg.seed,
             on_round=on_round,
@@ -211,7 +219,13 @@ class AsyncAgentDescent:
                          if self.verifier is not None else 0),
             final_dev_accuracy=self._accuracy_on(Ledger.DEV),
             final_stable_accuracy=self._accuracy_on(Ledger.STABLE),
-            wallclock=time.time() - start,
+            # The engine's own clock, which starts after the ledger, verifier
+            # and aggregator are built. Timing from the top of this method
+            # instead put that setup inside the window, and since it is a fixed
+            # cost it depressed the low-worker rows hardest -- which reads as
+            # superlinear speedup. Measured: 8 workers came out at 8.5-9.4x
+            # against a true ~8.1x.
+            wallclock=r.wallclock,
             error=r.error,
             timeline=timeline,
         )

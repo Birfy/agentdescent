@@ -76,25 +76,37 @@ configuration. Quality is scored on a split `evolve()`'s gate never saw.
 
 | config | seeds | reached | time-to-quality (min/med/max) | cost-to-quality | test quality | stale% |
 |---|---|---|---|---|---|---|
-| sync-1 | 3 | 2/3 | 1.06 / 1.10 / 1.13 | 21 / 22 / 22 | 0.793 / 0.862 / 0.897 | 0% |
-| sync-4 | 3 | 3/3 | 0.41 / 0.50 / 0.71 | 24 / 24 / 40 | 0.862 / 1.000 / 1.000 | 0% |
-| sync-8 | 3 | 3/3 | 0.25 / 0.26 / 0.42 | 24 / 24 / 40 | 0.931 / 1.000 / 1.000 | 0% |
-| async-4 (lag 3, the default) | 3 | **0/3** | — | — | 0.345 / 0.379 / 0.448 | **86%** |
-| async-4 (lag 1) | 3 | 3/3 | 0.49 / 0.56 / 0.59 | 35 / 38 / 76 | 0.931 / 1.000 / 1.000 | 10% |
-| async-4 (lag 0) | 3 | 3/3 | 0.59 / 0.66 / 0.83 | 21 / 23 / 35 | 0.897 / 0.931 / 1.000 | 0% |
+| sync-1 | 3 | 2/3 | 1.22 / 1.26 / 1.29 | 21 / 22 / 22 | 0.793 / 0.862 / 0.897 | 0% |
+| sync-4 | 3 | 3/3 | 0.46 / 0.52 / 0.71 | 24 / 24 / 40 | 0.862 / 1.000 / 1.000 | 0% |
+| sync-8 | 3 | 3/3 | 0.25 / 0.25 / 0.41 | 24 / 24 / 40 | 0.931 / 1.000 / 1.000 | 0% |
+| async-4 (lag 3, the default) | 3 | **0/3** | — | — | 0.310 / 0.345 / 0.379 | **93%** |
+| async-4 (lag 1) | 3 | 3/3 | 0.56 / 0.74 / 0.93 | 31 / 35 / 123 | 0.897 / 0.931 / 1.000 | 25% |
+| async-4 (lag 0) | 3 | 3/3 | 0.59 / 0.66 / 0.75 | 25 / 28 / 46 | 0.828 / 0.897 / 0.931 | 0% |
+
+!!! warning "The `stale%` column was understated, and this is the corrected run"
+    It read **86%** and **10%** for the two async rows. The async path ran its own
+    staleness gate and `Aggregator` ran another over the survivors, both writing
+    to the same meter, so every card that survived the first gate was counted as
+    "considered" twice — a true 50% rate read as 33%. With the denominator fixed
+    the same configurations report **93%** and **25%**.
+
+    Nothing about the runs changed; the numerator was always right. This is why
+    the row that never reaches the bar is the one whose figure moved least: at
+    93% there is not much room for a factor of two.
 
 ### What it says
 
-**Parallelism buys time, not rollouts.** Time-to-quality falls 1.10 → 0.50 → 0.26
+**Parallelism buys time, not rollouts.** Time-to-quality falls 1.26 → 0.52 → 0.25
 from 1 to 4 to 8 workers, while cost-to-quality *rises* slightly (22 → 24). More
 workers reach the bar sooner and more reliably (2/3 → 3/3), and spend marginally
 more rollouts doing it. Anyone hoping parallelism reduces total work should read
 the second column.
 
 **The barrier-free path's default lag budget is wrong for this domain, and the
-first version of this table blamed the path.** At `async_ratio=3` it discards 86%
-of its evidence and never reaches the bar. At 1 it matches the synchronous path
-on quality; at 0 it is the cheapest configuration in the table.
+first version of this table blamed the path.** At `async_ratio=3` it discards 93%
+of its evidence and never reaches the bar. At 1 it comes within a point of the
+synchronous path on quality; at 0 it is the steadiest configuration in the table,
+reaching the bar on every seed.
 
 `async_ratio` is a lag budget in **artifact versions**, and how much wall-clock a
 version represents depends entirely on how long a rollout takes. Three is
@@ -107,12 +119,12 @@ for, not for the one that is cheap to measure. Instead, a run that discards more
 than half its evidence now says so:
 
 ```
-RuntimeWarning: async_evolve discarded 110/130 (85%) of its evidence as stale.
+RuntimeWarning: async_evolve discarded 121/130 (93%) of its evidence as stale.
 async_ratio=3 is a lag budget in artifact versions, so it is too high whenever a
 worker finishes several rollouts in the time the merger takes one sweep.
 ```
 
-**Even correctly tuned, async does not beat sync here** — 0.56 against 0.50. Its
+**Even correctly tuned, async does not beat sync here** — 0.74 against 0.52. Its
 advantage is that workers never wait for the merge, and on a domain with no
 rollout latency there is no waiting to avoid. That is the caveat below, arrived
 at from the other direction.
@@ -184,10 +196,10 @@ and count rollouts. Throughput (rollouts/sec) should scale with N; **efficiency
 
 ```
  workers  rollouts  rollouts/s  speedup  efficiency
-       1       230         115     1.00        1.00
-       2       465         231     2.02        1.01
-       4       940         466     4.07        1.02
-       8      1880         935     8.09        1.01
+       1       271         136     1.00        1.00
+       2       467         234     1.72        0.86
+       4      1082         541     3.99        1.00
+       8      2172        1086     8.01        1.00
 ```
 
 **Near-linear scaling through 8 workers.** The rollout stage holds no global lock,
@@ -197,13 +209,35 @@ forking a `git checkout`). This is the `O(N / T_iter)` throughput the design
 targets versus serial RSI's `O(1 / T_iter)`.
 
 !!! note "Read efficiency as ≈1.0, not as a precise constant"
-    Across repeated runs the 8-worker figure lands between **8.05x and 8.16x**
-    (efficiency 1.01–1.02), and the 4-worker one between 3.96x and 4.13x. Values
-    slightly *above* 1.0 are not a superlinear effect: the single-worker baseline
-    absorbs the same fixed start-up inside its timed window, which depresses the
-    denominator by a percent or two. The honest reading is "linear to within
-    measurement noise at this scale", and the absolute rollout counts depend on the
-    machine — rerun it rather than quoting these.
+    Across five repeated runs the 8-worker figure landed between **7.83x and
+    9.15x** (efficiency 0.98–1.14) and the 4-worker one between 3.99x and 4.46x.
+    The spread is dominated by the **single-worker baseline**, which varied 15%
+    run to run (120–136 rollouts/s) and sits in the denominator of every other
+    row. The 2-worker row is consistently the weakest (0.86–1.01), which is where
+    a fixed per-run cost still shows.
+
+    The honest reading is "linear to within measurement noise at this scale", and
+    the absolute rollout counts depend on the machine — **rerun it rather than
+    quoting these**.
+
+!!! warning "Two measurement definitions were wrong here, and both flattered it"
+    Found while re-measuring on the ported runtime, and worth stating because
+    each inflated the headline:
+
+    * **The denominator included setup and the shutdown grace.** The rate was
+      `rollouts / measured wallclock`, and the measured clock covered building the
+      ledger, verifier and aggregator plus up to `shutdown_grace` seconds after
+      the window. Those are *fixed* costs, so they fall hardest on the low-worker
+      rows — which reads as superlinear speedup. Measured both ways: 8 workers
+      came out at **8.2–9.4x** against ~8.1x. The experiment says "a fixed
+      wall-clock window", so it now divides by the window it asked for.
+    * **`self_verify` doubled what a counted rollout cost.** The engine re-runs a
+      proposal's own rollout to record a before/after delta, and only the first
+      is counted — so with a 6 ms latency injected, every counted rollout paid
+      12 ms. The reference loop got that delta free. Throughput halved (935 →
+      466 rollouts/s) with the speedup unchanged, which is the signature of a
+      cost-model change rather than a scaling one. This experiment measures
+      dispatch, so it now passes `self_verify=False`.
 
 ---
 
@@ -220,10 +254,10 @@ ways:
 
 ```
             mode  wall-clock  rollouts/s  utilization
-    sync barrier       1.41s         114         36%
-async (no barrier)       0.51s         316        100%
+    sync barrier       1.41s         113         38%
+async (no barrier)       0.53s         300        100%
 
-async speedup: 2.78x  (the barrier idles fast workers waiting for the tail every round)
+async speedup: 2.65x  (the barrier idles fast workers waiting for the tail every round)
 ```
 
 The barrier runs at **~36–40% utilization** — most worker-time is spent idling for

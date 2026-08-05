@@ -97,13 +97,25 @@ integers representing cents, without dollar signs or decimal points."*
 
 Full breakdown in [Efficiency](efficiency.md).
 
-| | result |
-|---|---|
-| Thread parallelism, 8 threads, real API calls | **7.1×** (pure-Python CPU work: 1.0×) |
-| Whole `evolve()` run, uniform latency | **5.9×** of 8 workers |
-| ...heavy-tailed latency (a reasoning model) | **2.4×** — the round barrier waits on the slowest worker |
-| ...same, barrier-free `asynchronous=True` | **3.0×** |
-| Gate concurrency (`eval_concurrency` 1 → 8) | **193.6 s → 90.0 s** on identical work |
+| | result | re-measured? |
+|---|---|---|
+| Thread parallelism, 8 threads, real API calls | **7.1×** (pure-Python CPU work: 1.0×) | needs an API key |
+| Whole `evolve()` run, uniform latency | **5.9×** of 8 workers | needs an API key |
+| ...heavy-tailed latency (a reasoning model) | **2.4×** — the round barrier waits on the slowest worker | needs an API key |
+| ...same, barrier-free `asynchronous=True` | **3.0×** | needs an API key |
+| Gate concurrency (`eval_concurrency` 1 → 8) | **193.6 s → 90.0 s** on identical work | needs an API key |
+
+!!! note "These five were not re-measured when the reference runtimes became adapters"
+    They all come through [`evolve()`](evolution.md) against a real model, and
+    `evolve()`'s default behaviour did not change — `refresh_interval` defaults to
+    `1`, which is exactly the old snapshot discipline, and the new `RoundInfo`
+    fields are reported rather than acted on. So there is no reason to expect
+    them to have moved, and no way to confirm it without spending on the API.
+
+    The [offline table](efficiency.md#the-configuration-matrix-bench) *was*
+    re-measured, and one column there moved for a reason worth knowing: `stale%`
+    was understated by roughly a factor of two, because two staleness gates were
+    both counting into one denominator.
 
 `n_workers` buys rollout parallelism and `eval_concurrency` buys gate parallelism;
 they are independent, and a run slower than its worker count suggests usually

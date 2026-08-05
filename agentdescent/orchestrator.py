@@ -89,6 +89,7 @@ class AgentDescent:
         oracle_budget: int = 300,
         seed: int = 0,
         staleness_policy=None,
+        self_verify: bool = True,
     ) -> None:
         self.universe = universe
         self.skill_id = skill_id
@@ -99,6 +100,11 @@ class AgentDescent:
         self.oracle_budget = oracle_budget
         self.config = config or AggregatorConfig()
         self.staleness_policy = staleness_policy
+        #: See `AsyncConfig.self_verify`: the reference loop measured its
+        #: before/after delta for free, so leaving this on doubles what a
+        #: rollout costs. On by default -- the delta is evidence acceptance
+        #: reads -- and off for anything measuring throughput.
+        self.self_verify = self_verify
         self.train, self.held_out = universe.split()
 
         self.strategy = RouterStrategy()
@@ -188,6 +194,7 @@ class AgentDescent:
             staleness_policy=self.staleness_policy,
             aggregator_factory=factory,
             oracle_budget=self.oracle_budget,
+            self_verify=self.self_verify,
             solved_threshold=0.999,
             seed=self.seed,
             on_round=on_round,

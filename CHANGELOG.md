@@ -507,6 +507,38 @@ All notable changes to AgentDescent are documented here. The format follows
   rejected as `oversized`, which surfaces five rounds later as "my reflector
   emits junk" rather than "that file was never editable".
 
+### Documentation
+- **The offline measurements were re-taken on the ported runtimes, and two of
+  them were being measured wrongly.** Both flattered the result, and both were
+  found by re-measuring rather than by reading:
+
+  * **`docs/efficiency.md`'s `stale%` column was understated by roughly a factor
+    of two** — 86% and 10% for the two async rows, against a corrected 93% and
+    25%. The async path ran its own staleness gate and `Aggregator` ran another
+    over the survivors, both writing to the same meter, so every surviving card
+    was counted twice in the denominator. Nothing about the runs changed; the
+    numerator was always right.
+  * **The throughput experiment's denominator included setup and the shutdown
+    grace**, which are fixed costs and therefore fall hardest on the low-worker
+    rows — which reads as superlinear speedup (8.2–9.4x for 8 workers against
+    ~8.1x). It says "a fixed wall-clock window", so it now divides by the window
+    it asked for.
+  * **`self_verify` doubled what a counted rollout cost** in that experiment: the
+    engine re-runs a proposal's own rollout for a before/after delta and counts
+    only the first, so an injected 6 ms latency became 12 ms per counted rollout.
+    The reference loop got that delta free. `AsyncConfig.self_verify` and
+    `AgentDescent(self_verify=)` expose the knob; the throughput experiment turns
+    it off, because dispatch rate is what it measures.
+
+  The stated variance band is honest about the machine now: across five runs the
+  8-worker speedup landed between 7.83x and 9.15x, dominated by a single-worker
+  baseline that itself varied 15%.
+
+- **`docs/results.md`'s five efficiency figures are marked "needs an API key"**
+  rather than silently left in place. They come through `evolve()` against a real
+  model, `evolve()`'s default behaviour did not change, and there is no way to
+  confirm that without spending on the API.
+
 ### Changed
 - **The two reference runtimes are adapters, not a second implementation of the
   loop.** `AgentDescent` and `AsyncAgentDescent` had their own round barrier,

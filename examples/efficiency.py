@@ -81,11 +81,21 @@ def experiment_parallel(universe, seconds=2.0):
     for n in (1, 2, 4, 8):
         # target unreachable -> run the full window; huge async_ratio + stall
         # patience keep workers off the ledger so we measure pure rollout rate.
+        # `self_verify=False`: this counts dispatch, and a self-verify rollout
+        # is a second sleep the counter does not see. The reference loop got its
+        # before/after delta free, so leaving it on would halve a number that is
+        # supposed to be comparable with the published table.
         sys = _build(universe, n, constant_latency(0.006), seed=1,
-                     async_ratio=10_000, stall_patience=10_000,
+                     async_ratio=10_000, stall_patience=10_000, self_verify=False,
                      target_accuracy=2.0, max_seconds=seconds)
         stats = sys.run()
-        rate = stats.rollouts / stats.wallclock
+        # The window the experiment asked for, not a measured wall-clock. This
+        # is what the description says ("a fixed wall-clock window"), and a
+        # measured one also counts setup and the shutdown grace -- fixed costs
+        # that fall hardest on the low-worker rows and read as superlinear
+        # speedup. Measured both ways: 8 workers came out at 8.2-9.4x against
+        # ~8.1x here.
+        rate = stats.rollouts / seconds
         if base_rate is None:
             base_rate = rate
         speedup = rate / base_rate
