@@ -6,6 +6,36 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-08-05
+
+One engine. 0.3.0 made the numbers readable; this release removes the second
+implementation they were being measured against.
+
+`AgentDescent` and `AsyncAgentDescent` each had their own round barrier, worker
+dispatch, snapshot staggering, merger thread, published head and backpressure.
+`docs/architecture.md` called that "a known wart rather than a design intent",
+and it kept costing: two measured fixes that had to be hand-ported between the
+loops, two early-stop epsilons nobody chose, and three mechanisms the general
+engine re-derived — and got wrong — because the reference stack already had
+them. Both are adapters over `evolve()` now, the public surface is unchanged,
+and the reference table still reads first 0.604, final 1.000, against a fork
+baseline of 0.379.
+
+Underneath that, the decisions a loop used to hard-code became replaceable
+contracts, and the resources a rollout consumes got a plane of their own:
+sandbox leases with an owner, a ceiling and a way to be reclaimed; a container
+boundary verified against both podman and docker; a ledger and an evaluation
+cache that survive more than one writing process; and an executor seam the
+round's rollout actually goes through, which it did not before — a supplied
+executor ran nothing and the run reported that it had gone fine.
+
+**Breaking.** `agentdescent.worker.Worker`, `AsyncConfig.aggregator_interval`,
+`AsyncConfig.worker_pause`, `EvidenceCard.version_annotations` and the
+`domains.router.Task` alias are removed, and `full_eval` is no longer part of
+the `Evolvable` protocol. Each entry below says what replaced it.
+`Evolvable.cheap_eval` was renamed to `evidence_eval` but remains an alias, and
+the three moved strategy import paths still work.
+
 ### Changed
 - **Each faithful algorithm port now owns a directory.** `examples/` had grown to
   seven ports flat alongside six framework demos, and nothing in the name said
@@ -1823,6 +1853,8 @@ First public release on PyPI as **`agentdescent`**.
   discrete-space `Aggregator`, staleness policies, DP/TP/PP parallelism, layered
   governance, and the provider-agnostic `agentdescent.agents` completion layer.
 
-[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Birfy/agentdescent/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/Birfy/agentdescent/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Birfy/agentdescent/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Birfy/agentdescent/releases/tag/v0.1.0
