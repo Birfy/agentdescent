@@ -7,15 +7,6 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Added
-- **OpenEvolve function-minimization now runs through AgentDescent's real
-  evolution engines.** The port maps generated Python programs to a `Strategy`,
-  the MAP-Elites island archive to an `Aggregator`, sandboxed evaluation to the
-  rollout/reward boundary, and supports both `evolve()` and `async_evolve()`.
-  Its offline tests cover archive migration, strict mutation budgets, all three
-  runtime modes, and Bubblewrap is skipped when unavailable. A compact live
-  GLM-5.2 benchmark records three paired repetitions without model responses or
-  generated source.
-
 - **A test that runs the container execution chain end to end**, and the first
   time `sandbox_container.py` has been exercised against a real engine at all.
   Ten of its tests carry `skipif engine_available(...)`, and every machine that
@@ -64,6 +55,16 @@ All notable changes to AgentDescent are documented here. The format follows
   no capability can guess. The table marks the knob-dependent rows with ⚠︎ and
   the published numbers are unchanged -- they were measured, and nothing here
   falsifies them for the model they were measured on.
+
+### Added
+- **OpenEvolve function-minimization now runs through AgentDescent's real
+  evolution engines.** The port maps generated Python programs to a `Strategy`,
+  the MAP-Elites island archive to an `Aggregator`, sandboxed evaluation to the
+  rollout/reward boundary, and supports both `evolve()` and `async_evolve()`.
+  Its offline tests cover archive migration, strict mutation budgets, all three
+  runtime modes, and Bubblewrap is skipped when unavailable. A compact live
+  GLM-5.2 benchmark records three paired repetitions without model responses or
+  generated source.
 
 ### Fixed
 - **`claude()` was the one blocking boundary in the package with no timeout.**
