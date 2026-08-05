@@ -542,7 +542,8 @@ limit, credit exhaustion) — progress isn't lost.
 
     ```python
     result.stop_reason   # "target_reward" | "patience" | "rounds"
-                         # | "max_seconds" | "max_iters" | "error"
+                         # | "max_seconds" | "max_iters"
+                         # | "max_rollouts" | "max_calls" | "error"
     ```
 
     This matters most under `asynchronous=True`, where **`max_seconds=None` means
@@ -551,6 +552,28 @@ limit, credit exhaustion) — progress isn't lost.
     `rounds` changing meaning (it becomes a `rounds × n_workers` rollout budget,
     and `RoundInfo.round` becomes a merger-sweep index) now emit a
     `RuntimeWarning`.
+
+!!! tip "Budget in rollouts and calls, never in rounds"
+    `max_rollouts=` and `max_calls=` bound the two units a comparison has to hold
+    fixed, and they mean the same thing on both runtimes:
+
+    ```python
+    result = evolve(tasks, reward, agent=agent, n_workers=8,
+                    rounds=10_000,               # the bound below is the real one
+                    max_rollouts=800, max_calls=1600)
+    ```
+
+    `rounds` is not such a unit. Configurations differ in how much model a round
+    buys — `n_workers=8` buys eight times what `n_workers=1` does — so a budget
+    fixed in rounds hands the wider configuration more model and then reports the
+    extra model as a win for parallelism.
+
+    The synchronous path checks both **at the round barrier**, so it overshoots by
+    up to one round: a round is dispatched or it is not, and stopping halfway
+    would leave a half-merged round. Never compare on the budget you asked for.
+    Compare on `result.rollouts` and `result.usage.calls`, which is what
+    [`agentdescent.baselines`](results.md) does — it refuses to call two arms
+    equal-budget when their measured spends differ.
 
 !!! note "Three failure categories, not two"
     | category | example | what happens |

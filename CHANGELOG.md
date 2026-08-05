@@ -6,6 +6,22 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `evolve(max_rollouts=, max_calls=)` — a budget the engine enforces, in the two
+  units a comparison has to hold fixed. `rounds` is not one of them: configurations
+  differ in how much model a round buys, so a budget fixed in rounds hands the wider
+  one more model and then reports the extra model as a win for parallelism. The
+  synchronous path checks at the round barrier and so overshoots by up to one round;
+  the barrier-free path checks per rollout. `stop_reason` gained `"max_rollouts"` and
+  `"max_calls"`, and `async_evolve` gained `max_calls=`.
+- `agentdescent.baselines` — the control the efficiency numbers were missing.
+  `serial` / `best_of_n_fork` / `merge_of_n` run over one shared `Workload` on one
+  `Budget`, and fork reports both the oracle fork (best on test, unshippable) and the
+  selected fork (best on dev, reported on test). `compare(fixed=...)` names the unit
+  held fixed and prints the other unit's divergence as a confound — because the two
+  cannot both be equalised, which is measured rather than assumed.
+
 ## [0.4.0] — 2026-08-05
 
 One engine. 0.3.0 made the numbers readable; this release removes the second

@@ -8,7 +8,7 @@ page and the code disagree, so a signature here is the signature you get.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-164 public names across 30 modules.
+175 public names across 31 modules.
 
 ---
 
@@ -732,6 +732,61 @@ The reward functions everyone writes, with the details right. &nbsp;·&nbsp; `ag
 
 ---
 
+## Equal-budget baselines
+
+merge-of-N against best-of-N fork and serial, on one rollout budget. &nbsp;·&nbsp; `agentdescent.baselines` &nbsp;·&nbsp; [guide](results.md)
+
+### `ArmResult(...)`
+
+One arm, one seed, and the spend it actually incurred.
+
+### `Budget(rollouts: int, calls: Optional[int] = None) -> None`
+
+What every arm is allowed to spend.
+
+| method | what it does |
+|---|---|
+| `split(ways: int) -> 'Budget'` | The share of this budget one of `ways` independent runs may spend. |
+
+### `Comparison(...)`
+
+Several seeds of several arms, and whether they are comparable at all.
+
+| method | what it does |
+|---|---|
+| `separates(a: str, b: str) -> bool` | Whether `a`'s seeds are all above `b`'s, with no overlap. |
+| `spread(arm: str) -> Tuple[float, float, float]` | (min, median, max) test quality. Not a confidence interval. |
+
+### `ForkOutcome(seed: int, dev_reward: float, test_reward: float, rollouts: int, calls: int) -> None`
+
+One member of a fork arm, kept so the selection step can be audited.
+
+### `Workload(...)`
+
+The half of the comparison that must not vary, in one object.
+
+### `best_of_n_fork(workload: Workload, n: int, *, budget: Budget, *, seed: int = 0) -> ArmResult`
+
+N runs that never see each other, each on its share of the budget.
+
+### `compare(...)`
+
+Group arm results by arm and check what the comparison actually held fixed.
+
+### `merge_of_n(workload: Workload, n: int, *, budget: Budget, *, seed: int = 0) -> ArmResult`
+
+N workers proposing into one artifact, merged every round. The claim.
+
+### `serial(workload: Workload, *, budget: Budget, *, seed: int = 0) -> ArmResult`
+
+One worker, improving itself in sequence. The floor.
+
+### `to_markdown(comparison: Comparison) -> str`
+
+A table whose caption cannot claim more than the numbers support.
+
+---
+
 ## Type aliases and constants
 
 Values rather than classes or functions.
@@ -911,6 +966,10 @@ Provisions `LocalWorkspaceSandbox` -- `mkdtemp`, plus a lease file.
 ### `backends`
 
 Agentic backends -- a base agent that *navigates documents with tools*, not just maps a prompt to text.
+
+### `baselines`
+
+The control every efficiency number in this repository is missing.
 
 ### `dataloader`
 

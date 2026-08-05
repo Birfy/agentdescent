@@ -883,6 +883,7 @@ class RoundInfo:
     fused: int = 0
 
 
+
 @dataclass
 class EvolutionResult:
     state: Dict[str, str]
@@ -901,7 +902,8 @@ class EvolutionResult:
     #: from "died".
     error: Optional[str] = None
     #: Why the run ended -- ``"target_reward"`` / ``"patience"`` / ``"rounds"`` /
-    #: ``"max_seconds"`` / ``"max_iters"`` / ``"error"``. Without it a budget
+    #: ``"max_seconds"`` / ``"max_iters"`` / ``"max_rollouts"`` / ``"max_calls"``
+    #: / ``"error"``. Without it a budget
     #: expiry is indistinguishable from convergence: ``error`` is ``None`` for
     #: both, ``history`` has entries for both, and the only other clue is
     #: re-deriving ``len(history)`` against arguments whose meaning changes between
@@ -1625,6 +1627,8 @@ def evolve(
     asynchronous: bool = False,
     async_ratio: int = 3,
     max_seconds: Optional[float] = None,
+    max_rollouts: Optional[int] = None,
+    max_calls: Optional[int] = None,
     self_verify: bool = True,
     held_out_frac: float = 0.4,
     repo_path: Optional[str] = None,
@@ -1789,6 +1793,25 @@ def evolve(
     max_seconds:
         Wall-clock budget. ``None`` (default) means unbounded; the async path
         uses ``20.0`` when unset.
+    max_rollouts, max_calls:
+        The budget in the two units a comparison has to hold fixed: rollouts
+        completed, and actor invocations (``run`` + ``propose``). ``rounds`` is
+        not one of them -- configurations differ in how much model a round buys,
+        so a budget fixed in rounds hands the wider configuration more model and
+        then reports the extra model as a win for parallelism. Either bound stops
+        the run with ``stop_reason`` ``"max_rollouts"`` / ``"max_calls"``.
+
+        **Checked at the round barrier, so a run overshoots by up to one round.**
+        A round is dispatched or it is not; stopping halfway would leave a
+        half-merged round, and the states a comparison compares are the ones a
+        merge produced. So a budget is a *bound on where to stop*, never the
+        number to compare on: read the spend the run actually reported
+        (``result.rollouts``, ``result.usage.calls``), which is what
+        :mod:`agentdescent.baselines` does -- it refuses to call two arms
+        equal-budget when their measured spends differ.
+
+        The async path has no barrier and enforces both per rollout, so it
+        overshoots by at most the rollouts already in flight.
     self_verify:
         Re-run the trajectory with the diff applied to record a local
         before/after delta. Doubles the rollouts spent per proposal; ports that
@@ -1907,13 +1930,13 @@ def evolve(
                 "synchronous path. Pass max_seconds= explicitly, and check "
                 "result.stop_reason -- a budget expiry otherwise looks exactly "
                 "like convergence.", RuntimeWarning, stacklevel=2)
-        if rounds != 15:                     # i.e. the caller chose a value
+        if rounds != 15 and max_rollouts is None:   # i.e. the caller chose a value
             warnings.warn(
                 f"evolve(asynchronous=True) has no round barrier, so rounds={rounds} "
                 f"is reinterpreted as a budget of {rounds * max(1, n_workers)} worker "
                 "rollouts, and RoundInfo.round becomes a merger-sweep index -- "
                 "len(result.history) is not comparable with the synchronous path. "
-                "Call async_evolve(max_iters=) directly for an exact count.",
+                "Pass max_rollouts= to say the budget outright.",
                 RuntimeWarning, stacklevel=2)
         from .async_evolve import async_evolve
         return async_evolve(
@@ -1921,7 +1944,9 @@ def evolve(
             initial_state=initial_state, blast_radius=blast_radius, artifact_id=artifact_id,
             n_workers=n_workers, async_ratio=async_ratio,
             max_seconds=20.0 if max_seconds is None else max_seconds,
-            max_iters=rounds * max(1, n_workers), held_out_frac=held_out_frac,
+            max_iters=(max_rollouts if max_rollouts is not None
+                       else rounds * max(1, n_workers)),
+            max_calls=max_calls, held_out_frac=held_out_frac,
             repo_path=repo_path, agg_config=agg_config, staleness_policy=staleness_policy,
             aggregator_factory=aggregator_factory, oracle_budget=oracle_budget,
             cheap_eval_tasks=cheap_eval_tasks, shuffle=shuffle, seed=seed,
@@ -2003,6 +2028,22 @@ def evolve(
             stop_reason = "max_seconds"
             if verbose:
                 print(f"round {r:>3}  stopping: max_seconds={max_seconds} reached")
+            break
+        # The cost budgets, checked where the wall-clock one already is: at the
+        # barrier, before a round is dispatched. Mid-round would mean a partial
+        # merge, and the state a budget comparison compares is one a merge
+        # produced -- so the run overshoots by up to a round and reports the
+        # spend it actually incurred instead of the one it was asked for.
+        spent = eng.meter.snapshot()
+        over = ((max_rollouts is not None and spent.rollouts >= max_rollouts
+                 and "max_rollouts") or
+                (max_calls is not None and spent.calls >= max_calls
+                 and "max_calls"))
+        if over:
+            stop_reason = over
+            if verbose:
+                print(f"round {r:>3}  stopping: {over} reached "
+                      f"({spent.rollouts} rollouts / {spent.calls} calls)")
             break
         try:
             snap = ledger.snapshot(Ledger.DEV)

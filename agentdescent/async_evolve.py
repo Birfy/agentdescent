@@ -68,6 +68,7 @@ def async_evolve(
     async_ratio: int = 3,
     max_seconds: float = 20.0,
     max_iters: Optional[int] = None,
+    max_calls: Optional[int] = None,
     target_reward: Optional[float] = None,
     patience: Optional[int] = None,
     max_worker_errors: int = 3,
@@ -138,6 +139,13 @@ def async_evolve(
         short for any sweep to finish.
     max_iters:
         Stop after this many worker rollouts in total (a budget, not a barrier).
+    max_calls:
+        Stop after this many actor invocations (``run`` + ``propose``) in total.
+        The second half of an equal-budget comparison: two configurations matched
+        on rollouts still differ in model spend whenever one of them asks for
+        more proposals per rollout, and the cheaper unit is the one a reader
+        assumes was held fixed. Both bounds are checked as each rollout lands, so
+        a run overshoots only by what was already in flight.
     eval_concurrency:
         How many held-out tasks the merger scores at once. ``1`` restores the old
         sequential behaviour.
@@ -220,7 +228,7 @@ def async_evolve(
         ``error`` is set only when the run **ended** because of a failure -- a
         transient error the workers retried past leaves it ``None``, so read
         ``stop_reason`` to tell ``"target_reward"`` from ``"max_seconds"`` /
-        ``"max_iters"`` / ``"patience"``.
+        ``"max_iters"`` / ``"max_calls"`` / ``"patience"``.
 
         ``history`` holds one entry per **merger sweep** that had cards to merge,
         not per round: its length tracks how fast the workers produced and is not
@@ -478,6 +486,13 @@ def async_evolve(
                 counter[0] += 1
                 if max_iters is not None and counter[0] >= max_iters:
                     stop_reason[0] = "max_iters"
+                    stop.set()
+                elif max_calls is not None and eng.meter.usage.calls >= max_calls:
+                    # Read from the meter, not from a local tally: `calls` counts
+                    # `propose` as well as `run`, and a rollout that solved its
+                    # task never proposes -- so rollouts and calls are not a fixed
+                    # ratio and the second budget cannot be derived from the first.
+                    stop_reason[0] = "max_calls"
                     stop.set()
 
     def _drain_and_merge() -> None:

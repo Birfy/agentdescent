@@ -242,6 +242,9 @@ SUBMODULES: List[Tuple[str, str, str, str]] = [
      "backends.md"),
     ("agentdescent.rewards", "Ready-made scorers",
      "The reward functions everyone writes, with the details right.", "rewards.md"),
+    ("agentdescent.baselines", "Equal-budget baselines",
+     "merge-of-N against best-of-N fork and serial, on one rollout budget.",
+     "results.md"),
 ]
 
 

@@ -139,6 +139,7 @@ from .evolution import (
 )
 from .async_evolve import async_evolve
 from .async_runtime import AsyncAgentDescent, AsyncConfig, AsyncStats
+from . import baselines                     # agentdescent.baselines.merge_of_n(...)
 from .parallel import (
     ParallelMode,
     ParallelStrategy,
@@ -180,6 +181,7 @@ __all__ = [
     "Dataset",
     "split_dataset",
     "backends",
+    "baselines",
     "dataloader",
     "DifficultyWeighted",
     "RoundRobin",

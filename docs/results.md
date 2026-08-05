@@ -162,6 +162,65 @@ Full breakdown in [Efficiency](efficiency.md).
 they are independent, and a run slower than its worker count suggests usually
 wants the second.
 
+## Equal budget: merge-of-N against best-of-N fork
+
+!!! danger "Every number above is a *throughput* number, and throughput cannot settle this"
+    Speedup measures how fast the same work finishes. It cannot tell **merging**
+    from **sampling and selecting**, because population-based methods are already
+    parallel: N independent forks saturate N workers just as well, and their
+    speedup is also close to N. A table of speedups is consistent with merging
+    being a new mechanism *and* with it being an engineering convenience.
+
+    One quantity distinguishes them: held-out quality at **equal rollout budget**,
+    merge-of-N against best-of-N fork. `agentdescent.baselines` runs the three
+    arms that produce it — `serial`, `best_of_n_fork`, `merge_of_n` — over one
+    `Workload`, so the arms cannot drift in anything but execution shape.
+
+```python
+from agentdescent.baselines import Budget, Workload, best_of_n_fork, compare, merge_of_n, serial, to_markdown
+
+workload = Workload(tasks=tasks, reward=reward, test_eval=score_on_test,
+                    agent=agent, evolve_kwargs={"rounds": 10_000})
+budget = Budget(rollouts=800)
+arms = [f(workload, budget=budget, seed=s) for s in (0, 1, 2)
+        for f in (lambda w, **k: serial(w, **k),
+                  lambda w, **k: best_of_n_fork(w, 8, **k),
+                  lambda w, **k: merge_of_n(w, 8, **k))]
+print(to_markdown(compare(arms, fixed="rollouts")))
+```
+
+Two properties the module enforces rather than describes:
+
+**Fork is reported twice.** The *oracle* fork is the best fork on test — an upper
+bound nobody can ship, since picking it needs the answer. The *selected* fork is
+the best on dev, reported on test, which is what fork-and-select actually
+delivers. Reporting only one flatters one side.
+
+**Rollouts and calls cannot both be equalised.** Measured, not assumed. Forks that
+never talk to each other each start from nothing, so nearly every rollout of
+theirs fails and asks for a proposal; a merge arm shares what the others learned,
+so more of its rollouts solve outright and never call the proposer. Fix rollouts
+and the fork arm spends over twice the model; fix calls and it gets a quarter of
+the rollouts. `compare(fixed=...)` therefore names the unit held fixed and prints
+the other one's divergence as a confound beside the result. **A merge arm that
+wins at equal rollouts while spending more calls has not been shown to win.**
+
+| arm | dataset | rollouts | test quality (min/med/max) | fork oracle |
+|---|---|---|---|---|
+| serial | — | — | *not yet measured* | — |
+| fork-of-8 | — | — | *not yet measured* | — |
+| merge-of-8 | — | — | *not yet measured* | — |
+
+The row above is empty on purpose, and stays empty until it is filled by a real
+run on HotpotQA and FiNER-139 at ≥ 3 seeds. `docs/algo-ace.md` records the same
+configuration moving 4.8 points between two runs, so a single-seed number here
+would not be a result. **A negative outcome is publishable and this page will
+publish it:** if merge-of-N lands inside the spread of best-of-N fork at equal
+budget, then on those workloads parallel merging is a throughput optimisation and
+not a new mechanism, and the claim that "gradients add, diffs do not" implies
+anything beyond engineering convenience has to be marked unsupported here — with
+the datasets and budget it was tested at.
+
 ## Reproducing
 
 ```bash
