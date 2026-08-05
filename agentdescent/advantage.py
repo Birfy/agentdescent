@@ -87,10 +87,16 @@ class GroupAdvantage:
     by it is how a rounding error becomes a large advantage.
     """
 
-    def __init__(self, min_group: int = 4) -> None:
+    def __init__(self, min_group: int = 4, max_groups: int = 4_096) -> None:
         if min_group < 2:
             raise ValueError("a group needs at least two members to have a spread")
         self.min_group = min_group
+        #: Bounded, because a group key contains the base version and the base
+        #: version moves on every commit -- so the number of groups grows with
+        #: the length of the run and nothing ever removes one. The oldest are
+        #: evicted, which is safe: a base version that has been superseded can
+        #: never receive another rollout.
+        self.max_groups = max_groups
         self._n: Dict[str, int] = {}
         self._sum: Dict[str, float] = {}
         self._sq: Dict[str, float] = {}
@@ -107,6 +113,12 @@ class GroupAdvantage:
         itself. Excluding it (a leave-one-out advantage) is defensible too and
         differs by O(1/n); including it is what GRPO's own formulation does.
         """
+        if key not in self._n and len(self._n) >= self.max_groups:
+            # dicts preserve insertion order, so the first key is the oldest
+            # group -- one whose base version was superseded long ago.
+            oldest = next(iter(self._n))
+            for store in (self._n, self._sum, self._sq):
+                store.pop(oldest, None)
         self._n[key] = self._n.get(key, 0) + 1
         self._sum[key] = self._sum.get(key, 0.0) + reward
         self._sq[key] = self._sq.get(key, 0.0) + reward * reward

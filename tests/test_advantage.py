@@ -70,6 +70,19 @@ def test_a_group_of_one_is_refused_at_construction():
         GroupAdvantage(min_group=1)
 
 
+def test_the_group_table_is_bounded():
+    """A key contains the base version, which moves on every commit -- so the
+    number of groups grows with the length of the run and nothing removes one.
+    Evicting the oldest is safe: a superseded base version gets no more rollouts.
+    """
+    ga = GroupAdvantage(min_group=2, max_groups=8)
+    for version in range(50):
+        ga.observe(ga.key(version), 1.0)
+    assert len(ga._n) == 8
+    assert ga.group_size(ga.key(49)) == 1, "the newest group must survive"
+    assert ga.group_size(ga.key(0)) == 0, "the oldest must have been evicted"
+
+
 # -- the signal reaches the card --------------------------------------------
 
 

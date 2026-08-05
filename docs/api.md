@@ -650,7 +650,7 @@ Shift the acceptance prior by how well a proposal did against its group.
 
 Break a contradiction by group-relative advantage, not raw score.
 
-### `GroupAdvantage(min_group: int = 4) -> None`
+### `GroupAdvantage(min_group: int = 4, max_groups: int = 4096) -> None`
 
 Standardise a rollout's reward against the group it belongs to.
 
