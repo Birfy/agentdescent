@@ -1,5 +1,9 @@
 # AgentDescent 并行与异步 Time-to-Quality 实验报告
 
+> 验收口径已更新为直接使用 TextGrad 与 OpenEvolve。真实 GLM-5.2 主实验见
+> [`textgrad-openevolve-parallel-async.md`](textgrad-openevolve-parallel-async.md)。本报告保留为
+> 隔离调度器因果和重复运行稳定性的辅助证据。
+
 日期：2026-08-04
 运行目录：`/home/qiukaixi/agentdescent`
 结论性质：受控调度基准，用于验证并行扩展和异步消除 barrier 的效果

@@ -179,7 +179,32 @@ def validate_source(source: str, max_length: int = 20000) -> Tuple[bool, str]:
     return True, ""
 
 
-def _limit_candidate_process(timeout: float):
+def _current_user_task_count() -> int:
+    """Count Linux tasks owned by this uid for an RLIMIT_NPROC floor."""
+    uid = os.getuid()
+    total = 0
+    try:
+        entries = list(os.scandir("/proc"))
+    except OSError:
+        return 0
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        try:
+            status = Path(entry.path, "status").read_text(encoding="utf-8")
+            owner = next(
+                int(line.split()[1])
+                for line in status.splitlines()
+                if line.startswith("Uid:")
+            )
+            if owner == uid:
+                total += sum(1 for _ in os.scandir(Path(entry.path, "task")))
+        except (OSError, StopIteration, ValueError):
+            continue
+    return total
+
+
+def _limit_candidate_process(timeout: float, nproc_limit: int):
     def set_limits() -> None:
         os.setsid()
         cpu_seconds = max(2, int(math.ceil(timeout)))
@@ -189,9 +214,9 @@ def _limit_candidate_process(timeout: float):
         resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
         try:
             # RLIMIT_NPROC counts every thread owned by this WSL user, including
-            # the editor and test runner. A value of 64 prevents bwrap itself
-            # from creating its namespace before candidate code even starts.
-            resource.setrlimit(resource.RLIMIT_NPROC, (512, 512))
+            # the editor and test runner. The parent computes a floor from the
+            # current host load so bwrap keeps a small, bounded creation budget.
+            resource.setrlimit(resource.RLIMIT_NPROC, (nproc_limit, nproc_limit))
         except (ValueError, OSError):
             pass
 
@@ -332,13 +357,14 @@ def evaluate_source(
         candidate = Path(directory) / "candidate.py"
         candidate.write_text(source, encoding="utf-8")
         command = _bubblewrap_command(candidate, trials, budget, seed)
+        nproc_limit = max(512, _current_user_task_count() + 64)
         for sandbox_attempt in range(3):
             process = subprocess.Popen(
                 command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                preexec_fn=_limit_candidate_process(timeout),
+                preexec_fn=_limit_candidate_process(timeout, nproc_limit),
             )
             try:
                 stdout, stderr = process.communicate(timeout=timeout)
@@ -426,13 +452,14 @@ def _mutation_prompt(
     *,
     iteration: int,
     budget: int,
+    trials: int = 10,
 ) -> str:
     return f'''You are the mutation model in an OpenEvolve-style program search.
 
 Improve a Python search algorithm for this objective on x,y in [-5,5]:
 f(x,y) = sin(x)*cos(y) + sin(x*y) + (x^2+y^2)/20.
 
-The evaluator runs 10 deterministic seeds with a strict budget of {budget} calls to
+The evaluator runs {trials} deterministic seeds with a strict budget of {budget} calls to
 the supplied objective. It rewards low average objective value, proximity to the
 same global basin across seeds, and reliability. Never hard-code a known optimum.
 
@@ -573,6 +600,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                 inspiration,
                 iteration=iteration,
                 budget=args.objective_budget,
+                trials=args.trials,
             )
         ).strip()
         code, summary = extract_program(raw)

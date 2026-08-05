@@ -45,6 +45,7 @@ value”，它与 word sorting 的字符串列表答案明显不匹配。因此 
 
 并行与异步能力另有独立的 time-to-quality 报告：
 
+- [`textgrad-openevolve-parallel-async.md`](textgrad-openevolve-parallel-async.md)，真实算法主实验
 - [`parallel-async-time-to-quality.md`](parallel-async-time-to-quality.md)
 - [`parallel-async-time-to-quality-result.json`](parallel-async-time-to-quality-result.json)
 - [`parallel-async-incremental-stress-result.json`](parallel-async-incremental-stress-result.json)
@@ -308,9 +309,9 @@ Bubblewrap 启动成本，因此仅用于确认算法没有用运行时间换分
 pytest -q experiment/test_small_experiments.py
 ```
 
-结果：`9 passed`。覆盖答案解析、官方 positional split、dry-run 零网络、AST 安全门、
+结果：`12 passed`。覆盖答案解析、官方 positional split、dry-run 零网络、AST 安全门、
 官方评分公式、Bubblewrap 确定性执行、无 Key dry-run，以及并行/异步任务构造和
-time-to-quality 加速断言。
+time-to-quality 加速断言，以及两个真实算法的 serial/sync/async 调度入口。
 
 正式运行前后的 dry-run：
 

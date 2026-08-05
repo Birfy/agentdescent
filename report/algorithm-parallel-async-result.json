@@ -1,0 +1,2516 @@
+{
+  "experiment": "TextGrad and OpenEvolve parallel/async benchmark",
+  "status": "completed",
+  "started_at": "2026-08-05T01:52:02+00:00",
+  "config": {
+    "provider": "openai",
+    "model": "glm-5.2",
+    "thinking": "disabled",
+    "max_tokens": 1024,
+    "temperature": 0.0,
+    "api_timeout": 180.0,
+    "seed": 0,
+    "algorithms": [
+      "textgrad",
+      "openevolve"
+    ],
+    "modes": [
+      "serial",
+      "sync_parallel",
+      "async_pipeline"
+    ],
+    "repeats": 1,
+    "concurrency": 3,
+    "textgrad": {
+      "batch_size": 2,
+      "validation_size": 3,
+      "target_accuracy": 0.3333333333333333,
+      "subset": "first",
+      "steps": 1
+    },
+    "openevolve": {
+      "candidates": 3,
+      "trials": 5,
+      "objective_budget": 100,
+      "min_score_gain": 0.005,
+      "candidate_timeout": 15.0,
+      "archive_size": 6,
+      "generations": 1,
+      "fixed_parent_within_generation": true
+    }
+  },
+  "method": {
+    "provider_calls": "live API calls; no replay or synthetic sleep",
+    "serial": "one model/evaluator trajectory at a time",
+    "sync_parallel": "parallel work within each stage, with a barrier between stages",
+    "async_pipeline": "each independent trajectory advances immediately to its next stage"
+  },
+  "observations": [
+    {
+      "algorithm": "textgrad",
+      "mode": "serial",
+      "repeat": 0,
+      "target_quality": 0.3333333333333333,
+      "target_reached": true,
+      "time_to_quality_s": 122.84898728000007,
+      "candidate_ready_s": 122.84898728000007,
+      "wall_seconds": 122.84898853800019,
+      "baseline_quality": 0.0,
+      "final_quality": 1.0,
+      "quality_gain": 1.0,
+      "baseline_validation": {
+        "accuracy": 0.0,
+        "solved": 0,
+        "total": 3,
+        "wilson_95": {
+          "low": 5.551115123125783e-17,
+          "high": 0.5614970317550454
+        },
+        "items": [
+          {
+            "index": 50,
+            "correct": false,
+            "predicted": "4",
+            "target": "core discreet hat sonnet",
+            "response": "To sort the words alphabetically, we compare the first letter of each word. The words are \"hat\", \"core\", \"sonnet\", and \"discreet\". Their first letters are h, c, s, and d. Arranging these letters alphabetically gives c, d, h, s. Therefore, the sorted order of the words is \"core\", \"discreet\", \"hat\", \"sonnet\".\n\nAnswer: 4"
+          },
+          {
+            "index": 51,
+            "correct": false,
+            "predicted": "11",
+            "target": "alphabet birmingham cantonese educate entourage fashion fond marimba mechanic philology retrofit",
+            "response": "To sort the given words alphabetically, I will compare the first letter of each word and arrange them in alphabetical order. If two words start with the same letter, I will look at the subsequent letters until the order is determined.\n\n1. First, I will list the words: marimba, retrofit, alphabet, birmingham, philology, fashion, educate, mechanic, cantonese, fond, entourage.\n2. I will group them by their starting letters:\n   - 'a': alphabet\n   - 'b': birmingham\n   - 'c': cantonese\n   - 'e': educate, entourage\n   - 'f': fashion, fond\n   - 'm': marimba, mechanic\n   - 'p': philology\n   - 'r': retrofit\n3. For the words starting with 'e', I compare \"educate\" and \"entourage\". Since 'd' comes before 'n', \"educate\" comes first.\n4. For the words starting with 'f', I compare \"fashion\" and \"fond\". Since 'a' comes before 'o', \"fashion\" comes first.\n5. For the words starting with 'm', I compare \"marimba\" and \"mechanic\". Since 'a' comes before 'e', \"marimba\" comes first.\n6. Putting it all together, the sorted list is: alphabet, birmingham, cantonese, educate, entourage, fashion, fond, marimba, mechanic, philology, retrofit.\n7. The question asks for a numerical value, so I will count the number of words in the sorted list. There are 11 words in total.\n\nAnswer: 11"
+          },
+          {
+            "index": 52,
+            "correct": false,
+            "predicted": "5",
+            "target": "jugoslavia polyhedron retrorocket scoot walnut",
+            "response": "To sort the words alphabetically, I will compare the first letter of each word. The words are: walnut, scoot, jugoslavia, retrorocket, polyhedron.\n\n1. \"jugoslavia\" starts with 'j', which comes earliest in the alphabet among the first letters.\n2. \"polyhedron\" starts with 'p', which comes next.\n3. \"retrorocket\" starts with 'r', which comes after 'p'.\n4. \"scoot\" starts with 's', which comes after 'r'.\n5. \"walnut\" starts with 'w', which comes last.\n\nThe sorted list is: jugoslavia, polyhedron, retrorocket, scoot, walnut.\n\nAnswer: 5"
+          }
+        ]
+      },
+      "candidate_validation": {
+        "accuracy": 1.0,
+        "solved": 3,
+        "total": 3,
+        "wilson_95": {
+          "low": 0.4385029682449546,
+          "high": 1.0
+        },
+        "items": [
+          {
+            "index": 50,
+            "correct": true,
+            "predicted": "core discreet hat sonnet",
+            "target": "core discreet hat sonnet",
+            "response": "To sort the words alphabetically, we compare the first letter of each word:\n- core (c)\n- discreet (d)\n- hat (h)\n- sonnet (s)\n\nArranging them in alphabetical order gives: core, discreet, hat, sonnet.\n\nAnswer: core discreet hat sonnet"
+          },
+          {
+            "index": 51,
+            "correct": true,
+            "predicted": "alphabet birmingham cantonese educate entourage fashion fond marimba mechanic philology retrofit",
+            "target": "alphabet birmingham cantonese educate entourage fashion fond marimba mechanic philology retrofit",
+            "response": "To sort the given words alphabetically, I will compare the first letter of each word and arrange them in order from A to Z. If the first letters are the same, I will look at the subsequent letters until the order is determined.\n\nThe given list of words is:\nmarimba, retrofit, alphabet, birmingham, philology, fashion, educate, mechanic, cantonese, fond, entourage\n\nStep 1: Group the words by their starting letter.\n- a: alphabet\n- b: birmingham\n- c: cantonese\n- e: educate, entourage\n- f: fashion, fond\n- m: marimba, mechanic\n- p: philology\n- r: retrofit\n\nStep 2: Sort the words within each group.\n- For the 'e' group: \"educate\" comes before \"entourage\" (d comes before n).\n- For the 'f' group: \"fashion\" comes before \"fond\" (a comes before o).\n- For the 'm' group: \"marimba\" comes before \"mechanic\" (a comes before e).\n\nStep 3: Combine all the sorted groups into a single list.\nalphabet, birmingham, cantonese, educate, entourage, fashion, fond, marimba, mechanic, philology, retrofit\n\nAnswer: alphabet birmingham cantonese educate entourage fashion fond marimba mechanic philology retrofit"
+          },
+          {
+            "index": 52,
+            "correct": true,
+            "predicted": "jugoslavia polyhedron retrorocket scoot walnut",
+            "target": "jugoslavia polyhedron retrorocket scoot walnut",
+            "response": "To sort the words alphabetically, I will compare the first letter of each word. The words are: walnut, scoot, jugoslavia, retrorocket, polyhedron.\n\n1. 'j' comes first, so \"jugoslavia\" is first.\n2. 'p' comes next, so \"polyhedron\" is second.\n3. 'r' comes next, so \"retrorocket\" is third.\n4. 's' comes next, so \"scoot\" is fourth.\n5. 'w' comes last, so \"walnut\" is fifth.\n\nThe sorted list is: jugoslavia polyhedron retrorocket scoot walnut.\n\nAnswer: jugoslavia polyhedron retrorocket scoot walnut"
+          }
+        ]
+      },
+      "candidate_valid": true,
+      "candidate_accepted": true,
+      "candidate_rejection_reason": "",
+      "candidate_prompt": "You will answer a reasoning question. Think step by step. The last line of your response must be exactly: 'Answer: $VALUE' where $VALUE is the final answer. $VALUE may be a number, string, list, or any type required by the prompt. Format $VALUE exactly as specified by the prompt (e.g., space-separated words), without conversational text or extra punctuation. Only the 'Answer: $VALUE' line is evaluated, so its exact syntax is critical.",
+      "batch_ids": [
+        0,
+        1
+      ],
+      "gradients": [
+        {
+          "item_id": 0,
+          "response_gradient": "**Critique:** Your response was marked incorrect due to formatting artifacts that broke the exact string match. \n\n1. **Punctuation:** You added a comma between the words (`syndrome, therefrom`). The ground truth contains no punctuation.\n2. **Trailing Text:** You appended `Answer: 2` at the end, which is not part of the expected output.\n\n**Feedback:** Output the sorted words separated by a single space, with no punctuation, explanations, or trailing text. End your response immediately after the second word.",
+          "prompt_gradient": "**Backpropagated Feedback to System Instruction:**\n\nThe system instruction must be updated to resolve a direct conflict between its formatting rules and the objective's strict output-matching requirements. \n\n1. **Clarify the scope of the `Answer: $VALUE` format:** The instruction currently mandates that the *last line* of the response must be `Answer: $VALUE`. However, for tasks like sorting or string generation, the final evaluated answer is the sequence itself, not a numerical count. The instruction must clarify that if the final answer is a sequence of items (e.g., words), the sequence must be placed directly in the `Answer: $VALUE` line using the exact formatting required by the objective (e.g., space-separated), rather than outputting the sequence in the reasoning steps and appending an arbitrary numerical value (like a count) at the end.\n2. **Preserve exact output formatting:** The instruction must explicitly state that the final answer value must not contain any punctuation (such as commas) unless specifically requested. The model must avoid conversational formatting (like \"The sorted list is: ...\") for the final answer and strictly adhere to the objective's expected string structure.\n3. **Preserve the step-by-step reasoning:** The instruction should continue to enforce step-by-step thinking, but must clarify that the final `Answer: $VALUE` line is the *only* part of the response that will be evaluated, making its exact syntax critical."
+        },
+        {
+          "item_id": 1,
+          "response_gradient": "**Critique:** Your alphabetical sorting is completely correct and matches the ground truth. However, your final output line is `Answer: 20` instead of the sorted list of words. Because the objective is an exact-match on the sorted string, returning \"20\" results in a failure. \n\n**Actionable Feedback:** \n1. Remove the `Answer: 20` line entirely.\n2. Ensure your final output is exactly the space-separated list of sorted words: `barn damp delmarva dot drumhead embezzle entirety greene guru it&t malton obstetric onus panicking prod same scorch splutter subsist thrill` (remove the commas from your current list as well, to match the exact target format).",
+          "prompt_gradient": "**Feedback for System Instruction:**\n\nThe system instruction must clarify the definition of `$VALUE` in the `Answer: $VALUE` format. Currently, the instruction enforces a rigid output template intended for numerical reasoning tasks, but it fails to account for non-numerical reasoning tasks (like string sorting). \n\nTo prevent future failures, the instruction should be updated to clarify the following:\n1. **Generalize `$VALUE`:** Explicitly state that `$VALUE` represents the final answer to the reasoning question, which may be a numerical value, a string, a list, or any other data type required by the prompt. \n2. **Format Specification:** Instruct the model to format the final answer exactly as requested in the user prompt (e.g., space-separated, comma-separated), ensuring the `Answer: $VALUE` line contains the complete, exact-match result rather than a meta-property like the count of items.\n3. **Preserve Step-by-Step Constraint:** Continue to preserve the requirement to \"Think step by step\" and keep the final line restricted to the `Answer: $VALUE` format, as the intermediate reasoning was correct and helpful."
+        }
+      ],
+      "usage": {
+        "by_phase": {
+          "forward": {
+            "calls": 8,
+            "failures": 0,
+            "prompt_tokens": 1050,
+            "completion_tokens": 1541,
+            "total_tokens": 2591,
+            "model_seconds": 75.745592
+          },
+          "response_gradient": {
+            "calls": 2,
+            "failures": 0,
+            "prompt_tokens": 671,
+            "completion_tokens": 260,
+            "total_tokens": 931,
+            "model_seconds": 17.729474
+          },
+          "prompt_gradient": {
+            "calls": 2,
+            "failures": 0,
+            "prompt_tokens": 972,
+            "completion_tokens": 529,
+            "total_tokens": 1501,
+            "model_seconds": 23.366913
+          },
+          "tgd_update": {
+            "calls": 1,
+            "failures": 0,
+            "prompt_tokens": 694,
+            "completion_tokens": 109,
+            "total_tokens": 803,
+            "model_seconds": 6.005519
+          }
+        },
+        "total": {
+          "calls": 13,
+          "failures": 0,
+          "prompt_tokens": 3387,
+          "completion_tokens": 2439,
+          "total_tokens": 5826,
+          "model_seconds": 122.847498
+        }
+      },
+      "throughput_calls_s": 0.10582097707689944,
+      "stage_summary": {
+        "baseline_eval": {
+          "calls": 3,
+          "wall_span_s": 26.973669169999994,
+          "sum_call_s": 26.973515385999917,
+          "min_call_s": 6.494920307000029,
+          "max_call_s": 13.36032443399995
+        },
+        "train_forward": {
+          "calls": 2,
+          "wall_span_s": 38.22008249800001,
+          "sum_call_s": 19.213918427999943,
+          "min_call_s": 6.768463476999841,
+          "max_call_s": 12.445454951000102
+        },
+        "response_gradient": {
+          "calls": 2,
+          "wall_span_s": 41.16252091399997,
+          "sum_call_s": 17.729593094000165,
+          "min_call_s": 8.018692945000112,
+          "max_call_s": 9.710900149000054
+        },
+        "prompt_gradient": {
+          "calls": 2,
+          "wall_span_s": 45.52343827100003,
+          "sum_call_s": 23.367032435000056,
+          "min_call_s": 10.987422882000146,
+          "max_call_s": 12.37960955299991
+        },
+        "tgd_update": {
+          "calls": 1,
+          "wall_span_s": 6.005579134000072,
+          "sum_call_s": 6.005579134000072,
+          "min_call_s": 6.005579134000072,
+          "max_call_s": 6.005579134000072
+        },
+        "candidate_eval": {
+          "calls": 3,
+          "wall_span_s": 29.55880259100013,
+          "sum_call_s": 29.558750347000114,
+          "min_call_s": 6.668878409999934,
+          "max_call_s": 11.843936214000223
+        }
+      },
+      "events": [
+        {
+          "phase": "baseline_eval",
+          "unit": "baseline_eval:item-50",
+          "started_s": 4.653000132748275e-06,
+          "ended_s": 6.494924960000162,
+          "duration_s": 6.494920307000029,
+          "success": true
+        },
+        {
+          "phase": "baseline_eval",
+          "unit": "baseline_eval:item-51",
+          "started_s": 6.495050612000114,
+          "ended_s": 19.855375046000063,
+          "duration_s": 13.36032443399995,
+          "success": true
+        },
+        {
+          "phase": "baseline_eval",
+          "unit": "baseline_eval:item-52",
+          "started_s": 19.855403178000188,
+          "ended_s": 26.973673823000127,
+          "duration_s": 7.118270644999939,
+          "success": true
+        },
+        {
+          "phase": "train_forward",
+          "unit": "train_forward:item-0",
+          "started_s": 26.973754189000147,
+          "ended_s": 33.74221766599999,
+          "duration_s": 6.768463476999841,
+          "success": true
+        },
+        {
+          "phase": "response_gradient",
+          "unit": "item-0",
+          "started_s": 33.742245134000086,
+          "ended_s": 41.7609380790002,
+          "duration_s": 8.018692945000112,
+          "success": true
+        },
+        {
+          "phase": "prompt_gradient",
+          "unit": "item-0",
+          "started_s": 41.76094785800001,
+          "ended_s": 52.748370740000155,
+          "duration_s": 10.987422882000146,
+          "success": true
+        },
+        {
+          "phase": "train_forward",
+          "unit": "train_forward:item-1",
+          "started_s": 52.748381736000056,
+          "ended_s": 65.19383668700016,
+          "duration_s": 12.445454951000102,
+          "success": true
+        },
+        {
+          "phase": "response_gradient",
+          "unit": "item-1",
+          "started_s": 65.193865899,
+          "ended_s": 74.90476604800006,
+          "duration_s": 9.710900149000054,
+          "success": true
+        },
+        {
+          "phase": "prompt_gradient",
+          "unit": "item-1",
+          "started_s": 74.90477657600013,
+          "ended_s": 87.28438612900004,
+          "duration_s": 12.37960955299991,
+          "success": true
+        },
+        {
+          "phase": "tgd_update",
+          "unit": "batch-update",
+          "started_s": 87.284401463,
+          "ended_s": 93.28998059700007,
+          "duration_s": 6.005579134000072,
+          "success": true
+        },
+        {
+          "phase": "candidate_eval",
+          "unit": "candidate_eval:item-50",
+          "started_s": 93.29013804300007,
+          "ended_s": 99.959016453,
+          "duration_s": 6.668878409999934,
+          "success": true
+        },
+        {
+          "phase": "candidate_eval",
+          "unit": "candidate_eval:item-51",
+          "started_s": 99.95903682000016,
+          "ended_s": 111.00497254300012,
+          "duration_s": 11.045935722999957,
+          "success": true
+        },
+        {
+          "phase": "candidate_eval",
+          "unit": "candidate_eval:item-52",
+          "started_s": 111.00500441999998,
+          "ended_s": 122.8489406340002,
+          "duration_s": 11.843936214000223,
+          "success": true
+        }
+      ]
+    },
+    {
+      "algorithm": "textgrad",
+      "mode": "sync_parallel",
+      "repeat": 0,
+      "target_quality": 0.3333333333333333,
+      "target_reached": true,
+      "time_to_quality_s": 53.813602112000126,
+      "candidate_ready_s": 53.813602112000126,
+      "wall_seconds": 53.813603877000105,
+      "baseline_quality": 0.0,
+      "final_quality": 1.0,
+      "quality_gain": 1.0,
+      "baseline_validation": {
+        "accuracy": 0.0,
+        "solved": 0,
+        "total": 3,
+        "wilson_95": {
+          "low": 5.551115123125783e-17,
+          "high": 0.5614970317550454
+        },
+        "items": [
+          {
+            "index": 50,
+            "correct": false,
+            "predicted": "4",
+            "target": "core discreet hat sonnet",
+            "response": "To sort the given words alphabetically, I will compare the first letter of each word. The words are \"hat\", \"core\", \"sonnet\", and \"discreet\".\n\n1. The first letters are 'h', 'c', 's', and 'd'.\n2. Ordering these letters alphabetically gives: 'c', 'd', 'h', 's'.\n3. Matching the words to these letters, \"core\" comes first (c), followed by \"discreet\" (d), then \"hat\" (h), and finally \"sonnet\" (s).\n\nThe sorted list of words is: core, discreet, hat, sonnet.\nAnswer: 4"
+          },
+          {
+            "index": 51,
+            "correct": false,
+            "predicted": "11",
+            "target": "alphabet birmingham cantonese educate entourage fashion fond marimba mechanic philology retrofit",
+            "response": "To sort the given words alphabetically, I will compare the first letter of each word and arrange them in order from A to Z. If two words start with the same letter, I will look at the subsequent letters until the order is determined.\n\nStep 1: List all the words provided.\nmarimba, retrofit, alphabet, birmingham, philology, fashion, educate, mechanic, cantonese, fond, entourage\n\nStep 2: Group the words by their starting letter.\n- A: alphabet\n- B: birmingham\n- C: cantonese\n- E: educate, entourage\n- F: fashion, fond\n- M: marimba, mechanic\n- P: philology\n- R: retrofit\n\nStep 3: Sort the words within each group.\n- For the 'E' group: \"educate\" comes before \"entourage\" (d comes before n).\n- For the 'F' group: \"fashion\" comes before \"fond\" (a comes before o).\n- For the 'M' group: \"marimba\" comes before \"mechanic\" (a comes before e).\n\nStep 4: Combine all the sorted groups into a single list.\n1. alphabet\n2. birmingham\n3. cantonese\n4. educate\n5. entourage\n6. fashion\n7. fond\n8. marimba\n9. mechanic\n10. philology\n11. retrofit\n\nStep 5: Count the total number of words in the sorted list to provide the final numerical value.\nThere are 11 words in total.\n\nAnswer: 11"
+          },
+          {
+            "index": 52,
+            "correct": false,
+            "predicted": "5",
+            "target": "jugoslavia polyhedron retrorocket scoot walnut",
+            "response": "To sort the given words alphabetically, we compare the first letter of each word. If the first letters are the same, we compare the second letters, and so on.\n\nThe words to sort are: walnut, scoot, jugoslavia, retrorocket, polyhedron.\n\n1. Compare the first letters of each word:\n- w (walnut)\n- s (scoot)\n- j (jugoslavia)\n- r (retrorocket)\n- p (polyhedron)\n\n2. Arrange these letters in alphabetical order:\n- j comes first\n- p comes second\n- r comes third\n- s comes fourth\n- w comes fifth\n\n3. Match the sorted letters to their corresponding words:\n- j: jugoslavia\n- p: polyhedron\n- r: retrorocket\n- s: scoot\n- w: walnut\n\nThe sorted list is: jugoslavia, polyhedron, retrorocket, scoot, walnut.\n\nAnswer: 5"
+          }
+        ]
+      },
+      "candidate_validation": {
+        "accuracy": 1.0,
+        "solved": 3,
+        "total": 3,
+        "wilson_95": {
+          "low": 0.4385029682449546,
+          "high": 1.0
+        },
+        "items": [
+          {
+            "index": 50,
+            "correct": true,
+            "predicted": "core discreet hat sonnet",
+            "target": "core discreet hat sonnet",
+            "response": "Answer: core discreet hat sonnet"
+          },
+          {
+            "index": 51,
+            "correct": true,
+            "predicted": "alphabet birmingham cantonese educate entourage fashion fond marimba mechanic philology retrofit",
+            "target": "alphabet birmingham cantonese educate entourage fashion fond marimba mechanic philology retrofit",
+            "response": "alphabet birmingham cantonese educate entourage fashion fond marimba mechanic philology retrofit\nAnswer: alphabet birmingham cantonese educate entourage fashion fond marimba mechanic philology retrofit"
+          },
+          {
+            "index": 52,
+            "correct": true,
+            "predicted": "jugoslavia polyhedron retrorocket scoot walnut",
+            "target": "jugoslavia polyhedron retrorocket scoot walnut",
+            "response": "Answer: jugoslavia polyhedron retrorocket scoot walnut"
+          }
+        ]
+      },
+      "candidate_valid": true,
+      "candidate_accepted": true,
+      "candidate_rejection_reason": "",
+      "candidate_prompt": "You will answer a reasoning question. Use step-by-step reasoning only if needed for complex problems; otherwise, proceed directly to the answer. The last line of your response must be exactly: 'Answer: $VALUE' where $VALUE is the complete final answer to the specific question asked (e.g., a sorted list, string, or number). Do not include conversational filler, intermediate steps, or counts in this final line.",
+      "batch_ids": [
+        0,
+        1
+      ],
+      "gradients": [
+        {
+          "item_id": 0,
+          "response_gradient": "The response is correct and exactly matches the ground truth. No changes are needed. To optimize for conciseness in future responses, consider omitting the step-by-step reasoning and providing only the final sorted list.",
+          "prompt_gradient": "**Feedback for System Instruction:**\n\nThe instruction currently mandates \"Think step by step.\" While this ensures accuracy, it conflicts with the optimization goal of conciseness. \n\n**What the instruction should clarify or preserve:**\n1. **Preserve:** The strict formatting requirement for the final line (`Answer: $VALUE`). This must remain untouched to ensure the output can be reliably parsed.\n2. **Clarify/Adjust:** The instruction should clarify the trade-off between reasoning and conciseness. It should explicitly state that step-by-step reasoning is optional and should be omitted if the task is trivial (e.g., sorting two items). The instruction should prioritize returning only the final answer in the required format for simple tasks to minimize verbosity, while retaining the capacity for step-by-step thought only when necessary for complex reasoning."
+        },
+        {
+          "item_id": 1,
+          "response_gradient": "**Critique:** \nYour alphabetical sorting is perfectly correct, but your final output format is wrong. You ended the response with \"Answer: 20\" instead of outputting the sorted list of words. Because the objective requires an exact string match, the evaluation failed.\n\n**Actionable Feedback:**\n1. Remove all conversational filler, explanations, and numbered lists from your response.\n2. Do not output the count of the words (e.g., \"Answer: 20\").\n3. Output *only* the sorted words separated by single spaces, exactly matching the target format: `barn damp delmarva dot drumhead embezzle entirety greene guru it&t malton obstetric onus panicking prod same scorch splutter subsist thrill`",
+          "prompt_gradient": "**Feedback for System Instruction:**\n\nThe system instruction must clarify the definition of `$VALUE` in the `Answer: $VALUE` format. Currently, the instruction implies that the answer to any reasoning question should be a numerical value, which caused the model to output the count of the words (20) instead of the actual sorted list. \n\nTo prevent this, the instruction should explicitly state that `$VALUE` represents the final, resolved answer to the specific question asked (which may be a string, a list, or a mathematical result), and is not restricted to being a numerical value. It should also clarify that the final line must contain the complete answer exactly as required by the objective, without conversational filler, intermediate steps, or counts."
+        }
+      ],
+      "usage": {
+        "by_phase": {
+          "forward": {
+            "calls": 8,
+            "failures": 0,
+            "prompt_tokens": 1011,
+            "completion_tokens": 1043,
+            "total_tokens": 2054,
+            "model_seconds": 59.269811
+          },
+          "response_gradient": {
+            "calls": 2,
+            "failures": 0,
+            "prompt_tokens": 543,
+            "completion_tokens": 198,
+            "total_tokens": 741,
+            "model_seconds": 18.163529
+          },
+          "prompt_gradient": {
+            "calls": 2,
+            "failures": 0,
+            "prompt_tokens": 783,
+            "completion_tokens": 313,
+            "total_tokens": 1096,
+            "model_seconds": 15.813789
+          },
+          "tgd_update": {
+            "calls": 1,
+            "failures": 0,
+            "prompt_tokens": 478,
+            "completion_tokens": 96,
+            "total_tokens": 574,
+            "model_seconds": 7.633441
+          }
+        },
+        "total": {
+          "calls": 13,
+          "failures": 0,
+          "prompt_tokens": 2815,
+          "completion_tokens": 1650,
+          "total_tokens": 4465,
+          "model_seconds": 100.88057
+        }
+      },
+      "throughput_calls_s": 0.24157460313778,
+      "stage_summary": {
+        "baseline_eval": {
+          "calls": 3,
+          "wall_span_s": 10.229726901000049,
+          "sum_call_s": 28.026912791999848,
+          "min_call_s": 8.186040187999879,
+          "max_call_s": 10.228806023000061
+        },
+        "train_forward": {
+          "calls": 2,
+          "wall_span_s": 10.761736213999939,
+          "sum_call_s": 18.63703453700009,
+          "min_call_s": 7.875521932000083,
+          "max_call_s": 10.761512605000007
+        },
+        "response_gradient": {
+          "calls": 2,
+          "wall_span_s": 10.786890410999831,
+          "sum_call_s": 17.579476833999934,
+          "min_call_s": 6.792911072999914,
+          "max_call_s": 10.78656576100002
+        },
+        "prompt_gradient": {
+          "calls": 2,
+          "wall_span_s": 8.24016109199988,
+          "sum_call_s": 15.813896130999865,
+          "min_call_s": 7.573735038999985,
+          "max_call_s": 8.24016109199988
+        },
+        "tgd_update": {
+          "calls": 1,
+          "wall_span_s": 7.633504081999945,
+          "sum_call_s": 7.633504081999945,
+          "min_call_s": 7.633504081999945,
+          "max_call_s": 7.633504081999945
+        },
+        "candidate_eval": {
+          "calls": 3,
+          "wall_span_s": 6.159030740999924,
+          "sum_call_s": 12.606281353000213,
+          "min_call_s": 3.167691171000115,
+          "max_call_s": 6.158745498999906
+        }
+      },
+      "events": [
+        {
+          "phase": "baseline_eval",
+          "unit": "baseline_eval:item-50",
+          "started_s": 0.00021776000016870967,
+          "ended_s": 8.186257948000048,
+          "duration_s": 8.186040187999879,
+          "success": true
+        },
+        {
+          "phase": "baseline_eval",
+          "unit": "baseline_eval:item-51",
+          "started_s": 0.0011386380001567886,
+          "ended_s": 10.229944661000218,
+          "duration_s": 10.228806023000061,
+          "success": true
+        },
+        {
+          "phase": "baseline_eval",
+          "unit": "baseline_eval:item-52",
+          "started_s": 0.0013812220001909736,
+          "ended_s": 9.6134478030001,
+          "duration_s": 9.612066580999908,
+          "success": true
+        },
+        {
+          "phase": "train_forward",
+          "unit": "train_forward:item-0",
+          "started_s": 10.230518985000117,
+          "ended_s": 18.1060409170002,
+          "duration_s": 7.875521932000083,
+          "success": true
+        },
+        {
+          "phase": "train_forward",
+          "unit": "train_forward:item-1",
+          "started_s": 10.230742594000048,
+          "ended_s": 20.992255199000056,
+          "duration_s": 10.761512605000007,
+          "success": true
+        },
+        {
+          "phase": "response_gradient",
+          "unit": "item-0",
+          "started_s": 20.992749972000183,
+          "ended_s": 27.785661045000097,
+          "duration_s": 6.792911072999914,
+          "success": true
+        },
+        {
+          "phase": "response_gradient",
+          "unit": "item-1",
+          "started_s": 20.993074621999995,
+          "ended_s": 31.779640383000014,
+          "duration_s": 10.78656576100002,
+          "success": true
+        },
+        {
+          "phase": "prompt_gradient",
+          "unit": "item-0",
+          "started_s": 31.779977433000113,
+          "ended_s": 40.02013852499999,
+          "duration_s": 8.24016109199988,
+          "success": true
+        },
+        {
+          "phase": "prompt_gradient",
+          "unit": "item-1",
+          "started_s": 31.78022140400003,
+          "ended_s": 39.353956443000015,
+          "duration_s": 7.573735038999985,
+          "success": true
+        },
+        {
+          "phase": "tgd_update",
+          "unit": "batch-update",
+          "started_s": 40.020486405000156,
+          "ended_s": 47.6539904870001,
+          "duration_s": 7.633504081999945,
+          "success": true
+        },
+        {
+          "phase": "candidate_eval",
+          "unit": "candidate_eval:item-50",
+          "started_s": 47.65427558300007,
+          "ended_s": 50.82196675400019,
+          "duration_s": 3.167691171000115,
+          "success": true
+        },
+        {
+          "phase": "candidate_eval",
+          "unit": "candidate_eval:item-51",
+          "started_s": 47.65456082500009,
+          "ended_s": 53.813306323999996,
+          "duration_s": 6.158745498999906,
+          "success": true
+        },
+        {
+          "phase": "candidate_eval",
+          "unit": "candidate_eval:item-52",
+          "started_s": 47.654770375,
+          "ended_s": 50.93461505800019,
+          "duration_s": 3.279844683000192,
+          "success": true
+        }
+      ]
+    },
+    {
+      "algorithm": "textgrad",
+      "mode": "async_pipeline",
+      "repeat": 0,
+      "target_quality": 0.3333333333333333,
+      "target_reached": true,
+      "time_to_quality_s": 15.929640102999883,
+      "candidate_ready_s": 60.33695262599986,
+      "wall_seconds": 60.336953315999835,
+      "baseline_quality": 0.3333333333333333,
+      "final_quality": 1.0,
+      "quality_gain": 0.6666666666666667,
+      "baseline_validation": {
+        "accuracy": 0.3333333333333333,
+        "solved": 1,
+        "total": 3,
+        "wilson_95": {
+          "low": 0.06149194472039621,
+          "high": 0.7923403991979522
+        },
+        "items": [
+          {
+            "index": 50,
+            "correct": false,
+            "predicted": "4",
+            "target": "core discreet hat sonnet",
+            "response": "To sort the words alphabetically, I will compare the first letter of each word. The words are \"hat\", \"core\", \"sonnet\", and \"discreet\". \n\nThe first letters are:\n- h (for hat)\n- c (for core)\n- s (for sonnet)\n- d (for discreet)\n\nArranging these letters in alphabetical order gives: c, d, h, s.\n\nMatching the words to these letters, the alphabetical order is:\n1. core\n2. discreet\n3. hat\n4. sonnet\n\nAnswer: 4"
+          },
+          {
+            "index": 51,
+            "correct": false,
+            "predicted": "11",
+            "target": "alphabet birmingham cantonese educate entourage fashion fond marimba mechanic philology retrofit",
+            "response": "To sort the given words alphabetically, I will compare the first letter of each word and arrange them in order from A to Z. If two words start with the same letter, I will look at the subsequent letters until the order is determined.\n\nStep 1: List all the words provided.\nmarimba, retrofit, alphabet, birmingham, philology, fashion, educate, mechanic, cantonese, fond, entourage\n\nStep 2: Group the words by their starting letter.\n- a: alphabet\n- b: birmingham\n- c: cantonese\n- e: educate, entourage\n- f: fashion, fond\n- m: marimba, mechanic\n- p: philology\n- r: retrofit\n\nStep 3: Sort the words within each group.\n- For 'e': \"educate\" comes before \"entourage\" ('d' comes before 'n').\n- For 'f': \"fashion\" comes before \"fond\" ('a' comes before 'o').\n- For 'm': \"marimba\" comes before \"mechanic\" ('a' comes before 'e').\n\nStep 4: Combine the sorted groups into a single alphabetical list.\n1. alphabet\n2. birmingham\n3. cantonese\n4. educate\n5. entourage\n6. fashion\n7. fond\n8. marimba\n9. mechanic\n10. philology\n11. retrofit\n\nStep 5: Count the total number of words in the sorted list to provide the final numerical value.\nThere are 11 words in total.\n\nAnswer: 11"
+          },
+          {
+            "index": 52,
+            "correct": true,
+            "predicted": "jugoslavia, polyhedron, retrorocket, scoot, walnut",
+            "target": "jugoslavia polyhedron retrorocket scoot walnut",
+            "response": "To sort the given words alphabetically, I will compare the first letter of each word. If the first letters are the same, I will compare the subsequent letters until the order is determined.\n\n1. The words to sort are: walnut, scoot, jugoslavia, retrorocket, polyhedron.\n2. Looking at the first letters:\n   - w (walnut)\n   - s (scoot)\n   - j (jugoslavia)\n   - r (retrorocket)\n   - p (polyhedron)\n3. Arranging these starting letters in alphabetical order gives: j, p, r, s, w.\n4. Matching the words to these letters, the sorted order is:\n   - jugoslavia\n   - polyhedron\n   - retrorocket\n   - scoot\n   - walnut\n\nAnswer: jugoslavia, polyhedron, retrorocket, scoot, walnut"
+          }
+        ]
+      },
+      "candidate_validation": {
+        "accuracy": 1.0,
+        "solved": 3,
+        "total": 3,
+        "wilson_95": {
+          "low": 0.4385029682449546,
+          "high": 1.0
+        },
+        "items": [
+          {
+            "index": 50,
+            "correct": true,
+            "predicted": "core discreet hat sonnet",
+            "target": "core discreet hat sonnet",
+            "response": "core discreet hat sonnet"
+          },
+          {
+            "index": 51,
+            "correct": true,
+            "predicted": "alphabet birmingham cantonese educate entourage fashion fond marimba mechanic philology retrofit",
+            "target": "alphabet birmingham cantonese educate entourage fashion fond marimba mechanic philology retrofit",
+            "response": "alphabet birmingham cantonese educate entourage fashion fond marimba mechanic philology retrofit"
+          },
+          {
+            "index": 52,
+            "correct": true,
+            "predicted": "jugoslavia polyhedron retrorocket scoot walnut",
+            "target": "jugoslavia polyhedron retrorocket scoot walnut",
+            "response": "jugoslavia polyhedron retrorocket scoot walnut"
+          }
+        ]
+      },
+      "candidate_valid": true,
+      "candidate_accepted": true,
+      "candidate_rejection_reason": "",
+      "candidate_prompt": "You will perform a word-sorting reasoning task. Think step by step to determine the correct alphabetical order of the given words, but do not output your reasoning. Your final response must consist *only* of the sorted words separated by single spaces. Do not include any conversational text, intermediate steps, explanations, numbered lists, commas, trailing punctuation, or an 'Answer:' prefix.",
+      "batch_ids": [
+        0,
+        1
+      ],
+      "gradients": [
+        {
+          "item_id": 0,
+          "response_gradient": "Your response failed the exact match. \n\n1. **Remove extraneous text:** Delete all reasoning steps and the final \"Answer: 2\" line. Provide only the sorted words.\n2. **Fix punctuation:** Remove the comma between the words. The ground truth uses a space, not a comma.\n3. **Match formatting exactly:** Output exactly `syndrome therefrom` with no trailing punctuation or newlines.",
+          "prompt_gradient": "**Feedback for System Instruction:**\n\nThe system instruction currently mandates a step-by-step reasoning process and a final line formatted as `Answer: $VALUE`. However, the objective requires the model to output only the exact sorted string (e.g., `syndrome therefrom`) with no reasoning, no `Answer:` line, no commas, and no trailing punctuation or newlines. \n\nTo satisfy the objective, the system instruction should be updated to clarify or preserve the following:\n1. **Remove the step-by-step reasoning mandate:** Explicitly instruct the model to output *only* the final result, omitting all intermediate reasoning steps, explanations, or conversational text.\n2. **Remove the `Answer: $VALUE` formatting requirement:** Delete the instruction requiring the last line to be `Answer: $VALUE`. \n3. **Preserve exact output formatting:** Add a strict constraint that the output must be a space-separated list of the sorted words. Explicitly forbid the use of commas, trailing punctuation, or trailing newlines. \n4. **Clarify the task objective:** Ensure the instruction clearly states that the final output must exactly match the ground truth string formatting (space-separated words only)."
+        },
+        {
+          "item_id": 1,
+          "response_gradient": "**Critique:** Your list of words is perfectly sorted and exactly matches the ground truth. However, your final output line is `Answer: 20`. Because the objective is a deterministic exact-match, the evaluation script is comparing your final string to the expected space-separated string of words. \n\n**Actionable Feedback:** \nRemove the conversational text, the numbered list, and the `Answer: 20` line. Output *only* the exact space-separated string of sorted words as the final response to pass the exact-match check.",
+          "prompt_gradient": "**Feedback for System Instruction:**\n\nThe system instruction must be updated to clarify the distinction between the *result* of the reasoning task and the *final output format* required for evaluation. Specifically, it should preserve the \"think step by step\" directive but explicitly state that the reasoning steps must be discarded or hidden from the final output. \n\nIt must clarify that the `Answer: $VALUE` format is only applicable when the objective is to extract a numerical value. For tasks requiring a constructed output (such as sorting, listing, or formatting text), the instruction must enforce that the final response consists *only* of the exact expected string (e.g., the space-separated sorted words) with no conversational text, intermediate steps, or `Answer:` prefix. \n\nTo ensure future responses satisfy the exact-match objective, the instruction should explicitly prohibit including any formatting (like numbered lists) or labels that are not strictly part of the requested final data string."
+        }
+      ],
+      "usage": {
+        "by_phase": {
+          "forward": {
+            "calls": 8,
+            "failures": 0,
+            "prompt_tokens": 984,
+            "completion_tokens": 998,
+            "total_tokens": 1982,
+            "model_seconds": 75.62642
+          },
+          "response_gradient": {
+            "calls": 2,
+            "failures": 0,
+            "prompt_tokens": 563,
+            "completion_tokens": 194,
+            "total_tokens": 757,
+            "model_seconds": 14.96557
+          },
+          "prompt_gradient": {
+            "calls": 2,
+            "failures": 0,
+            "prompt_tokens": 797,
+            "completion_tokens": 432,
+            "total_tokens": 1229,
+            "model_seconds": 20.359975
+          },
+          "tgd_update": {
+            "calls": 1,
+            "failures": 0,
+            "prompt_tokens": 597,
+            "completion_tokens": 87,
+            "total_tokens": 684,
+            "model_seconds": 7.838924
+          }
+        },
+        "total": {
+          "calls": 13,
+          "failures": 0,
+          "prompt_tokens": 2941,
+          "completion_tokens": 1711,
+          "total_tokens": 4652,
+          "model_seconds": 118.790889
+        }
+      },
+      "throughput_calls_s": 0.21545668592041303,
+      "stage_summary": {
+        "baseline_eval": {
+          "calls": 3,
+          "wall_span_s": 15.928911596999797,
+          "sum_call_s": 37.85110877499983,
+          "min_call_s": 8.360225230999959,
+          "max_call_s": 15.92866871199999
+        },
+        "train_forward": {
+          "calls": 2,
+          "wall_span_s": 10.815547758000093,
+          "sum_call_s": 19.10949943100013,
+          "min_call_s": 8.294262453000101,
+          "max_call_s": 10.81523697800003
+        },
+        "response_gradient": {
+          "calls": 2,
+          "wall_span_s": 10.534789020000062,
+          "sum_call_s": 14.965677551999988,
+          "min_call_s": 6.952174835000051,
+          "max_call_s": 8.013502716999938
+        },
+        "prompt_gradient": {
+          "calls": 2,
+          "wall_span_s": 14.127303956999867,
+          "sum_call_s": 20.36009291299979,
+          "min_call_s": 9.815402921999976,
+          "max_call_s": 10.544689990999814
+        },
+        "tgd_update": {
+          "calls": 1,
+          "wall_span_s": 7.8389961390000735,
+          "sum_call_s": 7.8389961390000735,
+          "min_call_s": 7.8389961390000735,
+          "max_call_s": 7.8389961390000735
+        },
+        "candidate_eval": {
+          "calls": 3,
+          "wall_span_s": 7.193416240000033,
+          "sum_call_s": 18.666236760000174,
+          "min_call_s": 4.279894852000098,
+          "max_call_s": 7.193416240000033
+        }
+      },
+      "events": [
+        {
+          "phase": "baseline_eval",
+          "unit": "baseline_eval:item-50",
+          "started_s": 0.00011627100002442603,
+          "ended_s": 8.360341501999983,
+          "duration_s": 8.360225230999959,
+          "success": true
+        },
+        {
+          "phase": "baseline_eval",
+          "unit": "baseline_eval:item-51",
+          "started_s": 0.0003591559998312732,
+          "ended_s": 15.929027867999821,
+          "duration_s": 15.92866871199999,
+          "success": true
+        },
+        {
+          "phase": "baseline_eval",
+          "unit": "baseline_eval:item-52",
+          "started_s": 0.0005252930000096967,
+          "ended_s": 13.562740124999891,
+          "duration_s": 13.562214831999881,
+          "success": true
+        },
+        {
+          "phase": "train_forward",
+          "unit": "train_forward:item-0",
+          "started_s": 15.929908752999836,
+          "ended_s": 24.224171205999937,
+          "duration_s": 8.294262453000101,
+          "success": true
+        },
+        {
+          "phase": "train_forward",
+          "unit": "train_forward:item-1",
+          "started_s": 15.9302195329999,
+          "ended_s": 26.74545651099993,
+          "duration_s": 10.81523697800003,
+          "success": true
+        },
+        {
+          "phase": "response_gradient",
+          "unit": "item-0",
+          "started_s": 24.224194365999892,
+          "ended_s": 31.176369200999943,
+          "duration_s": 6.952174835000051,
+          "success": true
+        },
+        {
+          "phase": "response_gradient",
+          "unit": "item-1",
+          "started_s": 26.745480669000017,
+          "ended_s": 34.758983385999954,
+          "duration_s": 8.013502716999938,
+          "success": true
+        },
+        {
+          "phase": "prompt_gradient",
+          "unit": "item-0",
+          "started_s": 31.17637549699998,
+          "ended_s": 40.99177841899996,
+          "duration_s": 9.815402921999976,
+          "success": true
+        },
+        {
+          "phase": "prompt_gradient",
+          "unit": "item-1",
+          "started_s": 34.758989463000034,
+          "ended_s": 45.30367945399985,
+          "duration_s": 10.544689990999814,
+          "success": true
+        },
+        {
+          "phase": "tgd_update",
+          "unit": "batch-update",
+          "started_s": 45.30394670499982,
+          "ended_s": 53.14294284399989,
+          "duration_s": 7.8389961390000735,
+          "success": true
+        },
+        {
+          "phase": "candidate_eval",
+          "unit": "candidate_eval:item-50",
+          "started_s": 53.143167363999964,
+          "ended_s": 60.336583604,
+          "duration_s": 7.193416240000033,
+          "success": true
+        },
+        {
+          "phase": "candidate_eval",
+          "unit": "candidate_eval:item-51",
+          "started_s": 53.143411718999914,
+          "ended_s": 60.33633738699996,
+          "duration_s": 7.1929256680000435,
+          "success": true
+        },
+        {
+          "phase": "candidate_eval",
+          "unit": "candidate_eval:item-52",
+          "started_s": 53.143602067999836,
+          "ended_s": 57.423496919999934,
+          "duration_s": 4.279894852000098,
+          "success": true
+        }
+      ]
+    },
+    {
+      "algorithm": "openevolve",
+      "mode": "sync_parallel",
+      "repeat": 0,
+      "target_quality": 0.7041218513304834,
+      "target_reached": false,
+      "time_to_quality_s": null,
+      "candidate_ready_s": 21.056812412,
+      "wall_seconds": 21.05682218800007,
+      "baseline_quality": 0.6991218513304834,
+      "final_quality": 0.6991218513304834,
+      "quality_gain": 0.0,
+      "baseline": {
+        "program_id": "7059917504a429f1",
+        "iteration": 0,
+        "island": 0,
+        "parent_id": null,
+        "code": "\"\"\"Initial random-search genome for the function-minimization task.\"\"\"\n\ndef search_algorithm(objective, budget, rng, bounds):\n    \"\"\"Return the best (x, y) found within a strict objective-call budget.\"\"\"\n    low, high = bounds\n    best_x = rng.uniform(low, high)\n    best_y = rng.uniform(low, high)\n    best_value = objective(best_x, best_y)\n    for _ in range(budget - 1):\n        x = rng.uniform(low, high)\n        y = rng.uniform(low, high)\n        value = objective(x, y)\n        if value < best_value:\n            best_x, best_y, best_value = x, y, value\n    return best_x, best_y\n",
+        "change_summary": "uniform random search baseline",
+        "metrics": {
+          "value_score": 0.8233088404612733,
+          "distance_score": 0.291558103666156,
+          "reliability_score": 1.0,
+          "solution_quality_multiplier": 1.0,
+          "combined_score": 0.6991218513304834,
+          "avg_value": -1.3043889684462364,
+          "value_stddev": 0.19777835634483074,
+          "best_value": -1.5023023091109586,
+          "worst_value": -0.9623676241321372,
+          "avg_distance": 2.4298480729077396,
+          "distance_stddev": 1.823126599400888,
+          "best_distance": 0.12873081781744547,
+          "worst_distance": 4.089150985212977,
+          "avg_runtime_seconds": 6.670760003544274e-05,
+          "avg_objective_calls": 100.0,
+          "successful_trials": 5,
+          "total_trials": 5,
+          "error": ""
+        },
+        "valid": true,
+        "error": "",
+        "trials": [
+          {
+            "seed": 0,
+            "success": true,
+            "x": 1.301473404114728,
+            "y": 3.450775756715153,
+            "value": -1.2137725319594317,
+            "objective_calls": 100,
+            "seconds": 8.483600004183245e-05
+          },
+          {
+            "seed": 1,
+            "success": true,
+            "x": 1.515929727227629,
+            "y": 2.8872335113551317,
+            "value": -1.3788910622159178,
+            "objective_calls": 100,
+            "seconds": 6.31279999652179e-05
+          },
+          {
+            "seed": 2,
+            "success": true,
+            "x": 1.2416405075478227,
+            "y": 3.0020745563439633,
+            "value": -0.9623676241321372,
+            "objective_calls": 100,
+            "seconds": 6.163100010780909e-05
+          },
+          {
+            "seed": 3,
+            "success": true,
+            "x": -1.4908951122981993,
+            "y": 0.8507410740536345,
+            "value": -1.4646113148127364,
+            "objective_calls": 100,
+            "seconds": 6.191000011313008e-05
+          },
+          {
+            "seed": 4,
+            "success": true,
+            "x": -1.7933109675025802,
+            "y": 0.5852898358339207,
+            "value": -1.5023023091109586,
+            "objective_calls": 100,
+            "seconds": 6.203299994922418e-05
+          }
+        ]
+      },
+      "best": {
+        "program_id": "7059917504a429f1",
+        "iteration": 0,
+        "island": 0,
+        "parent_id": null,
+        "code": "\"\"\"Initial random-search genome for the function-minimization task.\"\"\"\n\ndef search_algorithm(objective, budget, rng, bounds):\n    \"\"\"Return the best (x, y) found within a strict objective-call budget.\"\"\"\n    low, high = bounds\n    best_x = rng.uniform(low, high)\n    best_y = rng.uniform(low, high)\n    best_value = objective(best_x, best_y)\n    for _ in range(budget - 1):\n        x = rng.uniform(low, high)\n        y = rng.uniform(low, high)\n        value = objective(x, y)\n        if value < best_value:\n            best_x, best_y, best_value = x, y, value\n    return best_x, best_y\n",
+        "change_summary": "uniform random search baseline",
+        "metrics": {
+          "value_score": 0.8233088404612733,
+          "distance_score": 0.291558103666156,
+          "reliability_score": 1.0,
+          "solution_quality_multiplier": 1.0,
+          "combined_score": 0.6991218513304834,
+          "avg_value": -1.3043889684462364,
+          "value_stddev": 0.19777835634483074,
+          "best_value": -1.5023023091109586,
+          "worst_value": -0.9623676241321372,
+          "avg_distance": 2.4298480729077396,
+          "distance_stddev": 1.823126599400888,
+          "best_distance": 0.12873081781744547,
+          "worst_distance": 4.089150985212977,
+          "avg_runtime_seconds": 6.670760003544274e-05,
+          "avg_objective_calls": 100.0,
+          "successful_trials": 5,
+          "total_trials": 5,
+          "error": ""
+        },
+        "valid": true,
+        "error": ""
+      },
+      "candidates": [
+        {
+          "program_id": "4a23e5c01ea64bbb",
+          "iteration": 1,
+          "island": 0,
+          "parent_id": "7059917504a429f1",
+          "code": "\"\"\"Coordinate-descent with multi-start and shrinking step refinement.\"\"\"\n\nimport math\n\ndef search_algorithm(objective, budget, rng, bounds):\n    low, high = bounds\n    span = high - low\n\n    best_x = rng.uniform(low, high)\n    best_y = rng.uniform(low, high)\n    best_value = objective(best_x, best_y)\n    calls = 1\n\n    num_starts = 4\n    starts = []\n    for _ in range(num_starts):\n        sx = rng.uniform(low, high)\n        sy = rng.uniform(low, high)\n        starts.append((sx, sy))\n\n    for sx, sy in starts:\n        if calls >= budget:\n            break\n        cx = min(max(sx, low), high)\n        cy = min(max(sy, low), high)\n        cval = objective(cx, cy)\n        calls += 1\n\n        if cval < best_value:\n            best_x, best_y, best_value = cx, cy, cval\n\n        step = span * 0.25\n        while step > 1e-4 and calls + 2 <= budget:\n            improved = True\n            while improved and calls + 2 <= budget:\n                improved = False\n                for sign in (1.0, -1.0):\n                    if calls >= budget:\n                        break\n                    nx = min(max(cx + sign * step, low), high)\n                    nval = objective(nx, cy)\n                    calls += 1\n                    if nval < cval:\n                        cx, cval = nx, nval\n                        improved = True\n                        if cval < best_value:\n                            best_x, best_y, best_value = cx, cy, cval\n\n                for sign in (1.0, -1.0):\n                    if calls >= budget:\n                        break\n                    ny = min(max(cy + sign * step, low), high)\n                    nval = objective(cx, ny)\n                    calls += 1\n                    if nval < cval:\n                        cy, cval = ny, nval\n                        improved = True\n                        if cval < best_value:\n                            best_x, best_y, best_value = cx, cy, cval\n\n            step *= 0.5\n\n    return best_x, best_y",
+          "change_summary": "Replaced pure random search with a multi-start coordinate-descent local optimizer that systematically probes and refines along axes with shrinking step sizes.",
+          "metrics": {
+            "value_score": 0.6836128880496266,
+            "distance_score": 0.2195399324178177,
+            "reliability_score": 1.0,
+            "solution_quality_multiplier": 0.7,
+            "combined_score": 0.425367896625111,
+            "avg_value": -1.0561838104851449,
+            "value_stddev": 0.32696926576680413,
+            "best_value": -1.5186858225849784,
+            "worst_value": -0.5332728109269418,
+            "avg_distance": 3.5549799937846793,
+            "distance_stddev": 1.8878274938646533,
+            "best_distance": 0.00047517297111539155,
+            "worst_distance": 5.671924353357052,
+            "avg_runtime_seconds": 7.210940007098542e-05,
+            "avg_objective_calls": 100.0,
+            "successful_trials": 5,
+            "total_trials": 5,
+            "error": ""
+          },
+          "valid": true,
+          "error": "",
+          "trials": [
+            {
+              "seed": 0,
+              "success": true,
+              "x": 2.23794237080845,
+              "y": -3.4002123798828663,
+              "value": -0.901231469016803,
+              "objective_calls": 100,
+              "seconds": 8.50339999942662e-05
+            },
+            {
+              "seed": 1,
+              "success": true,
+              "x": 0.7172749983598905,
+              "y": -2.486541187918283,
+              "value": -1.1638644716111162,
+              "objective_calls": 100,
+              "seconds": 7.10350000190374e-05
+            },
+            {
+              "seed": 2,
+              "success": true,
+              "x": -4.097572260231913,
+              "y": -2.6913191109107837,
+              "value": -0.5332728109269418,
+              "objective_calls": 100,
+              "seconds": 6.902900008753932e-05
+            },
+            {
+              "seed": 3,
+              "success": true,
+              "x": -1.7041958931129573,
+              "y": 0.6775670851806943,
+              "value": -1.5186858225849784,
+              "objective_calls": 100,
+              "seconds": 6.758100016668322e-05
+            },
+            {
+              "seed": 4,
+              "success": true,
+              "x": 0.7174793987630599,
+              "y": -2.4868373505696475,
+              "value": -1.163864478285885,
+              "objective_calls": 100,
+              "seconds": 6.786800008740101e-05
+            }
+          ]
+        },
+        {
+          "program_id": "ed15545087639f8b",
+          "iteration": 2,
+          "island": 1,
+          "parent_id": "7059917504a429f1",
+          "code": "\"\"\"Coordinate-descent with multi-start and adaptive step refinement.\"\"\"\n\nimport math\n\ndef _clip(v, low, high):\n    if v < low:\n        return low\n    if v > high:\n        return high\n    return v\n\ndef search_algorithm(objective, budget, rng, bounds):\n    low, high = bounds\n    span = high - low\n\n    best_x = rng.uniform(low, high)\n    best_y = rng.uniform(low, high)\n    best_value = objective(best_x, best_y)\n    calls = 1\n\n    num_starts = 4\n    starts = []\n    for _ in range(num_starts):\n        starts.append((rng.uniform(low, high), rng.uniform(low, high)))\n\n    for sx, sy in starts:\n        if calls >= budget:\n            break\n        x = _clip(sx, low, high)\n        y = _clip(sy, low, high)\n        if calls == 0:\n            val = objective(x, y)\n            calls += 1\n        else:\n            val = objective(x, y)\n            calls += 1\n        if val < best_value:\n            best_x, best_y, best_value = x, y, val\n\n        step = span * 0.25\n        while step > 1e-3 and calls < budget:\n            improved = True\n            while improved and calls < budget:\n                improved = False\n                for sign in (-1, 1):\n                    if calls >= budget:\n                        break\n                    nx = _clip(x + sign * step, low, high)\n                    nv = objective(nx, y)\n                    calls += 1\n                    if nv < val:\n                        x, val = nx, nv\n                        improved = True\n                        if val < best_value:\n                            best_x, best_y, best_value = x, y, val\n                for sign in (-1, 1):\n                    if calls >= budget:\n                        break\n                    ny = _clip(y + sign * step, low, high)\n                    nv = objective(x, ny)\n                    calls += 1\n                    if nv < val:\n                        y, val = ny, nv\n                        improved = True\n                        if val < best_value:\n                            best_x, best_y, best_value = x, y, val\n            step *= 0.5\n\n    if calls < budget:\n        x, y, val = best_x, best_y, best_value\n        step = span * 0.05\n        while step > 1e-4 and calls < budget:\n            improved = True\n            while improved and calls < budget:\n                improved = False\n                for sign in (-1, 1):\n                    if calls >= budget:\n                        break\n                    nx = _clip(x + sign * step, low, high)\n                    nv = objective(nx, y)\n                    calls += 1\n                    if nv < val:\n                        x, val = nx, nv\n                        improved = True\n                        if val < best_value:\n                            best_x, best_y, best_value = x, y, val\n                for sign in (-1, 1):\n                    if calls >= budget:\n                        break\n                    ny = _clip(y + sign * step, low, high)\n                    nv = objective(x, ny)\n                    calls += 1\n                    if nv < val:\n                        y, val = ny, nv\n                        improved = True\n                        if val < best_value:\n                            best_x, best_y, best_value = x, y, val\n            step *= 0.5\n\n    return best_x, best_y",
+          "change_summary": "Replaced pure random search with a multi-start coordinate-descent local optimizer using geometric step-size decay to efficiently converge to low-value basins within the fixed budget.",
+          "metrics": {
+            "value_score": 0.6506188378643296,
+            "distance_score": 0.23507602536418967,
+            "reliability_score": 1.0,
+            "solution_quality_multiplier": 0.7,
+            "combined_score": 0.41708255857899523,
+            "avg_value": -0.9820017733846722,
+            "value_stddev": 0.3889087534627204,
+            "best_value": -1.5186854067739877,
+            "worst_value": -0.5329368043649148,
+            "avg_distance": 3.253942946545731,
+            "distance_stddev": 1.6278214721277917,
+            "best_distance": 0.0005170950575914888,
+            "worst_distance": 4.133776217132536,
+            "avg_runtime_seconds": 8.014239997464757e-05,
+            "avg_objective_calls": 100.0,
+            "successful_trials": 5,
+            "total_trials": 5,
+            "error": ""
+          },
+          "valid": true,
+          "error": "",
+          "trials": [
+            {
+              "seed": 0,
+              "success": true,
+              "x": 0.7377472136860854,
+              "y": -2.5131586254958567,
+              "value": -1.16124955677471,
+              "objective_calls": 100,
+              "seconds": 8.410999998886837e-05
+            },
+            {
+              "seed": 1,
+              "success": true,
+              "x": 0.7175801741411405,
+              "y": -2.485930836355783,
+              "value": -1.1638642880828065,
+              "objective_calls": 100,
+              "seconds": 6.58369999655406e-05
+            },
+            {
+              "seed": 2,
+              "success": true,
+              "x": -4.097572260231913,
+              "y": -2.6913191109107837,
+              "value": -0.5332728109269418,
+              "objective_calls": 100,
+              "seconds": 0.00011383800006115052
+            },
+            {
+              "seed": 3,
+              "success": true,
+              "x": -1.7045010688942073,
+              "y": 0.6778722609619443,
+              "value": -1.5186854067739877,
+              "objective_calls": 100,
+              "seconds": 7.2036999881675e-05
+            },
+            {
+              "seed": 4,
+              "success": true,
+              "x": -4.169921875,
+              "y": -2.6397304169758975,
+              "value": -0.5329368043649148,
+              "objective_calls": 100,
+              "seconds": 6.488999997600331e-05
+            }
+          ]
+        },
+        {
+          "program_id": "7c10076baca72ed4",
+          "iteration": 3,
+          "island": 2,
+          "parent_id": "7059917504a429f1",
+          "code": "\"\"\"Coordinate-descent local search with multi-start sampling.\"\"\"\n\nimport math\n\ndef search_algorithm(objective, budget, rng, bounds):\n    \"\"\"Return the best (x, y) found within a strict objective-call budget.\"\"\"\n    low, high = bounds\n    span = high - low\n\n    best_x = rng.uniform(low, high)\n    best_y = rng.uniform(low, high)\n    best_value = objective(best_x, best_y)\n    calls = 1\n\n    # Initial step size: ~15% of the domain, shrinking each restart.\n    step = span * 0.15\n    min_step = span * 1e-4\n\n    while calls < budget:\n        # Coordinate descent: alternately optimize x and y.\n        improved = True\n        while improved and calls < budget:\n            improved = False\n            for axis in (0, 1):\n                if calls >= budget:\n                    break\n                for direction in (1, -1):\n                    if calls >= budget:\n                        break\n                    if axis == 0:\n                        nx = best_x + direction * step\n                        ny = best_y\n                    else:\n                        nx = best_x\n                        ny = best_y + direction * step\n\n                    # Clamp to bounds\n                    if nx < low:\n                        nx = low\n                    elif nx > high:\n                        nx = high\n                    if ny < low:\n                        ny = low\n                    elif ny > high:\n                        ny = high\n\n                    # Skip if clamping made this a duplicate of current best\n                    if nx == best_x and ny == best_y:\n                        continue\n\n                    val = objective(nx, ny)\n                    calls += 1\n\n                    if val < best_value:\n                        best_x, best_y, best_value = nx, ny, val\n                        improved = True\n\n        # Multi-start: jump to a new random point when stuck.\n        step *= 0.5\n        if step < min_step:\n            step = span * 0.15\n\n        if calls < budget:\n            best_x = rng.uniform(low, high)\n            best_y = rng.uniform(low, high)\n            best_value = objective(best_x, best_y)\n            calls += 1\n\n    return best_x, best_y",
+          "change_summary": "Replaced pure random search with a multi-start coordinate-descent local optimizer that systematically probes along x and y axes with geometrically shrinking step sizes, using random restarts to escape local minima and find the global basin.",
+          "metrics": {
+            "value_score": 0.592200036420218,
+            "distance_score": 0.2165513058758175,
+            "reliability_score": 1.0,
+            "solution_quality_multiplier": 0.7,
+            "combined_score": 0.39274578698099794,
+            "avg_value": -0.8303813939545048,
+            "value_stddev": 0.4471933032507993,
+            "best_value": -1.4022219066880133,
+            "worst_value": -0.06042730241024362,
+            "avg_distance": 3.6178433141079984,
+            "distance_stddev": 2.304475173889736,
+            "best_distance": 0.44308867057765394,
+            "worst_distance": 6.592376909601735,
+            "avg_runtime_seconds": 6.857700009277323e-05,
+            "avg_objective_calls": 100.0,
+            "successful_trials": 5,
+            "total_trials": 5,
+            "error": ""
+          },
+          "valid": true,
+          "error": "",
+          "trials": [
+            {
+              "seed": 0,
+              "success": true,
+              "x": -1.2652804584764414,
+              "y": 0.7400703945503118,
+              "value": -1.4022219066880133,
+              "objective_calls": 100,
+              "seconds": 8.999900001072092e-05
+            },
+            {
+              "seed": 1,
+              "success": true,
+              "x": 3.7326510391986965,
+              "y": -0.3910793209494665,
+              "value": -0.8047282668251646,
+              "objective_calls": 100,
+              "seconds": 6.321400019260182e-05
+            },
+            {
+              "seed": 2,
+              "success": true,
+              "x": -0.06555834321537546,
+              "y": 0.8805173364083787,
+              "value": -0.06042730241024362,
+              "objective_calls": 100,
+              "seconds": 6.266600007620582e-05
+            },
+            {
+              "seed": 3,
+              "success": true,
+              "x": 4.815823355104628,
+              "y": -0.2973649247755201,
+              "value": -0.7773639813144697,
+              "objective_calls": 100,
+              "seconds": 6.290800001806929e-05
+            },
+            {
+              "seed": 4,
+              "success": true,
+              "x": 0.6011750817481349,
+              "y": -2.420673565585498,
+              "value": -1.1071655125346331,
+              "objective_calls": 100,
+              "seconds": 6.409800016626832e-05
+            }
+          ]
+        }
+      ],
+      "completion_order": [
+        {
+          "slot": 1,
+          "elapsed_s": 21.056812412,
+          "candidate_score": 0.425367896625111,
+          "best_score": 0.6991218513304834,
+          "valid": true
+        },
+        {
+          "slot": 2,
+          "elapsed_s": 21.056818627999974,
+          "candidate_score": 0.41708255857899523,
+          "best_score": 0.6991218513304834,
+          "valid": true
+        },
+        {
+          "slot": 3,
+          "elapsed_s": 21.05682154100009,
+          "candidate_score": 0.39274578698099794,
+          "best_score": 0.6991218513304834,
+          "valid": true
+        }
+      ],
+      "usage": {
+        "calls": 3,
+        "failures": 0,
+        "prompt_tokens": 4242,
+        "completion_tokens": 1830,
+        "total_tokens": 6072,
+        "model_seconds": 53.315689
+      },
+      "throughput_calls_s": 0.14247164046005242,
+      "stage_summary": {
+        "baseline_evaluation": {
+          "calls": 1,
+          "wall_span_s": 0.023088466999979573,
+          "sum_call_s": 0.023088466999979573,
+          "min_call_s": 0.023088466999979573,
+          "max_call_s": 0.023088466999979573
+        },
+        "mutation": {
+          "calls": 3,
+          "wall_span_s": 20.97421754800007,
+          "sum_call_s": 53.316040182999814,
+          "min_call_s": 15.295028810999838,
+          "max_call_s": 20.973851048999904
+        },
+        "candidate_evaluation": {
+          "calls": 3,
+          "wall_span_s": 0.05837036800016904,
+          "sum_call_s": 0.16919122800027253,
+          "min_call_s": 0.054284933999952045,
+          "max_call_s": 0.05837036800016904
+        }
+      },
+      "events": [
+        {
+          "phase": "baseline_evaluation",
+          "unit": "initial-program",
+          "started_s": 2.786000095511554e-06,
+          "ended_s": 0.023091253000075085,
+          "duration_s": 0.023088466999979573,
+          "success": true
+        },
+        {
+          "phase": "mutation",
+          "unit": "candidate-1",
+          "started_s": 0.02332551099993907,
+          "ended_s": 17.07048583400001,
+          "duration_s": 17.04716032300007,
+          "success": true
+        },
+        {
+          "phase": "mutation",
+          "unit": "candidate-2",
+          "started_s": 0.023692010000104347,
+          "ended_s": 20.99754305900001,
+          "duration_s": 20.973851048999904,
+          "success": true
+        },
+        {
+          "phase": "mutation",
+          "unit": "candidate-3",
+          "started_s": 0.024001897000061945,
+          "ended_s": 15.3190307079999,
+          "duration_s": 15.295028810999838,
+          "success": true
+        },
+        {
+          "phase": "candidate_evaluation",
+          "unit": "candidate-1",
+          "started_s": 20.99806079599989,
+          "ended_s": 21.05643116400006,
+          "duration_s": 0.05837036800016904,
+          "success": true
+        },
+        {
+          "phase": "candidate_evaluation",
+          "unit": "candidate-2",
+          "started_s": 20.998913365999897,
+          "ended_s": 21.05544929200005,
+          "duration_s": 0.05653592600015145,
+          "success": true
+        },
+        {
+          "phase": "candidate_evaluation",
+          "unit": "candidate-3",
+          "started_s": 21.00008059600009,
+          "ended_s": 21.05436553000004,
+          "duration_s": 0.054284933999952045,
+          "success": true
+        }
+      ]
+    },
+    {
+      "algorithm": "openevolve",
+      "mode": "async_pipeline",
+      "repeat": 0,
+      "target_quality": 0.7041218513304834,
+      "target_reached": true,
+      "time_to_quality_s": 16.66613892700002,
+      "candidate_ready_s": 16.66613892700002,
+      "wall_seconds": 21.133231899000066,
+      "baseline_quality": 0.6991218513304834,
+      "final_quality": 0.7738995937704256,
+      "quality_gain": 0.07477774243994217,
+      "baseline": {
+        "program_id": "7059917504a429f1",
+        "iteration": 0,
+        "island": 0,
+        "parent_id": null,
+        "code": "\"\"\"Initial random-search genome for the function-minimization task.\"\"\"\n\ndef search_algorithm(objective, budget, rng, bounds):\n    \"\"\"Return the best (x, y) found within a strict objective-call budget.\"\"\"\n    low, high = bounds\n    best_x = rng.uniform(low, high)\n    best_y = rng.uniform(low, high)\n    best_value = objective(best_x, best_y)\n    for _ in range(budget - 1):\n        x = rng.uniform(low, high)\n        y = rng.uniform(low, high)\n        value = objective(x, y)\n        if value < best_value:\n            best_x, best_y, best_value = x, y, value\n    return best_x, best_y\n",
+        "change_summary": "uniform random search baseline",
+        "metrics": {
+          "value_score": 0.8233088404612733,
+          "distance_score": 0.291558103666156,
+          "reliability_score": 1.0,
+          "solution_quality_multiplier": 1.0,
+          "combined_score": 0.6991218513304834,
+          "avg_value": -1.3043889684462364,
+          "value_stddev": 0.19777835634483074,
+          "best_value": -1.5023023091109586,
+          "worst_value": -0.9623676241321372,
+          "avg_distance": 2.4298480729077396,
+          "distance_stddev": 1.823126599400888,
+          "best_distance": 0.12873081781744547,
+          "worst_distance": 4.089150985212977,
+          "avg_runtime_seconds": 6.48786000056134e-05,
+          "avg_objective_calls": 100.0,
+          "successful_trials": 5,
+          "total_trials": 5,
+          "error": ""
+        },
+        "valid": true,
+        "error": "",
+        "trials": [
+          {
+            "seed": 0,
+            "success": true,
+            "x": 1.301473404114728,
+            "y": 3.450775756715153,
+            "value": -1.2137725319594317,
+            "objective_calls": 100,
+            "seconds": 8.119500012071512e-05
+          },
+          {
+            "seed": 1,
+            "success": true,
+            "x": 1.515929727227629,
+            "y": 2.8872335113551317,
+            "value": -1.3788910622159178,
+            "objective_calls": 100,
+            "seconds": 6.198000005497306e-05
+          },
+          {
+            "seed": 2,
+            "success": true,
+            "x": 1.2416405075478227,
+            "y": 3.0020745563439633,
+            "value": -0.9623676241321372,
+            "objective_calls": 100,
+            "seconds": 6.078299998080183e-05
+          },
+          {
+            "seed": 3,
+            "success": true,
+            "x": -1.4908951122981993,
+            "y": 0.8507410740536345,
+            "value": -1.4646113148127364,
+            "objective_calls": 100,
+            "seconds": 5.996699997012911e-05
+          },
+          {
+            "seed": 4,
+            "success": true,
+            "x": -1.7933109675025802,
+            "y": 0.5852898358339207,
+            "value": -1.5023023091109586,
+            "objective_calls": 100,
+            "seconds": 6.046799990144791e-05
+          }
+        ]
+      },
+      "best": {
+        "program_id": "ccfeef2c707e0812",
+        "iteration": 2,
+        "island": 1,
+        "parent_id": "7059917504a429f1",
+        "code": "\"\"\"Coordinate-descent local search with multi-start sampling.\"\"\"\n\nimport math\n\ndef search_algorithm(objective, budget, rng, bounds):\n    \"\"\"Return the best (x, y) found within a strict objective-call budget.\"\"\"\n    low, high = bounds\n    span = high - low\n    calls = 0\n\n    def evaluate(x, y):\n        nonlocal calls\n        x = max(low, min(high, x))\n        y = max(low, min(high, y))\n        val = objective(x, y)\n        calls += 1\n        return val, x, y\n\n    best_x = rng.uniform(low, high)\n    best_y = rng.uniform(low, high)\n    best_value, best_x, best_y = evaluate(best_x, best_y)\n\n    while calls < budget:\n        if calls < budget * 0.4:\n            x = rng.uniform(low, high)\n            y = rng.uniform(low, high)\n            val, x, y = evaluate(x, y)\n        else:\n            x = best_x + rng.gauss(0, span * 0.1)\n            y = best_y + rng.gauss(0, span * 0.1)\n            val, x, y = evaluate(x, y)\n\n        if val < best_value:\n            best_x, best_y, best_value = x, y, val\n\n        step = span * 0.2\n        while step > 1e-4 and calls < budget:\n            improved = False\n            for dx, dy in ((step, 0), (-step, 0), (0, step), (0, -step)):\n                if calls >= budget:\n                    break\n                nx, ny = best_x + dx, best_y + dy\n                if low <= nx <= high and low <= ny <= high:\n                    val, nx, ny = evaluate(nx, ny)\n                    if val < best_value:\n                        best_x, best_y, best_value = nx, ny, val\n                        improved = True\n            if not improved:\n                step *= 0.5\n\n    return best_x, best_y",
+        "change_summary": "Replaced pure random search with a multi-start strategy that samples globally then performs greedy coordinate-descent local refinement with geometrically shrinking step sizes.",
+        "metrics": {
+          "value_score": 0.9166604271028809,
+          "distance_score": 0.3852312673966175,
+          "reliability_score": 1.0,
+          "solution_quality_multiplier": 1.0,
+          "combined_score": 0.7738995937704256,
+          "avg_value": -1.4280834834437925,
+          "value_stddev": 0.13747338971045034,
+          "best_value": -1.5186858064665554,
+          "worst_value": -1.1638645433279158,
+          "avg_distance": 1.5958432885211347,
+          "distance_stddev": 1.9526792045198311,
+          "best_distance": 0.0006674527180363739,
+          "worst_distance": 3.9899393812668857,
+          "avg_runtime_seconds": 8.967539997684071e-05,
+          "avg_objective_calls": 100.0,
+          "successful_trials": 5,
+          "total_trials": 5,
+          "error": ""
+        },
+        "valid": true,
+        "error": ""
+      },
+      "candidates": [
+        {
+          "program_id": "fbaf3a4e706acfdc",
+          "iteration": 1,
+          "island": 0,
+          "parent_id": "7059917504a429f1",
+          "code": "\"\"\"Coordinate-descent with multi-start and shrinking step refinement.\"\"\"\n\nimport math\n\ndef search_algorithm(objective, budget, rng, bounds):\n    \"\"\"Return the best (x, y) found within a strict objective-call budget.\"\"\"\n    low, high = bounds\n    span = high - low\n\n    best_x = rng.uniform(low, high)\n    best_y = rng.uniform(low, high)\n    best_value = objective(best_x, best_y)\n    calls = 1\n\n    num_starts = 4\n    starts = []\n    for _ in range(num_starts):\n        sx = rng.uniform(low, high)\n        sy = rng.uniform(low, high)\n        starts.append((sx, sy))\n\n    for sx, sy in starts:\n        if calls >= budget:\n            break\n        cx = min(max(sx, low), high)\n        cy = min(max(sy, low), high)\n        cval = objective(cx, cy)\n        calls += 1\n\n        if cval < best_value:\n            best_x, best_y, best_value = cx, cy, cval\n\n        step = span * 0.25\n        while step > 1e-3 and calls + 2 <= budget:\n            improved = True\n            while improved and calls + 2 <= budget:\n                improved = False\n                for sign in (-1, 1):\n                    if calls >= budget:\n                        break\n                    nx = min(max(cx + sign * step, low), high)\n                    nval = objective(nx, cy)\n                    calls += 1\n                    if nval < cval:\n                        cx, cval = nx, nval\n                        improved = True\n                        if cval < best_value:\n                            best_x, best_y, best_value = cx, cy, cval\n\n                for sign in (-1, 1):\n                    if calls >= budget:\n                        break\n                    ny = min(max(cy + sign * step, low), high)\n                    nval = objective(cx, ny)\n                    calls += 1\n                    if nval < cval:\n                        cy, cval = ny, nval\n                        improved = True\n                        if cval < best_value:\n                            best_x, best_y, best_value = cx, cy, cval\n\n            step *= 0.5\n\n    while calls < budget:\n        x = rng.uniform(low, high)\n        y = rng.uniform(low, high)\n        value = objective(x, y)\n        calls += 1\n        if value < best_value:\n            best_x, best_y, best_value = x, y, value\n\n    return best_x, best_y",
+          "change_summary": "Replaced pure random search with a multi-start coordinate-descent local optimizer that probes along x and y with geometrically shrinking steps, using leftover budget for random exploration.",
+          "metrics": {
+            "value_score": 0.6693472364447998,
+            "distance_score": 0.23595606839152714,
+            "reliability_score": 1.0,
+            "solution_quality_multiplier": 0.7,
+            "combined_score": 0.42382230711790064,
+            "avg_value": -1.0250071282112945,
+            "value_stddev": 0.4174805200766761,
+            "best_value": -1.5186854067739877,
+            "worst_value": -0.5329368043649148,
+            "avg_distance": 3.238077057381198,
+            "distance_stddev": 1.6209980477301587,
+            "best_distance": 0.0005170950575914888,
+            "worst_distance": 4.133776217132536,
+            "avg_runtime_seconds": 6.959679999454237e-05,
+            "avg_objective_calls": 100.0,
+            "successful_trials": 5,
+            "total_trials": 5,
+            "error": ""
+          },
+          "valid": true,
+          "error": "",
+          "trials": [
+            {
+              "seed": 0,
+              "success": true,
+              "x": 0.7377472136860854,
+              "y": -2.5131586254958567,
+              "value": -1.16124955677471,
+              "objective_calls": 100,
+              "seconds": 8.930399985729309e-05
+            },
+            {
+              "seed": 1,
+              "success": true,
+              "x": 1.515929727227629,
+              "y": 2.8872335113551317,
+              "value": -1.3788910622159178,
+              "objective_calls": 100,
+              "seconds": 6.62239999655867e-05
+            },
+            {
+              "seed": 2,
+              "success": true,
+              "x": -4.097572260231913,
+              "y": -2.6913191109107837,
+              "value": -0.5332728109269418,
+              "objective_calls": 100,
+              "seconds": 6.443799998123723e-05
+            },
+            {
+              "seed": 3,
+              "success": true,
+              "x": -1.7045010688942073,
+              "y": 0.6778722609619443,
+              "value": -1.5186854067739877,
+              "objective_calls": 100,
+              "seconds": 6.429800009755127e-05
+            },
+            {
+              "seed": 4,
+              "success": true,
+              "x": -4.169921875,
+              "y": -2.6397304169758975,
+              "value": -0.5329368043649148,
+              "objective_calls": 100,
+              "seconds": 6.372000007104361e-05
+            }
+          ]
+        },
+        {
+          "program_id": "ccfeef2c707e0812",
+          "iteration": 2,
+          "island": 1,
+          "parent_id": "7059917504a429f1",
+          "code": "\"\"\"Coordinate-descent local search with multi-start sampling.\"\"\"\n\nimport math\n\ndef search_algorithm(objective, budget, rng, bounds):\n    \"\"\"Return the best (x, y) found within a strict objective-call budget.\"\"\"\n    low, high = bounds\n    span = high - low\n    calls = 0\n\n    def evaluate(x, y):\n        nonlocal calls\n        x = max(low, min(high, x))\n        y = max(low, min(high, y))\n        val = objective(x, y)\n        calls += 1\n        return val, x, y\n\n    best_x = rng.uniform(low, high)\n    best_y = rng.uniform(low, high)\n    best_value, best_x, best_y = evaluate(best_x, best_y)\n\n    while calls < budget:\n        if calls < budget * 0.4:\n            x = rng.uniform(low, high)\n            y = rng.uniform(low, high)\n            val, x, y = evaluate(x, y)\n        else:\n            x = best_x + rng.gauss(0, span * 0.1)\n            y = best_y + rng.gauss(0, span * 0.1)\n            val, x, y = evaluate(x, y)\n\n        if val < best_value:\n            best_x, best_y, best_value = x, y, val\n\n        step = span * 0.2\n        while step > 1e-4 and calls < budget:\n            improved = False\n            for dx, dy in ((step, 0), (-step, 0), (0, step), (0, -step)):\n                if calls >= budget:\n                    break\n                nx, ny = best_x + dx, best_y + dy\n                if low <= nx <= high and low <= ny <= high:\n                    val, nx, ny = evaluate(nx, ny)\n                    if val < best_value:\n                        best_x, best_y, best_value = nx, ny, val\n                        improved = True\n            if not improved:\n                step *= 0.5\n\n    return best_x, best_y",
+          "change_summary": "Replaced pure random search with a multi-start strategy that samples globally then performs greedy coordinate-descent local refinement with geometrically shrinking step sizes.",
+          "metrics": {
+            "value_score": 0.9166604271028809,
+            "distance_score": 0.3852312673966175,
+            "reliability_score": 1.0,
+            "solution_quality_multiplier": 1.0,
+            "combined_score": 0.7738995937704256,
+            "avg_value": -1.4280834834437925,
+            "value_stddev": 0.13747338971045034,
+            "best_value": -1.5186858064665554,
+            "worst_value": -1.1638645433279158,
+            "avg_distance": 1.5958432885211347,
+            "distance_stddev": 1.9526792045198311,
+            "best_distance": 0.0006674527180363739,
+            "worst_distance": 3.9899393812668857,
+            "avg_runtime_seconds": 8.967539997684071e-05,
+            "avg_objective_calls": 100.0,
+            "successful_trials": 5,
+            "total_trials": 5,
+            "error": ""
+          },
+          "valid": true,
+          "error": "",
+          "trials": [
+            {
+              "seed": 0,
+              "success": true,
+              "x": 1.5838669527504816,
+              "y": 2.9384307481530243,
+              "value": -1.4205000626573079,
+              "objective_calls": 100,
+              "seconds": 0.00011074999997617851
+            },
+            {
+              "seed": 1,
+              "success": true,
+              "x": 0.7173360335161405,
+              "y": -2.486785328543283,
+              "value": -1.1638645433279158,
+              "objective_calls": 100,
+              "seconds": 8.601299987276434e-05
+            },
+            {
+              "seed": 2,
+              "success": true,
+              "x": -1.704017572731913,
+              "y": 0.6768449515892163,
+              "value": -1.518685038526961,
+              "objective_calls": 100,
+              "seconds": 8.481300005769299e-05
+            },
+            {
+              "seed": 3,
+              "success": true,
+              "x": -1.7042569282692073,
+              "y": 0.6773839797119443,
+              "value": -1.5186858064665554,
+              "objective_calls": 100,
+              "seconds": 8.391599999413302e-05
+            },
+            {
+              "seed": 4,
+              "success": true,
+              "x": -1.7059253526256546,
+              "y": 0.6761915923071582,
+              "value": -1.5186819662402231,
+              "objective_calls": 100,
+              "seconds": 8.288499998343468e-05
+            }
+          ]
+        },
+        {
+          "program_id": "4b0fb46bc069e1f9",
+          "iteration": 3,
+          "island": 2,
+          "parent_id": "7059917504a429f1",
+          "code": "\"\"\"Coordinate-descent local search with multi-start sampling.\"\"\"\n\nimport math\n\ndef search_algorithm(objective, budget, rng, bounds):\n    \"\"\"Return the best (x, y) found within a strict objective-call budget.\"\"\"\n    low, high = bounds\n    span = high - low\n\n    def clamp(v):\n        if v < low:\n            return low\n        if v > high:\n            return high\n        return v\n\n    def evaluate(x, y):\n        return objective(clamp(x), clamp(y))\n\n    best_x = rng.uniform(low, high)\n    best_y = rng.uniform(low, high)\n    best_value = evaluate(best_x, best_y)\n    calls = 1\n\n    # Initial step size relative to domain span\n    step = span * 0.1\n\n    while calls < budget:\n        # Start a new local search from a random point\n        x = rng.uniform(low, high)\n        y = rng.uniform(low, high)\n        v = evaluate(x, y)\n        calls += 1\n\n        if v < best_value:\n            best_x, best_y, best_value = x, y, v\n\n        local_step = step\n        improved = True\n\n        # Coordinate descent refinement\n        while improved and calls + 2 <= budget:\n            improved = False\n            for coord in (0, 1):\n                if calls + 2 > budget:\n                    break\n                if coord == 0:\n                    v_plus = evaluate(x + local_step, y)\n                    v_minus = evaluate(x - local_step, y)\n                    calls += 2\n                    if v_plus < v and v_plus <= v_minus:\n                        x = clamp(x + local_step)\n                        v = v_plus\n                        improved = True\n                    elif v_minus < v:\n                        x = clamp(x - local_step)\n                        v = v_minus\n                        improved = True\n                else:\n                    v_plus = evaluate(x, y + local_step)\n                    v_minus = evaluate(x, y - local_step)\n                    calls += 2\n                    if v_plus < v and v_plus <= v_minus:\n                        y = clamp(y + local_step)\n                        v = v_plus\n                        improved = True\n                    elif v_minus < v:\n                        y = clamp(y - local_step)\n                        v = v_minus\n                        improved = True\n\n                if v < best_value:\n                    best_x, best_y, best_value = x, y, v\n\n            # Shrink step size if no improvement was found this cycle\n            if not improved:\n                local_step *= 0.5\n\n    return best_x, best_y",
+          "change_summary": "Replaced pure random search with a multi-start coordinate-descent local search that uses pairwise axis probes and adaptive step-size shrinking to refine promising basins within the fixed budget.",
+          "metrics": {
+            "value_score": 0.8112478971417567,
+            "distance_score": 0.34294348685743864,
+            "reliability_score": 1.0,
+            "solution_quality_multiplier": 1.0,
+            "combined_score": 0.70850699462811,
+            "avg_value": -1.2863311653278025,
+            "value_stddev": 0.10849219397900284,
+            "best_value": -1.409278941415801,
+            "worst_value": -1.142552877174221,
+            "avg_distance": 1.9159323279864453,
+            "distance_stddev": 1.7666632249806447,
+            "best_distance": 0.3876155805157279,
+            "worst_distance": 4.167302142854546,
+            "avg_runtime_seconds": 9.923780003191496e-05,
+            "avg_objective_calls": 100.0,
+            "successful_trials": 5,
+            "total_trials": 5,
+            "error": ""
+          },
+          "valid": true,
+          "error": "",
+          "trials": [
+            {
+              "seed": 0,
+              "success": true,
+              "x": -1.2340304584764414,
+              "y": 0.8338203945503118,
+              "value": -1.3801599629594088,
+              "objective_calls": 100,
+              "seconds": 0.0001423539999905188
+            },
+            {
+              "seed": 1,
+              "success": true,
+              "x": -2.0456491290805907,
+              "y": 0.49491064788738104,
+              "value": -1.409278941415801,
+              "objective_calls": 100,
+              "seconds": 7.19130000561563e-05
+            },
+            {
+              "seed": 2,
+              "success": true,
+              "x": 0.8120401711200307,
+              "y": -2.4161712974519443,
+              "value": -1.142552877174221,
+              "objective_calls": 100,
+              "seconds": 8.641900012662518e-05
+            },
+            {
+              "seed": 3,
+              "success": true,
+              "x": -1.3004483345192073,
+              "y": 1.0392003859619443,
+              "value": -1.3259773141580833,
+              "objective_calls": 100,
+              "seconds": 8.604599997852347e-05
+            },
+            {
+              "seed": 4,
+              "success": true,
+              "x": 1.31894708878718,
+              "y": 3.546483579913472,
+              "value": -1.1736867309314982,
+              "objective_calls": 100,
+              "seconds": 0.00010945700000775105
+            }
+          ]
+        }
+      ],
+      "completion_order": [
+        {
+          "slot": 2,
+          "elapsed_s": 16.66613892700002,
+          "candidate_score": 0.7738995937704256,
+          "best_score": 0.7738995937704256,
+          "valid": true
+        },
+        {
+          "slot": 1,
+          "elapsed_s": 17.266859134000015,
+          "candidate_score": 0.42382230711790064,
+          "best_score": 0.7738995937704256,
+          "valid": true
+        },
+        {
+          "slot": 3,
+          "elapsed_s": 21.13298790099998,
+          "candidate_score": 0.70850699462811,
+          "best_score": 0.7738995937704256,
+          "valid": true
+        }
+      ],
+      "usage": {
+        "calls": 3,
+        "failures": 0,
+        "prompt_tokens": 4224,
+        "completion_tokens": 1664,
+        "total_tokens": 5888,
+        "model_seconds": 54.924668
+      },
+      "throughput_calls_s": 0.14195651731536374,
+      "stage_summary": {
+        "baseline_evaluation": {
+          "calls": 1,
+          "wall_span_s": 0.022755025000151363,
+          "sum_call_s": 0.022755025000151363,
+          "min_call_s": 0.022755025000151363,
+          "max_call_s": 0.022755025000151363
+        },
+        "mutation": {
+          "calls": 3,
+          "wall_span_s": 21.086546732999977,
+          "sum_call_s": 54.92503588399995,
+          "min_call_s": 16.619309445,
+          "max_call_s": 21.085778624999875
+        },
+        "candidate_evaluation": {
+          "calls": 3,
+          "wall_span_s": 4.489778777000083,
+          "sum_call_s": 0.06930176700006996,
+          "min_call_s": 0.022918071000049167,
+          "max_call_s": 0.02342346299997189
+        }
+      },
+      "events": [
+        {
+          "phase": "baseline_evaluation",
+          "unit": "initial-program",
+          "started_s": 3.1289998787542572e-06,
+          "ended_s": 0.022758154000030117,
+          "duration_s": 0.022755025000151363,
+          "success": true
+        },
+        {
+          "phase": "mutation",
+          "unit": "candidate-1",
+          "started_s": 0.023262348999878668,
+          "ended_s": 17.243210162999958,
+          "duration_s": 17.21994781400008,
+          "success": true
+        },
+        {
+          "phase": "mutation",
+          "unit": "candidate-2",
+          "started_s": 0.023704545999862603,
+          "ended_s": 16.64301399099986,
+          "duration_s": 16.619309445,
+          "success": true
+        },
+        {
+          "phase": "mutation",
+          "unit": "candidate-3",
+          "started_s": 0.024030456999980743,
+          "ended_s": 21.109809081999856,
+          "duration_s": 21.085778624999875,
+          "success": true
+        },
+        {
+          "phase": "candidate_evaluation",
+          "unit": "candidate-2",
+          "started_s": 16.643079625999917,
+          "ended_s": 16.665997696999966,
+          "duration_s": 0.022918071000049167,
+          "success": true
+        },
+        {
+          "phase": "candidate_evaluation",
+          "unit": "candidate-1",
+          "started_s": 17.243296357999952,
+          "ended_s": 17.266719820999924,
+          "duration_s": 0.02342346299997189,
+          "success": true
+        },
+        {
+          "phase": "candidate_evaluation",
+          "unit": "candidate-3",
+          "started_s": 21.10989816999995,
+          "ended_s": 21.132858403,
+          "duration_s": 0.022960233000048902,
+          "success": true
+        }
+      ]
+    },
+    {
+      "algorithm": "openevolve",
+      "mode": "serial",
+      "repeat": 0,
+      "target_quality": 0.7041218513304834,
+      "target_reached": false,
+      "time_to_quality_s": null,
+      "candidate_ready_s": 14.341458681999939,
+      "wall_seconds": 48.40924348900012,
+      "baseline_quality": 0.6991218513304834,
+      "final_quality": 0.6991218513304834,
+      "quality_gain": 0.0,
+      "baseline": {
+        "program_id": "7059917504a429f1",
+        "iteration": 0,
+        "island": 0,
+        "parent_id": null,
+        "code": "\"\"\"Initial random-search genome for the function-minimization task.\"\"\"\n\ndef search_algorithm(objective, budget, rng, bounds):\n    \"\"\"Return the best (x, y) found within a strict objective-call budget.\"\"\"\n    low, high = bounds\n    best_x = rng.uniform(low, high)\n    best_y = rng.uniform(low, high)\n    best_value = objective(best_x, best_y)\n    for _ in range(budget - 1):\n        x = rng.uniform(low, high)\n        y = rng.uniform(low, high)\n        value = objective(x, y)\n        if value < best_value:\n            best_x, best_y, best_value = x, y, value\n    return best_x, best_y\n",
+        "change_summary": "uniform random search baseline",
+        "metrics": {
+          "value_score": 0.8233088404612733,
+          "distance_score": 0.291558103666156,
+          "reliability_score": 1.0,
+          "solution_quality_multiplier": 1.0,
+          "combined_score": 0.6991218513304834,
+          "avg_value": -1.3043889684462364,
+          "value_stddev": 0.19777835634483074,
+          "best_value": -1.5023023091109586,
+          "worst_value": -0.9623676241321372,
+          "avg_distance": 2.4298480729077396,
+          "distance_stddev": 1.823126599400888,
+          "best_distance": 0.12873081781744547,
+          "worst_distance": 4.089150985212977,
+          "avg_runtime_seconds": 8.343880003849335e-05,
+          "avg_objective_calls": 100.0,
+          "successful_trials": 5,
+          "total_trials": 5,
+          "error": ""
+        },
+        "valid": true,
+        "error": "",
+        "trials": [
+          {
+            "seed": 0,
+            "success": true,
+            "x": 1.301473404114728,
+            "y": 3.450775756715153,
+            "value": -1.2137725319594317,
+            "objective_calls": 100,
+            "seconds": 0.00012615900004675495
+          },
+          {
+            "seed": 1,
+            "success": true,
+            "x": 1.515929727227629,
+            "y": 2.8872335113551317,
+            "value": -1.3788910622159178,
+            "objective_calls": 100,
+            "seconds": 9.944999987965275e-05
+          },
+          {
+            "seed": 2,
+            "success": true,
+            "x": 1.2416405075478227,
+            "y": 3.0020745563439633,
+            "value": -0.9623676241321372,
+            "objective_calls": 100,
+            "seconds": 6.85410000187403e-05
+          },
+          {
+            "seed": 3,
+            "success": true,
+            "x": -1.4908951122981993,
+            "y": 0.8507410740536345,
+            "value": -1.4646113148127364,
+            "objective_calls": 100,
+            "seconds": 6.143900009192294e-05
+          },
+          {
+            "seed": 4,
+            "success": true,
+            "x": -1.7933109675025802,
+            "y": 0.5852898358339207,
+            "value": -1.5023023091109586,
+            "objective_calls": 100,
+            "seconds": 6.160500015539583e-05
+          }
+        ]
+      },
+      "best": {
+        "program_id": "7059917504a429f1",
+        "iteration": 0,
+        "island": 0,
+        "parent_id": null,
+        "code": "\"\"\"Initial random-search genome for the function-minimization task.\"\"\"\n\ndef search_algorithm(objective, budget, rng, bounds):\n    \"\"\"Return the best (x, y) found within a strict objective-call budget.\"\"\"\n    low, high = bounds\n    best_x = rng.uniform(low, high)\n    best_y = rng.uniform(low, high)\n    best_value = objective(best_x, best_y)\n    for _ in range(budget - 1):\n        x = rng.uniform(low, high)\n        y = rng.uniform(low, high)\n        value = objective(x, y)\n        if value < best_value:\n            best_x, best_y, best_value = x, y, value\n    return best_x, best_y\n",
+        "change_summary": "uniform random search baseline",
+        "metrics": {
+          "value_score": 0.8233088404612733,
+          "distance_score": 0.291558103666156,
+          "reliability_score": 1.0,
+          "solution_quality_multiplier": 1.0,
+          "combined_score": 0.6991218513304834,
+          "avg_value": -1.3043889684462364,
+          "value_stddev": 0.19777835634483074,
+          "best_value": -1.5023023091109586,
+          "worst_value": -0.9623676241321372,
+          "avg_distance": 2.4298480729077396,
+          "distance_stddev": 1.823126599400888,
+          "best_distance": 0.12873081781744547,
+          "worst_distance": 4.089150985212977,
+          "avg_runtime_seconds": 8.343880003849335e-05,
+          "avg_objective_calls": 100.0,
+          "successful_trials": 5,
+          "total_trials": 5,
+          "error": ""
+        },
+        "valid": true,
+        "error": ""
+      },
+      "candidates": [
+        {
+          "program_id": "76f1a75f0826df03",
+          "iteration": 1,
+          "island": 0,
+          "parent_id": "7059917504a429f1",
+          "code": "\"\"\"Coordinate-descent local search with multi-start sampling.\"\"\"\n\nimport math\n\ndef search_algorithm(objective, budget, rng, bounds):\n    \"\"\"Return the best (x, y) found within a strict objective-call budget.\"\"\"\n    low, high = bounds\n    span = high - low\n\n    best_x = rng.uniform(low, high)\n    best_y = rng.uniform(low, high)\n    best_value = objective(best_x, best_y)\n    calls = 1\n\n    # Multi-start loop: each iteration samples a new point and refines it.\n    while calls < budget:\n        if calls < budget:\n            x = rng.uniform(low, high)\n            y = rng.uniform(low, high)\n            value = objective(x, y)\n            calls += 1\n            if value < best_value:\n                best_x, best_y, best_value = x, y, value\n\n        # Coordinate descent refinement around the current best.\n        step = span * 0.25\n        while step > 1e-3 and calls < budget:\n            improved = True\n            while improved and calls < budget:\n                improved = False\n                for dim in (0, 1):\n                    if calls >= budget:\n                        break\n                    for delta in (step, -step):\n                        if calls >= budget:\n                            break\n                        nx = min(max(best_x + delta, low), high) if dim == 0 else best_x\n                        ny = min(max(best_y + delta, low), high) if dim == 1 else best_y\n                        val = objective(nx, ny)\n                        calls += 1\n                        if val < best_value:\n                            best_x, best_y, best_value = nx, ny, val\n                            improved = True\n            step *= 0.5\n\n    return best_x, best_y",
+          "change_summary": "Replaced pure random search with a multi-start strategy that refines each sample via greedy coordinate descent with geometrically shrinking step sizes.",
+          "metrics": {
+            "value_score": 0.6655355508447258,
+            "distance_score": 0.25438212102357427,
+            "reliability_score": 1.0,
+            "solution_quality_multiplier": 1.0,
+            "combined_score": 0.6090824117294351,
+            "avg_value": -1.016450664009221,
+            "value_stddev": 0.4463586535756266,
+            "best_value": -1.5186854067739877,
+            "worst_value": -0.44593075160506124,
+            "avg_distance": 2.9310938833917786,
+            "distance_stddev": 1.5754436936066343,
+            "best_distance": 0.0005170950575914888,
+            "worst_distance": 4.1329770669700485,
+            "avg_runtime_seconds": 6.69437999931688e-05,
+            "avg_objective_calls": 100.0,
+            "successful_trials": 5,
+            "total_trials": 5,
+            "error": ""
+          },
+          "valid": true,
+          "error": "",
+          "trials": [
+            {
+              "seed": 0,
+              "success": true,
+              "x": 1.5838669527504816,
+              "y": 2.9384307481530243,
+              "value": -1.4205000626573079,
+              "objective_calls": 100,
+              "seconds": 8.336499990946322e-05
+            },
+            {
+              "seed": 1,
+              "success": true,
+              "x": 0.7175801741411405,
+              "y": -2.485930836355783,
+              "value": -1.1638642880828065,
+              "objective_calls": 100,
+              "seconds": 6.520300007650803e-05
+            },
+            {
+              "seed": 2,
+              "success": true,
+              "x": -4.097572260231913,
+              "y": -2.6913191109107837,
+              "value": -0.5332728109269418,
+              "objective_calls": 100,
+              "seconds": 6.42889999653562e-05
+            },
+            {
+              "seed": 3,
+              "success": true,
+              "x": -1.7045010688942073,
+              "y": 0.6778722609619443,
+              "value": -1.5186854067739877,
+              "objective_calls": 100,
+              "seconds": 6.086700000196288e-05
+            },
+            {
+              "seed": 4,
+              "success": true,
+              "x": -2.8445972276256546,
+              "y": -1.6001755951928418,
+              "value": -0.44593075160506124,
+              "objective_calls": 100,
+              "seconds": 6.0995000012553646e-05
+            }
+          ]
+        },
+        {
+          "program_id": "0cacd1683a62fc53",
+          "iteration": 2,
+          "island": 1,
+          "parent_id": "7059917504a429f1",
+          "code": "\"\"\"Coordinate-descent with multi-start and adaptive step refinement.\"\"\"\n\nimport math\n\ndef search_algorithm(objective, budget, rng, bounds):\n    low, high = bounds\n    span = high - low\n\n    best_x = rng.uniform(low, high)\n    best_y = rng.uniform(low, high)\n    best_value = objective(best_x, best_y)\n    calls = 1\n\n    num_starts = 4\n    starts = []\n    for _ in range(num_starts):\n        sx = rng.uniform(low, high)\n        sy = rng.uniform(low, high)\n        starts.append((sx, sy))\n\n    for sx, sy in starts:\n        if calls >= budget:\n            break\n        cx = min(max(sx, low), high)\n        cy = min(max(sy, low), high)\n        cval = objective(cx, cy)\n        calls += 1\n\n        if cval < best_value:\n            best_x, best_y, best_value = cx, cy, cval\n\n        step = span * 0.25\n        while step > 1e-3 and calls + 2 <= budget:\n            improved = True\n            while improved and calls + 2 <= budget:\n                improved = False\n                for sign in (1.0, -1.0):\n                    if calls >= budget:\n                        break\n                    nx = min(max(cx + sign * step, low), high)\n                    nval = objective(nx, cy)\n                    calls += 1\n                    if nval < cval:\n                        cx, cval = nx, nval\n                        improved = True\n                        if cval < best_value:\n                            best_x, best_y, best_value = cx, cy, cval\n\n                for sign in (1.0, -1.0):\n                    if calls >= budget:\n                        break\n                    ny = min(max(cy + sign * step, low), high)\n                    nval = objective(cx, ny)\n                    calls += 1\n                    if nval < cval:\n                        cy, cval = ny, nval\n                        improved = True\n                        if cval < best_value:\n                            best_x, best_y, best_value = cx, cy, cval\n\n            step *= 0.5\n\n    while calls < budget:\n        radius = span * 0.05 * (rng.random() + 0.1)\n        angle = rng.uniform(0.0, 2.0 * math.pi)\n        nx = min(max(best_x + radius * math.cos(angle), low), high)\n        ny = min(max(best_y + radius * math.sin(angle), low), high)\n        nval = objective(nx, ny)\n        calls += 1\n        if nval < best_value:\n            best_x, best_y, best_value = nx, ny, nval\n\n    return best_x, best_y",
+          "change_summary": "Replaced pure random search with a multi-start coordinate-descent local optimizer using geometric step refinement, plus a small local polish around the best point to spend any leftover budget.",
+          "metrics": {
+            "value_score": 0.7043190589057289,
+            "distance_score": 0.22030499094632522,
+            "reliability_score": 1.0,
+            "solution_quality_multiplier": 0.7,
+            "combined_score": 0.4327757187157334,
+            "avg_value": -1.0991889252384306,
+            "value_stddev": 0.351522953636571,
+            "best_value": -1.5186854067739877,
+            "worst_value": -0.5332728109269418,
+            "avg_distance": 3.539161803391184,
+            "distance_stddev": 1.8845553781211921,
+            "best_distance": 0.0005170950575914888,
+            "worst_distance": 5.672363222619861,
+            "avg_runtime_seconds": 6.523980005113117e-05,
+            "avg_objective_calls": 100.0,
+            "successful_trials": 5,
+            "total_trials": 5,
+            "error": ""
+          },
+          "valid": true,
+          "error": "",
+          "trials": [
+            {
+              "seed": 0,
+              "success": true,
+              "x": 2.23794237080845,
+              "y": -3.4008227314453663,
+              "value": -0.9012308999975163,
+              "objective_calls": 100,
+              "seconds": 7.911100010460359e-05
+            },
+            {
+              "seed": 1,
+              "success": true,
+              "x": 1.515929727227629,
+              "y": 2.8872335113551317,
+              "value": -1.3788910622159178,
+              "objective_calls": 100,
+              "seconds": 6.088500003897934e-05
+            },
+            {
+              "seed": 2,
+              "success": true,
+              "x": -4.097572260231913,
+              "y": -2.6913191109107837,
+              "value": -0.5332728109269418,
+              "objective_calls": 100,
+              "seconds": 6.065899992790946e-05
+            },
+            {
+              "seed": 3,
+              "success": true,
+              "x": -1.7045010688942073,
+              "y": 0.6778722609619443,
+              "value": -1.5186854067739877,
+              "objective_calls": 100,
+              "seconds": 6.186700011312496e-05
+            },
+            {
+              "seed": 4,
+              "success": true,
+              "x": 0.7171742229818099,
+              "y": -2.4871425263508975,
+              "value": -1.1638644462777892,
+              "objective_calls": 100,
+              "seconds": 6.367700007103849e-05
+            }
+          ]
+        },
+        {
+          "program_id": "fadefc39e2706d53",
+          "iteration": 3,
+          "island": 2,
+          "parent_id": "7059917504a429f1",
+          "code": "\"\"\"Coordinate-descent with multi-start and shrinking step sizes.\"\"\"\n\nimport math\n\ndef search_algorithm(objective, budget, rng, bounds):\n    \"\"\"Return the best (x, y) found within a strict objective-call budget.\"\"\"\n    low, high = bounds\n    span = high - low\n\n    best_x = rng.uniform(low, high)\n    best_y = rng.uniform(low, high)\n    best_value = objective(best_x, best_y)\n    calls = 1\n\n    num_starts = 4\n    starts = []\n    for _ in range(num_starts):\n        sx = rng.uniform(low, high)\n        sy = rng.uniform(low, high)\n        starts.append((sx, sy))\n\n    for sx, sy in starts:\n        if calls >= budget:\n            break\n        cx = min(max(sx, low), high)\n        cy = min(max(sy, low), high)\n        cval = objective(cx, cy)\n        calls += 1\n\n        if cval < best_value:\n            best_x, best_y, best_value = cx, cy, cval\n\n        step = span * 0.25\n        while step > 1e-4 and calls < budget:\n            improved = True\n            while improved and calls < budget:\n                improved = False\n                for sign in (1.0, -1.0):\n                    if calls >= budget:\n                        break\n                    nx = min(max(cx + sign * step, low), high)\n                    nval = objective(nx, cy)\n                    calls += 1\n                    if nval < cval:\n                        cx, cval = nx, nval\n                        improved = True\n                        if cval < best_value:\n                            best_x, best_y, best_value = cx, cy, cval\n\n                for sign in (1.0, -1.0):\n                    if calls >= budget:\n                        break\n                    ny = min(max(cy + sign * step, low), high)\n                    nval = objective(cx, ny)\n                    calls += 1\n                    if nval < cval:\n                        cy, cval = ny, nval\n                        improved = True\n                        if cval < best_value:\n                            best_x, best_y, best_value = cx, cy, cval\n\n            step *= 0.5\n\n    return best_x, best_y",
+          "change_summary": "Replaced pure random search with a multi-start coordinate-descent local optimizer that uses shrinking step sizes to efficiently converge to local minima within the fixed budget.",
+          "metrics": {
+            "value_score": 0.6836128880496266,
+            "distance_score": 0.2195399324178177,
+            "reliability_score": 1.0,
+            "solution_quality_multiplier": 0.7,
+            "combined_score": 0.425367896625111,
+            "avg_value": -1.0561838104851449,
+            "value_stddev": 0.32696926576680413,
+            "best_value": -1.5186858225849784,
+            "worst_value": -0.5332728109269418,
+            "avg_distance": 3.5549799937846793,
+            "distance_stddev": 1.8878274938646533,
+            "best_distance": 0.00047517297111539155,
+            "worst_distance": 5.671924353357052,
+            "avg_runtime_seconds": 6.603839992749271e-05,
+            "avg_objective_calls": 100.0,
+            "successful_trials": 5,
+            "total_trials": 5,
+            "error": ""
+          },
+          "valid": true,
+          "error": "",
+          "trials": [
+            {
+              "seed": 0,
+              "success": true,
+              "x": 2.23794237080845,
+              "y": -3.4002123798828663,
+              "value": -0.901231469016803,
+              "objective_calls": 100,
+              "seconds": 8.37089999095042e-05
+            },
+            {
+              "seed": 1,
+              "success": true,
+              "x": 0.7172749983598905,
+              "y": -2.486541187918283,
+              "value": -1.1638644716111162,
+              "objective_calls": 100,
+              "seconds": 6.308000001808978e-05
+            },
+            {
+              "seed": 2,
+              "success": true,
+              "x": -4.097572260231913,
+              "y": -2.6913191109107837,
+              "value": -0.5332728109269418,
+              "objective_calls": 100,
+              "seconds": 6.194699994921393e-05
+            },
+            {
+              "seed": 3,
+              "success": true,
+              "x": -1.7041958931129573,
+              "y": 0.6775670851806943,
+              "value": -1.5186858225849784,
+              "objective_calls": 100,
+              "seconds": 6.079799982217082e-05
+            },
+            {
+              "seed": 4,
+              "success": true,
+              "x": 0.7174793987630599,
+              "y": -2.4868373505696475,
+              "value": -1.163864478285885,
+              "objective_calls": 100,
+              "seconds": 6.065799993848486e-05
+            }
+          ]
+        }
+      ],
+      "completion_order": [
+        {
+          "slot": 1,
+          "elapsed_s": 14.341458681999939,
+          "candidate_score": 0.6090824117294351,
+          "best_score": 0.6991218513304834,
+          "valid": true
+        },
+        {
+          "slot": 2,
+          "elapsed_s": 32.14921466200008,
+          "candidate_score": 0.4327757187157334,
+          "best_score": 0.6991218513304834,
+          "valid": true
+        },
+        {
+          "slot": 3,
+          "elapsed_s": 48.40924147700002,
+          "candidate_score": 0.425367896625111,
+          "best_score": 0.6991218513304834,
+          "valid": true
+        }
+      ],
+      "usage": {
+        "calls": 3,
+        "failures": 0,
+        "prompt_tokens": 4242,
+        "completion_tokens": 1593,
+        "total_tokens": 5835,
+        "model_seconds": 49.476792
+      },
+      "throughput_calls_s": 0.061971635658418844,
+      "stage_summary": {
+        "baseline_evaluation": {
+          "calls": 1,
+          "wall_span_s": 0.0224724879999485,
+          "sum_call_s": 0.0224724879999485,
+          "min_call_s": 0.0224724879999485,
+          "max_call_s": 0.0224724879999485
+        },
+        "mutation": {
+          "calls": 3,
+          "wall_span_s": 48.36373904700008,
+          "sum_call_s": 48.31890068400003,
+          "min_call_s": 14.29732650599999,
+          "max_call_s": 17.784543346999953
+        },
+        "candidate_evaluation": {
+          "calls": 3,
+          "wall_span_s": 34.08928268599993,
+          "sum_call_s": 0.06744653599980666,
+          "min_call_s": 0.02150262500003919,
+          "max_call_s": 0.02307291399984024
+        }
+      },
+      "events": [
+        {
+          "phase": "baseline_evaluation",
+          "unit": "initial-program",
+          "started_s": 2.3889999738457846e-06,
+          "ended_s": 0.022474876999922344,
+          "duration_s": 0.0224724879999485,
+          "success": true
+        },
+        {
+          "phase": "mutation",
+          "unit": "candidate-1",
+          "started_s": 0.022512178999932075,
+          "ended_s": 14.319838684999922,
+          "duration_s": 14.29732650599999,
+          "success": true
+        },
+        {
+          "phase": "candidate_evaluation",
+          "unit": "candidate-1",
+          "started_s": 14.319913757999984,
+          "ended_s": 14.341416383000023,
+          "duration_s": 0.02150262500003919,
+          "success": true
+        },
+        {
+          "phase": "mutation",
+          "unit": "candidate-2",
+          "started_s": 14.341464535000114,
+          "ended_s": 32.12600788200007,
+          "duration_s": 17.784543346999953,
+          "success": true
+        },
+        {
+          "phase": "candidate_evaluation",
+          "unit": "candidate-2",
+          "started_s": 32.12609508200012,
+          "ended_s": 32.14916799599996,
+          "duration_s": 0.02307291399984024,
+          "success": true
+        },
+        {
+          "phase": "mutation",
+          "unit": "candidate-3",
+          "started_s": 32.14922039499993,
+          "ended_s": 48.38625122600001,
+          "duration_s": 16.237030831000084,
+          "success": true
+        },
+        {
+          "phase": "candidate_evaluation",
+          "unit": "candidate-3",
+          "started_s": 48.38632544699999,
+          "ended_s": 48.40919644399992,
+          "duration_s": 0.02287099699992723,
+          "success": true
+        }
+      ]
+    }
+  ],
+  "dataset": {
+    "textgrad_bbh_sha256": "2a6132d2c99f00d0d2eb1113ac6b4a918bd969d863c48749210d969713db8d43",
+    "train_ids": [
+      0,
+      1
+    ],
+    "validation_ids": [
+      50,
+      51,
+      52
+    ]
+  },
+  "summary": {
+    "textgrad": {
+      "serial": {
+        "runs": 1,
+        "target_reached_runs": 1,
+        "time_to_quality_s_median": 122.84898728000007,
+        "wall_seconds_median": 122.84898853800019,
+        "quality_gain_median": 1.0,
+        "calls_median": 13,
+        "tokens_median": 5826,
+        "ttq_speedup_vs_serial": 1.0
+      },
+      "sync_parallel": {
+        "runs": 1,
+        "target_reached_runs": 1,
+        "time_to_quality_s_median": 53.813602112000126,
+        "wall_seconds_median": 53.813603877000105,
+        "quality_gain_median": 1.0,
+        "calls_median": 13,
+        "tokens_median": 4465,
+        "ttq_speedup_vs_serial": 2.282861255492976
+      },
+      "async_pipeline": {
+        "runs": 1,
+        "target_reached_runs": 1,
+        "time_to_quality_s_median": 15.929640102999883,
+        "wall_seconds_median": 60.336953315999835,
+        "quality_gain_median": 0.6666666666666667,
+        "calls_median": 13,
+        "tokens_median": 4652,
+        "ttq_speedup_vs_serial": 7.711975065705662
+      },
+      "async_vs_sync_ttq_speedup": 3.378205770126966
+    },
+    "openevolve": {
+      "sync_parallel": {
+        "runs": 1,
+        "target_reached_runs": 0,
+        "time_to_quality_s_median": null,
+        "wall_seconds_median": 21.05682218800007,
+        "quality_gain_median": 0.0,
+        "calls_median": 3,
+        "tokens_median": 6072,
+        "ttq_speedup_vs_serial": null
+      },
+      "async_pipeline": {
+        "runs": 1,
+        "target_reached_runs": 1,
+        "time_to_quality_s_median": 16.66613892700002,
+        "wall_seconds_median": 21.133231899000066,
+        "quality_gain_median": 0.07477774243994217,
+        "calls_median": 3,
+        "tokens_median": 5888,
+        "ttq_speedup_vs_serial": null
+      },
+      "serial": {
+        "runs": 1,
+        "target_reached_runs": 0,
+        "time_to_quality_s_median": null,
+        "wall_seconds_median": 48.40924348900012,
+        "quality_gain_median": 0.0,
+        "calls_median": 3,
+        "tokens_median": 5835,
+        "ttq_speedup_vs_serial": null
+      },
+      "async_vs_sync_ttq_speedup": null
+    }
+  },
+  "completed_at": "2026-08-05T01:57:31+00:00",
+  "trace_replay": {
+    "scope": "paired scheduler analysis over real API traces; estimates exclude thread-launch and ledger overhead",
+    "textgrad": {
+      "source_mode": "sync_parallel",
+      "source_repeat": 0,
+      "quality_target": 1.0,
+      "source_model_calls": 13,
+      "source_tokens": 4465,
+      "method": "critical-path replay of one real TextGrad response/gradient/candidate trace; every mode receives identical outputs and call durations",
+      "live_observed_at_common_target": {
+        "serial": {
+          "reached": true,
+          "time_to_quality_s": 122.84898728000007,
+          "baseline_quality": 0.0,
+          "final_quality": 1.0
+        },
+        "sync_parallel": {
+          "reached": true,
+          "time_to_quality_s": 53.813602112000126,
+          "baseline_quality": 0.0,
+          "final_quality": 1.0
+        },
+        "async_pipeline": {
+          "reached": true,
+          "time_to_quality_s": 60.33695262599986,
+          "baseline_quality": 0.3333333333333333,
+          "final_quality": 1.0
+        }
+      },
+      "modes": {
+        "serial": {
+          "time_to_quality_s": 100.2971057289999,
+          "calls_to_quality": 13
+        },
+        "sync_parallel": {
+          "time_to_quality_s": 53.80929506199982,
+          "calls_to_quality": 13,
+          "speedup_vs_serial": 1.8639364372537528
+        },
+        "async_pipeline": {
+          "time_to_quality_s": 53.142869008999924,
+          "calls_to_quality": 13,
+          "speedup_vs_serial": 1.8873107078959972,
+          "speedup_vs_sync": 1.0125402723907706
+        }
+      },
+      "components_s": {
+        "baseline_serial": 28.026912791999848,
+        "baseline_parallel": 10.228806023000061,
+        "train_serial": 52.03040750199989,
+        "train_sync_parallel": 29.788239457999907,
+        "train_async_pipeline": 29.12181340500001,
+        "update": 7.633504081999945,
+        "candidate_eval_serial": 12.606281353000213,
+        "candidate_eval_parallel": 6.158745498999906
+      }
+    },
+    "openevolve": {
+      "source_mode": "async_pipeline",
+      "source_repeat": 0,
+      "quality_target": 0.7041218513304834,
+      "baseline_quality": 0.6991218513304834,
+      "final_quality": 0.7738995937704256,
+      "source_model_calls": 3,
+      "source_tokens": 5888,
+      "method": "critical-path replay of one real OpenEvolve candidate generation and sandbox-evaluation trace; every mode receives identical programs and durations",
+      "modes": {
+        "serial": {
+          "time_to_quality_s": 33.90835381800025,
+          "calls_to_quality": 2,
+          "full_budget_wall_s": 55.017092676000175
+        },
+        "sync_parallel": {
+          "time_to_quality_s": 21.131957113,
+          "calls_to_quality": 3,
+          "full_budget_wall_s": 21.131957113,
+          "speedup_vs_serial": 1.604600730385755
+        },
+        "async_pipeline": {
+          "time_to_quality_s": 16.6649825410002,
+          "calls_to_quality": 1,
+          "full_budget_wall_s": 21.131493883000076,
+          "speedup_vs_serial": 2.034706831199905,
+          "speedup_vs_sync": 1.2680455596643967
+        }
+      },
+      "candidates": [
+        {
+          "slot": 1,
+          "score": 0.42382230711790064,
+          "valid": true,
+          "mutation_s": 17.21994781400008,
+          "evaluation_s": 0.02342346299997189
+        },
+        {
+          "slot": 2,
+          "score": 0.7738995937704256,
+          "valid": true,
+          "mutation_s": 16.619309445,
+          "evaluation_s": 0.022918071000049167
+        },
+        {
+          "slot": 3,
+          "score": 0.70850699462811,
+          "valid": true,
+          "mutation_s": 21.085778624999875,
+          "evaluation_s": 0.022960233000048902
+        }
+      ]
+    }
+  }
+}

@@ -1,12 +1,15 @@
-"""Offline checks for the two local demonstration experiments."""
+"""Offline checks for the local demonstration experiments."""
 
 from __future__ import annotations
 
 import json
+import re
+import time
 
 import pytest
 
 from experiment import openevolve_program_search as oe
+from experiment import algorithm_parallel_async_benchmark as ap
 from experiment import parallel_async_time_to_quality as pa
 from experiment import textgrad_prompt_optimization as tg
 
@@ -158,3 +161,157 @@ def test_parallel_and_async_reduce_time_to_quality_on_controlled_latency():
     assert sync.final_reward >= 0.75
     assert asynchronous.final_reward >= 0.75
     assert asynchronous.time_to_quality_s < sync.time_to_quality_s * 0.65
+
+
+def test_algorithm_parallel_async_dry_run_needs_no_key(monkeypatch, capsys):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    assert ap.main(["--dry-run"]) == 0
+    assert "upper-bound model calls=48" in capsys.readouterr().out
+
+
+def test_textgrad_real_algorithm_scheduler_modes_with_fake_model(monkeypatch):
+    answers = {
+        "train one": "alpha beta",
+        "train two": "delta gamma",
+        "validate one": "able baker",
+        "validate two": "cable zebra",
+    }
+
+    def fake_make_completion(args, usage, *, temperature=None):
+        def complete(prompt):
+            started = time.monotonic()
+            time.sleep(0.002)
+            if "You are TextualGradientDescent" in prompt:
+                response = (
+                    "<IMPROVED_VARIABLE>Sort every supplied word lexicographically and "
+                    "return the complete ordered list after Answer:.</IMPROVED_VARIABLE>"
+                )
+            elif "You are the backward engine" in prompt:
+                response = "Require a lexicographically sorted list instead of a number."
+            elif "Backpropagate the response feedback" in prompt:
+                response = "Clarify the output type and compare every character."
+            else:
+                question = re.search(
+                    r"<USER_QUESTION>\s*(.*?)\s*</USER_QUESTION>", prompt, re.S
+                ).group(1)
+                response = (
+                    f"Answer: {answers[question]}"
+                    if "Sort every supplied word" in prompt
+                    else "Answer: 0"
+                )
+            usage.record(
+                prompt_tokens=1,
+                completion_tokens=1,
+                seconds=time.monotonic() - started,
+            )
+            return response
+
+        return complete
+
+    monkeypatch.setattr(ap, "make_completion", fake_make_completion)
+    args = ap.build_parser().parse_args(
+        [
+            "--textgrad-batch-size",
+            "2",
+            "--textgrad-val-size",
+            "2",
+            "--textgrad-target-accuracy",
+            "0.5",
+            "--concurrency",
+            "2",
+        ]
+    )
+    train = [
+        tg.Example(1, "train one", answers["train one"]),
+        tg.Example(2, "train two", answers["train two"]),
+    ]
+    val = [
+        tg.Example(101, "validate one", answers["validate one"]),
+        tg.Example(102, "validate two", answers["validate two"]),
+    ]
+
+    observations = []
+    for mode in ap.MODES:
+        result = ap.run_textgrad_mode(
+            args,
+            mode=mode,
+            repeat=0,
+            train=train,
+            val=val,
+        )
+        assert result["baseline_quality"] == 0.0
+        assert result["final_quality"] == 1.0
+        assert result["target_reached"]
+        assert result["usage"]["total"]["calls"] == 11
+        assert {"baseline_eval", "train_forward", "candidate_eval"} <= set(
+            result["stage_summary"]
+        )
+        observations.append(result)
+    replay = ap._textgrad_trace_replay(observations)
+    assert replay["quality_target"] == 1.0
+    assert (
+        replay["modes"]["sync_parallel"]["time_to_quality_s"]
+        <= replay["modes"]["serial"]["time_to_quality_s"]
+    )
+    assert (
+        replay["modes"]["async_pipeline"]["time_to_quality_s"]
+        <= replay["modes"]["sync_parallel"]["time_to_quality_s"]
+    )
+
+
+def test_openevolve_real_algorithm_scheduler_modes_with_fake_model(monkeypatch):
+    def fake_make_completion(args, usage, *, temperature=None):
+        def complete(prompt):
+            slot = int(re.search(r"Iteration: (\d+)", prompt).group(1))
+            usage.record(prompt_tokens=1, completion_tokens=1, seconds=0.001)
+            return (
+                "<PROGRAM>\n"
+                "def search_algorithm(objective, budget, rng, bounds):\n"
+                f"    return ({slot}.0, 0.0)\n"
+                f"# candidate-{slot}\n"
+                "</PROGRAM>\n"
+                "<CHANGE_SUMMARY>deterministic test candidate</CHANGE_SUMMARY>"
+            )
+
+        return complete
+
+    def fake_evaluate(source, **kwargs):
+        match = re.search(r"candidate-(\d+)", source)
+        score = 0.5 if match is None else 0.5 + 0.01 * int(match.group(1))
+        metrics = {
+            "combined_score": score,
+            "avg_value": -score,
+            "avg_distance": 1.0 - score,
+        }
+        return True, metrics, "", []
+
+    monkeypatch.setattr(ap, "make_completion", fake_make_completion)
+    monkeypatch.setattr(oe, "evaluate_source", fake_evaluate)
+    args = ap.build_parser().parse_args(
+        [
+            "--openevolve-candidates",
+            "3",
+            "--openevolve-min-score-gain",
+            "0.005",
+            "--concurrency",
+            "3",
+        ]
+    )
+
+    observations = []
+    for mode in ap.MODES:
+        result = ap.run_openevolve_mode(args, mode=mode, repeat=0)
+        assert result["baseline_quality"] == 0.5
+        assert result["final_quality"] == pytest.approx(0.53)
+        assert result["target_reached"]
+        assert result["usage"]["calls"] == 3
+        assert len(result["candidates"]) == 3
+        observations.append(result)
+    replay = ap._openevolve_trace_replay(observations)
+    assert replay["quality_target"] == pytest.approx(0.505)
+    assert replay["modes"]["async_pipeline"]["calls_to_quality"] == 1
+    assert (
+        replay["modes"]["async_pipeline"]["time_to_quality_s"]
+        <= replay["modes"]["sync_parallel"]["time_to_quality_s"]
+    )
