@@ -112,6 +112,15 @@ class MergeContext:
     prior: Optional["BetaPosterior"] = None
     #: Fraction of the artifact a single diff may touch.
     trust_radius: float = 0.2
+    #: How far the candidate sits from the ``stable`` branch, as a fraction of
+    #: keys that differ, in ``[0, 1]``. The KL-to-a-reference-policy analogy, and
+    #: information today's default gate does not use: L1 safety rests entirely on
+    #: the oracle's single veto, and "how far is this from the thing known to
+    #: work" is exactly what a blast radius should be weighed against. ``0.0``
+    #: when the run has no ``stable`` branch yet, which is the same as "no
+    #: reference to be far from". See
+    #: :class:`~agentdescent.advantage.StableDistanceAcceptance`.
+    stable_distance: float = 0.0
     #: Fingerprint of the environment each side was measured in. Equal on a
     #: single-machine run, so the comparison is always valid there. Once
     #: measurements can come from different toolchains they stop being

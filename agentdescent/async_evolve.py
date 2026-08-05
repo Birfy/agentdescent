@@ -36,6 +36,7 @@ import time
 import warnings
 from typing import Callable, Dict, List, Optional
 
+from .advantage import GroupAdvantage
 from .agents import Usage
 from .policies import Policies
 from .evolution import (
@@ -309,6 +310,11 @@ def async_evolve(
     died = [False]                            # True only if the run ENDED on failure
     contract_error = FirstError()          # caller bug -> re-raise on this thread
     stop_reason = ["max_seconds"]             # overwritten by whichever bound fires
+    # Group-relative reward, recorded on every card. Thread-safe by way of the
+    # GIL on dict updates; the statistic is a running one, so a torn read costs
+    # a slightly stale mean rather than a wrong decision -- and nothing reads it
+    # by default anyway.
+    advantage = GroupAdvantage()
     # Backpressure: bumped when the pipeline stalls (evidence keeps arriving and
     # nothing commits), which forces every worker to resync regardless of the ratio.
     epoch = [0]
@@ -388,6 +394,11 @@ def async_evolve(
                 eng.meter.add("rollouts")
                 eng.meter.add("rollout_seconds", time.time() - t_start)
                 sampler.record(task.id, score)     # learn which tasks carry signal
+                # Before the solved-task branch, for the same reason as on the
+                # synchronous path: a group that only saw the failures has no
+                # variance to standardise against.
+                adv = advantage.observe(
+                    advantage.key(base_v, str(task.meta.get("cluster", ""))), score)
                 if score < solved_threshold:
                     proposal = _checked_proposal(
                         eng.propose(artifact.render(), task, output, score), task)
@@ -408,7 +419,14 @@ def async_evolve(
                             card = EvidenceCard(
                                 diff=diff, base_version={eng.artifact_id: base_v},
                                 touched=[eng.artifact_id], before_after_delta=delta,
-                                trajectory_refs=[task])
+                                trajectory_refs=[task],
+                                # Same signal as the synchronous path, and the
+                                # reason `GroupAdvantage` accumulates rather than
+                                # batching at a barrier: there is no barrier here,
+                                # so a batched version would silently record
+                                # nothing on exactly the runtime the project is
+                                # making claims about.
+                                advantage=adv)
                             with intake_lock:
                                 intake.append(card)
             except ContractError as e:

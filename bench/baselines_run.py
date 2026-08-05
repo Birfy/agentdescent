@@ -43,7 +43,8 @@ from agentdescent.evolution import EvolutionResult
 from examples._common import completion_for, confirm
 
 
-def _hotpotqa(fetch: int, seed: int, completion) -> Workload:
+def _hotpotqa(fetch: int, seed: int, completion, *, self_verify: bool = True,
+              eval_concurrency: int = 8) -> Workload:
     """GEPA's dataset and actor; the engine's own optimizer."""
     from examples.gepa import gepa_prompt_evolution as gepa
 
@@ -62,10 +63,12 @@ def _hotpotqa(fetch: int, seed: int, completion) -> Workload:
             "initial_state": {"instruction": gepa._SEED_INSTRUCTION},
             "artifact_id": "gepa_prompt", "blast_radius": 0.2,
             "held_out_frac": ds.val_frac, "rounds": 10_000,
+            "self_verify": self_verify, "eval_concurrency": eval_concurrency,
         })
 
 
-def _finer(pool: int, top_k: int, seed: int, completion) -> Workload:
+def _finer(pool: int, top_k: int, seed: int, completion, *,
+           self_verify: bool = True, eval_concurrency: int = 8) -> Workload:
     """ACE's dataset and actor; the engine's own optimizer."""
     from examples.ace import ace_context_evolution as ace
 
@@ -82,6 +85,7 @@ def _finer(pool: int, top_k: int, seed: int, completion) -> Workload:
         evolve_kwargs={
             "artifact_id": "ace_playbook", "blast_radius": 0.2,
             "held_out_frac": ds.val_frac, "rounds": 10_000,
+            "self_verify": self_verify, "eval_concurrency": eval_concurrency,
         })
 
 
@@ -106,6 +110,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--provider", default="openai", choices=["claude", "openai", "glm"])
     p.add_argument("--model", default="GLM-5.2")
     p.add_argument("--json", dest="json_out")
+    p.add_argument("--no-self-verify", dest="self_verify", action="store_false",
+                   help="skip the second rollout that measures each proposal's "
+                        "own before/after delta. Halves the model cost per "
+                        "proposal and removes one input from the Beta posterior "
+                        "-- identical across arms, so the comparison stays valid, "
+                        "but it is a different algorithm from the default and the "
+                        "table has to say which one ran")
+    p.add_argument("--eval-concurrency", type=int, default=8,
+                   help="how many held-out tasks the gate scores at once. The "
+                        "gate, not the rollouts, is what dominates wall-clock on "
+                        "a small budget")
     p.add_argument("--plan", action="store_true",
                    help="print how many runs this would be, and stop")
     p.add_argument("--yes", action="store_true")
@@ -132,6 +147,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
           f"~{runs * budget.rollouts} rollouts in total")
     print("Optimizer: the engine's default aggregator -- the port's own search "
           "strategy is deliberately not used, so a difference cannot come from it")
+    print(f"self_verify: {args.self_verify}"
+          + ("" if args.self_verify else
+             "  (each proposal's own before/after delta is not measured)"))
     if args.plan:
         return 0
     if len(seeds) < 3:
@@ -148,10 +166,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     for seed in seeds:
         # Rebuilt per seed so the split moves with it, and once per seed so every
         # arm at that seed sees byte-identical data.
+        shared = {"self_verify": args.self_verify,
+                  "eval_concurrency": args.eval_concurrency}
         if args.dataset == "hotpotqa":
-            workload = _hotpotqa(args.fetch, seed, completion)
+            workload = _hotpotqa(args.fetch, seed, completion, **shared)
         else:
-            workload = _finer(args.pool, args.top_k, seed, completion)
+            workload = _finer(args.pool, args.top_k, seed, completion, **shared)
 
         builders: dict = {
             "serial": lambda w, **k: serial(w, **k),

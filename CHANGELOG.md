@@ -56,6 +56,23 @@ All notable changes to AgentDescent are documented here. The format follows
   quality regressions anywhere is more likely a measurement problem than a free
   lunch.
 
+- `agentdescent.advantage` — three decision rules borrowed from PPO and GRPO,
+  **all off by default and none validated**: group-relative advantage
+  (`EvidenceCard.advantage`, consumed by opt-in `AdvantageAcceptance` /
+  `AdvantageConflict`), `AdaptiveTrustRegion` for the two guessed diff-size
+  constants, and `MergeContext.stable_distance` with `StableDistanceAcceptance`.
+  There is no PPO and no GRPO here — no policy distribution, so no importance
+  ratio and no clipping objective — and `docs/concepts.md` keeps these separate
+  from the analogy table whose rows all land on code that runs. `bench.ab_run`
+  is the A/B each has to pass; one that does not should be deleted with the
+  negative result recorded.
+- Measured while building it: a group is one base version and one task cluster,
+  and the base version moves on every commit — so a group is at most one round of
+  workers split across the clusters they landed in. Four workers over four
+  clusters can never fill the default `min_group=4`. That bounds where the
+  advantage signal can exist at all, and is pinned by a test rather than left to
+  be discovered during an A/B.
+
 ### Changed
 
 - OpenEvolve's `--serial` now means the shared thing (one worker) rather than

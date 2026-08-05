@@ -146,6 +146,21 @@ class EvidenceCard:
     # capability, and the mid-rollout hot-update it names does not exist (a worker
     # holds one snapshot for a whole rollout, by construction). It would come back
     # with the code that needs it.
+    #: How this rollout's reward compared with its **group** -- other rollouts
+    #: against the same base version and task cluster -- as
+    #: ``(reward - mean) / std``. GRPO's baseline-free advantage, and the one part
+    #: of it that transfers without a policy distribution.
+    #:
+    #: ``None`` means *not known*, which is not the same as ``0.0``. Zero is a
+    #: real advantage value ("did exactly as well as its peers"); ``None`` is a
+    #: group too small to have a spread, or one with no variance at all -- the
+    #: zero-advantage case :class:`~agentdescent.sampling.DifficultyWeighted`
+    #: already filters on. A consumer that treats the two alike puts noise into
+    #: the gate wearing the costume of a measurement.
+    #:
+    #: Recorded by default and **acted on by nobody** by default: see
+    #: :mod:`agentdescent.advantage` for the opt-in policies that read it.
+    advantage: Optional[float] = None
     cost_tokens: int = 0
     cost_wallclock: float = 0.0
 

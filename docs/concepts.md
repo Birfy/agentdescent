@@ -52,6 +52,10 @@ creates**. AgentDescent transplants that theory:
 | EMA | `stable`/`dev` dual branch |
 | training code (immutable) | L0 frozen layer |
 
+Every row above lands on code that runs by default. Three further rows do not,
+and are kept separate rather than folded in — see
+[Three rules borrowed from PPO and GRPO](#three-rules-borrowed-from-ppo-and-grpo).
+
 The analogy **necessarily fails in one place**, and that failure *is* the
 framework's core technical problem:
 
@@ -72,6 +76,46 @@ framework's core technical problem:
   `base_version`**; cross-base fusion must rebase to a common head first.
 - **EMA → dual branch.** The slow branch is an *exponential* confirmation of the
   fast branch (EMA), not a uniform trajectory average (SWA).
+
+### Three rules borrowed from PPO and GRPO
+
+!!! danger "Status: implemented, **not validated**. None is on by default."
+    Each of these is an *option* until an A/B on a real dataset says otherwise.
+    An analogy without an A/B is decoration, and a `PPOAggregator` that computed
+    no importance ratio and had no policy distribution would make the table above
+    stop being a map of the code — which is the only thing it is good for. So
+    these live in [`agentdescent.advantage`](api.md), off by default, and a rule
+    that fails its A/B should be **deleted** with the negative result recorded
+    here.
+
+There is no PPO here and no GRPO: no parameters, no log-probabilities, no policy
+distribution, and therefore no importance ratio and no clipping objective. What
+transfers is three *decision rules*.
+
+| RL | here | before | status |
+|---|---|---|---|
+| group-relative advantage (GRPO) | a proposal's reward against its group's | only the zero-advantage *filter* — `DifficultyWeighted` drops all-pass/all-fail groups; the relative value never reached acceptance | signal recorded on every `EvidenceCard`; `AdvantageAcceptance` / `AdvantageConflict` opt-in |
+| trust region / clipping (PPO) | op and character caps on one diff | constants `6` / `32_000`, chosen by guess | `AdaptiveTrustRegion` opt-in via `AggregatorConfig(trust_region_policy=)` |
+| KL to a reference policy | distance from the `stable` branch | did not exist | `MergeContext.stable_distance` measured; `StableDistanceAcceptance` opt-in |
+
+**A measured limit on the first one, before anyone tries to use it.** A group is
+one base version and one task cluster, and the base version moves on every
+commit — so a group is at most *one round of workers*, split across however many
+clusters they landed in. With four workers over four clusters the largest
+possible group is one, and the default `min_group=4` records nothing at all.
+That is not a bug to tune away: it says where this signal can exist — wide
+rounds, few clusters, or a head that has stopped moving — and an A/B has to be
+run somewhere it does. `tests/test_advantage.py` pins it.
+
+Two design choices that are load-bearing:
+
+* **`None` is not zero.** An unknown advantage and an advantage of exactly zero
+  ("did as well as its peers") are different facts, and a consumer that conflates
+  them puts noise into the gate wearing the costume of a measurement.
+* **The stable-distance penalty refuses, it does not adjust the score.** Scores
+  here feed a Beta posterior; silently lowering one corrupts every downstream
+  number that reads it. A candidate far from `stable` clears a proportionally
+  higher bar instead, and the refusal says so.
 
 ---
 

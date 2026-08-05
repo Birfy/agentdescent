@@ -41,6 +41,7 @@ from typing import (
 )
 
 from .agents import Completion, Usage, claude
+from .advantage import GroupAdvantage
 from .aggregator import (
     Aggregator, AggregatorConfig, AggregatorFactory, AggregatorContractError,
     check_reports,
@@ -2134,6 +2135,9 @@ def evolve(
     # Where the next batch starts. `SingleHead` is the current head for every
     # worker, i.e. exactly what this loop has always done.
     selection = _pol.selection or SingleHead()
+    # The group-relative reward every rollout carries. Off nobody's path: the
+    # value lands on the evidence card and no default policy reads it.
+    advantage = GroupAdvantage()
     strategy = strategy or AppendRules()
     # TP owns a *section of the artifact*, so it needs the artifact's key space --
     # not the task ids `plan()` is handed. Resolve and validate it here, before any
@@ -2312,6 +2316,14 @@ def evolve(
             output = outcome.output
             score = _checked_reward(outcome.reward, task)
             sampler.record(task.id, score)               # learn which tasks carry signal
+            # Observed here, before the solved-task early return: a *group* is
+            # every rollout against this base and cluster, and one that only saw
+            # the failures would have no variance to standardise against on a
+            # binary reward -- every member scoring zero, every advantage
+            # therefore undefined. The signal would exist and be permanently
+            # `None`, which is worse than not having it.
+            adv = advantage.observe(
+                advantage.key(mine_v, str(task.meta.get("cluster", ""))), score)
             if observe_plan is not None:
                 # ...and let the parallel strategy learn too, if it wants to.
                 # `plan` alone is a pure function of its arguments, which is
@@ -2360,7 +2372,13 @@ def evolve(
                 delta = 0.0
             aggregator.ingest(EvidenceCard(
                 diff=diff, base_version={artifact_id: mine_v}, touched=[artifact_id],
-                before_after_delta=delta, trajectory_refs=[task]))
+                before_after_delta=delta, trajectory_refs=[task],
+                # Recorded always, acted on by nobody unless a policy from
+                # `agentdescent.advantage` is installed. It is arithmetic over
+                # two numbers the round already has, and a signal that is only
+                # computed when something consumes it can never be looked at to
+                # decide whether anything should.
+                advantage=adv))
 
         try:
             # the parallel strategy assigns this round's tasks to workers; they run

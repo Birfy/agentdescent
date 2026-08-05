@@ -98,6 +98,13 @@ class AggregatorConfig:
     #: say) could commit a 500 KB value that then renders into every later prompt.
     #: Real ops in the shipped ports are ~2.5k chars, so this is ~12x headroom.
     trust_region_chars: int = 32_000
+    #: Optional :class:`~agentdescent.advantage.AdaptiveTrustRegion`. `None` keeps
+    #: the two constants above, which is what every measurement in this repository
+    #: was taken with. Both of them are guesses -- the character cap exists because
+    #: a comment records that the op count alone was not enough -- and a guess that
+    #: fits a rule table fits a file tree in neither direction. Opt-in until an A/B
+    #: says letting it move is better than leaving it still.
+    trust_region_policy: Optional[Any] = None
     promote_after_k: int = 3        # dev->stable: regression-free ROUNDS (EMA)
     #: Version half-life of the acceptance risk. `base_delta` is exposed but the
     #: half-life that turns it into the actual threshold was a default argument
@@ -462,7 +469,13 @@ class Aggregator:
         self.buffer.tick()
         reports: List[MergeReport] = []
         for aid in self.buffer.ready(self.config):
-            reports.append(self._process(aid))
+            report = self._process(aid)
+            # Told after the fact, from the category the merge actually reported
+            # -- not from a second reading of the same decision. A trust region
+            # that adapted to its own guess about what happened would be tuning
+            # itself against a number nothing else in the run agrees with.
+            self._observe_trust_region(report.category)
+            reports.append(report)
         self._age_and_promote(reports)
         return reports
 
@@ -519,10 +532,12 @@ class Aggregator:
         never settled, so a runaway reflector vanished from the report and from
         the evidence pool at once -- the most expensive failure to diagnose is
         the one that leaves no trace."""
+        region = self._trust_region()
+
         def within(card) -> bool:
-            if card.diff.size() > self.config.trust_region_ops:
+            if card.diff.size() > region.ops:
                 return False
-            return all(len(str(v)) <= self.config.trust_region_chars
+            return all(len(str(v)) <= region.chars
                        for v in card.diff.ops.values())
 
         kept = [c for c in cards if within(c)]
@@ -530,6 +545,46 @@ class Aggregator:
         if oversized:
             self.buffer.settle(oversized)
         return kept, oversized
+
+    def _trust_region(self):
+        """The size cap for this merge: the constants, or whatever adapted them.
+
+        Read through the policy rather than from `config` directly so the two
+        cannot disagree -- an adaptive region that the size check did not consult
+        would move, be recorded as moving, and change nothing."""
+        from .advantage import TrustRegion
+
+        policy = getattr(self.config, "trust_region_policy", None)
+        if policy is None:
+            return TrustRegion(ops=self.config.trust_region_ops,
+                               chars=self.config.trust_region_chars)
+        return policy.current
+
+    def _observe_trust_region(self, outcome: str) -> None:
+        """Tell an adaptive region how the merge it sized turned out."""
+        policy = getattr(self.config, "trust_region_policy", None)
+        if policy is not None:
+            policy.observe(outcome)
+
+    def _stable_distance(self, artifact_id: str, candidate) -> float:
+        """How far a candidate sits from the confirmed branch, in ``[0, 1]``.
+
+        Read here rather than by the policy, because a policy is not allowed to
+        know about the ledger -- that is the boundary `policies.py` exists to
+        keep. Any failure to read `stable` yields ``0.0``: a branch that does not
+        exist yet, or cannot be read, is not a reference to be far from, and
+        inventing a distance would be worse than reporting none.
+        """
+        from .advantage import state_distance
+
+        try:
+            stable = self.ledger.snapshot(Ledger.STABLE).get(artifact_id)
+        except Exception:  # noqa: BLE001 - a missing branch is the normal case
+            return 0.0
+        if stable is None:
+            return 0.0
+        return state_distance(getattr(stable, "state", {}) or {},
+                              getattr(candidate, "state", {}) or {})
 
     def _audit(self, artifact, artifact_id, best_state, best_diff,
                base_full, cand_full, base_score, cand_score, prior) -> bool:
@@ -700,7 +755,8 @@ class Aggregator:
             artifact=artifact, candidate=best_state, cards=kept_cards,
             base_counts=(base_s, base_f), cand_counts=(cand_s, cand_f),
             diff=best_diff, base_cheap=base_score, cand_cheap=cand_score,
-            prior=prior, trust_radius=artifact.blast_radius))
+            prior=prior, trust_radius=artifact.blast_radius,
+            stable_distance=self._stable_distance(artifact_id, best_state)))
         p_improve = decision.p_improve
 
         # The full held-out rates. The regression guard below must use *these*

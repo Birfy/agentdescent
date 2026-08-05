@@ -29,6 +29,15 @@ from .ledger import (
 from .verifier import ThreeLayerVerifier, VerifierBudget
 from . import backends, dataloader          # submodules: agentdescent.dataloader.hf_rows(...)
 from .dataloader import Dataset, split_dataset
+from .advantage import (
+    AdaptiveTrustRegion,
+    AdvantageAcceptance,
+    AdvantageConflict,
+    GroupAdvantage,
+    StableDistanceAcceptance,
+    TrustRegion,
+    state_distance,
+)
 from .sampling import DifficultyWeighted, RoundRobin, TaskSampler
 from .selection import (
     Archive,
@@ -199,6 +208,13 @@ __all__ = [
     "DifficultyWeighted",
     "RoundRobin",
     "TaskSampler",
+    "GroupAdvantage",
+    "AdvantageAcceptance",
+    "AdvantageConflict",
+    "AdaptiveTrustRegion",
+    "TrustRegion",
+    "StableDistanceAcceptance",
+    "state_distance",
     "SelectionPolicy",
     "SelectionContext",
     "Candidate",

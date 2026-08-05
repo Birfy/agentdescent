@@ -8,7 +8,7 @@ page and the code disagree, so a signature here is the signature you get.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-186 public names across 32 modules.
+193 public names across 33 modules.
 
 ---
 
@@ -627,6 +627,48 @@ Every worker starts from the current head. Today's behaviour, exactly.
 ### `pareto_front(candidates: Sequence[Candidate], *, tasks: Sequence[str]) -> List[Candidate]`
 
 Candidates no other candidate beats on every task and betters on one.
+
+---
+
+## Borrowed RL decision rules
+
+Group-relative advantage, an adaptive trust region, distance from stable. &nbsp;·&nbsp; `agentdescent.advantage` &nbsp;·&nbsp; [guide](concepts.md)
+
+### `AdaptiveTrustRegion(...)`
+
+Widen the diff-size cap while merges land; tighten when they do not.
+
+| method | what it does |
+|---|---|
+| `observe(outcome: str) -> TrustRegion` | Record one merge outcome and return the region for the next merge. |
+
+### `AdvantageAcceptance(inner, strength: float = 1.0) -> None`
+
+Shift the acceptance prior by how well a proposal did against its group.
+
+### `AdvantageConflict(inner, margin: float = 0.5) -> None`
+
+Break a contradiction by group-relative advantage, not raw score.
+
+### `GroupAdvantage(min_group: int = 4) -> None`
+
+Standardise a rollout's reward against the group it belongs to.
+
+| method | what it does |
+|---|---|
+| `observe(key: str, reward: float) -> Optional[float]` | Record a reward and return its advantage, or `None` if unknown yet. |
+
+### `StableDistanceAcceptance(inner, strength: float = 0.1) -> None`
+
+Penalise candidates that drift far from the confirmed branch.
+
+### `TrustRegion(ops: int, chars: int) -> None`
+
+How large one diff may be: operations, and characters.
+
+### `state_distance(a, b) -> float`
+
+Fraction of keys on which two artifact states differ, in `[0, 1]`.
 
 ---
 
