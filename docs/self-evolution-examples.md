@@ -2,27 +2,29 @@
 
 AgentDescent is a *general* engine for parallel, merge-based evolution. To show it
 is faithful to the field — not a toy — this page ports a set of the most
-representative **skill self-evolution** and **harness self-evolution** algorithms
-from the literature, each as one runnable example, each faithful to the original
-paper/repo's **algorithm** and **dataset choice**.
+representative **skill self-evolution**, **program evolution**, and **harness
+self-evolution** algorithms from the literature, each as one runnable example,
+each faithful to the original paper/repo's **algorithm** and **dataset choice**.
 
-Two categories, mirroring the two governance layers:
+Three artifact categories, spanning the two governance layers:
 
 * **Skill self-evolution** — evolve a *skill / prompt / context* (an **L2**
   artifact, `blast_radius=0.2`): ACE, GEPA, EvoSkill, SkillOpt.
 * **Harness self-evolution** — evolve the *agentic system / coding agent itself*
   (an **L1** artifact, `blast_radius=0.6`, oracle-gated): ADAS, DGM.
+* **Program evolution** — evolve executable search code (an **L1** artifact,
+  `blast_radius=0.6`, sandbox-evaluated): OpenEvolve.
 
-**All six run through the one entry point, [`evolve()`](evolution.md)** — each is
-just a custom `strategy=` (how a proposal becomes a `Diff`) and/or a custom
+**All seven run through the AgentDescent evolution engines** — each is just a
+custom `strategy=` (how a proposal becomes a `Diff`) and/or a custom
 `aggregator_factory=` (the selection/acceptance optimizer). No example bypasses
 the engine; they differ only in those two plug-ins and the blast radius. Each has
 a dedicated page:
 
-**All six are parallel — and can run async.** Each passes `max_concurrency=n_workers`,
-so a round's workers run **concurrently** (overlapping LLM rollouts) with the
-aggregator merge as the barrier (*synchronous data-parallelism*). Add **`--async`**
-and the same example runs **barrier-free** through
+**All seven are parallel — and can run async.** In synchronous mode their workers
+run **concurrently** (overlapping LLM rollouts) with the aggregator merge as the
+barrier (*synchronous data-parallelism*). Add **`--async`** and the same example
+runs **barrier-free** through
 [`async_evolve()`](evolution.md#the-barrier-free-runtime-async_evolve) — workers
 never wait for the merge, and the staleness policy rebases/discards stale diffs.
 Their custom optimizers keep shared state thread-safe, so both modes work
@@ -41,11 +43,12 @@ python -m examples.ace_context_evolution --model claude-haiku-4-5 --async   # ba
 | **SkillOpt** (ReflACT) | chendanyang | skill document | SearchQA (EM/F1) | `strategy` (edits) + `aggregator_factory=` strict gate | [→](algo-skillopt.md) |
 | **ADAS** (Meta Agent Search) | chendanyang | harness (L1) | MGSM | `strategy` + `aggregator_factory=` keep-all archive | [→](algo-adas.md) |
 | **DGM** (Darwin Gödel Machine) | chendanyang | harness (L1) | SWE-bench Verified | `strategy` + `aggregator_factory=` archive + selection | [→](algo-dgm.md) |
+| **OpenEvolve** (Program Evolution) | cyanneko | program (L1) | Function minimization | `strategy` + `aggregator_factory=` MAP-Elites islands | [→](algo-openevolve.md) |
 
 Every example takes `--dry-run`, which prints its configuration and returns with
 **zero network access and no API key**, and has an offline test suite
-(`tests/test_<name>_example.py`) exercising its pure logic. Real runs load their
-datasets through the shared
+(`tests/test_<name>_example.py`) exercising its pure logic. Ports that need an
+external dataset load it through the shared
 [**`agentdescent.dataloader`**](dataloader.md) data layer — dependency-free
 (`urllib` only), cached under `~/.cache/agentdescent/`, from each benchmark's
 canonical source. Where a paper's full setup needs heavy infrastructure, the
@@ -166,6 +169,29 @@ python -m examples.skillopt_skill_training --model claude-haiku-4-5
 
 ---
 
+## Program evolution
+
+### OpenEvolve — function-minimization program search
+
+*Repo* `algorithmicsuperintelligence/openevolve` · *task* bundled function
+minimization.
+
+OpenEvolve evolves Python source with model mutations, MAP-Elites feature grids,
+island-local selection, and ring migration. The port maps source replacement to
+a `Strategy`, the archive to a custom `Aggregator`, and concurrency to
+`evolve()` / `async_evolve()`. Generated programs run behind an AST gate and a
+Bubblewrap sandbox with no network and explicit resource limits.
+
+The [dedicated page](algo-openevolve.md) documents the pinned upstream revision,
+intentional substitutions, live GLM-5.2 benchmark, equal model-call budget, and
+the distinction between time to quality and full end-to-end return time.
+
+```bash
+python -m examples.openevolve_program_evolution --dry-run
+```
+
+---
+
 ## Harness self-evolution
 
 ### ADAS — Meta Agent Search
@@ -226,13 +252,13 @@ released code.
 
 | Mechanism | Candidates | Existing coverage | Owner |
 |---|---|---|---|
-| Evolution / program search | AlphaEvolve (OpenEvolve), PromptBreeder, AFlow | none | TBD |
+| Evolution / program search | AlphaEvolve (OpenEvolve), PromptBreeder, AFlow | OpenEvolve | cyanneko |
 | Reflection / textual gradients | TextGrad, Reflexion, Self-Refine | partial (GEPA is reflective, not textual-gradient) | TBD |
 | Skills / lifelong learning | Voyager, SkillWeaver | adjacent (EvoSkill) | TBD |
 | Self-play / unlabeled data | Absolute Zero, R-Zero, Agent0 | **none; highest priority** | TBD |
 | Self-modifying code | SICA, Gödel Agent | DGM | TBD |
 
-The unlabeled path is the most important gap: all six current ports derive reward
+The unlabeled path is the most important gap: all seven current ports derive reward
 from a benchmark with gold labels, although `evolve()` only requires a score in
 `[0, 1]` and does not require labels.
 
