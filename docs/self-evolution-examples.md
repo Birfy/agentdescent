@@ -304,7 +304,9 @@ from a benchmark with gold labels, although `evolve()` only requires a score in
 
 ## Fidelity principles
 
-Use the short [porting checklist](porting-checklist.md) before adding a row here.
+Use the short [porting checklist](porting-checklist.md) before adding a row here,
+and record the result in [port fidelity](port-fidelity.md) after — the checklist
+is the standard, that page is what each port was actually found to do.
 
 1. **Faithful to the repo, not just the paper.** Where the released code diverges
    from the paper's claims (e.g. EvoSkill's frontier is top-K aggregate, not

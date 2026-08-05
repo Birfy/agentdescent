@@ -47,6 +47,15 @@ All notable changes to AgentDescent are documented here. The format follows
   a starting point other than the head raises rather than being collapsed to it —
   the ledger holds one live branch, and multi-head support is separate work.
 
+- `docs/port-fidelity.md` — one section per port, in the shape the differences
+  actually take: paper says / released code does / this port follows. The notes
+  existed, scattered across seven pages, a README paragraph and a test file, so
+  "we did not change the algorithm" could not be checked in one place. Carries
+  the parallelisation matrix (serial vs N=8, speedup, final held-out Δ, semantics
+  changed) with its cells empty until measured, and states that a table with no
+  quality regressions anywhere is more likely a measurement problem than a free
+  lunch.
+
 ### Changed
 
 - OpenEvolve's `--serial` now means the shared thing (one worker) rather than
