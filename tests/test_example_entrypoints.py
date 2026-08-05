@@ -1,4 +1,4 @@
-"""The command-line contract shared by the six faithful algorithm ports."""
+"""The command-line contract shared by the seven faithful algorithm ports."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import inspect
 import pathlib
 import socket
 import urllib.request
+from typing import Any, NamedTuple, Optional
 
 import pytest
 
@@ -15,20 +16,44 @@ from examples import adas_meta_agent_search as adas
 from examples import dgm_self_improve as dgm
 from examples import evoskill_skill_discovery as evoskill
 from examples import gepa_prompt_evolution as gepa
+from examples import openevolve_program_evolution as openevolve
 from examples import skillopt_skill_training as skillopt
 from examples import _TEMPLATE as port_template
 from examples import _common as common
 from examples._common import add_standard_args
 
 
+class Port(NamedTuple):
+    """One port's entry in the contract.
+
+    ``provider`` and ``async_ratio`` carry defaults because six of the seven
+    ports take the shared ones; a port that names them is declaring a deliberate
+    deviation, which is the only way one gets past this file.
+    """
+
+    module: Any
+    iteration: str
+    model: Optional[str]
+    seconds: float
+    loader: str
+    provider: str = "claude"
+    async_ratio: int = 3
+
+
 PORTS = (
-    (ace, "rounds", "claude-haiku-4-5", 30.0, "load_dataset"),
-    (gepa, "rounds", "claude-haiku-4-5", 45.0, "load_dataset"),
-    (evoskill, "iterations", "claude-haiku-4-5", 40.0, "load_dataset"),
-    (skillopt, "steps", "claude-haiku-4-5", 40.0, "load_dataset"),
-    (adas, "generations", "claude-haiku-4-5", 60.0, "build_examples"),
-    (dgm, "generations", None, 15.0, "load_dataset"),
+    Port(ace, "rounds", "claude-haiku-4-5", 30.0, "load_dataset"),
+    Port(gepa, "rounds", "claude-haiku-4-5", 45.0, "load_dataset"),
+    Port(evoskill, "iterations", "claude-haiku-4-5", 40.0, "load_dataset"),
+    Port(skillopt, "steps", "claude-haiku-4-5", 40.0, "load_dataset"),
+    Port(adas, "generations", "claude-haiku-4-5", 60.0, "build_examples"),
+    Port(dgm, "generations", None, 15.0, "load_dataset"),
+    # OpenEvolve is measured against an OpenAI-compatible GLM endpoint, and its
+    # sandboxed candidate evaluation makes a lag budget of 3 versions too loose.
+    Port(openevolve, "iterations", "glm-5.2", 300.0, "build_tasks",
+         provider="openai", async_ratio=1),
 )
+
+PORT_IDS = tuple(port.module.__name__.rsplit(".", 1)[-1] for port in PORTS)
 
 
 def test_standard_args_have_one_definition():
@@ -53,50 +78,49 @@ def test_standard_args_have_one_definition():
     assert args.yes is True
 
 
-@pytest.mark.parametrize("module,iteration,model,seconds,_loader", PORTS)
-def test_every_port_uses_the_standard_contract(module, iteration, model, seconds,
-                                                _loader):
-    parser = module.build_parser()
+@pytest.mark.parametrize("port", PORTS, ids=PORT_IDS)
+def test_every_port_uses_the_standard_contract(port):
+    parser = port.module.build_parser()
     args = parser.parse_args([])
-    assert args.provider == "claude"
-    assert args.model == model
+    assert args.provider == port.provider
+    assert args.model == port.model
     assert args.seed == 0
     assert args.asynchronous is False
-    assert args.async_ratio == 3
-    assert args.max_seconds == seconds
+    assert args.async_ratio == port.async_ratio
+    assert args.max_seconds == port.seconds
     assert args.dry_run is False
     assert args.yes is False
-    assert hasattr(args, iteration)
+    assert hasattr(args, port.iteration)
 
     option_strings = [opt for action in parser._actions for opt in action.option_strings]
     for option in ("--provider", "--model", "--seed", "--async", "--async-ratio",
                    "--max-seconds", "--dry-run", "--yes"):
-        assert option_strings.count(option) == 1, f"{module.__name__}: {option}"
+        assert option_strings.count(option) == 1, f"{port.module.__name__}: {option}"
     iteration_options = {"--rounds", "--generations", "--iterations", "--steps"}
-    assert iteration_options.intersection(option_strings) == {f"--{iteration}"}
+    assert iteration_options.intersection(option_strings) == {f"--{port.iteration}"}
 
 
-@pytest.mark.parametrize("module,_iteration,_model,_seconds,_loader", PORTS)
-def test_every_port_calls_the_shared_helper_once(
-        module, _iteration, _model, _seconds, _loader, monkeypatch):
+@pytest.mark.parametrize("port", PORTS, ids=PORT_IDS)
+def test_every_port_calls_the_shared_helper_once(port, monkeypatch):
     calls = []
 
     def recording_helper(parser, **kwargs):
         calls.append(kwargs)
         return common.add_standard_args(parser, **kwargs)
 
-    monkeypatch.setattr(module, "add_standard_args", recording_helper)
-    module.build_parser()
+    monkeypatch.setattr(port.module, "add_standard_args", recording_helper)
+    port.module.build_parser()
     assert len(calls) == 1
 
 
-@pytest.mark.parametrize("module,_iteration,_model,_seconds,loader", PORTS)
-def test_dry_run_never_touches_data_network_or_models(
-        module, _iteration, _model, _seconds, loader, monkeypatch, capsys):
+@pytest.mark.parametrize("port", PORTS, ids=PORT_IDS)
+def test_dry_run_never_touches_data_network_or_models(port, monkeypatch, capsys):
+    module = port.module
+
     def forbidden(*_args, **_kwargs):
         raise AssertionError("dry-run crossed an external boundary")
 
-    monkeypatch.setattr(module, loader, forbidden)
+    monkeypatch.setattr(module, port.loader, forbidden)
     monkeypatch.setattr(module, "completion_for", forbidden)
     monkeypatch.setattr(common, "claude", forbidden)
     monkeypatch.setattr(common, "openai_compatible", forbidden)
@@ -166,8 +190,12 @@ def test_completion_for_dispatches_on_provider(provider, factory, monkeypatch):
     assert seen == {factory: {"model": "test-model", "usage": None, "max_tokens": 99}}
 
 
-@pytest.mark.parametrize("module,_i,_m,_s,_l", PORTS + ((port_template, "", "", 0.0, ""),))
-def test_no_port_reimplements_the_shared_behaviour(module, _i, _m, _s, _l):
+@pytest.mark.parametrize(
+    "module",
+    [port.module for port in PORTS] + [port_template],
+    ids=list(PORT_IDS) + ["_TEMPLATE"],
+)
+def test_no_port_reimplements_the_shared_behaviour(module):
     source = inspect.getsource(module)
     assert "Proceed with real API calls?" not in source, (
         f"{module.__name__}: use examples._common.confirm(args)")
