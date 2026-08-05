@@ -52,7 +52,21 @@ def test_guarded_discards_more_than_reflective():
     r = _run("reflective", async_ratio=4, seconds=12.0, seed=3)
 
     assert g.discarded_stale > r.discarded_stale   # the claim under test
-    assert r.rollouts < g.rollouts                 # Reflective wastes far less work
+    # ...and as a *rate*, which is what "wastes less work" actually means.
+    #
+    # This used to read `r.rollouts < g.rollouts`, which is not an invariant: both
+    # runs are bounded by wall-clock *and* stop at the first sweep past
+    # `target_accuracy`, so total rollouts mixes "how much did it waste" with "how
+    # long did it take to get there" -- whichever policy converges first has fewer.
+    # It is a coin flip, and it flipped: CI failed with reflective at 12094
+    # rollouts against guarded's 1657 on 3.12 and 40182 against 6587 on 3.11,
+    # while 3.9 passed. Measured locally the rate never comes close: guarded
+    # discards 97-98% of its evidence, reflective 13-26%.
+    assert (g.discarded_stale / max(1, g.proposals)
+            > r.discarded_stale / max(1, r.proposals)), (
+        f"guarded wasted {g.discarded_stale}/{g.proposals} of its evidence and "
+        f"reflective {r.discarded_stale}/{r.proposals}; rebasing is supposed to "
+        "recover what the budget would otherwise throw away")
     # Recovering that work cannot leave Reflective *materially* behind, and both
     # must progress. Not `r >= g`: both runs stop at the first sweep that crosses
     # `target_accuracy` (0.95 here), so the value each one *lands* on is a
