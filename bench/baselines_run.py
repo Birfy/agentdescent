@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import threading
 from typing import Callable, List, Optional, Sequence
 
 from agentdescent import Usage
@@ -89,6 +90,28 @@ def _finer(pool: int, top_k: int, seed: int, completion, *,
         })
 
 
+#: Below this many test tasks the quality column cannot resolve anything worth
+#: reporting. Learned the expensive way: a run launched with a `--pool` that
+#: happened to yield a **2-task** test split reported `test=1.000` for two
+#: different arms -- 2/2 both times -- and had to be thrown away. The split is
+#: cheap to check and the run is not, so it is checked first.
+MIN_TEST_TASKS = 20
+
+
+def split_sizes(args) -> tuple:
+    """(train, val, test) for one seed, without touching a model.
+
+    The dataset loaders are the ports' own, and they need no completion to build
+    a split -- so the plan can report what the run will actually be measured on
+    before a single call is paid for.
+    """
+    if args.dataset == "hotpotqa":
+        from examples.gepa import gepa_prompt_evolution as gepa
+        return gepa.load_dataset(args.fetch, seed=0).sizes()
+    from examples.ace import ace_context_evolution as ace
+    return ace.load_dataset(args.pool, args.top_k, seed=0).sizes()
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--dataset", choices=["hotpotqa", "finer"], default="hotpotqa")
@@ -117,10 +140,23 @@ def build_parser() -> argparse.ArgumentParser:
                         "-- identical across arms, so the comparison stays valid, "
                         "but it is a different algorithm from the default and the "
                         "table has to say which one ran")
+    p.add_argument("--run-concurrency", type=int, default=1,
+                   help="how many of the (arm, seed) runs to execute at once. "
+                        "They are independent by construction -- different seeds, "
+                        "separate scratch ledgers, and no arm can observe another "
+                        "-- so this changes wall-clock and nothing else. The "
+                        "backend's rate limit is the real ceiling; start at 4")
+    p.add_argument("--fork-concurrency", type=int, default=1,
+                   help="how many forks inside one fork arm to run at once. That "
+                        "arm is N runs by itself and is otherwise the slowest of "
+                        "the three by a factor of N")
     p.add_argument("--eval-concurrency", type=int, default=8,
                    help="how many held-out tasks the gate scores at once. The "
                         "gate, not the rollouts, is what dominates wall-clock on "
                         "a small budget")
+    p.add_argument("--allow-small-test", action="store_true",
+                   help=f"run even when the test split is under {MIN_TEST_TASKS} "
+                        "tasks. It will not resolve a quality difference")
     p.add_argument("--plan", action="store_true",
                    help="print how many runs this would be, and stop")
     p.add_argument("--yes", action="store_true")
@@ -150,6 +186,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"self_verify: {args.self_verify}"
           + ("" if args.self_verify else
              "  (each proposal's own before/after delta is not measured)"))
+    try:
+        ntr, nva, nte = split_sizes(args)
+    except Exception as e:  # noqa: BLE001 - a cold cache needs the network
+        print(f"Split    : could not be checked offline ({type(e).__name__})")
+        ntr = nva = nte = None
+    else:
+        print(f"Split    : {ntr} train / {nva} val (the gate) / {nte} test "
+              "(nothing sees this)")
+        if nte < MIN_TEST_TASKS:
+            print(f"\nREFUSED: {nte} test tasks cannot resolve a quality "
+                  f"difference -- every number would be a count out of {nte}. "
+                  f"Raise --pool/--fetch until the test split is at least "
+                  f"{MIN_TEST_TASKS}, or pass --allow-small-test if a coarse "
+                  "number is genuinely what you want.", file=sys.stderr)
+            if not args.allow_small_test:
+                return 2
     if args.plan:
         return 0
     if len(seeds) < 3:
@@ -162,30 +214,49 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     usage = Usage()
     completion = completion_for(args, usage=usage)
 
-    results: List[ArmResult] = []
-    for seed in seeds:
-        # Rebuilt per seed so the split moves with it, and once per seed so every
-        # arm at that seed sees byte-identical data.
-        shared = {"self_verify": args.self_verify,
-                  "eval_concurrency": args.eval_concurrency}
-        if args.dataset == "hotpotqa":
-            workload = _hotpotqa(args.fetch, seed, completion, **shared)
-        else:
-            workload = _finer(args.pool, args.top_k, seed, completion, **shared)
+    # Workloads are built once per seed and *before* any run starts, so every arm
+    # at a seed sees byte-identical data -- and so a dataset download cannot
+    # happen concurrently from several threads.
+    shared = {"self_verify": args.self_verify,
+              "eval_concurrency": args.eval_concurrency}
+    workloads = {
+        seed: (_hotpotqa(args.fetch, seed, completion, **shared)
+               if args.dataset == "hotpotqa"
+               else _finer(args.pool, args.top_k, seed, completion, **shared))
+        for seed in seeds
+    }
 
-        builders: dict = {
-            "serial": lambda w, **k: serial(w, **k),
-            "fork": lambda w, **k: best_of_n_fork(w, args.width, **k),
-            "merge": lambda w, **k: merge_of_n(w, args.width, **k),
-        }
-        for name in arms:
-            arm = builders[name](workload, budget=budget, seed=seed)
+    def _build(name: str, workload, seed: int) -> ArmResult:
+        if name == "serial":
+            return serial(workload, budget=budget, seed=seed)
+        if name == "fork":
+            return best_of_n_fork(workload, args.width, budget=budget, seed=seed,
+                                  concurrency=args.fork_concurrency)
+        if name == "merge":
+            return merge_of_n(workload, args.width, budget=budget, seed=seed)
+        raise ValueError(f"unknown arm {name!r}")
+
+    jobs = [(name, seed) for seed in seeds for name in arms]
+    printing = threading.Lock()
+
+    def _run_job(job):
+        name, seed = job
+        arm = _build(name, workloads[seed], seed)
+        with printing:          # threads interleave; a torn line is unreadable
             print(f"  {arm.arm:<12} seed={seed}  {arm.rollouts} rollouts / "
                   f"{arm.calls} calls  dev={arm.dev_reward:.3f} "
                   f"test={arm.test_reward:.3f}"
                   + (f" oracle={arm.test_oracle:.3f}" if arm.test_oracle else "")
                   + (f"  ERROR {arm.error}" if arm.error else ""))
-            results.append(arm)
+        return arm
+
+    if args.run_concurrency > 1:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=args.run_concurrency) as pool:
+            results: List[ArmResult] = list(pool.map(_run_job, jobs))
+    else:
+        results = [_run_job(job) for job in jobs]
 
     comparison = compare(results, fixed=args.fixed)
     print()

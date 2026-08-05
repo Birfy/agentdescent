@@ -276,25 +276,31 @@ def merge_of_n(workload: Workload, n: int, *, budget: Budget,
 
 
 def best_of_n_fork(workload: Workload, n: int, *, budget: Budget,
-                   seed: int = 0) -> ArmResult:
+                   seed: int = 0, concurrency: int = 1) -> ArmResult:
     """N runs that never see each other, each on its share of the budget.
 
     The forks differ only in seed. That is deliberate: any other difference
     (different data, different actors) would make this a comparison between two
     workloads rather than between merging and selecting.
 
-    Run sequentially here so the arm is reproducible. Their wall-clock is
-    reported both ways -- summed, which is what this call took, and maximum,
-    which is what N of them cost on N machines. The rollout budget is what the
-    comparison fixes; wall-clock is reported, not controlled.
+    ``concurrency`` runs that many forks at once. It does not change any result:
+    a fork's seed is fixed before it starts, its ledger is its own scratch repo,
+    and by construction no fork can observe another -- that is what makes this
+    the fork arm. It changes only how long the call takes, which is why
+    wall-clock is reported both ways: ``wallclock`` sums the runs (what the work
+    cost) and ``wallclock_parallel`` takes the longest (what N machines would
+    take). Neither is affected by how many threads this process happened to use.
+
+    Leave it at ``1`` when the backend is rate-limited; the arm is otherwise the
+    slowest of the three by a factor of N.
     """
     if n < 1:
         raise ValueError(f"best_of_n_fork needs at least one fork, got {n}")
+    if concurrency < 1:
+        raise ValueError(f"concurrency must be at least 1, got {concurrency}")
     share = budget.split(n)
-    results: List[EvolutionResult] = []
-    usages: List[Usage] = []
-    outcomes: List[ForkOutcome] = []
-    for i in range(n):
+
+    def _one(i: int):
         # A fork's seed has to move, or N forks are one fork run N times and the
         # arm measures nothing. Spread them far enough apart that two forks
         # cannot collide with a neighbouring `seed` argument.
@@ -302,12 +308,25 @@ def best_of_n_fork(workload: Workload, n: int, *, budget: Budget,
         usage = Usage()
         result = workload._evolve(seed=fork_seed, n_workers=1, budget=share,
                                   usage=usage)
-        results.append(result)
-        usages.append(usage)
-        outcomes.append(ForkOutcome(
+        return result, usage, ForkOutcome(
             seed=fork_seed, dev_reward=result.final_reward,
             test_reward=workload.test_eval(result),
-            rollouts=result.rollouts, calls=usage.calls))
+            rollouts=result.rollouts, calls=usage.calls)
+
+    if concurrency > 1:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=min(concurrency, n)) as pool:
+            # `map` preserves input order, so the forks are collected in seed
+            # order however they finish -- a selection that depended on
+            # completion order would not be reproducible.
+            done = list(pool.map(_one, range(n)))
+    else:
+        done = [_one(i) for i in range(n)]
+
+    results: List[EvolutionResult] = [d[0] for d in done]
+    usages: List[Usage] = [d[1] for d in done]
+    outcomes: List[ForkOutcome] = [d[2] for d in done]
 
     # Selection, both ways. `max` over dev breaks ties on the first fork, which
     # is the pessimistic choice and the honest one: a real selector has no reason
