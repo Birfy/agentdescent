@@ -238,7 +238,7 @@ def with_retries(completion: Completion, attempts: int = 3,
 
 def claude(model: str = "claude-opus-4-8", max_tokens: int = 4096,
            client: Optional[object] = None, usage: Optional[Usage] = None,
-           retries: int = 3, **create_kwargs) -> Completion:
+           retries: int = 3, timeout: float = 120.0, **create_kwargs) -> Completion:
     """A Claude-backed completion (requires ``pip install anthropic`` + creds).
 
     Pass ``client`` to reuse an existing ``anthropic.Anthropic`` instance;
@@ -251,7 +251,21 @@ def claude(model: str = "claude-opus-4-8", max_tokens: int = 4096,
     on internal reasoning first, so too small a cap returns **empty visible
     content** rather than a short answer. Measured on ``deepseek-v4-flash``, a
     1024 cap returned nothing at all for 4 of 8 reflection prompts. You are billed
-    for tokens generated, not for the cap, so a generous limit costs nothing."""
+    for tokens generated, not for the cap, so a generous limit costs nothing.
+
+    ``timeout`` bounds one request, and it is not optional in spirit. Every other
+    blocking boundary in this package has one -- ``_git`` at 120s, ``_CliAgent``
+    at 600s, ``runners._sh`` per call, :func:`openai_compatible` at 120s -- and
+    this was the exception. Without it the SDK's own 600s default applies, the
+    SDK retries it internally, and :func:`with_retries` retries *that*, so one
+    logical call against a stalled endpoint can block for well over half an hour
+    with nothing in the log.
+
+    Measured: a GEPA run against a hosted endpoint sat for **51 minutes on a
+    single round**, 1.07s of CPU across the whole time and one ESTABLISHED socket
+    -- a run that reports nothing and cannot be told apart from a slow one.
+    Raise it for an agentic backend that legitimately takes longer; the
+    equivalent knob on :func:`openai_compatible` has always been here."""
     _client = client
 
     def complete(prompt: str) -> str:
@@ -262,7 +276,7 @@ def claude(model: str = "claude-opus-4-8", max_tokens: int = 4096,
         t0 = time.time()
         try:
             msg = _client.messages.create(
-                model=model, max_tokens=max_tokens,
+                model=model, max_tokens=max_tokens, timeout=timeout,
                 messages=[{"role": "user", "content": prompt}], **create_kwargs,
             )
         except Exception:
