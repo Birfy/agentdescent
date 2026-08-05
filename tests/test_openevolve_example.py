@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 
 from bench import openevolve_agentdescent as bench
-from examples import _openevolve_support as evaluator
-from examples import openevolve_program_evolution as port
+from examples.openevolve import _openevolve_support as evaluator
+from examples.openevolve import openevolve_program_evolution as port
 
 
 def test_source_gate_accepts_genome_and_rejects_unsafe_code():

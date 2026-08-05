@@ -1,6 +1,6 @@
 """Sandbox, evaluator, and mutation helpers for the OpenEvolve port.
 
-The public runnable example lives in :mod:`examples.openevolve_program_evolution`.
+The public runnable example lives in :mod:`examples.openevolve.openevolve_program_evolution`.
 Keeping the generated-code boundary here makes the AST gate and Bubblewrap
 runner independently testable without adding a second evolution loop.
 """

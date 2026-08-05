@@ -20,7 +20,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from agentdescent.agents import Usage, claude, openai_compatible
 
-from examples.openevolve_program_evolution import run_agentdescent_openevolve
+from examples.openevolve.openevolve_program_evolution import run_agentdescent_openevolve
 
 
 MODES = ("serial", "sync", "async")

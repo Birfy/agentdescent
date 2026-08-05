@@ -4,7 +4,7 @@
 > keeping every variant in an open-ended archive. Runs through
 > [`evolve()`](evolution.md) with a custom `Strategy` + `aggregator_factory` at
 > **L1** governance. Example:
-> [`examples/dgm_self_improve.py`](https://github.com/Birfy/agentdescent/blob/main/examples/dgm_self_improve.py).
+> [`examples/dgm/dgm_self_improve.py`](https://github.com/Birfy/agentdescent/blob/main/examples/dgm/dgm_self_improve.py).
 
 | | |
 |---|---|
@@ -48,7 +48,7 @@ plug in the actual Docker harness.
 
 ## Plug-ins implemented
 
-In [`examples/dgm_self_improve.py`](https://github.com/Birfy/agentdescent/blob/main/examples/dgm_self_improve.py):
+In [`examples/dgm/dgm_self_improve.py`](https://github.com/Birfy/agentdescent/blob/main/examples/dgm/dgm_self_improve.py):
 
 | Plug-in | `evolve()` slot | What it does |
 |---|---|---|
@@ -79,9 +79,9 @@ capabilities `context-retrieval`, `dependency-resolver`, `diff-minimization`,
 ## Run it
 
 ```bash
-python -m examples.dgm_self_improve                      # runs offline (surrogate)
-python -m examples.dgm_self_improve --generations 12 --archive keep_all
-python -m examples.dgm_self_improve --model claude-haiku-4-5   # LLM proposes modifications
+python -m examples.dgm.dgm_self_improve                      # runs offline (surrogate)
+python -m examples.dgm.dgm_self_improve --generations 12 --archive keep_all
+python -m examples.dgm.dgm_self_improve --model claude-haiku-4-5   # LLM proposes modifications
 ```
 
 Offline tests: `tests/test_dgm_example.py`.

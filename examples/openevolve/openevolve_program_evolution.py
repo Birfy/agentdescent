@@ -61,7 +61,7 @@ from examples._common import (
     confirm,
     is_openai_compatible,
 )
-from examples._openevolve_support import (
+from examples.openevolve._openevolve_support import (
     INITIAL_PROGRAM,
     UPSTREAM_COMMIT,
     Program,

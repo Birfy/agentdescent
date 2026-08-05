@@ -14,9 +14,9 @@ import inspect
 
 import pytest
 
-from examples import adas_meta_agent_search as adas
-from examples import dgm_self_improve as dgm
-from examples import evoskill_skill_discovery as evoskill
+from examples.adas import adas_meta_agent_search as adas
+from examples.dgm import dgm_self_improve as dgm
+from examples.evoskill import evoskill_skill_discovery as evoskill
 
 
 # -- DGM (jennyzzt/dgm) ---------------------------------------------------------

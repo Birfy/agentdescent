@@ -67,7 +67,7 @@ def test_evolve_asynchronous_flag_delegates_to_async():
 
 
 def test_async_evolve_works_with_custom_pareto_aggregator():
-    from examples.gepa_prompt_evolution import InstructionSlot, pareto_aggregator_factory
+    from examples.gepa.gepa_prompt_evolution import InstructionSlot, pareto_aggregator_factory
 
     class _Gepa:
         def solve(self, rendered, task):

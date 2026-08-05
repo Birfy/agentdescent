@@ -7,7 +7,7 @@ answer normalisation, and scoring -- no network or LLM calls.
 import random
 
 from agentdescent.evolution import Task, evolve
-from examples.gepa_prompt_evolution import (
+from examples.gepa.gepa_prompt_evolution import (
     InstructionSlot,
     _extract_answer,
     build_tasks,

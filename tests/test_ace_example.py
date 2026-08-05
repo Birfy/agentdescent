@@ -5,7 +5,7 @@ decoding, task shaping, and scoring -- no network or LLM calls.
 """
 
 from agentdescent.evolution import Task
-from examples.ace_context_evolution import (
+from examples.ace.ace_context_evolution import (
     ACEPlaybook,
     _entities,
     build_tasks,

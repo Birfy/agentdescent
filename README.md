@@ -249,18 +249,18 @@ benchmarks through the shared [`agentdescent.dataloader`](https://github.com/Bir
 
 | Algorithm | Kind | Dataset | Example |
 |---|---|---|---|
-| **ACE** (Agentic Context Engineering) | skill / context | FiNER-139 | [`ace_context_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/ace_context_evolution.py) |
-| **GEPA** (Reflective Prompt Evolution) | skill / prompt | HotpotQA | [`gepa_prompt_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/gepa_prompt_evolution.py) |
-| **EvoSkill** (Automated Skill Discovery) | skill library | OfficeQA | [`evoskill_skill_discovery.py`](https://github.com/Birfy/agentdescent/blob/main/examples/evoskill_skill_discovery.py) |
-| **SkillOpt** (ReflACT) | skill document | SearchQA | [`skillopt_skill_training.py`](https://github.com/Birfy/agentdescent/blob/main/examples/skillopt_skill_training.py) |
-| **ADAS** (Meta Agent Search) | harness | MGSM | [`adas_meta_agent_search.py`](https://github.com/Birfy/agentdescent/blob/main/examples/adas_meta_agent_search.py) |
-| **DGM** (Darwin Gödel Machine) | harness | SWE-bench Verified | [`dgm_self_improve.py`](https://github.com/Birfy/agentdescent/blob/main/examples/dgm_self_improve.py) |
-| **OpenEvolve** (Program Evolution) | program search | Function minimization | [`openevolve_program_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/openevolve_program_evolution.py) |
+| **ACE** (Agentic Context Engineering) | skill / context | FiNER-139 | [`ace_context_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/ace/ace_context_evolution.py) |
+| **GEPA** (Reflective Prompt Evolution) | skill / prompt | HotpotQA | [`gepa_prompt_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/gepa/gepa_prompt_evolution.py) |
+| **EvoSkill** (Automated Skill Discovery) | skill library | OfficeQA | [`evoskill_skill_discovery.py`](https://github.com/Birfy/agentdescent/blob/main/examples/evoskill/evoskill_skill_discovery.py) |
+| **SkillOpt** (ReflACT) | skill document | SearchQA | [`skillopt_skill_training.py`](https://github.com/Birfy/agentdescent/blob/main/examples/skillopt/skillopt_skill_training.py) |
+| **ADAS** (Meta Agent Search) | harness | MGSM | [`adas_meta_agent_search.py`](https://github.com/Birfy/agentdescent/blob/main/examples/adas/adas_meta_agent_search.py) |
+| **DGM** (Darwin Gödel Machine) | harness | SWE-bench Verified | [`dgm_self_improve.py`](https://github.com/Birfy/agentdescent/blob/main/examples/dgm/dgm_self_improve.py) |
+| **OpenEvolve** (Program Evolution) | program search | Function minimization | [`openevolve_program_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/openevolve/openevolve_program_evolution.py) |
 
 ```bash
-python -m examples.ace_context_evolution --dry-run     # skill/context self-evolution (ACE)
-python -m examples.dgm_self_improve                    # harness self-evolution (DGM), offline
-python -m examples.openevolve_program_evolution --dry-run  # program evolution (OpenEvolve)
+python -m examples.ace.ace_context_evolution --dry-run     # skill/context self-evolution (ACE)
+python -m examples.dgm.dgm_self_improve                    # harness self-evolution (DGM), offline
+python -m examples.openevolve.openevolve_program_evolution --dry-run  # program evolution (OpenEvolve)
 ```
 
 Fidelity is to the **released code**, not just the paper (e.g. EvoSkill's frontier

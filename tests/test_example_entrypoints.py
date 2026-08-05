@@ -11,13 +11,13 @@ from typing import Any, NamedTuple, Optional
 
 import pytest
 
-from examples import ace_context_evolution as ace
-from examples import adas_meta_agent_search as adas
-from examples import dgm_self_improve as dgm
-from examples import evoskill_skill_discovery as evoskill
-from examples import gepa_prompt_evolution as gepa
-from examples import openevolve_program_evolution as openevolve
-from examples import skillopt_skill_training as skillopt
+from examples.ace import ace_context_evolution as ace
+from examples.adas import adas_meta_agent_search as adas
+from examples.dgm import dgm_self_improve as dgm
+from examples.evoskill import evoskill_skill_discovery as evoskill
+from examples.gepa import gepa_prompt_evolution as gepa
+from examples.openevolve import openevolve_program_evolution as openevolve
+from examples.skillopt import skillopt_skill_training as skillopt
 from examples import _TEMPLATE as port_template
 from examples import _common as common
 from examples._common import add_standard_args
@@ -206,14 +206,38 @@ def test_no_port_reimplements_the_shared_behaviour(module):
 
 
 def test_ports_table_covers_every_standardised_entrypoint():
-    """A seventh port must join PORTS, or it escapes the whole contract."""
+    """An eighth port must join PORTS, or it escapes the whole contract.
+
+    Each port owns a directory now, so this walks the tree instead of the top
+    level. A glob that stopped at ``examples/*.py`` would have gone quietly
+    empty the moment the ports moved down a level -- passing by finding nothing.
+    """
     examples_dir = pathlib.Path(common.__file__).resolve().parent
     on_disk = {
-        path.stem for path in examples_dir.glob("*.py")
-        if path.stem != "_common" and "add_standard_args" in path.read_text()
+        path.stem for path in examples_dir.rglob("*.py")
+        if path.stem not in ("_common", "__init__")
+        and "add_standard_args" in path.read_text()
     }
-    listed = {module.__name__.rsplit(".", 1)[-1] for module, *_ in PORTS}
+    listed = {port.module.__name__.rsplit(".", 1)[-1] for port in PORTS}
     assert on_disk == listed | {"_TEMPLATE"}
+    assert len(on_disk) > 1, "the walk found nothing to check"
+
+
+@pytest.mark.parametrize("port", PORTS, ids=PORT_IDS)
+def test_every_port_owns_a_directory_with_a_readme(port):
+    """The layout is the contract: one algorithm, one folder, one entry point.
+
+    A port dropped back at the top of ``examples/`` still imports and still
+    runs, so nothing else in the suite would notice it had skipped the layout.
+    """
+    module_path = pathlib.Path(inspect.getfile(port.module)).resolve()
+    folder = module_path.parent
+    assert folder.name != "examples", \
+        f"{port.module.__name__} sits at the top of examples/, not in its own folder"
+    assert folder.parent.name == "examples", \
+        f"{port.module.__name__} is nested deeper than examples/<algorithm>/"
+    assert (folder / "README.md").exists(), f"{folder.name}/ has no README.md"
+    assert (folder / "__init__.py").exists(), f"{folder.name}/ is not a package"
 
 
 def test_porting_checklist_stays_short():

@@ -34,9 +34,9 @@ buffer. A skill doc is an **L2** artifact (`blast_radius=0.2`, via `classify`).
 The epoch-level *slow-update* and *meta-skill* stabilisers are optional in the
 repo and omitted from this minimal-but-faithful slice (noted, not hidden).
 
-    python -m examples.skillopt_skill_training --dry-run        # plan only, zero network
-    python -m examples.skillopt_skill_training --model claude-haiku-4-5
-    python -m examples.skillopt_skill_training --steps 8 --lr 4
+    python -m examples.skillopt.skillopt_skill_training --dry-run        # plan only, zero network
+    python -m examples.skillopt.skillopt_skill_training --model claude-haiku-4-5
+    python -m examples.skillopt.skillopt_skill_training --steps 8 --lr 4
 """
 
 from __future__ import annotations

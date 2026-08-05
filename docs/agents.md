@@ -40,7 +40,7 @@ everything:
 ```bash
 export OPENAI_BASE_URL=https://api.deepseek.com
 export OPENAI_API_KEY=sk-...
-python -m examples.adas_meta_agent_search --provider openai --model deepseek-v4-flash
+python -m examples.adas.adas_meta_agent_search --provider openai --model deepseek-v4-flash
 ```
 
 **GLM / Zhipu**
@@ -48,7 +48,7 @@ python -m examples.adas_meta_agent_search --provider openai --model deepseek-v4-
 ```bash
 export OPENAI_BASE_URL=https://open.bigmodel.cn/api/paas/v4
 export OPENAI_API_KEY=...
-python -m examples.adas_meta_agent_search --provider openai --model glm-4.6
+python -m examples.adas.adas_meta_agent_search --provider openai --model glm-4.6
 ```
 
 **OpenAI** — `OPENAI_BASE_URL` is the default here and may be omitted
@@ -56,7 +56,7 @@ python -m examples.adas_meta_agent_search --provider openai --model glm-4.6
 ```bash
 export OPENAI_BASE_URL=https://api.openai.com/v1
 export OPENAI_API_KEY=sk-...
-python -m examples.adas_meta_agent_search --provider openai --model gpt-4.1-mini
+python -m examples.adas.adas_meta_agent_search --provider openai --model gpt-4.1-mini
 ```
 
 **A local server** (vLLM, Ollama, LM Studio) — the key is unused but must be set
@@ -64,14 +64,14 @@ python -m examples.adas_meta_agent_search --provider openai --model gpt-4.1-mini
 ```bash
 export OPENAI_BASE_URL=http://localhost:8000/v1
 export OPENAI_API_KEY=not-used
-python -m examples.adas_meta_agent_search --provider openai --model my-local-model
+python -m examples.adas.adas_meta_agent_search --provider openai --model my-local-model
 ```
 
 **Claude** — a different variable, and `ant auth login` works instead
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-python -m examples.adas_meta_agent_search --provider claude --model claude-haiku-4-5
+python -m examples.adas.adas_meta_agent_search --provider claude --model claude-haiku-4-5
 ```
 
 Put the `export` lines in your shell profile to keep them across sessions. Every
@@ -80,7 +80,7 @@ configuration without reading these credentials — the cheapest way to inspect 
 run before paying for it:
 
 ```bash
-python -m examples.adas_meta_agent_search --dry-run
+python -m examples.adas.adas_meta_agent_search --dry-run
 ```
 
 !!! tip "Check the endpoint before a long run"

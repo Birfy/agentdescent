@@ -2,7 +2,7 @@
 
 > **Skill / context self-evolution.** Evolve a *playbook of lessons* (the model's
 > context), not the weights. Runs through [`evolve()`](evolution.md) with a custom
-> `Strategy`. Example: [`examples/ace_context_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/ace_context_evolution.py).
+> `Strategy`. Example: [`examples/ace/ace_context_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/ace/ace_context_evolution.py).
 
 | | |
 |---|---|
@@ -56,7 +56,7 @@ documented in the module docstring.
 ## Plug-ins implemented
 
 The example provides these plug-ins to `evolve()` (in
-[`examples/ace_context_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/ace_context_evolution.py)):
+[`examples/ace/ace_context_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/ace/ace_context_evolution.py)):
 
 | Plug-in | `evolve()` slot | What it does |
 |---|---|---|
@@ -126,9 +126,9 @@ the gate and validation accuracy rises 4.5 points.
 ## Run it
 
 ```bash
-python -m examples.ace_context_evolution --dry-run
-python -m examples.ace_context_evolution --model claude-haiku-4-5
-python -m examples.ace_context_evolution --top-k 40 --pool 400 --rounds 8   # the run above
+python -m examples.ace.ace_context_evolution --dry-run
+python -m examples.ace.ace_context_evolution --model claude-haiku-4-5
+python -m examples.ace.ace_context_evolution --top-k 40 --pool 400 --rounds 8   # the run above
 ```
 
 Offline tests: `tests/test_ace_example.py`.

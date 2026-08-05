@@ -4,7 +4,7 @@ Exercise the four faithful invariants -- bounded edit ops, strict accept gate,
 learning-rate budget, rejected-edit buffer -- plus SearchQA scoring. No network.
 """
 
-from examples.skillopt_skill_training import (
+from examples.skillopt.skillopt_skill_training import (
     LRScheduler,
     apply_patch,
     em_score,

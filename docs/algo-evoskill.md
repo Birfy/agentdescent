@@ -3,7 +3,7 @@
 > **Skill-library self-evolution.** Discover reusable `SKILL.md` skills from
 > execution failures, governed by a bounded top-K frontier. Runs through
 > [`evolve()`](evolution.md) with a custom `Strategy` + `aggregator_factory`.
-> Example: [`examples/evoskill_skill_discovery.py`](https://github.com/Birfy/agentdescent/blob/main/examples/evoskill_skill_discovery.py).
+> Example: [`examples/evoskill/evoskill_skill_discovery.py`](https://github.com/Birfy/agentdescent/blob/main/examples/evoskill/evoskill_skill_discovery.py).
 
 | | |
 |---|---|
@@ -61,7 +61,7 @@ Traced from the repo (`src/loop/runner.py`, `src/registry/manager.py`,
 
 ## Plug-ins implemented
 
-In [`examples/evoskill_skill_discovery.py`](https://github.com/Birfy/agentdescent/blob/main/examples/evoskill_skill_discovery.py)
+In [`examples/evoskill/evoskill_skill_discovery.py`](https://github.com/Birfy/agentdescent/blob/main/examples/evoskill/evoskill_skill_discovery.py)
 (+ [`agentdescent/backends.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/backends.py)):
 
 | Plug-in | `evolve()` slot | What it does |
@@ -94,7 +94,7 @@ The OpenHands backend is the faithful fix (real EvoSkill uses Read/Grep/Bash). W
 ```bash
 # real OpenHands agent, DeepSeek endpoint (needs Python 3.12 env + openhands-ai)
 OPENAI_BASE_URL=https://api.deepseek.com OPENAI_API_KEY=... \
-  python -m examples.evoskill_skill_discovery --provider glm \
+  python -m examples.evoskill.evoskill_skill_discovery --provider glm \
     --model deepseek-v4-pro --backend openhands
 ```
 
@@ -156,7 +156,7 @@ numeric answer to locate and compute, at 60 items with ~4 KB documents that a
 model without tools can read directly.
 
 ```bash
-python -m examples.evoskill_skill_discovery --dataset finqa \
+python -m examples.evoskill.evoskill_skill_discovery --dataset finqa \
     --provider openai --model deepseek-v4-flash --iterations 5 --yes
 ```
 
@@ -179,8 +179,8 @@ The run header states which dataset it loaded.
 ## Run it
 
 ```bash
-python -m examples.evoskill_skill_discovery --dry-run
-python -m examples.evoskill_skill_discovery --model claude-haiku-4-5 --backend toolloop
+python -m examples.evoskill.evoskill_skill_discovery --dry-run
+python -m examples.evoskill.evoskill_skill_discovery --model claude-haiku-4-5 --backend toolloop
 ```
 
 Offline tests: `tests/test_evoskill_example.py`, `tests/test_backends.py`.

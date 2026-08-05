@@ -73,9 +73,9 @@ the [`agentdescent.dataloader`](dataloader.md) data layer on a real run.
 before loading data or models: it needs no network and no API key.
 
 ```bash
-python -m examples.ace_context_evolution --dry-run     # ACE   / FiNER-139
-python -m examples.gepa_prompt_evolution --dry-run     # GEPA  / HotpotQA
-python -m examples.dgm_self_improve                    # DGM   / SWE-bench Verified (offline surrogate)
+python -m examples.ace.ace_context_evolution --dry-run     # ACE   / FiNER-139
+python -m examples.gepa.gepa_prompt_evolution --dry-run     # GEPA  / HotpotQA
+python -m examples.dgm.dgm_self_improve                    # DGM   / SWE-bench Verified (offline surrogate)
 ```
 
 ### Tests
