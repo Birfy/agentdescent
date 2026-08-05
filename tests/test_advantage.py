@@ -412,3 +412,23 @@ def test_advantage_conflict_keeps_the_higher_advantage_side():
         None, [card(0.1, "weak"), card(2.0, "strong")])
     assert dropped == 1
     assert [c.diff.ops["k"] for c in kept] == ["strong"]
+
+
+def test_an_inner_rule_that_keeps_both_does_not_spin():
+    """A wrapped rule is user code. One that returns a contradicting pair intact
+    would otherwise be asked the same question forever."""
+    from agentdescent.evolvable import Diff
+
+    class KeepsBoth:
+        def resolve(self, artifact, cards):
+            return list(cards), 0
+
+    def card(value):
+        c = type("C", (), {})()
+        c.diff = Diff(diff_id=f"d{value}", target="a", ops={"k": value})
+        c.advantage = None
+        return c
+
+    kept, dropped = AdvantageConflict(KeepsBoth()).resolve(
+        None, [card("x"), card("y")])
+    assert dropped == 0 and len(kept) == 2

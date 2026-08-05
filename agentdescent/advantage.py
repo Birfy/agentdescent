@@ -206,9 +206,15 @@ class AdvantageConflict:
                         artifact, [kept[idx], survivor])
                     dropped += sub_dropped
                     kept.pop(idx)
-                    kept.extend(resolved[:1])
-                    survivor = resolved[1] if len(resolved) > 1 else None
-                    continue
+                    # Whatever the inner rule kept goes back at the same
+                    # position, and the loop ends for this card either way. If it
+                    # kept *both* -- which the shipped rule never does for a
+                    # contradicting pair, but a replacement may -- re-entering
+                    # the loop would find the same pair, ask the same question
+                    # and get the same answer, forever.
+                    kept[idx:idx] = list(resolved)
+                    survivor = None
+                    break
                 dropped += 1
                 if a > b:
                     kept.pop(idx)
