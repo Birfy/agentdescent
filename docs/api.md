@@ -8,7 +8,7 @@ page and the code disagree, so a signature here is the signature you get.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-175 public names across 31 modules.
+177 public names across 31 modules.
 
 ---
 
@@ -27,6 +27,7 @@ Convenience actor: bundles running a task and proposing an improvement.
 | `cost_summary() -> str` | One line: what the run cost. Complements `outcomes()`, which says why it went as it did. |
 | `cost_to_quality(target: float) -> Optional[int]` | Rollouts spent up to the first round that reached `target`. |
 | `duplicate_rate() -> float` | Cache hits as a fraction of lookups -- work that did *not* have to be redone. In one process this is memoisation working; across processes it is the figure that says how much a shared cache would be worth. |
+| `fusion_stats() -> 'FusionStats'` | How often merging beat the best single diff -- and how badly it lost. |
 | `outcomes() -> Dict[str, int]` | Merge outcomes for the whole run, by category -- *why* it went as it did. |
 | `save(path: str) -> None` | Write the evolved artifact and its run summary to a JSON file. |
 | `stale_rate() -> float` | Discarded evidence as a fraction of evidence considered; 0.0 if none. |
@@ -43,6 +44,14 @@ An `Evolvable`: flat state + a strategy.
 | `evidence_eval(evidence: EvidenceCard) -> float` | Score this artifact on the trajectories an evidence card carries. |
 | `full_eval(task_set: Sequence[Task]) -> Dict[str, float]` | Score on a task set. No longer part of the `Evolvable` protocol -- the engine reaches ground truth through the verifier's `eval_fn` -- and kept because it is a convenient thing for a caller to have. |
 | `score(tasks: Sequence[Task]) -> float` | Mean reward over `tasks`, evaluated concurrently. |
+
+### `FusionStats(...)`
+
+The fusion tournament's record, with every denominator it needs.
+
+| method | what it does |
+|---|---|
+| `summary() -> str` | One line, and it says when there is nothing to report. |
 
 ### `LLMAgent(...)`
 
@@ -842,6 +851,10 @@ A directory of evaluations, so separate processes can share them.
 ### `FusionPolicy`
 
 How complementary diffs become one candidate.
+
+### `FusionTrial`
+
+One tournament: what the fused candidate scored against the best single.
 
 ### `KeyedRules`
 

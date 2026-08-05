@@ -41,7 +41,7 @@ from .policies import Policies
 from .evolution import (
     _publish_stable, _safe_log,
     Agent, EvolutionResult, Propose, Reward, RoundInfo, Run, Strategy, Task,
-    _ASYNC_WIRED_POLICIES, _cost_fields, _resolve_policies,
+    _ASYNC_WIRED_POLICIES, _cost_fields, _fusion_trials, _resolve_policies,
     SOLVED, _build_engine, _checked_proposal, _checked_reward,
 )
 from .aggregator import AggregatorConfig, check_reports
@@ -723,6 +723,7 @@ def async_evolve(
                              stop_reason="error" if run_error else stop_reason[0],
                              forced_refreshes=forced_refreshes[0],
                              stragglers=stragglers[0],
+                             fusion_trials=_fusion_trials(eng.aggregator),
                              **_cost_fields(eng.meter))
     eng.cleanup()          # do not hold a scratch git repo for the whole process
     return result

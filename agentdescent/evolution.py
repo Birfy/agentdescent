@@ -34,7 +34,7 @@ import shutil
 import threading
 import time
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import (
     Any, Callable, Dict, List, Optional, Protocol, Sequence, Tuple,
     runtime_checkable,
@@ -52,7 +52,7 @@ from .governance import FROZEN_IDS, GovernanceError, assert_mutable
 from .ledger import Ledger, LedgerFailure
 from .metrics import Meter, measured
 from .pipeline import EarlyStop, FirstError, WorkerHealth
-from .policies import Policies
+from .policies import FusionTrial, Policies
 from .sampling import RoundRobin, TaskSampler
 from .scheduler import AuditScheduler
 from .staleness import StalenessPolicy
@@ -785,6 +785,17 @@ def notify(on_round: Optional[Callable[["RoundInfo"], None]],
                       RuntimeWarning, stacklevel=2)
 
 
+def _fusion_trials(aggregator) -> List[FusionTrial]:
+    """Whatever the fusion policy recorded, if it recorded anything.
+
+    ``trials`` is optional on :class:`~agentdescent.policies.FusionPolicy` -- it
+    is instrumentation, not a decision, and a replacement policy is not obliged
+    to keep one. Read through ``getattr`` for that reason, and
+    :meth:`EvolutionResult.fusion_stats` reports the count so an uninstrumented
+    policy cannot be misread as a mechanism that never fired."""
+    return list(getattr(getattr(aggregator, "fusion_policy", None), "trials", ()))
+
+
 def _cost_fields(meter: Meter) -> Dict[str, Any]:
     """The meter's counters, keyed as :class:`EvolutionResult` fields.
 
@@ -883,6 +894,87 @@ class RoundInfo:
     fused: int = 0
 
 
+@dataclass(frozen=True)
+class FusionStats:
+    """The fusion tournament's record, with every denominator it needs.
+
+    Four counters rather than one rate, because the rate alone is ambiguous in
+    both directions. ``trials`` counts tournaments held; ``contested`` counts the
+    ones where a fused candidate existed to compete at all. A run with
+    ``trials=40, contested=0`` never tested fusion once -- every round either had
+    a single survivor or had contradicting ones -- and reporting "win rate 0%"
+    for it would be a claim about a mechanism that never ran.
+    """
+
+    trials: int = 0
+    #: Tournaments where a fused candidate was built and scored.
+    contested: int = 0
+    #: Why the rest were not contested.
+    single_candidate: int = 0
+    contradiction: int = 0
+
+    fused_wins: int = 0
+    single_wins: int = 0
+    #: Tournaments where nothing beat the artifact the round started from.
+    neither: int = 0
+    #: Contested tournaments where the fusion exactly tied the best single. High
+    #: here with an empty negative tail means the cheap layer cannot separate the
+    #: candidates, not that fusion is safe.
+    ties: int = 0
+
+    #: Mean of (fused - best single) over contested tournaments.
+    mean_gain: float = 0.0
+    #: The losing tail: how many contested tournaments the fusion lost, its mean
+    #: loss, and the worst single one. This is the number the objection is about,
+    #: and the tournament's job is to make sure it never commits.
+    negative: int = 0
+    mean_loss: float = 0.0
+    worst_loss: float = 0.0
+    #: Fusions that were worse than the *baseline* -- not merely ranked below the
+    #: best single, but actively harmful. `negative` includes ranking noise;
+    #: this is the failure mode "merging averages the improvements away" names.
+    below_baseline: int = 0
+
+    @property
+    def win_rate(self) -> Optional[float]:
+        """Fused wins over contested tournaments; ``None`` when none were.
+
+        ``None`` rather than ``0.0`` on purpose: a rate with an empty denominator
+        printed as zero reads as "fusion always lost"."""
+        return self.fused_wins / self.contested if self.contested else None
+
+    @classmethod
+    def of(cls, trials: Sequence["FusionTrial"]) -> "FusionStats":
+        gains = [t.gain for t in trials if t.gain is not None]
+        losses = [g for g in gains if g < 0]
+        return cls(
+            trials=len(trials),
+            contested=len(gains),
+            single_candidate=sum(1 for t in trials if t.reason == "single-candidate"),
+            contradiction=sum(1 for t in trials if t.reason == "contradiction"),
+            fused_wins=sum(1 for t in trials if t.winner == "fused"),
+            single_wins=sum(1 for t in trials if t.winner == "single"),
+            neither=sum(1 for t in trials if t.winner == "neither"),
+            ties=sum(1 for g in gains if g == 0.0),
+            mean_gain=sum(gains) / len(gains) if gains else 0.0,
+            negative=len(losses),
+            mean_loss=sum(losses) / len(losses) if losses else 0.0,
+            worst_loss=min(losses) if losses else 0.0,
+            below_baseline=sum(
+                1 for t in trials
+                if t.fused_score is not None and t.fused_score < t.baseline_score))
+
+    def summary(self) -> str:
+        """One line, and it says when there is nothing to report."""
+        if not self.contested:
+            return (f"fusion: {self.trials} tournaments, none contested "
+                    f"({self.single_candidate} single-candidate, "
+                    f"{self.contradiction} contradicting) -- fusion never ran")
+        return (f"fusion: won {self.fused_wins}/{self.contested} "
+                f"({self.win_rate:.0%}), mean gain {self.mean_gain:+.3f}, "
+                f"{self.negative} losses (worst {self.worst_loss:+.3f}, "
+                f"{self.below_baseline} below baseline), {self.ties} ties")
+
 
 @dataclass
 class EvolutionResult:
@@ -972,6 +1064,33 @@ class EvolutionResult:
     sandboxes_created: int = 0
     sandboxes_reused: int = 0
     sandbox_failures: int = 0
+    #: Every fusion tournament the run held, when the fusion policy recorded
+    #: them (the shipped one does). Read it through :meth:`fusion_stats`.
+    fusion_trials: List["FusionTrial"] = field(default_factory=list)
+
+    def fusion_stats(self) -> "FusionStats":
+        """How often merging beat the best single diff -- and how badly it lost.
+
+        The strongest objection to this whole design is that two workers' local
+        improvements might be worse together than either is alone. `RoundStat.fused`
+        counted how often a fusion was *committed*, which cannot answer it: the
+        tournament only ever commits a fusion that won, so the count is a tally of
+        successes with the denominator missing.
+
+        Three shapes of answer, all worth having:
+
+        * **win rate well above 50%** -- merging recovers the N-1 proposals
+          best-of-N throws away, which is the claim.
+        * **win rate near 50%** -- fusion is noise, and the tournament's cost (an
+          extra held-out pass per merge) has to be justified some other way.
+        * **win rate below 50%, with the tournament catching it** -- the gate is
+          doing real work, which is its own result: the optimizer audits itself.
+
+        Read ``negative`` before the win rate. An empty negative tail does not mean
+        fusion never hurts; on a small held-out set it usually means the cheap layer
+        cannot separate the candidates at all, and ``ties`` is the tell.
+        """
+        return FusionStats.of(self.fusion_trials)
 
     def outcomes(self) -> Dict[str, int]:
         """Merge outcomes for the whole run, by category -- *why* it went as it did.
@@ -1099,6 +1218,7 @@ class EvolutionResult:
             "sandboxes_created": self.sandboxes_created,
             "sandboxes_reused": self.sandboxes_reused,
             "sandbox_failures": self.sandbox_failures,
+            "fusion_trials": [asdict(t) for t in self.fusion_trials],
         }
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, indent=2, ensure_ascii=False)
@@ -1199,6 +1319,7 @@ class EvolutionResult:
             forced_refreshes=d.get("forced_refreshes", 0),
             stragglers=d.get("stragglers", 0),
             stop_reason=d.get("stop_reason", "rounds"),
+            fusion_trials=[FusionTrial(**t) for t in d.get("fusion_trials", [])],
             # Every cost field is `.get` with a default, so a file written before
             # they existed loads as a run that simply did not measure them.
             usage=Usage(calls=u.get("calls", 0),
@@ -2377,6 +2498,7 @@ def evolve(
                              final_reward=final_reward, history=history,
                              ledger_log=_safe_log(ledger), error=run_error,
                              stop_reason="error" if run_error else stop_reason,
+                             fusion_trials=_fusion_trials(aggregator),
                              **_cost_fields(eng.meter))
     eng.cleanup()
     return result

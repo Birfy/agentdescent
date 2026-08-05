@@ -59,6 +59,7 @@ __all__ = [
     "AcceptancePolicy",
     "ConflictPolicy",
     "FusionPolicy",
+    "FusionTrial",
     "LedgerProtocol",
     "MergeContext",
     "Policies",
@@ -127,6 +128,53 @@ class MergeContext:
     def comparable(self) -> bool:
         """Were both sides measured in the same environment?"""
         return self.base_env == self.cand_env
+
+
+@dataclass(frozen=True)
+class FusionTrial:
+    """One tournament: what the fused candidate scored against the best single.
+
+    The sharpest objection to "diffs can be merged" is that two workers' local
+    improvements can be worse together than either is alone. The tournament has
+    always been the answer to it -- the fused candidate has to *win* on held-out
+    before anything commits -- and the run recorded only how often a fusion was
+    committed, never how often it won, by how much, or how badly it lost. That is
+    a design, not evidence.
+
+    ``baseline_score`` is why this is a record rather than a boolean. A fusion
+    that loses to the best single diff while both beat the baseline is complementary
+    changes ranking imperfectly; a fusion that loses to the *baseline* is two good
+    changes making each other worse. Only the second is the failure mode the
+    objection describes, and ``winner`` alone cannot tell them apart.
+
+    All three scores come from the cheap layer, which is what the tournament
+    ranks on. They are comparable with each other and not with a full held-out
+    number.
+    """
+
+    artifact_id: str
+    #: Surviving diffs entering the tournament -- the fused candidate is built
+    #: from all of them, so this is what "of N" means in a merge-of-N claim.
+    n_candidates: int
+    best_single_score: float
+    baseline_score: float
+    #: ``None`` when no fused candidate was built at all; ``reason`` says why.
+    #: Distinguishing that from "the fusion lost" is the difference between a
+    #: mechanism that fails and a mechanism that never ran.
+    fused_score: Optional[float] = None
+    #: ``"fused"`` / ``"single"`` / ``"neither"``. ``"neither"`` means nothing in
+    #: the tournament beat the artifact it started from.
+    winner: str = "single"
+    #: Why no fusion was built: ``"single-candidate"`` or ``"contradiction"``.
+    #: Empty when one was.
+    reason: str = ""
+
+    @property
+    def gain(self) -> Optional[float]:
+        """Fused minus best single. Negative is the interesting direction."""
+        if self.fused_score is None:
+            return None
+        return self.fused_score - self.best_single_score
 
 
 @dataclass(frozen=True)
@@ -212,7 +260,15 @@ class FusionPolicy(Protocol):
     """How complementary diffs become one candidate.
 
     Returns ``(chosen_diff, candidate_artifact, fused)``. Signature taken from
-    ``Aggregator._tournament``."""
+    ``Aggregator._tournament``.
+
+    A policy may also expose ``trials`` -- a growing sequence of
+    :class:`FusionTrial` -- and the engine will carry it onto
+    :attr:`~agentdescent.evolution.EvolutionResult.fusion_trials`. Optional
+    because it is instrumentation, not a decision: a replacement policy that
+    keeps no trials still satisfies this protocol, and
+    :meth:`EvolutionResult.fusion_stats` reports the trial count so that
+    "not instrumented" cannot be misread as "fusion never won"."""
 
     def select(self, artifact: "Evolvable",
                diffs: List["Diff"]) -> Tuple["Diff", "Evolvable", bool]: ...

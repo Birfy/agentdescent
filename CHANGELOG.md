@@ -21,6 +21,15 @@ All notable changes to AgentDescent are documented here. The format follows
   selected fork (best on dev, reported on test). `compare(fixed=...)` names the unit
   held fixed and prints the other unit's divergence as a confound — because the two
   cannot both be equalised, which is measured rather than assumed.
+- `EvolutionResult.fusion_stats()` — the fusion tournament's record, with the
+  denominators `RoundStat.fused` was missing. That counter tallied *committed*
+  fusions, and the tournament only commits one that won, so it could not answer
+  "does merging just average the improvements away?". The shipped `FusionPolicy`
+  now records a `FusionTrial` per tournament (it was already computing the scores),
+  reporting win rate, mean gain, the losing tail with its worst case, and fusions
+  that fell below the baseline rather than merely below the best single diff.
+  `win_rate` is `None` when nothing was contested, so a mechanism that never ran
+  cannot be read as one that always lost.
 
 ## [0.4.0] — 2026-08-05
 

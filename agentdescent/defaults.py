@@ -26,7 +26,7 @@ from typing import (
 
 from .evolvable import Diff, EvidenceCard, Evolvable
 from .policies import (
-    AcceptDecision, MergeContext, Promotion, ProposalContext,
+    AcceptDecision, FusionTrial, MergeContext, Promotion, ProposalContext,
 )
 from .stats import annealed_delta, prob_improvement
 
@@ -95,27 +95,65 @@ class DefaultConflict:
 
 
 class DefaultFusion:
-    """Run each candidate, plus their fusion, in a cheap held-out tournament."""
+    """Run each candidate, plus their fusion, in a cheap held-out tournament.
+
+    Also the only place that can answer "does merging actually help, or does it
+    average the improvements away?", so it records a :class:`FusionTrial` per
+    tournament. The scores were already being computed to rank the candidates;
+    keeping them costs nothing and is the difference between claiming a mechanism
+    and reporting one. See :meth:`EvolutionResult.fusion_stats`.
+    """
 
     def __init__(self, verifier) -> None:
         self.verifier = verifier
+        #: Every tournament this policy has run, in order. Append-only, and read
+        #: by the engine when it assembles the result.
+        self.trials: List[FusionTrial] = []
 
     def select(self, artifact: Evolvable,
                diffs: List[Diff]) -> Tuple[Diff, Evolvable, bool]:
         from .aggregator import diffs_contradict, fuse_diffs
 
-        candidates: List[Tuple[Diff, Evolvable, bool]] = []
-        for d in diffs:
-            candidates.append((d, artifact.apply(d), False))
+        # Score once and keep the numbers. `max(..., key=cheap_eval)` recomputed
+        # them and threw them away, which is why the question below had no data
+        # even though the tournament had been answering it every round.
+        scored: List[Tuple[float, Diff, Evolvable, bool]] = [
+            (self.verifier.cheap_eval(candidate), d, candidate, False)
+            for d, candidate in ((d, artifact.apply(d)) for d in diffs)
+        ]
         # add a fused candidate if the survivors are mutually complementary.
-        if len(diffs) > 1 and not any(
-            diffs_contradict(a, b) for i, a in enumerate(diffs) for b in diffs[i + 1:]
-        ):
+        reason = ""
+        if len(diffs) <= 1:
+            reason = "single-candidate"
+        elif any(diffs_contradict(a, b)
+                 for i, a in enumerate(diffs) for b in diffs[i + 1:]):
+            reason = "contradiction"
+        else:
             fused = fuse_diffs(diffs)
-            candidates.append((fused, artifact.apply(fused), True))
+            candidate = artifact.apply(fused)
+            scored.append((self.verifier.cheap_eval(candidate), fused, candidate,
+                           True))
 
-        best = max(candidates, key=lambda c: self.verifier.cheap_eval(c[1]))
-        return best
+        # `max` keeps the first of equal scores, so a fused candidate that merely
+        # ties the best single does not win. That is the conservative reading and
+        # it matters for the statistic: counting ties as fusion wins would inflate
+        # the win rate on exactly the workloads where the held-out set is too
+        # small to separate the candidates at all.
+        best = max(scored, key=lambda c: c[0])
+        singles = [c[0] for c in scored if not c[3]]
+        fused_score = next((c[0] for c in scored if c[3]), None)
+        baseline = self.verifier.cheap_eval(artifact)
+        best_single = max(singles) if singles else baseline
+        if best[0] <= baseline:
+            winner = "neither"
+        else:
+            winner = "fused" if best[3] else "single"
+        self.trials.append(FusionTrial(
+            artifact_id=getattr(artifact, "id", ""),
+            n_candidates=len(diffs), best_single_score=best_single,
+            baseline_score=baseline, fused_score=fused_score, winner=winner,
+            reason=reason))
+        return best[1], best[2], best[3]
 
 
 class DefaultAcceptance:

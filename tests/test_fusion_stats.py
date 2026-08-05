@@ -1,0 +1,203 @@
+"""Did merging help, or did it average the improvements away?
+
+`RoundStat.fused` counted how often a fusion was **committed**. That cannot
+answer the question: the tournament only ever commits a fusion that won, so the
+count is a tally of successes with its denominator missing. These tests pin the
+denominators -- how many tournaments were held, how many had a fusion in them at
+all, how often it lost, and how badly.
+
+None of them assert that fusion wins. Whether it does is the empirical question
+`docs/results.md` is for, and three of the possible answers are useful.
+"""
+
+import pytest
+
+from agentdescent.evolution import (
+    AppendRules, EvolutionResult, FusionStats, KeyedRules, Task, evolve,
+)
+from agentdescent.policies import FusionTrial
+
+
+# -- the record --------------------------------------------------------------
+
+
+def _trial(**kw):
+    base = dict(artifact_id="a", n_candidates=2, best_single_score=0.5,
+                baseline_score=0.4, fused_score=0.6, winner="fused")
+    base.update(kw)
+    return FusionTrial(**base)
+
+
+def test_gain_is_none_when_no_fusion_was_built():
+    """Not zero. A fusion that never ran and a fusion that broke even are
+    different facts, and a zero would average into `mean_gain` as if the
+    mechanism had been tested."""
+    assert _trial(fused_score=None).gain is None
+    assert _trial(fused_score=0.5).gain == pytest.approx(0.0)
+
+
+def test_an_uncontested_run_reports_no_win_rate_rather_than_zero():
+    """A rate with an empty denominator printed as 0% reads as 'fusion always
+    lost', which is the opposite of 'fusion never ran'."""
+    stats = FusionStats.of([_trial(fused_score=None, reason="single-candidate",
+                                   winner="single")] * 3)
+    assert stats.contested == 0
+    assert stats.win_rate is None
+    assert "fusion never ran" in stats.summary()
+    assert stats.single_candidate == 3
+
+
+def test_the_two_reasons_a_fusion_is_not_built_are_counted_apart():
+    """'Every round had one survivor' and 'the survivors contradicted' point at
+    different fixes -- more workers versus a strategy with a key space."""
+    stats = FusionStats.of([
+        _trial(fused_score=None, reason="single-candidate", winner="single"),
+        _trial(fused_score=None, reason="contradiction", winner="single"),
+        _trial(fused_score=None, reason="contradiction", winner="single"),
+    ])
+    assert (stats.single_candidate, stats.contradiction) == (1, 2)
+
+
+def test_the_losing_tail_is_reported_with_its_worst_case():
+    stats = FusionStats.of([
+        _trial(fused_score=0.6, best_single_score=0.5),      # +0.1
+        _trial(fused_score=0.4, best_single_score=0.5, winner="single"),   # -0.1
+        _trial(fused_score=0.2, best_single_score=0.5, winner="single"),   # -0.3
+    ])
+    assert stats.negative == 2
+    assert stats.worst_loss == pytest.approx(-0.3)
+    assert stats.mean_loss == pytest.approx(-0.2)
+    assert stats.mean_gain == pytest.approx(-0.1)
+
+
+def test_below_baseline_is_separate_from_merely_losing():
+    """Losing to the best single diff is ranking noise. Losing to the artifact
+    you started from is the failure the objection actually names."""
+    stats = FusionStats.of([
+        # ranked below the best single, still an improvement on the baseline
+        _trial(fused_score=0.45, best_single_score=0.5, baseline_score=0.4,
+               winner="single"),
+        # actively harmful
+        _trial(fused_score=0.3, best_single_score=0.5, baseline_score=0.4,
+               winner="single"),
+    ])
+    assert stats.negative == 2
+    assert stats.below_baseline == 1
+
+
+def test_ties_are_counted_because_an_empty_tail_can_mean_a_blind_gate():
+    """No negative samples at all usually means the cheap layer cannot separate
+    the candidates, not that fusion is safe. `ties` is how you tell."""
+    stats = FusionStats.of([_trial(fused_score=0.5, best_single_score=0.5,
+                                   winner="single")] * 4)
+    assert stats.negative == 0 and stats.ties == 4
+
+
+# -- the wiring --------------------------------------------------------------
+
+
+KEYS = ("alpha", "beta", "gamma", "delta")
+
+
+def _tasks(n=24):
+    return [Task(id=str(i), prompt=f"q{i}",
+                 meta={"key": KEYS[i % len(KEYS)], "gold": f"A{i % len(KEYS)}"})
+            for i in range(n)]
+
+
+def _run(rendered, task):
+    lines = rendered.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip() == f"## {task.meta['key']}" and i + 1 < len(lines):
+            return lines[i + 1].strip()
+    return "?"
+
+
+def _reward(task, output):
+    return 1.0 if output == task.meta["gold"] else 0.0
+
+
+def _propose(rendered, task, output, score):
+    return f"{task.meta['key']}: {task.meta['gold']}"
+
+
+def _evolve(**kw):
+    kw.setdefault("rounds", 6)
+    kw.setdefault("n_workers", 4)
+    return evolve(_tasks(), _reward, run=_run, propose=_propose,
+                  strategy=KeyedRules(categories=KEYS), held_out_frac=0.4,
+                  max_concurrency=1, **kw)
+
+
+def test_a_multi_worker_run_records_its_tournaments():
+    result = _evolve()
+    stats = result.fusion_stats()
+    assert stats.trials > 0, "four workers must have produced tournaments"
+    assert stats.fused_wins + stats.single_wins + stats.neither == stats.trials
+
+
+def test_a_single_worker_run_has_nothing_to_fuse():
+    """The denominator has to survive the degenerate case: one worker means one
+    candidate, so every tournament is uncontested rather than a fusion loss."""
+    stats = _evolve(n_workers=1).fusion_stats()
+    assert stats.contested == 0
+    assert stats.single_candidate == stats.trials
+    assert stats.win_rate is None
+
+
+def test_an_uninstrumented_fusion_policy_reports_zero_trials_not_zero_wins():
+    """A replaced `FusionPolicy` keeps no trials, and that must not read as
+    evidence about fusion."""
+    from agentdescent.aggregator import Aggregator
+
+    class Blind:
+        def __init__(self, verifier):
+            self.verifier = verifier
+
+        def select(self, artifact, diffs):
+            candidate = artifact.apply(diffs[0])
+            return diffs[0], candidate, False
+
+    def factory(ledger, verifier, audit, config, policy):
+        agg = Aggregator(ledger, verifier, audit, config, staleness_policy=policy)
+        agg.fusion_policy = Blind(verifier)
+        return agg
+
+    stats = _evolve(aggregator_factory=factory).fusion_stats()
+    assert stats.trials == 0
+    assert stats.win_rate is None
+
+
+def test_trials_survive_a_save_and_load_round_trip(tmp_path):
+    result = _evolve()
+    path = str(tmp_path / "run.json")
+    result.save(path)
+    assert EvolutionResult.load(path).fusion_stats() == result.fusion_stats()
+
+
+def test_a_result_written_before_the_field_existed_still_loads(tmp_path):
+    import json
+
+    result = _evolve()
+    path = str(tmp_path / "old.json")
+    result.save(path)
+    with open(path, encoding="utf-8") as fh:
+        payload = json.load(fh)
+    payload.pop("fusion_trials")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh)
+    assert EvolutionResult.load(path).fusion_stats().trials == 0
+
+
+def test_append_only_strategies_still_produce_contested_tournaments():
+    """`AppendRules` never contradicts, so its tournaments are the *upper* bound
+    on how often fusion gets to compete -- worth pinning, because a run where
+    fusion always wins is usually a run on a domain where it cannot lose."""
+    result = evolve(_tasks(), _reward,
+                    run=lambda rendered, task: (
+                        task.meta["gold"] if task.meta["gold"] in rendered else "?"),
+                    propose=lambda rendered, t, o, s: t.meta["gold"],
+                    strategy=AppendRules(), rounds=4, n_workers=4,
+                    max_concurrency=1, held_out_frac=0.4)
+    stats = result.fusion_stats()
+    assert stats.contradiction == 0

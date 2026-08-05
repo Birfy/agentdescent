@@ -74,6 +74,44 @@ Evidence cards are bucketed by artifact; a bucket fires on batch size `B` or a
 
 Deep dive on the *why*: [concepts §4](concepts.md#4-the-aggregator-a-discrete-space-optimizer).
 
+### Reading step 3: did fusion actually help?
+
+The tournament is the whole answer to "two local improvements might be worse
+together than either alone", so it is worth knowing whether it ever fires and
+whether it wins. `RoundStat.fused` counted **committed** fusions, which cannot
+tell you: the tournament only commits a fusion that won, so that count is a tally
+of successes with the denominator missing.
+
+The shipped `FusionPolicy` records a `FusionTrial` per tournament — it was already
+computing the scores to rank the candidates — and `result.fusion_stats()` reads
+them back:
+
+```python
+stats = result.fusion_stats()
+print(stats.summary())
+# fusion: won 12/31 (39%), mean gain -0.004, 9 losses (worst -0.070,
+#         1 below baseline), 10 ties
+```
+
+| field | what it answers |
+|---|---|
+| `trials` / `contested` | how many tournaments ran, and how many had a fusion in them at all |
+| `single_candidate` / `contradiction` | why the rest did not — one survivor, or survivors that contradicted |
+| `win_rate` | fused wins over `contested`; `None` when nothing was contested, so "never ran" cannot be read as "always lost" |
+| `mean_gain` | mean `fused − best single` |
+| `negative` / `mean_loss` / `worst_loss` | the losing tail — the number the objection is actually about |
+| `below_baseline` | fusions worse than the artifact they started from, as opposed to merely ranked below the best single |
+| `ties` | fusion exactly matching the best single; high here with an empty tail means the cheap layer cannot separate the candidates |
+
+Ties do not count as fusion wins: `max` keeps the first of equal scores, so a
+fusion that merely matches the best single loses. That is the conservative reading
+and it matters — counting ties as wins would inflate the rate on exactly the
+workloads where the held-out set is too small to tell the candidates apart.
+
+A replaced `FusionPolicy` is not obliged to keep `trials`; then `stats.trials` is
+`0` and `win_rate` is `None`, which reads as "not instrumented" rather than as a
+verdict.
+
 ---
 
 ## Tuning — `agg_config=` (`AggregatorConfig`)
