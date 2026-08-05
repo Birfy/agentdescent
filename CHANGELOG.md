@@ -7,6 +7,122 @@ All notable changes to AgentDescent are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **`claude()` was the one blocking boundary in the package with no timeout.**
+  `_git` bounds a command at 120s, `_CliAgent` at 600s, `runners._sh` takes one
+  per call, and `openai_compatible` has had `timeout=120.0` all along -- this one
+  relied on the Anthropic SDK's 600s default, which the SDK then retries
+  internally, and which `with_retries` retries again. One logical call against a
+  stalled endpoint can block for well over half an hour while the log says
+  nothing, and a run doing that is indistinguishable from a slow one.
+
+  Measured against a hosted endpoint: a GEPA run sat **51 minutes without
+  finishing five rounds** -- 1.07s of CPU across the whole time and one
+  ESTABLISHED socket -- and the same run with `timeout=120.0` finished all five
+  in **14 minutes**, 96 calls. Same model, same endpoint, same settings.
+
+  `claude(timeout=120.0)` now matches its sibling adapter and is overridable for
+  a backend that legitimately takes longer.
+
+### Fixed
+- **`evolve(staleness_policy=...)` could not decide anything on the synchronous
+  path.** The loop snapshots the ledger at the top of every round and every
+  worker proposes against that snapshot, so a diff's staleness `eta` is **0 by
+  construction** -- measured over an 8-round run, all 15 staleness decisions saw
+  `eta = 0` and returned ACCEPT, which makes Full, Guarded and Reflective
+  identical runs. The `alpha` tolerances in `AggregatorConfig` and the
+  `all-stale` outcome were equally unreachable there. The whole mechanism only
+  ever bit on `async_evolve`, where `async_ratio` produces the drift.
+
+  `evolve(refresh_interval=N)` is the missing half: a worker keeps its snapshot
+  for N rounds, **staggered by worker id**, so the workers hold a spread of
+  versions and their diffs arrive with a spread of `eta`. `1` is the default and
+  is exactly the old behaviour. It costs no extra ledger read -- a worker either
+  adopts the snapshot the round already took, or keeps the older one it has --
+  and it is the same mechanism `AgentDescent` uses to make the staleness sweep
+  meaningful, which is the first thing the general engine was missing before the
+  two loops can be merged.
+
+- **The async path counted every surviving card twice, so `stale_rate()` read
+  about half the truth.** `async_evolve` runs its own staleness gate — it has to,
+  because a custom `aggregator_factory` is promised only already-rebased cards —
+  and then `Aggregator` runs its own over the survivors, on the same `Meter`.
+  Measured: 20 cards reported `stale_considered = 40`. A true 50% stale rate read
+  as 33%, and the end-of-run "you are discarding most of your evidence" warning,
+  which fires at `discarded/considered > 0.5`, needed a *67%* true rate to trip.
+  Each side now counts only what the other cannot see: the gate's discards, the
+  aggregator's survivors.
+
+- **An async worker read the ledger once per rollout to measure its drift.** A
+  ledger read is a `git checkout` behind a process-wide file lock and an RLock
+  every worker and the merger queue on, so the cost of asking "am I far enough
+  behind to resync?" grew with the concurrency it exists to support. The merger
+  is the only writer, so it now publishes the head after each sweep and workers
+  read that — which is what `AsyncAgentDescent` has always done, and what the
+  general engine reached for git to do instead. Measured on a 21-rollout run: 46
+  ledger reads before, 22 after. A published head can lag by one sweep, delaying
+  a refresh by at most one rollout; the refresh still takes a real snapshot.
+
+- **An exhausted `oracle_budget` turned the audit gate into a sub-sample veto.**
+  `oracle_eval` degrades to `rule_eval` once the budget is gone — by design, so a
+  run cannot spend money it was told not to — but `rule_eval` is the
+  `cheap_eval_tasks` sub-sample, and the audit gate vetoed on its verdict.
+  Measured: a candidate that took the full held-out rate from 0.5 to 1.0 came
+  back `oracle-rejected` because a two-task sample scored both sides at 0.5. Two
+  sections of `docs/verifier.md` promise sub-sampling can never decide a commit;
+  this was the path that made it false, and it is the same hole the acceptance
+  step's regression guard was fixed for one entry below.
+
+  The fix is that the audit stops buying a measurement it already has.
+  `ThreeLayerVerifier.oracle_shares_full_set` records what that class has always
+  done — `oracle_eval` and `eval_counts` are the same `eval_fn` over the same
+  held-out set — and the aggregator reuses the full-set rates the acceptance test
+  just computed. The verdict is identical while budget remains, and there is no
+  degraded path to fall onto when it does not. A custom verifier whose oracle is
+  genuinely independent leaves the attribute undefined and keeps being called.
+
+  Consequences worth knowing: with the shipped verifier an L1 run now reports
+  `oracle_calls_used == 0` — the audit ran, nothing had to be bought — so
+  `AuditScheduler.audits` was added to answer "did the gate open", which is the
+  question `oracle_calls_used` used to be a proxy for.
+
+- **`async_evolve()` accepted `Policies(executor=...)` and ignored it.** Both
+  engines shared one `_WIRED_POLICIES` tuple, and the barrier-free loop has no
+  executor seam — its worker calls `eng.run` directly. So the field was declared
+  supported for a loop that never read it: accepted, then dropped, which is the
+  single outcome `Policies.require_supported` exists to prevent. It got sharper
+  the moment a supplied executor started working under `evolve()`, because
+  flipping `asynchronous=True` would then silently stop honouring it. The async
+  path now has its own set and raises `NotImplementedError` naming the field.
+
+- **A "cheap re-verification" that verified nothing did so in silence.** The
+  staleness policies' `REBASE` branch keeps a rebased diff iff
+  `before <= after`, and `EvolvingArtifact.score` returns `0.0` for an empty task
+  list — so when an evidence card carries nothing the engine can score, the check
+  compares `0.0 <= 0.0` and keeps *every* diff, including one that makes the
+  artifact worse. `EvidenceCard.trajectory_refs` was annotated `List[str]` for a
+  while, so a domain that followed the annotation and stored ids landed here with
+  a non-empty list and nothing in it to score. The annotation was corrected
+  earlier; `evidence_eval` now warns once per run when it happens, which is what
+  would have made the original trap visible while it was running.
+
+- **`policies=Policies(executor=...)` produced a finished run that measured
+  nothing.** `evolve()` describes each rollout as a `RolloutSpec`, and the
+  `Ref`s in it named `agents:echo` / `rewards:contains` as stand-ins — the
+  caller's `run` and `reward` are closures and cannot be named. The built-in
+  `ThreadExecutor` holds the actors directly and never resolved them, so nothing
+  noticed; a *supplied* executor resolved the stand-ins, failed every rollout on
+  an argument-count mismatch, and returned `rollouts=0` with a plausible
+  `final_reward` from the gate and no exception raised.
+
+  A supplied executor is now handed the run's actors via `attach_actors(run,
+  reward)` — `evolve()`'s win over any passed to the constructor, so which actor
+  runs does not depend on how the executor was built. One that cannot accept
+  them (any cross-process executor: a closure does not cross a boundary) is
+  **refused at build time** naming the fix, rather than producing a wrong answer
+  in the shape of a right one. The spec's placeholder `Ref`s now point at
+  `evolution:undescribable_actor`, which raises and explains itself if anything
+  else resolves them.
+
 - **`cheap_eval_tasks` could veto a commit, while four places promised it could
   not.** The aggregator's acceptance step refuses a candidate that scores worse
   than the incumbent — a guard worth having — but it read the *cheap* layer,
@@ -105,6 +221,37 @@ All notable changes to AgentDescent are documented here. The format follows
   merge.
 
 ### Changed
+- **The documentation grew an execution-and-resource plane, because the code
+  had one and the pages did not.** Eight modules — `executor`, `supervisor`,
+  `workspec`, `sandbox`, `sandbox_shared`, `sandbox_container` and the two
+  evaluation ones — were reachable only through pages named for something else:
+  where a rollout runs was a section inside *Customizable parallelism*, and how a
+  sandbox is isolated was a section inside *Evolving a directory*. A reader
+  running `evolve()` against a container had no reason to open either.
+
+  There are now two pages, [Where rollouts run](docs/execution.md) and
+  [Sandboxes](docs/sandboxes.md), grouped with async and scheduling under a
+  *Running at scale* section; the pages they came from keep a pointer. The module
+  map is redrawn along the same four planes — its ASCII diagram had listed
+  `sandbox` twice and filed six execution modules under *how a change is
+  accepted*.
+
+  Also corrected against the code, rather than moved: the executors' status
+  ("not yet wired into `evolve()`'s round loop" — they were wired in #89), a
+  paragraph in the container warning that had escaped its admonition mid-sentence
+  since #67, and three docstrings that described behaviour the code does not have
+  (`Ledger._exclusive` calling its `RLock` a `Lock` and claiming the section
+  nests — `flock` is per-open-file-description, so it does not;
+  `EvaluatorGroup.map` claiming to report rather than raise; `bench.harness`
+  claiming every row carries a fingerprint when `bench.run` populates none).
+
+  Two limits that were true and unwritten are now written down: the shared
+  sandbox pool's ceiling is [advisory](docs/sandboxes.md#one-ceiling-across-processes)
+  — admission reads the lease directory and then acquires, with nothing holding it
+  still in between — and `Ledger` [initialises its repository before the lock
+  exists](docs/ledger.md#more-than-one-writer), so concurrent *creation* of one
+  path still races.
+
 - **Faithful algorithm ports now share one tested CLI contract.** Their provider,
   model, seed, async, dry-run and confirmation flags come from
   `examples._common`; upstream iteration vocabulary and per-port defaults remain
@@ -237,6 +384,54 @@ All notable changes to AgentDescent are documented here. The format follows
   name is documented and had nothing to document.
 
 ### Added
+- **`ClusterParallel`, and the feedback channel that makes it possible.**
+  `ParallelStrategy.plan(n_workers, round_index, keys)` was a pure function of
+  its arguments, so a strategy could not learn anything from the rollouts it
+  dispatched -- enough to *shard*, not enough to *schedule*. That is why UCB over
+  task clusters (design section 5.2, L-task) existed only in the reference
+  runtime's `TaskScheduler`, which `evolve()` cannot reach, and why the general
+  engine's answer to the task tail stopped at `DifficultyWeighted` over
+  individual tasks.
+
+  `ParallelStrategy` gains an **optional** `observe(unit, task_id, score)`;
+  `evolve()` calls it after every rollout when the strategy defines one, so
+  `DataParallel` and `TensorParallel` are untouched. `ClusterParallel` is the
+  consumer -- it groups tasks by `cluster_of(task_id)`, leases whole clusters
+  UCB-ordered with the same difficulty filter (all-pass and all-fail clusters
+  carry no gradient), and feeds each rollout's reward back into the estimate. It
+  composes with `task_sampler` rather than replacing it: one picks the cluster,
+  the other picks the task inside it, and they share
+  `stats.difficulty_weight`.
+
+  Two stated differences from the reference scheduler: it learns from a
+  rollout's **reward** rather than the before/after delta of the diff it produced
+  (that delta needs `self_verify`, which the directory entry points turn off, so
+  a scheduler depending on it would silently stop learning exactly there), and it
+  learns per task rather than per lease.
+
+- **`RoundInfo` reports what the merge *did*, not only what category it landed
+  in.** Four numbers `MergeReport` computed all along and the driver threw away:
+  `considered` (the denominator), `discarded_stale`, `conflicts_dropped`, and
+  `fused` -- commits whose winning candidate was the fusion of several diffs
+  rather than any single one, which is the model-soup question asked per round.
+  The reference runtimes reported them (`RoundStat.fused`,
+  `AsyncStats.conflicts_dropped`) and the engine every real workload uses did
+  not, so a caller could see *that* nothing committed and never *how* the merge
+  got there. `save`/`load` round-trip them, and a file written before they
+  existed still loads.
+
+  `fused` counts only fusions that **committed**: the tournament builds a fused
+  candidate whenever the survivors are complementary, so counting the ones it
+  built says nothing about whether combining them beat taking the best single
+  diff.
+
+  `_Engine.record_round` now takes the reports rather than a pre-chewed
+  `committed` / `rejected` / `reasons`. Deriving those was the other thing both
+  loops were doing separately -- and they disagreed on spelling, one counting
+  `rejected` as `len(reports) - committed` and the other re-scanning for a
+  missing `committed_version`. Same answer, two places for the next number to be
+  added to one and not the other.
+
 - **Evolving a directory: a skill folder, an agent folder, or its code.** Until
   now every artifact was text that ended up *in a prompt*. A skill directory is
   not that: it is only a skill directory if the agent can *read the files*, which
@@ -328,6 +523,140 @@ All notable changes to AgentDescent are documented here. The format follows
   larger file could be loaded but never changed: every diff touching it is
   rejected as `oversized`, which surfaces five rounds later as "my reflector
   emits junk" rather than "that file was never editable".
+
+### Added
+- **`examples/efficiency.py` now produces every number `docs/efficiency.md`
+  publishes.** Four of them had **no entry point in the repository at all** --
+  the latency-distribution table, the `eval_concurrency` table, and the
+  threads-and-the-GIL table were measured by hand and could not be re-run. Three
+  new experiments, selectable with `--only`:
+
+      --only distribution   overlap against four shapes of latency
+      --only gate           wall-clock against eval_concurrency 1/4/8/16
+      --only gil --model X  a real API round trip vs pure-Python arithmetic
+
+  The GIL one needs a model (`ANTHROPIC_BASE_URL` + `ANTHROPIC_API_KEY`, or any
+  id `agentdescent.agents.claude` can reach); the other two need nothing.
+
+### Documentation
+- **The offline measurements were re-taken on the ported runtimes, and two of
+  them were being measured wrongly.** Both flattered the result, and both were
+  found by re-measuring rather than by reading:
+
+  * **`docs/efficiency.md`'s `stale%` column was understated by roughly a factor
+    of two** — 86% and 10% for the two async rows, against a corrected 93% and
+    25%. The async path ran its own staleness gate and `Aggregator` ran another
+    over the survivors, both writing to the same meter, so every surviving card
+    was counted twice in the denominator. Nothing about the runs changed; the
+    numerator was always right.
+  * **The throughput experiment's denominator included setup and the shutdown
+    grace**, which are fixed costs and therefore fall hardest on the low-worker
+    rows — which reads as superlinear speedup (8.2–9.4x for 8 workers against
+    ~8.1x). It says "a fixed wall-clock window", so it now divides by the window
+    it asked for.
+  * **`self_verify` doubled what a counted rollout cost** in that experiment: the
+    engine re-runs a proposal's own rollout for a before/after delta and counts
+    only the first, so an injected 6 ms latency became 12 ms per counted rollout.
+    The reference loop got that delta free. `AsyncConfig.self_verify` and
+    `AgentDescent(self_verify=)` expose the knob; the throughput experiment turns
+    it off, because dispatch rate is what it measures.
+
+  Three more tables were re-measured, and two moved for reasons worth knowing
+  rather than drift:
+
+  * **the latency-distribution table** read 5.9x / 4.8x / 3.3x / 2.4x and now
+    reads 1.8x / 2.4x / 2.2x / 1.7x. The old one isolated the rollout stage under
+    a setup nobody could reproduce; the new one is end-to-end `evolve()` at
+    default settings. Subtract the columns and the rollout saving is exactly what
+    eight workers should buy -- the speedup is smaller because the ceiling is
+    whatever in a round is *not* a rollout, which at default settings is the
+    gate;
+  * **the threads-and-the-GIL row** was 7.1x on `deepseek-v4-flash` and is 5.8x
+    on `glm-5.2` (5.8 / 6.3 / 6.5 across three runs). The gap is the
+    latency-distribution table restated: eight threads finish when the slowest
+    finishes, and a reasoning model has a long tail. Its CPU row was 1.0x from a
+    25 ms unit of work -- too small to measure -- and is 1.1x from a unit sized
+    to take seconds;
+  * **the `eval_concurrency` table** keeps its shape (serial, then linear, then
+    flat past the held-out size) on a workload small enough to re-run.
+
+  The stated variance band is honest about the machine now: across five runs the
+  8-worker speedup landed between 7.83x and 9.15x, dominated by a single-worker
+  baseline that itself varied 15%.
+
+- **`docs/results.md`'s efficiency table is re-measured and says how.** Every row
+  now names the command that produces it. Only one of the five needed a model at
+  all -- the other four were stub-backend measurements that had simply never been
+  scripted.
+
+### Removed
+- **Six resilience tests that had become duplicates.** `AsyncAgentDescent` was a
+  separate implementation of the barrier-free loop when they were written, so
+  driving failures through it tested something of its own. It is an adapter now,
+  and they were asserting `async_evolve`'s behaviour through a wrapper --
+  `tests/test_fault_matrix.py` asserts the same invariants directly against both
+  engines, and `tests/test_worker_resilience.py` in more detail. One survives, as
+  the only test of the adapter's `rollout=` seam: a broken seam would otherwise
+  make every reference example quietly stop exercising failures.
+
+### Changed
+- **The two reference runtimes are adapters, not a second implementation of the
+  loop.** `AgentDescent` and `AsyncAgentDescent` had their own round barrier,
+  worker dispatch, snapshot staggering, merger thread, published head and
+  backpressure, all feeding the shared `Ledger` and `Aggregator`.
+  `docs/architecture.md` called that "a known wart rather than a design intent",
+  and it kept costing: two measured fixes that had to be hand-ported, two
+  early-stop epsilons nobody chose, and three mechanisms the general engine
+  re-derived -- and got wrong -- because the reference stack already had them.
+
+  They now describe the reference domain in the vocabulary `evolve()` and
+  `async_evolve()` speak and run that. The public surface is unchanged
+  (`RoundStat`, `AsyncStats`, `final_accuracy`, `buffer_pending`,
+  `run_fork_baseline`), the sequential barrier is preserved so a seeded run stays
+  reproducible, and both paths still converge on the same table with merge
+  beating fork:
+
+      AgentDescent (adapter)   first 0.604   final 1.000
+      evolve() directly        first 0.604   final 1.000
+      fork baseline (RQ1)      0.379
+
+  Three things the translation does not preserve exactly, listed in
+  `agentdescent/domains/router.py` rather than left to be discovered:
+  `before_after_delta` and `evidence_eval` are measured over the whole cluster
+  rather than the failing subset, and noise is per proposal rather than per
+  worker -- the general engine has one `propose` for every worker and, by design,
+  no worker identity to branch on. `run_fork_baseline` keeps per-fork noise,
+  because a fork is one actor for its whole run.
+
+  `AsyncAgentDescent` gains `rollout=` and `aggregator_factory=`, which are the
+  seams `Worker.run` and a patched `aggregator.step` used to be: the resilience
+  tests inject a failing rollout and a flaky merger through them.
+
+### Removed
+- **`agentdescent.worker.Worker`.** It modelled a rollout for a loop that no
+  longer exists. What it did lives in
+  `agentdescent.domains.router.router_propose` (the corrector) and `rollout=`
+  (the latency injection the efficiency experiments need).
+- **`AsyncConfig.aggregator_interval` and `AsyncConfig.worker_pause`.** They
+  paced threads this module no longer owns; `async_evolve` owns its own sleeps.
+  Nothing in the tests or examples set either.
+
+### Removed
+- **`EvidenceCard.version_annotations`**, described as "per-turn version
+  annotations, used when the ledger hot-updates mid-rollout". Nothing wrote one
+  and nothing read one -- no producer in the package, no consumer, no test, no
+  doc page. A field on the object every worker constructs is not free: it reads
+  as a capability, and the mid-rollout hot-update it names does not exist (a
+  worker holds one snapshot for a whole rollout, by construction).
+
+### Documentation
+- **One table of everything provided, tested, and not in any engine path**, in
+  `docs/modules.md`: `Ledger.commit_atomic`, `L1SerialGate`, `ResumeQueue`,
+  `AuditScheduler.pop`, `EvidenceBuffer.settled`, `TaskScheduler`'s missing
+  artifact axis, `PipelineParallel`. Each already said so in its own docstring,
+  so finding out cost a read of the source, one class at a time. The rule they
+  share is worth stating once: a primitive that is implemented and unreachable is
+  honest, one that is reachable and silently does nothing is not.
 
 ## [0.3.0] — 2026-08-01
 

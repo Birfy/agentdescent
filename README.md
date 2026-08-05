@@ -144,6 +144,8 @@ Full docs live in [`docs/`](https://github.com/Birfy/agentdescent/tree/main/docs
 | [Connecting agents & LLMs](https://github.com/Birfy/agentdescent/blob/main/docs/agents.md) | The provider-agnostic completion layer |
 | [Loading datasets](https://github.com/Birfy/agentdescent/blob/main/docs/dataloader.md) | The `agentdescent.dataloader` data layer — HF datasets-server + raw-file fetch, cached, dependency-free |
 | [Customizable parallelism](https://github.com/Birfy/agentdescent/blob/main/docs/parallelism.md) | Pluggable DP / TP / PP strategies — or write your own |
+| [Where rollouts run](https://github.com/Birfy/agentdescent/blob/main/docs/execution.md) | The executor seam: threads, supervised worker processes, and describing a rollout as data |
+| [Sandboxes](https://github.com/Birfy/agentdescent/blob/main/docs/sandboxes.md) | Workspace leases, one ceiling across processes, and the three isolation levels |
 | [Duration-aware scheduling](https://github.com/Birfy/agentdescent/blob/main/docs/duration-scheduling.md) | Estimate rollout cost from task size; LPT dispatch + straggler checkpointing |
 | [Efficiency experiments](https://github.com/Birfy/agentdescent/blob/main/docs/efficiency.md) | Measured parallel scaling and async tail-hiding |
 | [Example: skill evolution](https://github.com/Birfy/agentdescent/blob/main/docs/skill-evolution.md) | One complete run — real dataset, real LLM, every module |

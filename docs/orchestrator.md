@@ -3,7 +3,7 @@
 *Modules:* [`agentdescent.orchestrator`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/orchestrator.py)
 · [`agentdescent.worker`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/worker.py)
 · [`agentdescent.domains.router`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/domains/router.py)
-· *API:* [`AgentDescent`, `RoundStat`, `run_fork_baseline`](api.md#the-reference-orchestrator), [`Worker`](api.md#the-worker)
+· *API:* [`AgentDescent`, `RoundStat`, `run_fork_baseline`](api.md#the-reference-orchestrator)
 
 [`evolve()`](evolution.md) is the entry point you build on. `AgentDescent` is the
 one the **research claims were measured with**: the same loop, wired to a
@@ -97,37 +97,57 @@ merge advantage                        : +0.621
 python -m examples.run_demo        # reproduces both numbers, no API key
 ```
 
-## `Worker` — rollout and propose
+## The rollout, and where the noise comes from
+
+There is no `Worker` class any more. `AgentDescent` and `AsyncAgentDescent` are
+**adapters over [`evolve()`](evolution.md) and [`async_evolve()`](async.md)** —
+they describe this domain in the vocabulary those speak and let them run it. The
+loop they used to own is gone, and with it the second implementation
+[`architecture.md`](architecture.md) called a known wart.
+
+What a rollout *is* has not changed: classify a cluster against the current
+table, turn the failures into a diff of up to `max_ops` keyword fixes, attach an
+[evidence card](data-model.md). It is now expressed as the three callables the
+engine takes:
 
 ```python
-Worker(worker_id="w0", gold=gold_table, noise=0.15, max_ops=4, seed=0)
+from agentdescent.domains.router import (
+    RouterStrategy, cluster_tasks, router_propose, router_reward, router_run)
+
+train, held = cluster_tasks(universe, n_clusters=6)
+evolve(train + held, router_reward, run=router_run,
+       propose=router_propose(universe.gold, noise=0.15, seed=0),
+       strategy=RouterStrategy())
 ```
 
-A worker holds a **snapshot** of the ledger, runs tasks against it, and turns
-observed failures into a diff plus an [evidence card](data-model.md). It never
-mutates the ledger — all mutation goes through the
-[aggregator](aggregator.md), which is the sole optimizer.
+`propose` is a deterministic corrector with tunable `noise`, which is what makes
+the aggregator's two hard paths reachable on demand: raise `noise` to generate
+contradictions, spread the tasks to generate complements. `max_ops` keeps a
+diff inside the aggregator's [trust region](aggregator.md), so the baseline
+never wins or loses by emitting one enormous diff.
 
-In a real deployment "propose" is a model reflecting on a trajectory. Here it is
-a deterministic corrector with tunable `noise`, which is what makes the
-aggregator's two hard paths reachable on demand: raise `noise` to generate
-contradictions, spread the tasks to generate complements.
+!!! note "Three things the translation does not preserve exactly"
+    Listed in `agentdescent/domains/router.py` rather than left to be found:
+    `before_after_delta` and `evidence_eval` are measured over the whole cluster
+    rather than the failing subset, and **noise is per proposal, not per
+    worker** — the general engine has one `propose` for every worker and, by
+    design, no worker identity to branch on. `run_fork_baseline` keeps per-fork
+    noise, because a fork *is* one actor for its whole run.
 
-`rollout_latency` is an optional callable returning seconds. It models the real
-cost of a rollout — tool calls, queue time, model latency — and is what makes
-parallelism and asynchrony observable in wall-clock in the
-[efficiency experiments](efficiency.md).
+    Both paths still converge on the same table and merge still beats fork,
+    which is what the [results](results.md) actually claim.
 
-`max_ops` keeps a worker's diffs inside the aggregator's
-[trust region](aggregator.md) so the baseline never wins or loses by emitting
-one enormous diff.
+`rollout=` replaces `Worker.rollout_latency`: pass a callable that sleeps before
+doing the domain's work, and parallelism becomes observable in wall-clock. That
+is how the [efficiency experiments](efficiency.md) inject latency, and how the
+resilience tests inject failures.
 
 ## Relationship to `evolve()`
 
 | | `AgentDescent` | [`evolve()`](evolution.md) |
 |---|---|---|
-| artifact | `RouterSkill` (fixed) | any [`Strategy`](strategies.md) |
-| actor | `Worker` (deterministic, noisy) | your agent or model |
+| artifact | `RouterStrategy` (fixed) | any [`Strategy`](strategies.md) |
+| actor | a deterministic, noisy corrector | your agent or model |
 | purpose | measuring the system | using the system |
 | needs a model | no | usually |
 

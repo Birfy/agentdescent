@@ -8,7 +8,7 @@ page and the code disagree, so a signature here is the signature you get.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-164 public names across 31 modules.
+164 public names across 30 modules.
 
 ---
 
@@ -39,6 +39,8 @@ An `Evolvable`: flat state + a strategy.
 
 | method | what it does |
 |---|---|
+| `cheap_eval(evidence: EvidenceCard) -> float` | Score this artifact on the trajectories an evidence card carries. |
+| `evidence_eval(evidence: EvidenceCard) -> float` | Score this artifact on the trajectories an evidence card carries. |
 | `full_eval(task_set: Sequence[Task]) -> Dict[str, float]` | Score on a task set. No longer part of the `Evolvable` protocol -- the engine reaches ground truth through the verifier's `eval_fn` -- and kept because it is a convenient thing for a caller to have. |
 | `score(tasks: Sequence[Task]) -> float` | Mean reward over `tasks`, evaluated concurrently. |
 
@@ -470,6 +472,14 @@ What the aggregator should do with a (possibly stale) evidence card.
 
 How a round's work is split across workers: DP / TP / PP. &nbsp;·&nbsp; `agentdescent.parallel` &nbsp;·&nbsp; [guide](parallelism.md)
 
+### `ClusterParallel(...)`
+
+DP over task **clusters**, leased by UCB instead of sharded round-robin.
+
+| method | what it does |
+|---|---|
+| `observe(unit: WorkUnit, task_id: str, score: float) -> None` | Feed one rollout's outcome back into the cluster's UCB estimate. |
+
 ### `DataParallel(name: str = 'DP') -> None`
 
 DP -- every worker holds the same artifact; the *tasks* (keys) are sharded across workers and their diffs are merged. Coverage rotates each round.
@@ -646,6 +656,12 @@ The reference barrier-free runtime and its statistics. &nbsp;·&nbsp; `agentdesc
 
 ### `AsyncAgentDescent(...)`
 
+Barrier-free reference runtime, on the general engine.
+
+| method | what it does |
+|---|---|
+| `buffer_pending() -> int` | Cards waiting in the aggregator's buckets, or 0 before a run. |
+
 ### `AsyncConfig(...)`
 
 ### `AsyncStats(...)`
@@ -658,25 +674,13 @@ The round loop the research results were measured with. &nbsp;·&nbsp; `agentdes
 
 ### `AgentDescent(...)`
 
-The merge-based parallel self-evolution system.
+The merge-based parallel self-evolution system, on the general engine.
 
 ### `RoundStat(...)`
 
 ### `run_fork_baseline(...)`
 
 DGM-style archive/fork control: parallel but never merged (RQ1).
-
----
-
-## The worker
-
-One worker's rollout and proposal. &nbsp;·&nbsp; `agentdescent.worker` &nbsp;·&nbsp; [guide](orchestrator.md)
-
-### `Worker(...)`
-
-| method | what it does |
-|---|---|
-| `run(...)` | One rollout: classify tasks, propose a corrective diff for failures. |
 
 ---
 

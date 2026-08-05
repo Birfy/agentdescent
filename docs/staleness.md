@@ -20,6 +20,24 @@ longer exists. The policy is where you choose.
 evolve(tasks, reward, agent=agent, staleness_policy=get_policy("guarded"))
 ```
 
+!!! warning "First, make sure the run *has* staleness"
+    A policy can only decide something if `eta` can be non-zero, and on the
+    **synchronous** path it cannot by default: `evolve()` takes a fresh snapshot
+    at the top of every round and every worker proposes against it, so `eta` is 0
+    by construction. Measured over an 8-round run, all 15 staleness decisions saw
+    `eta = 0` and returned ACCEPT — `full`, `guarded` and `reflective` produced
+    identical runs.
+
+    Two ways to have some:
+
+    | | knob | what it does |
+    |---|---|---|
+    | synchronous | `evolve(refresh_interval=N)` | a worker keeps its snapshot for N rounds, staggered by worker id |
+    | barrier-free | `async_evolve(async_ratio=N)` | a worker resyncs once the head is N versions ahead |
+
+    `refresh_interval` costs no extra ledger read — a worker either adopts the
+    snapshot the round already took, or keeps the older one it has.
+
 | policy | `eta == 0` | `0 < eta <= alpha` | `eta > alpha` |
 |---|---|---|---|
 | `full` | accept | accept | accept |

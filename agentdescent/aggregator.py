@@ -26,7 +26,9 @@ on the accept path -- the diagrams used to draw it after the commit with a dotte
 
 from __future__ import annotations
 
+import random
 import threading
+import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from enum import Enum
@@ -106,6 +108,15 @@ class AggregatorConfig:
     anneal_half_life: int = 64
     #: Monte-Carlo draws behind each acceptance decision. Also unreachable before.
     accept_samples: int = 4000
+    #: How many times a losing commit rebases and tries again. 1 restores the old
+    #: behaviour: settle the evidence back into the pool and wait a round, which
+    #: is the wrong answer to "somebody committed first" as soon as there is more
+    #: than one writer -- and with one writer this never fires at all.
+    cas_attempts: int = 3
+    #: Upper bound of the jittered backoff, doubling per attempt. Jittered because
+    #: two writers backing off by the same amount collide again on the same
+    #: schedule.
+    cas_backoff: float = 0.05
 
 
 class MergeOutcome(str, Enum):
@@ -202,6 +213,7 @@ class MergeReport:
     #: Stable bucket for the same outcome, safe to count across rounds. ``reason``
     #: interpolates values ("P(delta>0)=0.42 <= 0.75"), so it makes a useless key.
     category: str = ""
+
 
 
 class EvidenceBuffer:
@@ -547,20 +559,81 @@ class Aggregator:
             self.audit.update_trust(
                 artifact_id, (cand_full > base_full) == (cand_score > base_score))
         if self.audit.force_oracle(artifact.blast_radius, artifact_id):
-            oracle_base = self.verifier.oracle_eval(artifact)
-            oracle_cand = self.verifier.oracle_eval(best_state)
+            # A verifier whose oracle scores the same set `eval_counts` does has
+            # already been paid for: `base_full` / `cand_full` ARE that
+            # measurement. Re-buying it was not merely wasteful -- `oracle_eval`
+            # degrades to `rule_eval` once the budget is gone, so past that point
+            # the gate vetoed on the cheap SUB-SAMPLE. Measured: a candidate that
+            # took the full-set rate from 0.5 to 1.0 came back `oracle-rejected`
+            # because the two-task sample scored both at 0.5. The verifier page
+            # promises in two places that sub-sampling can never decide a commit;
+            # this was the path that made it false.
+            if getattr(self.verifier, "oracle_shares_full_set", False):
+                oracle_base, oracle_cand = base_full, cand_full
+            else:
+                oracle_base = self.verifier.oracle_eval(artifact)
+                oracle_cand = self.verifier.oracle_eval(best_state)
             agreed = (oracle_cand > oracle_base) == (cand_score > base_score)
             self.audit.update_trust(artifact_id, agreed)
             if oracle_cand <= oracle_base:
                 prior.observe_delta(oracle_cand - oracle_base)
+                # Not settled, unlike the CAS-conflict path below -- and the
+                # asymmetry is deliberate. A CAS-conflicted diff lost a race and
+                # was never judged against the new head, so it deserves another
+                # look; one rejected here was judged and lost, and its tournament
+                # rivals scored below it on the same held-out set. Re-filing them
+                # would just buy the same rejection again.
                 return True
         return False
 
-        # Not settled, unlike the CAS-conflict path below -- and the asymmetry is
-        # deliberate. A CAS-conflicted diff lost a race and was never judged against
-        # the new head, so it deserves another look; one rejected here was judged and
-        # lost, and its tournament rivals scored below it on the same held-out set.
-        # Re-filing them would just buy the same rejection again.
+    def _commit_with_retry(self, artifact_id, candidate, diff, head):
+        """CAS, rebasing onto whatever landed first. ``None`` when it kept losing.
+
+        With one writer a conflict cannot happen: every commit goes through a
+        single merger. With several -- separate processes sharing a ledger --
+        losing the race is ordinary, and settling the evidence back into the pool
+        to wait a round is the wrong answer to "somebody committed first". The
+        right one is to rebase and try again.
+
+        **Rebasing means re-applying the diff to the new head**, not re-sending
+        the old candidate. The candidate was computed against a head that no
+        longer exists; committing it would discard whatever won the race, which is
+        the lost update CAS is there to prevent, arriving through the retry that
+        was supposed to preserve it.
+
+        Bounded, and jittered: two writers backing off by the same amount collide
+        again on the same schedule. The acceptance decision is **not** re-run --
+        it was made against a measurement of this diff's effect, and that
+        measurement is what the retry is trying to preserve. A diff whose value
+        depends on which of two commits landed first is a diff the staleness
+        policy should have caught.
+        """
+        attempts = max(1, self.config.cas_attempts)
+        for attempt in range(attempts):
+            base_vv = {artifact_id: head.get(artifact_id, 0)}
+            try:
+                _, new_version = self.ledger.commit(
+                    candidate, base_vv, branch=Ledger.DEV,
+                    message=f"merge {diff.diff_id} -> {artifact_id}")
+                return new_version
+            except CASConflict:
+                if self.meter is not None:
+                    self.meter.add("cas_conflicts")
+                if attempt + 1 >= attempts:
+                    return None
+                time.sleep(random.uniform(0.0, self.config.cas_backoff)
+                           * (2 ** attempt))
+                snap = self.ledger.snapshot(Ledger.DEV)
+                fresh = snap.get(artifact_id)
+                if fresh is None:
+                    return None
+                head, candidate = snap.version, fresh.apply(diff)
+                if candidate.state == fresh.state:
+                    # Whoever won applied the same change. Nothing left to commit,
+                    # and reporting a conflict would be truer than reporting a
+                    # commit that did not happen.
+                    return None
+        return None
 
     def _known_artifacts(self):
         """Every artifact id this aggregator has merged for.
@@ -654,13 +727,8 @@ class Aggregator:
                                decision.detail, MergeOutcome(decision.category))
 
         # -- commit (section 4.1): CAS on dev --------------------------------
-        base_vv = {artifact_id: head.get(artifact_id, 0)}
-        try:
-            _, new_version = self.ledger.commit(
-                best_state, base_vv, branch=Ledger.DEV,
-                message=f"merge {best_diff.diff_id} -> {artifact_id}",
-            )
-        except CASConflict:
+        new_version = self._commit_with_retry(artifact_id, best_state, best_diff, head)
+        if new_version is None:
             self.buffer.settle(survivors)
             return MergeReport(artifact_id, None, fused, n_considered, len(survivors),
                                len(discarded), conflicts, p_improve, None,

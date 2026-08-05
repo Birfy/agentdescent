@@ -101,7 +101,6 @@ from .filetree import (
 from .treestrategy import EDIT_PROTOCOL, FileTree, parse_edits, tree_reflector
 from .runners import LAYOUTS, TEST_FAILURE_MARKER, code_runner, tree_runner
 from .skilldir import evolve_agent_code, evolve_agent_dir, evolve_skill_dir
-from .worker import Worker
 from .orchestrator import AgentDescent, RoundStat, run_fork_baseline
 from .agents import (
     AgentError,
@@ -147,6 +146,7 @@ from .parallel import (
     DataParallel,
     TensorParallel,
     PipelineParallel,
+    ClusterParallel,
     TensorParallelMerge,
     PipelineChain,
     SectionViolation,
@@ -243,7 +243,6 @@ __all__ = [
     "LocalWorkspaceSandbox",
     "SandboxProvider",
     "Sandbox",
-    "Worker",
     "AgentDescent",
     "RoundStat",
     "run_fork_baseline",
@@ -253,6 +252,7 @@ __all__ = [
     "ParallelMode",
     "ParallelStrategy",
     "WorkUnit",
+    "ClusterParallel",
     "DataParallel",
     "TensorParallel",
     "PipelineParallel",

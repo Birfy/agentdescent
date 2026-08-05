@@ -41,7 +41,7 @@ from .policies import Policies
 from .evolution import (
     _publish_stable, _safe_log,
     Agent, EvolutionResult, Propose, Reward, RoundInfo, Run, Strategy, Task,
-    _cost_fields, _resolve_policies, _tally,
+    _ASYNC_WIRED_POLICIES, _cost_fields, _resolve_policies,
     SOLVED, _build_engine, _checked_proposal, _checked_reward,
 )
 from .aggregator import AggregatorConfig, check_reports
@@ -228,7 +228,9 @@ def async_evolve(
         ``RoundInfo.round`` is the sweep index. Compare ``final_reward`` across the
         sync and async paths, not ``len(history)``.
     """
-    _pol = _resolve_policies(policies, "async_evolve()", task_sampler=task_sampler,
+    _pol = _resolve_policies(policies, "async_evolve()",
+                             supported=_ASYNC_WIRED_POLICIES,
+                             task_sampler=task_sampler,
                              staleness=staleness_policy,
                              aggregator_factory=aggregator_factory)
     task_sampler, staleness_policy = _pol.task_sampler, _pol.staleness
@@ -261,6 +263,29 @@ def async_evolve(
 
     intake: List[EvidenceCard] = []
     intake_lock = threading.Lock()
+    # The head every worker measures its drift against, published by the merger.
+    #
+    # Workers used to read it from the ledger on **every rollout**, and a ledger
+    # read is a `git checkout` guarded by a process-wide file lock and an RLock
+    # that every worker and the merger queue behind -- so the cost of asking "am I
+    # far enough behind to resync?" grew with the concurrency it was there to
+    # support. The merger is the only writer, so it can simply say. This is what
+    # `AsyncAgentDescent._publish_head` has always done; the general engine reached
+    # for git instead.
+    #
+    # A published head can lag by at most one sweep, which delays a refresh by one
+    # rollout at worst. The refresh itself still takes a real `ledger.snapshot()`,
+    # so nothing downstream reads a cached version.
+    head_pub = [eng.ledger.head_version(Ledger.DEV).get(eng.artifact_id, 0)]
+    head_lock = threading.Lock()
+
+    def _publish_head(version: int) -> None:
+        with head_lock:
+            head_pub[0] = version
+
+    def _published_head() -> int:
+        with head_lock:
+            return head_pub[0]
     stop = threading.Event()
     counter = [0]
     counter_lock = threading.Lock()
@@ -315,7 +340,7 @@ def async_evolve(
                 if pending <= async_ratio:
                     break
                 time.sleep(0.05)
-            head_v = eng.ledger.head_version(Ledger.DEV).get(eng.artifact_id, 0)
+            head_v = _published_head()
             # Refresh on the lag budget, or when the merger has asked everyone to
             # sync. `concepts.md` documents that backpressure guard as what keeps a
             # mismatched `async_ratio > alpha` from livelocking under Guarded --
@@ -461,8 +486,27 @@ def async_evolve(
         if not batch:
             time.sleep(0.005)
             return
-        head_vv = eng.ledger.head_version(Ledger.DEV)
-        head_art = eng.ledger.snapshot(Ledger.DEV).get(eng.artifact_id)
+        snap = eng.ledger.snapshot(Ledger.DEV)
+        head_vv, head_art = snap.version, snap.get(eng.artifact_id)
+
+        def _discarded() -> None:
+            """Record a card this gate is dropping, denominator included.
+
+            The denominator is split between here and `Aggregator`, and it has to
+            be: this gate sees every card but forwards only survivors, while the
+            aggregator sees only survivors and counts them on the **same meter**.
+            Counting the whole batch here as well counted every survivor twice --
+            measured, 20 cards reported `stale_considered = 40`, so a true 50%
+            stale rate came out as 33% and the "you are discarding most of your
+            evidence" warning at the end of this function needed a *67%* true rate
+            to fire at its documented 50% threshold.
+
+            So each side counts what only it can see: the discards here, the
+            survivors there. `D + (N - D) = N`.
+            """
+            eng.meter.add("stale_considered")
+            eng.meter.add("stale_discarded")
+
         # staleness gate: hand the aggregator only rebased (η=0) cards.
         for card in batch:
             eta = vv_staleness(head_vv, card.base_version)
@@ -473,10 +517,15 @@ def async_evolve(
                 cand = head_art.apply(card.diff)         # cheap re-verify on current head
                 if head_art.evidence_eval(card) <= cand.evidence_eval(card):
                     eng.aggregator.ingest(card.rebased_onto(head_vv))
-            # DISCARD -> drop the card
+                else:
+                    _discarded()
+            else:
+                _discarded()                             # DISCARD -> drop the card
         reports = check_reports(eng.aggregator.step(), eng.aggregator)
         committed = sum(1 for x in reports if x.committed_version is not None)
-        dev = eng.ledger.snapshot(Ledger.DEV).get(eng.artifact_id)
+        after = eng.ledger.snapshot(Ledger.DEV)
+        dev = after.get(eng.artifact_id)
+        _publish_head(after.version.get(eng.artifact_id, 0))
         last_good[0] = dev
         # Must be the real held-out reward: MergeReport.prob_improve is P(Δ>0)
         # from the Beta posterior, a *probability*, and reporting it here would
@@ -484,11 +533,11 @@ def async_evolve(
         # is not a redundant eval -- `_Runtime.eval_one` memoises on
         # (artifact signature, task id), so re-scoring an unchanged head is free.
         r = dev.score(eng.held_out)
-        early_stop = early.observe(r)
-        _m = eng.meter.snapshot()
-        history.append(RoundInfo(len(history), r, len(dev.state), committed,
-                                 len(reports) - committed, _tally(reports),
-                                 elapsed_s=_m.elapsed_s, rollouts=_m.rollouts))
+        # Same three steps as the barrier loop; the round index is a merger sweep
+        # here and a barrier there, which is the only part that differs.
+        _info, early_stop = eng.record_round(
+            index=len(history), reward=r, n_items=len(dev.state),
+            reports=reports, history=history, early=early, on_round=on_round)
         # A stalled pipeline: cards keep arriving and none of them commits. Under
         # Guarded with async_ratio > alpha that is a livelock, not slow progress.
         # A sweep with no cards in it is neither, so it is not counted -- and this
@@ -500,12 +549,6 @@ def async_evolve(
         if verbose:
             print(f"sweep {len(history):>3}  reward={r:.3f}  merged={len(batch)}  "
                   f"+{committed}  pending={len(intake)}")
-        if on_round is not None:
-            try:                       # a reporting callback must not kill the merger
-                on_round(history[-1])
-            except Exception as e:  # noqa: BLE001
-                warnings.warn(f"on_round callback raised: {type(e).__name__}: {e}",
-                              RuntimeWarning, stacklevel=2)
         if early_stop is not None:
             stop_reason[0] = early_stop
             stop.set()
@@ -637,6 +680,27 @@ def async_evolve(
             print(f"async run ended with a backend failure: {run_error[:140]}")
         warnings.warn(f"async_evolve() ended with a backend failure: {run_error}",
                       RuntimeWarning, stacklevel=2)
+    # A run that discarded most of its evidence is misconfigured, and every
+    # number it reports is a number about the fraction that survived. `stale_rate`
+    # makes that visible to anyone who looks; this says it to anyone who does not.
+    #
+    # Not a reason to lower the default: `async_ratio` is a lag budget in
+    # *versions*, and how much wall-clock a version represents depends entirely on
+    # how long a rollout takes. Three is sensible when a rollout is a model call
+    # taking seconds; on a workload where rollouts are near-instant, a worker
+    # drifts three versions behind almost immediately and stays there.
+    _considered = eng.meter.snapshot().stale_considered
+    _discarded = eng.meter.snapshot().stale_discarded
+    if _considered >= 20 and _discarded / _considered > 0.5:
+        warnings.warn(
+            f"async_evolve discarded {_discarded}/{_considered} "
+            f"({_discarded / _considered:.0%}) of its evidence as stale. "
+            f"async_ratio={async_ratio} is a lag budget in artifact versions, so "
+            "it is too high whenever a worker finishes several rollouts in the "
+            "time the merger takes one sweep. Lower it (0 resyncs every rollout) "
+            "or use a staleness policy that rebases rather than discards.",
+            RuntimeWarning, stacklevel=2)
+
     result = EvolutionResult(state=dict(final.state), rendered=final.render(),
                              final_reward=final_reward, history=history,
                              ledger_log=_safe_log(eng.ledger),

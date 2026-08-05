@@ -1,22 +1,24 @@
-"""The two async pipelines must not diverge in behaviour.
+"""Capabilities the general engine was missing, and one seam the adapter keeps.
 
-`AsyncAgentDescent` (reference stack, synthetic router domain) and `async_evolve`
-(general, and the only one a real workload reaches) implement the same
-barrier-free shape independently and share no code. The cost was that fixes and
-capabilities lived in whichever one they were written for:
+This file used to guard **two independent barrier-free implementations** against
+drifting apart: `AsyncAgentDescent` had its own worker threads, merger thread,
+published head and backpressure, and shared no code with `async_evolve`. The cost
+was that fixes and capabilities lived in whichever one they were written for --
+the worker-retirement heuristic was measured wrong and fixed in one, backpressure
+and duration-aware straggler detection existed only in the other.
 
-* the worker-retirement heuristic was **measured wrong** and fixed in
-  `async_evolve` -- "at a 1-in-3 call failure rate the old blanket rule retired
-  all three workers in 22s with nothing learned" -- while `AsyncAgentDescent` kept
-  the rule that paragraph describes, along with a merger that ended the run on its
-  first exception (the other pattern that measurement removed);
-* backpressure and duration-aware straggler detection existed only in
-  `AsyncAgentDescent`, which accepts nothing but `TaskUniverse` -- so the guard
-  `concepts.md` says prevents a livelock, and the whole L-traj mechanism, were
-  unreachable from the API every real workload uses.
+`AsyncAgentDescent` is an adapter now (#93), so most of what was here tested
+`async_evolve` through a wrapper -- which `test_fault_matrix.py` asserts directly
+against both engines, and `test_worker_resilience.py` asserts in more detail.
+Those went. What is left is what only this file says:
 
-These pin the behaviour on *both* sides rather than the implementation, so they
-keep holding if the two are ever merged into one.
+* the capabilities that were reference-only are reachable from the general API
+  and actually fire -- backpressure, straggler detection, and the diagnostics
+  that report them;
+* one test of the **adapter's own seam** (`rollout=`), because a broken seam
+  would otherwise make every reference example silently stop exercising failures;
+* one that the retirement rule has a single implementation, by name -- the two
+  loops are `evolve` and `async_evolve` now, and that is still two.
 """
 
 import tempfile
@@ -27,7 +29,8 @@ import pytest
 
 from agentdescent import AppendRules, Task, async_evolve
 from agentdescent.async_runtime import AsyncAgentDescent, AsyncConfig
-from agentdescent.domains.router import make_task_universe
+from agentdescent.aggregator import Aggregator
+from agentdescent.domains.router import make_task_universe, router_run
 from agentdescent.scheduler import DurationEstimator
 
 
@@ -48,77 +51,27 @@ def _async_evolve(**kw):
 # -- the retirement heuristic, on both sides ------------------------------------
 
 
-def test_the_reference_runtime_no_longer_sheds_workers_over_a_transient():
-    """Every worker shares one backend, so shedding workers cannot relieve
-    throttling -- it only guarantees the run dies."""
-    universe = make_task_universe(seed=7)
-    cfg = AsyncConfig(n_workers=4, max_seconds=3.0, seed=1)
-    with tempfile.TemporaryDirectory() as repo:
-        system = AsyncAgentDescent(repo, universe, config=cfg)
-        original = [w.run for w in system.workers]
-        calls = {"n": 0}
-
-        def flaky(w, orig):
-            def run(*a, **kw):
-                calls["n"] += 1
-                if calls["n"] % 3:            # ~2 in 3 fail, after a first success
-                    if calls["n"] > 1:
-                        raise RuntimeError("429 rate limited")
-                return orig(*a, **kw)
-            return run
-
-        for w, orig in zip(system.workers, original):
-            w.run = flaky(w, orig)
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            stats = system.run()
-    assert stats.retired_workers == 0, (
-        f"{stats.retired_workers} worker(s) retired over a transient the backend "
-        "recovers from; shedding them cannot relieve a shared throttle")
-
-
 def test_a_misconfigured_backend_still_retires_every_worker_fast():
-    """The other half: while nothing has ever succeeded, give up loudly."""
+    """While nothing has ever succeeded, give up loudly rather than spin.
+
+    Kept out of a larger group that all asserted this through the adapter,
+    because it is also the only test of the adapter's `rollout=` seam: if that
+    stopped reaching the engine, every reference example would quietly stop
+    exercising failures and nothing else would notice.
+    """
     universe = make_task_universe(seed=7)
     cfg = AsyncConfig(n_workers=3, max_seconds=20.0, seed=1)
     with tempfile.TemporaryDirectory() as repo:
-        system = AsyncAgentDescent(repo, universe, config=cfg)
-        for w in system.workers:
-            w.run = lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("401 unauthorized"))
+        def dead(rendered, task):
+            raise RuntimeError("401 unauthorized")
+
+        system = AsyncAgentDescent(repo, universe, config=cfg, rollout=dead)
         t0 = time.time()
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             stats = system.run()
     assert stats.error is not None and "401" in stats.error, "ended silently"
     assert time.time() - t0 < 15.0, "burned the whole budget on a dead backend"
-
-
-def test_the_reference_merger_survives_a_transient():
-    """It scores held-out every sweep, so it is a backend caller like any other.
-
-    Ending the run on its first exception made the merger a single point of
-    failure -- measured in `async_evolve` as 0 sweeps while the workers were fine.
-    """
-    universe = make_task_universe(seed=7)
-    # Generous budget on purpose: the retry backs off 2s after one failure, which
-    # would be half of a short run and would test the clock, not the tolerance.
-    cfg = AsyncConfig(n_workers=2, max_seconds=12.0, target_accuracy=2.0, seed=1)
-    with tempfile.TemporaryDirectory() as repo:
-        system = AsyncAgentDescent(repo, universe, config=cfg)
-        original, calls = system.aggregator.step, {"n": 0}
-
-        def flaky_step():
-            calls["n"] += 1
-            if calls["n"] == 2:
-                raise RuntimeError("503 transient")
-            return original()
-
-        system.aggregator.step = flaky_step
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            stats = system.run()
-    assert stats.sweeps > 2, \
-        f"the merger stopped at the first transient ({stats.sweeps} sweeps)"
 
 
 # -- capabilities the general path was missing ----------------------------------
@@ -193,11 +146,12 @@ def test_the_new_diagnostics_survive_save_and_load(tmp_path):
 def test_both_loops_retire_workers_through_the_same_object():
     """The rule that was hand-ported once must not be re-implemented again.
 
-    `pipeline.py`'s module docstring records that these two runtimes implemented
-    the same shape independently, and that a measured fix had to be carried
-    across by hand. The synchronous loop had re-grown its own copy
-    (`any_success` + `dead_rounds >= max_worker_errors`); this asserts there is
-    one implementation, by name, in both.
+    `pipeline.py`'s module docstring records that a measured fix had to be
+    carried across by hand between two implementations of the same shape. The
+    reference runtimes are adapters now, but `evolve` and `async_evolve` are
+    still two loops, and the synchronous one had re-grown its own copy once
+    already (`any_success` + `dead_rounds >= max_worker_errors`). This asserts
+    there is one implementation, by name, in both.
     """
     import re
     from pathlib import Path

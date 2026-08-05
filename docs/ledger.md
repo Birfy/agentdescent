@@ -41,10 +41,22 @@ the version vector should be.
 agree. A writer holding a version that has moved is told to rebase exactly as
 before — which is what the retry loop in any multi-writer caller is for:
 
+The aggregator does this for you now — `AggregatorConfig(cas_attempts=3)`, with
+a jittered backoff, because two writers backing off by the same amount collide
+again on the same schedule. Setting it to 1 restores the old behaviour: settle
+the evidence back into the pool and wait a round.
+
+**Rebasing means re-applying the diff to the new head**, not re-sending the
+candidate. The candidate was computed against a head that no longer exists;
+committing it would discard whatever won the race — the lost update CAS exists to
+prevent, arriving through the retry meant to preserve it.
+
+Writing it by hand, outside the aggregator, looks like this:
+
 ```python
 for _ in range(attempts):
     head = ledger.head_version(Ledger.DEV)
-    candidate = ledger.snapshot(Ledger.DEV).get(aid).apply(diff)
+    candidate = ledger.snapshot(Ledger.DEV).get(aid).apply(diff)   # re-apply
     try:
         ledger.commit(candidate, base_version=head)
         break
@@ -52,9 +64,20 @@ for _ in range(attempts):
         continue        # somebody committed first; rebase onto their head
 ```
 
+With one writer none of this fires: every commit goes through a single merger, so
+a conflict is unreachable. `result.cas_conflicts` is how much contention a
+multi-writer configuration is actually producing.
+
 !!! note "Keep the ledger outside the sandbox"
     A ledger inside a sandbox is destroyed with it. Point `repo_path` at a
     location the sandbox does not own.
+
+!!! warning "The lock starts after the repository does"
+    `Ledger(...)` initialises the repo in its constructor, before there is a
+    `.git/` to put a lock file in — so two processes *creating* the same ledger
+    at the same instant race over `git init`. Every path after that is covered.
+    Create the ledger once (or let the first run create it) and share the path;
+    do not start N processes against a directory that does not exist yet.
 
 ## Why git, and why that is not overkill
 

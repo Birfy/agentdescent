@@ -35,7 +35,10 @@ import threading
 import time
 import warnings
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Protocol, Sequence, runtime_checkable
+from typing import (
+    Any, Callable, Dict, List, Optional, Protocol, Sequence, Tuple,
+    runtime_checkable,
+)
 
 from .agents import Completion, Usage, claude
 from .aggregator import (
@@ -44,7 +47,7 @@ from .aggregator import (
 )
 from .evalcache import CacheProtocol, MemoryCache, cache_key
 from .evaluator import EvaluatorGroup
-from .evolvable import Contract, ContractError, Diff, EvidenceCard
+from .evolvable import Contract, ContractError, Diff, EvidenceCard, stable_hash
 from .governance import FROZEN_IDS, GovernanceError, assert_mutable
 from .ledger import Ledger, LedgerFailure
 from .metrics import Meter, measured
@@ -389,7 +392,42 @@ class EvolvingArtifact:
         return sum(scores) / len(scores)
 
     def evidence_eval(self, evidence: EvidenceCard) -> float:
-        return self.score([t for t in evidence.trajectory_refs if isinstance(t, Task)])
+        """Score this artifact on the trajectories an evidence card carries.
+
+        Says so out loud when there is nothing to score. This is the one call
+        behind the staleness policy's REBASE branch, which keeps a rebased diff
+        iff ``before <= after`` -- and :meth:`score` returns ``0.0`` for an empty
+        task list, so when the filter below empties it the branch compares
+        ``0.0 <= 0.0``, keeps *every* rebased diff, and the cheap re-verification
+        the policy is named for silently becomes a no-op. A diff that makes the
+        artifact worse survives it.
+
+        :class:`~agentdescent.evolvable.EvidenceCard.trajectory_refs` was
+        annotated ``List[str]`` for a while, so a custom domain that followed the
+        annotation and stored ids landed here with a non-empty list and nothing
+        in it to score. The annotation is fixed; this is the part that would have
+        made it visible at the time.
+        """
+        tasks = [t for t in evidence.trajectory_refs if isinstance(t, Task)]
+        if not tasks:
+            self._warn_unscorable(len(evidence.trajectory_refs))
+        return self.score(tasks)
+
+    def _warn_unscorable(self, n_refs: int) -> None:
+        """Warn once per run. The caller is a per-card loop, so once is the point."""
+        rt = self._rt
+        if rt is None or rt.warned_unscorable:
+            return
+        rt.warned_unscorable = True
+        detail = (f"its {n_refs} trajectory ref(s) are not Task objects"
+                  if n_refs else "it carries no trajectory refs")
+        warnings.warn(
+            f"an evidence card reached the staleness filter's re-verification with "
+            f"nothing to score ({detail}), so the check compares 0.0 <= 0.0 and "
+            "keeps the diff whatever it does to the artifact. Put the failing "
+            "Task objects in EvidenceCard.trajectory_refs -- ids are not enough, "
+            "the engine scores the tasks themselves.",
+            RuntimeWarning, stacklevel=3)
 
     def full_eval(self, task_set: Sequence[Task]) -> Dict[str, float]:
         """Score on a task set. No longer part of the `Evolvable` protocol -- the
@@ -441,6 +479,12 @@ class _Runtime:
     #: two, it is what stops one environment's score answering the other's
     #: question.
     env_fingerprint: str = ""
+
+    #: Has this run already reported an evidence card with nothing to score?
+    #: Lives here rather than on the artifact because artifacts are rebuilt from
+    #: the ledger constantly, and rather than at module scope because "once" has
+    #: to mean once per run, not once per interpreter.
+    warned_unscorable: bool = False
 
     def eval_one(self, artifact: EvolvingArtifact, task: Task) -> float:
         key = cache_key(artifact._signature(), task.id, self.env_fingerprint)
@@ -604,12 +648,22 @@ def _publish_stable(aggregator) -> None:
         pass
 
 
-#: What `evolve` / `async_evolve` can honour from a `Policies` bundle today.
-#: Everything else raises rather than being accepted and ignored -- see
+#: What `evolve` can honour from a `Policies` bundle today. Everything else
+#: raises rather than being accepted and ignored -- see
 #: `Policies.require_supported`. The set grows as the implementations land.
 _WIRED_POLICIES = ("task_sampler", "proposal", "conflict", "fusion", "acceptance",
                    "promotion", "staleness", "verifier", "ledger",
-                   "aggregator_factory", "eval_cache", "sandbox_spec", "evaluator")
+                   "aggregator_factory", "eval_cache", "sandbox_spec", "evaluator",
+                   "executor")
+
+#: The same bundle, minus the one field the barrier-free loop does not read.
+#: `async_evolve`'s worker calls `eng.run` directly; there is no executor seam in
+#: it yet, so a supplied one was accepted and then dropped -- the exact outcome
+#: `require_supported` exists to make impossible, arriving through a *shared*
+#: constant rather than a missing check. It matters more since a supplied
+#: executor started working on the synchronous path: flipping
+#: `asynchronous=True` would otherwise silently stop honouring it.
+_ASYNC_WIRED_POLICIES = tuple(p for p in _WIRED_POLICIES if p != "executor")
 
 
 def _propose_via_policy(policy):
@@ -638,15 +692,97 @@ def _propose_via_policy(policy):
     return propose
 
 
-def _resolve_policies(policies: Optional[Policies], where: str, **shortcuts) -> Policies:
+def _resolve_policies(policies: Optional[Policies], where: str, *,
+                      supported: Optional[Sequence[str]] = None,
+                      **shortcuts) -> Policies:
     """Fold the legacy keyword arguments into a bundle and check it is honourable.
 
     The keyword arguments are shortcuts onto bundle fields, so an explicit
     argument has to beat a bundle default -- being silently dropped is the one
-    outcome a caller cannot detect."""
+    outcome a caller cannot detect.
+
+    ``supported`` is keyword-only and defaults to `evolve`'s set. The two engines
+    do not honour quite the same bundle, and sharing one constant meant the
+    narrower of them silently ignored a field."""
     merged = (policies or Policies()).merged_with(**shortcuts)
-    merged.require_supported(_WIRED_POLICIES, where)
+    merged.require_supported(supported or _WIRED_POLICIES, where)
     return merged
+
+
+def undescribable_actor(which: str = "run"):
+    """The ``Ref`` a spec carries when ``evolve()`` cannot name the caller's actor.
+
+    Module-level and public because a `Ref` is resolved *by name*, including on
+    the far side of a process boundary -- which is exactly the case this exists
+    to report.
+
+    `evolve()` is handed `run` and `reward` as callables. In this process that is
+    all an executor needs, and `ThreadExecutor` is given them directly. There is
+    no way to turn a closure back into `Ref("module:factory", {...})`, so a spec
+    built here cannot describe them for anybody else, and the honest thing for
+    the spec to carry is a reference that says so when it is resolved.
+    """
+    from .workspec import RefError
+
+    raise RefError(
+        f"evolve() cannot describe its `{which}` argument as a Ref: it was passed "
+        "as a callable, and a closure has no name to resolve on the other side. "
+        "The built-in ThreadExecutor is handed the callables directly and never "
+        "reaches this. An executor that resolves the spec instead -- anything "
+        "across a process boundary -- needs the rollout described as data; build "
+        "the RolloutSpecs yourself and drive the executor directly (see "
+        "docs/execution.md).")
+
+
+def _spec_for(engine: "_Engine", artifact, task: Task):
+    """Describe one rollout, as completely as `evolve()`'s arguments allow.
+
+    Everything the far side needs is here except the two things `evolve()` was
+    given as closures. Those are carried as a reference that raises when it is
+    resolved, rather than as a plausible-looking default: a spec that quietly
+    names *some* actor turns "this executor cannot be driven from `evolve()`"
+    into a finished run measuring the wrong thing.
+    """
+    from .policies import SandboxSpec
+    from .workspec import Ref, RolloutSpec
+
+    return RolloutSpec(
+        rendered=artifact.render(), task=task,
+        run=Ref("agentdescent.evolution:undescribable_actor", {"which": "run"}),
+        reward=Ref("agentdescent.evolution:undescribable_actor", {"which": "reward"}),
+        sandbox=engine.sandbox_spec or SandboxSpec())
+
+
+def _rollout_failure(outcome) -> BaseException:
+    """Turn a reported failure back into the exception the round body expects.
+
+    The executor reports rather than raises, because one bad rollout is evidence
+    and not the end of a run. The round body's error handling predates that and
+    is written against exceptions -- and it distinguishes a caller's broken
+    contract, which must stop the run, from a backend transient, which must not.
+    That distinction is carried in `Result.kind`, so it survives the trip."""
+    if outcome.kind == "caller":
+        return ProposalContractError(outcome.error or "contract violation")
+    return RuntimeError(outcome.error or "rollout failed")
+
+
+def notify(on_round: Optional[Callable[["RoundInfo"], None]],
+           info: "RoundInfo") -> None:
+    """Run a reporting callback without letting it take the run down.
+
+    One behaviour, because there were two: every site warned except the one on
+    `evolve`'s target-reached path, which swallowed the exception with a comment
+    saying the normal path would report it -- and that path `break`s immediately
+    after, so nothing ever did. A callback that raises on the last round of a
+    successful run was the one case where the user heard nothing.
+    """
+    if on_round is None:
+        return
+    try:
+        on_round(info)
+    except Exception as e:  # noqa: BLE001
+        warnings.warn(f"on_round callback raised: {type(e).__name__}: {e}",
+                      RuntimeWarning, stacklevel=2)
 
 
 def _cost_fields(meter: Meter) -> Dict[str, Any]:
@@ -666,6 +802,7 @@ def _cost_fields(meter: Meter) -> Dict[str, Any]:
         "stale_discarded": m.stale_discarded,
         "redispatched": m.redispatched,
         "duplicates_dropped": m.duplicates_dropped,
+        "cas_conflicts": m.cas_conflicts,
         "cache_hits": m.cache_hits,
         "cache_misses": m.cache_misses,
         "sandbox_wait_s": m.sandbox_wait_s,
@@ -711,6 +848,39 @@ class RoundInfo:
     #: denominator: a configuration that reaches the same reward having spent
     #: twice the rollouts has not done as well.
     rollouts: int = 0
+    #: Actor invocations by the end of this round, cumulative. Recorded per round
+    #: because a budget fixed in *rounds* hands the wider configuration more
+    #: model and then reports the extra model as a win for parallelism -- so a
+    #: comparison has to be able to ask "where was each configuration after N
+    #: calls", which needs the number at every round rather than only at the end.
+    calls: int = 0
+
+    # -- what the merge did, this round --------------------------------------
+    #
+    # `MergeReport` computes all four and the driver used to throw them away, so
+    # a `evolve()` user could see *that* nothing committed and never *how* the
+    # merge got there. The reference runtimes reported them all along
+    # (`RoundStat.fused`, `AsyncStats.conflicts_dropped`), which is the shape of
+    # gap this seam exists to close.
+
+    #: Evidence cards this round's merge looked at, before any filter. The
+    #: denominator: `discarded_stale=3` needs "out of how many" to mean anything,
+    #: and shipping a numerator without one is a mistake this codebase has
+    #: already made once, on the async path's stale rate.
+    considered: int = 0
+    #: Cards the staleness filter dropped. Rising here with a flat
+    #: `held_out_reward` is the lag budget, not the reflector.
+    discarded_stale: int = 0
+    #: Diffs dropped because they contradicted a better-scoring one. Non-zero
+    #: means the workers are genuinely disagreeing about the same key, which is
+    #: the case `KeyedRules` and `SingleSlot` are for and `AppendRules` avoids.
+    conflicts_dropped: int = 0
+    #: Commits whose winning candidate was the **fusion** of several diffs rather
+    #: than any single one -- the model-soup question, per round. Counted only
+    #: when it committed: the tournament builds a fused candidate whenever the
+    #: survivors are complementary, so counting the ones it built says nothing
+    #: about whether combining them beat taking the best single diff.
+    fused: int = 0
 
 
 @dataclass
@@ -783,6 +953,9 @@ class EvolutionResult:
     #: alive -- correct, and paid for twice.
     redispatched: int = 0
     duplicates_dropped: int = 0
+    #: Commits that lost a compare-and-swap race and rebased. Zero with one
+    #: writer by construction.
+    cas_conflicts: int = 0
     #: Evaluation cache. ``misses`` is the number of evaluations actually
     #: performed; the ratio is the duplicate-computation figure a multi-process
     #: run has to report.
@@ -892,7 +1065,10 @@ class EvolutionResult:
                 {"round": h.round, "held_out_reward": h.held_out_reward,
                  "n_items": h.n_items, "committed": h.committed,
                  "rejected": h.rejected, "reasons": h.reasons,
-                 "elapsed_s": h.elapsed_s, "rollouts": h.rollouts}
+                 "elapsed_s": h.elapsed_s, "rollouts": h.rollouts,
+                 "calls": h.calls, "considered": h.considered,
+                 "discarded_stale": h.discarded_stale,
+                 "conflicts_dropped": h.conflicts_dropped, "fused": h.fused}
                 for h in self.history
             ],
             "retired_workers": self.retired_workers,
@@ -913,6 +1089,7 @@ class EvolutionResult:
             "stale_discarded": self.stale_discarded,
             "redispatched": self.redispatched,
             "duplicates_dropped": self.duplicates_dropped,
+            "cas_conflicts": self.cas_conflicts,
             "cache_hits": self.cache_hits,
             "cache_misses": self.cache_misses,
             "sandbox_wait_s": self.sandbox_wait_s,
@@ -1035,6 +1212,7 @@ class EvolutionResult:
             stale_discarded=d.get("stale_discarded", 0),
             redispatched=d.get("redispatched", 0),
             duplicates_dropped=d.get("duplicates_dropped", 0),
+            cas_conflicts=d.get("cas_conflicts", 0),
             cache_hits=d.get("cache_hits", 0),
             cache_misses=d.get("cache_misses", 0),
             sandbox_wait_s=d.get("sandbox_wait_s", 0.0),
@@ -1064,6 +1242,12 @@ class _Engine:
     train_ids: List[str]
     artifact_id: str
     blast_radius: float
+    #: Where rollouts run. Always present, defaulting to this process, so the
+    #: round body has one path rather than one per substrate.
+    executor: Any = None
+    #: What environment a rollout asks for. Empty by default; it is what a
+    #: cross-process executor hands its sandbox pool.
+    sandbox_spec: Any = None
     #: Every counter this run accumulates. Always present: an optional meter
     #: would mean every recording site grows an `if`, and the sites are the hot
     #: path.
@@ -1072,6 +1256,57 @@ class _Engine:
     #: ``None`` when the caller passed ``repo_path`` (theirs to keep, and how a run
     #: is resumed).
     scratch_repo: Optional[str] = None
+
+    def record_round(self, *, index: int, reward: float, n_items: int,
+                     reports: Sequence[Any],
+                     history: List["RoundInfo"], early: "EarlyStop",
+                     on_round: Optional[Callable[["RoundInfo"], None]],
+                     extra_reasons: Optional[Dict[str, int]] = None,
+                     ) -> Tuple["RoundInfo", Optional[str]]:
+        """Close out one round: record it, ask whether to stop, tell the caller.
+
+        The two loops disagree about what a round *is* -- a barrier sweep in one,
+        a merger sweep in the other -- and agreed on everything that happens once
+        one has finished. That agreement was written twice.
+
+        It now takes the ``MergeReport``s rather than a pre-chewed
+        ``committed`` / ``rejected`` / ``reasons``, because deriving those was the
+        *other* thing both loops were doing separately -- and one of them counted
+        ``rejected`` as ``len(reports) - committed`` while the other re-scanned for
+        a missing ``committed_version``. Same answer, two spellings, and the
+        numbers below could have been added to one loop and not the other in
+        exactly the way this whole seam exists to stop.
+
+        ``extra_reasons`` is for a category the aggregator cannot know about --
+        today only tensor parallelism's ``section-violation``, which is counted in
+        the round body because those diffs never reach a bucket.
+
+        Returns the round and a stop reason, or `None` to continue. The caller
+        stops; this does not, because "should we stop" and "how do we stop" are
+        different questions and only the loop knows the second.
+        """
+        reports = list(reports)
+        committed = sum(1 for x in reports if x.committed_version is not None)
+        reasons = _tally(reports)
+        if extra_reasons:
+            reasons.update(extra_reasons)
+        m = self.meter.snapshot()
+        info = RoundInfo(
+            index, reward, n_items, committed, len(reports) - committed, reasons,
+            elapsed_s=m.elapsed_s, rollouts=m.rollouts, calls=m.calls,
+            considered=sum(x.considered for x in reports),
+            discarded_stale=sum(x.discarded_stale for x in reports),
+            conflicts_dropped=sum(x.conflicts_dropped for x in reports),
+            # A fusion that *won*, which is the question worth asking -- the
+            # tournament builds a fused candidate whenever the survivors are
+            # complementary, so counting the ones it built says nothing about
+            # whether combining them beat taking the best single diff.
+            fused=sum(1 for x in reports
+                      if x.fused and x.committed_version is not None))
+        history.append(info)
+        stop_reason = early.observe(info.held_out_reward)
+        notify(on_round, info)
+        return info, stop_reason
 
     def cleanup(self) -> None:
         """Remove the scratch ledger, if this call created one. Idempotent.
@@ -1326,10 +1561,43 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
                 f"no callable {method}(). An aggregator needs ingest(card) and "
                 "step() -> list[MergeReport] (see AggregatorProtocol).")
 
+    # Imported here rather than at module scope: `executor` reaches `workspec`,
+    # which reaches back here for `Task`.
+    from .executor import ThreadExecutor
+
+    # In-process by default, taking the actors directly: a closure crosses no
+    # boundary here, and resolving a `Ref` per rollout would rebuild a model
+    # client every time.
+    supplied = (policies_bundle.executor
+                if policies_bundle is not None else None)
+    executor = supplied if supplied is not None else ThreadExecutor(
+        max(1, eval_concurrency), meter=meter, run=run, reward=reward)
+    if supplied is not None:
+        # A supplied executor was built before this run existed, so it has
+        # neither the meter nor the actors. The meter is optional -- an executor
+        # that cannot report simply reports nothing. The actors are not: without
+        # them the executor falls back to resolving the spec, and `evolve()`
+        # cannot describe a closure as a `Ref`, so every rollout would fail. That
+        # was the behaviour, and it produced a finished run with `rollouts=0` and
+        # a plausible reward from the gate -- a wrong answer wearing the shape of
+        # a right one. Refuse instead, and say what would work.
+        if not callable(getattr(supplied, "attach_actors", None)):
+            raise TypeError(
+                f"policies.executor is a {type(supplied).__name__}, which cannot "
+                "be driven by evolve(): it has no attach_actors(run, reward), so "
+                "it would have to resolve the rollout spec -- and evolve() is "
+                "given `run` and `reward` as callables, which have no name to "
+                "resolve. Pass an in-process executor (ThreadExecutor), or "
+                "describe the rollouts yourself as RolloutSpecs and drive the "
+                "executor directly (see docs/execution.md).")
+        supplied.attach_actors(run, reward)
+    attach = getattr(executor, "attach_meter", None)
+    if callable(attach):
+        attach(meter)
     return _Engine(ledger, runtime, verifier, aggregator, strategy, run, reward,
                    propose, train, held_out, {t.id: t for t in train},
                    [t.id for t in train], artifact_id, blast_radius,
-                   meter=meter, scratch_repo=scratch)
+                   executor=executor, meter=meter, scratch_repo=scratch)
 
 
 def evolve(
@@ -1348,6 +1616,7 @@ def evolve(
     rounds: int = 15,
     n_workers: int = 4,
     max_concurrency: int = 1,
+    refresh_interval: int = 1,
     round_timeout: Optional[float] = None,
     target_reward: Optional[float] = None,
     patience: Optional[int] = None,
@@ -1468,6 +1737,22 @@ def evolve(
         Workers per round (``>= 1``).
     max_concurrency:
         How many of them actually run at once (see above).
+    refresh_interval:
+        How many rounds a worker keeps its ledger snapshot before taking the
+        round's fresh one. ``1`` (default) is what this loop always did: every
+        worker proposes against the current head, so a diff's staleness ``eta``
+        is **0 by construction** -- and that made ``staleness_policy=`` a knob
+        with nothing to decide on this path (measured over an 8-round run: all
+        15 staleness decisions saw ``eta=0`` and returned ACCEPT, so Full,
+        Guarded and Reflective were indistinguishable).
+
+        Above ``1``, workers hold a spread of versions -- the refresh is
+        staggered by worker id -- so their diffs arrive with a spread of ``eta``
+        and the staleness policy, the ``alpha`` tolerances in ``agg_config`` and
+        the ``all-stale`` outcome all become reachable synchronously. Costs no
+        extra ledger read: a worker either adopts the snapshot the round already
+        took, or keeps the older one it has. Ignored under ``asynchronous=True``,
+        where the lag budget is ``async_ratio``.
     eval_concurrency:
         How many held-out tasks to score at once. Every gate goes through this --
         each round's measurement and, far more often, the aggregator's
@@ -1601,6 +1886,9 @@ def evolve(
              "it bounds the round barrier, and the async path has no barrier -- "
              "bound a rollout with your backend's own timeout= instead, and the "
              "run with max_seconds"),
+            ("refresh_interval", None if refresh_interval == 1 else refresh_interval,
+             "it staggers snapshot refresh across round barriers, and the async "
+             "path has none -- async_ratio is its lag budget"),
         ):
             if value is not None:
                 warnings.warn(
@@ -1664,6 +1952,11 @@ def evolve(
     # silently discarding it.
     section_map = _resolve_sections(parallel, strategy)
     _reject_pipeline_parallel(parallel)
+    # Resolved once: the round body is the hot path, and a strategy either has
+    # the hook for the whole run or does not.
+    observe_plan = getattr(parallel, "observe", None)
+    if not callable(observe_plan):
+        observe_plan = None
     section_violations = [0]
     tp_lock = threading.Lock()
     eng = _build_engine(
@@ -1692,6 +1985,9 @@ def evolve(
     # tracker, and now the same epsilon (they had two).
     early = EarlyStop(target_reward=target_reward, patience=patience)
     unit_lock = threading.Lock()
+    # Per-worker snapshots, when `refresh_interval > 1`. See `_snapshot_for`.
+    worker_snaps: Dict[int, Tuple["EvolvingArtifact", int]] = {}
+    snap_lock = threading.Lock()
     first_error: List[Optional[str]] = [None]
     contract_error = FirstError()          # caller bug -> re-raise on this thread
     # The retirement rule lives in `pipeline.WorkerHealth`, shared with the
@@ -1740,6 +2036,35 @@ def evolve(
         assert_mutable(artifact)
         ok_units, failed_units = [0], [0]      # this round's tally
 
+        def _snapshot_for(worker: int):
+            """The artifact this worker proposes against, and the version it read.
+
+            With ``refresh_interval=1`` -- the default, and what this loop always
+            did -- every worker takes the round's fresh snapshot, so a diff is
+            always proposed against the current head and ``eta`` is **0 by
+            construction**. That made ``evolve(staleness_policy=)`` a knob that
+            could not decide anything: measured over an 8-round run, every one of
+            the 15 staleness decisions saw ``eta=0`` and returned ACCEPT, so Full,
+            Guarded and Reflective were indistinguishable.
+
+            Above 1, a worker keeps its snapshot for that many rounds and the
+            refresh is **staggered** by worker id, so at any moment the workers
+            hold a spread of versions and their diffs arrive with a spread of
+            ``eta``. That is the same mechanism
+            :class:`~agentdescent.orchestrator.AgentDescent` uses to make the
+            staleness sweep meaningful, expressed against the round's existing
+            snapshot rather than a fresh one -- so it costs no extra ledger read;
+            a worker either adopts the snapshot this round already took, or keeps
+            the older one it has.
+            """
+            if refresh_interval <= 1:
+                return artifact, base_v
+            with snap_lock:
+                due = (r % refresh_interval) == (stable_hash(worker) % refresh_interval)
+                if worker not in worker_snaps or due:
+                    worker_snaps[worker] = (artifact, base_v)
+                return worker_snaps[worker]
+
         def _run_unit(unit) -> None:
             """One worker: rollout -> propose -> ingest evidence (against `snap`).
 
@@ -1767,23 +2092,36 @@ def evolve(
         def _run_unit_inner(unit) -> None:
             if not unit.keys:
                 return
+            # This worker's own view of the artifact. Identical to the round's
+            # under the default `refresh_interval=1`; older, by design, above it.
+            mine, mine_v = _snapshot_for(unit.worker)
             task = by_id[sampler.pick(unit.keys, r)]     # a task from this worker's shard
-            _t0 = time.time()
-            output = run(artifact.render(), task)
-            score = _checked_reward(reward(task, output), task)
-            eng.meter.add("rollouts")
-            eng.meter.add("rollout_seconds", time.time() - _t0)
+            # The rollout is the part that can move elsewhere. Everything around
+            # it -- which task, what the output implies, who is told about it --
+            # reads or writes state that has to stay in this process.
+            outcome = eng.executor.rollout(_spec_for(eng, mine, task))
+            if not outcome.ok:
+                raise _rollout_failure(outcome)
+            output = outcome.output
+            score = _checked_reward(outcome.reward, task)
             sampler.record(task.id, score)               # learn which tasks carry signal
+            if observe_plan is not None:
+                # ...and let the parallel strategy learn too, if it wants to.
+                # `plan` alone is a pure function of its arguments, which is
+                # enough to shard and not enough to schedule: UCB over task
+                # clusters had nowhere to receive an outcome, so it lived only in
+                # the reference runtime. Optional, so DP and TP are untouched.
+                observe_plan(unit, task.id, score)
             with unit_lock:
                 ok_units[0] += 1
                 health.record_success()
             if score >= solved_threshold:
                 return
             proposal = _checked_proposal(
-                propose(artifact.render(), task, output, score), task)
+                propose(mine.render(), task, output, score), task)
             if not proposal:
                 return
-            diff = strategy.to_diff(artifact.state, proposal, f"w{unit.worker}", base_v, artifact_id)
+            diff = strategy.to_diff(mine.state, proposal, f"w{unit.worker}", mine_v, artifact_id)
             if diff is None:
                 return
             # Tensor parallelism means each worker owns a disjoint *section* of the
@@ -1809,12 +2147,12 @@ def evolve(
             # opt-out here exactly as it is on the async path.
             if self_verify:
                 after = _checked_reward(
-                    reward(task, run(artifact.apply(diff).render(), task)), task)
+                    reward(task, run(mine.apply(diff).render(), task)), task)
                 delta = after - score
             else:
                 delta = 0.0
             aggregator.ingest(EvidenceCard(
-                diff=diff, base_version={artifact_id: base_v}, touched=[artifact_id],
+                diff=diff, base_version={artifact_id: mine_v}, touched=[artifact_id],
                 before_after_delta=delta, trajectory_refs=[task]))
 
         try:
@@ -1889,8 +2227,6 @@ def evolve(
             if verbose:
                 print(f"round {r:>3}  stopped early: {run_error[:140]}")
             break
-        committed = sum(1 for x in reports if x.committed_version is not None)
-        rejected = sum(1 for x in reports if x.committed_version is None)
         try:
             dev = ledger.snapshot(Ledger.DEV).get(artifact_id)
         except LedgerFailure as e:      # as at the round head: skip, do not raise
@@ -1939,21 +2275,19 @@ def evolve(
                 print(f"round {r:>3}  held-out unmeasurable, carrying last reward: "
                       f"{type(e).__name__}: {str(e)[:100]}")
             continue
-        reasons = _tally(reports)
         with tp_lock:
-            if section_violations[0]:
-                reasons["section-violation"] = section_violations[0]
-                section_violations[0] = 0
-        _m = eng.meter.snapshot()
-        info = RoundInfo(r, round_reward, len(dev.state), committed, rejected,
-                         reasons, elapsed_s=_m.elapsed_s, rollouts=_m.rollouts)
-        history.append(info)
-        # Early stopping: an LLM rollout costs money, so do not keep buying them
-        # once the artifact has converged or clearly stalled.
-        early_stop = early.observe(info.held_out_reward)
+            extra = ({"section-violation": section_violations[0]}
+                     if section_violations[0] else None)
+            section_violations[0] = 0
+        # Recording the round, deciding whether to stop, and telling the caller
+        # are the same three steps in both loops; only "what is a round" differs.
+        info, early_stop = eng.record_round(
+            index=r, reward=round_reward, n_items=len(dev.state), reports=reports,
+            history=history, early=early, on_round=on_round, extra_reasons=extra)
         if verbose:
             print(f"round {r:>3}  reward={info.held_out_reward:.3f} on "
-                  f"{len(held_out)}  size={info.n_items}  +{committed}/-{rejected}")
+                  f"{len(held_out)}  size={info.n_items}  "
+                  f"+{info.committed}/-{info.rejected}")
         if early_stop is not None:
             stop_reason = early_stop
             if verbose:
@@ -1961,19 +2295,7 @@ def evolve(
                       + (f"target_reward={target_reward} reached, stopping"
                          if early_stop == "target_reward" else
                          f"no improvement for {early.stalled} rounds, stopping"))
-            if early_stop == "target_reward" and on_round is not None:
-                try:
-                    on_round(info)
-                except Exception:  # noqa: BLE001 - reported below on the normal path
-                    pass
             break
-        if on_round is not None:
-            # A reporting callback must never take the run down with it.
-            try:
-                on_round(info)
-            except Exception as e:  # noqa: BLE001
-                warnings.warn(f"on_round callback raised: {type(e).__name__}: {e}",
-                              RuntimeWarning, stacklevel=2)
 
     if run_error is None:
         # A clean run publishes the head it produced (see `_publish_stable`);

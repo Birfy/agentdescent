@@ -91,3 +91,100 @@ def test_pending_intake_is_bounded_by_the_lag_budget():
     r = async_evolve(_tasks(), REWARD, agent=_Composer(), strategy=AppendRules(),
                      n_workers=4, async_ratio=2, max_seconds=2.0, held_out_frac=0.5)
     assert r.error is None
+
+
+# ---------------------------------------------------------------------------
+# What the async path measures about itself
+# ---------------------------------------------------------------------------
+
+
+def _counting_run(**kw):
+    """Run the async path with the cards and the ledger reads counted."""
+    import tempfile
+    import warnings
+
+    from agentdescent import Policies
+    from agentdescent.aggregator import Aggregator
+    from agentdescent.evolution import EvolvingArtifact
+    from agentdescent.ledger import Ledger
+
+    seen = {"cards": 0, "reads": 0}
+
+    class _Ledger(Ledger):
+        def head_version(self, branch=Ledger.DEV):
+            seen["reads"] += 1
+            return super().head_version(branch)
+
+        def snapshot(self, branch=Ledger.DEV):
+            seen["reads"] += 1
+            return super().snapshot(branch)
+
+    class _Agg(Aggregator):
+        def ingest(self, card):
+            seen["cards"] += 1
+            return super().ingest(card)
+
+    ledger = _Ledger(
+        tempfile.mkdtemp() + "/repo",
+        lambda a: {"state": a.state, "blast_radius": a.blast_radius},
+        lambda aid, v, d: EvolvingArtifact(aid, d.get("state", {}), v,
+                                           d.get("blast_radius", 0.2)))
+    n = [0]
+
+    def propose(rendered, task, output, score):
+        n[0] += 1
+        return f"rule {n[0]}"
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        result = async_evolve(
+            _tasks(n=12), lambda t, o: 0.0, run=lambda rendered, t: "x",
+            propose=propose, strategy=AppendRules(), n_workers=2,
+            max_iters=20, max_seconds=10.0, self_verify=False,
+            aggregator_factory=lambda l, v, a, c, p: _Agg(
+                l, v, a, c, staleness_policy=p),
+            policies=Policies(ledger=ledger), **kw)
+    return result, seen
+
+
+def test_the_stale_denominator_counts_each_card_once():
+    """`async_evolve` runs a staleness gate and so does `Aggregator`.
+
+    Both wrote to the same meter, so every card that *survived* the first gate
+    was counted as "considered" twice: measured, 20 cards reported
+    `stale_considered = 40`. A true 50% stale rate then read as 33%, and the
+    "you are discarding most of your evidence" warning -- which fires at
+    `discarded/considered > 0.5` -- needed a true rate of 67% to trip.
+
+    Each side now counts only what the other cannot see: this gate's discards,
+    the aggregator's survivors.
+    """
+    result, seen = _counting_run()
+    assert seen["cards"] > 0, "premise: cards reached the aggregator"
+    assert result.stale_considered == seen["cards"] + result.stale_discarded, (
+        f"stale_considered={result.stale_considered} but "
+        f"{seen['cards']} card(s) survived the gate and "
+        f"{result.stale_discarded} were discarded")
+    assert 0.0 <= result.stale_rate() <= 1.0
+
+
+def test_a_worker_does_not_read_the_ledger_once_per_rollout():
+    """Drift is measured against a head the merger publishes, not against git.
+
+    Every ledger read is a `git checkout` behind a process-wide file lock and an
+    RLock the whole run queues on, so asking "am I far enough behind to resync?"
+    got more expensive with exactly the concurrency it exists to support.
+
+    The property is that reads scale with **merger sweeps**, not with rollouts:
+    each sweep costs two here plus one inside `Aggregator._process`, and startup
+    and shutdown cost a handful. A worker reading per rollout adds a term this
+    bound has no room for -- measured on this workload, 46 reads before and 22
+    after, against a budget of 27.
+    """
+    result, seen = _counting_run()
+    assert result.rollouts > 0 and result.history, "premise: the run did something"
+    budget = 3 * len(result.history) + 12
+    assert seen["reads"] <= budget, (
+        f"{seen['reads']} ledger reads for {len(result.history)} sweeps and "
+        f"{result.rollouts} rollouts (budget {budget}) -- a worker is asking git "
+        "for the head on every loop again")

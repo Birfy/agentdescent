@@ -163,3 +163,107 @@ def test_custom_strategy_is_structural():
     assert isinstance(Blocks(), ParallelStrategy)
     plan = Blocks().plan(3, 0, KEYS)
     assert sorted(k for u in plan for k in u.keys) == sorted(KEYS)
+
+
+# ---------------------------------------------------------------------------
+# ClusterParallel — UCB over task clusters, and the channel that makes it possible
+# ---------------------------------------------------------------------------
+
+
+def _cluster_tasks(n=18, k=3):
+    from agentdescent.evolution import Task
+
+    return [Task(id=f"c{i % k}-{i}", prompt=f"q{i}", meta={"gold": str(i)})
+            for i in range(n)]
+
+
+def _cluster_of(task_id):
+    return task_id.split("-")[0]
+
+
+def test_a_lease_hands_a_worker_one_whole_cluster():
+    """The point of leasing clusters rather than sharding tasks: a worker sees a
+    coherent slice of the distribution, not one task from each of them."""
+    from agentdescent.parallel import ClusterParallel
+
+    cp = ClusterParallel(cluster_of=_cluster_of)
+    units = cp.plan(3, 0, [t.id for t in _cluster_tasks()])
+    assert units and all(u.keys for u in units)
+    for unit in units:
+        assert len({_cluster_of(k) for k in unit.keys}) == 1, (
+            f"worker {unit.worker} was handed tasks from several clusters: {unit.keys}")
+
+
+def test_feedback_reaches_the_scheduler():
+    """`plan` was a pure function of its arguments, so a strategy could not learn
+    from the rollouts it dispatched -- which is why UCB over clusters lived only
+    in the reference runtime."""
+    from agentdescent.parallel import ClusterParallel
+
+    cp = ClusterParallel(cluster_of=_cluster_of)
+    units = cp.plan(3, 0, [t.id for t in _cluster_tasks()])
+    before = dict(cp.scheduler.clusters["c0"].__dict__)
+
+    cp.observe(units[0], "c0-0", 0.0)          # a failure: room to learn
+    after = cp.scheduler.clusters["c0"]
+    assert after.n_evidence > before["n_evidence"]
+    assert after.recent_value > before["recent_value"], (
+        "a failing cluster did not become more attractive to the scheduler")
+
+
+def test_a_solved_cluster_loses_its_pull():
+    """The difficulty filter: a cluster that always passes carries no gradient."""
+    from agentdescent.parallel import ClusterParallel
+
+    cp = ClusterParallel(cluster_of=_cluster_of)
+    units = cp.plan(3, 0, [t.id for t in _cluster_tasks()])
+    for _ in range(30):
+        cp.observe(units[0], "c0-0", 1.0)      # solved, every time
+    solved = cp.scheduler.clusters["c0"]
+    assert solved.pass_rate > 0.9
+    assert cp.scheduler._difficulty_weight(solved) < \
+        cp.scheduler._difficulty_weight(cp.scheduler.clusters["c1"]), (
+        "an all-pass cluster is still weighted like one that still fails")
+
+
+def test_an_unknown_task_id_is_ignored_rather_than_raising():
+    """`cluster_of` is caller code over ids the caller supplied; a stray one must
+    not take the round down from inside a worker thread."""
+    from agentdescent.parallel import ClusterParallel
+
+    cp = ClusterParallel(cluster_of=_cluster_of)
+    units = cp.plan(3, 0, [t.id for t in _cluster_tasks()])
+    cp.observe(units[0], "nope-999", 0.0)      # no such cluster
+
+
+def test_evolve_drives_it_end_to_end():
+    """The hook has to be load-bearing in the round body, not just callable."""
+    import warnings
+
+    from agentdescent.evolution import AppendRules, evolve
+    from agentdescent.parallel import ClusterParallel
+
+    tasks = _cluster_tasks(n=18, k=3)
+    cp = ClusterParallel(cluster_of=_cluster_of)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        result = evolve(
+            tasks, lambda t, o: 1.0 if o == t.meta["gold"] else 0.0,
+            run=lambda rendered, t: t.meta["gold"] if t.id in rendered else "?",
+            propose=lambda r, t, o, s: t.id, strategy=AppendRules(),
+            parallel=cp, rounds=6, n_workers=3, max_concurrency=3,
+            held_out_frac=0.4)
+
+    assert result.error is None
+    assert cp.scheduler is not None, "evolve() never asked the strategy to plan"
+    total = sum(c.n_evidence for c in cp.scheduler.clusters.values())
+    assert total > 0, (
+        "no rollout outcome reached the strategy -- the observe hook is not wired")
+
+
+def test_a_strategy_without_the_hook_is_untouched():
+    """`observe` is optional; DataParallel and TensorParallel do not define it."""
+    from agentdescent.parallel import DataParallel, TensorParallel
+
+    assert not hasattr(DataParallel(), "observe")
+    assert not hasattr(TensorParallel(n_sections=2, keys=["a", "b"]), "observe")

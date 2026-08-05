@@ -163,38 +163,45 @@ Two consequences worth knowing when you write a policy:
 
 ## 4. The two runtimes
 
-!!! warning "Two stacks — know which one you are reading about"
-    The data-flow diagram above (`TaskScheduler` → `Worker` → `EvidenceBuffer`)
-    describes the **reference stage-orchestration stack**:
+!!! note "There is one engine now, and two runtimes on top of it"
+    There used to be two *stacks*. The data-flow diagram above described the
+    reference one --
     [`AgentDescent`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/orchestrator.py)
-    and [`AsyncAgentDescent`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/async_runtime.py),
-    used by `run_demo`, `run_async`, `efficiency`, `duration_scheduling` and
-    `rq2_staleness`.
+    and [`AsyncAgentDescent`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/async_runtime.py)
+    with their own loops, worker dispatch and merger thread — while
+    [`evolve()` / `async_evolve()`](evolution.md), the entry point every algorithm
+    port uses, implemented the same shape again. This page called that "a known
+    wart rather than a design intent", and it kept costing: two measured fixes
+    hand-ported, two early-stop epsilons nobody chose, and three mechanisms the
+    general engine re-derived — and got wrong — because the reference stack
+    already had them.
 
-    The **general engine** — [`evolve()` / `async_evolve()`](evolution.md), the
-    documented entry point that every algorithm port uses — shares the `Ledger`,
-    `Aggregator`, staleness policies, governance and `AuditScheduler`, but **not**
-    the `TaskScheduler`, `EvidenceBuffer`, `ResumeQueue` or `DurationEstimator`.
-    It does its own sharding, keeps its own intake buffer, and selects tasks via a
-    [`task_sampler`](sampling.md).
+    Both reference classes are now **adapters**: they describe the reference
+    domain in the vocabulary `evolve()` and `async_evolve()` speak and run that.
+    Their public surface is unchanged, and the numbers on the
+    [results page](results.md) still come out of them.
 
-    They are still **two implementations**, which is a known wart rather than a
-    design intent. What no longer differs is *behaviour*: the worker-retirement
-    heuristic and the merger's error tolerance were measured, fixed in
-    `async_evolve`, and have been ported back — so a resilience bug cannot live in
-    one and not the other. Backpressure (the guard that keeps `async_ratio > α`
-    from livelocking under Guarded) and duration-aware straggler detection (§5.1 /
-    L-traj) are reachable from `async_evolve` too, via `stall_patience=` and
-    `duration_estimator=`, and reported as `result.forced_refreshes` /
-    `result.stragglers`.
+    What the general engine gained on the way, each of which was a real gap for
+    ordinary callers and not just migration scaffolding:
 
-    One capability remains reference-only: **UCB task-cluster leasing** (§5.2 /
-    L-task), because it partitions a `TaskUniverse` into clusters and `evolve()`
-    takes a flat task list. `evolve()`'s
-    [`task_sampler`](sampling.md) covers the
-    same idea at task granularity. Partial-rollout **resume** is unimplemented on
-    both paths — `run(rendered, task) -> output` is opaque, so there is no
-    continuation state to check point; both now *detect* and count stragglers.
+    | | |
+    |---|---|
+    | `evolve(refresh_interval=N)` | synchronous staleness. Without it `eta` was **0 by construction**, so `staleness_policy=` could not change a single decision on that path |
+    | `RoundInfo.considered` / `discarded_stale` / `conflicts_dropped` / `fused` | what the merge *did*, per round — which `RoundStat` and `AsyncStats` had all along |
+    | [`ClusterParallel`](parallelism.md) + `ParallelStrategy.observe` | UCB task-cluster leasing (§5.2 / L-task) moves to the general engine rather than being lost with the reference `TaskScheduler` |
+
+    Partial-rollout **resume** is still unimplemented — `run(rendered, task) ->
+    output` is opaque, so there is no continuation state to check point; both
+    paths *detect* and count stragglers. What does exist is recovery one level
+    coarser: a
+    [task whose worker is lost is re-dispatched whole](execution.md#recovery-is-at-task-granularity),
+    under the same lease id so a late answer from the original can be dropped.
+
+    Three things the domain translation does not preserve exactly, listed in
+    `agentdescent/domains/router.py`: `before_after_delta` and `evidence_eval`
+    are measured over the whole cluster rather than the failing subset, and noise
+    is per proposal rather than per worker — the general engine has one `propose`
+    for every worker and, by design, no worker identity to branch on.
 
 AgentDescent separates *what to merge* (the Aggregator, identical in both) from
 *when workers and the aggregator run relative to each other* (the runtime).

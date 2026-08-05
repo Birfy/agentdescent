@@ -1,7 +1,7 @@
-# Customizable parallelism (DP / TP)
+# Customizable parallelism (DP / TP / CP)
 
 > **Plugs into [`evolve`](evolution.md) via** `parallel=DataParallel()` (or
-> `TensorParallel` / your own).
+> `TensorParallel` / `ClusterParallel` / your own).
 
 The parallelism *method* — how a round of work is partitioned across workers — is
 **pluggable**. Pick a paradigm, or implement the `ParallelStrategy` protocol
@@ -27,88 +27,14 @@ Source:
 ---
 
 
-## Where rollouts run — the execution plane
+## Where rollouts run
 
-`evolve()` runs rollouts in threads, and for this workload that is the measured
-right answer: a rollout is almost entirely waiting on a model, and the numbers
-above are **7.1x** on I/O against **1.0x** on CPU. Nothing here is an attempt to
-make rollouts faster with processes.
-
-What processes buy is different and unavailable any other way:
-
-* **fault isolation** — the code being evolved is model-authored, so a segfault
-  or an OOM is ordinary. In a thread it takes the run with it;
-* **capacity beyond one machine**, and **heterogeneous workers**, later.
-
-```python
-from agentdescent import ProcessExecutor, Ref, RolloutSpec, ThreadExecutor
-```
-
-### Work has to be describable as data first
-
-The wall is not the executor. Measured on this package:
-
-| passed to `evolve()` | crosses a process? |
-|---|---|
-| `Task`, `Diff`, `EvidenceCard`, `AppendRules` | yes |
-| `rewards.last_number()` | **no** — `Can't pickle local object` |
-| `reflector(model)`, `LLMAgent(...)` | **no** |
-| `run=lambda rendered, task: ...` | **no** |
-
-Every factory in the package returns a closure, and so does every example in
-these docs. So a process pool fails on the first submit no matter how good the
-pool is, and the fix is a way to *describe* the work:
-
-```python
-Ref("agentdescent.rewards:last_number", {"gold_key": "gold"})
-Ref("agentdescent.runners:code_runner", {"entrypoint": ["python", "main.py"]})
-Ref("agentdescent.evolution:reflector",              # references nest
-    {"complete": Ref("agentdescent.agents:claude", {"model": "..."})})
-```
-
-The worker resolves these against **its own** copy of the code. `cloudpickle`
-would send the closure instead, which is less work here and worse afterwards: it
-executes the sending process's code on the receiving side, so a version skew
-becomes a wrong answer rather than an import error.
-
-`resolve()` runs whatever it imports, so across a boundary it *is* the boundary:
-targets are restricted to an allowlist (`agentdescent.*` by default) and config
-to JSON scalars. Widen it deliberately — that is the moment to think about who
-can write to the queue.
-
-### Why not `ProcessPoolExecutor`
-
-1. **One worker dying abruptly breaks the whole pool** (`BrokenProcessPool`) and
-   every in-flight task with it. Fault isolation built on something that fails as
-   a unit is not fault isolation — and this is the entire reason for processes
-   here;
-2. `max_tasks_per_child` is 3.11+; this package supports 3.9;
-3. it has no notion of a sandbox, so no way to say "this needs an environment
-   with fingerprint X, wait for one";
-4. its default start method is `fork` on Linux, and this engine is threaded — a
-   `fork` from a process holding locks in other threads produces a child holding
-   locks nothing will release.
-
-`ProcessExecutor` is persistent workers, a bounded task queue and a supervisor
-that decides on its own when a worker is gone.
-
-!!! warning "`spawn` re-imports `__main__`"
-    A script that builds a `ProcessExecutor` at module level builds one again in
-    every child, which builds one in every grandchild. The machine fills with
-    processes and nothing reports, so it reads as *slow* rather than as a fault.
-    Put the run behind `if __name__ == "__main__":`. Building one inside a worker
-    is refused outright.
-
-### Status
-
-The executors are usable directly and are covered by tests, including the
-assertion `ProcessPoolExecutor` cannot pass: killing one of three workers leaves
-the others producing and re-dispatches the dead one's task.
-
-They are **not yet wired into `evolve()`'s round loop**. Doing that now would
-mean writing it twice, once in each of the two loops that
-[#57](https://github.com/Birfy/agentdescent/issues/57) exists to unify — so it
-waits for that, rather than being duplicated and then de-duplicated.
+`parallel=` decides how a round's work is **split**. Where each piece then
+**runs** — threads here, supervised worker processes, hosts later — is a separate
+plane with its own page: [Where rollouts run](execution.md). It covers the
+`rollout(spec) -> Result` seam, why a rollout has to be describable as data
+before it can leave the process, and what `policies=Policies(executor=...)`
+does and does not accept.
 
 ## The interface
 
@@ -127,7 +53,66 @@ class ParallelStrategy(Protocol):
 A `WorkUnit(worker, keys, stage, section)` says which artifact keys (and, for
 PP/TP, which stage/section) a worker owns that round.
 
-## The three built-in paradigms
+There is one **optional** method:
+
+```python
+    def observe(self, unit: WorkUnit, task_id: str, score: float) -> None: ...
+```
+
+`evolve()` calls it after every rollout, when the strategy defines it. `plan`
+alone is a pure function of `(n_workers, round_index, keys)` — enough to *shard*,
+not enough to *schedule*, because a strategy had no way to learn anything from
+the rollouts it dispatched. That is why UCB over task clusters (design §5.2,
+L-task) lived only in the reference runtime's `TaskScheduler` and was
+inexpressible here. `DataParallel` and `TensorParallel` do not define it and are
+unaffected; [`ClusterParallel`](#clusterparallel-ucb-over-the-task-tail) is what
+uses it.
+
+## `ClusterParallel` — UCB over the task tail
+
+DP shards tasks round-robin, which spends as much on a cluster that teaches
+nothing as on one that still fails. `ClusterParallel` groups the tasks and
+**leases whole clusters**, ordered by UCB with a difficulty filter — clusters
+that are all-pass or all-fail carry no gradient and are down-weighted (the GRPO
+zero-advantage argument), while clusters with little evidence keep an exploration
+bonus.
+
+```python
+from agentdescent import ClusterParallel, evolve
+
+evolve(tasks, reward, agent=agent,
+       parallel=ClusterParallel(cluster_of=lambda task_id: task_id.split("-")[0]))
+```
+
+`cluster_of` maps a **task id** to a cluster id — by source, by topic, by
+difficulty band, by whatever axis your tail actually runs along. A worker is
+handed one cluster whole, so it sees a coherent slice of the distribution rather
+than one task from each.
+
+Two honest differences from the reference `TaskScheduler`, both in what feeds the
+estimate:
+
+* it is told a rollout's **reward**, not the before/after delta of the diff that
+  rollout produced. That delta needs `self_verify`, which the directory entry
+  points turn **off** because it doubles the cost of every proposal — a scheduler
+  depending on it would silently stop learning exactly there. `1 - score` is the
+  room a cluster still has;
+* it learns per **task**, not per lease, so an estimate moves once per rollout
+  rather than once per round.
+
+The exploration constant stays the textbook `1.4`. [`DifficultyWeighted`](sampling.md)
+uses `0.2` because a sweep at *task* granularity measured 1.4 as worse than
+round-robin; that sweep has not been repeated at cluster granularity, where there
+are far fewer arms and each carries many tasks, and transplanting a number
+measured elsewhere is how a default stops meaning anything.
+
+!!! note "It composes with `task_sampler`, it does not replace it"
+    `ClusterParallel` decides **which cluster** a worker gets;
+    [`task_sampler`](sampling.md) decides **which task inside it** the worker
+    rolls out next. Two granularities of the same idea, and they share
+    `stats.difficulty_weight`.
+
+## The classic two: DP and TP
 
 | Strategy | How work is partitioned | Recombination |
 |---|---|---|
@@ -208,6 +193,7 @@ provides [`PipelineChain`](https://github.com/Birfy/agentdescent/blob/main/agent
 | | Enforced by `evolve()` | What that means |
 |---|---|---|
 | **DP** | ✅ `keys` | workers take disjoint task shards; diffs merge |
+| **CP** | ✅ `keys` + `observe` | workers take whole clusters, leased by UCB; every rollout's reward feeds back into the lease order |
 | **TP** | ✅ `section` | a worker's diff is **rejected if it touches a key outside its section**, which is what makes the union conflict-free — and every rejection is counted as `section-violation` in [`result.outcomes()`](evolution.md) |
 | **PP** | ⛔ refused | `evolve()` raises. It evolves **one** `artifact_id`, so there is no artifact chain for stages to walk |
 

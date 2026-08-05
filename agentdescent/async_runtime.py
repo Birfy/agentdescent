@@ -1,58 +1,45 @@
-"""Asynchronous stage-orchestration runtime (design doc, section 3.1;
-FlashEvolve 2605.08520; ROLL Flash 2510.11345).
+"""The reference barrier-free runtime -- now an adapter over ``async_evolve()``.
 
-The synchronous :class:`~agentdescent.orchestrator.AgentDescent` runs a round barrier:
-every worker steps, then a single ``aggregator.step()`` fires, then the next
-round begins.  That is "synchronous DP".  This module removes the barrier.
+Like :mod:`agentdescent.orchestrator`, this used to be a second implementation:
+its own worker threads, its own merger thread, its own published head, its own
+backpressure. Every one of those now exists in
+:func:`~agentdescent.async_evolve.async_evolve`, in three cases *because* this
+file had it first and the general engine had to be taught (see #93 and the
+`stale_considered` / published-head fixes that came out of it).
 
-**Stage orchestration (FlashEvolve).**  The stages -- *rollout+propose* (workers)
-and *aggregate+commit* (aggregator) -- run as independent threads connected by
-the thread-safe :class:`~agentdescent.aggregator.EvidenceBuffer`.  A worker keeps
-producing evidence while the aggregator is still merging the previous batch, so
-the pipeline overlaps instead of stalling on a barrier.
+So the threads are gone and this is the adapter that remains: it describes the
+reference domain the way `async_evolve` wants it and reports the result as
+:class:`AsyncStats`.
 
-**Asynchronous ratio (ROLL Flash).**  ``async_ratio`` is a *global lag budget*:
-a worker refreshes its ledger snapshot only once head has drifted more than
-``async_ratio`` versions ahead of it.  Small ratio -> near-synchronous, few stale
-diffs; large ratio -> highly asynchronous, many stale diffs that the active
-:class:`~agentdescent.staleness.StalenessPolicy` (Full / Guarded / Reflective) must
-rebase or discard.  This is the knob that trades throughput against staleness.
-
-The GIL means Python threads do not give true CPU parallelism, but the *pipeline
-overlap* and the concurrency-control machinery (CAS, buffer locks, per-diff
-staleness) are real -- and the same code shape drives a genuinely parallel
-process/host pool.
+**Stage orchestration (FlashEvolve)** and the **asynchronous ratio (ROLL Flash)**
+are unchanged in substance -- they are what `async_evolve` implements. The knob
+names are preserved: ``AsyncConfig.async_ratio`` is the lag budget,
+``stall_patience`` the backpressure guard, ``duration_timeout_factor`` the
+straggler threshold.
 """
 
 from __future__ import annotations
 
-import threading
 import time
-import warnings
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from .aggregator import Aggregator, AggregatorConfig
+from .async_evolve import async_evolve
 from .domains.router import (
     RouterSkill,
+    RouterStrategy,
     TaskUniverse,
-    deserialize_router,
-    router_eval,
-    serialize_router,
+    cluster_split_frac,
+    cluster_tasks,
+    router_propose,
+    router_reward,
+    router_run,
 )
 from .ledger import Ledger
-from .scheduler import (
-    AuditScheduler,
-    DurationEstimator,
-    ResumeItem,
-    ResumeQueue,
-    TaskCluster,
-    TaskScheduler,
-)
-from .pipeline import StallGuard, WorkerHealth
-from .staleness import StalenessPolicy, get_policy
-from .verifier import ThreeLayerVerifier, VerifierBudget
-from .worker import Worker
+from .orchestrator import _read_skill, _write_skill
+from .scheduler import DurationEstimator, ResumeQueue
+from .staleness import StalenessPolicy
 
 
 @dataclass
@@ -62,15 +49,26 @@ class AsyncConfig:
     noise: float = 0.15
     target_accuracy: float = 0.98
     max_seconds: float = 20.0     # wall-clock safety bound
-    aggregator_interval: float = 0.002  # sleep between aggregator sweeps
-    worker_pause: float = 0.001   # sleep between worker rollouts
     oracle_budget: int = 400
     stall_patience: int = 150     # no-commit sweeps before backpressure sync
     # duration-aware straggler control: a rollout that runs longer than
-    # duration_timeout_factor x its *estimated* cost is checkpointed to the
-    # ResumeQueue (partial rollout) instead of blocking a worker.
+    # duration_timeout_factor x its *estimated* cost is counted as a straggler.
     duration_timeout_factor: float = 3.0
     seed: int = 0
+    #: Re-run a proposal's own rollout with the diff applied, to record a local
+    #: before/after delta. The reference loop got that delta **free** -- it
+    #: measured accuracy directly, with no second rollout -- so a port that
+    #: leaves this on doubles what a counted rollout costs. It stays on by
+    #: default because the delta is real evidence and feeds acceptance; the
+    #: throughput experiment turns it off, because a second sleep per rollout is
+    #: not the dispatch rate it is trying to measure.
+    self_verify: bool = True
+
+    # `aggregator_interval` and `worker_pause` used to live here. They paced a
+    # loop that no longer exists -- `async_evolve` owns its own sleeps -- and a
+    # field that is accepted and then ignored is the one outcome this codebase
+    # keeps deciding is worse than a missing feature. Nothing in the tests or
+    # examples set them.
 
 
 @dataclass
@@ -83,6 +81,9 @@ class AsyncStats:
     discarded_stale: int = 0
     conflicts_dropped: int = 0
     forced_refreshes: int = 0
+    #: Rollouts that overran their own predicted duration. **Detection only** --
+    #: `run(rendered, task) -> output` is opaque, so there is no continuation
+    #: state to check point. The name is kept because it is a published field.
     stragglers_checkpointed: int = 0
     #: Workers that gave up after repeated failures *before any worker had ever
     #: succeeded*. A run can finish cleanly at a fraction of its requested
@@ -92,17 +93,13 @@ class AsyncStats:
     final_dev_accuracy: float = 0.0
     final_stable_accuracy: float = 0.0
     wallclock: float = 0.0
-    #: ``None`` on a clean run; otherwise the backend failure that ended it. A run
-    #: whose workers all died used to return normal-looking zeros.
+    #: ``None`` on a clean run; otherwise the backend failure that ended it.
     error: Optional[str] = None
     timeline: List[Tuple[int, float]] = field(default_factory=list)
 
 
 class AsyncAgentDescent:
-
-    _MAX_WORKER_ERRORS = 3
-    _MAX_MERGER_ERRORS = 3
-    """Barrier-free, thread-per-worker parallel self-evolution runtime."""
+    """Barrier-free reference runtime, on the general engine."""
 
     def __init__(
         self,
@@ -113,275 +110,123 @@ class AsyncAgentDescent:
         staleness_policy: Optional[StalenessPolicy] = None,
         estimator: Optional[DurationEstimator] = None,
         skill_id: str = "mol-router",
+        aggregator_factory=None,
+        rollout=None,
     ) -> None:
         self.cfg = config or AsyncConfig()
         self.universe = universe
         self.skill_id = skill_id
-        # duration-aware scheduling: predict rollout cost from task size and
-        # checkpoint stragglers to the resume queue (design doc, section 5.1).
         self.estimator = estimator
+        self.agg_config = agg_config or AggregatorConfig()
+        self.staleness_policy = staleness_policy
+        self._aggregator_factory = aggregator_factory
+        #: What a rollout does, defaulting to the reference domain's classifier.
+        #: This is the seam `Worker.run` used to be: the resilience tests replace
+        #: it with something that raises, and there is no other way to ask "what
+        #: does this runtime do when the backend is down".
+        self._rollout = rollout or router_run
+        #: Kept because it is a published attribute. Nothing pushes to it any
+        #: more: the reference loop checkpointed stragglers here, and nothing
+        #: ever popped one -- see the table in `docs/modules.md`.
         self.resume_queue = ResumeQueue()
         self.train, self.held_out = universe.split()
 
-        self.ledger = Ledger(repo_path, serialize_router, deserialize_router)
-        self.ledger.register(RouterSkill(skill_id, table={}), branch=Ledger.DEV)
+        self.strategy = RouterStrategy()
+        self._train_tasks, self._held_tasks = cluster_tasks(
+            universe, n_clusters=max(2, self.cfg.n_workers))
 
-        self.verifier = ThreeLayerVerifier(
-            eval_fn=router_eval,
-            held_out=self.held_out,
-            budget=VerifierBudget(oracle_calls_remaining=self.cfg.oracle_budget),
-            seed=self.cfg.seed,
-        )
-        self.audit = AuditScheduler()
-        self.aggregator = Aggregator(
-            self.ledger, self.verifier, self.audit,
-            agg_config or AggregatorConfig(),
-            staleness_policy=staleness_policy or get_policy("guarded"),
-        )
-
-        clusters = universe.clusters(n_clusters=max(2, self.cfg.n_workers))
-        self.scheduler = TaskScheduler(
-            [TaskCluster(id=f"c{i}", tasks=c) for i, c in enumerate(clusters)]
-        )
-        self.workers = [
-            Worker(worker_id=f"w{i}", gold=universe.gold,
-                   noise=self.cfg.noise if i % 3 == 0 else 0.0,
-                   seed=self.cfg.seed + i)
-            for i in range(self.cfg.n_workers)
-        ]
-
+        self.ledger = Ledger(repo_path, _write_skill, _read_skill)
+        self._repo_path = repo_path
+        self.aggregator: Optional[Aggregator] = None
+        self.verifier: Optional[Any] = None
         self.stats = AsyncStats()
-        self._stop = threading.Event()
-        # published head version (updated by the aggregator thread on commit) so
-        # workers can measure drift without hitting git on every rollout.
-        self._head_lock = threading.Lock()
-        self._head: Dict[str, int] = dict(self.ledger.head_version(Ledger.DEV))
-        # backpressure: bumped when the pipeline stalls (buffer keeps filling but
-        # nothing commits), forcing every worker to sync regardless of the ratio.
-        self._refresh_epoch = 0
-        self._stats_lock = threading.Lock()
-        # Worker resilience, shared with the general pipeline so the two cannot
-        # drift apart again: the run ends once every worker has retired.
-        self._live_workers = len(self.workers)
-        self._health = WorkerHealth(max_errors=self._MAX_WORKER_ERRORS)
+        self.result = None
 
-    # -- shared head bookkeeping (ROLL Flash async ratio) --------------------
+    # -- reading a branch -----------------------------------------------------
 
-    def _publish_head(self) -> None:
-        hv = self.ledger.head_version(Ledger.DEV)
-        with self._head_lock:
-            self._head = dict(hv)
-
-    def _head_version(self, artifact_id: str) -> int:
-        with self._head_lock:
-            return self._head.get(artifact_id, 0)
-
-    def _epoch(self) -> int:
-        with self._head_lock:
-            return self._refresh_epoch
-
-    def _bump_epoch(self) -> None:
-        with self._head_lock:
-            self._refresh_epoch += 1
-
-    # -- worker thread -------------------------------------------------------
-
-    def _worker_loop(self, worker: Worker) -> None:
-        # each worker caches a snapshot and refreshes only when its drift from
-        # head exceeds the async ratio (bounded staleness).
-        snap = self.ledger.snapshot(Ledger.DEV)
-        local = snap.get(self.skill_id)
-        local_v = snap.version.get(self.skill_id, 0)
-        local_epoch = self._epoch()
-        consecutive = 0            # consecutive backend failures for this worker
-
-        while not self._stop.is_set():
-            drift = self._head_version(self.skill_id) - local_v
-            epoch = self._epoch()
-            # refresh when the ratio budget is exceeded, or when a pipeline stall
-            # forced a global sync (backpressure).
-            forced = epoch != local_epoch
-            if drift > self.cfg.async_ratio or forced:
-                snap = self.ledger.snapshot(Ledger.DEV)
-                local = snap.get(self.skill_id)
-                local_v = snap.version.get(self.skill_id, 0)
-                local_epoch = epoch
-                # Only the backpressure-forced half is counted -- see the same
-                # comment in `async_evolve._worker`: a lag-budget refresh is
-                # ordinary progress, and counting it made the stall diagnostic
-                # non-zero on every healthy run.
-                if forced:
-                    with self._stats_lock:
-                        self.stats.forced_refreshes += 1
-
-            cluster = self.scheduler.lease_round_robin()
-            # estimate this rollout's cost from task size, time it, and calibrate.
-            cost = float(sum(len(t.text) for t in cluster.tasks))
-            predicted = self.estimator.estimate(cost) if self.estimator else 0.0
-            t0 = time.time()
-            try:
-                card = worker.run(local, {self.skill_id: local_v}, cluster.tasks)
-            except Exception as e:  # noqa: BLE001 - a backend failure must not kill
-                # the thread silently: an unhandled exception here used to print a
-                # traceback and leave the run spinning out its whole budget with no
-                # producers, returning zeros that looked like a normal result.
-                consecutive += 1
-                with self._stats_lock:
-                    if self.stats.error is None:
-                        self.stats.error = f"{type(e).__name__}: {str(e)[:200]}"
-                # Retirement policy is shared with `async_evolve` -- see
-                # `agentdescent.pipeline.WorkerHealth` for why it is global rather
-                # than per-worker, and what was measured when it was not.
-                if self._health.should_retire(consecutive):
-                    with self._stats_lock:
-                        self._live_workers -= 1
-                        self.stats.retired_workers += 1
-                        all_dead = self._live_workers <= 0
-                    if all_dead:
-                        self._stop.set()      # nothing can make progress any more
-                    return
-                if self._health.should_warn(consecutive):
-                    warnings.warn(
-                        f"{worker.worker_id} has failed {consecutive} rollouts in a "
-                        f"row and is backing off, not retiring (it succeeded "
-                        f"earlier, so this reads as transient). Last error: "
-                        f"{type(e).__name__}: {str(e)[:120]}",
-                        RuntimeWarning, stacklevel=2)
-                self._stop.wait(self._health.backoff(consecutive))
-                continue
-            consecutive = 0
-            self._health.record_success()   # the backend demonstrably works
-            elapsed = time.time() - t0
-            if self.estimator is not None:
-                self.estimator.observe(cost, elapsed)
-                # a rollout that overran its estimate is a straggler: checkpoint it
-                # (partial rollout) rather than letting it define the wall-clock.
-                if predicted > 0 and elapsed > self.cfg.duration_timeout_factor * predicted:
-                    self.resume_queue.push(ResumeItem(
-                        task_id=cluster.id, turn=0, conversation=[],
-                        external_handle=None, version_at_checkpoint={self.skill_id: local_v}))
-                    with self._stats_lock:
-                        self.stats.stragglers_checkpointed += 1
-            with self._stats_lock:
-                self.stats.rollouts += 1
-            if card is not None:
-                self.aggregator.ingest(card)
-                self.scheduler.record(
-                    cluster.id, learning_value=max(0.0, card.before_after_delta),
-                    passed=card.before_after_delta > 0,
-                )
-                with self._stats_lock:
-                    self.stats.proposals += 1
-            time.sleep(self.cfg.worker_pause)
-
-    # -- aggregator thread ---------------------------------------------------
-
-    def _aggregator_loop(self) -> None:
-        # Backpressure policy is shared with `async_evolve` (`pipeline.StallGuard`).
-        stall = StallGuard(patience=self.cfg.stall_patience)
-        consecutive = 0
-        while not self._stop.is_set():
-            try:
-                reports = self.aggregator.step()
-                consecutive = 0
-            except Exception as e:  # noqa: BLE001 - the merger is the only writer,
-                # so if it dies the workers fill a buffer nobody drains. But it also
-                # *calls the backend* every sweep (it scores held-out), so ending
-                # the run on the first exception made it a single point of failure
-                # one transient could take out permanently -- the same mistake
-                # `async_evolve` removed after measuring it end with 0 sweeps while
-                # the workers were still healthy. Tolerate, and let the run's own
-                # budget bound the wait: a truly dead backend retires every worker,
-                # which ends the run anyway.
-                consecutive += 1
-                with self._stats_lock:
-                    if self.stats.error is None:
-                        self.stats.error = f"{type(e).__name__}: {str(e)[:200]}"
-                if consecutive == self._MAX_MERGER_ERRORS:
-                    warnings.warn(
-                        f"the merger has failed {consecutive} sweeps in a row and "
-                        f"is retrying; nothing will merge until it recovers. Last "
-                        f"error: {type(e).__name__}: {str(e)[:120]}",
-                        RuntimeWarning, stacklevel=2)
-                self._stop.wait(min(2.0 ** consecutive, 30.0))
-                continue
-            committed = False
-            with self._stats_lock:
-                self.stats.sweeps += 1
-                for rep in reports:
-                    self.stats.discarded_stale += rep.discarded_stale
-                    self.stats.conflicts_dropped += rep.conflicts_dropped
-                    if rep.committed_version is not None:
-                        self.stats.commits += 1
-                        committed = True
-                        if rep.fused:
-                            self.stats.fused += 1
-            if committed:
-                stall.note_sweep(True)
-                self._publish_head()
-                acc = self._dev_accuracy()
-                with self._stats_lock:
-                    self.stats.timeline.append((self.stats.sweeps, acc))
-                if acc >= self.cfg.target_accuracy:
-                    self._stop.set()
-                    return
-            elif self.buffer_pending() > 0:
-                # pipeline is producing evidence but nothing commits (all stale /
-                # rejected) -> apply backpressure and force a global sync. A sweep
-                # with an empty buffer is neither progress nor a stall, so it is
-                # not counted either way.
-                stall.note_sweep(False)
-                if stall.should_force_refresh():
-                    self._bump_epoch()
-                    stall.force()
-            time.sleep(self.cfg.aggregator_interval)
+    def _accuracy_on(self, branch: str) -> float:
+        try:
+            skill = self.ledger.snapshot(branch).get(self.skill_id)
+        except Exception:  # noqa: BLE001 -- a diagnostic read must not end a run
+            return 0.0
+        return skill.accuracy(self.held_out) if skill else 0.0
 
     def buffer_pending(self) -> int:
-        return self.aggregator.buffer.pending()
+        """Cards waiting in the aggregator's buckets, or 0 before a run."""
+        return self.aggregator.buffer.pending() if self.aggregator else 0
 
-    # -- accuracy helpers ----------------------------------------------------
-
-    def _dev_accuracy(self) -> float:
-        skill = self.ledger.snapshot(Ledger.DEV).get(self.skill_id)
-        return skill.accuracy(self.held_out) if skill else 0.0
-
-    def _stable_accuracy(self) -> float:
-        skill = self.ledger.snapshot(Ledger.STABLE).get(self.skill_id)
-        return skill.accuracy(self.held_out) if skill else 0.0
-
-    # -- driver --------------------------------------------------------------
+    # -- the run --------------------------------------------------------------
 
     def run(self) -> AsyncStats:
-        start = time.time()
-        # daemon: a run that overruns max_seconds must not block interpreter exit.
-        agg_thread = threading.Thread(target=self._aggregator_loop, name="aggregator",
-                                      daemon=True)
-        worker_threads = [
-            threading.Thread(target=self._worker_loop, args=(w,), name=w.worker_id,
-                             daemon=True)
-            for w in self.workers
-        ]
-        agg_thread.start()
-        for t in worker_threads:
-            t.start()
+        timeline: List[Tuple[int, float]] = []
 
-        # main thread enforces the wall-clock safety bound.
-        while not self._stop.is_set():
-            if time.time() - start > self.cfg.max_seconds:
-                self._stop.set()
-                break
-            time.sleep(0.01)
+        def factory(ledger, verifier, audit, config, policy):
+            self.verifier = verifier
+            if self._aggregator_factory is not None:
+                self.aggregator = self._aggregator_factory(
+                    ledger, verifier, audit, config, policy)
+            else:
+                self.aggregator = Aggregator(ledger, verifier, audit, config,
+                                             staleness_policy=policy)
+            return self.aggregator
 
-        for t in worker_threads:
-            t.join(timeout=2.0)
-        agg_thread.join(timeout=2.0)
+        def on_round(info) -> None:
+            if info.committed:
+                timeline.append((info.round, info.held_out_reward))
 
-        if self.stats.error is None:
-            # Confirmation takes promote_after_k rounds and this loop can stop the
-            # instant target_accuracy is hit, so publish the head the run produced.
-            self.aggregator.finalize()
-        self.stats.wallclock = time.time() - start
-        self.stats.final_dev_accuracy = self._dev_accuracy()
-        self.stats.final_stable_accuracy = self._stable_accuracy()
-        self.stats.oracle_used = self.verifier.budget.oracle_calls_used
+        self.result = async_evolve(
+            self._train_tasks + self._held_tasks,
+            router_reward,
+            run=self._rollout,
+            propose=router_propose(self.universe.gold, noise=self.cfg.noise,
+                                   seed=self.cfg.seed),
+            strategy=self.strategy,
+            artifact_id=self.skill_id,
+            n_workers=self.cfg.n_workers,
+            async_ratio=self.cfg.async_ratio,
+            max_seconds=self.cfg.max_seconds,
+            target_reward=self.cfg.target_accuracy,
+            held_out_frac=cluster_split_frac(self._train_tasks, self._held_tasks),
+            repo_path=self._repo_path,
+            agg_config=self.agg_config,
+            staleness_policy=self.staleness_policy,
+            aggregator_factory=factory,
+            oracle_budget=self.cfg.oracle_budget,
+            stall_patience=self.cfg.stall_patience,
+            duration_estimator=self.estimator,
+            straggler_factor=self.cfg.duration_timeout_factor,
+            self_verify=self.cfg.self_verify,
+            solved_threshold=0.999,
+            seed=self.cfg.seed,
+            on_round=on_round,
+        )
+
+        r = self.result
+        self.stats = AsyncStats(
+            rollouts=r.rollouts,
+            # Cards produced. `stale_considered` counts every card the staleness
+            # gate saw, which is one per proposal.
+            proposals=r.stale_considered,
+            sweeps=len(r.history),
+            commits=sum(h.committed for h in r.history),
+            fused=sum(h.fused for h in r.history),
+            discarded_stale=r.stale_discarded,
+            conflicts_dropped=sum(h.conflicts_dropped for h in r.history),
+            forced_refreshes=r.forced_refreshes,
+            stragglers_checkpointed=r.stragglers,
+            retired_workers=r.retired_workers,
+            oracle_used=(self.verifier.budget.oracle_calls_used
+                         if self.verifier is not None else 0),
+            final_dev_accuracy=self._accuracy_on(Ledger.DEV),
+            final_stable_accuracy=self._accuracy_on(Ledger.STABLE),
+            # The engine's own clock, which starts after the ledger, verifier
+            # and aggregator are built. Timing from the top of this method
+            # instead put that setup inside the window, and since it is a fixed
+            # cost it depressed the low-worker rows hardest -- which reads as
+            # superlinear speedup. Measured: 8 workers came out at 8.5-9.4x
+            # against a true ~8.1x.
+            wallclock=r.wallclock,
+            error=r.error,
+            timeline=timeline,
+        )
         return self.stats

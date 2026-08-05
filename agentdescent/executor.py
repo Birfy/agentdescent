@@ -77,6 +77,17 @@ class Executor(Protocol):
 
     def shutdown(self, grace: float = 5.0) -> None: ...
 
+    def rollout(self, spec: RolloutSpec) -> Result:
+        """One rollout, wherever this executor runs them.
+
+        The engine's round body already has its own concurrency -- a thread per
+        worker unit under a semaphore -- and the work either side of the rollout
+        (choosing the task, turning an output into a diff, handing it to the
+        aggregator) touches state that has to stay in this process. So the seam
+        is the rollout itself, not the batch: routing one at a time is what lets
+        `run` move to another process without moving the control plane with it.
+        """
+
 
 class ThreadExecutor:
     """The default: a bounded pool of threads in this process.
@@ -155,6 +166,39 @@ class ThreadExecutor:
             t.start()
         for _ in specs:
             yield done.get()
+
+    def attach_meter(self, meter: Meter) -> None:
+        """Report into this run's counters.
+
+        A supplied executor is built before the engine exists, so it has no
+        meter -- and then `rollouts` reads zero for the configuration whose whole
+        point was to move rollouts somewhere else. The same shape of mistake the
+        evaluation cache made, in the next seam along."""
+        self.meter = meter
+
+    def attach_actors(self, run: Callable[[str, Any], str],
+                      reward: Callable[[Any, str], float]) -> None:
+        """Take the run's actors directly, rather than from the spec.
+
+        Same reason as `attach_meter`: an executor passed to `evolve()` was built
+        before the run existed, so it has neither. Without this it would fall
+        back to resolving the spec's `Ref`s -- and `evolve()` is handed its actors
+        as closures, which have no name to resolve, so every rollout would fail
+        for a reason that has nothing to do with the caller's code.
+
+        Only in-process executors can accept this. A closure does not cross a
+        boundary, which is the whole reason `workspec` exists.
+
+        `evolve()`'s actors **win** over any passed to the constructor. Which
+        actor a rollout uses would otherwise depend on how the executor happened
+        to be built, which is not something a reader of the `evolve()` call can
+        see.
+        """
+        self._run, self._reward = run, reward
+
+    def rollout(self, spec: RolloutSpec) -> Result:
+        """One rollout in this process. Same path `map_rollouts` takes."""
+        return self._one(spec)
 
     def shutdown(self, grace: float = 5.0) -> None:
         """Release anything still held. Idempotent.

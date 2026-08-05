@@ -341,6 +341,47 @@ def test_the_async_path_honours_the_same_bundle():
                      policies=Policies(sandbox_provider=object()))
 
 
+def test_the_async_path_refuses_an_executor_it_would_otherwise_ignore():
+    """The barrier-free loop has no executor seam: its worker calls `eng.run`.
+
+    Both engines shared one `_WIRED_POLICIES` tuple, so `executor` was declared
+    supported for a loop that never reads it -- accepted and dropped, which is the
+    single outcome `require_supported` exists to prevent. It matters more since a
+    supplied executor started working under `evolve()`: flipping
+    `asynchronous=True` would silently stop honouring it.
+    """
+    from agentdescent import async_evolve
+    from agentdescent.executor import ThreadExecutor
+
+    ex = ThreadExecutor(2, run=lambda r, t: "x", reward=lambda t, o: 0.0)
+    try:
+        with pytest.raises(NotImplementedError, match="executor"):
+            async_evolve(_tasks(), lambda t, o: 0.0, run=lambda r, t: "x",
+                         propose=lambda r, t, o, s: None, max_iters=1,
+                         policies=Policies(executor=ex))
+    finally:
+        ex.shutdown()
+
+
+def test_the_sync_path_still_honours_an_executor():
+    """The other half: narrowing the async set must not narrow evolve()'s."""
+    from agentdescent.executor import ThreadExecutor
+
+    seen = []
+
+    class Counting(ThreadExecutor):
+        def rollout(self, spec):
+            seen.append(spec.task.id)
+            return super().rollout(spec)
+
+    ex = Counting(2)
+    try:
+        _run_evolve(policies=Policies(executor=ex))
+    finally:
+        ex.shutdown()
+    assert seen, "evolve() stopped routing rollouts through a supplied executor"
+
+
 def test_a_multi_proposal_policy_is_refused_rather_than_truncated():
     """Keeping the first of k would make a sampling algorithm look like it ran
     when only a fraction of it did."""
