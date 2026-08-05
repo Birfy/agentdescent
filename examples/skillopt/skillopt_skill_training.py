@@ -57,7 +57,8 @@ from agentdescent.evolvable import Diff, EvidenceCard
 from agentdescent.evolution import EvolvingArtifact, Task, evolve, rule_id
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
-from examples._common import add_standard_args, completion_for, confirm
+from examples._common import (add_standard_args, completion_for, confirm,
+                              worker_count)
 
 SEARCHQA = ("lucadiliello/searchqa", "default")   # (dataset, config)
 Completion = Callable[[str], str]
@@ -509,6 +510,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> None:
     args = build_parser().parse_args(argv)
+    # --serial collapses this to the upstream algorithm's own semantics:
+    # one worker, nothing to merge. Applied to args so the printed plan,
+    # the cost estimate and the run cannot disagree about what ran.
+    args.minibatch = worker_count(args, args.minibatch)
 
     print("Algorithm: SkillOpt / ReflACT -- skill-document self-evolution")
     print("Dataset  : SearchQA (single-turn text QA, EM/F1)")

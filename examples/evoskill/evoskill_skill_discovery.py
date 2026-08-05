@@ -59,7 +59,7 @@ from agentdescent.treestrategy import FileTree
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
 from examples._common import (add_standard_args, completion_for, confirm,
-                              is_openai_compatible)
+                              is_openai_compatible, worker_count)
 
 RAW = "https://raw.githubusercontent.com/sentient-agi/EvoSkill/main/examples/officeqa/data"
 Completion = Callable[[str], str]
@@ -655,7 +655,8 @@ def run_evoskill(complete: Completion, docs: Dict[str, str],
                  max_frontier: int = 5, seed: int = 0, asynchronous: bool = False,
                  async_ratio: int = 3, max_seconds: float = 30.0, backend=None,
                  eval_concurrency: int = 8, batch_size: int = 4, val_every: int = 3,
-                 eval_at_end: bool = False, verbose: bool = False) -> EvoResult:
+                 eval_at_end: bool = False, max_workers: int = 3,
+                 verbose: bool = False) -> EvoResult:
     """Drive EvoSkill through `evolve()` (`val` is the held-out frontier metric).
 
     ``backend`` (an :class:`~agentdescent.backends.AgentBackend`) replaces the passive
@@ -698,7 +699,10 @@ def run_evoskill(complete: Completion, docs: Dict[str, str],
         cls = SgdSkillAggregator if asynchronous else TopKFrontierAggregator
         return cls(ledger, verifier, ctx, artifact_id="skill_library")
 
-    workers = min(3, len(train))
+    # `max_workers` is the ceiling `--serial` lowers to 1; the shard size is
+    # still bounded by the data, because a worker with an empty shard is not a
+    # worker.
+    workers = min(max_workers, len(train))
     result = evolve(tasks, reward, run=run, propose=make_propose(ctx, complete),
                     strategy=SkillLibraryTree(), blast_radius=0.2,
                     artifact_id="skill_library", rounds=iterations,
@@ -807,17 +811,22 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> None:
     args = build_parser().parse_args(argv)
+    # --serial collapses this to the upstream algorithm's own semantics:
+    # one worker, nothing to merge. Applied to args so the printed plan,
+    # the cost estimate and the run cannot disagree about what ran.
+    args.workers = worker_count(args, 3)
 
     print("Algorithm: EvoSkill -- failure-driven skill discovery (top-K frontier)")
     print(f"Dataset  : selection={args.dataset} (OfficeQA preferred; FinQA fallback)")
     print(f"\nPlan     : model={args.model}, iterations={args.iterations}, "
           f"frontier={args.frontier}")
     if args.asynchronous:
-        print(f"Async    : up to 3 workers, barrier-free (async_ratio={args.async_ratio}, "
+        print(f"Async    : up to {args.workers} workers, barrier-free "
+              f"(async_ratio={args.async_ratio}, "
               f"max {args.max_seconds:.0f}s); the frontier rebases/discards stale skills")
     else:
-        print("Parallel : up to 3 workers run concurrently each round "
-              "(synchronous DP; the frontier merge is the barrier)")
+        print(f"Parallel : up to {args.workers} worker(s) run concurrently each "
+              "round (synchronous DP; the frontier merge is the barrier)")
     if args.dry_run:
         print("Data     : deferred (dry-run performs no network access)")
         print("\n[dry-run] plan only; no dataset or model API was accessed.")
@@ -835,7 +844,7 @@ def main(argv=None) -> None:
     print("  A:", ds.train[0]["answer"], f"(difficulty={ds.train[0]['difficulty']})")
 
     calls = args.iterations * (3 + 2 + nva) + nte
-    print(f"Workers  : dataset provides {min(3, ntr)} active workers")
+    print(f"Workers  : dataset provides {min(args.workers, ntr)} active workers")
     print(f"Budget   : up to ~{calls} model calls")
 
     if not confirm(args):
@@ -875,7 +884,8 @@ def main(argv=None) -> None:
     result = run_evoskill(completion, docs, ds.train, ds.val, iterations=args.iterations,
                           max_frontier=args.frontier, seed=args.seed,
                           asynchronous=args.asynchronous, async_ratio=args.async_ratio,
-                          max_seconds=args.max_seconds, backend=backend, verbose=True)
+                          max_seconds=args.max_seconds, backend=backend,
+                          max_workers=args.workers, verbose=True)
 
     test_score = evaluate(completion, docs, result.skills, ds.test, backend=backend)
     print("\n=== discovered skill library ===")

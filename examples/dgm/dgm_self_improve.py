@@ -67,7 +67,8 @@ from agentdescent.evolvable import Diff, EvidenceCard
 from agentdescent.evolution import EvolvingArtifact, Task, evolve
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
-from examples._common import add_standard_args, completion_for, confirm
+from examples._common import (add_standard_args, completion_for, confirm,
+                              worker_count)
 
 SWEBENCH = ("princeton-nlp/SWE-bench_Verified", "test", "default")   # (dataset, split, config)
 
@@ -441,6 +442,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> None:
     args = build_parser().parse_args(argv)
+    # --serial collapses this to the upstream algorithm's own semantics:
+    # one worker, nothing to merge. Applied to args so the printed plan,
+    # the cost estimate and the run cannot disagree about what ran.
+    args.selfimprove_size = worker_count(args, args.selfimprove_size)
 
     print("Algorithm: Darwin Godel Machine (DGM) -- harness self-evolution")
     print("Dataset  : SWE-bench Verified (real instance ids; surrogate objective)")

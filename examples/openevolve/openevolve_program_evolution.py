@@ -59,6 +59,7 @@ from examples._common import (
     add_standard_args,
     completion_for,
     confirm,
+    worker_count,
     is_openai_compatible,
 )
 from examples.openevolve._openevolve_support import (
@@ -878,7 +879,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     add_standard_args(parser, model_default="glm-5.2", max_seconds_default=300.0)
     parser.set_defaults(provider="openai", async_ratio=1)
-    parser.add_argument("--serial", action="store_true", help="disable within-round concurrency")
     parser.add_argument("--iterations", type=int, default=6)
     parser.add_argument("--workers", type=int, default=3)
     parser.add_argument("--tasks", type=int, default=12)
@@ -913,8 +913,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[Iterable[str]] = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.serial and args.asynchronous:
-        raise ValueError("--serial and --async are mutually exclusive")
+    # --serial collapses this to the upstream algorithm's own semantics:
+    # one worker, nothing to merge. Applied to args so the printed plan,
+    # the cost estimate and the run cannot disagree about what ran.
+    args.workers = worker_count(args, args.workers)
     mode = "async" if args.asynchronous else ("serial" if args.serial else "sync")
     print("Algorithm: OpenEvolve program evolution on AgentDescent")
     print("Evaluator: pinned function-minimization combined score, Bubblewrap isolated")

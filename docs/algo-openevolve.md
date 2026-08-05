@@ -78,9 +78,19 @@ python -m examples.openevolve.openevolve_program_evolution \
   --provider glm --model glm-5.2 --iterations 6 --workers 3 --yes
 ```
 
-Add `--async` for the barrier-free engine or `--serial` for a one-worker
-concurrency baseline. `OPENAI_API_KEY` and `OPENAI_BASE_URL` must be set for the
-`glm` provider.
+Add `--async` for the barrier-free engine, or `--serial` for the upstream serial
+algorithm. `OPENAI_API_KEY` and `OPENAI_BASE_URL` must be set for the `glm`
+provider.
+
+!!! note "`--serial` and the benchmark's `serial` row are two different baselines"
+    `--serial` is the [shared port flag](self-evolution-examples.md#the-shared-command-line):
+    **one worker**, so there is nothing to merge and the loop is the published
+    one. The benchmark table below has a row also called `serial`, and it means
+    something narrower — `evolve(max_concurrency=1)` with the full three workers,
+    i.e. the same algorithm run without thread concurrency. That row isolates
+    threading; the flag isolates merging. The benchmark reaches its mode directly
+    through `run_agentdescent_openevolve(mode="serial", workers=3)`, so the two
+    are independent and the recorded numbers below are unaffected by the flag.
 
 ## Live benchmark method
 

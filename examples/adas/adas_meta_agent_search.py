@@ -61,7 +61,7 @@ from agentdescent.evolution import EvolvingArtifact, Task, evolve, rule_id
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
 from examples._common import (add_standard_args, completion_for, confirm,
-                              is_openai_compatible)
+                              is_openai_compatible, worker_count)
 
 MGSM_URL = "https://raw.githubusercontent.com/ShengranHu/ADAS/main/dataset/mgsm/mgsm_{lang}.tsv"
 # ADAS's MGSM language set (utils.ALL_LANGUAGES).
@@ -1015,6 +1015,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None) -> None:
     p = build_parser()
     args = p.parse_args(argv)
+    # --serial collapses this to the upstream algorithm's own semantics:
+    # one worker, nothing to merge. Applied to args so the printed plan,
+    # the cost estimate and the run cannot disagree about what ran.
+    args.workers = worker_count(args, args.workers)
 
     langs = [l.strip() for l in args.langs.split(",") if l.strip() in ALL_LANGUAGES]
     # `not` binds tighter than `and`, so the guard needs its own parentheses --

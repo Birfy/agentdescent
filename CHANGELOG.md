@@ -30,6 +30,18 @@ All notable changes to AgentDescent are documented here. The format follows
   that fell below the baseline rather than merely below the best single diff.
   `win_rate` is `None` when nothing was contested, so a mechanism that never ran
   cannot be read as one that always lost.
+- `--serial` on every algorithm port — the eighth shared flag, and the control
+  they were all missing. Each port parallelises an algorithm published as a serial
+  loop, and none of them could run that loop, so every parallelisation claim here
+  was one-armed. `examples._common.worker_count` honours it (one worker, nothing
+  to merge) and refuses `--serial --async`, which would be a one-worker
+  *asynchronous* run — staleness in the control arm.
+
+### Changed
+
+- OpenEvolve's `--serial` now means the shared thing (one worker) rather than
+  `max_concurrency=1` with three. Its benchmark's `serial` mode is untouched and
+  still isolates threading; `docs/algo-openevolve.md` states the difference.
 
 ## [0.4.0] — 2026-08-05
 

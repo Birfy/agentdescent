@@ -58,7 +58,8 @@ from agentdescent.evolution import EvolvingArtifact, LLMAgent, Task, evolve, rul
 from agentdescent.governance import classify
 from agentdescent.parallel import DataParallel
 from agentdescent.sampling import DifficultyWeighted, RoundRobin
-from examples._common import add_standard_args, completion_for, confirm
+from examples._common import (add_standard_args, completion_for, confirm,
+                              worker_count)
 
 FINER = ("nlpaueb/finer-139", "validation", "finer-139")   # (dataset, split, config)
 
@@ -303,6 +304,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> None:
     args = build_parser().parse_args(argv)
+    # --serial collapses this to the upstream algorithm's own semantics:
+    # one worker, nothing to merge. Applied to args so the printed plan,
+    # the cost estimate and the run cannot disagree about what ran.
+    args.workers = worker_count(args, args.workers)
 
     print("Algorithm: ACE (Agentic Context Engineering) -- skill/context self-evolution")
     print("Dataset  : FiNER-139 (financial XBRL tagging)")

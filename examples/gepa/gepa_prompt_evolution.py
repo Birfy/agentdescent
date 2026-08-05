@@ -55,7 +55,8 @@ from agentdescent.evolvable import Diff, EvidenceCard
 from agentdescent.evolution import EvolvingArtifact, LLMAgent, Task, evolve, rule_id
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
-from examples._common import add_standard_args, completion_for, confirm
+from examples._common import (add_standard_args, completion_for, confirm,
+                              worker_count)
 
 HOTPOTQA = ("hotpotqa/hotpot_qa", "validation", "distractor")   # (dataset, split, config)
 
@@ -398,6 +399,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> None:
     args = build_parser().parse_args(argv)
+    # --serial collapses this to the upstream algorithm's own semantics:
+    # one worker, nothing to merge. Applied to args so the printed plan,
+    # the cost estimate and the run cannot disagree about what ran.
+    args.workers = worker_count(args, args.workers)
 
     print("Algorithm: GEPA (Reflective Prompt Evolution) -- skill/prompt self-evolution")
     print("Dataset  : HotpotQA (multi-hop QA, distractor), exact-match")

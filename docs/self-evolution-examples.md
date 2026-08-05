@@ -45,6 +45,36 @@ python -m examples.ace.ace_context_evolution --model claude-haiku-4-5 --async   
 | **DGM** (Darwin Gödel Machine) | chendanyang | harness (L1) | SWE-bench Verified | `strategy` + `aggregator_factory=` archive + selection | [→](algo-dgm.md) |
 | **OpenEvolve** (Program Evolution) | cyanneko | program (L1) | Function minimization | `strategy` + `aggregator_factory=` MAP-Elites islands | [→](algo-openevolve.md) |
 
+### The shared command line
+
+Eight flags have one definition, in
+[`examples/_common.py`](https://github.com/Birfy/agentdescent/blob/main/examples/_common.py),
+and the behaviour behind each lives there too — a flag declared centrally and
+honoured locally is how a port grows a `--yes` it never reads.
+
+| flag | what it does | honoured by |
+|---|---|---|
+| `--provider` / `--model` | pick Claude or any OpenAI-compatible endpoint | `completion_for` |
+| `--seed` | the run's seed | the port |
+| `--async` / `--async-ratio` / `--max-seconds` | barrier-free runtime and its lag budget | the port |
+| `--dry-run` | print the plan; zero network, zero API key | the port's early return |
+| `--yes` | skip the confirmation before real API calls | `confirm` |
+| `--serial` | **the upstream algorithm's own semantics**: one worker, nothing to merge | `worker_count` |
+
+The iteration count is deliberately *not* standardised: `--rounds` (ACE, GEPA),
+`--generations` (ADAS, DGM), `--iterations` (EvoSkill, OpenEvolve) and `--steps`
+(SkillOpt) each keep their upstream vocabulary, which is part of being a faithful
+port.
+
+`--serial` is the control every one of these ports was missing. They all
+parallelise an algorithm that was published as a serial loop, and until this flag
+existed none of them could run that loop — so every claim about parallelising
+them had no baseline in the repository at all. It is refused together with
+`--async`: the barrier-free runtime's concurrency *is* `n_workers`, so
+`--serial --async` is a one-worker *asynchronous* run whose diffs can still go
+stale against a moved head, and staleness in the control arm is the one thing a
+control must not have.
+
 Every example takes `--dry-run`, which prints its configuration and returns with
 **zero network access and no API key**, and has an offline test suite
 (`tests/test_<name>_example.py`) exercising its pure logic. Ports that need an
