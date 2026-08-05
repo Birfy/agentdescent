@@ -6,6 +6,30 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **The OpenEvolve port joined the examples tree without joining the entrypoint
+  contract, and `main` went red on the guard test written for exactly that.**
+  `test_ports_table_covers_every_standardised_entrypoint` globs the examples
+  directory for anything calling `add_standard_args` and demands it appear in
+  `PORTS`; the port called the helper and never appeared, so the seventh entry
+  was missing and the assertion failed on every push.
+
+  The table was the smaller half of it. The port had also grown its own copies
+  of two things `examples/_common.py` already owns: a `_make_completion` that
+  branched on `provider in ("openai", "glm")` itself, and an inline
+  `input("Proceed with paid model calls? [y/N] ")`. Both are what
+  `test_no_port_reimplements_the_shared_behaviour` exists to catch — it just
+  never ran on this module, because the module was not in the table. Adding the
+  row without the cleanup would have traded a red gate for a silent exemption.
+
+  `_make_completion` now dispatches through `completion_for()` and assembles
+  only the genuinely one-sided option (GLM `thinking`), the prompt is
+  `confirm(args)`, and `PORTS` became a `NamedTuple` whose `provider` and
+  `async_ratio` carry the shared defaults. That last part is what keeps the
+  entry honest: OpenEvolve really is measured on an OpenAI-compatible GLM
+  endpoint with a lag budget of 1, so the deviation is now written down in the
+  row rather than expressed by staying out of the table.
+
 ### Added
 - **A test that runs the container execution chain end to end**, and the first
   time `sandbox_container.py` has been exercised against a real engine at all.

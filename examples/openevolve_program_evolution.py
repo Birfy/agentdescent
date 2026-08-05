@@ -41,7 +41,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from agentdescent.agents import Completion, Usage, claude, openai_compatible
+from agentdescent.agents import Completion, Usage
 from agentdescent.aggregator import (
     AggregatorConfig,
     AggregatorProtocol,
@@ -55,7 +55,12 @@ from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
 from agentdescent.staleness import StaleAction, get_policy
 
-from examples._common import add_standard_args
+from examples._common import (
+    add_standard_args,
+    completion_for,
+    confirm,
+    is_openai_compatible,
+)
 from examples._openevolve_support import (
     INITIAL_PROGRAM,
     UPSTREAM_COMMIT,
@@ -87,27 +92,26 @@ def _require_api_environment(provider: str) -> None:
 
 
 def _make_completion(args: argparse.Namespace, usage: Usage) -> Completion:
-    if args.provider in ("openai", "glm"):
-        options: Dict[str, Any] = {}
-        if (
-            args.thinking != "default"
-            and (args.provider == "glm" or args.model.lower().startswith("glm"))
-        ):
-            options["thinking"] = {"type": args.thinking}
-        return openai_compatible(
-            model=args.model,
-            usage=usage,
-            max_tokens=args.max_tokens,
-            timeout=args.api_timeout,
-            temperature=args.temperature,
-            **options,
-        )
-    return claude(
-        model=args.model,
+    """Dispatch through the shared helper, branching only for the GLM extra.
+
+    ``thinking`` is one-sided -- it reaches an OpenAI-compatible GLM endpoint and
+    nothing else -- so it is the one option assembled here rather than passed to
+    both factories, exactly as ADAS does for its OpenAI-only ``--timeout``.
+    """
+    options: Dict[str, Any] = {}
+    if (
+        is_openai_compatible(args)
+        and args.thinking != "default"
+        and (args.provider == "glm" or args.model.lower().startswith("glm"))
+    ):
+        options["thinking"] = {"type": args.thinking}
+    return completion_for(
+        args,
         usage=usage,
         max_tokens=args.max_tokens,
         timeout=args.api_timeout,
         temperature=args.temperature,
+        **options,
     )
 
 
@@ -928,11 +932,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         return 0
 
     _require_api_environment(args.provider)
-    if not args.yes and sys.stdin.isatty():
-        answer = input("Proceed with paid model calls? [y/N] ").strip().lower()
-        if answer not in ("y", "yes"):
-            print("aborted.")
-            return 0
+    if not confirm(args):
+        return 0
 
     model_usage = Usage()
     actor_usage = Usage()
