@@ -37,6 +37,16 @@ All notable changes to AgentDescent are documented here. The format follows
   to merge) and refuses `--serial --async`, which would be a one-worker
   *asynchronous* run — staleness in the control arm.
 
+- `agentdescent.selection` — the decision `Policies` was missing: **which
+  candidate the next batch of workers starts from**. `SingleHead` is the default
+  and reproduces the current run exactly (asserted against a full run, not
+  described); `Beam`, `ParetoFrontier(mode="per_instance"|"topk_aggregate")`,
+  `Archive(sampling=...)` and `MCTS` are the ports' hand-written rules, as
+  arguments. Selection is *under* merging, not instead of it: one selected
+  starting point still has N/k workers merging diffs into it. A policy that names
+  a starting point other than the head raises rather than being collapsed to it —
+  the ledger holds one live branch, and multi-head support is separate work.
+
 ### Changed
 
 - OpenEvolve's `--serial` now means the shared thing (one worker) rather than

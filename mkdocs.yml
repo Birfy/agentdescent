@@ -61,6 +61,7 @@ nav:
     - Sandboxes: sandboxes.md
     - Async — no round barrier: async.md
     - Task sampling: sampling.md
+    - Candidate selection: selection.md
     - Duration-aware scheduling: duration-scheduling.md
   - API reference: api.md
   - Run everything, and extend it: usage.md

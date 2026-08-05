@@ -51,6 +51,7 @@ if TYPE_CHECKING:                                   # pragma: no cover
     from .evaluator import EvaluatorGroup
     from .evolvable import Diff, EvidenceCard, Evolvable
     from .sampling import TaskSampler
+    from .selection import SelectionPolicy
     from .staleness import StalenessPolicy
     from .stats import BetaPosterior
 
@@ -422,6 +423,10 @@ class Policies:
 
     # the algorithm
     task_sampler: Optional["TaskSampler"] = None
+    #: Which candidate the next batch of workers starts from. `None` is
+    #: :class:`~agentdescent.selection.SingleHead` -- the current head, for every
+    #: worker, which is what the engine has always done.
+    selection: Optional["SelectionPolicy"] = None
     proposal: Optional[ProposalPolicy] = None
     conflict: Optional[ConflictPolicy] = None
     fusion: Optional[FusionPolicy] = None

@@ -8,7 +8,7 @@ page and the code disagree, so a signature here is the signature you get.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-177 public names across 31 modules.
+186 public names across 32 modules.
 
 ---
 
@@ -585,6 +585,48 @@ Chooses the next task id for a worker, and learns from the outcome.
 |---|---|
 | `pick(keys: Sequence[str], round_index: int) -> str` | Return one task id from `keys` (never mutate `keys`). |
 | `record(task_id: str, score: float) -> None` | Report the reward a rollout of `task_id` achieved (0..1). |
+
+---
+
+## Candidate selection
+
+Which candidate the next batch of workers starts from. &nbsp;·&nbsp; `agentdescent.selection` &nbsp;·&nbsp; [guide](selection.md)
+
+### `Archive(sampling: str = 'novelty', temperature: float = 1.0, seed: int = 0) -> None`
+
+DGM's and ADAS's archive sampling: performance, tempered by novelty.
+
+### `Beam(k: int = 1) -> None`
+
+Keep the `k` best-scoring candidates and spread the workers over them.
+
+### `Candidate(...)`
+
+One starting point the next batch could be launched from.
+
+### `MCTS(exploration: float = 1.4) -> None`
+
+UCT over the candidate tree: one evolve step is one rollout.
+
+### `ParetoFrontier(mode: str = 'per_instance', k: int = 5) -> None`
+
+GEPA's and EvoSkill's selection rules, as one class and one argument.
+
+### `SelectionContext(...)`
+
+What a `SelectionPolicy` is allowed to look at.
+
+### `SelectionPolicy`
+
+Given the candidates, return the `n` starting points for the next batch.
+
+### `SingleHead()`
+
+Every worker starts from the current head. Today's behaviour, exactly.
+
+### `pareto_front(candidates: Sequence[Candidate], *, tasks: Sequence[str]) -> List[Candidate]`
+
+Candidates no other candidate beats on every task and betters on one.
 
 ---
 

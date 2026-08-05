@@ -54,6 +54,7 @@ from .metrics import Meter, measured
 from .pipeline import EarlyStop, FirstError, WorkerHealth
 from .policies import FusionTrial, Policies
 from .sampling import RoundRobin, TaskSampler
+from .selection import SingleHead
 from .scheduler import AuditScheduler
 from .staleness import StalenessPolicy
 
@@ -651,8 +652,8 @@ def _publish_stable(aggregator) -> None:
 #: What `evolve` can honour from a `Policies` bundle today. Everything else
 #: raises rather than being accepted and ignored -- see
 #: `Policies.require_supported`. The set grows as the implementations land.
-_WIRED_POLICIES = ("task_sampler", "proposal", "conflict", "fusion", "acceptance",
-                   "promotion", "staleness", "verifier", "ledger",
+_WIRED_POLICIES = ("task_sampler", "selection", "proposal", "conflict", "fusion",
+                   "acceptance", "promotion", "staleness", "verifier", "ledger",
                    "aggregator_factory", "eval_cache", "sandbox_spec", "evaluator",
                    "executor")
 
@@ -794,6 +795,45 @@ def _fusion_trials(aggregator) -> List[FusionTrial]:
     :meth:`EvolutionResult.fusion_stats` reports the count so an uninstrumented
     policy cannot be misread as a mechanism that never fired."""
     return list(getattr(getattr(aggregator, "fusion_policy", None), "trials", ()))
+
+
+def _check_selection(policy, artifact_id, artifact, base_v, round_index,
+                     n_workers, history) -> None:
+    """Ask the selection policy where the next batch starts, and check we can go.
+
+    The engine has one live head. `SingleHead` -- the default -- returns it for
+    every worker, so this is a no-op on the default path and the whole point is
+    that it stays one: the seam exists before the ledger can express what a
+    non-default policy would ask for.
+
+    A policy that names a *different* starting point is refused, loudly, rather
+    than collapsed to the head. Silently ignoring it is the failure mode
+    `Policies.require_supported` was written against: a caller who passes a beam
+    and watches a run finish has every reason to believe the beam ran. Refusing
+    also means every policy in `agentdescent.selection` is usable today in its
+    degenerate, single-candidate shape -- ``Beam(1)``, an archive of one -- and
+    only genuinely multi-head requests fail.
+    """
+    from .selection import Candidate, SelectionContext
+
+    head = Candidate(
+        artifact_id=artifact_id, version=base_v,
+        state=dict(getattr(artifact, "state", {}) or {}),
+        # The last measured held-out reward, which is what any of these policies
+        # would rank on. `None` before the first round has been scored -- and the
+        # policies treat that as "unmeasured", not as zero.
+        score=history[-1].held_out_reward if history else None,
+        selected=round_index)
+    ctx = SelectionContext(head=head, candidates=(head,), round=round_index,
+                           n_workers=n_workers)
+    chosen = list(policy.select(ctx, n_workers))
+    if any(c.version != base_v or c.artifact_id != artifact_id for c in chosen):
+        raise NotImplementedError(
+            f"{type(policy).__name__}.select() asked to start from a candidate "
+            f"other than the current head, and the ledger holds one live branch: "
+            "`dev`, with staleness defined as eta = max(head - base). Multi-head "
+            "support is a separate change; until then a selection policy may only "
+            "return the head it was given.")
 
 
 def _cost_fields(meter: Meter) -> Dict[str, Any]:
@@ -2091,6 +2131,9 @@ def evolve(
     task_sampler, staleness_policy = _pol.task_sampler, _pol.staleness
     aggregator_factory = _pol.aggregator_factory
     sampler = task_sampler or RoundRobin()
+    # Where the next batch starts. `SingleHead` is the current head for every
+    # worker, i.e. exactly what this loop has always done.
+    selection = _pol.selection or SingleHead()
     strategy = strategy or AppendRules()
     # TP owns a *section of the artifact*, so it needs the artifact's key space --
     # not the task ids `plan()` is handed. Resolve and validate it here, before any
@@ -2196,6 +2239,8 @@ def evolve(
         artifact = snap.get(artifact_id)
         base_v = snap.version.get(artifact_id, 0)
         assert_mutable(artifact)
+        _check_selection(selection, artifact_id, artifact, base_v, r, n_workers,
+                         history)
         ok_units, failed_units = [0], [0]      # this round's tally
 
         def _snapshot_for(worker: int):

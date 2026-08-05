@@ -73,6 +73,8 @@ SECTIONS: List[Tuple[str, str, str, str]] = [
      "How a round's work is split across workers: DP / TP / PP.", "parallelism.md"),
     ("agentdescent.sampling", "Task sampling",
      "Which task a worker rolls out next.", "sampling.md"),
+    ("agentdescent.selection", "Candidate selection",
+     "Which candidate the next batch of workers starts from.", "selection.md"),
     ("agentdescent.scheduler", "Scheduling and audits",
      "Duration-aware dispatch, straggler handling, and the oracle audit queue.",
      "duration-scheduling.md"),

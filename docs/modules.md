@@ -59,6 +59,7 @@ and *how*, that is *what*.
 |---|---|---|
 | `parallel` | DP / TP / PP — how a round's work is split | [Parallelism](parallelism.md) |
 | `sampling` | which task a worker rolls out next | [Sampling](sampling.md) |
+| `selection` | which candidate the next batch starts from | [Selection](selection.md) |
 | `scheduler` | duration-aware dispatch, stragglers, the audit queue | [Scheduling](duration-scheduling.md) |
 | `pipeline` | the retirement, early-stop and backpressure rules both runtimes share | [Async](async.md) |
 

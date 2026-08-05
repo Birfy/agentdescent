@@ -30,6 +30,17 @@ from .verifier import ThreeLayerVerifier, VerifierBudget
 from . import backends, dataloader          # submodules: agentdescent.dataloader.hf_rows(...)
 from .dataloader import Dataset, split_dataset
 from .sampling import DifficultyWeighted, RoundRobin, TaskSampler
+from .selection import (
+    Archive,
+    Beam,
+    Candidate,
+    MCTS,
+    ParetoFrontier,
+    SelectionContext,
+    SelectionPolicy,
+    SingleHead,
+    pareto_front,
+)
 from .scheduler import (
     AuditScheduler,
     DurationEstimator,
@@ -188,6 +199,15 @@ __all__ = [
     "DifficultyWeighted",
     "RoundRobin",
     "TaskSampler",
+    "SelectionPolicy",
+    "SelectionContext",
+    "Candidate",
+    "SingleHead",
+    "Beam",
+    "ParetoFrontier",
+    "Archive",
+    "MCTS",
+    "pareto_front",
     "ResumeQueue",
     "DurationEstimator",
     "lpt_schedule",
