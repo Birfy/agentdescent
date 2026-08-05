@@ -6,6 +6,26 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **A test that runs the container execution chain end to end**, and the first
+  time `sandbox_container.py` has been exercised against a real engine at all.
+  Ten of its tests carry `skipif engine_available(...)`, and every machine that
+  has run this suite skipped all ten -- the provider shipped, and stayed shipped,
+  without an engine ever seeing it.
+
+  What that hid is not in any one component. It is that `runners._sh` has to
+  notice `sandbox.exec_prefix()`, that the workspace has to appear at
+  `CONTAINER_WORKDIR`, and that a missing tool has to come back as a *scored*
+  failure rather than an exception. The new test materialises a candidate, runs
+  its frozen test suite inside the container, runs the entrypoint there, and
+  asserts a broken gate returns `TEST_FAILURE_MARKER` in-band.
+
+  It puts the workspace under `$HOME` rather than `$TMPDIR`, which is the fix the
+  provider's own error message gives: on macOS and Windows the engine runs in a
+  VM that shares only part of the host filesystem, and the system temp directory
+  is usually outside it. Reaching that message was the first thing a live run
+  found.
+
 ### Documentation
 - **The algorithm-port results table now says which rows survive a change of
   model, because two of them do not.** Every row was measured with
