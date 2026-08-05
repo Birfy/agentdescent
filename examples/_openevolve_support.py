@@ -1,45 +1,26 @@
-"""A compact OpenEvolve program-search experiment with sandboxed evaluation.
+"""Sandbox, evaluator, and mutation helpers for the OpenEvolve port.
 
-It keeps OpenEvolve's defining mechanics: Python source is the genome, an LLM
-proposes mutations from a parent plus archive inspirations, every candidate is
-executed by an external evaluator, and a quality-diversity archive supplies the
-next parents. Full-program rewrites are used instead of diffs because the genome
-is intentionally tiny.
+The public runnable example lives in :mod:`examples.openevolve_program_evolution`.
+Keeping the generated-code boundary here makes the AST gate and Bubblewrap
+runner independently testable without adding a second evolution loop.
 """
 
 from __future__ import annotations
 
-import argparse
 import ast
 import hashlib
 import json
 import math
 import os
-import random
 import re
-import resource
 import shutil
 import signal
 import subprocess
 import tempfile
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
-
-from agentdescent.agents import Usage
-
-from examples.textgrad_openevolve._common import (
-    EXAMPLE_DIR,
-    REPORT_DIR,
-    add_model_args,
-    confirm_paid_run,
-    make_completion,
-    require_api_environment,
-    usage_dict,
-    utc_now,
-    write_json,
-)
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 
 UPSTREAM_COMMIT = "411fb59c886c18704caaffb611e17cf9e7d824d2"
@@ -93,30 +74,6 @@ class Program:
     metrics: Dict[str, Any]
     valid: bool
     error: str = ""
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
-    add_model_args(parser, max_tokens=2048, temperature=0.7)
-    parser.add_argument("--iterations", type=int, default=6)
-    parser.add_argument("--trials", type=int, default=10)
-    parser.add_argument("--objective-budget", type=int, default=200)
-    parser.add_argument("--archive-size", type=int, default=12)
-    parser.add_argument("--islands", type=int, default=3)
-    parser.add_argument("--exploitation-ratio", type=float, default=0.7)
-    parser.add_argument("--candidate-timeout", type=float, default=15.0)
-    parser.add_argument("--max-code-length", type=int, default=20000)
-    parser.add_argument(
-        "--output",
-        type=Path,
-        default=REPORT_DIR / "openevolve-small-result.json",
-    )
-    parser.add_argument(
-        "--best-program",
-        type=Path,
-        default=EXAMPLE_DIR / "openevolve_best_program.py",
-    )
-    return parser
 
 
 def objective_value(x: float, y: float) -> float:
@@ -204,26 +161,14 @@ def _current_user_task_count() -> int:
     return total
 
 
-def _limit_candidate_process(timeout: float, nproc_limit: int):
-    def set_limits() -> None:
-        os.setsid()
-        cpu_seconds = max(2, int(math.ceil(timeout)))
-        resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds + 1))
-        resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024, 512 * 1024 * 1024))
-        resource.setrlimit(resource.RLIMIT_FSIZE, (1024 * 1024, 1024 * 1024))
-        resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
-        try:
-            # RLIMIT_NPROC counts every thread owned by this WSL user, including
-            # the editor and test runner. The parent computes a floor from the
-            # current host load so bwrap keeps a small, bounded creation budget.
-            resource.setrlimit(resource.RLIMIT_NPROC, (nproc_limit, nproc_limit))
-        except (ValueError, OSError):
-            pass
-
-    return set_limits
-
-
-def _bubblewrap_command(candidate: Path, trials: int, budget: int, seed: int) -> List[str]:
+def _bubblewrap_command(
+    candidate: Path,
+    trials: int,
+    budget: int,
+    seed: int,
+    timeout: float,
+    nproc_limit: int,
+) -> List[str]:
     bwrap = shutil.which("bwrap")
     if not bwrap:
         raise RuntimeError("Bubblewrap (bwrap) is required for candidate isolation")
@@ -268,6 +213,10 @@ def _bubblewrap_command(candidate: Path, trials: int, budget: int, seed: int) ->
             str(budget),
             "--seed",
             str(seed),
+            "--cpu-seconds",
+            str(max(2, int(math.ceil(timeout)))),
+            "--nproc-limit",
+            str(nproc_limit),
         )
     )
     return command
@@ -289,7 +238,14 @@ def _zero_metrics(error: str) -> Dict[str, Any]:
     }
 
 
-def official_metrics(trials: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+def combined_metrics(trials: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Compute the pinned upstream function-minimization fitness.
+
+    Formula and weights match OpenEvolve commit ``411fb59``
+    ``examples/function_minimization/evaluator.py`` lines 190-215: value 0.5,
+    distance 0.3, reliability 0.2, followed by the basin-distance multiplier.
+    That pinned evaluator has no speed term.
+    """
     successes = [trial for trial in trials if trial.get("success")]
     total = len(trials)
     if not successes or total == 0:
@@ -356,15 +312,17 @@ def evaluate_source(
     with tempfile.TemporaryDirectory(prefix="agentdescent-openevolve-") as directory:
         candidate = Path(directory) / "candidate.py"
         candidate.write_text(source, encoding="utf-8")
-        command = _bubblewrap_command(candidate, trials, budget, seed)
         nproc_limit = max(512, _current_user_task_count() + 64)
+        command = _bubblewrap_command(
+            candidate, trials, budget, seed, timeout, nproc_limit
+        )
         for sandbox_attempt in range(3):
             process = subprocess.Popen(
                 command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                preexec_fn=_limit_candidate_process(timeout, nproc_limit),
+                start_new_session=True,
             )
             try:
                 stdout, stderr = process.communicate(timeout=timeout)
@@ -397,7 +355,7 @@ def evaluate_source(
         error = str(payload.get("error") or "sandbox runner failed")
         return False, _zero_metrics(error), error, payload.get("trials", [])
     trial_rows = payload.get("trials", [])
-    metrics = official_metrics(trial_rows)
+    metrics = combined_metrics(trial_rows)
     valid = metrics["successful_trials"] > 0
     return valid, metrics, metrics.get("error", ""), trial_rows
 
@@ -425,27 +383,7 @@ def code_distance(left: str, right: str) -> float:
     return 1.0 - len(a & b) / len(a | b) if a or b else 0.0
 
 
-def prune_archive(programs: Sequence[Program], size: int) -> List[Program]:
-    valid = [program for program in programs if program.valid]
-    if len(valid) <= size:
-        return sorted(valid, key=lambda p: p.metrics["combined_score"], reverse=True)
-    ranked = sorted(valid, key=lambda p: p.metrics["combined_score"], reverse=True)
-    kept = [ranked.pop(0)]
-    while ranked and len(kept) < size:
-        max_score = max(program.metrics["combined_score"] for program in valid) or 1.0
-
-        def utility(program: Program) -> float:
-            quality = program.metrics["combined_score"] / max_score
-            diversity = min(code_distance(program.code, other.code) for other in kept)
-            return 0.75 * quality + 0.25 * diversity
-
-        choice = max(ranked, key=utility)
-        kept.append(choice)
-        ranked.remove(choice)
-    return sorted(kept, key=lambda p: p.metrics["combined_score"], reverse=True)
-
-
-def _mutation_prompt(
+def mutation_prompt(
     parent: Program,
     best: Program,
     inspiration: Program,
@@ -501,201 +439,5 @@ complete Python source
 <CHANGE_SUMMARY>one concise sentence</CHANGE_SUMMARY>'''
 
 
-def _program_id(code: str) -> str:
+def program_id(code: str) -> str:
     return hashlib.sha256(code.encode("utf-8")).hexdigest()[:16]
-
-
-def _serialize_program(program: Program, *, include_trials=None) -> Dict[str, Any]:
-    payload = asdict(program)
-    if include_trials is not None:
-        payload["trials"] = include_trials
-    return payload
-
-
-def run(args: argparse.Namespace) -> Dict[str, Any]:
-    if args.iterations < 1 or args.trials < 1 or args.objective_budget < 2:
-        raise ValueError("iterations/trials must be positive and objective-budget must be >= 2")
-    if args.archive_size < 1 or args.islands < 1:
-        raise ValueError("archive-size and islands must be positive")
-    if not 0.0 <= args.exploitation_ratio <= 1.0:
-        raise ValueError("exploitation-ratio must be in [0, 1]")
-    require_api_environment(args.provider)
-
-    started = time.monotonic()
-    started_at = utc_now()
-    usage = Usage()
-    completion = make_completion(args, usage)
-    rng = random.Random(args.seed)
-
-    initial_valid, initial_metrics, initial_error, initial_trials = evaluate_source(
-        INITIAL_PROGRAM,
-        trials=args.trials,
-        budget=args.objective_budget,
-        seed=args.seed,
-        timeout=args.candidate_timeout,
-        max_length=args.max_code_length,
-    )
-    if not initial_valid:
-        raise RuntimeError(f"initial program failed evaluation: {initial_error}")
-    initial = Program(
-        _program_id(INITIAL_PROGRAM),
-        0,
-        0,
-        None,
-        INITIAL_PROGRAM,
-        "uniform random search baseline",
-        initial_metrics,
-        True,
-    )
-    archive = [initial]
-    history = [_serialize_program(initial, include_trials=initial_trials)]
-
-    result: Dict[str, Any] = {
-        "experiment": "OpenEvolve-style function minimization",
-        "status": "running",
-        "started_at": started_at,
-        "upstream": {
-            "repository": "https://github.com/algorithmicsuperintelligence/openevolve",
-            "commit": UPSTREAM_COMMIT,
-            "example": "examples/function_minimization",
-        },
-        "config": {
-            "provider": args.provider,
-            "model": args.model,
-            "thinking": args.thinking,
-            "max_tokens": args.max_tokens,
-            "temperature": args.temperature,
-            "api_timeout": args.api_timeout,
-            "seed": args.seed,
-            "iterations": args.iterations,
-            "trials": args.trials,
-            "objective_budget": args.objective_budget,
-            "archive_size": args.archive_size,
-            "islands": args.islands,
-            "exploitation_ratio": args.exploitation_ratio,
-            "candidate_timeout": args.candidate_timeout,
-            "max_code_length": args.max_code_length,
-            "evolution_mode": "full-program rewrite",
-            "sandbox": "bubblewrap + no network + clear environment + rlimits + AST gate",
-        },
-        "baseline": history[0],
-        "history": history,
-    }
-    write_json(args.output, result)
-
-    for iteration in range(1, args.iterations + 1):
-        island = (iteration - 1) % args.islands
-        island_pool = [program for program in archive if program.island == island] or archive
-        if rng.random() < args.exploitation_ratio:
-            parent = max(island_pool, key=lambda program: program.metrics["combined_score"])
-        else:
-            parent = rng.choice(island_pool)
-        best = max(archive, key=lambda program: program.metrics["combined_score"])
-        inspiration = max(archive, key=lambda program: code_distance(parent.code, program.code))
-
-        raw = completion(
-            _mutation_prompt(
-                parent,
-                best,
-                inspiration,
-                iteration=iteration,
-                budget=args.objective_budget,
-                trials=args.trials,
-            )
-        ).strip()
-        code, summary = extract_program(raw)
-        valid, metrics, error, trials = evaluate_source(
-            code,
-            trials=args.trials,
-            budget=args.objective_budget,
-            seed=args.seed,
-            timeout=args.candidate_timeout,
-            max_length=args.max_code_length,
-        )
-        program = Program(
-            _program_id(code),
-            iteration,
-            island,
-            parent.program_id,
-            code,
-            summary,
-            metrics,
-            valid,
-            error,
-        )
-        history.append(_serialize_program(program, include_trials=trials))
-        if valid:
-            archive = prune_archive([*archive, program], args.archive_size)
-        best = max(archive, key=lambda item: item.metrics["combined_score"])
-        result.update(
-            {
-                "history": history,
-                "archive_ids": [item.program_id for item in archive],
-                "best_so_far_id": best.program_id,
-                "usage": usage_dict(usage),
-                "wall_seconds_so_far": round(time.monotonic() - started, 6),
-            }
-        )
-        write_json(args.output, result)
-        print(
-            f"iteration {iteration}/{args.iterations}: valid={valid}, "
-            f"score={metrics['combined_score']:.6f}, "
-            f"best={best.metrics['combined_score']:.6f}"
-        )
-
-    best = max(archive, key=lambda program: program.metrics["combined_score"])
-    args.best_program.parent.mkdir(parents=True, exist_ok=True)
-    args.best_program.write_text(best.code.rstrip() + "\n", encoding="utf-8")
-    baseline_score = initial.metrics["combined_score"]
-    best_score = best.metrics["combined_score"]
-    result.update(
-        {
-            "status": "completed",
-            "completed_at": utc_now(),
-            "best": _serialize_program(best),
-            "best_program_path": str(args.best_program),
-            "improvement": {
-                "combined_score_absolute": best_score - baseline_score,
-                "combined_score_percent": (
-                    100.0 * (best_score - baseline_score) / baseline_score
-                    if baseline_score
-                    else None
-                ),
-                "avg_value_delta": best.metrics["avg_value"] - initial.metrics["avg_value"],
-                "avg_distance_delta": (
-                    best.metrics["avg_distance"] - initial.metrics["avg_distance"]
-                ),
-            },
-            "archive_ids": [program.program_id for program in archive],
-            "usage": usage_dict(usage),
-            "wall_seconds": round(time.monotonic() - started, 6),
-        }
-    )
-    write_json(args.output, result)
-    return result
-
-
-def main(argv: Iterable[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    if args.dry_run:
-        print(
-            "OpenEvolve dry run: "
-            f"model={args.model}, thinking={args.thinking}, "
-            f"iterations/calls={args.iterations}, "
-            f"trials={args.trials}, objective_budget={args.objective_budget}, "
-            f"archive={args.archive_size}, islands={args.islands}, output={args.output}"
-        )
-        return 0
-    confirm_paid_run(args, "OpenEvolve function-minimization experiment")
-    result = run(args)
-    print(
-        "completed: "
-        f"score {result['baseline']['metrics']['combined_score']:.6f} -> "
-        f"{result['best']['metrics']['combined_score']:.6f}; "
-        f"calls={result['usage']['calls']}; output={args.output}"
-    )
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

@@ -1,0 +1,921 @@
+{
+  "experiment": "OpenEvolve on AgentDescent: serial vs sync vs async",
+  "status": "completed",
+  "started_at": "2026-08-05T07:58:15+00:00",
+  "method": {
+    "algorithm": "real OpenEvolve program mutation + MAP-Elites islands",
+    "runtime": "AgentDescent evolve for serial/sync and async_evolve for async",
+    "provider_calls": "live calls with no trace replay",
+    "budget": "equal reserved LLM mutation calls per mode",
+    "quality": "validation TTQ plus disjoint evaluator test seeds",
+    "order": "mode order rotates each repeat",
+    "result_payload": "summary metrics only; no prompts, responses, source, or per-trial rows"
+  },
+  "config": {
+    "provider": "openai",
+    "model": "glm-5.2",
+    "max_tokens": 2048,
+    "temperature": 0.7,
+    "thinking": "disabled",
+    "api_timeout": 180.0,
+    "seed": 0,
+    "repeats": 3,
+    "modes": [
+      "serial",
+      "sync",
+      "async"
+    ],
+    "iterations": 6,
+    "workers": 3,
+    "tasks": 12,
+    "test_trials": 6,
+    "held_out_frac": 0.5,
+    "objective_budget": 200,
+    "archive_size": 20,
+    "islands": 3,
+    "feature_bins": 4,
+    "exploitation_ratio": 0.7,
+    "migration_interval": 4,
+    "candidate_timeout": 15.0,
+    "max_code_length": 20000,
+    "async_ratio": 1,
+    "max_seconds": 300.0,
+    "shutdown_grace": 120.0,
+    "quality_target": 0.8,
+    "dry_run": false
+  },
+  "observations": [
+    {
+      "mode": "serial",
+      "wall_seconds": 153.12984630800202,
+      "framework": {
+        "baseline_reward": 0.7287753501224445,
+        "final_reward": 0.8886009799490737,
+        "quality_gain": 0.15982562982662918,
+        "stop_reason": "rounds",
+        "error": null,
+        "outcomes": {
+          "committed": 2
+        },
+        "rollouts": 6,
+        "rollout_seconds": 0.20606613159179688,
+        "eval_seconds": 0.9834878444671631,
+        "stale_considered": 6,
+        "stale_discarded": 0,
+        "stale_rate": 0.0,
+        "retired_workers": 0
+      },
+      "archive": {
+        "programs_evaluated": 7,
+        "valid_programs": 6,
+        "island_cell_counts": [
+          2,
+          2,
+          1
+        ],
+        "island_generations": [
+          3,
+          2,
+          1
+        ],
+        "migrations": 0
+      },
+      "test": {
+        "baseline": {
+          "combined_score": 0.9309061636957869,
+          "avg_value": -1.3542121037330863,
+          "avg_distance": 1.0478873321358384,
+          "successful_trials": 6,
+          "total_trials": 6,
+          "framework_reward": 0.7104255838232572
+        },
+        "best": {
+          "combined_score": 1.046267777109825,
+          "avg_value": -1.502320073436982,
+          "avg_distance": 0.665806464192725,
+          "successful_trials": 6,
+          "total_trials": 6,
+          "framework_reward": 0.8886039558529052
+        },
+        "combined_score_gain": 0.11536161341403806
+      },
+      "quality_target": 0.8,
+      "target_reached": true,
+      "time_to_quality_s": 63.52398157119751,
+      "rollouts_to_quality": 3,
+      "repeat": 1,
+      "seed": 0,
+      "end_to_end_seconds": 153.22721218399965,
+      "model_usage": {
+        "calls": 6,
+        "failures": 0,
+        "prompt_tokens": 10037,
+        "completion_tokens": 4621,
+        "total_tokens": 14658,
+        "model_seconds": 152.29040837287903
+      },
+      "framework_actor_usage": {
+        "calls": 24,
+        "failures": 0,
+        "model_seconds": 153.482728
+      }
+    },
+    {
+      "mode": "sync",
+      "wall_seconds": 63.21711561600023,
+      "framework": {
+        "baseline_reward": 0.7287753501224445,
+        "final_reward": 0.7766347436439581,
+        "quality_gain": 0.04785939352151358,
+        "stop_reason": "rounds",
+        "error": null,
+        "outcomes": {
+          "archive-updated": 1,
+          "committed": 1
+        },
+        "rollouts": 6,
+        "rollout_seconds": 0.8410294055938721,
+        "eval_seconds": 0.9896776676177979,
+        "stale_considered": 6,
+        "stale_discarded": 0,
+        "stale_rate": 0.0,
+        "retired_workers": 0
+      },
+      "archive": {
+        "programs_evaluated": 7,
+        "valid_programs": 6,
+        "island_cell_counts": [
+          2,
+          2,
+          1
+        ],
+        "island_generations": [
+          3,
+          2,
+          1
+        ],
+        "migrations": 0
+      },
+      "test": {
+        "baseline": {
+          "combined_score": 0.9309061636957869,
+          "avg_value": -1.3542121037330863,
+          "avg_distance": 1.0478873321358384,
+          "successful_trials": 6,
+          "total_trials": 6,
+          "framework_reward": 0.7104255838232572
+        },
+        "best": {
+          "combined_score": 0.745066850177069,
+          "avg_value": -1.35663076635715,
+          "avg_distance": 1.6107175674394754,
+          "successful_trials": 6,
+          "total_trials": 6,
+          "framework_reward": 0.758163147392699
+        },
+        "combined_score_gain": -0.18583931351871796
+      },
+      "quality_target": 0.8,
+      "target_reached": false,
+      "time_to_quality_s": null,
+      "rollouts_to_quality": null,
+      "repeat": 1,
+      "seed": 0,
+      "end_to_end_seconds": 63.279297195000254,
+      "model_usage": {
+        "calls": 6,
+        "failures": 0,
+        "prompt_tokens": 10442,
+        "completion_tokens": 5191,
+        "total_tokens": 15633,
+        "model_seconds": 167.82557916641235
+      },
+      "framework_actor_usage": {
+        "calls": 24,
+        "failures": 0,
+        "model_seconds": 169.659238
+      }
+    },
+    {
+      "mode": "async",
+      "wall_seconds": 85.67110093600058,
+      "framework": {
+        "baseline_reward": 0.7287753501224445,
+        "final_reward": 0.7287753501224445,
+        "quality_gain": 0.0,
+        "stop_reason": "max_iters",
+        "error": null,
+        "outcomes": {
+          "archive-updated": 3,
+          "no-valid-candidates": 1
+        },
+        "rollouts": 8,
+        "rollout_seconds": 0.33397483825683594,
+        "eval_seconds": 0.42778968811035156,
+        "stale_considered": 4,
+        "stale_discarded": 0,
+        "stale_rate": 0.0,
+        "retired_workers": 0
+      },
+      "archive": {
+        "programs_evaluated": 5,
+        "valid_programs": 4,
+        "island_cell_counts": [
+          2,
+          1,
+          1
+        ],
+        "island_generations": [
+          2,
+          1,
+          1
+        ],
+        "migrations": 0
+      },
+      "test": {
+        "baseline": {
+          "combined_score": 0.9309061636957869,
+          "avg_value": -1.3542121037330863,
+          "avg_distance": 1.0478873321358384,
+          "successful_trials": 6,
+          "total_trials": 6,
+          "framework_reward": 0.7104255838232572
+        },
+        "best": {
+          "combined_score": 0.9309061636957869,
+          "avg_value": -1.3542121037330863,
+          "avg_distance": 1.0478873321358384,
+          "successful_trials": 6,
+          "total_trials": 6,
+          "framework_reward": 0.7104255838232572
+        },
+        "combined_score_gain": 0.0
+      },
+      "quality_target": 0.8,
+      "target_reached": false,
+      "time_to_quality_s": null,
+      "rollouts_to_quality": null,
+      "repeat": 1,
+      "seed": 0,
+      "end_to_end_seconds": 85.71935720699912,
+      "model_usage": {
+        "calls": 6,
+        "failures": 0,
+        "prompt_tokens": 9508,
+        "completion_tokens": 6913,
+        "total_tokens": 16421,
+        "model_seconds": 221.21139883995056
+      },
+      "framework_actor_usage": {
+        "calls": 22,
+        "failures": 0,
+        "model_seconds": 221.975066
+      }
+    },
+    {
+      "mode": "sync",
+      "wall_seconds": 70.68779417300175,
+      "framework": {
+        "baseline_reward": 0.680628588638887,
+        "final_reward": 0.8751515623599952,
+        "quality_gain": 0.19452297372110827,
+        "stop_reason": "rounds",
+        "error": null,
+        "outcomes": {
+          "committed": 2
+        },
+        "rollouts": 6,
+        "rollout_seconds": 0.4065835475921631,
+        "eval_seconds": 0.7445085048675537,
+        "stale_considered": 6,
+        "stale_discarded": 0,
+        "stale_rate": 0.0,
+        "retired_workers": 0
+      },
+      "archive": {
+        "programs_evaluated": 7,
+        "valid_programs": 7,
+        "island_cell_counts": [
+          3,
+          1,
+          2
+        ],
+        "island_generations": [
+          3,
+          2,
+          2
+        ],
+        "migrations": 0
+      },
+      "test": {
+        "baseline": {
+          "combined_score": 0.722467912469339,
+          "avg_value": -1.3479907525887167,
+          "avg_distance": 2.1418283571891585,
+          "successful_trials": 6,
+          "total_trials": 6,
+          "framework_reward": 0.6170064251732005
+        },
+        "best": {
+          "combined_score": 0.9010391718729015,
+          "avg_value": -1.3382423991106787,
+          "avg_distance": 1.3546210456706793,
+          "successful_trials": 6,
+          "total_trials": 6,
+          "framework_reward": 0.7617436938473504
+        },
+        "combined_score_gain": 0.17857125940356255
+      },
+      "quality_target": 0.8,
+      "target_reached": true,
+      "time_to_quality_s": 70.6229887008667,
+      "rollouts_to_quality": 6,
+      "repeat": 2,
+      "seed": 100,
+      "end_to_end_seconds": 70.74471434700172,
+      "model_usage": {
+        "calls": 6,
+        "failures": 0,
+        "prompt_tokens": 10685,
+        "completion_tokens": 6140,
+        "total_tokens": 16825,
+        "model_seconds": 188.3708701133728
+      },
+      "framework_actor_usage": {
+        "calls": 24,
+        "failures": 0,
+        "model_seconds": 189.525332
+      }
+    },
+    {
+      "mode": "async",
+      "wall_seconds": 71.47605687000032,
+      "framework": {
+        "baseline_reward": 0.680628588638887,
+        "final_reward": 0.9996938401354174,
+        "quality_gain": 0.3190652514965304,
+        "stop_reason": "max_iters",
+        "error": null,
+        "outcomes": {
+          "no-valid-candidates": 1,
+          "committed": 1
+        },
+        "rollouts": 8,
+        "rollout_seconds": 0.34381747245788574,
+        "eval_seconds": 0.992753267288208,
+        "stale_considered": 4,
+        "stale_discarded": 2,
+        "stale_rate": 0.5,
+        "retired_workers": 0
+      },
+      "archive": {
+        "programs_evaluated": 3,
+        "valid_programs": 2,
+        "island_cell_counts": [
+          1,
+          1,
+          0
+        ],
+        "island_generations": [
+          1,
+          1,
+          0
+        ],
+        "migrations": 0
+      },
+      "test": {
+        "baseline": {
+          "combined_score": 0.722467912469339,
+          "avg_value": -1.3479907525887167,
+          "avg_distance": 2.1418283571891585,
+          "successful_trials": 6,
+          "total_trials": 6,
+          "framework_reward": 0.6170064251732005
+        },
+        "best": {
+          "combined_score": 1.022605880322948,
+          "avg_value": -1.459548958254528,
+          "avg_distance": 0.6645486052765895,
+          "successful_trials": 6,
+          "total_trials": 6,
+          "framework_reward": 0.8820112285660052
+        },
+        "combined_score_gain": 0.30013796785360913
+      },
+      "quality_target": 0.8,
+      "target_reached": true,
+      "time_to_quality_s": 25.70955801010132,
+      "rollouts_to_quality": 5,
+      "repeat": 2,
+      "seed": 100,
+      "end_to_end_seconds": 71.52603710999756,
+      "model_usage": {
+        "calls": 6,
+        "failures": 0,
+        "prompt_tokens": 9512,
+        "completion_tokens": 4668,
+        "total_tokens": 14180,
+        "model_seconds": 155.26705193519592
+      },
+      "framework_actor_usage": {
+        "calls": 32,
+        "failures": 0,
+        "model_seconds": 156.604519
+      }
+    },
+    {
+      "mode": "serial",
+      "wall_seconds": 205.03662336599882,
+      "framework": {
+        "baseline_reward": 0.680628588638887,
+        "final_reward": 0.9996641222370899,
+        "quality_gain": 0.3190355335982029,
+        "stop_reason": "rounds",
+        "error": null,
+        "outcomes": {
+          "committed": 1,
+          "archive-updated": 1
+        },
+        "rollouts": 6,
+        "rollout_seconds": 0.16744136810302734,
+        "eval_seconds": 0.38663482666015625,
+        "stale_considered": 6,
+        "stale_discarded": 0,
+        "stale_rate": 0.0,
+        "retired_workers": 0
+      },
+      "archive": {
+        "programs_evaluated": 7,
+        "valid_programs": 5,
+        "island_cell_counts": [
+          2,
+          1,
+          1
+        ],
+        "island_generations": [
+          2,
+          2,
+          1
+        ],
+        "migrations": 0
+      },
+      "test": {
+        "baseline": {
+          "combined_score": 0.722467912469339,
+          "avg_value": -1.3479907525887167,
+          "avg_distance": 2.1418283571891585,
+          "successful_trials": 6,
+          "total_trials": 6,
+          "framework_reward": 0.6170064251732005
+        },
+        "best": {
+          "combined_score": 1.4994874241634812,
+          "avg_value": -1.518685798291526,
+          "avg_distance": 0.0006159315246571508,
+          "successful_trials": 6,
+          "total_trials": 6,
+          "framework_reward": 0.9996582827756542
+        },
+        "combined_score_gain": 0.7770195116941423
+      },
+      "quality_target": 0.8,
+      "target_reached": true,
+      "time_to_quality_s": 66.93386721611023,
+      "rollouts_to_quality": 3,
+      "repeat": 2,
+      "seed": 100,
+      "end_to_end_seconds": 205.0904961970009,
+      "model_usage": {
+        "calls": 6,
+        "failures": 0,
+        "prompt_tokens": 10243,
+        "completion_tokens": 5642,
+        "total_tokens": 15885,
+        "model_seconds": 204.51250290870667
+      },
+      "framework_actor_usage": {
+        "calls": 18,
+        "failures": 0,
+        "model_seconds": 205.06915
+      }
+    },
+    {
+      "mode": "async",
+      "wall_seconds": 53.22844046499813,
+      "framework": {
+        "baseline_reward": 0.6801172458433479,
+        "final_reward": 0.9996801704673559,
+        "quality_gain": 0.31956292462400804,
+        "stop_reason": "max_iters",
+        "error": null,
+        "outcomes": {
+          "archive-updated": 2,
+          "committed": 1
+        },
+        "rollouts": 8,
+        "rollout_seconds": 0.3319571018218994,
+        "eval_seconds": 0.6179680824279785,
+        "stale_considered": 4,
+        "stale_discarded": 1,
+        "stale_rate": 0.25,
+        "retired_workers": 0
+      },
+      "archive": {
+        "programs_evaluated": 4,
+        "valid_programs": 4,
+        "island_cell_counts": [
+          2,
+          1,
+          1
+        ],
+        "island_generations": [
+          2,
+          1,
+          1
+        ],
+        "migrations": 0
+      },
+      "test": {
+        "baseline": {
+          "combined_score": 0.979662350231825,
+          "avg_value": -1.4301220020488052,
+          "avg_distance": 0.9084330557230366,
+          "successful_trials": 6,
+          "total_trials": 6,
+          "framework_reward": 0.774534596007978
+        },
+        "best": {
+          "combined_score": 1.4995202557010339,
+          "avg_value": -1.5186856417499408,
+          "avg_distance": 0.0005426269598020259,
+          "successful_trials": 6,
+          "total_trials": 6,
+          "framework_reward": 0.9996801704673559
+        },
+        "combined_score_gain": 0.5198579054692088
+      },
+      "quality_target": 0.8,
+      "target_reached": true,
+      "time_to_quality_s": 28.80194616317749,
+      "rollouts_to_quality": 6,
+      "repeat": 3,
+      "seed": 200,
+      "end_to_end_seconds": 53.272138127998915,
+      "model_usage": {
+        "calls": 6,
+        "failures": 0,
+        "prompt_tokens": 10170,
+        "completion_tokens": 4461,
+        "total_tokens": 14631,
+        "model_seconds": 142.06498622894287
+      },
+      "framework_actor_usage": {
+        "calls": 30,
+        "failures": 0,
+        "model_seconds": 143.016335
+      }
+    },
+    {
+      "mode": "serial",
+      "wall_seconds": 164.81455072600147,
+      "framework": {
+        "baseline_reward": 0.6801172458433479,
+        "final_reward": 0.9191000397868644,
+        "quality_gain": 0.2389827939435165,
+        "stop_reason": "rounds",
+        "error": null,
+        "outcomes": {
+          "committed": 2
+        },
+        "rollouts": 6,
+        "rollout_seconds": 0.14348483085632324,
+        "eval_seconds": 0.6731889247894287,
+        "stale_considered": 6,
+        "stale_discarded": 0,
+        "stale_rate": 0.0,
+        "retired_workers": 0
+      },
+      "archive": {
+        "programs_evaluated": 7,
+        "valid_programs": 7,
+        "island_cell_counts": [
+          2,
+          2,
+          2
+        ],
+        "island_generations": [
+          3,
+          2,
+          2
+        ],
+        "migrations": 0
+      },
+      "test": {
+        "baseline": {
+          "combined_score": 0.979662350231825,
+          "avg_value": -1.4301220020488052,
+          "avg_distance": 0.9084330557230366,
+          "successful_trials": 6,
+          "total_trials": 6,
+          "framework_reward": 0.774534596007978
+        },
+        "best": {
+          "combined_score": 0.9306822931000056,
+          "avg_value": -1.4149852124490796,
+          "avg_distance": 1.445464249226039,
+          "successful_trials": 6,
+          "total_trials": 6,
+          "framework_reward": 0.7301799499414172
+        },
+        "combined_score_gain": -0.04898005713181941
+      },
+      "quality_target": 0.8,
+      "target_reached": true,
+      "time_to_quality_s": 67.58015847206116,
+      "rollouts_to_quality": 3,
+      "repeat": 3,
+      "seed": 200,
+      "end_to_end_seconds": 164.88104819899672,
+      "model_usage": {
+        "calls": 6,
+        "failures": 0,
+        "prompt_tokens": 10296,
+        "completion_tokens": 5254,
+        "total_tokens": 15550,
+        "model_seconds": 164.19289708137512
+      },
+      "framework_actor_usage": {
+        "calls": 24,
+        "failures": 0,
+        "model_seconds": 165.012063
+      }
+    },
+    {
+      "mode": "sync",
+      "wall_seconds": 57.26644224299889,
+      "framework": {
+        "baseline_reward": 0.6801172458433479,
+        "final_reward": 0.997856444800783,
+        "quality_gain": 0.3177391989574351,
+        "stop_reason": "rounds",
+        "error": null,
+        "outcomes": {
+          "archive-updated": 1,
+          "committed": 1
+        },
+        "rollouts": 6,
+        "rollout_seconds": 0.30908656120300293,
+        "eval_seconds": 0.7556707859039307,
+        "stale_considered": 6,
+        "stale_discarded": 0,
+        "stale_rate": 0.0,
+        "retired_workers": 0
+      },
+      "archive": {
+        "programs_evaluated": 7,
+        "valid_programs": 6,
+        "island_cell_counts": [
+          3,
+          1,
+          2
+        ],
+        "island_generations": [
+          3,
+          1,
+          2
+        ],
+        "migrations": 0
+      },
+      "test": {
+        "baseline": {
+          "combined_score": 0.979662350231825,
+          "avg_value": -1.4301220020488052,
+          "avg_distance": 0.9084330557230366,
+          "successful_trials": 6,
+          "total_trials": 6,
+          "framework_reward": 0.774534596007978
+        },
+        "best": {
+          "combined_score": 1.4923836724186,
+          "avg_value": -1.5182406498644074,
+          "avg_distance": 0.015909703834270216,
+          "successful_trials": 6,
+          "total_trials": 6,
+          "framework_reward": 0.9949571209985745
+        },
+        "combined_score_gain": 0.5127213221867749
+      },
+      "quality_target": 0.8,
+      "target_reached": true,
+      "time_to_quality_s": 57.205989837646484,
+      "rollouts_to_quality": 6,
+      "repeat": 3,
+      "seed": 200,
+      "end_to_end_seconds": 57.33193520900022,
+      "model_usage": {
+        "calls": 6,
+        "failures": 0,
+        "prompt_tokens": 10476,
+        "completion_tokens": 4688,
+        "total_tokens": 15164,
+        "model_seconds": 151.07914328575134
+      },
+      "framework_actor_usage": {
+        "calls": 24,
+        "failures": 0,
+        "model_seconds": 152.146251
+      }
+    }
+  ],
+  "summary": {
+    "modes": {
+      "serial": {
+        "runs": 3,
+        "target_reached_runs": 3,
+        "time_to_quality_s_min_median_max": [
+          63.52398157119751,
+          66.93386721611023,
+          67.58015847206116
+        ],
+        "engine_wall_s_min_median_max": [
+          153.12984630800202,
+          164.81455072600147,
+          205.03662336599882
+        ],
+        "end_to_end_s_min_median_max": [
+          153.22721218399965,
+          164.88104819899672,
+          205.0904961970009
+        ],
+        "validation_reward_min_median_max": [
+          0.8886009799490737,
+          0.9191000397868644,
+          0.9996641222370899
+        ],
+        "test_combined_score_min_median_max": [
+          0.9306822931000056,
+          1.046267777109825,
+          1.4994874241634812
+        ],
+        "test_gain_min_median_max": [
+          -0.04898005713181941,
+          0.11536161341403806,
+          0.7770195116941423
+        ],
+        "model_calls_min_median_max": [
+          6.0,
+          6.0,
+          6.0
+        ],
+        "tokens_min_median_max": [
+          14658.0,
+          15550.0,
+          15885.0
+        ],
+        "stale_rate_min_median_max": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "retired_workers": 0
+      },
+      "sync": {
+        "runs": 3,
+        "target_reached_runs": 2,
+        "time_to_quality_s_min_median_max": [
+          57.205989837646484,
+          63.91448926925659,
+          70.6229887008667
+        ],
+        "engine_wall_s_min_median_max": [
+          57.26644224299889,
+          63.21711561600023,
+          70.68779417300175
+        ],
+        "end_to_end_s_min_median_max": [
+          57.33193520900022,
+          63.279297195000254,
+          70.74471434700172
+        ],
+        "validation_reward_min_median_max": [
+          0.7766347436439581,
+          0.8751515623599952,
+          0.997856444800783
+        ],
+        "test_combined_score_min_median_max": [
+          0.745066850177069,
+          0.9010391718729015,
+          1.4923836724186
+        ],
+        "test_gain_min_median_max": [
+          -0.18583931351871796,
+          0.17857125940356255,
+          0.5127213221867749
+        ],
+        "model_calls_min_median_max": [
+          6.0,
+          6.0,
+          6.0
+        ],
+        "tokens_min_median_max": [
+          15164.0,
+          15633.0,
+          16825.0
+        ],
+        "stale_rate_min_median_max": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "retired_workers": 0
+      },
+      "async": {
+        "runs": 3,
+        "target_reached_runs": 2,
+        "time_to_quality_s_min_median_max": [
+          25.70955801010132,
+          27.255752086639404,
+          28.80194616317749
+        ],
+        "engine_wall_s_min_median_max": [
+          53.22844046499813,
+          71.47605687000032,
+          85.67110093600058
+        ],
+        "end_to_end_s_min_median_max": [
+          53.272138127998915,
+          71.52603710999756,
+          85.71935720699912
+        ],
+        "validation_reward_min_median_max": [
+          0.7287753501224445,
+          0.9996801704673559,
+          0.9996938401354174
+        ],
+        "test_combined_score_min_median_max": [
+          0.9309061636957869,
+          1.022605880322948,
+          1.4995202557010339
+        ],
+        "test_gain_min_median_max": [
+          0.0,
+          0.30013796785360913,
+          0.5198579054692088
+        ],
+        "model_calls_min_median_max": [
+          6.0,
+          6.0,
+          6.0
+        ],
+        "tokens_min_median_max": [
+          14180.0,
+          14631.0,
+          16421.0
+        ],
+        "stale_rate_min_median_max": [
+          0.0,
+          0.25,
+          0.5
+        ],
+        "retired_workers": 0
+      }
+    },
+    "comparisons": {
+      "definition": "paired speedup = baseline seconds / comparison seconds for the same repeat and evaluator seed",
+      "sync_vs_serial_end_to_end": {
+        "paired_runs": 3,
+        "speedup_min_median_max": [
+          2.421443014953495,
+          2.8759023674664475,
+          2.8990221826472466
+        ]
+      },
+      "async_vs_sync_end_to_end": {
+        "paired_runs": 3,
+        "speedup_min_median_max": [
+          0.7382147890142298,
+          0.9890763868017143,
+          1.0762086378295288
+        ]
+      },
+      "sync_vs_serial_time_to_quality": {
+        "paired_runs": 2,
+        "speedup_min_median_max": [
+          0.9477631639127841,
+          1.0645553790872264,
+          1.181347594261669
+        ]
+      },
+      "async_vs_sync_time_to_quality": {
+        "paired_runs": 2,
+        "speedup_min_median_max": [
+          1.9861848749228896,
+          2.366569738648786,
+          2.7469546023746823
+        ]
+      }
+    }
+  },
+  "completed_at": "2026-08-05T08:13:40+00:00",
+  "errors": 0
+}

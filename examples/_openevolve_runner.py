@@ -1,4 +1,4 @@
-"""Sandbox-side runner for OpenEvolve candidate programs.
+"""Sandbox-side runner for the OpenEvolve example's candidate programs.
 
 This module is executed by the system Python inside Bubblewrap. It deliberately
 uses only the standard library and emits exactly one JSON object on stdout.
@@ -13,6 +13,7 @@ import io
 import json
 import math
 import random
+import resource
 import time
 
 
@@ -33,6 +34,18 @@ class BudgetedObjective:
             raise ValueError("objective coordinates must be finite")
         self.calls += 1
         return objective_value(x, y)
+
+
+def set_resource_limits(cpu_seconds: int, nproc_limit: int) -> None:
+    """Apply candidate limits after Bubblewrap starts, before importing its code."""
+    resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds + 1))
+    resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024, 512 * 1024 * 1024))
+    resource.setrlimit(resource.RLIMIT_FSIZE, (1024 * 1024, 1024 * 1024))
+    resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
+    try:
+        resource.setrlimit(resource.RLIMIT_NPROC, (nproc_limit, nproc_limit))
+    except (ValueError, OSError):
+        pass
 
 
 def load_search(path: str):
@@ -89,9 +102,12 @@ def main() -> int:
     parser.add_argument("--budget", type=int, required=True)
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--bound", type=float, default=5.0)
+    parser.add_argument("--cpu-seconds", type=int, required=True)
+    parser.add_argument("--nproc-limit", type=int, required=True)
     args = parser.parse_args()
 
     try:
+        set_resource_limits(args.cpu_seconds, args.nproc_limit)
         search = load_search(args.candidate)
         trials = [
             run_trial(search, args.seed + index, args.budget, args.bound)
