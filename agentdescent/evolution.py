@@ -948,8 +948,17 @@ class FusionStats:
     """
 
     trials: int = 0
-    #: Tournaments where a fused candidate was built and scored.
+    #: Tournaments where a fused candidate was built **and ranked against the
+    #: singles**. The denominator of `win_rate`.
     contested: int = 0
+    #: Unions that were committed **without being compared to anything**.
+    #: :class:`~agentdescent.fusion.ReflectiveFusion` hands the union straight to
+    #: the acceptance gate, so nothing is ranked and there is no verdict to
+    #: report. Deliberately not folded into `contested`: a mode that skips the
+    #: measurement must not be able to produce a win rate. A trial with no union
+    #: in it -- one candidate, or a failed synthesis -- is not counted here
+    #: either, because nothing was committed unmeasured.
+    unranked: int = 0
     #: Why the rest were not contested.
     single_candidate: int = 0
     contradiction: int = 0
@@ -1000,11 +1009,16 @@ class FusionStats:
 
     @classmethod
     def of(cls, trials: Sequence["FusionTrial"]) -> "FusionStats":
-        gains = [t.gain for t in trials if t.gain is not None]
+        gains = [t.gain for t in trials
+                 if t.gain is not None and getattr(t, "ranked", True)]
         losses = [g for g in gains if g < 0]
         return cls(
             trials=len(trials),
-            contested=len(gains),
+            contested=sum(1 for t in trials
+                          if t.gain is not None and getattr(t, "ranked", True)),
+            unranked=sum(1 for t in trials
+                         if not getattr(t, "ranked", True)
+                         and t.winner == "synthesized"),
             single_candidate=sum(1 for t in trials if t.reason == "single-candidate"),
             contradiction=sum(1 for t in trials if t.reason == "contradiction"),
             dominant_single=sum(1 for t in trials if t.reason == "dominant-single"),
@@ -1014,7 +1028,8 @@ class FusionStats:
             # A synthesised win is a fused win: both mean the merge beat every
             # single diff. The narrower counter says *how* it was built.
             fused_wins=sum(1 for t in trials
-                           if t.winner in ("fused", "synthesized")),
+                           if t.winner in ("fused", "synthesized")
+                           and getattr(t, "ranked", True)),
             single_wins=sum(1 for t in trials if t.winner == "single"),
             neither=sum(1 for t in trials if t.winner == "neither"),
             ties=sum(1 for g in gains if g == 0.0),

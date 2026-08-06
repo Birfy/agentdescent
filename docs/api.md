@@ -645,6 +645,7 @@ Combine contradicting diffs by asking a model to synthesise their values.
 | method | what it does |
 |---|---|
 | `bind(verifier: Any) -> None` | Receive the engine's verifier, if the caller did not supply one. |
+| `select(artifact: Evolvable, diffs: List[Diff]) -> Tuple[Diff, Evolvable, bool]` | Build the union and hand it straight to the acceptance gate. |
 
 ### `reflective_merge(complete, **kwargs) -> Dict[str, Any]`
 

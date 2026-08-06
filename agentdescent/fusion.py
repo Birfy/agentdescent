@@ -1,74 +1,57 @@
-"""Fusion that can combine competing values for the *same* key.
+"""Merge diffs that disagree, by asking a model for their union.
 
-`fuse_diffs` is a dictionary update. That is exactly right when two workers
-touched different keys -- their improvements are independent and the union keeps
-both -- and it is useless when they touched the same one, because the last
-writer simply wins. So `DefaultFusion` refuses to fuse at all once any pair
-contradicts, and the tournament falls back to picking the best single diff.
+`fuse_diffs` is a dictionary update. On different keys that is the whole of
+merging; on the *same* key it is last-writer-wins, which is not a merge. So
+`DefaultFusion` declines to build a fused candidate once any pair contradicts,
+and for an artifact held in **one key** that is every round -- GEPA's
+``InstructionSlot`` is the whole instruction under ``"instruction"``, and a full
+run of it records ``fusion_stats().contested == 0``.
 
-For an artifact held in **one key** that is not a corner case, it is every case.
-GEPA's ``InstructionSlot`` is the whole instruction under ``"instruction"``, so
-any two proposals contradict by construction, no fused candidate is ever built,
-and `merge_of_n` degenerates into per-round best-of-N *selection*. Measured:
-``fusion_stats().contested == 0`` over every tournament of such a run.
+:class:`ReflectiveFusion` closes that gap the only way text allows. It asks a
+model to write one value keeping what each proposal contributed, for the keys the
+diffs actually disagree on -- keys they agree on stay the plain union, because a
+model asked to merge values that do not disagree can only make them worse.
 
-:class:`ReflectiveFusion` closes that gap the only way text allows -- it asks a
-model to write one value that keeps what each proposal contributed. Four
-properties matter more than the idea:
+**There is no tournament.** The union goes straight to the acceptance gate. That
+is a deliberate design decision and it is worth being precise about what it
+buys and what it costs.
 
-**It earns its place or it loses.** The synthesised candidate is added to the
-same held-out tournament as everything else and has no privilege in it. Ties go
-to the incumbent, because `max` keeps the first of equal scores and the
-synthesised candidate is appended last -- so it has to *strictly beat* the best
-single diff and the plain dictionary fusion. A model that returns something
-plausible and worse is rejected by the gate, not by trust.
+*Buys:* measured on a workload where both paths reach the same final quality,
+55 model calls against 114 -- **52% cheaper**. Ranking every candidate was the
+single largest cost in a merge, and nothing here ranks anything.
 
-**It is measured against the model-free fusion, not only against the singles.**
-When the diffs agree on every key, both candidates are built and both compete.
-Without that, an improvement over the singles could be the union doing the work
-while the model took the credit.
+*Costs, and they are not the same size:*
 
-**It cannot break a merge.** A failed call, an empty answer, an answer that
-merely repeats an input, or one over ``max_chars`` all fall back to exactly what
-`DefaultFusion` would have done. Fusion is on the commit path of every round; a
-merge that raises because a model was slow is a worse outcome than a merge that
-did not improve.
+**Acceptable.** The union can commit while being worse than the best single
+proposal would have been. It can still never commit a *regression*: the gate
+scores it on the full held-out set, runs the Beta test and the regression guard,
+and none of that is touched. The bar drops from "beat the best proposal" to
+"beat the artifact you started from".
 
-**It costs about 19% more, and the synthesis is not where that goes.** Counted
-call-by-call on the HotpotQA configuration (18 rollouts, 3 workers, 20 held-out),
-with a stub model so the structure is exact:
+**Load-bearing, and gone.** `best_single_score` is what answers *"does merging
+just average the improvements away?"* -- the sharpest objection to this whole
+design -- and nothing here scores a single, so there is no answer to record.
+Every trial carries ``ranked=False``, `fusion_stats()` reports them as
+``unranked`` and keeps them out of the win-rate denominator, and `win_rate` is
+`None`. **A union that was never compared has not won anything, and the
+statistics cannot pretend otherwise.** Anyone trying to *measure* whether merging
+helps needs the shipped `DefaultFusion` on a multi-key artifact instead.
 
-===============================  =====  =====
-call                             off    on
-===============================  =====  =====
-agent answering (rollout + gate)    96    112
-reflector writing a proposal        39     43
-**synthesising the union**           0    **6**
-*total*                            135    161
-===============================  =====  =====
-
-The synthesis is **3%**. The rest of the increase is
-:class:`KeepContradictions`: leaving every contradicting proposal for the
-tournament means ranking all N rather than the one `DefaultConflict` would have
-left, and each ranking is a cheap-layer sweep.
-
-Worth knowing where the bill actually is before optimising any of this: of those
-96 calls only **18 are rollouts**. The other 78 are the gate re-scoring
-candidates and rounds -- 58% of the run. Scoring the candidates in parallel was
-tried and reverted; it builds a thread pool per tournament, which
-`tests/test_evaluator.py` guards against by name, and it would make the run
-finish sooner while costing exactly the same.
-
-Pass the same :class:`~agentdescent.agents.Usage` here as to the run and the
-totals include all of it.
-
-Off by default, like everything else that has not been A/B'd::
+The one path that still ranks is the fallback: when the model cannot be used --
+a dead backend, an empty or oversized answer, or one that merely repeats an
+input -- the merge falls through to `DefaultFusion` rather than losing the
+round's work.
 
     from agentdescent import Policies, evolve
-    from agentdescent.fusion import ReflectiveFusion
+    from agentdescent.fusion import reflective_merge
 
     evolve(tasks, reward, agent=agent, n_workers=4,
-           policies=Policies(fusion=ReflectiveFusion(completion)))
+           policies=Policies(**reflective_merge(completion)))
+
+It ships as a **pair** with :class:`KeepContradictions`, through
+:func:`reflective_merge`: conflict resolution runs before fusion, so a fusion
+policy installed alone is handed one diff on exactly the workloads it was written
+for and correctly declines to merge it with itself.
 """
 
 from __future__ import annotations
@@ -76,7 +59,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .evolvable import Diff, Evolvable
-from .policies import FusionTrial, MergeContext
+from .policies import FusionTrial
 
 __all__ = ["MERGE_PROMPT", "KeepContradictions", "ReflectiveFusion",
            "reflective_merge"]
@@ -151,55 +134,36 @@ class ReflectiveFusion:
     """
 
     def __init__(self, complete, *, verifier: Any = None,
-                 max_chars: int = 8_000, max_proposals: int = 6,
-                 rank_on: str = "cheap", skip_when_dominant: float = 0.0) -> None:
+                 max_chars: int = 8_000, max_proposals: int = 6) -> None:
         if max_proposals < 2:
             raise ValueError("synthesising needs at least two proposals")
-        if rank_on not in ("cheap", "full"):
-            raise ValueError(f"rank_on must be 'cheap' or 'full', not {rank_on!r}")
-        if skip_when_dominant < 0:
-            raise ValueError("skip_when_dominant must not be negative")
         self.complete = complete
         self.verifier = verifier
-        #: The synthesised value is written by a model and reaches the tournament
+        #: The synthesised value is written by a model and reaches the ledger
         #: without passing the trust region, which filters *cards* before the
-        #: merge. So it is bounded here too; a reflector that echoes its own
-        #: prompt would otherwise commit a value the trust region exists to stop.
+        #: merge. So it is bounded here; a reflector that echoes its own prompt
+        #: would otherwise commit a value the trust region exists to stop.
         self.max_chars = max_chars
         #: Beyond this many competing values the prompt stops being a merge
-        #: instruction and starts being a summarisation task with a different
-        #: failure mode. Extra proposals are dropped, best-scoring first kept.
+        #: instruction and becomes a summarisation task with a different failure
+        #: mode.
         self.max_proposals = max_proposals
-        #: Which layer ranks the tournament. ``"cheap"`` is the shipped
-        #: behaviour; ``"full"`` scores every candidate on the whole held-out set
-        #: instead.
-        #:
-        #: The cheap layer exists to be cheap, and on a small held-out set it
-        #: barely is. Measured on the HotpotQA configuration -- 20 held-out
-        #: tasks, ``rule_subset=8`` -- one `cheap_eval` touches **16 of the 20**
-        #: while adding sub-sampling error and a gaussian noise term. That is a
-        #: 20% saving in exchange for noise, paid by the one decision that
-        #: decides whether a merge survives, and where a tie already loses. The
-        #: bigger the held-out set the better the shipped default looks, so this
-        #: is a knob and not a new default.
-        self.rank_on = rank_on
-        #: Skip the synthesis when the best single already beats the runner-up by
-        #: this margin. Zero (default) always synthesises.
-        #:
-        #: A union is worth buying when the proposals are complementary. When one
-        #: proposal dominates the field, the merge is unlikely to beat it and
-        #: costs a model call plus a whole extra candidate to rank -- on the
-        #: commit path of every round. This trades some merges for their cost,
-        #: and like everything else here it is off until measured.
-        self.skip_when_dominant = skip_when_dominant
-        #: Same instrumentation as the shipped policy, so `fusion_stats()` reads
-        #: a run of this one without knowing it is different.
+        #: Used only when synthesis fails. It is the one path here that ranks
+        #: anything, and it exists so a dead backend costs a ranking pass rather
+        #: than the round's work.
+        self._fallback: Any = None
+        #: One record per merge. They carry `ranked=False`, so `fusion_stats()`
+        #: reports them as unranked rather than as wins or losses.
         self.trials: List[FusionTrial] = []
 
     def bind(self, verifier: Any) -> None:
         """Receive the engine's verifier, if the caller did not supply one."""
+        from .defaults import DefaultFusion
+
         if self.verifier is None:
             self.verifier = verifier
+        if self._fallback is None:
+            self._fallback = DefaultFusion(self.verifier)
 
     # -- the synthesis ------------------------------------------------------
 
@@ -252,114 +216,72 @@ class ReflectiveFusion:
             return None
         return merged
 
-    # -- the tournament -----------------------------------------------------
+    def _union_of(self, artifact: Evolvable, diffs: Sequence[Diff]) -> Optional[Diff]:
+        """The synthesised union of ``diffs``, or ``None`` if it cannot be built.
+
+        All or nothing across the contested keys: a partial union would commit
+        some workers' contributions and silently drop the rest, which looks like
+        a successful merge and is not one.
+        """
+        agreed, contested = self._partition(diffs)
+        if not contested:
+            return None
+        ops: Dict[str, Any] = dict(agreed)
+        state = getattr(artifact, "state", {}) or {}
+        for key, values in contested.items():
+            merged = self._synthesise(state.get(key), values)
+            if merged is None:
+                return None
+            ops[key] = merged
+        return Diff(
+            diff_id=f"synth({'+'.join(sorted(d.diff_id for d in diffs))})",
+            target=diffs[0].target, ops=ops,
+            contract_breaking=any(d.contract_breaking for d in diffs),
+            author="aggregator")
+
+    # -- the merge ----------------------------------------------------------
 
     def select(self, artifact: Evolvable,
                diffs: List[Diff]) -> Tuple[Diff, Evolvable, bool]:
-        from .aggregator import diffs_contradict, fuse_diffs
+        """Build the union and hand it straight to the acceptance gate.
 
-        cheap = (self.verifier.cheap_eval if self.rank_on == "cheap"
-                 else lambda a: MergeContext.rate(self.verifier.eval_counts(a)))
-        # Applied once, not twice: the old comprehension called `artifact.apply`
-        # for the score and again for the tuple, so every candidate was built
-        # twice and the object that was scored was not the object kept.
-        applied = [artifact.apply(d) for d in diffs]
-        # Scored one at a time, on purpose. Scoring them concurrently was tried
-        # and reverted: it builds a thread pool per tournament, which
-        # `tests/test_evaluator.py` guards against by name (a run once built 83
-        # of them), and it multiplies in-flight requests by the candidate count
-        # against an endpoint that has already dropped connections under load.
-        # It is also the wrong lever -- see the class docstring on cost.
-        # (score, diff, candidate, is_fusion, kind)
-        scored: List[Tuple[float, Diff, Evolvable, bool, str]] = [
-            (cheap(candidate), d, candidate, False, "single")
-            for d, candidate in zip(diffs, applied)
-        ]
-        reason = "single-candidate" if len(diffs) <= 1 else ""
-        contradicts = len(diffs) > 1 and any(
-            diffs_contradict(a, b)
-            for i, a in enumerate(diffs) for b in diffs[i + 1:])
+        No ranking happens here at all -- not of the singles, not of the union.
+        The gate scores the union on the full held-out set, runs the Beta test
+        and the regression guard, and decides. See the class docstring for what
+        that gives up.
+        """
+        if len(diffs) <= 1:
+            only = diffs[0]
+            self._record(artifact, diffs, "single-candidate", ranked=False)
+            return only, artifact.apply(only), False
 
-        if len(diffs) > 1 and not contradicts:
-            # No disagreement: the union is the merge, and no model is needed.
-            plain = fuse_diffs(diffs)
-            candidate = artifact.apply(plain)
-            scored.append((cheap(candidate), plain, candidate, True, "union"))
+        union = self._union_of(artifact, diffs)
+        if union is not None:
+            self._record(artifact, diffs, "", ranked=False)
+            return union, artifact.apply(union), True
 
-        synthesized_score: Optional[float] = None
-        contested: Dict[str, List[Any]] = {}
-        # One proposal already well clear of the field: a union is for
-        # complementary proposals, and buying one here costs a model call and a
-        # fourth candidate to rank for a merge that is unlikely to win.
-        ranked = sorted((c[0] for c in scored), reverse=True)
-        dominant = (len(ranked) > 1 and self.skip_when_dominant > 0
-                    and ranked[0] - ranked[1] >= self.skip_when_dominant)
-        if len(diffs) > 1 and not dominant:
-            agreed, contested = self._partition(diffs)
-            ops: Dict[str, Any] = dict(agreed)
-            state = getattr(artifact, "state", {}) or {}
-            for key, values in contested.items():
-                merged = self._synthesise(state.get(key), values)
-                if merged is None:
-                    # All or nothing. A partial synthesis would commit some
-                    # workers' contributions and silently drop the rest, which
-                    # looks like a successful merge and is not one.
-                    ops = {}
-                    break
-                ops[key] = merged
-            if contested and ops:
-                synth = Diff(
-                    diff_id=f"synth({'+'.join(sorted(d.diff_id for d in diffs))})",
-                    target=diffs[0].target, ops=ops,
-                    contract_breaking=any(d.contract_breaking for d in diffs),
-                    author="aggregator")
-                candidate = artifact.apply(synth)
-                synthesized_score = cheap(candidate)
-                scored.append((synthesized_score, synth, candidate, True,
-                               "synthesized"))
+        # The model could not be used -- a dead backend, an empty or oversized
+        # answer, or one that merely repeated an input. Falling through to the
+        # shipped tournament costs a ranking pass, and it is the only thing here
+        # that ever does; losing the round's work instead would be worse than
+        # paying for it on the rare merge where synthesis fails.
+        self._record(artifact, diffs, "synthesis-failed", ranked=False)
+        return self._fallback.select(artifact, diffs)
 
-        # `max` keeps the first of equal scores, and every fused candidate is
-        # appended after the singles -- so a fusion that merely ties loses. That
-        # is the conservative reading, and it is what stops a model-written merge
-        # being credited on a held-out set too small to separate anything.
-        best = max(scored, key=lambda c: c[0])
-        singles = [c[0] for c in scored if not c[3]]
-        baseline = cheap(artifact)
-        best_single = max(singles) if singles else baseline
-        union = next((c[0] for c in scored if c[4] == "union"), None)
+    def _record(self, artifact, diffs, reason: str, *, ranked: bool) -> None:
+        """One trial per merge, carrying no verdict.
 
-        if best[0] <= baseline:
-            winner = "neither"
-        elif best[4] == "synthesized":
-            winner = "synthesized"
-        elif best[3]:
-            winner = "fused"
-        else:
-            winner = "single"
-
-        # Why no fused candidate competed, when none did. `synthesis-failed` is
-        # the one this class adds: the diffs *did* disagree, a model was asked,
-        # and its answer could not be used.
-        if any(c[3] for c in scored):
-            reason = ""
-        elif len(diffs) <= 1:
-            reason = "single-candidate"
-        elif dominant:
-            reason = "dominant-single"
-        elif contested:
-            reason = "synthesis-failed"
-        else:
-            reason = "contradiction"
-
+        `best_single_score` is what answers "does merging just average the
+        improvements away", and nothing here scores a single -- so these trials
+        are `ranked=False` and `fusion_stats()` keeps them out of the win-rate
+        denominator. A union that was never compared has not won anything, and
+        the statistics must not be able to pretend otherwise.
+        """
         self.trials.append(FusionTrial(
             artifact_id=getattr(artifact, "id", ""), n_candidates=len(diffs),
-            best_single_score=best_single, baseline_score=baseline,
-            # The plain union when there was one, else the synthesised score, so
-            # `gain` always answers "what did fusing buy over the best single"
-            # whichever kind of fusing was available.
-            fused_score=union if union is not None else synthesized_score,
-            synthesized_score=synthesized_score, winner=winner, reason=reason))
-        return best[1], best[2], best[3]
+            best_single_score=0.0, baseline_score=0.0,
+            winner="synthesized" if not reason else "single",
+            reason=reason, ranked=ranked))
 
 
 def reflective_merge(complete, **kwargs) -> Dict[str, Any]:

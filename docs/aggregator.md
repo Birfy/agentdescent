@@ -114,14 +114,11 @@ verdict.
 
 ### When a dictionary update cannot merge — `ReflectiveFusion`
 
-`fuse_diffs` is `ops.update()`. That is exactly right when two workers touched
+`fuse_diffs` is `ops.update()`. That is right when two workers touched
 **different** keys, and useless when they touched the same one: the last writer
-wins, so `DefaultFusion` declines to build a fused candidate at all.
-
-For an artifact held in **one key** that is not a corner case, it is every round.
-GEPA's `InstructionSlot` keeps the whole instruction under `"instruction"`, so
-`contested` is 0 for an entire run and `merge_of_n` is really per-round
-best-of-N selection.
+wins, so `DefaultFusion` declines to build a fused candidate at all. For an
+artifact held in **one key** that is every round — GEPA's `InstructionSlot`
+records `contested = 0` for a whole run.
 
 ```python
 from agentdescent import Policies, evolve
@@ -131,34 +128,35 @@ evolve(tasks, reward, agent=agent, n_workers=4,
        policies=Policies(**reflective_merge(completion)))
 ```
 
-It asks a model to write one value that keeps what each proposal contributed —
-only for the keys the diffs actually disagree on; keys they agree on are still
-the plain union, because a model asked to merge values that do not disagree can
-only make them worse.
+A model writes one value keeping what each proposal contributed, for the keys the
+diffs actually disagree on. Keys they agree on stay the plain union.
+
+!!! danger "There is no tournament on this path, and that is the trade"
+    The union goes **straight to the acceptance gate**. Measured on a workload
+    where both paths reach the same final quality: **55 model calls against
+    114** — 52% cheaper, because ranking every candidate was the largest cost in
+    a merge and nothing here ranks anything.
+
+    | | |
+    |---|---|
+    | **acceptable** | the union can commit while being worse than the best single would have been. It can still never commit a **regression** — the gate scores it on the full held-out set and runs the Beta test and the regression guard, untouched |
+    | **gone** | `best_single_score`, and with it the answer to *"does merging just average the improvements away?"* Nothing scores a single, so every trial is `ranked=False`, `fusion_stats()` reports them as `unranked`, and `win_rate` is `None` |
+
+    A union that was never compared has not won anything, and the statistics
+    cannot pretend otherwise. To **measure** whether merging helps, use the
+    shipped `DefaultFusion` on a multi-key artifact instead.
 
 !!! warning "It needs two policies, which is why `reflective_merge` returns a pair"
-    Conflict resolution is **step 2** and fusion is **step 3**. By the time a
-    fusion policy runs, `DefaultConflict` has already dropped the losing side of
-    every contradiction — so `ReflectiveFusion` installed alone is handed a single
-    diff on exactly the workloads it was written for, and correctly declines to
-    merge it with itself. It looks installed, costs nothing and does nothing.
-    `KeepContradictions` is the partner that leaves them for step 3, and nothing
-    is lost when synthesis fails: the tournament scores every surviving single and
-    takes the best, which is the candidate step 2 would have left anyway.
+    Conflict resolution is **step 2** and fusion is **step 3**, so `DefaultConflict`
+    has already dropped the losing side of every contradiction before a fusion
+    policy runs. `ReflectiveFusion` alone is handed a single diff on exactly the
+    workloads it was written for, and correctly declines to merge it with itself.
+    `KeepContradictions` is the partner that leaves them for step 3.
 
-Four properties, none of them optional:
-
-| | |
-|---|---|
-| **no privilege** | the synthesised candidate joins the same held-out tournament; `max` keeps the first of equal scores and it is appended last, so a **tie loses** |
-| **judged against the union too** | when the diffs agree on every key, both the plain fusion and the synthesised one compete — otherwise the union's work could be credited to the model |
-| **cannot break a merge** | a dead backend, an empty answer, one over `max_chars`, or one that merely repeats an input all fall back to shipped behaviour. Fusion is on the commit path of every round |
-| **`synthesis-failed` ≠ `contradiction`** | the first means a model was asked and could not be used; the second means none was asked. Same `contested=0`, opposite fixes |
-
-`FusionTrial.synthesized_score` is kept separate from `fused_score` so "the union
-of independent edits helped" and "a model rewrote two competing edits into one"
-are never the same number. **Off by default and not yet A/B'd** — the same bar as
-everything in [`advantage`](concepts.md#three-rules-borrowed-from-ppo-and-grpo).
+The one path that still ranks is the fallback: a dead backend, an empty or
+oversized answer, or one that merely repeats an input falls through to
+`DefaultFusion` rather than losing the round's work — counted as
+`synthesis_failed`, apart from `contradiction`, which means no model was asked.
 
 ---
 

@@ -182,6 +182,12 @@ class FusionTrial:
     #: ``"neither"`` means nothing in the tournament beat the artifact it
     #: started from.
     winner: str = "single"
+    #: Whether the singles were scored at all. ``False`` under
+    #: :attr:`~agentdescent.fusion.ReflectiveFusion.trust_union`, where the union
+    #: goes straight to the acceptance gate and nothing is ranked -- so this trial
+    #: carries no verdict, and `FusionStats` keeps it out of the win rate. A union
+    #: that was never compared has not won anything.
+    ranked: bool = True
     #: Why no fusion was built: ``"single-candidate"``, ``"contradiction"``,
     #: ``"dominant-single"`` (one proposal was already clear of the field, so no
     #: union was bought -- a saving, not a failure), or ``"synthesis-failed"`` (a model was asked and could not be used -- a dead

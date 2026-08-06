@@ -60,8 +60,8 @@ def test_the_shipped_policy_cannot_fuse_a_one_key_artifact():
     assert _evolve().fusion_stats().contested == 0
 
 
-def test_reflective_fusion_gets_a_fused_candidate_into_the_tournament():
-    """Same workload, same one key -- now a fused candidate competes."""
+def test_reflective_fusion_commits_a_union_where_the_default_cannot():
+    """Same workload, same one key -- now a union reaches the ledger."""
     def merger(prompt):
         # A merge that genuinely unions: keep every gold answer it was shown.
         golds = sorted({line.strip() for block in prompt.split("PROPOSAL")[1:]
@@ -70,7 +70,8 @@ def test_reflective_fusion_gets_a_fused_candidate_into_the_tournament():
         return "instruction\n" + "\n".join(golds)
 
     stats = _evolve(policies=Policies(**reflective_merge(merger))).fusion_stats()
-    assert stats.contested > 0, "a fused candidate never reached the tournament"
+    assert stats.unranked > 0, "no union was ever built"
+    assert stats.contested == 0, "nothing is ranked on this path, by design"
 
 
 # -- it must not be able to cheat -------------------------------------------
@@ -124,7 +125,7 @@ def test_a_dead_backend_falls_back_instead_of_raising():
     assert result.error is None, "a dead merger must not end the run"
     stats = result.fusion_stats()
     assert stats.trials > 0
-    assert stats.contested == 0, "nothing was fused, which is the fallback"
+    assert stats.unranked == 0, "no union was built"
     assert stats.synthesis_failed > 0, "and the reason has to be recorded"
 
 
@@ -176,10 +177,9 @@ def test_a_partial_synthesis_is_discarded_whole():
     fusion.verifier = type("V", (), {"cheap_eval": staticmethod(lambda a: 0.5)})()
     a = Diff(diff_id="a", target="x", ops={"k1": "1", "k2": "3"})
     b = Diff(diff_id="b", target="x", ops={"k1": "2", "k2": "4"})
+    fusion.bind(type("V", (), {"cheap_eval": staticmethod(lambda a: 0.5)})())
     fusion.select(Art(), [a, b])
-    trial = fusion.trials[-1]
-    assert trial.synthesized_score is None
-    assert trial.reason == "synthesis-failed"
+    assert fusion.trials[-1].reason == "synthesis-failed"
 
 
 # -- default is untouched ----------------------------------------------------
@@ -214,10 +214,10 @@ def test_installing_the_fusion_alone_is_the_mistake_it_looks_like():
     installed, costs nothing, and does nothing.
     """
     alone = _evolve(policies=Policies(fusion=ReflectiveFusion(lambda p: "merged")))
-    assert alone.fusion_stats().contested == 0
+    assert alone.fusion_stats().unranked == 0, "never given more than one diff"
 
     paired = _evolve(policies=Policies(**reflective_merge(lambda p: "merged")))
-    assert paired.fusion_stats().contested > 0
+    assert paired.fusion_stats().unranked > 0
 
 
 def test_the_prompt_asks_for_a_union_of_deltas_not_a_rewrite():
@@ -283,113 +283,6 @@ def test_scoring_a_tournament_is_order_independent():
 # -- the two cost/precision knobs --------------------------------------------
 
 
-def test_ranking_on_the_full_set_is_available_because_cheap_is_not_cheap_here():
-    """Measured: with 20 held-out tasks and `rule_subset=8`, one `cheap_eval`
-    touches 16 of them and adds a gaussian noise term. A 20% saving bought with
-    noise, spent on the one decision that decides whether a merge survives -- and
-    where a tie already loses."""
-    from agentdescent.verifier import ThreeLayerVerifier
-
-    touched = []
-    v = ThreeLayerVerifier(eval_fn=lambda a, t: (touched.extend(t), 0.5)[1],
-                           held_out=list(range(20)), rule_subset=8)
-
-    class A:
-        id = "x"
-        version = 1
-        def render(self): return "instr"
-
-    v.cheap_eval(A())
-    cheap_unique = len(set(touched))
-    touched.clear()
-    v.eval_counts(A())
-    assert cheap_unique < len(set(touched)), "cheap must at least be smaller"
-    assert cheap_unique >= 0.7 * len(set(touched)), \
-        "and here it is barely smaller, which is the point of the knob"
-
-
-def test_rank_on_full_uses_the_full_held_out_set():
-    from agentdescent.evolvable import Diff
-
-    calls = {"cheap": 0, "full": 0}
-
-    class V:
-        @staticmethod
-        def cheap_eval(a): calls["cheap"] += 1; return 0.5
-        @staticmethod
-        def eval_counts(a): calls["full"] += 1; return (5.0, 5.0)
-
-    class Art:
-        id = "x"
-        state = {"k": "a"}
-        def apply(self, d): return self
-
-    f = ReflectiveFusion(lambda p: "merged", verifier=V(), rank_on="full")
-    f.select(Art(), [Diff(diff_id="a", target="x", ops={"k": "1"}),
-                     Diff(diff_id="b", target="x", ops={"k": "2"})])
-    assert calls["full"] > 0 and calls["cheap"] == 0
-
-
-def test_a_dominant_single_skips_the_synthesis():
-    """A union is for complementary proposals. When one is already clear of the
-    field, buying one costs a model call and a fourth candidate to rank for a
-    merge unlikely to win."""
-    from agentdescent.evolvable import Diff
-
-    asked = []
-
-    class V:
-        @staticmethod
-        def cheap_eval(a):
-            return 0.9 if a.state.get("k") == "1" else 0.2
-
-    class Art:
-        id = "x"
-        def __init__(self, st=None): self.state = st or {"k": "a"}
-        def apply(self, d): return Art({**self.state, **d.ops})
-
-    f = ReflectiveFusion(lambda p: asked.append(p) or "merged", verifier=V(),
-                         skip_when_dominant=0.3)
-    f.select(Art(), [Diff(diff_id="a", target="x", ops={"k": "1"}),
-                     Diff(diff_id="b", target="x", ops={"k": "2"})])
-    assert not asked, "the model must not have been called"
-    assert f.trials[-1].reason == "dominant-single"
-
-
-def test_a_close_field_still_synthesises():
-    from agentdescent.evolvable import Diff
-
-    asked = []
-
-    class V:
-        @staticmethod
-        def cheap_eval(a):
-            return {"1": 0.55, "2": 0.50}.get(a.state.get("k"), 0.4)
-
-    class Art:
-        id = "x"
-        def __init__(self, st=None): self.state = st or {"k": "a"}
-        def apply(self, d): return Art({**self.state, **d.ops})
-
-    f = ReflectiveFusion(lambda p: asked.append(p) or "merged", verifier=V(),
-                         skip_when_dominant=0.3)
-    f.select(Art(), [Diff(diff_id="a", target="x", ops={"k": "1"}),
-                     Diff(diff_id="b", target="x", ops={"k": "2"})])
-    assert asked, "a close field is exactly when a union is worth buying"
-
-
-@pytest.mark.parametrize("kwargs", [{"rank_on": "nope"}, {"skip_when_dominant": -1}])
-def test_the_knobs_are_checked(kwargs):
-    with pytest.raises(ValueError):
-        ReflectiveFusion(lambda p: "", **kwargs)
-
-
-def test_the_defaults_change_nothing():
-    """Both knobs are off unless asked for, like everything else here."""
-    f = ReflectiveFusion(lambda p: "")
-    assert f.rank_on == "cheap" and f.skip_when_dominant == 0.0
-
-
 def test_two_arms_of_an_ab_do_not_see_different_noise():
     """The confound that invalidated a real A/B run, pinned.
 
@@ -441,7 +334,12 @@ def test_the_synthesis_is_one_call_per_tournament_not_per_candidate():
     result = _evolve(policies=Policies(
         **reflective_merge(lambda p: asked.append(p) or "instruction\nmerged")))
     stats = result.fusion_stats()
-    assert stats.contested > 0, "the mechanism has to have fired at all"
+    assert stats.unranked > 0, "the mechanism has to have fired at all"
     assert len(asked) <= stats.trials, (
         f"{len(asked)} synthesis calls over {stats.trials} tournaments: it is "
         "being asked more than once per merge")
+
+
+# -- trust_union: the big saving, and what it costs --------------------------
+
+
