@@ -33,6 +33,7 @@ import argparse
 import json
 import statistics
 import sys
+import threading
 from typing import Any, Dict, List, Optional, Sequence
 
 from agentdescent import Usage
@@ -42,15 +43,17 @@ from agentdescent.advantage import (
 )
 from agentdescent.aggregator import AggregatorConfig
 from agentdescent.defaults import DefaultAcceptance, DefaultConflict
+from agentdescent.fusion import reflective_merge
 from agentdescent.policies import Policies
 from examples._common import completion_for, confirm
 
-from .baselines_run import _finer, _hotpotqa
+from .baselines_run import _finer, _fmt, _hotpotqa
 
-RULES = ("advantage", "trust-region", "stable-distance")
+RULES = ("advantage", "trust-region", "stable-distance",
+         "reflective-fusion")
 
 
-def _arm(rule: str, on: bool) -> Dict[str, Any]:
+def _arm(rule: str, on: bool, completion=None) -> Dict[str, Any]:
     """The `evolve()` keyword arguments for one arm of one A/B.
 
     The control is *not* "a bundle with nothing in it" -- it is the default
@@ -72,6 +75,11 @@ def _arm(rule: str, on: bool) -> Dict[str, Any]:
     if rule == "stable-distance":
         base = DefaultAcceptance(0.5, 64, 4000)
         return {"policies": Policies(acceptance=StableDistanceAcceptance(base))}
+    if rule == "reflective-fusion":
+        # The pair, not the fusion policy alone: conflict resolution runs first
+        # and would hand it a single diff. `reflective_merge` is what makes the
+        # unpaired mistake unavailable.
+        return {"policies": Policies(**reflective_merge(completion))}
     raise ValueError(f"unknown rule {rule!r}; known: {', '.join(RULES)}")
 
 
@@ -88,9 +96,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--provider", default="claude", choices=["claude", "openai", "glm"])
     p.add_argument("--model", default="GLM-5.2")
     p.add_argument("--json", dest="json_out")
+    p.add_argument("--no-self-verify", dest="self_verify", action="store_false",
+                   help="skip the second rollout per proposal. Identical on both "
+                        "arms, so the A/B stays valid, and it halves the bill")
+    p.add_argument("--eval-concurrency", type=int, default=8)
+    p.add_argument("--run-concurrency", type=int, default=1,
+                   help="how many of the (arm, seed) runs to execute at once. "
+                        "All of them are independent -- separate seeds, separate "
+                        "scratch ledgers -- so this changes wall-clock only")
     p.add_argument("--plan", action="store_true")
     p.add_argument("--yes", action="store_true")
     return p
+
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -101,7 +118,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"Dataset  : {args.dataset}")
     print(f"Budget   : {args.budget_rollouts} rollouts, {args.workers} workers")
     print(f"Seeds    : {seeds}")
-    print(f"Runs     : {2 * len(seeds)} evolve() calls (off, then on, per seed)")
+    print(f"Runs     : {2 * len(seeds)} evolve() calls (off and on, per seed)")
+    print(f"self_verify: {args.self_verify}")
     if args.plan:
         return 0
     if len(seeds) < 3:
@@ -112,73 +130,141 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     usage = Usage()
     completion = completion_for(args, usage=usage)
-    rows: List[Dict[str, Any]] = []
 
-    for seed in seeds:
-        if args.dataset == "hotpotqa":
-            workload = _hotpotqa(args.fetch, seed, completion)
-        else:
-            workload = _finer(args.pool, args.top_k, seed, completion)
+    shared = {"self_verify": args.self_verify,
+              "eval_concurrency": args.eval_concurrency}
+    # Built once per seed and before anything runs, so both arms at a seed see
+    # byte-identical data and no two threads race a dataset download.
+    workloads = {
+        seed: (_hotpotqa(args.fetch, seed, completion, **shared)
+               if args.dataset == "hotpotqa"
+               else _finer(args.pool, args.top_k, seed, completion, **shared))
+        for seed in seeds
+    }
+    printing = threading.Lock()
 
-        for on in (False, True):
-            kwargs = dict(workload.evolve_kwargs)
-            kwargs.update(_arm(args.rule, on))
-            kwargs.setdefault("rounds", 10_000)
-            from agentdescent.evolution import evolve
+    def _one(job) -> Optional[Dict[str, Any]]:
+        seed, on = job
+        label = f"{args.rule} {'on ' if on else 'off'} seed={seed}"
+        workload = workloads[seed]
+        kwargs = dict(workload.evolve_kwargs)
+        kwargs.update(_arm(args.rule, on, completion))
+        kwargs.setdefault("rounds", 10_000)
+        from agentdescent.evolution import evolve
 
+        try:
             result = evolve(
                 workload.tasks, workload.reward, agent=workload.agent,
                 strategy=workload.strategy, seed=seed,
                 n_workers=args.workers, max_concurrency=args.workers,
                 max_rollouts=args.budget_rollouts, usage=usage, **kwargs)
-            outcomes = result.outcomes()
-            rows.append({
-                "seed": seed, "arm": "on" if on else "off",
-                "test": workload.test_eval(result),
-                "dev": result.final_reward,
-                "rollouts": result.rollouts, "calls": result.usage.calls,
-                "committed": outcomes.get("committed", 0),
-                "oracle_rejected": outcomes.get("oracle-rejected", 0),
-                "oversized": outcomes.get("oversized", 0),
-                "error": result.error,
-            })
-            print(f"  {args.rule} {'on ' if on else 'off'} seed={seed}  "
-                  f"test={rows[-1]['test']:.3f} dev={rows[-1]['dev']:.3f}  "
-                  f"{rows[-1]['rollouts']} rollouts / {rows[-1]['calls']} calls  "
-                  f"+{rows[-1]['committed']} "
-                  f"-{rows[-1]['oracle_rejected']} vetoed")
+        except Exception as e:  # noqa: BLE001 - one dead arm is not six
+            with printing:
+                print(f"  {label}  FAILED {type(e).__name__}: {str(e)[:120]}",
+                      file=sys.stderr)
+            return None
+
+        # Scoring runs *after* `evolve()`, outside its backend-failure
+        # protection, so a dropped connection here must not discard the arm.
+        try:
+            test = workload.test_eval(result)
+        except Exception as e:  # noqa: BLE001
+            with printing:
+                print(f"  {label}  scoring failed: {type(e).__name__}",
+                      file=sys.stderr)
+            test = None
+
+        outcomes = result.outcomes()
+        fusion = result.fusion_stats()
+        row = {
+            "seed": seed, "arm": "on" if on else "off",
+            "test": test, "dev": result.final_reward,
+            "rollouts": result.rollouts, "calls": result.usage.calls,
+            "committed": outcomes.get("committed", 0),
+            "oracle_rejected": outcomes.get("oracle-rejected", 0),
+            "oversized": outcomes.get("oversized", 0),
+            # Whether the mechanism fired at all. `contested` is the first thing
+            # to read for --rule reflective-fusion: zero means no fused candidate
+            # ever competed, and the quality column is then about nothing.
+            "contested": fusion.contested,
+            "fused_wins": fusion.fused_wins,
+            "synthesized_wins": fusion.synthesized_wins,
+            "synthesis_failed": fusion.synthesis_failed,
+            "error": result.error,
+        }
+        with printing:
+            print(f"  {label}  test={_fmt(test)} dev={_fmt(row['dev'])}  "
+                  f"{row['rollouts']} rollouts / {row['calls']} calls  "
+                  f"+{row['committed']} -{row['oracle_rejected']} vetoed  "
+                  f"fusion: {row['contested']} contested, "
+                  f"{row['synthesized_wins']} synth wins, "
+                  f"{row['synthesis_failed']} failed")
+        return row
+
+    jobs = [(seed, on) for seed in seeds for on in (False, True)]
+    if args.run_concurrency > 1:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=args.run_concurrency) as pool:
+            collected = list(pool.map(_one, jobs))
+    else:
+        collected = [_one(job) for job in jobs]
+    rows: List[Dict[str, Any]] = [r for r in collected if r is not None]
+    if not rows:
+        print("every arm failed; nothing to compare.", file=sys.stderr)
+        return 4
 
     print()
-    print("| arm | seeds | test (min/med/max) | commits | oracle vetoes | oversized |")
-    print("|---|---|---|---|---|---|")
+    print("| arm | seeds | test (min/med/max) | commits | vetoes | contested | synth wins |")
+    print("|---|---|---|---|---|---|---|")
     for arm in ("off", "on"):
         group = [r for r in rows if r["arm"] == arm]
-        tests = sorted(r["test"] for r in group)
-        print(f"| {arm} | {len(group)} | "
-              f"{tests[0]:.3f} / {statistics.median(tests):.3f} / {tests[-1]:.3f} | "
+        if not group:
+            continue
+        tests = sorted(r["test"] for r in group if r["test"] is not None)
+        interval = ("n/a" if not tests else
+                    f"{tests[0]:.3f} / {statistics.median(tests):.3f} / {tests[-1]:.3f}")
+        print(f"| {arm} | {len(tests)}/{len(group)} | {interval} | "
               f"{sum(r['committed'] for r in group)} | "
               f"{sum(r['oracle_rejected'] for r in group)} | "
-              f"{sum(r['oversized'] for r in group)} |")
+              f"{sum(r['contested'] for r in group)} | "
+              f"{sum(r['synthesized_wins'] for r in group)} |")
 
-    off = sorted(r["test"] for r in rows if r["arm"] == "off")
-    on = sorted(r["test"] for r in rows if r["arm"] == "on")
     print()
-    if on[0] > off[-1]:
-        print(f"`{args.rule}` is above the control on every seed.")
-    elif off[0] > on[-1]:
-        print(f"`{args.rule}` is *below* the control on every seed. Delete it and "
-              "record the negative result in docs/concepts.md.")
+    contested_on = sum(r["contested"] for r in rows if r["arm"] == "on")
+    if contested_on == 0:
+        # Before any quality claim: a mechanism that never ran is a control
+        # against a control, and its table looks exactly like a null result.
+        print(f"`{args.rule}` never fired: 0 contested tournaments on the `on` "
+              "arm. The quality column below is not about this rule -- fix the "
+              "workload or the wiring before reading it.")
     else:
-        print(f"`{args.rule}` overlaps the control across seeds: this budget on "
-              "this dataset did not separate them. An unvalidated mechanism is "
-              "not a mechanism -- either widen the experiment or drop the rule.")
+        off = sorted(r["test"] for r in rows if r["arm"] == "off"
+                     and r["test"] is not None)
+        on = sorted(r["test"] for r in rows if r["arm"] == "on"
+                    and r["test"] is not None)
+        if min(len(off), len(on)) < 3:
+            print(f"{min(len(off), len(on))} scored seed(s) per arm: too few to "
+                  "compare. Not a null result -- an experiment that could not "
+                  "have produced one.")
+        elif on[0] > off[-1]:
+            print(f"`{args.rule}` is above the control on every seed.")
+        elif off[0] > on[-1]:
+            print(f"`{args.rule}` is *below* the control on every seed. Delete it "
+                  "and record the negative result in docs/concepts.md.")
+        else:
+            print(f"`{args.rule}` overlaps the control across seeds: this budget "
+                  "on this dataset did not separate them.")
+
+    print()
+    print(f"total model spend: {usage.summary()}")
 
     if args.json_out:
         with open(args.json_out, "w", encoding="utf-8") as fh:
             json.dump({"rule": args.rule, "dataset": args.dataset,
                        "budget_rollouts": args.budget_rollouts,
                        "workers": args.workers, "model": args.model,
-                       "rows": rows}, fh, indent=2)
+                       "self_verify": args.self_verify, "rows": rows}, fh, indent=2)
     return 0
 
 
