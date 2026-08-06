@@ -325,11 +325,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 # Only the merge arm. serial has one proposal per step and fork
                 # never merges, so installing it there would change nothing and
                 # make the arms differ in more than one way.
+                # One meter for the arm *and* its merger. Built here rather
+                # than inside `merge_of_n` because the synthesis calls come from
+                # a policy, and a policy spending on a throwaway `Usage` makes
+                # the arm under test look cheaper than it is.
+                arm_usage = Usage()
                 merged = dict(workload.evolve_kwargs)
                 merged["policies"] = Policies(
-                    **reflective_merge(completion_for(args, usage=Usage())))
+                    **reflective_merge(completion_for(args, usage=arm_usage)))
                 w = replace(workload, evolve_kwargs=merged)
-                return merge_of_n(w, args.width, budget=budget, seed=seed)
+                return merge_of_n(w, args.width, budget=budget, seed=seed,
+                                  usage=arm_usage)
             return merge_of_n(workload, args.width, budget=budget, seed=seed)
         raise ValueError(f"unknown arm {name!r}")
 

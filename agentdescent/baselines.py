@@ -290,13 +290,14 @@ def _tally(arm: str, seed: int, width: int, runs: Sequence[EvolutionResult],
 # ---------------------------------------------------------------------------
 
 
-def serial(workload: Workload, *, budget: Budget, seed: int = 0) -> ArmResult:
+def serial(workload: Workload, *, budget: Budget, seed: int = 0,
+           usage: Optional[Usage] = None) -> ArmResult:
     """One worker, improving itself in sequence. The floor.
 
     Without it a comparison between two parallel arms cannot say whether either
     of them beat doing nothing clever at all.
     """
-    usage = Usage()
+    usage = usage or Usage()
     result = workload._evolve(seed=seed, n_workers=1, budget=budget, usage=usage)
     test, failure = _scored(workload, result)
     return _tally("serial", seed, 1, [result], [usage], scoring_error=failure,
@@ -304,11 +305,15 @@ def serial(workload: Workload, *, budget: Budget, seed: int = 0) -> ArmResult:
 
 
 def merge_of_n(workload: Workload, n: int, *, budget: Budget,
-               seed: int = 0) -> ArmResult:
+               seed: int = 0, usage: Optional[Usage] = None) -> ArmResult:
     """N workers proposing into one artifact, merged every round. The claim."""
     if n < 1:
         raise ValueError(f"merge_of_n needs at least one worker, got {n}")
-    usage = Usage()
+    # Accepts a caller's meter so a *policy* that also calls a model -- a
+    # model-assisted fusion, say -- lands on this arm's bill rather than on a
+    # throwaway one. Reporting an arm's cost while its merge policy spends
+    # elsewhere is how a comparison flatters exactly the arm under test.
+    usage = usage or Usage()
     result = workload._evolve(seed=seed, n_workers=n, budget=budget, usage=usage)
     test, failure = _scored(workload, result)
     return _tally(f"merge-of-{n}", seed, n, [result], [usage],
@@ -345,7 +350,12 @@ def best_of_n_fork(workload: Workload, n: int, *, budget: Budget,
         # A fork's seed has to move, or N forks are one fork run N times and the
         # arm measures nothing. Spread them far enough apart that two forks
         # cannot collide with a neighbouring `seed` argument.
-        fork_seed = seed * 1_000 + i
+        # `+ 1_000` keeps the namespace clear of the other arms: at `seed=0` the
+        # old `seed * 1_000 + i` produced 0, 1, 2 -- so fork's first branch was a
+        # budget-thirded rerun of `serial` on identical task order, at that seed
+        # and no other. Three "independent" samples should not be independent
+        # only sometimes.
+        fork_seed = (seed + 1) * 1_000 + i
         usage = Usage()
         result = workload._evolve(seed=fork_seed, n_workers=1, budget=share,
                                   usage=usage)

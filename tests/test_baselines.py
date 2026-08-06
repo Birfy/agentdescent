@@ -331,3 +331,61 @@ def test_unscored_seeds_do_not_count_toward_the_seed_requirement():
     assert c.scored("b") == 2 and len(c.arms["b"]) == 3
     assert c.underpowered("a", "b")
     assert not c.separates("a", "b")
+
+
+# -- an arm's bill must include what its policies spend ----------------------
+
+
+def test_a_merge_policy_that_calls_a_model_lands_on_the_arms_bill():
+    """The third accounting bug of this shape, and the one that flattered the
+    arm under test.
+
+    A model-assisted fusion policy makes model calls of its own. Built over a
+    throwaway `Usage`, those calls vanish from the arm's reported cost -- so the
+    merge arm looked cheaper than it was in exactly the comparison its cost was
+    being read from.
+
+    A **single-key** workload, because that is the only shape where the merger
+    is asked anything: distinct keys do not contradict, so nothing needs merging.
+    """
+    from agentdescent import SingleSlot, Usage
+    from agentdescent.fusion import reflective_merge
+    from agentdescent.policies import Policies
+
+    calls = {"n": 0}
+    meter = Usage()
+
+    def merger(prompt):
+        calls["n"] += 1
+        meter.record()                      # what a metered adapter would do
+        return "instruction\n" + "\n".join(f"A{i}" for i in range(4))
+
+    def run(rendered, task):
+        return task.meta["gold"] if task.meta["gold"] in rendered else "?"
+
+    workload = Workload(
+        tasks=_tasks(), reward=_reward, test_eval=lambda r: 0.5,
+        run=run, propose=lambda rd, t, o, s: f"{rd}\n{t.meta['gold']}",
+        strategy=SingleSlot(key="instruction"),
+        evolve_kwargs={"held_out_frac": 0.4, "rounds": 10_000,
+                       "max_concurrency": 1, "self_verify": False,
+                       "policies": Policies(**reflective_merge(merger))})
+
+    arm = merge_of_n(workload, 3, budget=Budget(rollouts=24), usage=meter)
+    assert calls["n"] > 0, "the merger has to have been asked at all"
+    assert arm.calls >= calls["n"], (
+        f"arm reported {arm.calls} calls but the merger alone made "
+        f"{calls['n']}; its spend is missing from the bill")
+
+
+def test_fork_seeds_never_collide_with_the_other_arms():
+    """At `seed=0` the old `seed * 1_000 + i` gave 0, 1, 2 -- so fork's first
+    branch was a budget-thirded rerun of `serial` on identical task order, at
+    that seed and no other. Three independent samples should not be independent
+    only sometimes."""
+    arm0 = best_of_n_fork(_workload(), 3, budget=BUDGET, seed=0)
+    arm1 = best_of_n_fork(_workload(), 3, budget=BUDGET, seed=1)
+    fork_seeds = {f.seed for f in arm0.forks} | {f.seed for f in arm1.forks}
+    assert not (fork_seeds & {0, 1, 2}), \
+        f"fork reused a plain arm seed: {sorted(fork_seeds & {0, 1, 2})}"
+    assert len(fork_seeds) == 6, "and the two seeds' branches stay distinct"

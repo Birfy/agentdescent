@@ -891,11 +891,11 @@ N runs that never see each other, each on its share of the budget.
 
 Group arm results by arm and check what the comparison actually held fixed.
 
-### `merge_of_n(workload: Workload, n: int, *, budget: Budget, *, seed: int = 0) -> ArmResult`
+### `merge_of_n(...)`
 
 N workers proposing into one artifact, merged every round. The claim.
 
-### `serial(workload: Workload, *, budget: Budget, *, seed: int = 0) -> ArmResult`
+### `serial(...)`
 
 One worker, improving itself in sequence. The floor.
 
