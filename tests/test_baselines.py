@@ -283,3 +283,51 @@ def test_fusion_rows_appear_in_the_table_only_when_contested():
         assert "Fusion tournaments" in table
     else:
         assert "Fusion tournaments" not in table
+
+
+# -- a transient must not discard the arms already paid for ------------------
+
+
+class _Exploding:
+    """A workload whose scoring pass fails, like a dropped connection would."""
+
+    def __init__(self, inner):
+        self._inner = inner
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def test_eval(self, result):
+        raise ConnectionError("Connection error.")
+
+
+def test_a_failed_scoring_pass_becomes_an_error_not_an_exception():
+    """`evolve()` absorbs backend failures; `test_eval` runs after it and did
+    not. One dropped connection there discarded a sweep that had already paid
+    for three arms -- the same failure `agents.py` records from an earlier run.
+    """
+    arm = serial(_Exploding(_workload()), budget=BUDGET)
+    assert arm.test_reward is None, "a missing score must not be faked"
+    assert arm.error and "test_eval failed" in arm.error
+    assert arm.dev_reward >= 0.0, "the run itself still happened"
+
+
+def test_an_unscored_arm_is_shown_as_missing_rather_than_zero():
+    arm = serial(_Exploding(_workload()), budget=BUDGET)
+    table = to_markdown(compare([arm]))
+    assert "| — |" in table or "—" in table
+    assert "0.000" not in table.split("\n")[2]
+
+
+def test_unscored_seeds_do_not_count_toward_the_seed_requirement():
+    """Otherwise a two-seed comparison calls itself three and separates()
+    unblocks on evidence that is not there."""
+    good = _arm("a", [0.9, 0.8, 0.85])
+    broken = _arm("b", [0.1, 0.2]) + [ArmResult(
+        arm="b", seed=9, width=1, rollouts=10, calls=10, prompt_tokens=0,
+        completion_tokens=0, wallclock=1.0, wallclock_parallel=1.0,
+        dev_reward=0.0, test_reward=None, error="test_eval failed")]
+    c = compare(good + broken)
+    assert c.scored("b") == 2 and len(c.arms["b"]) == 3
+    assert c.underpowered("a", "b")
+    assert not c.separates("a", "b")

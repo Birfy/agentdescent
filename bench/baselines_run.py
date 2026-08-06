@@ -293,7 +293,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     def _run_job(job):
         name, seed = job
-        arm = _build(name, workloads[seed], seed)
+        try:
+            arm = _build(name, workloads[seed], seed)
+        except Exception as e:  # noqa: BLE001 - one dead arm is not nine
+            # Every completed arm has already been paid for. Losing them because
+            # a later one hit a dropped connection is the most expensive possible
+            # response to a transient, and it is what happened before this
+            # existed: three finished arms discarded by the fourth.
+            with printing:
+                print(f"  {name:<12} seed={seed}  FAILED "
+                      f"{type(e).__name__}: {str(e)[:120]}", file=sys.stderr)
+            return None
         with printing:          # threads interleave; a torn line is unreadable
             print(f"  {arm.arm:<12} seed={seed}  {arm.rollouts} rollouts / "
                   f"{arm.calls} calls  dev={arm.dev_reward:.3f} "
@@ -306,9 +316,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         from concurrent.futures import ThreadPoolExecutor
 
         with ThreadPoolExecutor(max_workers=args.run_concurrency) as pool:
-            results: List[ArmResult] = list(pool.map(_run_job, jobs))
+            collected = list(pool.map(_run_job, jobs))
     else:
-        results = [_run_job(job) for job in jobs]
+        collected = [_run_job(job) for job in jobs]
+
+    results: List[ArmResult] = [a for a in collected if a is not None]
+    if not results:
+        print("every arm failed; nothing to compare.", file=sys.stderr)
+        return 4
+    if len(results) < len(jobs):
+        print(f"\n{len(jobs) - len(results)} of {len(jobs)} arms failed outright "
+              "and are absent from the table below -- read the seed counts, not "
+              "the arm names.", file=sys.stderr)
 
     comparison = compare(results, fixed=args.fixed)
     print()

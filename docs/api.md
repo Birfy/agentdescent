@@ -847,11 +847,12 @@ Several seeds of several arms, and whether they are comparable at all.
 
 | method | what it does |
 |---|---|
+| `scored(arm: str) -> int` | Seeds of `arm` that produced a test score at all. |
 | `separates(a: str, b: str, *, min_seeds: int = 3) -> bool` | Whether `a`'s seeds are all above `b`'s, with no overlap. |
-| `spread(arm: str) -> Tuple[float, float, float]` | (min, median, max) test quality. Not a confidence interval. |
+| `spread(arm: str) -> Optional[Tuple[float, float, float]]` | (min, median, max) test quality. Not a confidence interval. |
 | `underpowered(*arms: str, min_seeds: int = 3) -> bool` | Whether any named arm has too few seeds to support a comparison. |
 
-### `ForkOutcome(seed: int, dev_reward: float, test_reward: float, rollouts: int, calls: int) -> None`
+### `ForkOutcome(...)`
 
 One member of a fork arm, kept so the selection step can be audited.
 
@@ -859,7 +860,7 @@ One member of a fork arm, kept so the selection step can be audited.
 
 The half of the comparison that must not vary, in one object.
 
-### `best_of_n_fork(workload: Workload, n: int, *, budget: Budget, *, seed: int = 0) -> ArmResult`
+### `best_of_n_fork(...)`
 
 N runs that never see each other, each on its share of the budget.
 

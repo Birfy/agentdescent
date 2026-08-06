@@ -161,6 +161,27 @@ class Workload:
             usage=usage, **kwargs)
 
 
+def _scored(workload: Workload, result: EvolutionResult) -> Tuple[Optional[float], str]:
+    """Score a finished run on the test split, surviving a backend failure.
+
+    `evolve()` absorbs backend failures into `result.error` and still returns the
+    artifact it evolved. `test_eval` runs *after* it, outside that protection, and
+    is a plain sequence of model calls -- so one transient dropped connection
+    there used to raise out of the arm, out of the thread pool, and discard every
+    arm that had already finished.
+
+    This is not a hypothetical: `agents.py` records the identical failure ("one
+    `RemoteDisconnected` during an example's final held-out evaluation ...
+    discarded the entire run") and it happened again here, in a sweep that had
+    already paid for three arms. A missing score is a missing score; it is not a
+    reason to throw away the ones that exist.
+    """
+    try:
+        return workload.test_eval(result), ""
+    except Exception as e:  # noqa: BLE001 - report it, keep every other arm
+        return None, f"test_eval failed: {type(e).__name__}: {str(e)[:160]}"
+
+
 # ---------------------------------------------------------------------------
 # What an arm produced
 # ---------------------------------------------------------------------------
@@ -172,7 +193,8 @@ class ForkOutcome:
 
     seed: int
     dev_reward: float
-    test_reward: float
+    #: ``None`` when the scoring pass failed. Never substituted with zero.
+    test_reward: Optional[float]
     rollouts: int
     calls: int
 
@@ -205,8 +227,10 @@ class ArmResult:
     #: What each run's own gate saw. Not comparable across arms as a quality
     #: number: it is the split the run optimised against and stopped on.
     dev_reward: float
-    #: Quality on the set no gate saw. This is the comparison.
-    test_reward: float
+    #: Quality on the set no gate saw. This is the comparison. ``None`` when the
+    #: scoring pass itself failed -- distinct from a low score, and never
+    #: substituted with one.
+    test_reward: Optional[float]
     #: Fork only. `test_reward` above is the *selected* fork -- best on dev,
     #: reported on test, which is what fork-and-select can ship. `test_oracle` is
     #: the best fork on test, an upper bound that requires the answer to pick.
@@ -226,7 +250,8 @@ class ArmResult:
 
 
 def _tally(arm: str, seed: int, width: int, runs: Sequence[EvolutionResult],
-           usages: Sequence[Usage], **extra: Any) -> ArmResult:
+           usages: Sequence[Usage], *, scoring_error: str = "",
+           **extra: Any) -> ArmResult:
     # One arm may be several runs (fork), so the trials are concatenated before
     # being summarised -- summarising each run and averaging the rates would
     # weight a run that held two tournaments the same as one that held twenty.
@@ -241,7 +266,8 @@ def _tally(arm: str, seed: int, width: int, runs: Sequence[EvolutionResult],
         wallclock=sum(r.wallclock for r in runs),
         wallclock_parallel=max(r.wallclock for r in runs),
         stop_reason=",".join(sorted({r.stop_reason for r in runs})),
-        error="; ".join(r.error for r in runs if r.error) or None,
+        error="; ".join([r.error for r in runs if r.error]
+                        + ([scoring_error] if scoring_error else [])) or None,
         **extra)
 
 
@@ -258,9 +284,9 @@ def serial(workload: Workload, *, budget: Budget, seed: int = 0) -> ArmResult:
     """
     usage = Usage()
     result = workload._evolve(seed=seed, n_workers=1, budget=budget, usage=usage)
-    return _tally("serial", seed, 1, [result], [usage],
-                  dev_reward=result.final_reward,
-                  test_reward=workload.test_eval(result))
+    test, failure = _scored(workload, result)
+    return _tally("serial", seed, 1, [result], [usage], scoring_error=failure,
+                  dev_reward=result.final_reward, test_reward=test)
 
 
 def merge_of_n(workload: Workload, n: int, *, budget: Budget,
@@ -270,9 +296,10 @@ def merge_of_n(workload: Workload, n: int, *, budget: Budget,
         raise ValueError(f"merge_of_n needs at least one worker, got {n}")
     usage = Usage()
     result = workload._evolve(seed=seed, n_workers=n, budget=budget, usage=usage)
+    test, failure = _scored(workload, result)
     return _tally(f"merge-of-{n}", seed, n, [result], [usage],
-                  dev_reward=result.final_reward,
-                  test_reward=workload.test_eval(result))
+                  scoring_error=failure, dev_reward=result.final_reward,
+                  test_reward=test)
 
 
 def best_of_n_fork(workload: Workload, n: int, *, budget: Budget,
@@ -308,10 +335,10 @@ def best_of_n_fork(workload: Workload, n: int, *, budget: Budget,
         usage = Usage()
         result = workload._evolve(seed=fork_seed, n_workers=1, budget=share,
                                   usage=usage)
+        test, failure = _scored(workload, result)
         return result, usage, ForkOutcome(
-            seed=fork_seed, dev_reward=result.final_reward,
-            test_reward=workload.test_eval(result),
-            rollouts=result.rollouts, calls=usage.calls)
+            seed=fork_seed, dev_reward=result.final_reward, test_reward=test,
+            rollouts=result.rollouts, calls=usage.calls), failure
 
     if concurrency > 1:
         from concurrent.futures import ThreadPoolExecutor
@@ -327,13 +354,18 @@ def best_of_n_fork(workload: Workload, n: int, *, budget: Budget,
     results: List[EvolutionResult] = [d[0] for d in done]
     usages: List[Usage] = [d[1] for d in done]
     outcomes: List[ForkOutcome] = [d[2] for d in done]
+    failures = "; ".join(d[3] for d in done if d[3])
 
     # Selection, both ways. `max` over dev breaks ties on the first fork, which
     # is the pessimistic choice and the honest one: a real selector has no reason
     # to prefer a later tie.
     selected = max(outcomes, key=lambda f: f.dev_reward)
-    oracle = max(outcomes, key=lambda f: f.test_reward)
+    # `None` sorts below every score rather than raising: a fork whose scoring
+    # pass died is not the best fork on test, and it is not zero either.
+    scored = [f for f in outcomes if f.test_reward is not None]
+    oracle = max(scored, key=lambda f: f.test_reward) if scored else selected
     return _tally(f"fork-of-{n}", seed, n, results, usages,
+                  scoring_error=failures,
                   dev_reward=selected.dev_reward,
                   test_reward=selected.test_reward,
                   test_oracle=oracle.test_reward,
@@ -365,7 +397,7 @@ class Comparison:
     confounded: List[Tuple[str, str, float, float]] = field(default_factory=list)
     tolerance: float = 0.1
 
-    def spread(self, arm: str) -> Tuple[float, float, float]:
+    def spread(self, arm: str) -> Optional[Tuple[float, float, float]]:
         """(min, median, max) test quality. Not a confidence interval.
 
         Three seeds cannot support one. This repository has published a point
@@ -373,7 +405,10 @@ class Comparison:
         the observed spread is the honest thing to show; a t-interval over three
         points is arithmetic dressed as statistics.
         """
-        values = sorted(r.test_reward for r in self.arms[arm])
+        values = sorted(r.test_reward for r in self.arms[arm]
+                        if r.test_reward is not None)
+        if not values:
+            return None
         return values[0], statistics.median(values), values[-1]
 
     def separates(self, a: str, b: str, *, min_seeds: int = 3) -> bool:
@@ -391,9 +426,10 @@ class Comparison:
         first and a one-seed pilot printed "above on every seed"; the guard is
         here because the mistake is that easy to make.
         """
-        if min(len(self.arms.get(a, ())), len(self.arms.get(b, ()))) < min_seeds:
+        if min(self.scored(a), self.scored(b)) < min_seeds:
             return False
-        return self.spread(a)[0] > self.spread(b)[2]
+        sa, sb = self.spread(a), self.spread(b)
+        return bool(sa and sb and sa[0] > sb[2])
 
     def underpowered(self, *arms: str, min_seeds: int = 3) -> bool:
         """Whether any named arm has too few seeds to support a comparison.
@@ -402,7 +438,16 @@ class Comparison:
         no difference" from "we could not have found one" -- they read the same
         in a table and mean opposite things about what to do next.
         """
-        return any(len(self.arms.get(arm, ())) < min_seeds for arm in arms)
+        return any(self.scored(arm) < min_seeds for arm in arms)
+
+    def scored(self, arm: str) -> int:
+        """Seeds of ``arm`` that produced a test score at all.
+
+        Not ``len(self.arms[arm])``: an arm whose scoring pass died has a row and
+        no number, and counting it toward the seed requirement would let a
+        two-seed comparison call itself three."""
+        return sum(1 for r in self.arms.get(arm, ())
+                   if r.test_reward is not None)
 
 
 def compare(results: Sequence[ArmResult], *, fixed: str = "rollouts",
@@ -446,15 +491,22 @@ def to_markdown(comparison: Comparison) -> str:
              "|---|---|---|---|---|---|---|"]
     for arm in sorted(comparison.arms):
         group = comparison.arms[arm]
-        low, mid, high = comparison.spread(arm)
+        spread = comparison.spread(arm)
         oracles = [r.test_oracle for r in group if r.test_oracle is not None]
         oracle = f"{statistics.median(oracles):.3f}" if oracles else "—"
+        # An arm whose scoring pass died has a row and no number. Printing a
+        # blank is the point: it is not a low score, and the seed count beside it
+        # says how many of its seeds are actually behind the interval.
+        quality = ("—" if spread is None else
+                   f"{spread[0]:.3f} / {spread[1]:.3f} / {spread[2]:.3f}")
+        seeds = (f"{len(group)}" if comparison.scored(arm) == len(group)
+                 else f"{comparison.scored(arm)}/{len(group)}")
         lines.append(
-            f"| {arm} | {len(group)} | "
+            f"| {arm} | {seeds} | "
             f"{statistics.median([r.rollouts for r in group]):.0f} | "
             f"{statistics.median([r.calls for r in group]):.0f} | "
             f"{statistics.median([r.dev_reward for r in group]):.3f} | "
-            f"{low:.3f} / {mid:.3f} / {high:.3f} | {oracle} |")
+            f"{quality} | {oracle} |")
 
     lines.append("")
     lines.append(f"Budget held fixed in **{comparison.fixed}**.")
@@ -483,7 +535,7 @@ def to_markdown(comparison: Comparison) -> str:
     if errored:
         lines.append("")
         lines.append("Runs that ended on a failure, whose quality numbers are "
-                     "from partial runs: "
+                     "from partial runs or missing entirely: "
                      + ", ".join(f"`{r.arm}` seed {r.seed}" for r in errored))
 
     fused = [r for group in comparison.arms.values() for r in group
