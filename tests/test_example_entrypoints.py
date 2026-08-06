@@ -304,3 +304,49 @@ def test_port_template_is_importable_and_offline(capsys):
     assert args.provider == "claude"
     port_template.main(["--dry-run"])
     assert "no dataset or model api was accessed" in capsys.readouterr().out.lower()
+
+
+# -- the reported metric was the silent half of a run ------------------------
+
+
+def test_score_tasks_matches_the_sequential_loop_it_replaces():
+    """Concurrency here must change wall-clock and nothing else."""
+    tasks = [type("T", (), {"id": str(i), "gold": i % 3})() for i in range(12)]
+
+    def solve(artifact, task):
+        return f"{artifact}-{task.gold}"
+
+    def reward(task, output):
+        return 1.0 if output.endswith(f"-{task.gold}") else 0.0
+
+    serial_score = sum(reward(t, solve("x", t)) for t in tasks) / len(tasks)
+    assert common.score_tasks(solve, "x", tasks, reward, concurrency=8) == serial_score
+    assert common.score_tasks(solve, "x", tasks, reward, concurrency=1) == serial_score
+
+
+def test_score_tasks_runs_them_concurrently():
+    """The point of it. A sequential loop over a 20-task split at ~38s a call is
+    thirteen minutes of silence, paid twice per arm."""
+    import threading
+    import time
+
+    peak = [0]
+    live = [0]
+    lock = threading.Lock()
+
+    def solve(artifact, task):
+        with lock:
+            live[0] += 1
+            peak[0] = max(peak[0], live[0])
+        time.sleep(0.02)
+        with lock:
+            live[0] -= 1
+        return "ok"
+
+    tasks = [type("T", (), {"id": str(i)})() for i in range(8)]
+    common.score_tasks(solve, "x", tasks, lambda t, o: 1.0, concurrency=8)
+    assert peak[0] > 1, "the split was scored one task at a time"
+
+
+def test_an_empty_split_scores_zero_rather_than_dividing_by_it():
+    assert common.score_tasks(lambda a, t: "x", "a", [], lambda t, o: 1.0) == 0.0

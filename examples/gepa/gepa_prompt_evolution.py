@@ -56,7 +56,7 @@ from agentdescent.evolution import EvolvingArtifact, LLMAgent, Task, evolve, rul
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
 from examples._common import (add_standard_args, completion_for, confirm,
-                              worker_count)
+                              score_tasks, worker_count)
 
 HOTPOTQA = ("hotpotqa/hotpot_qa", "validation", "distractor")   # (dataset, split, config)
 
@@ -378,9 +378,7 @@ def load_dataset(fetch: int, ratios=(0.5, 0.25, 0.25), seed: int = 0) -> Dataset
 
 def evaluate(agent, instruction: str, tasks: List[Task], reward) -> float:
     """Score an instruction on a held-out split (the reported test metric)."""
-    if not tasks:
-        return 0.0
-    return sum(reward(t, agent.solve(instruction, t)) for t in tasks) / len(tasks)
+    return score_tasks(agent.solve, instruction, tasks, reward)
 
 
 # ===========================================================================

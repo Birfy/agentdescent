@@ -59,7 +59,7 @@ from agentdescent.governance import classify
 from agentdescent.parallel import DataParallel
 from agentdescent.sampling import DifficultyWeighted, RoundRobin
 from examples._common import (add_standard_args, completion_for, confirm,
-                              worker_count)
+                              score_tasks, worker_count)
 
 FINER = ("nlpaueb/finer-139", "validation", "finer-139")   # (dataset, split, config)
 
@@ -273,9 +273,7 @@ def load_dataset(pool: int, top_k: int, ratios=(0.5, 0.25, 0.25), seed: int = 0)
 
 def evaluate(agent, rendered: str, tasks: List[Task], reward) -> float:
     """Score a rendered playbook on a held-out split (the reported test metric)."""
-    if not tasks:
-        return 0.0
-    return sum(reward(t, agent.solve(rendered, t)) for t in tasks) / len(tasks)
+    return score_tasks(agent.solve, rendered, tasks, reward)
 
 
 # ===========================================================================

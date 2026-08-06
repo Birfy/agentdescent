@@ -10,6 +10,9 @@ and every test still passes. So the behaviours behind the shared flags are
 functions, not prose: ``confirm`` for ``--yes``, ``completion_for`` for
 ``--provider``/``--model``, ``worker_count`` for ``--serial``, and the early
 ``--dry-run`` return that each port's ``main`` performs before touching data.
+
+``score_tasks`` is here for the same reason: every port had written the same
+sequential held-out loop, and every port paid the same silent wall-clock for it.
 """
 
 from __future__ import annotations
@@ -101,6 +104,36 @@ def confirm(args: argparse.Namespace) -> bool:
         return True
     print("aborted.")
     return False
+
+
+def score_tasks(solve, artifact: str, tasks, reward, *,
+                concurrency: int = 8) -> float:
+    """Score an artifact on a task list, concurrently.
+
+    Every port reports a final held-out number by looping over the split one task
+    at a time. That is the *reported metric*, so it runs after `evolve()` returns
+    and outside everything the engine parallelises -- `eval_concurrency` bounds
+    the gate and never reaches here. On a reasoning model at ~38s a call, a
+    20-task split is thirteen minutes of wall-clock per scoring pass, in silence,
+    and a sweep pays it twice per arm: once for `final_reward` and once for the
+    test split.
+
+    Concurrency changes no result. Each task is scored independently, `reward` is
+    pure, and the sum is order-independent -- so this is wall-clock only, which is
+    why it is a plain default rather than a knob a caller has to discover.
+
+    Sequential below two tasks, so a small split does not pay for a pool.
+    """
+    tasks = list(tasks)
+    if not tasks:
+        return 0.0
+    if len(tasks) < 2 or concurrency < 2:
+        return sum(reward(t, solve(artifact, t)) for t in tasks) / len(tasks)
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=min(concurrency, len(tasks))) as pool:
+        outputs = list(pool.map(lambda t: solve(artifact, t), tasks))
+    return sum(reward(t, o) for t, o in zip(tasks, outputs)) / len(tasks)
 
 
 def worker_count(args: argparse.Namespace, requested: int) -> int:
