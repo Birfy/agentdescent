@@ -129,7 +129,55 @@ evolve(tasks, reward, agent=agent, n_workers=4,
 ```
 
 A model writes one value keeping what each proposal contributed, for the keys the
-diffs actually disagree on. Keys they agree on stay the plain union.
+diffs actually disagree on. Keys they agree on stay the plain union — a model
+asked to merge values that do not disagree can only make them worse.
+
+**It is asked for a union of deltas, not for a rewrite.** "Write one version that
+keeps every improvement" invites a fresh composition that happens to cover the
+same ground, and there is no way to check whether it did. The prompt
+(`fusion.MERGE_PROMPT`) instead says:
+
+```
+Several independent improvements were made to the same text, each fixing a
+different failure. Produce their UNION.
+
+CURRENT
+--- {the value the workers started from} ---
+
+PROPOSAL 1 --- {worker 0's whole rewrite} ---
+PROPOSAL 2 --- {worker 1's} ---
+PROPOSAL 3 --- {worker 2's} ---
+
+Do this:
+1. For each proposal, work out what it CHANGED relative to CURRENT.
+2. Output CURRENT with every one of those changes applied together.
+```
+
+That is an operation whose result can be checked, and it needs only what a
+`FusionPolicy` receives — the current value and the competing ones. Fusion never
+sees the evidence cards, so "what was each proposal fixing" is not available and
+deriving the deltas from CURRENT is what makes it unnecessary rather than
+missing.
+
+Verified on `GLM-5.2` with three real GEPA-style rewrites of one instruction:
+
+| | |
+|---|---|
+| CURRENT | *Answer the question using the given context.* |
+| worker 0 | + *for comparison questions, verify the attribute for BOTH entities* |
+| worker 1 | + *reply with the shortest correct form, no explanation* |
+| worker 2 | + *for yes/no questions reply with exactly 'yes' or 'no'* |
+| **union** | all three survive into one instruction |
+| `fuse_diffs` on the same input | keeps **one**, the other two are lost |
+
+Four things it refuses to do, each because the obvious version would mislead: it
+will not accept an answer that merely repeats one of its inputs (that is not a
+merge, and would enter as a duplicate); it will not accept one over `max_chars`
+(the synthesised value reaches the ledger without passing the trust region, which
+filters *cards*); it will not commit a **partial** union when one contested key
+fails (that would ship some workers' contributions and silently drop the rest,
+which looks like success); and a dead backend falls back rather than raising —
+fusion sits on the commit path of every round.
 
 !!! danger "There is no tournament on this path, and that is the trade"
     The union goes **straight to the acceptance gate**. Measured on a workload

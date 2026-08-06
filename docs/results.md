@@ -247,88 +247,82 @@ search. The numbers are therefore not comparable with those ports' own results.
 | fork-of-8 | — | — | *not yet measured* | — |
 | merge-of-8 | — | — | *not yet measured* | — |
 
-### Measured: per-round selection on HotpotQA — no separation
+### Measured: merge-of-N against best-of-N fork, HotpotQA — no separation
 
-HotpotQA, `GLM-5.2`, 18 rollouts, N=3, `--fetch 80` (40 train / 20 val / 20 test),
-**3 seeds**, `--no-self-verify`. Seed artifact scores **0.600** on test, so there
-was real headroom. 2050 calls, 4.3M tokens, 15.4 h of model time.
+The first run in which the merge arm **actually merges**. Earlier attempts on
+this dataset recorded `fusion.contested == 0` for every arm: GEPA's
+`InstructionSlot` holds the whole instruction in one key, so conflict resolution
+collapsed every pair of proposals to one and no fusion was ever built. Those runs
+measured per-round *selection*. This one installs
+[`reflective_merge`](aggregator.md#when-a-dictionary-update-cannot-merge-reflectivefusion)
+on the merge arm, so contradicting proposals survive to the merge step and a
+model writes their union.
+
+**Setup.** HotpotQA through `GLM-5.2`. 80 rows split **40 train / 20 val (the
+gate) / 20 test (no gate ever sees it)**. Budget **9 rollouts**, held fixed in
+rollouts, N=3, **3 seeds**, `--no-self-verify`. The engine's default aggregator
+throughout — GEPA's own Pareto optimizer is deliberately not used, so a
+difference cannot come from it. The seed artifact scores **0.600** on test, so
+there was real headroom; `--headroom` checks that before spending anything.
 
 | arm | seeds | rollouts | calls | test (min/med/max) | fork oracle |
 |---|---|---|---|---|---|
-| serial | 3 | 18 | 164 | 0.700 / **0.750** / 0.750 | — |
-| fork-of-3 | 3 | 18 | 225 | 0.700 / 0.700 / 0.800 | 0.800 |
-| merge-of-3 | 3 | 18 | 143 | 0.650 / 0.700 / 0.800 | — |
+| serial | 3 | 9 | 93 | 0.650 / 0.700 / 0.850 | — |
+| fork-of-3 | 3 | 9 | 132 | 0.700 / 0.700 / 0.750 | 0.750 |
+| merge-of-3 | 3 | 9 | **73** | 0.600 / **0.800** / 0.850 | — |
 
 > merge-of-3 and fork-of-3 **overlap across seeds**: this budget on this dataset
 > did not distinguish merging from selecting.
 
-**This row is not about merging, and it says so through `contested`.** GEPA's
-`InstructionSlot` holds the whole instruction in one key, so every pair of
-proposals contradicts, conflict resolution collapses them to one, and
-`fusion.contested == 0` for all nine arms — no fused candidate ever competed.
-What was measured is **per-round best-of-N selection** against
-fork-and-select-at-the-end, and against one worker.
+53 minutes, 1298 calls, 2.7M tokens, 11.3 h of model time.
 
-Three things it does establish:
+#### What it establishes
 
-* **No separation, three seeds.** Every arm's spread overlaps every other's. The
-  harness refuses to call that a win in either direction, and it is the outcome
-  this page said in advance it would publish.
-* **One worker was not beaten.** `serial` has the highest median of the three.
-  On this budget, on this workload, neither parallel arm bought anything the
-  quality column can see.
-* **Fork's selection cost is visible.** Its oracle median is 0.800 against a
-  selected median of 0.700 — the 0.100 is what fork-and-select loses by having to
-  choose on dev. That gap is the reason both numbers are reported.
+* **No separation, three seeds.** merge has the highest median *and* the widest
+  spread — 0.850 / 0.600 / 0.800, with seed 1 landing at the seed artifact's own
+  level. `Comparison.separates` refuses to call that a win, which is what it is
+  for. Reporting seed 0 alone would have shown merge beating both arms by 0.100;
+  reporting seed 1 alone would have shown it losing to both.
+* **The call confound runs in merge's favour here.** merge spent 73 calls against
+  a median of 93 and fork's 132 — the highest median at the lowest cost, which is
+  the shape this page calls robust. It is not enough on its own: robust requires
+  the intervals not to overlap, and they do.
+* **Fork pays for choosing on dev.** Oracle median 0.750 against a selected
+  median of 0.700. The gap is what fork-and-select loses by having to pick
+  without the answer, and is why both numbers are reported.
 
-The call column is the confound, and here it runs *against* the parallel arms:
-fork spent 225 calls against a median of 164 for the same 18 rollouts, and did
-not win. merge spent 143 and did not win either.
+#### The caveat that bounds all of it
 
-Reproduce:
+**The union was built twice, in the whole experiment.** `FusionStats` per seed:
+
+| seed | tournaments | union built | only one candidate |
+|---|---|---|---|
+| 0 | 2 | 1 | 1 |
+| 1 | 1 | **0** | 1 |
+| 2 | 3 | 1 | 2 |
+
+At 9 rollouts over 3 workers a run is three rounds, and the aggregator fires on a
+batch of 4 cards — so most merges saw a single diff and had nothing to merge. On
+**seed 1 the mechanism never fired at all**, and that seed is the 0.600 pulling
+merge's spread down.
+
+So this is not "model-assisted merging does not help". It is an experiment in
+which merging happened twice. Read `unranked` before the quality column, exactly
+as `contested` had to be read before it in the runs this one replaces.
+
+Two smaller ones: `fork-of-3` seed 1 hit an `APITimeoutError` during test
+scoring and its 0.700 is a retried measurement; 29 of 1298 calls failed and were
+absorbed by the engine without ending any arm.
+
+#### Reproduce
 
 ```bash
-python -m bench.baselines_run --dataset hotpotqa --fetch 80 --budget-rollouts 18 --width 3 --seeds 0,1,2 --no-self-verify --headroom --run-concurrency 3 --fork-concurrency 2 --eval-concurrency 6 --provider claude --model GLM-5.2 --yes
+python -m bench.baselines_run --dataset hotpotqa --fetch 80 --budget-rollouts 9 --width 3 --seeds 0,1,2 --no-self-verify --reflective-merge --headroom --run-concurrency 5 --fork-concurrency 3 --eval-concurrency 16 --provider claude --model GLM-5.2 --yes
 ```
 
-??? note "A one-seed pilot, which is a pipeline check and not a row of that table"
-    HotpotQA, `GLM-5.2`, 12 rollouts, `--width 3`, `--fetch 24` (12 train / 6 val
-    / 6 test), one seed, `--no-self-verify`. 182 calls, 435k tokens, ~35 minutes.
-
-    | arm | rollouts | calls | dev | test | fork oracle |
-    |---|---|---|---|---|---|
-    | serial | 12 | 39 | 0.833 | 0.500 | — |
-    | fork-of-3 | 12 | 72 | 0.833 | 0.167 | 0.500 |
-    | merge-of-3 | 12 | 39 | 0.667 | 0.333 | — |
-
-    **Nothing about merging can be read off this**, and the harness says so
-    rather than leaving it to the reader: six test tasks make every quality
-    number a count out of six, and one seed cannot separate anything at all —
-    `Comparison.separates` returns `False` below three seeds by construction.
-
-    Two things it does establish, both about the method rather than the result:
-
-    * **The confound is real and it is large.** At *identical* rollouts the fork
-      arm spent **72 calls against 39** — 1.85×. Its three forks each start from
-      nothing, so nearly every rollout of theirs fails and asks for a proposal,
-      while the merge arm shares what the others learned and more of its rollouts
-      solve outright. A table matched only on rollouts would have called that
-      equal budget. This was predicted from the mechanism before the run; the run
-      measured it.
-    * **`dev` is not `test`.** The serial arm's gate reported 0.833 and the split
-      nothing ever saw reported 0.500. Reporting `final_reward` as the result —
-      which the fork arm additionally *selects* on — would have been reporting a
-      training score twice over.
-
-The row above is empty on purpose, and stays empty until it is filled by a real
-run on HotpotQA and FiNER-139 at ≥ 3 seeds. `docs/algo-ace.md` records the same
-configuration moving 4.8 points between two runs, so a single-seed number here
-would not be a result. **A negative outcome is publishable and this page will
-publish it:** if merge-of-N lands inside the spread of best-of-N fork at equal
-budget, then on those workloads parallel merging is a throughput optimisation and
-not a new mechanism, and the claim that "gradients add, diffs do not" implies
-anything beyond engineering convenience has to be marked unsupported here — with
-the datasets and budget it was tested at.
+To make the mechanism fire more than twice, raise `--budget-rollouts` so a run
+has more rounds, or lower `AggregatorConfig.batch_trigger` so a merge fires on
+fewer cards. Both cost model time; neither was affordable at ~38 s a call.
 
 ## Reproducing
 
