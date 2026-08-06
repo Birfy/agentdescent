@@ -388,3 +388,40 @@ def test_the_defaults_change_nothing():
     """Both knobs are off unless asked for, like everything else here."""
     f = ReflectiveFusion(lambda p: "")
     assert f.rank_on == "cheap" and f.skip_when_dominant == 0.0
+
+
+def test_two_arms_of_an_ab_do_not_see_different_noise():
+    """The confound that invalidated a real A/B run, pinned.
+
+    The `off` arm scores a pair and drops one; the `on` arm scores every
+    contradicting proposal plus the synthesised candidate. Drawing the noise from
+    a shared stream meant the two arms consumed different numbers of draws, so
+    their streams diverged from the first merge -- the arms differed in the noise
+    they saw as well as in the mechanism, and a 0.200 gap on test could not be
+    attributed to either.
+
+    Measured before the fix: the same candidate scored 0.5244 / 0.4820 / 0.4909 /
+    0.5016 depending only on its position, a spread wider than one task's worth
+    of improvement on the ranking subset.
+    """
+    from agentdescent.verifier import ThreeLayerVerifier
+
+    class Art:
+        id = "x"
+        version = 1
+        def __init__(self, t): self.t = t
+        def render(self): return self.t
+
+    target = Art("the candidate")
+    others = [Art(f"other-{i}") for i in range(3)]
+
+    scores = []
+    for n_before in range(4):
+        v = ThreeLayerVerifier(eval_fn=lambda a, t: 0.5, held_out=list(range(20)),
+                               rule_subset=8, learned_noise=0.04)
+        for o in others[:n_before]:
+            v.cheap_eval(o)
+        scores.append(v.cheap_eval(target))
+
+    assert len(set(scores)) == 1, (
+        f"a candidate's score still depends on its position: {scores}")
