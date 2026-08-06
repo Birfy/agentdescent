@@ -25,6 +25,9 @@ resistant to the three long tails.
 
 ```mermaid
 flowchart TD
+    SEL["SelectionPolicy<br/>which candidate the batch starts from<br/>(SingleHead: the dev head)"] -->|starting point| W1
+    SEL --> W2
+    SEL --> WN
     TS["TaskScheduler (UCB)<br/>leases task clusters"] -->|lease| W1[Worker 1]
     TS -->|lease| W2[Worker 2]
     TS -->|lease| WN[Worker N]
@@ -88,6 +91,19 @@ The same flow, with the design-doc section numbers annotated:
            (step 4 above submits the candidate to the AuditScheduler,
             which spends the oracle budget by Ĝ and may VETO it)      §5.3
 ```
+
+Two decisions in that picture are easy to confuse, and they are different
+questions asked by different components:
+
+* the **`TaskScheduler`** picks *which task* a worker rolls out;
+* the **[`SelectionPolicy`](selection.md)** picks *which candidate* it starts
+  from.
+
+The default `SingleHead` answers the second with "the `dev` head", for every
+worker, which is what the engine has always done — so the two arrows into each
+worker carry a task and an artifact respectively. Selection sits **above** the
+merge rather than instead of it: `k` starting points, `N/k` workers under each,
+and the aggregator merging their diffs back into their own starting point.
 
 The three-layer **verifier** (rule / learned / oracle) is the evaluation backend
 the Aggregator calls at steps 1–3 and 5 (cheap) and at step 4 (oracle, budgeted).
@@ -205,6 +221,32 @@ Two consequences worth knowing when you write a policy:
 
 AgentDescent separates *what to merge* (the Aggregator, identical in both) from
 *when workers and the aggregator run relative to each other* (the runtime).
+
+That one sentence is the whole difference, and it is worth seeing rather than
+reading — because everything the async path has to deal with follows from the
+barrier being gone:
+
+```mermaid
+flowchart LR
+    subgraph SY["Synchronous - evolve()"]
+        direction TB
+        SW["workers 1..N<br/>rollout + propose"] --> SB["round barrier:<br/>aggregator.step()"]
+        SB -->|"head moves, every worker resnaps<br/>so eta = 0 by construction"| SW
+    end
+    subgraph AS["Barrier-free - async_evolve()"]
+        direction TB
+        AW["workers 1..N<br/>never wait"] -->|cards| BUF["EvidenceBuffer"]
+        BUF --> MG["merger thread:<br/>drains, merges, commits"]
+        MG -->|"head moves, a worker resnaps only once<br/>it has drifted past async_ratio, so eta grows"| AW
+    end
+```
+
+The consequence that costs the most to rediscover: with the default
+`refresh_interval=1` the synchronous path hands every worker the round's fresh
+snapshot, so `η` is **zero by construction** and the staleness policy cannot
+change a single decision there. Staleness is a property of the *runtime*, not of
+the algorithm — which is why `evolve(refresh_interval=N)` exists and why the
+[staleness sweep](staleness.md) is meaningless without it.
 
 ### 4.1 Synchronous DP — `AgentDescent` (orchestrator.py)
 

@@ -1,0 +1,89 @@
+{
+  "dataset": "hotpotqa",
+  "width": 3,
+  "budget": {
+    "rollouts": 12,
+    "calls": null
+  },
+  "fixed": "rollouts",
+  "seeds": [
+    0
+  ],
+  "model": "GLM-5.2",
+  "provider": "claude",
+  "arms": [
+    {
+      "arm": "serial",
+      "seed": 0,
+      "width": 1,
+      "rollouts": 12,
+      "calls": 39,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "wallclock": 1787.480592250824,
+      "wallclock_parallel": 1787.480592250824,
+      "dev_reward": 0.8333333333333334,
+      "test_reward": 0.5,
+      "test_oracle": null,
+      "forks": [],
+      "stop_reason": "max_rollouts",
+      "error": null
+    },
+    {
+      "arm": "fork-of-3",
+      "seed": 0,
+      "width": 3,
+      "rollouts": 12,
+      "calls": 72,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "wallclock": 1900.1464297771454,
+      "wallclock_parallel": 887.4234330654144,
+      "dev_reward": 0.8333333333333334,
+      "test_reward": 0.16666666666666666,
+      "test_oracle": 0.5,
+      "forks": [
+        {
+          "seed": 0,
+          "dev_reward": 0.8333333333333334,
+          "test_reward": 0.16666666666666666,
+          "rollouts": 4,
+          "calls": 24
+        },
+        {
+          "seed": 1,
+          "dev_reward": 0.8333333333333334,
+          "test_reward": 0.5,
+          "rollouts": 4,
+          "calls": 24
+        },
+        {
+          "seed": 2,
+          "dev_reward": 0.6666666666666666,
+          "test_reward": 0.5,
+          "rollouts": 4,
+          "calls": 24
+        }
+      ],
+      "stop_reason": "max_rollouts",
+      "error": null
+    },
+    {
+      "arm": "merge-of-3",
+      "seed": 0,
+      "width": 3,
+      "rollouts": 12,
+      "calls": 39,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "wallclock": 775.4399900436401,
+      "wallclock_parallel": 775.4399900436401,
+      "dev_reward": 0.6666666666666666,
+      "test_reward": 0.3333333333333333,
+      "test_oracle": null,
+      "forks": [],
+      "stop_reason": "max_rollouts",
+      "error": null
+    }
+  ]
+}

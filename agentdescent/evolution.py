@@ -34,13 +34,14 @@ import shutil
 import threading
 import time
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import (
     Any, Callable, Dict, List, Optional, Protocol, Sequence, Tuple,
     runtime_checkable,
 )
 
 from .agents import Completion, Usage, claude
+from .advantage import GroupAdvantage
 from .aggregator import (
     Aggregator, AggregatorConfig, AggregatorFactory, AggregatorContractError,
     check_reports,
@@ -52,8 +53,9 @@ from .governance import FROZEN_IDS, GovernanceError, assert_mutable
 from .ledger import Ledger, LedgerFailure
 from .metrics import Meter, measured
 from .pipeline import EarlyStop, FirstError, WorkerHealth
-from .policies import Policies
+from .policies import FusionTrial, Policies
 from .sampling import RoundRobin, TaskSampler
+from .selection import SingleHead
 from .scheduler import AuditScheduler
 from .staleness import StalenessPolicy
 
@@ -651,8 +653,8 @@ def _publish_stable(aggregator) -> None:
 #: What `evolve` can honour from a `Policies` bundle today. Everything else
 #: raises rather than being accepted and ignored -- see
 #: `Policies.require_supported`. The set grows as the implementations land.
-_WIRED_POLICIES = ("task_sampler", "proposal", "conflict", "fusion", "acceptance",
-                   "promotion", "staleness", "verifier", "ledger",
+_WIRED_POLICIES = ("task_sampler", "selection", "proposal", "conflict", "fusion",
+                   "acceptance", "promotion", "staleness", "verifier", "ledger",
                    "aggregator_factory", "eval_cache", "sandbox_spec", "evaluator",
                    "executor")
 
@@ -785,6 +787,56 @@ def notify(on_round: Optional[Callable[["RoundInfo"], None]],
                       RuntimeWarning, stacklevel=2)
 
 
+def _fusion_trials(aggregator) -> List[FusionTrial]:
+    """Whatever the fusion policy recorded, if it recorded anything.
+
+    ``trials`` is optional on :class:`~agentdescent.policies.FusionPolicy` -- it
+    is instrumentation, not a decision, and a replacement policy is not obliged
+    to keep one. Read through ``getattr`` for that reason, and
+    :meth:`EvolutionResult.fusion_stats` reports the count so an uninstrumented
+    policy cannot be misread as a mechanism that never fired."""
+    return list(getattr(getattr(aggregator, "fusion_policy", None), "trials", ()))
+
+
+def _check_selection(policy, artifact_id, artifact, base_v, round_index,
+                     n_workers, history) -> None:
+    """Ask the selection policy where the next batch starts, and check we can go.
+
+    The engine has one live head. `SingleHead` -- the default -- returns it for
+    every worker, so this is a no-op on the default path and the whole point is
+    that it stays one: the seam exists before the ledger can express what a
+    non-default policy would ask for.
+
+    A policy that names a *different* starting point is refused, loudly, rather
+    than collapsed to the head. Silently ignoring it is the failure mode
+    `Policies.require_supported` was written against: a caller who passes a beam
+    and watches a run finish has every reason to believe the beam ran. Refusing
+    also means every policy in `agentdescent.selection` is usable today in its
+    degenerate, single-candidate shape -- ``Beam(1)``, an archive of one -- and
+    only genuinely multi-head requests fail.
+    """
+    from .selection import Candidate, SelectionContext
+
+    head = Candidate(
+        artifact_id=artifact_id, version=base_v,
+        state=dict(getattr(artifact, "state", {}) or {}),
+        # The last measured held-out reward, which is what any of these policies
+        # would rank on. `None` before the first round has been scored -- and the
+        # policies treat that as "unmeasured", not as zero.
+        score=history[-1].held_out_reward if history else None,
+        selected=round_index)
+    ctx = SelectionContext(head=head, candidates=(head,), round=round_index,
+                           n_workers=n_workers)
+    chosen = list(policy.select(ctx, n_workers))
+    if any(c.version != base_v or c.artifact_id != artifact_id for c in chosen):
+        raise NotImplementedError(
+            f"{type(policy).__name__}.select() asked to start from a candidate "
+            f"other than the current head, and the ledger holds one live branch: "
+            "`dev`, with staleness defined as eta = max(head - base). Multi-head "
+            "support is a separate change; until then a selection policy may only "
+            "return the head it was given.")
+
+
 def _cost_fields(meter: Meter) -> Dict[str, Any]:
     """The meter's counters, keyed as :class:`EvolutionResult` fields.
 
@@ -883,6 +935,124 @@ class RoundInfo:
     fused: int = 0
 
 
+@dataclass(frozen=True)
+class FusionStats:
+    """The fusion tournament's record, with every denominator it needs.
+
+    Four counters rather than one rate, because the rate alone is ambiguous in
+    both directions. ``trials`` counts tournaments held; ``contested`` counts the
+    ones where a fused candidate existed to compete at all. A run with
+    ``trials=40, contested=0`` never tested fusion once -- every round either had
+    a single survivor or had contradicting ones -- and reporting "win rate 0%"
+    for it would be a claim about a mechanism that never ran.
+    """
+
+    trials: int = 0
+    #: Tournaments where a fused candidate was built **and ranked against the
+    #: singles**. The denominator of `win_rate`.
+    contested: int = 0
+    #: Unions that were committed **without being compared to anything**.
+    #: :class:`~agentdescent.fusion.ReflectiveFusion` hands the union straight to
+    #: the acceptance gate, so nothing is ranked and there is no verdict to
+    #: report. Deliberately not folded into `contested`: a mode that skips the
+    #: measurement must not be able to produce a win rate. A trial with no union
+    #: in it -- one candidate, or a failed synthesis -- is not counted here
+    #: either, because nothing was committed unmeasured.
+    unranked: int = 0
+    #: Why the rest were not contested.
+    single_candidate: int = 0
+    contradiction: int = 0
+    #: One proposal was already clear of the field by
+    #: :attr:`~agentdescent.fusion.ReflectiveFusion.skip_when_dominant`, so no
+    #: union was bought. A deliberate saving, not a failure -- counted apart from
+    #: `synthesis_failed` for exactly that reason.
+    dominant_single: int = 0
+    #: A model was asked to synthesise the competing values and its answer could
+    #: not be used -- a dead backend, an empty or oversized answer, or one that
+    #: merely repeated an input. Counted apart from `contradiction`, which means
+    #: no model was asked at all: both leave `contested` at zero and need
+    #: opposite fixes. Only :class:`~agentdescent.fusion.ReflectiveFusion`
+    #: produces it.
+    synthesis_failed: int = 0
+    #: Tournaments a model-synthesised candidate won outright.
+    synthesized_wins: int = 0
+
+    fused_wins: int = 0
+    single_wins: int = 0
+    #: Tournaments where nothing beat the artifact the round started from.
+    neither: int = 0
+    #: Contested tournaments where the fusion exactly tied the best single. High
+    #: here with an empty negative tail means the cheap layer cannot separate the
+    #: candidates, not that fusion is safe.
+    ties: int = 0
+
+    #: Mean of (fused - best single) over contested tournaments.
+    mean_gain: float = 0.0
+    #: The losing tail: how many contested tournaments the fusion lost, its mean
+    #: loss, and the worst single one. This is the number the objection is about,
+    #: and the tournament's job is to make sure it never commits.
+    negative: int = 0
+    mean_loss: float = 0.0
+    worst_loss: float = 0.0
+    #: Fusions that were worse than the *baseline* -- not merely ranked below the
+    #: best single, but actively harmful. `negative` includes ranking noise;
+    #: this is the failure mode "merging averages the improvements away" names.
+    below_baseline: int = 0
+
+    @property
+    def win_rate(self) -> Optional[float]:
+        """Fused wins over contested tournaments; ``None`` when none were.
+
+        ``None`` rather than ``0.0`` on purpose: a rate with an empty denominator
+        printed as zero reads as "fusion always lost"."""
+        return self.fused_wins / self.contested if self.contested else None
+
+    @classmethod
+    def of(cls, trials: Sequence["FusionTrial"]) -> "FusionStats":
+        gains = [t.gain for t in trials
+                 if t.gain is not None and getattr(t, "ranked", True)]
+        losses = [g for g in gains if g < 0]
+        return cls(
+            trials=len(trials),
+            contested=sum(1 for t in trials
+                          if t.gain is not None and getattr(t, "ranked", True)),
+            unranked=sum(1 for t in trials
+                         if not getattr(t, "ranked", True)
+                         and t.winner == "synthesized"),
+            single_candidate=sum(1 for t in trials if t.reason == "single-candidate"),
+            contradiction=sum(1 for t in trials if t.reason == "contradiction"),
+            dominant_single=sum(1 for t in trials if t.reason == "dominant-single"),
+            synthesis_failed=sum(1 for t in trials
+                                 if t.reason == "synthesis-failed"),
+            synthesized_wins=sum(1 for t in trials if t.winner == "synthesized"),
+            # A synthesised win is a fused win: both mean the merge beat every
+            # single diff. The narrower counter says *how* it was built.
+            fused_wins=sum(1 for t in trials
+                           if t.winner in ("fused", "synthesized")
+                           and getattr(t, "ranked", True)),
+            single_wins=sum(1 for t in trials if t.winner == "single"),
+            neither=sum(1 for t in trials if t.winner == "neither"),
+            ties=sum(1 for g in gains if g == 0.0),
+            mean_gain=sum(gains) / len(gains) if gains else 0.0,
+            negative=len(losses),
+            mean_loss=sum(losses) / len(losses) if losses else 0.0,
+            worst_loss=min(losses) if losses else 0.0,
+            below_baseline=sum(
+                1 for t in trials
+                if t.fused_score is not None and t.fused_score < t.baseline_score))
+
+    def summary(self) -> str:
+        """One line, and it says when there is nothing to report."""
+        if not self.contested:
+            return (f"fusion: {self.trials} tournaments, none contested "
+                    f"({self.single_candidate} single-candidate, "
+                    f"{self.contradiction} contradicting) -- fusion never ran")
+        return (f"fusion: won {self.fused_wins}/{self.contested} "
+                f"({self.win_rate:.0%}), mean gain {self.mean_gain:+.3f}, "
+                f"{self.negative} losses (worst {self.worst_loss:+.3f}, "
+                f"{self.below_baseline} below baseline), {self.ties} ties")
+
+
 @dataclass
 class EvolutionResult:
     state: Dict[str, str]
@@ -901,7 +1071,8 @@ class EvolutionResult:
     #: from "died".
     error: Optional[str] = None
     #: Why the run ended -- ``"target_reward"`` / ``"patience"`` / ``"rounds"`` /
-    #: ``"max_seconds"`` / ``"max_iters"`` / ``"error"``. Without it a budget
+    #: ``"max_seconds"`` / ``"max_iters"`` / ``"max_rollouts"`` / ``"max_calls"``
+    #: / ``"error"``. Without it a budget
     #: expiry is indistinguishable from convergence: ``error`` is ``None`` for
     #: both, ``history`` has entries for both, and the only other clue is
     #: re-deriving ``len(history)`` against arguments whose meaning changes between
@@ -970,6 +1141,33 @@ class EvolutionResult:
     sandboxes_created: int = 0
     sandboxes_reused: int = 0
     sandbox_failures: int = 0
+    #: Every fusion tournament the run held, when the fusion policy recorded
+    #: them (the shipped one does). Read it through :meth:`fusion_stats`.
+    fusion_trials: List["FusionTrial"] = field(default_factory=list)
+
+    def fusion_stats(self) -> "FusionStats":
+        """How often merging beat the best single diff -- and how badly it lost.
+
+        The strongest objection to this whole design is that two workers' local
+        improvements might be worse together than either is alone. `RoundStat.fused`
+        counted how often a fusion was *committed*, which cannot answer it: the
+        tournament only ever commits a fusion that won, so the count is a tally of
+        successes with the denominator missing.
+
+        Three shapes of answer, all worth having:
+
+        * **win rate well above 50%** -- merging recovers the N-1 proposals
+          best-of-N throws away, which is the claim.
+        * **win rate near 50%** -- fusion is noise, and the tournament's cost (an
+          extra held-out pass per merge) has to be justified some other way.
+        * **win rate below 50%, with the tournament catching it** -- the gate is
+          doing real work, which is its own result: the optimizer audits itself.
+
+        Read ``negative`` before the win rate. An empty negative tail does not mean
+        fusion never hurts; on a small held-out set it usually means the cheap layer
+        cannot separate the candidates at all, and ``ties`` is the tell.
+        """
+        return FusionStats.of(self.fusion_trials)
 
     def outcomes(self) -> Dict[str, int]:
         """Merge outcomes for the whole run, by category -- *why* it went as it did.
@@ -1097,6 +1295,7 @@ class EvolutionResult:
             "sandboxes_created": self.sandboxes_created,
             "sandboxes_reused": self.sandboxes_reused,
             "sandbox_failures": self.sandbox_failures,
+            "fusion_trials": [asdict(t) for t in self.fusion_trials],
         }
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, indent=2, ensure_ascii=False)
@@ -1197,6 +1396,7 @@ class EvolutionResult:
             forced_refreshes=d.get("forced_refreshes", 0),
             stragglers=d.get("stragglers", 0),
             stop_reason=d.get("stop_reason", "rounds"),
+            fusion_trials=[FusionTrial(**t) for t in d.get("fusion_trials", [])],
             # Every cost field is `.get` with a default, so a file written before
             # they existed loads as a run that simply did not measure them.
             usage=Usage(calls=u.get("calls", 0),
@@ -1625,6 +1825,8 @@ def evolve(
     asynchronous: bool = False,
     async_ratio: int = 3,
     max_seconds: Optional[float] = None,
+    max_rollouts: Optional[int] = None,
+    max_calls: Optional[int] = None,
     self_verify: bool = True,
     held_out_frac: float = 0.4,
     repo_path: Optional[str] = None,
@@ -1789,6 +1991,25 @@ def evolve(
     max_seconds:
         Wall-clock budget. ``None`` (default) means unbounded; the async path
         uses ``20.0`` when unset.
+    max_rollouts, max_calls:
+        The budget in the two units a comparison has to hold fixed: rollouts
+        completed, and actor invocations (``run`` + ``propose``). ``rounds`` is
+        not one of them -- configurations differ in how much model a round buys,
+        so a budget fixed in rounds hands the wider configuration more model and
+        then reports the extra model as a win for parallelism. Either bound stops
+        the run with ``stop_reason`` ``"max_rollouts"`` / ``"max_calls"``.
+
+        **Checked at the round barrier, so a run overshoots by up to one round.**
+        A round is dispatched or it is not; stopping halfway would leave a
+        half-merged round, and the states a comparison compares are the ones a
+        merge produced. So a budget is a *bound on where to stop*, never the
+        number to compare on: read the spend the run actually reported
+        (``result.rollouts``, ``result.usage.calls``), which is what
+        :mod:`agentdescent.baselines` does -- it refuses to call two arms
+        equal-budget when their measured spends differ.
+
+        The async path has no barrier and enforces both per rollout, so it
+        overshoots by at most the rollouts already in flight.
     self_verify:
         Re-run the trajectory with the diff applied to record a local
         before/after delta. Doubles the rollouts spent per proposal; ports that
@@ -1907,13 +2128,13 @@ def evolve(
                 "synchronous path. Pass max_seconds= explicitly, and check "
                 "result.stop_reason -- a budget expiry otherwise looks exactly "
                 "like convergence.", RuntimeWarning, stacklevel=2)
-        if rounds != 15:                     # i.e. the caller chose a value
+        if rounds != 15 and max_rollouts is None:   # i.e. the caller chose a value
             warnings.warn(
                 f"evolve(asynchronous=True) has no round barrier, so rounds={rounds} "
                 f"is reinterpreted as a budget of {rounds * max(1, n_workers)} worker "
                 "rollouts, and RoundInfo.round becomes a merger-sweep index -- "
                 "len(result.history) is not comparable with the synchronous path. "
-                "Call async_evolve(max_iters=) directly for an exact count.",
+                "Pass max_rollouts= to say the budget outright.",
                 RuntimeWarning, stacklevel=2)
         from .async_evolve import async_evolve
         return async_evolve(
@@ -1921,7 +2142,9 @@ def evolve(
             initial_state=initial_state, blast_radius=blast_radius, artifact_id=artifact_id,
             n_workers=n_workers, async_ratio=async_ratio,
             max_seconds=20.0 if max_seconds is None else max_seconds,
-            max_iters=rounds * max(1, n_workers), held_out_frac=held_out_frac,
+            max_iters=(max_rollouts if max_rollouts is not None
+                       else rounds * max(1, n_workers)),
+            max_calls=max_calls, held_out_frac=held_out_frac,
             repo_path=repo_path, agg_config=agg_config, staleness_policy=staleness_policy,
             aggregator_factory=aggregator_factory, oracle_budget=oracle_budget,
             cheap_eval_tasks=cheap_eval_tasks, shuffle=shuffle, seed=seed,
@@ -1945,6 +2168,12 @@ def evolve(
     task_sampler, staleness_policy = _pol.task_sampler, _pol.staleness
     aggregator_factory = _pol.aggregator_factory
     sampler = task_sampler or RoundRobin()
+    # Where the next batch starts. `SingleHead` is the current head for every
+    # worker, i.e. exactly what this loop has always done.
+    selection = _pol.selection or SingleHead()
+    # The group-relative reward every rollout carries. Off nobody's path: the
+    # value lands on the evidence card and no default policy reads it.
+    advantage = GroupAdvantage()
     strategy = strategy or AppendRules()
     # TP owns a *section of the artifact*, so it needs the artifact's key space --
     # not the task ids `plan()` is handed. Resolve and validate it here, before any
@@ -2004,6 +2233,22 @@ def evolve(
             if verbose:
                 print(f"round {r:>3}  stopping: max_seconds={max_seconds} reached")
             break
+        # The cost budgets, checked where the wall-clock one already is: at the
+        # barrier, before a round is dispatched. Mid-round would mean a partial
+        # merge, and the state a budget comparison compares is one a merge
+        # produced -- so the run overshoots by up to a round and reports the
+        # spend it actually incurred instead of the one it was asked for.
+        spent = eng.meter.snapshot()
+        over = ((max_rollouts is not None and spent.rollouts >= max_rollouts
+                 and "max_rollouts") or
+                (max_calls is not None and spent.calls >= max_calls
+                 and "max_calls"))
+        if over:
+            stop_reason = over
+            if verbose:
+                print(f"round {r:>3}  stopping: {over} reached "
+                      f"({spent.rollouts} rollouts / {spent.calls} calls)")
+            break
         try:
             snap = ledger.snapshot(Ledger.DEV)
         except LedgerFailure as e:
@@ -2034,6 +2279,8 @@ def evolve(
         artifact = snap.get(artifact_id)
         base_v = snap.version.get(artifact_id, 0)
         assert_mutable(artifact)
+        _check_selection(selection, artifact_id, artifact, base_v, r, n_workers,
+                         history)
         ok_units, failed_units = [0], [0]      # this round's tally
 
         def _snapshot_for(worker: int):
@@ -2105,6 +2352,14 @@ def evolve(
             output = outcome.output
             score = _checked_reward(outcome.reward, task)
             sampler.record(task.id, score)               # learn which tasks carry signal
+            # Observed here, before the solved-task early return: a *group* is
+            # every rollout against this base and cluster, and one that only saw
+            # the failures would have no variance to standardise against on a
+            # binary reward -- every member scoring zero, every advantage
+            # therefore undefined. The signal would exist and be permanently
+            # `None`, which is worse than not having it.
+            adv = advantage.observe(
+                advantage.key(mine_v, str(task.meta.get("cluster", ""))), score)
             if observe_plan is not None:
                 # ...and let the parallel strategy learn too, if it wants to.
                 # `plan` alone is a pure function of its arguments, which is
@@ -2153,7 +2408,13 @@ def evolve(
                 delta = 0.0
             aggregator.ingest(EvidenceCard(
                 diff=diff, base_version={artifact_id: mine_v}, touched=[artifact_id],
-                before_after_delta=delta, trajectory_refs=[task]))
+                before_after_delta=delta, trajectory_refs=[task],
+                # Recorded always, acted on by nobody unless a policy from
+                # `agentdescent.advantage` is installed. It is arithmetic over
+                # two numbers the round already has, and a signal that is only
+                # computed when something consumes it can never be looked at to
+                # decide whether anything should.
+                advantage=adv))
 
         try:
             # the parallel strategy assigns this round's tasks to workers; they run
@@ -2336,6 +2597,7 @@ def evolve(
                              final_reward=final_reward, history=history,
                              ledger_log=_safe_log(ledger), error=run_error,
                              stop_reason="error" if run_error else stop_reason,
+                             fusion_trials=_fusion_trials(aggregator),
                              **_cost_fields(eng.meter))
     eng.cleanup()
     return result

@@ -377,7 +377,9 @@ optimizer step:
    (contradictory ops) detection; contradictions are projected out PCGrad-style,
    keeping the better of the pair on a shared subset.
 3. **Fusion tournament (§4.3)** — complementary diffs are fused (model-soup
-   analogy) and run against the individual candidates on held-out data.
+   analogy) and run against the individual candidates on held-out data. Every
+   tournament is recorded; see [Does merging just average the improvements
+   away?](#does-merging-just-average-the-improvements-away) below.
 4. **Audit gate (§5.3)** — the merge decision is itself submitted to the
    `AuditScheduler`; high-blast-radius / low-trust merges are forced through the
    oracle, which can **veto outright** (`oracle-rejected`) *before* the
@@ -392,6 +394,39 @@ optimizer step:
    commit *restarts* the clock rather than advancing it — so the artifact most
    likely to be promoted is the one that stopped changing because nothing beat
    it). A clean run publishes its head on the way out.
+
+### Does merging just average the improvements away?
+
+The sharpest objection to this whole design: two workers each make a local
+improvement, and the two together are worse than either alone. The tournament in
+step 3 is the answer — a fused candidate has to *win* on held-out before anything
+commits — but "we have a tournament" is a design, not evidence.
+
+`result.fusion_stats()` is the evidence, with the denominators the old `fused`
+counter was missing:
+
+```python
+stats = result.fusion_stats()
+stats.win_rate        # fused wins / tournaments where a fusion competed at all
+stats.mean_gain       # mean (fused − best single)
+stats.negative        # how often the fusion lost, and by how much
+stats.below_baseline  # how often it was worse than the artifact it started from
+```
+
+Read `contested` before `win_rate`. A run where every round had a single
+survivor never tested fusion once, and `win_rate` is `None` rather than `0%` so
+that cannot be misread. Read `negative` before believing a high win rate: an
+empty losing tail usually means the held-out set is too small to separate the
+candidates, and `ties` is the tell.
+
+Three outcomes, all worth having. Well above 50% means merging recovers the N−1
+proposals best-of-N discards. Near 50% means fusion is noise and the tournament's
+extra held-out pass needs a different justification. Below 50% *with the
+tournament catching it* means the gate is doing real work — the optimizer audits
+itself. Measured numbers go in
+[Measured results](https://github.com/Birfy/agentdescent/blob/main/docs/results.md);
+the synthetic router domain is not where they can come from, because its diffs
+are additive by construction and fusion there wins by definition.
 
 ## Parallelism & asynchrony
 

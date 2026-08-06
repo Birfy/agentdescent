@@ -55,7 +55,10 @@ def test_no_evolve_argument_is_dropped_without_notice():
     forwarded = set(re.findall(r"(\w+)=", src.split("return async_evolve(")[1]
                                               .split(")\n")[0]))
     warned = set(re.findall(r'\("(\w+)", ', src))
-    remapped = {"tasks", "reward", "rounds", "max_seconds", "asynchronous"}
+    # Forwarded under another name: `max_rollouts` is what the barrier-free path
+    # has always called `max_iters`, so it reaches async_evolve as that.
+    remapped = {"tasks", "reward", "rounds", "max_seconds", "asynchronous",
+                "max_rollouts"}
     leaked = set(inspect.signature(_evolve).parameters) - forwarded - warned - remapped
     assert not leaked, f"silently dropped by the async path: {sorted(leaked)}"
 

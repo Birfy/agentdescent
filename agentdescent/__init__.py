@@ -29,7 +29,28 @@ from .ledger import (
 from .verifier import ThreeLayerVerifier, VerifierBudget
 from . import backends, dataloader          # submodules: agentdescent.dataloader.hf_rows(...)
 from .dataloader import Dataset, split_dataset
+from .advantage import (
+    AdaptiveTrustRegion,
+    AdvantageAcceptance,
+    AdvantageConflict,
+    GroupAdvantage,
+    StableDistanceAcceptance,
+    TrustRegion,
+    state_distance,
+)
+from .fusion import KeepContradictions, ReflectiveFusion, reflective_merge
 from .sampling import DifficultyWeighted, RoundRobin, TaskSampler
+from .selection import (
+    Archive,
+    Beam,
+    Candidate,
+    MCTS,
+    ParetoFrontier,
+    SelectionContext,
+    SelectionPolicy,
+    SingleHead,
+    pareto_front,
+)
 from .scheduler import (
     AuditScheduler,
     DurationEstimator,
@@ -69,6 +90,7 @@ from .policies import (
     AcceptancePolicy,
     ConflictPolicy,
     FusionPolicy,
+    FusionTrial,
     LedgerProtocol,
     MergeContext,
     Policies,
@@ -128,6 +150,7 @@ from .evolution import (
     KeyedRules,
     SingleSlot,
     EvolutionResult,
+    FusionStats,
     ProposalContractError,
     RewardContractError,
     SOLVED,
@@ -139,6 +162,7 @@ from .evolution import (
 )
 from .async_evolve import async_evolve
 from .async_runtime import AsyncAgentDescent, AsyncConfig, AsyncStats
+from . import baselines                     # agentdescent.baselines.merge_of_n(...)
 from .parallel import (
     ParallelMode,
     ParallelStrategy,
@@ -180,10 +204,30 @@ __all__ = [
     "Dataset",
     "split_dataset",
     "backends",
+    "baselines",
     "dataloader",
     "DifficultyWeighted",
     "RoundRobin",
     "TaskSampler",
+    "ReflectiveFusion",
+    "KeepContradictions",
+    "reflective_merge",
+    "GroupAdvantage",
+    "AdvantageAcceptance",
+    "AdvantageConflict",
+    "AdaptiveTrustRegion",
+    "TrustRegion",
+    "StableDistanceAcceptance",
+    "state_distance",
+    "SelectionPolicy",
+    "SelectionContext",
+    "Candidate",
+    "SingleHead",
+    "Beam",
+    "ParetoFrontier",
+    "Archive",
+    "MCTS",
+    "pareto_front",
     "ResumeQueue",
     "DurationEstimator",
     "lpt_schedule",
@@ -219,6 +263,8 @@ __all__ = [
     "AcceptDecision",
     "ConflictPolicy",
     "FusionPolicy",
+    "FusionTrial",
+    "FusionStats",
     "PromotionPolicy",
     "Promotion",
     "ProposalPolicy",

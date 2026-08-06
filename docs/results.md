@@ -162,6 +162,168 @@ Full breakdown in [Efficiency](efficiency.md).
 they are independent, and a run slower than its worker count suggests usually
 wants the second.
 
+## Equal budget: merge-of-N against best-of-N fork
+
+!!! danger "Every number above is a *throughput* number, and throughput cannot settle this"
+    Speedup measures how fast the same work finishes. It cannot tell **merging**
+    from **sampling and selecting**, because population-based methods are already
+    parallel: N independent forks saturate N workers just as well, and their
+    speedup is also close to N. A table of speedups is consistent with merging
+    being a new mechanism *and* with it being an engineering convenience.
+
+    One quantity distinguishes them: held-out quality at **equal rollout budget**,
+    merge-of-N against best-of-N fork. `agentdescent.baselines` runs the three
+    arms that produce it — `serial`, `best_of_n_fork`, `merge_of_n` — over one
+    `Workload`, so the arms cannot drift in anything but execution shape.
+
+```python
+from agentdescent.baselines import Budget, Workload, best_of_n_fork, compare, merge_of_n, serial, to_markdown
+
+workload = Workload(tasks=tasks, reward=reward, test_eval=score_on_test,
+                    agent=agent, evolve_kwargs={"rounds": 10_000})
+budget = Budget(rollouts=800)
+arms = [f(workload, budget=budget, seed=s) for s in (0, 1, 2)
+        for f in (lambda w, **k: serial(w, **k),
+                  lambda w, **k: best_of_n_fork(w, 8, **k),
+                  lambda w, **k: merge_of_n(w, 8, **k))]
+print(to_markdown(compare(arms, fixed="rollouts")))
+```
+
+Two properties the module enforces rather than describes:
+
+**Fork is reported twice.** The *oracle* fork is the best fork on test — an upper
+bound nobody can ship, since picking it needs the answer. The *selected* fork is
+the best on dev, reported on test, which is what fork-and-select actually
+delivers. Reporting only one flatters one side.
+
+**Rollouts and calls cannot both be equalised.** Measured, not assumed. Forks that
+never talk to each other each start from nothing, so nearly every rollout of
+theirs fails and asks for a proposal; a merge arm shares what the others learned,
+so more of its rollouts solve outright and never call the proposer. Fix rollouts
+and the fork arm spends over twice the model; fix calls and it gets a quarter of
+the rollouts. `compare(fixed=...)` therefore names the unit held fixed and prints
+the other one's divergence as a confound beside the result. **A merge arm that
+wins at equal rollouts while spending more calls has not been shown to win.**
+
+`bench.baselines_run` is the same thing as a command, on the GEPA and ACE
+datasets. Print the plan first — a fork arm is N runs by itself, so the run count
+is not `arms × seeds`:
+
+```bash
+python -m bench.baselines_run --dataset hotpotqa --budget-rollouts 96 --width 4 --seeds 0,1,2 --plan
+```
+
+```bash
+python -m bench.baselines_run --dataset hotpotqa --budget-rollouts 96 --width 4 --seeds 0,1,2 --provider claude --model GLM-5.2 --yes --json equal-budget.json
+```
+
+It runs the **engine's default aggregator**, not GEPA's Pareto selection or ACE's
+grow-and-refine: those are search strategies, and running them would leave the
+comparison unable to say whether a difference came from merging or from the
+search. The numbers are therefore not comparable with those ports' own results.
+
+!!! danger "Check `contested` before reading any merge-vs-fork row"
+    A strategy that keeps the whole artifact in **one key** — GEPA's
+    `InstructionSlot`, and therefore the HotpotQA workload — makes every pair of
+    worker proposals contradict by construction. Conflict resolution collapses
+    them to one, and **the fusion tournament never builds a fused candidate at
+    all**. `merge_of_n` there is per-round *best-of-N selection*: a real
+    mechanism, and not merging.
+
+    `ArmResult.fusion.contested` counts the tournaments a fused candidate
+    actually competed in. Measured on the two shipped artifacts:
+
+    | artifact | keys | contested |
+    |---|---|---|
+    | GEPA `InstructionSlot` | 1 (`instruction`) | **0** — fusion never runs |
+    | ACE playbook | one per bullet | > 0 — fusion runs and can lose |
+
+    So a HotpotQA row belongs under *selection*, and only a multi-key artifact
+    can fill the table below. `tests/test_fusion_stats.py` pins both directions.
+
+| arm | dataset | rollouts | test quality (min/med/max) | fork oracle |
+|---|---|---|---|---|
+| serial | — | — | *not yet measured* | — |
+| fork-of-8 | — | — | *not yet measured* | — |
+| merge-of-8 | — | — | *not yet measured* | — |
+
+### Measured: merge-of-N against best-of-N fork, HotpotQA — no separation
+
+The first run in which the merge arm **actually merges**. Earlier attempts on
+this dataset recorded `fusion.contested == 0` for every arm: GEPA's
+`InstructionSlot` holds the whole instruction in one key, so conflict resolution
+collapsed every pair of proposals to one and no fusion was ever built. Those runs
+measured per-round *selection*. This one installs
+[`reflective_merge`](aggregator.md#when-a-dictionary-update-cannot-merge-reflectivefusion)
+on the merge arm, so contradicting proposals survive to the merge step and a
+model writes their union.
+
+**Setup.** HotpotQA through `GLM-5.2`. 80 rows split **40 train / 20 val (the
+gate) / 20 test (no gate ever sees it)**. Budget **9 rollouts**, held fixed in
+rollouts, N=3, **3 seeds**, `--no-self-verify`. The engine's default aggregator
+throughout — GEPA's own Pareto optimizer is deliberately not used, so a
+difference cannot come from it. The seed artifact scores **0.600** on test, so
+there was real headroom; `--headroom` checks that before spending anything.
+
+| arm | seeds | rollouts | calls | test (min/med/max) | fork oracle |
+|---|---|---|---|---|---|
+| serial | 3 | 9 | 93 | 0.650 / 0.700 / 0.850 | — |
+| fork-of-3 | 3 | 9 | 132 | 0.700 / 0.700 / 0.750 | 0.750 |
+| merge-of-3 | 3 | 9 | **73** | 0.600 / **0.800** / 0.850 | — |
+
+> merge-of-3 and fork-of-3 **overlap across seeds**: this budget on this dataset
+> did not distinguish merging from selecting.
+
+53 minutes, 1298 calls, 2.7M tokens, 11.3 h of model time.
+
+#### What it establishes
+
+* **No separation, three seeds.** merge has the highest median *and* the widest
+  spread — 0.850 / 0.600 / 0.800, with seed 1 landing at the seed artifact's own
+  level. `Comparison.separates` refuses to call that a win, which is what it is
+  for. Reporting seed 0 alone would have shown merge beating both arms by 0.100;
+  reporting seed 1 alone would have shown it losing to both.
+* **The call confound runs in merge's favour here.** merge spent 73 calls against
+  a median of 93 and fork's 132 — the highest median at the lowest cost, which is
+  the shape this page calls robust. It is not enough on its own: robust requires
+  the intervals not to overlap, and they do.
+* **Fork pays for choosing on dev.** Oracle median 0.750 against a selected
+  median of 0.700. The gap is what fork-and-select loses by having to pick
+  without the answer, and is why both numbers are reported.
+
+#### The caveat that bounds all of it
+
+**The union was built twice, in the whole experiment.** `FusionStats` per seed:
+
+| seed | tournaments | union built | only one candidate |
+|---|---|---|---|
+| 0 | 2 | 1 | 1 |
+| 1 | 1 | **0** | 1 |
+| 2 | 3 | 1 | 2 |
+
+At 9 rollouts over 3 workers a run is three rounds, and the aggregator fires on a
+batch of 4 cards — so most merges saw a single diff and had nothing to merge. On
+**seed 1 the mechanism never fired at all**, and that seed is the 0.600 pulling
+merge's spread down.
+
+So this is not "model-assisted merging does not help". It is an experiment in
+which merging happened twice. Read `unranked` before the quality column, exactly
+as `contested` had to be read before it in the runs this one replaces.
+
+Two smaller ones: `fork-of-3` seed 1 hit an `APITimeoutError` during test
+scoring and its 0.700 is a retried measurement; 29 of 1298 calls failed and were
+absorbed by the engine without ending any arm.
+
+#### Reproduce
+
+```bash
+python -m bench.baselines_run --dataset hotpotqa --fetch 80 --budget-rollouts 9 --width 3 --seeds 0,1,2 --no-self-verify --reflective-merge --headroom --run-concurrency 5 --fork-concurrency 3 --eval-concurrency 16 --provider claude --model GLM-5.2 --yes
+```
+
+To make the mechanism fire more than twice, raise `--budget-rollouts` so a run
+has more rounds, or lower `AggregatorConfig.batch_trigger` so a merge fires on
+fewer cards. Both cost model time; neither was affordable at ~38 s a call.
+
 ## Reproducing
 
 ```bash

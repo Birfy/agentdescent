@@ -55,24 +55,36 @@ meaning without a barrier and it **says so** rather than dropping them silently:
 | `parallel=` | ignored — the async runtime shards data-parallel across its own workers |
 | `max_concurrency=` | ignored — concurrency *is* `n_workers` |
 | `round_timeout=` | ignored — there is no barrier to bound; use the backend's own timeout |
-| `rounds=` | **reinterpreted** as a budget of `rounds × n_workers` worker rollouts |
+| `rounds=` | **reinterpreted** as a budget of `rounds × n_workers` worker rollouts (silent, and exact, once `max_rollouts=` says the budget outright) |
 | `max_seconds=None` | **becomes 20.0 seconds**, where it means "no limit" on the sync path |
 
 Each of those emits a `RuntimeWarning`. The last two are the sharp ones: flipping
 one boolean turns an unbounded run into a 20-second one, and a partial artifact
 with `error=None` and a populated `history` is indistinguishable from a converged
 one. **Check `result.stop_reason`** — `"target_reward"` is convergence,
-`"max_seconds"` / `"max_iters"` is a budget expiry.
+`"max_seconds"` / `"max_iters"` / `"max_rollouts"` / `"max_calls"` is a budget
+expiry.
 
-Call `async_evolve(max_iters=...)` directly when you want an exact rollout count.
+Say the rollout budget outright rather than deriving it from `rounds`. Either
+spelling works and both silence the reinterpretation warning:
 
 ```python
-from agentdescent import async_evolve
+from agentdescent import async_evolve, evolve
 
-result = async_evolve(tasks, reward, agent=agent,
-                      n_workers=6, async_ratio=3,
-                      max_seconds=120, max_iters=200)
+evolve(tasks, reward, agent=agent, asynchronous=True,
+       n_workers=6, max_seconds=120, max_rollouts=200, max_calls=400)
+
+async_evolve(tasks, reward, agent=agent,
+             n_workers=6, async_ratio=3,
+             max_seconds=120, max_iters=200, max_calls=400)
 ```
+
+`max_calls` is the second half of an equal-budget comparison: two configurations
+matched on rollouts still differ in model spend whenever one asks for more
+proposals per rollout, and a rollout that solves its task never proposes at all —
+so calls are not a fixed multiple of rollouts and cannot be derived from them.
+Both bounds are checked as each rollout lands here, so the barrier-free path
+overshoots only by what was already in flight.
 
 ## How the pipeline holds together
 

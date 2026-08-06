@@ -51,6 +51,7 @@ if TYPE_CHECKING:                                   # pragma: no cover
     from .evaluator import EvaluatorGroup
     from .evolvable import Diff, EvidenceCard, Evolvable
     from .sampling import TaskSampler
+    from .selection import SelectionPolicy
     from .staleness import StalenessPolicy
     from .stats import BetaPosterior
 
@@ -59,6 +60,7 @@ __all__ = [
     "AcceptancePolicy",
     "ConflictPolicy",
     "FusionPolicy",
+    "FusionTrial",
     "LedgerProtocol",
     "MergeContext",
     "Policies",
@@ -110,6 +112,15 @@ class MergeContext:
     prior: Optional["BetaPosterior"] = None
     #: Fraction of the artifact a single diff may touch.
     trust_radius: float = 0.2
+    #: How far the candidate sits from the ``stable`` branch, as a fraction of
+    #: keys that differ, in ``[0, 1]``. The KL-to-a-reference-policy analogy, and
+    #: information today's default gate does not use: L1 safety rests entirely on
+    #: the oracle's single veto, and "how far is this from the thing known to
+    #: work" is exactly what a blast radius should be weighed against. ``0.0``
+    #: when the run has no ``stable`` branch yet, which is the same as "no
+    #: reference to be far from". See
+    #: :class:`~agentdescent.advantage.StableDistanceAcceptance`.
+    stable_distance: float = 0.0
     #: Fingerprint of the environment each side was measured in. Equal on a
     #: single-machine run, so the comparison is always valid there. Once
     #: measurements can come from different toolchains they stop being
@@ -127,6 +138,69 @@ class MergeContext:
     def comparable(self) -> bool:
         """Were both sides measured in the same environment?"""
         return self.base_env == self.cand_env
+
+
+@dataclass(frozen=True)
+class FusionTrial:
+    """One tournament: what the fused candidate scored against the best single.
+
+    The sharpest objection to "diffs can be merged" is that two workers' local
+    improvements can be worse together than either is alone. The tournament has
+    always been the answer to it -- the fused candidate has to *win* on held-out
+    before anything commits -- and the run recorded only how often a fusion was
+    committed, never how often it won, by how much, or how badly it lost. That is
+    a design, not evidence.
+
+    ``baseline_score`` is why this is a record rather than a boolean. A fusion
+    that loses to the best single diff while both beat the baseline is complementary
+    changes ranking imperfectly; a fusion that loses to the *baseline* is two good
+    changes making each other worse. Only the second is the failure mode the
+    objection describes, and ``winner`` alone cannot tell them apart.
+
+    All three scores come from the cheap layer, which is what the tournament
+    ranks on. They are comparable with each other and not with a full held-out
+    number.
+    """
+
+    artifact_id: str
+    #: Surviving diffs entering the tournament -- the fused candidate is built
+    #: from all of them, so this is what "of N" means in a merge-of-N claim.
+    n_candidates: int
+    best_single_score: float
+    baseline_score: float
+    #: ``None`` when no fused candidate was built at all; ``reason`` says why.
+    #: Distinguishing that from "the fusion lost" is the difference between a
+    #: mechanism that fails and a mechanism that never ran.
+    fused_score: Optional[float] = None
+    #: Score of a **model-synthesised** candidate, when a fusion policy built one
+    #: -- :class:`~agentdescent.fusion.ReflectiveFusion` does, for keys the diffs
+    #: disagree on. ``None`` when no model was involved, which is the default.
+    #: Separate from ``fused_score`` so "the union of independent edits helped"
+    #: and "a model rewrote two competing edits into one" are never one number.
+    synthesized_score: Optional[float] = None
+    #: ``"fused"`` / ``"synthesized"`` / ``"single"`` / ``"neither"``.
+    #: ``"neither"`` means nothing in the tournament beat the artifact it
+    #: started from.
+    winner: str = "single"
+    #: Whether the singles were scored at all. ``False`` under
+    #: :attr:`~agentdescent.fusion.ReflectiveFusion.trust_union`, where the union
+    #: goes straight to the acceptance gate and nothing is ranked -- so this trial
+    #: carries no verdict, and `FusionStats` keeps it out of the win rate. A union
+    #: that was never compared has not won anything.
+    ranked: bool = True
+    #: Why no fusion was built: ``"single-candidate"``, ``"contradiction"``,
+    #: ``"dominant-single"`` (one proposal was already clear of the field, so no
+    #: union was bought -- a saving, not a failure), or ``"synthesis-failed"`` (a model was asked and could not be used -- a dead
+    #: backend, an empty answer, an oversized one, or one that merely repeated an
+    #: input). Empty when a fused candidate did reach the tournament.
+    reason: str = ""
+
+    @property
+    def gain(self) -> Optional[float]:
+        """Fused minus best single. Negative is the interesting direction."""
+        if self.fused_score is None:
+            return None
+        return self.fused_score - self.best_single_score
 
 
 @dataclass(frozen=True)
@@ -212,7 +286,15 @@ class FusionPolicy(Protocol):
     """How complementary diffs become one candidate.
 
     Returns ``(chosen_diff, candidate_artifact, fused)``. Signature taken from
-    ``Aggregator._tournament``."""
+    ``Aggregator._tournament``.
+
+    A policy may also expose ``trials`` -- a growing sequence of
+    :class:`FusionTrial` -- and the engine will carry it onto
+    :attr:`~agentdescent.evolution.EvolutionResult.fusion_trials`. Optional
+    because it is instrumentation, not a decision: a replacement policy that
+    keeps no trials still satisfies this protocol, and
+    :meth:`EvolutionResult.fusion_stats` reports the trial count so that
+    "not instrumented" cannot be misread as "fusion never won"."""
 
     def select(self, artifact: "Evolvable",
                diffs: List["Diff"]) -> Tuple["Diff", "Evolvable", bool]: ...
@@ -366,6 +448,10 @@ class Policies:
 
     # the algorithm
     task_sampler: Optional["TaskSampler"] = None
+    #: Which candidate the next batch of workers starts from. `None` is
+    #: :class:`~agentdescent.selection.SingleHead` -- the current head, for every
+    #: worker, which is what the engine has always done.
+    selection: Optional["SelectionPolicy"] = None
     proposal: Optional[ProposalPolicy] = None
     conflict: Optional[ConflictPolicy] = None
     fusion: Optional[FusionPolicy] = None

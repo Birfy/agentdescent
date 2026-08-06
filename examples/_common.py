@@ -6,10 +6,13 @@ must not be normalised here: they are part of the upstream algorithm's language.
 
 Declaring a flag in one place is only half of a contract -- the code that
 *honours* it has to live here too, or a port can grow a ``--yes`` it never reads
-and every test still passes. So the three behaviours behind the shared flags are
+and every test still passes. So the behaviours behind the shared flags are
 functions, not prose: ``confirm`` for ``--yes``, ``completion_for`` for
-``--provider``/``--model``, and the early ``--dry-run`` return that each port's
-``main`` performs before touching data.
+``--provider``/``--model``, ``worker_count`` for ``--serial``, and the early
+``--dry-run`` return that each port's ``main`` performs before touching data.
+
+``score_tasks`` is here for the same reason: every port had written the same
+sequential held-out loop, and every port paid the same silent wall-clock for it.
 """
 
 from __future__ import annotations
@@ -75,6 +78,11 @@ def add_standard_args(
         action="store_true",
         help="skip confirmation before real model API calls",
     )
+    parser.add_argument(
+        "--serial",
+        action="store_true",
+        help="run the upstream algorithm's own semantics: one worker, no merge",
+    )
     return parser
 
 
@@ -96,6 +104,67 @@ def confirm(args: argparse.Namespace) -> bool:
         return True
     print("aborted.")
     return False
+
+
+def score_tasks(solve, artifact: str, tasks, reward, *,
+                concurrency: int = 8) -> float:
+    """Score an artifact on a task list, concurrently.
+
+    Every port reports a final held-out number by looping over the split one task
+    at a time. That is the *reported metric*, so it runs after `evolve()` returns
+    and outside everything the engine parallelises -- `eval_concurrency` bounds
+    the gate and never reaches here. On a reasoning model at ~38s a call, a
+    20-task split is thirteen minutes of wall-clock per scoring pass, in silence,
+    and a sweep pays it twice per arm: once for `final_reward` and once for the
+    test split.
+
+    Concurrency changes no result. Each task is scored independently, `reward` is
+    pure, and the sum is order-independent -- so this is wall-clock only, which is
+    why it is a plain default rather than a knob a caller has to discover.
+
+    Sequential below two tasks, so a small split does not pay for a pool.
+    """
+    tasks = list(tasks)
+    if not tasks:
+        return 0.0
+    if len(tasks) < 2 or concurrency < 2:
+        return sum(reward(t, solve(artifact, t)) for t in tasks) / len(tasks)
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=min(concurrency, len(tasks))) as pool:
+        outputs = list(pool.map(lambda t: solve(artifact, t), tasks))
+    return sum(reward(t, o) for t, o in zip(tasks, outputs)) / len(tasks)
+
+
+def worker_count(args: argparse.Namespace, requested: int) -> int:
+    """The number of workers to run, after ``--serial``.
+
+    Every port here parallelises an algorithm that was published as a **serial**
+    loop, and until this flag existed none of them could run that loop. So every
+    claim about parallelising them -- speedup, and more importantly whether the
+    final quality survives -- had no baseline in the repository at all. A speedup
+    without the serial arm is a measurement of nothing.
+
+    One worker, and the merge that goes with it disappears: with a single
+    proposal per step there is nothing to fuse and nothing to resolve, which is
+    what makes this the upstream semantics rather than a narrow version of ours.
+
+    Refused together with ``--async``, loudly. The barrier-free runtime's
+    concurrency *is* ``n_workers``, so ``--serial --async`` is not the upstream
+    algorithm: it is a one-worker asynchronous run, where a diff can still be
+    proposed against a head the merger has since moved. Reporting that as the
+    serial baseline would put staleness into the control arm, which is the one
+    place it must not be.
+    """
+    if not getattr(args, "serial", False):
+        return requested
+    if getattr(args, "asynchronous", False):
+        raise SystemExit(
+            "--serial and --async are contradictory: the barrier-free runtime's "
+            "concurrency is n_workers, so --serial --async is a one-worker "
+            "asynchronous run rather than the upstream serial algorithm -- its "
+            "diffs can still go stale against a moved head. Drop one of them.")
+    return 1
 
 
 def completion_for(args: argparse.Namespace, *, usage: Optional[Usage] = None,

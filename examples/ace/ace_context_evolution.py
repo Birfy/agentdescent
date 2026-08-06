@@ -58,7 +58,8 @@ from agentdescent.evolution import EvolvingArtifact, LLMAgent, Task, evolve, rul
 from agentdescent.governance import classify
 from agentdescent.parallel import DataParallel
 from agentdescent.sampling import DifficultyWeighted, RoundRobin
-from examples._common import add_standard_args, completion_for, confirm
+from examples._common import (add_standard_args, completion_for, confirm,
+                              score_tasks, worker_count)
 
 FINER = ("nlpaueb/finer-139", "validation", "finer-139")   # (dataset, split, config)
 
@@ -272,9 +273,7 @@ def load_dataset(pool: int, top_k: int, ratios=(0.5, 0.25, 0.25), seed: int = 0)
 
 def evaluate(agent, rendered: str, tasks: List[Task], reward) -> float:
     """Score a rendered playbook on a held-out split (the reported test metric)."""
-    if not tasks:
-        return 0.0
-    return sum(reward(t, agent.solve(rendered, t)) for t in tasks) / len(tasks)
+    return score_tasks(agent.solve, rendered, tasks, reward)
 
 
 # ===========================================================================
@@ -303,6 +302,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> None:
     args = build_parser().parse_args(argv)
+    # --serial collapses this to the upstream algorithm's own semantics:
+    # one worker, nothing to merge. Applied to args so the printed plan,
+    # the cost estimate and the run cannot disagree about what ran.
+    args.workers = worker_count(args, args.workers)
 
     print("Algorithm: ACE (Agentic Context Engineering) -- skill/context self-evolution")
     print("Dataset  : FiNER-139 (financial XBRL tagging)")

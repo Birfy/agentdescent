@@ -24,7 +24,8 @@ from agentdescent.agents import Usage
 from agentdescent.dataloader import hf_rows
 from agentdescent.evolution import AppendRules, LLMAgent, Task, evolve
 from agentdescent.rewards import exact_match
-from examples._common import add_standard_args, completion_for, confirm
+from examples._common import (add_standard_args, completion_for, confirm,
+                              worker_count)
 
 
 PORT_NAME = "replace-with-algorithm-name"
@@ -64,6 +65,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> None:
     args = build_parser().parse_args(argv)
+    # --serial collapses this to the upstream algorithm's own semantics: one
+    # worker, nothing to merge. Applied to args so the printed plan, the cost
+    # estimate and the run cannot disagree about what ran. Without it the port
+    # has no baseline, and any speedup it reports is a speedup over nothing.
+    args.workers = worker_count(args, args.workers)
     print(f"Algorithm: {PORT_NAME} (port author: {PORT_AUTHOR})")
     print(f"Upstream : {UPSTREAM_RELEASED_CODE}")
     print(f"Dataset  : {DATASET_NAME}")

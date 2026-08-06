@@ -36,6 +36,39 @@ def test_every_exported_name_appears():
     assert not missing, f"exported but undocumented: {missing}"
 
 
+def test_the_generator_reads_the_same_class_on_every_interpreter():
+    """A generated file committed on one Python must check clean on another.
+
+    `_methods` tested `callable(member)` before unwrapping `staticmethod`, and a
+    `staticmethod` object only became callable in 3.10 (bpo-43682). So the page
+    grew a row when regenerated on 3.11 and lost it again on 3.9, and CI
+    contradicted itself across the matrix on one unchanged tree -- 3.9 green,
+    3.11 and 3.12 red. Six members were missing from the reference on the
+    version that wrote it.
+
+    `--check` cannot catch this: it only ever sees the interpreter running it.
+    """
+    from tools.gen_api_docs import _methods
+
+    class _Probe:
+        @staticmethod
+        def stat(a: int) -> str:
+            """A documented staticmethod."""
+            return ""
+
+        @classmethod
+        def clsm(cls, a: int) -> str:
+            """A documented classmethod."""
+            return ""
+
+        def inst(self, a: int) -> str:
+            """A documented instance method."""
+            return ""
+
+    got = {sig for sig, _ in _methods(_Probe)}
+    assert got == {"stat(a: int) -> str", "clsm(a: int) -> str", "inst(a: int) -> str"}, got
+
+
 def test_no_sphinx_roles_leak_into_the_page():
     """Docstrings use `:class:` cross-references; a Markdown page must not."""
     text = API.read_text(encoding="utf-8")

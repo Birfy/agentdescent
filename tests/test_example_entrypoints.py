@@ -67,6 +67,7 @@ def test_standard_args_have_one_definition():
         "--max-seconds", "9.5",
         "--dry-run",
         "--yes",
+        "--serial",
     ])
     assert args.provider == "openai"
     assert args.model == "test-model"
@@ -76,6 +77,7 @@ def test_standard_args_have_one_definition():
     assert args.max_seconds == 9.5
     assert args.dry_run is True
     assert args.yes is True
+    assert args.serial is True
 
 
 @pytest.mark.parametrize("port", PORTS, ids=PORT_IDS)
@@ -90,11 +92,12 @@ def test_every_port_uses_the_standard_contract(port):
     assert args.max_seconds == port.seconds
     assert args.dry_run is False
     assert args.yes is False
+    assert args.serial is False
     assert hasattr(args, port.iteration)
 
     option_strings = [opt for action in parser._actions for opt in action.option_strings]
     for option in ("--provider", "--model", "--seed", "--async", "--async-ratio",
-                   "--max-seconds", "--dry-run", "--yes"):
+                   "--max-seconds", "--dry-run", "--yes", "--serial"):
         assert option_strings.count(option) == 1, f"{port.module.__name__}: {option}"
     iteration_options = {"--rounds", "--generations", "--iterations", "--steps"}
     assert iteration_options.intersection(option_strings) == {f"--{port.iteration}"}
@@ -203,6 +206,55 @@ def test_no_port_reimplements_the_shared_behaviour(module):
         f"{module.__name__}: use examples._common.completion_for/is_openai_compatible")
     assert "confirm(args)" in source, f"{module.__name__}: --yes is declared but never read"
     assert "completion_for(" in source, f"{module.__name__}: --provider is never dispatched"
+    assert "worker_count(" in source, (
+        f"{module.__name__}: --serial is declared but never read, so the port has "
+        "no serial baseline and any speedup it reports has nothing to be a "
+        "speedup over")
+
+
+# -- the serial control -----------------------------------------------------
+#
+# #73 needs one row per port comparing the upstream serial algorithm against the
+# parallelised one. Until this flag existed, no port could run the first of
+# those, so every parallelisation claim in the repository was one-armed.
+
+
+def test_serial_collapses_to_one_worker():
+    assert common.worker_count(argparse.Namespace(serial=True, asynchronous=False),
+                               8) == 1
+
+
+def test_without_serial_the_requested_count_is_untouched():
+    assert common.worker_count(argparse.Namespace(serial=False, asynchronous=False),
+                               8) == 8
+
+
+def test_serial_and_async_are_refused_rather_than_silently_reconciled():
+    """A one-worker *asynchronous* run is not the upstream serial algorithm: its
+    diffs can still go stale against a head the merger moved. Putting staleness
+    into the control arm is the one thing the control must not have."""
+    with pytest.raises(SystemExit) as excinfo:
+        common.worker_count(argparse.Namespace(serial=True, asynchronous=True), 8)
+    assert "contradictory" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("port", PORTS, ids=PORT_IDS)
+def test_serial_reaches_the_plan_every_port_prints(port, monkeypatch, capsys):
+    """Honoured, not merely accepted -- and visible in the run's own output.
+
+    A port that collapsed its worker count inside `evolve()` while still printing
+    the parallel plan would be reporting one run and performing another.
+    """
+    module = port.module
+    monkeypatch.setattr(module, port.loader,
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            AssertionError("dry-run crossed a boundary")))
+    module.main(["--dry-run", "--serial"])
+    plan = capsys.readouterr().out
+    module.main(["--dry-run"])
+    parallel = capsys.readouterr().out
+    assert plan != parallel, (
+        f"{module.__name__}: --serial changed nothing the run reports")
 
 
 def test_ports_table_covers_every_standardised_entrypoint():
@@ -252,3 +304,49 @@ def test_port_template_is_importable_and_offline(capsys):
     assert args.provider == "claude"
     port_template.main(["--dry-run"])
     assert "no dataset or model api was accessed" in capsys.readouterr().out.lower()
+
+
+# -- the reported metric was the silent half of a run ------------------------
+
+
+def test_score_tasks_matches_the_sequential_loop_it_replaces():
+    """Concurrency here must change wall-clock and nothing else."""
+    tasks = [type("T", (), {"id": str(i), "gold": i % 3})() for i in range(12)]
+
+    def solve(artifact, task):
+        return f"{artifact}-{task.gold}"
+
+    def reward(task, output):
+        return 1.0 if output.endswith(f"-{task.gold}") else 0.0
+
+    serial_score = sum(reward(t, solve("x", t)) for t in tasks) / len(tasks)
+    assert common.score_tasks(solve, "x", tasks, reward, concurrency=8) == serial_score
+    assert common.score_tasks(solve, "x", tasks, reward, concurrency=1) == serial_score
+
+
+def test_score_tasks_runs_them_concurrently():
+    """The point of it. A sequential loop over a 20-task split at ~38s a call is
+    thirteen minutes of silence, paid twice per arm."""
+    import threading
+    import time
+
+    peak = [0]
+    live = [0]
+    lock = threading.Lock()
+
+    def solve(artifact, task):
+        with lock:
+            live[0] += 1
+            peak[0] = max(peak[0], live[0])
+        time.sleep(0.02)
+        with lock:
+            live[0] -= 1
+        return "ok"
+
+    tasks = [type("T", (), {"id": str(i)})() for i in range(8)]
+    common.score_tasks(solve, "x", tasks, lambda t, o: 1.0, concurrency=8)
+    assert peak[0] > 1, "the split was scored one task at a time"
+
+
+def test_an_empty_split_scores_zero_rather_than_dividing_by_it():
+    assert common.score_tasks(lambda a, t: "x", "a", [], lambda t, o: 1.0) == 0.0

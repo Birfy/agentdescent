@@ -19,10 +19,23 @@ import random
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Sequence, Tuple
 
-from .evolvable import Evolvable
+from .evolvable import Evolvable, stable_hash
 
 # eval_fn(artifact, tasks) -> accuracy in [0, 1]
 EvalFn = Callable[[Evolvable, Sequence], float]
+
+
+def _identity(artifact) -> str:
+    """A stable identity for an artifact, for seeding a per-artifact draw.
+
+    ``render()`` is what the evaluation cache already keys on, so two artifacts
+    that the cache calls identical seed identically. Falls back to id/version for
+    an `Evolvable` that cannot render, which the protocol does not require.
+    """
+    try:
+        return artifact.render()
+    except Exception:  # noqa: BLE001 - an Evolvable need not be renderable
+        return f"{getattr(artifact, 'id', '')}:{getattr(artifact, 'version', 0)}"
 
 
 @dataclass
@@ -115,10 +128,21 @@ class ThreeLayerVerifier:
 
         Returns ``(score, uncertainty)``.  Uncertainty grows when the artifact
         is under-observed; here we approximate it with the noise band, which is
-        what the audit scheduler needs to rank oracle spending."""
+        what the audit scheduler needs to rank oracle spending.
+
+        **The noise is seeded from the artifact**, not drawn from a shared
+        stream. Drawing from `self._rng` made a candidate's score depend on how
+        many other candidates had been scored before it -- so the same candidate
+        got a different number depending on its position in the tournament, and
+        scoring two candidates concurrently would have made it depend on which
+        thread arrived first. `DefaultAcceptance` already seeds its acceptance
+        draw per candidate for the same reason, and this is the other half of
+        it: identical artifacts now score identically, whenever and wherever
+        they are scored."""
         subset = self._subset(self.rule_subset * 2)
         base = self.eval_fn(artifact, subset)
-        noisy = min(1.0, max(0.0, base + self._rng.gauss(0.0, self.learned_noise)))
+        rng = random.Random(stable_hash((self.seed, _identity(artifact))) & 0x7FFFFFFF)
+        noisy = min(1.0, max(0.0, base + rng.gauss(0.0, self.learned_noise)))
         uncertainty = self.learned_noise + 0.5 / (1 + len(subset))
         return noisy, uncertainty
 

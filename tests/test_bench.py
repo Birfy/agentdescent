@@ -225,3 +225,32 @@ def test_a_run_that_discards_most_of_its_evidence_says_so():
     messages = [str(w.message) for w in caught if "stale" in str(w.message)]
     assert messages, "a run discarding most of its evidence reported nothing"
     assert "async_ratio" in messages[0], "the warning must name the knob"
+
+
+# -- the reporting path must survive an unscored arm -------------------------
+
+
+def test_the_progress_line_never_formats_a_missing_score():
+    """`test_reward` is Optional precisely so a failed scoring pass does not kill
+    a sweep. Formatting that None with `:.3f` raises from inside the thread pool
+    and takes the sweep down anyway -- which is what happened, one commit after
+    the Optional was introduced to prevent it."""
+    from bench.baselines_run import _fmt
+
+    assert _fmt(None) == "n/a"
+    assert _fmt(0.5) == "0.500"
+
+
+def test_the_run_survives_an_arm_that_produced_no_score(capsys):
+    """End to end through the runner's own printing path, with a None score."""
+    from agentdescent.baselines import ArmResult
+    from bench.baselines_run import _fmt
+
+    arm = ArmResult(arm="serial", seed=0, width=1, rollouts=8, calls=8,
+                    prompt_tokens=0, completion_tokens=0, wallclock=1.0,
+                    wallclock_parallel=1.0, dev_reward=0.5, test_reward=None,
+                    error="test_eval failed: ConnectionError")
+    line = (f"  {arm.arm:<12} seed={arm.seed}  {arm.rollouts} rollouts / "
+            f"{arm.calls} calls  dev={_fmt(arm.dev_reward)} "
+            f"test={_fmt(arm.test_reward)}")
+    assert "test=n/a" in line

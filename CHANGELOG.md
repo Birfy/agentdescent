@@ -6,6 +6,100 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `evolve(max_rollouts=, max_calls=)` — a budget the engine enforces, in the two
+  units a comparison has to hold fixed. `rounds` is not one of them: configurations
+  differ in how much model a round buys, so a budget fixed in rounds hands the wider
+  one more model and then reports the extra model as a win for parallelism. The
+  synchronous path checks at the round barrier and so overshoots by up to one round;
+  the barrier-free path checks per rollout. `stop_reason` gained `"max_rollouts"` and
+  `"max_calls"`, and `async_evolve` gained `max_calls=`.
+- `agentdescent.baselines` — the control the efficiency numbers were missing.
+  `serial` / `best_of_n_fork` / `merge_of_n` run over one shared `Workload` on one
+  `Budget`, and fork reports both the oracle fork (best on test, unshippable) and the
+  selected fork (best on dev, reported on test). `compare(fixed=...)` names the unit
+  held fixed and prints the other unit's divergence as a confound — because the two
+  cannot both be equalised, which is measured rather than assumed.
+- `EvolutionResult.fusion_stats()` — the fusion tournament's record, with the
+  denominators `RoundStat.fused` was missing. That counter tallied *committed*
+  fusions, and the tournament only commits one that won, so it could not answer
+  "does merging just average the improvements away?". The shipped `FusionPolicy`
+  now records a `FusionTrial` per tournament (it was already computing the scores),
+  reporting win rate, mean gain, the losing tail with its worst case, and fusions
+  that fell below the baseline rather than merely below the best single diff.
+  `win_rate` is `None` when nothing was contested, so a mechanism that never ran
+  cannot be read as one that always lost.
+- `--serial` on every algorithm port — the eighth shared flag, and the control
+  they were all missing. Each port parallelises an algorithm published as a serial
+  loop, and none of them could run that loop, so every parallelisation claim here
+  was one-armed. `examples._common.worker_count` honours it (one worker, nothing
+  to merge) and refuses `--serial --async`, which would be a one-worker
+  *asynchronous* run — staleness in the control arm.
+
+- `agentdescent.selection` — the decision `Policies` was missing: **which
+  candidate the next batch of workers starts from**. `SingleHead` is the default
+  and reproduces the current run exactly (asserted against a full run, not
+  described); `Beam`, `ParetoFrontier(mode="per_instance"|"topk_aggregate")`,
+  `Archive(sampling=...)` and `MCTS` are the ports' hand-written rules, as
+  arguments. Selection is *under* merging, not instead of it: one selected
+  starting point still has N/k workers merging diffs into it. A policy that names
+  a starting point other than the head raises rather than being collapsed to it —
+  the ledger holds one live branch, and multi-head support is separate work.
+
+- `docs/port-fidelity.md` — one section per port, in the shape the differences
+  actually take: paper says / released code does / this port follows. The notes
+  existed, scattered across seven pages, a README paragraph and a test file, so
+  "we did not change the algorithm" could not be checked in one place. Carries
+  the parallelisation matrix (serial vs N=8, speedup, final held-out Δ, semantics
+  changed) with its cells empty until measured, and states that a table with no
+  quality regressions anywhere is more likely a measurement problem than a free
+  lunch.
+
+- `agentdescent.advantage` — three decision rules borrowed from PPO and GRPO,
+  **all off by default and none validated**: group-relative advantage
+  (`EvidenceCard.advantage`, consumed by opt-in `AdvantageAcceptance` /
+  `AdvantageConflict`), `AdaptiveTrustRegion` for the two guessed diff-size
+  constants, and `MergeContext.stable_distance` with `StableDistanceAcceptance`.
+  There is no PPO and no GRPO here — no policy distribution, so no importance
+  ratio and no clipping objective — and `docs/concepts.md` keeps these separate
+  from the analogy table whose rows all land on code that runs. `bench.ab_run`
+  is the A/B each has to pass; one that does not should be deleted with the
+  negative result recorded.
+- Measured while building it: a group is one base version and one task cluster,
+  and the base version moves on every commit — so a group is at most one round of
+  workers split across the clusters they landed in. Four workers over four
+  clusters can never fill the default `min_group=4`. That bounds where the
+  advantage signal can exist at all, and is pinned by a test rather than left to
+  be discovered during an A/B.
+
+- `docs/architecture.md` gains a diagram of the **two runtimes** — the barrier
+  and the barrier-free path side by side — because everything the async path has
+  to deal with follows from the barrier being gone, and the consequence that
+  costs the most to rediscover (`η` is zero by construction on the synchronous
+  path at `refresh_interval=1`, so the staleness policy cannot decide anything
+  there) is a property of the runtime rather than of the algorithm. The data-flow
+  diagram also shows the [selection seam](docs/selection.md), and names the
+  difference between "which task" (`TaskScheduler`) and "which candidate"
+  (`SelectionPolicy`), which the picture previously invited confusing.
+
+- `agentdescent.fusion` — `ReflectiveFusion`, which merges **competing values for
+  the same key** by asking a model to write one version keeping both. `fuse_diffs`
+  is a dictionary update, so on a one-key artifact (GEPA's `InstructionSlot`) the
+  last writer wins and no fused candidate is ever built: measured `contested = 0`
+  for an entire run, which makes `merge_of_n` there per-round best-of-N selection
+  rather than merging. Ships as a **pair** with `KeepContradictions` via
+  `reflective_merge()`, because conflict resolution runs first and would otherwise
+  hand the fusion policy a single diff. The synthesised candidate has no privilege
+  in the tournament — a tie loses — and every failure path falls back to shipped
+  behaviour. Off by default, not yet A/B'd.
+
+### Changed
+
+- OpenEvolve's `--serial` now means the shared thing (one worker) rather than
+  `max_concurrency=1` with three. Its benchmark's `serial` mode is untouched and
+  still isolates threading; `docs/algo-openevolve.md` states the difference.
+
 ## [0.4.0] — 2026-08-05
 
 One engine. 0.3.0 made the numbers readable; this release removes the second

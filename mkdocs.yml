@@ -61,6 +61,7 @@ nav:
     - Sandboxes: sandboxes.md
     - Async — no round barrier: async.md
     - Task sampling: sampling.md
+    - Candidate selection: selection.md
     - Duration-aware scheduling: duration-scheduling.md
   - API reference: api.md
   - Run everything, and extend it: usage.md
@@ -71,6 +72,7 @@ nav:
   - Self-evolution algorithms (faithful ports):
     - Overview: self-evolution-examples.md
     - Porting checklist: porting-checklist.md
+    - Port fidelity: port-fidelity.md
     - ACE — context evolution: algo-ace.md
     - GEPA — prompt evolution: algo-gepa.md
     - EvoSkill — skill discovery: algo-evoskill.md

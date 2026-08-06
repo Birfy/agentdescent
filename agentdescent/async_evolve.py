@@ -36,12 +36,13 @@ import time
 import warnings
 from typing import Callable, Dict, List, Optional
 
+from .advantage import GroupAdvantage
 from .agents import Usage
 from .policies import Policies
 from .evolution import (
     _publish_stable, _safe_log,
     Agent, EvolutionResult, Propose, Reward, RoundInfo, Run, Strategy, Task,
-    _ASYNC_WIRED_POLICIES, _cost_fields, _resolve_policies,
+    _ASYNC_WIRED_POLICIES, _cost_fields, _fusion_trials, _resolve_policies,
     SOLVED, _build_engine, _checked_proposal, _checked_reward,
 )
 from .aggregator import AggregatorConfig, check_reports
@@ -68,6 +69,7 @@ def async_evolve(
     async_ratio: int = 3,
     max_seconds: float = 20.0,
     max_iters: Optional[int] = None,
+    max_calls: Optional[int] = None,
     target_reward: Optional[float] = None,
     patience: Optional[int] = None,
     max_worker_errors: int = 3,
@@ -138,6 +140,13 @@ def async_evolve(
         short for any sweep to finish.
     max_iters:
         Stop after this many worker rollouts in total (a budget, not a barrier).
+    max_calls:
+        Stop after this many actor invocations (``run`` + ``propose``) in total.
+        The second half of an equal-budget comparison: two configurations matched
+        on rollouts still differ in model spend whenever one of them asks for
+        more proposals per rollout, and the cheaper unit is the one a reader
+        assumes was held fixed. Both bounds are checked as each rollout lands, so
+        a run overshoots only by what was already in flight.
     eval_concurrency:
         How many held-out tasks the merger scores at once. ``1`` restores the old
         sequential behaviour.
@@ -220,7 +229,7 @@ def async_evolve(
         ``error`` is set only when the run **ended** because of a failure -- a
         transient error the workers retried past leaves it ``None``, so read
         ``stop_reason`` to tell ``"target_reward"`` from ``"max_seconds"`` /
-        ``"max_iters"`` / ``"patience"``.
+        ``"max_iters"`` / ``"max_calls"`` / ``"patience"``.
 
         ``history`` holds one entry per **merger sweep** that had cards to merge,
         not per round: its length tracks how fast the workers produced and is not
@@ -301,6 +310,11 @@ def async_evolve(
     died = [False]                            # True only if the run ENDED on failure
     contract_error = FirstError()          # caller bug -> re-raise on this thread
     stop_reason = ["max_seconds"]             # overwritten by whichever bound fires
+    # Group-relative reward, recorded on every card. Thread-safe by way of the
+    # GIL on dict updates; the statistic is a running one, so a torn read costs
+    # a slightly stale mean rather than a wrong decision -- and nothing reads it
+    # by default anyway.
+    advantage = GroupAdvantage()
     # Backpressure: bumped when the pipeline stalls (evidence keeps arriving and
     # nothing commits), which forces every worker to resync regardless of the ratio.
     epoch = [0]
@@ -380,6 +394,11 @@ def async_evolve(
                 eng.meter.add("rollouts")
                 eng.meter.add("rollout_seconds", time.time() - t_start)
                 sampler.record(task.id, score)     # learn which tasks carry signal
+                # Before the solved-task branch, for the same reason as on the
+                # synchronous path: a group that only saw the failures has no
+                # variance to standardise against.
+                adv = advantage.observe(
+                    advantage.key(base_v, str(task.meta.get("cluster", ""))), score)
                 if score < solved_threshold:
                     proposal = _checked_proposal(
                         eng.propose(artifact.render(), task, output, score), task)
@@ -400,7 +419,14 @@ def async_evolve(
                             card = EvidenceCard(
                                 diff=diff, base_version={eng.artifact_id: base_v},
                                 touched=[eng.artifact_id], before_after_delta=delta,
-                                trajectory_refs=[task])
+                                trajectory_refs=[task],
+                                # Same signal as the synchronous path, and the
+                                # reason `GroupAdvantage` accumulates rather than
+                                # batching at a barrier: there is no barrier here,
+                                # so a batched version would silently record
+                                # nothing on exactly the runtime the project is
+                                # making claims about.
+                                advantage=adv)
                             with intake_lock:
                                 intake.append(card)
             except ContractError as e:
@@ -478,6 +504,13 @@ def async_evolve(
                 counter[0] += 1
                 if max_iters is not None and counter[0] >= max_iters:
                     stop_reason[0] = "max_iters"
+                    stop.set()
+                elif max_calls is not None and eng.meter.usage.calls >= max_calls:
+                    # Read from the meter, not from a local tally: `calls` counts
+                    # `propose` as well as `run`, and a rollout that solved its
+                    # task never proposes -- so rollouts and calls are not a fixed
+                    # ratio and the second budget cannot be derived from the first.
+                    stop_reason[0] = "max_calls"
                     stop.set()
 
     def _drain_and_merge() -> None:
@@ -708,6 +741,7 @@ def async_evolve(
                              stop_reason="error" if run_error else stop_reason[0],
                              forced_refreshes=forced_refreshes[0],
                              stragglers=stragglers[0],
+                             fusion_trials=_fusion_trials(eng.aggregator),
                              **_cost_fields(eng.meter))
     eng.cleanup()          # do not hold a scratch git repo for the whole process
     return result

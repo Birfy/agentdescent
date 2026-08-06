@@ -8,7 +8,7 @@ page and the code disagree, so a signature here is the signature you get.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-164 public names across 30 modules.
+196 public names across 34 modules.
 
 ---
 
@@ -27,6 +27,8 @@ Convenience actor: bundles running a task and proposing an improvement.
 | `cost_summary() -> str` | One line: what the run cost. Complements `outcomes()`, which says why it went as it did. |
 | `cost_to_quality(target: float) -> Optional[int]` | Rollouts spent up to the first round that reached `target`. |
 | `duplicate_rate() -> float` | Cache hits as a fraction of lookups -- work that did *not* have to be redone. In one process this is memoisation working; across processes it is the figure that says how much a shared cache would be worth. |
+| `fusion_stats() -> 'FusionStats'` | How often merging beat the best single diff -- and how badly it lost. |
+| `load(path: str) -> 'EvolutionResult'` | Read back a result written by `save`. |
 | `outcomes() -> Dict[str, int]` | Merge outcomes for the whole run, by category -- *why* it went as it did. |
 | `save(path: str) -> None` | Write the evolved artifact and its run summary to a JSON file. |
 | `stale_rate() -> float` | Discarded evidence as a fraction of evidence considered; 0.0 if none. |
@@ -43,6 +45,14 @@ An `Evolvable`: flat state + a strategy.
 | `evidence_eval(evidence: EvidenceCard) -> float` | Score this artifact on the trajectories an evidence card carries. |
 | `full_eval(task_set: Sequence[Task]) -> Dict[str, float]` | Score on a task set. No longer part of the `Evolvable` protocol -- the engine reaches ground truth through the verifier's `eval_fn` -- and kept because it is a convenient thing for a caller to have. |
 | `score(tasks: Sequence[Task]) -> float` | Mean reward over `tasks`, evaluated concurrently. |
+
+### `FusionStats(...)`
+
+The fusion tournament's record, with every denominator it needs.
+
+| method | what it does |
+|---|---|
+| `summary() -> str` | One line, and it says when there is nothing to report. |
 
 ### `LLMAgent(...)`
 
@@ -579,6 +589,114 @@ Chooses the next task id for a worker, and learns from the outcome.
 
 ---
 
+## Candidate selection
+
+Which candidate the next batch of workers starts from. &nbsp;·&nbsp; `agentdescent.selection` &nbsp;·&nbsp; [guide](selection.md)
+
+### `Archive(sampling: str = 'novelty', temperature: float = 1.0, seed: int = 0) -> None`
+
+DGM's and ADAS's archive sampling: performance, tempered by novelty.
+
+### `Beam(k: int = 1) -> None`
+
+Keep the `k` best-scoring candidates and spread the workers over them.
+
+### `Candidate(...)`
+
+One starting point the next batch could be launched from.
+
+### `MCTS(exploration: float = 1.4) -> None`
+
+UCT over the candidate tree: one evolve step is one rollout.
+
+### `ParetoFrontier(mode: str = 'per_instance', k: int = 5) -> None`
+
+GEPA's and EvoSkill's selection rules, as one class and one argument.
+
+### `SelectionContext(...)`
+
+What a `SelectionPolicy` is allowed to look at.
+
+### `SelectionPolicy`
+
+Given the candidates, return the `n` starting points for the next batch.
+
+### `SingleHead()`
+
+Every worker starts from the current head. Today's behaviour, exactly.
+
+### `pareto_front(candidates: Sequence[Candidate], *, tasks: Sequence[str]) -> List[Candidate]`
+
+Candidates no other candidate beats on every task and betters on one.
+
+---
+
+## Model-assisted fusion
+
+Combine competing values for the same key, when a dict update cannot. &nbsp;·&nbsp; `agentdescent.fusion` &nbsp;·&nbsp; [guide](aggregator.md)
+
+### `KeepContradictions()`
+
+A conflict policy that leaves contradicting diffs for fusion to resolve.
+
+### `ReflectiveFusion(...)`
+
+Combine contradicting diffs by asking a model to synthesise their values.
+
+| method | what it does |
+|---|---|
+| `bind(verifier: Any) -> None` | Receive the engine's verifier, if the caller did not supply one. |
+| `select(artifact: Evolvable, diffs: List[Diff]) -> Tuple[Diff, Evolvable, bool]` | Build the union and hand it straight to the acceptance gate. |
+
+### `reflective_merge(complete, **kwargs) -> Dict[str, Any]`
+
+The two policies model-merging needs, as `Policies` keyword arguments.
+
+---
+
+## Borrowed RL decision rules
+
+Group-relative advantage, an adaptive trust region, distance from stable. &nbsp;·&nbsp; `agentdescent.advantage` &nbsp;·&nbsp; [guide](concepts.md)
+
+### `AdaptiveTrustRegion(...)`
+
+Widen the diff-size cap while merges land; tighten when they do not.
+
+| method | what it does |
+|---|---|
+| `observe(outcome: str) -> TrustRegion` | Record one merge outcome and return the region for the next merge. |
+
+### `AdvantageAcceptance(inner, strength: float = 1.0) -> None`
+
+Shift the acceptance prior by how well a proposal did against its group.
+
+### `AdvantageConflict(inner, margin: float = 0.5) -> None`
+
+Break a contradiction by group-relative advantage, not raw score.
+
+### `GroupAdvantage(min_group: int = 4, max_groups: int = 4096) -> None`
+
+Standardise a rollout's reward against the group it belongs to.
+
+| method | what it does |
+|---|---|
+| `key(base_version: int, cluster: str = '') -> str` | The group a rollout belongs to. Same base, same cluster. |
+| `observe(key: str, reward: float) -> Optional[float]` | Record a reward and return its advantage, or `None` if unknown yet. |
+
+### `StableDistanceAcceptance(inner, strength: float = 0.1) -> None`
+
+Penalise candidates that drift far from the confirmed branch.
+
+### `TrustRegion(ops: int, chars: int) -> None`
+
+How large one diff may be: operations, and characters.
+
+### `state_distance(a, b) -> float`
+
+Fraction of keys on which two artifact states differ, in `[0, 1]`.
+
+---
+
 ## Scheduling and audits
 
 Duration-aware dispatch, straggler handling, and the oracle audit queue. &nbsp;·&nbsp; `agentdescent.scheduler` &nbsp;·&nbsp; [guide](duration-scheduling.md)
@@ -732,6 +850,63 @@ The reward functions everyone writes, with the details right. &nbsp;·&nbsp; `ag
 
 ---
 
+## Equal-budget baselines
+
+merge-of-N against best-of-N fork and serial, on one rollout budget. &nbsp;·&nbsp; `agentdescent.baselines` &nbsp;·&nbsp; [guide](results.md)
+
+### `ArmResult(...)`
+
+One arm, one seed, and the spend it actually incurred.
+
+### `Budget(rollouts: int, calls: Optional[int] = None) -> None`
+
+What every arm is allowed to spend.
+
+| method | what it does |
+|---|---|
+| `split(ways: int) -> 'Budget'` | The share of this budget one of `ways` independent runs may spend. |
+
+### `Comparison(...)`
+
+Several seeds of several arms, and whether they are comparable at all.
+
+| method | what it does |
+|---|---|
+| `scored(arm: str) -> int` | Seeds of `arm` that produced a test score at all. |
+| `separates(a: str, b: str, *, min_seeds: int = 3) -> bool` | Whether `a`'s seeds are all above `b`'s, with no overlap. |
+| `spread(arm: str) -> Optional[Tuple[float, float, float]]` | (min, median, max) test quality. Not a confidence interval. |
+| `underpowered(*arms: str, min_seeds: int = 3) -> bool` | Whether any named arm has too few seeds to support a comparison. |
+
+### `ForkOutcome(...)`
+
+One member of a fork arm, kept so the selection step can be audited.
+
+### `Workload(...)`
+
+The half of the comparison that must not vary, in one object.
+
+### `best_of_n_fork(...)`
+
+N runs that never see each other, each on its share of the budget.
+
+### `compare(...)`
+
+Group arm results by arm and check what the comparison actually held fixed.
+
+### `merge_of_n(...)`
+
+N workers proposing into one artifact, merged every round. The claim.
+
+### `serial(...)`
+
+One worker, improving itself in sequence. The floor.
+
+### `to_markdown(comparison: Comparison) -> str`
+
+A table whose caption cannot claim more than the numbers support.
+
+---
+
 ## Type aliases and constants
 
 Values rather than classes or functions.
@@ -787,6 +962,10 @@ A directory of evaluations, so separate processes can share them.
 ### `FusionPolicy`
 
 How complementary diffs become one candidate.
+
+### `FusionTrial`
+
+One tournament: what the fused candidate scored against the best single.
 
 ### `KeyedRules`
 
@@ -911,6 +1090,10 @@ Provisions `LocalWorkspaceSandbox` -- `mkdtemp`, plus a lease file.
 ### `backends`
 
 Agentic backends -- a base agent that *navigates documents with tools*, not just maps a prompt to text.
+
+### `baselines`
+
+The control every efficiency number in this repository is missing.
 
 ### `dataloader`
 

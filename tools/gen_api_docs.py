@@ -73,6 +73,14 @@ SECTIONS: List[Tuple[str, str, str, str]] = [
      "How a round's work is split across workers: DP / TP / PP.", "parallelism.md"),
     ("agentdescent.sampling", "Task sampling",
      "Which task a worker rolls out next.", "sampling.md"),
+    ("agentdescent.selection", "Candidate selection",
+     "Which candidate the next batch of workers starts from.", "selection.md"),
+    ("agentdescent.fusion", "Model-assisted fusion",
+     "Combine competing values for the same key, when a dict update cannot.",
+     "aggregator.md"),
+    ("agentdescent.advantage", "Borrowed RL decision rules",
+     "Group-relative advantage, an adaptive trust region, distance from stable.",
+     "concepts.md"),
     ("agentdescent.scheduler", "Scheduling and audits",
      "Duration-aware dispatch, straggler handling, and the oracle audit queue.",
      "duration-scheduling.md"),
@@ -185,7 +193,11 @@ def _signature(name: str, obj: Any) -> str:
     # *defaults* quoted, which is the distinction str() cannot make.
     parts: List[str] = []
     for pname, param in sig.parameters.items():
-        if pname == "self":
+        # `cls` for the same reason as `self`: a caller writes
+        # `EvolutionResult.load(path)`, and the bound first argument is noise in
+        # a one-line signature. It only started mattering once `_methods` began
+        # unwrapping classmethods at all.
+        if pname in ("self", "cls"):
             continue
         prefix = {param.VAR_POSITIONAL: "*", param.VAR_KEYWORD: "**"}.get(param.kind, "")
         if param.kind is param.KEYWORD_ONLY and "*" not in "".join(parts[-1:]):
@@ -219,13 +231,24 @@ def _kind(obj: Any) -> str:
 
 
 def _methods(cls: type) -> List[Tuple[str, str]]:
-    """Public methods worth listing: defined here, documented, not dunder."""
+    """Public methods worth listing: defined here, documented, not dunder.
+
+    Unwrap **before** the callable test. A ``staticmethod`` object only became
+    callable in 3.10 (bpo-43682), so testing first meant this page had a
+    different set of rows on 3.9 than on 3.10+ -- the generated file cannot be
+    committed from one interpreter and checked on another, which is how the
+    sync test came to pass on 3.9 and fail on 3.11 for the same tree. Six
+    `@staticmethod`/`@classmethod` members were missing from the reference on
+    the version that wrote it, and the unwrap below was unreachable there.
+    """
     out = []
     for name, member in sorted(vars(cls).items()):
-        if name.startswith("_") or not callable(member):
+        if name.startswith("_"):
             continue
         if isinstance(member, (staticmethod, classmethod)):
             member = member.__func__
+        if not callable(member):
+            continue
         summary = _summary(member)
         if not summary:
             continue
@@ -242,6 +265,9 @@ SUBMODULES: List[Tuple[str, str, str, str]] = [
      "backends.md"),
     ("agentdescent.rewards", "Ready-made scorers",
      "The reward functions everyone writes, with the details right.", "rewards.md"),
+    ("agentdescent.baselines", "Equal-budget baselines",
+     "merge-of-N against best-of-N fork and serial, on one rollout budget.",
+     "results.md"),
 ]
 
 
