@@ -34,19 +34,19 @@ merely repeats an input, or one over ``max_chars`` all fall back to exactly what
 merge that raises because a model was slow is a worse outcome than a merge that
 did not improve.
 
-**It is expensive, and the cost is not the synthesis call.** Measured on
-HotpotQA: **1219 model calls against 143** for the same 18 rollouts -- 8.5x. The
-synthesis is one call per tournament; the multiplier is
-:class:`KeepContradictions`, which leaves every contradicting proposal for the
-tournament to rank. `DefaultConflict` scores a pair and drops one; this scores
-all N plus the synthesised candidate, and each score is a cheap-layer sweep.
+**It costs more than the synthesis call, and by how much is not yet measured.**
+The synthesis is one model call per tournament. The part that is not one call is
+:class:`KeepContradictions`: leaving every contradicting proposal for the
+tournament means ranking all N of them plus the synthesised candidate, where
+`DefaultConflict` scores a pair and drops one -- and each score is a cheap-layer
+sweep. Expect a multiple, not an increment, and measure it with `bench.ab_run`
+before switching this on for a paid run.
 
-That is the real price of being able to merge at all on a one-key artifact, and
-no amount of scheduling reduces it -- concurrency makes the run *finish* sooner,
-not cost less. Scoring the candidates in parallel was tried and reverted: it
-builds a thread pool per tournament, which `tests/test_evaluator.py` guards
-against by name, and multiplies in-flight requests against an endpoint that has
-already dropped connections under load.
+No amount of scheduling reduces that: concurrency makes such a run *finish*
+sooner and cost exactly the same. Scoring the candidates in parallel was tried
+and reverted -- it builds a thread pool per tournament, which
+`tests/test_evaluator.py` guards against by name, and multiplies in-flight
+requests against an endpoint that has already dropped connections under load.
 
 Pass the same :class:`~agentdescent.agents.Usage` here as to the run and the
 totals include all of it.

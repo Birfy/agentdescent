@@ -128,25 +128,39 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if not confirm(args):
         return 0
 
-    usage = Usage()
-    completion = completion_for(args, usage=usage)
-
+    total = Usage()                    # the grand total, for the run's own bill
     shared = {"self_verify": args.self_verify,
               "eval_concurrency": args.eval_concurrency}
-    # Built once per seed and before anything runs, so both arms at a seed see
-    # byte-identical data and no two threads race a dataset download.
-    workloads = {
-        seed: (_hotpotqa(args.fetch, seed, completion, **shared)
-               if args.dataset == "hotpotqa"
-               else _finer(args.pool, args.top_k, seed, completion, **shared))
-        for seed in seeds
-    }
+
+    def _build(seed: int, usage: Usage):
+        """A workload with its **own** meter.
+
+        One `Usage` per run, not one for the sweep. Sharing it made
+        `result.usage.calls` the running total across every concurrently
+        executing arm, so the per-arm call column was the sum of whatever else
+        happened to be in flight -- and a cost comparison read straight off it.
+        `agentdescent.baselines` gets this right by giving every arm a fresh
+        meter; this did not.
+
+        The dataset is deterministic given the seed and cached on disk, so
+        rebuilding it per run costs nothing and both arms still see identical
+        data.
+        """
+        completion = completion_for(args, usage=usage)
+        return (_hotpotqa(args.fetch, seed, completion, **shared)
+                if args.dataset == "hotpotqa"
+                else _finer(args.pool, args.top_k, seed, completion, **shared)), completion
+
+    # Warm the dataset cache once, before any thread starts, so N threads do not
+    # race the same download.
+    _build(seeds[0], Usage())
     printing = threading.Lock()
 
     def _one(job) -> Optional[Dict[str, Any]]:
         seed, on = job
         label = f"{args.rule} {'on ' if on else 'off'} seed={seed}"
-        workload = workloads[seed]
+        usage = Usage()
+        workload, completion = _build(seed, usage)
         kwargs = dict(workload.evolve_kwargs)
         kwargs.update(_arm(args.rule, on, completion))
         kwargs.setdefault("rounds", 10_000)
@@ -179,7 +193,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         row = {
             "seed": seed, "arm": "on" if on else "off",
             "test": test, "dev": result.final_reward,
-            "rollouts": result.rollouts, "calls": result.usage.calls,
+            # This arm's own meter, not the sweep's.
+            "rollouts": result.rollouts, "calls": usage.calls,
             "committed": outcomes.get("committed", 0),
             "oracle_rejected": outcomes.get("oracle-rejected", 0),
             "oversized": outcomes.get("oversized", 0),
@@ -257,7 +272,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                   "on this dataset did not separate them.")
 
     print()
-    print(f"total model spend: {usage.summary()}")
+    print(f"total model spend: {sum(r['calls'] for r in rows)} calls "
+          f"across {len(rows)} arms")
 
     if args.json_out:
         with open(args.json_out, "w", encoding="utf-8") as fh:
