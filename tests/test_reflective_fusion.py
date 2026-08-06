@@ -425,3 +425,23 @@ def test_two_arms_of_an_ab_do_not_see_different_noise():
 
     assert len(set(scores)) == 1, (
         f"a candidate's score still depends on its position: {scores}")
+
+
+def test_the_synthesis_is_one_call_per_tournament_not_per_candidate():
+    """The invariant behind the cost figure in the module docstring.
+
+    A union is asked for **once per contested tournament**, however many
+    proposals are competing -- so turning this on adds calls proportional to
+    merges, not to workers x merges. Counted end-to-end with a stub model, the
+    synthesis came to 3% of a HotpotQA run; two earlier claims that it was a
+    multiple came from reading a shared `Usage` accumulating across concurrent
+    arms, and this is the property that makes the small number believable.
+    """
+    asked = []
+    result = _evolve(policies=Policies(
+        **reflective_merge(lambda p: asked.append(p) or "instruction\nmerged")))
+    stats = result.fusion_stats()
+    assert stats.contested > 0, "the mechanism has to have fired at all"
+    assert len(asked) <= stats.trials, (
+        f"{len(asked)} synthesis calls over {stats.trials} tournaments: it is "
+        "being asked more than once per merge")

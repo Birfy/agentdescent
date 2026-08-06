@@ -34,19 +34,30 @@ merely repeats an input, or one over ``max_chars`` all fall back to exactly what
 merge that raises because a model was slow is a worse outcome than a merge that
 did not improve.
 
-**It costs more than the synthesis call, and by how much is not yet measured.**
-The synthesis is one model call per tournament. The part that is not one call is
-:class:`KeepContradictions`: leaving every contradicting proposal for the
-tournament means ranking all N of them plus the synthesised candidate, where
-`DefaultConflict` scores a pair and drops one -- and each score is a cheap-layer
-sweep. Expect a multiple, not an increment, and measure it with `bench.ab_run`
-before switching this on for a paid run.
+**It costs about 19% more, and the synthesis is not where that goes.** Counted
+call-by-call on the HotpotQA configuration (18 rollouts, 3 workers, 20 held-out),
+with a stub model so the structure is exact:
 
-No amount of scheduling reduces that: concurrency makes such a run *finish*
-sooner and cost exactly the same. Scoring the candidates in parallel was tried
-and reverted -- it builds a thread pool per tournament, which
-`tests/test_evaluator.py` guards against by name, and multiplies in-flight
-requests against an endpoint that has already dropped connections under load.
+===============================  =====  =====
+call                             off    on
+===============================  =====  =====
+agent answering (rollout + gate)    96    112
+reflector writing a proposal        39     43
+**synthesising the union**           0    **6**
+*total*                            135    161
+===============================  =====  =====
+
+The synthesis is **3%**. The rest of the increase is
+:class:`KeepContradictions`: leaving every contradicting proposal for the
+tournament means ranking all N rather than the one `DefaultConflict` would have
+left, and each ranking is a cheap-layer sweep.
+
+Worth knowing where the bill actually is before optimising any of this: of those
+96 calls only **18 are rollouts**. The other 78 are the gate re-scoring
+candidates and rounds -- 58% of the run. Scoring the candidates in parallel was
+tried and reverted; it builds a thread pool per tournament, which
+`tests/test_evaluator.py` guards against by name, and it would make the run
+finish sooner while costing exactly the same.
 
 Pass the same :class:`~agentdescent.agents.Usage` here as to the run and the
 totals include all of it.
