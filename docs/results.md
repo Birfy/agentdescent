@@ -247,6 +247,50 @@ search. The numbers are therefore not comparable with those ports' own results.
 | fork-of-8 | — | — | *not yet measured* | — |
 | merge-of-8 | — | — | *not yet measured* | — |
 
+### Measured: per-round selection on HotpotQA — no separation
+
+HotpotQA, `GLM-5.2`, 18 rollouts, N=3, `--fetch 80` (40 train / 20 val / 20 test),
+**3 seeds**, `--no-self-verify`. Seed artifact scores **0.600** on test, so there
+was real headroom. 2050 calls, 4.3M tokens, 15.4 h of model time.
+
+| arm | seeds | rollouts | calls | test (min/med/max) | fork oracle |
+|---|---|---|---|---|---|
+| serial | 3 | 18 | 164 | 0.700 / **0.750** / 0.750 | — |
+| fork-of-3 | 3 | 18 | 225 | 0.700 / 0.700 / 0.800 | 0.800 |
+| merge-of-3 | 3 | 18 | 143 | 0.650 / 0.700 / 0.800 | — |
+
+> merge-of-3 and fork-of-3 **overlap across seeds**: this budget on this dataset
+> did not distinguish merging from selecting.
+
+**This row is not about merging, and it says so through `contested`.** GEPA's
+`InstructionSlot` holds the whole instruction in one key, so every pair of
+proposals contradicts, conflict resolution collapses them to one, and
+`fusion.contested == 0` for all nine arms — no fused candidate ever competed.
+What was measured is **per-round best-of-N selection** against
+fork-and-select-at-the-end, and against one worker.
+
+Three things it does establish:
+
+* **No separation, three seeds.** Every arm's spread overlaps every other's. The
+  harness refuses to call that a win in either direction, and it is the outcome
+  this page said in advance it would publish.
+* **One worker was not beaten.** `serial` has the highest median of the three.
+  On this budget, on this workload, neither parallel arm bought anything the
+  quality column can see.
+* **Fork's selection cost is visible.** Its oracle median is 0.800 against a
+  selected median of 0.700 — the 0.100 is what fork-and-select loses by having to
+  choose on dev. That gap is the reason both numbers are reported.
+
+The call column is the confound, and here it runs *against* the parallel arms:
+fork spent 225 calls against a median of 164 for the same 18 rollouts, and did
+not win. merge spent 143 and did not win either.
+
+Reproduce:
+
+```bash
+python -m bench.baselines_run --dataset hotpotqa --fetch 80 --budget-rollouts 18 --width 3 --seeds 0,1,2 --no-self-verify --headroom --run-concurrency 3 --fork-concurrency 2 --eval-concurrency 6 --provider claude --model GLM-5.2 --yes
+```
+
 ??? note "A one-seed pilot, which is a pipeline check and not a row of that table"
     HotpotQA, `GLM-5.2`, 12 rollouts, `--width 3`, `--fetch 24` (12 train / 6 val
     / 6 test), one seed, `--no-self-verify`. 182 calls, 435k tokens, ~35 minutes.
