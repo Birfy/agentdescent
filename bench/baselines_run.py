@@ -137,6 +137,11 @@ class _SeedOnly:
         self.rendered = strategy.render(initial) if strategy is not None else ""
 
 
+def _fmt(value) -> str:
+    """A score, or ``n/a`` when there is not one. Never a formatted `None`."""
+    return "n/a" if value is None else f"{value:.3f}"
+
+
 def _workload_for(args, seed: int, completion):
     """One workload, built the way the run builds it."""
     shared = {"self_verify": args.self_verify,
@@ -304,11 +309,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 print(f"  {name:<12} seed={seed}  FAILED "
                       f"{type(e).__name__}: {str(e)[:120]}", file=sys.stderr)
             return None
+        # `test_reward` is None when the scoring pass failed, which is the whole
+        # point of it being Optional -- and formatting None with `:.3f` raises,
+        # from inside the pool, taking the sweep down for the reason the
+        # Optional existed to prevent. Every number here goes through `_fmt`.
         with printing:          # threads interleave; a torn line is unreadable
             print(f"  {arm.arm:<12} seed={seed}  {arm.rollouts} rollouts / "
-                  f"{arm.calls} calls  dev={arm.dev_reward:.3f} "
-                  f"test={arm.test_reward:.3f}"
-                  + (f" oracle={arm.test_oracle:.3f}" if arm.test_oracle else "")
+                  f"{arm.calls} calls  dev={_fmt(arm.dev_reward)} "
+                  f"test={_fmt(arm.test_reward)}"
+                  + (f" oracle={_fmt(arm.test_oracle)}"
+                     if arm.test_oracle is not None else "")
                   + (f"  ERROR {arm.error}" if arm.error else ""))
         return arm
 
