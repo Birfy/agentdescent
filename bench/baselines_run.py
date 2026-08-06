@@ -40,7 +40,11 @@ from agentdescent.baselines import (
     ArmResult, Budget, Workload, best_of_n_fork, compare, merge_of_n, serial,
     to_markdown,
 )
+from dataclasses import replace
+
 from agentdescent.evolution import EvolutionResult
+from agentdescent.fusion import reflective_merge
+from agentdescent.policies import Policies
 from examples._common import completion_for, confirm
 
 
@@ -199,6 +203,13 @@ def build_parser() -> argparse.ArgumentParser:
                         "one call per test task -- a rounding error against a run, "
                         "and the only way to catch a workload that has no headroom, "
                         "which a split-size check cannot see")
+    p.add_argument("--reflective-merge", action="store_true",
+                   help="give the merge arm `reflective_merge()`: contradicting "
+                        "proposals survive to the merge step and a model writes "
+                        "their union, which goes straight to the acceptance gate. "
+                        "Without it, a one-key artifact (GEPA's InstructionSlot) "
+                        "cannot fuse at all and the merge arm is really per-round "
+                        "best-of-N selection -- `fusion.contested` is 0 and says so")
     p.add_argument("--allow-small-test", action="store_true",
                    help=f"run even when the test split is under {MIN_TEST_TASKS} "
                         "tasks. It will not resolve a quality difference")
@@ -283,13 +294,42 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # happen concurrently from several threads.
     workloads = {seed: _workload_for(args, seed, completion) for seed in seeds}
 
+    def _progress(label: str):
+        """Per-round output, because an arm is 20+ minutes of silence otherwise.
+
+        `evolve(verbose=True)` prints to stdout from several threads at once and
+        interleaves into an unreadable mess; `on_round` is the structured hook,
+        and one line per round under the same lock as everything else keeps a
+        concurrent sweep legible. It also makes a stall visible: a run that has
+        stopped producing rounds looks exactly like a slow one from the outside,
+        which is how an earlier sweep sat for 51 minutes on a single round.
+        """
+        def hook(info) -> None:
+            with printing:
+                print(f"    {label} r{info.round:<3} reward={info.held_out_reward:.3f} "
+                      f"{info.rollouts} rollouts / {info.calls} calls "
+                      f"+{info.committed}/-{info.rejected}", flush=True)
+        return hook
+
     def _build(name: str, workload, seed: int) -> ArmResult:
+        hooked = replace(workload, evolve_kwargs={
+            **workload.evolve_kwargs, "on_round": _progress(f"{name}/s{seed}")})
+        workload = hooked
         if name == "serial":
             return serial(workload, budget=budget, seed=seed)
         if name == "fork":
             return best_of_n_fork(workload, args.width, budget=budget, seed=seed,
                                   concurrency=args.fork_concurrency)
         if name == "merge":
+            if args.reflective_merge:
+                # Only the merge arm. serial has one proposal per step and fork
+                # never merges, so installing it there would change nothing and
+                # make the arms differ in more than one way.
+                merged = dict(workload.evolve_kwargs)
+                merged["policies"] = Policies(
+                    **reflective_merge(completion_for(args, usage=Usage())))
+                w = replace(workload, evolve_kwargs=merged)
+                return merge_of_n(w, args.width, budget=budget, seed=seed)
             return merge_of_n(workload, args.width, budget=budget, seed=seed)
         raise ValueError(f"unknown arm {name!r}")
 
