@@ -28,6 +28,7 @@ Convenience actor: bundles running a task and proposing an improvement.
 | `cost_to_quality(target: float) -> Optional[int]` | Rollouts spent up to the first round that reached `target`. |
 | `duplicate_rate() -> float` | Cache hits as a fraction of lookups -- work that did *not* have to be redone. In one process this is memoisation working; across processes it is the figure that says how much a shared cache would be worth. |
 | `fusion_stats() -> 'FusionStats'` | How often merging beat the best single diff -- and how badly it lost. |
+| `load(path: str) -> 'EvolutionResult'` | Read back a result written by `save`. |
 | `outcomes() -> Dict[str, int]` | Merge outcomes for the whole run, by category -- *why* it went as it did. |
 | `save(path: str) -> None` | Write the evolved artifact and its run summary to a JSON file. |
 | `stale_rate() -> float` | Discarded evidence as a fraction of evidence considered; 0.0 if none. |
@@ -679,6 +680,7 @@ Standardise a rollout's reward against the group it belongs to.
 
 | method | what it does |
 |---|---|
+| `key(base_version: int, cluster: str = '') -> str` | The group a rollout belongs to. Same base, same cluster. |
 | `observe(key: str, reward: float) -> Optional[float]` | Record a reward and return its advantage, or `None` if unknown yet. |
 
 ### `StableDistanceAcceptance(inner, strength: float = 0.1) -> None`
