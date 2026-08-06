@@ -278,3 +278,113 @@ def test_scoring_a_tournament_is_order_independent():
     assert first == [reversed_order[1], reversed_order[0]]
 
 
+
+
+# -- the two cost/precision knobs --------------------------------------------
+
+
+def test_ranking_on_the_full_set_is_available_because_cheap_is_not_cheap_here():
+    """Measured: with 20 held-out tasks and `rule_subset=8`, one `cheap_eval`
+    touches 16 of them and adds a gaussian noise term. A 20% saving bought with
+    noise, spent on the one decision that decides whether a merge survives -- and
+    where a tie already loses."""
+    from agentdescent.verifier import ThreeLayerVerifier
+
+    touched = []
+    v = ThreeLayerVerifier(eval_fn=lambda a, t: (touched.extend(t), 0.5)[1],
+                           held_out=list(range(20)), rule_subset=8)
+
+    class A:
+        id = "x"
+        version = 1
+        def render(self): return "instr"
+
+    v.cheap_eval(A())
+    cheap_unique = len(set(touched))
+    touched.clear()
+    v.eval_counts(A())
+    assert cheap_unique < len(set(touched)), "cheap must at least be smaller"
+    assert cheap_unique >= 0.7 * len(set(touched)), \
+        "and here it is barely smaller, which is the point of the knob"
+
+
+def test_rank_on_full_uses_the_full_held_out_set():
+    from agentdescent.evolvable import Diff
+
+    calls = {"cheap": 0, "full": 0}
+
+    class V:
+        @staticmethod
+        def cheap_eval(a): calls["cheap"] += 1; return 0.5
+        @staticmethod
+        def eval_counts(a): calls["full"] += 1; return (5.0, 5.0)
+
+    class Art:
+        id = "x"
+        state = {"k": "a"}
+        def apply(self, d): return self
+
+    f = ReflectiveFusion(lambda p: "merged", verifier=V(), rank_on="full")
+    f.select(Art(), [Diff(diff_id="a", target="x", ops={"k": "1"}),
+                     Diff(diff_id="b", target="x", ops={"k": "2"})])
+    assert calls["full"] > 0 and calls["cheap"] == 0
+
+
+def test_a_dominant_single_skips_the_synthesis():
+    """A union is for complementary proposals. When one is already clear of the
+    field, buying one costs a model call and a fourth candidate to rank for a
+    merge unlikely to win."""
+    from agentdescent.evolvable import Diff
+
+    asked = []
+
+    class V:
+        @staticmethod
+        def cheap_eval(a):
+            return 0.9 if a.state.get("k") == "1" else 0.2
+
+    class Art:
+        id = "x"
+        def __init__(self, st=None): self.state = st or {"k": "a"}
+        def apply(self, d): return Art({**self.state, **d.ops})
+
+    f = ReflectiveFusion(lambda p: asked.append(p) or "merged", verifier=V(),
+                         skip_when_dominant=0.3)
+    f.select(Art(), [Diff(diff_id="a", target="x", ops={"k": "1"}),
+                     Diff(diff_id="b", target="x", ops={"k": "2"})])
+    assert not asked, "the model must not have been called"
+    assert f.trials[-1].reason == "dominant-single"
+
+
+def test_a_close_field_still_synthesises():
+    from agentdescent.evolvable import Diff
+
+    asked = []
+
+    class V:
+        @staticmethod
+        def cheap_eval(a):
+            return {"1": 0.55, "2": 0.50}.get(a.state.get("k"), 0.4)
+
+    class Art:
+        id = "x"
+        def __init__(self, st=None): self.state = st or {"k": "a"}
+        def apply(self, d): return Art({**self.state, **d.ops})
+
+    f = ReflectiveFusion(lambda p: asked.append(p) or "merged", verifier=V(),
+                         skip_when_dominant=0.3)
+    f.select(Art(), [Diff(diff_id="a", target="x", ops={"k": "1"}),
+                     Diff(diff_id="b", target="x", ops={"k": "2"})])
+    assert asked, "a close field is exactly when a union is worth buying"
+
+
+@pytest.mark.parametrize("kwargs", [{"rank_on": "nope"}, {"skip_when_dominant": -1}])
+def test_the_knobs_are_checked(kwargs):
+    with pytest.raises(ValueError):
+        ReflectiveFusion(lambda p: "", **kwargs)
+
+
+def test_the_defaults_change_nothing():
+    """Both knobs are off unless asked for, like everything else here."""
+    f = ReflectiveFusion(lambda p: "")
+    assert f.rank_on == "cheap" and f.skip_when_dominant == 0.0

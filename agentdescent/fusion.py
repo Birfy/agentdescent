@@ -65,7 +65,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .evolvable import Diff, Evolvable
-from .policies import FusionTrial
+from .policies import FusionTrial, MergeContext
 
 __all__ = ["MERGE_PROMPT", "KeepContradictions", "ReflectiveFusion",
            "reflective_merge"]
@@ -140,9 +140,14 @@ class ReflectiveFusion:
     """
 
     def __init__(self, complete, *, verifier: Any = None,
-                 max_chars: int = 8_000, max_proposals: int = 6) -> None:
+                 max_chars: int = 8_000, max_proposals: int = 6,
+                 rank_on: str = "cheap", skip_when_dominant: float = 0.0) -> None:
         if max_proposals < 2:
             raise ValueError("synthesising needs at least two proposals")
+        if rank_on not in ("cheap", "full"):
+            raise ValueError(f"rank_on must be 'cheap' or 'full', not {rank_on!r}")
+        if skip_when_dominant < 0:
+            raise ValueError("skip_when_dominant must not be negative")
         self.complete = complete
         self.verifier = verifier
         #: The synthesised value is written by a model and reaches the tournament
@@ -154,6 +159,28 @@ class ReflectiveFusion:
         #: instruction and starts being a summarisation task with a different
         #: failure mode. Extra proposals are dropped, best-scoring first kept.
         self.max_proposals = max_proposals
+        #: Which layer ranks the tournament. ``"cheap"`` is the shipped
+        #: behaviour; ``"full"`` scores every candidate on the whole held-out set
+        #: instead.
+        #:
+        #: The cheap layer exists to be cheap, and on a small held-out set it
+        #: barely is. Measured on the HotpotQA configuration -- 20 held-out
+        #: tasks, ``rule_subset=8`` -- one `cheap_eval` touches **16 of the 20**
+        #: while adding sub-sampling error and a gaussian noise term. That is a
+        #: 20% saving in exchange for noise, paid by the one decision that
+        #: decides whether a merge survives, and where a tie already loses. The
+        #: bigger the held-out set the better the shipped default looks, so this
+        #: is a knob and not a new default.
+        self.rank_on = rank_on
+        #: Skip the synthesis when the best single already beats the runner-up by
+        #: this margin. Zero (default) always synthesises.
+        #:
+        #: A union is worth buying when the proposals are complementary. When one
+        #: proposal dominates the field, the merge is unlikely to beat it and
+        #: costs a model call plus a whole extra candidate to rank -- on the
+        #: commit path of every round. This trades some merges for their cost,
+        #: and like everything else here it is off until measured.
+        self.skip_when_dominant = skip_when_dominant
         #: Same instrumentation as the shipped policy, so `fusion_stats()` reads
         #: a run of this one without knowing it is different.
         self.trials: List[FusionTrial] = []
@@ -220,7 +247,8 @@ class ReflectiveFusion:
                diffs: List[Diff]) -> Tuple[Diff, Evolvable, bool]:
         from .aggregator import diffs_contradict, fuse_diffs
 
-        cheap = self.verifier.cheap_eval
+        cheap = (self.verifier.cheap_eval if self.rank_on == "cheap"
+                 else lambda a: MergeContext.rate(self.verifier.eval_counts(a)))
         # Applied once, not twice: the old comprehension called `artifact.apply`
         # for the score and again for the tuple, so every candidate was built
         # twice and the object that was scored was not the object kept.
@@ -249,7 +277,13 @@ class ReflectiveFusion:
 
         synthesized_score: Optional[float] = None
         contested: Dict[str, List[Any]] = {}
-        if len(diffs) > 1:
+        # One proposal already well clear of the field: a union is for
+        # complementary proposals, and buying one here costs a model call and a
+        # fourth candidate to rank for a merge that is unlikely to win.
+        ranked = sorted((c[0] for c in scored), reverse=True)
+        dominant = (len(ranked) > 1 and self.skip_when_dominant > 0
+                    and ranked[0] - ranked[1] >= self.skip_when_dominant)
+        if len(diffs) > 1 and not dominant:
             agreed, contested = self._partition(diffs)
             ops: Dict[str, Any] = dict(agreed)
             state = getattr(artifact, "state", {}) or {}
@@ -299,6 +333,8 @@ class ReflectiveFusion:
             reason = ""
         elif len(diffs) <= 1:
             reason = "single-candidate"
+        elif dominant:
+            reason = "dominant-single"
         elif contested:
             reason = "synthesis-failed"
         else:

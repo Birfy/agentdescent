@@ -182,8 +182,9 @@ class FusionTrial:
     #: ``"neither"`` means nothing in the tournament beat the artifact it
     #: started from.
     winner: str = "single"
-    #: Why no fusion was built: ``"single-candidate"``, ``"contradiction"``, or
-    #: ``"synthesis-failed"`` (a model was asked and could not be used -- a dead
+    #: Why no fusion was built: ``"single-candidate"``, ``"contradiction"``,
+    #: ``"dominant-single"`` (one proposal was already clear of the field, so no
+    #: union was bought -- a saving, not a failure), or ``"synthesis-failed"`` (a model was asked and could not be used -- a dead
     #: backend, an empty answer, an oversized one, or one that merely repeated an
     #: input). Empty when a fused candidate did reach the tournament.
     reason: str = ""

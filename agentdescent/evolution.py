@@ -953,6 +953,11 @@ class FusionStats:
     #: Why the rest were not contested.
     single_candidate: int = 0
     contradiction: int = 0
+    #: One proposal was already clear of the field by
+    #: :attr:`~agentdescent.fusion.ReflectiveFusion.skip_when_dominant`, so no
+    #: union was bought. A deliberate saving, not a failure -- counted apart from
+    #: `synthesis_failed` for exactly that reason.
+    dominant_single: int = 0
     #: A model was asked to synthesise the competing values and its answer could
     #: not be used -- a dead backend, an empty or oversized answer, or one that
     #: merely repeated an input. Counted apart from `contradiction`, which means
@@ -1002,6 +1007,7 @@ class FusionStats:
             contested=len(gains),
             single_candidate=sum(1 for t in trials if t.reason == "single-candidate"),
             contradiction=sum(1 for t in trials if t.reason == "contradiction"),
+            dominant_single=sum(1 for t in trials if t.reason == "dominant-single"),
             synthesis_failed=sum(1 for t in trials
                                  if t.reason == "synthesis-failed"),
             synthesized_wins=sum(1 for t in trials if t.winner == "synthesized"),
