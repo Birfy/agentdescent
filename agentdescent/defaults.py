@@ -117,9 +117,10 @@ class DefaultFusion:
         # Score once and keep the numbers. `max(..., key=cheap_eval)` recomputed
         # them and threw them away, which is why the question below had no data
         # even though the tournament had been answering it every round.
+        applied = [artifact.apply(d) for d in diffs]
         scored: List[Tuple[float, Diff, Evolvable, bool]] = [
             (self.verifier.cheap_eval(candidate), d, candidate, False)
-            for d, candidate in ((d, artifact.apply(d)) for d in diffs)
+            for d, candidate in zip(diffs, applied)
         ]
         # add a fused candidate if the survivors are mutually complementary.
         reason = ""

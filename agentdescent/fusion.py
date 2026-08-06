@@ -34,8 +34,22 @@ merely repeats an input, or one over ``max_chars`` all fall back to exactly what
 merge that raises because a model was slow is a worse outcome than a merge that
 did not improve.
 
-**It costs a call per tournament, and one more held-out pass.** Pass the same
-:class:`~agentdescent.agents.Usage` here as to the run and the totals include it.
+**It is expensive, and the cost is not the synthesis call.** Measured on
+HotpotQA: **1219 model calls against 143** for the same 18 rollouts -- 8.5x. The
+synthesis is one call per tournament; the multiplier is
+:class:`KeepContradictions`, which leaves every contradicting proposal for the
+tournament to rank. `DefaultConflict` scores a pair and drops one; this scores
+all N plus the synthesised candidate, and each score is a cheap-layer sweep.
+
+That is the real price of being able to merge at all on a one-key artifact, and
+no amount of scheduling reduces it -- concurrency makes the run *finish* sooner,
+not cost less. Scoring the candidates in parallel was tried and reverted: it
+builds a thread pool per tournament, which `tests/test_evaluator.py` guards
+against by name, and multiplies in-flight requests against an endpoint that has
+already dropped connections under load.
+
+Pass the same :class:`~agentdescent.agents.Usage` here as to the run and the
+totals include all of it.
 
 Off by default, like everything else that has not been A/B'd::
 
@@ -207,10 +221,20 @@ class ReflectiveFusion:
         from .aggregator import diffs_contradict, fuse_diffs
 
         cheap = self.verifier.cheap_eval
+        # Applied once, not twice: the old comprehension called `artifact.apply`
+        # for the score and again for the tuple, so every candidate was built
+        # twice and the object that was scored was not the object kept.
+        applied = [artifact.apply(d) for d in diffs]
+        # Scored one at a time, on purpose. Scoring them concurrently was tried
+        # and reverted: it builds a thread pool per tournament, which
+        # `tests/test_evaluator.py` guards against by name (a run once built 83
+        # of them), and it multiplies in-flight requests by the candidate count
+        # against an endpoint that has already dropped connections under load.
+        # It is also the wrong lever -- see the class docstring on cost.
         # (score, diff, candidate, is_fusion, kind)
         scored: List[Tuple[float, Diff, Evolvable, bool, str]] = [
-            (cheap(artifact.apply(d)), d, artifact.apply(d), False, "single")
-            for d in diffs
+            (cheap(candidate), d, candidate, False, "single")
+            for d, candidate in zip(diffs, applied)
         ]
         reason = "single-candidate" if len(diffs) <= 1 else ""
         contradicts = len(diffs) > 1 and any(

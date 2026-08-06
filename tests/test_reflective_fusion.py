@@ -251,3 +251,30 @@ def test_the_union_is_verified_against_the_thing_it_replaces():
         lambda p: "base. CHECK BOTH. BE SHORT.")._synthesise(
             "base.", ["base. CHECK BOTH.", "base. BE SHORT."])
     assert "CHECK BOTH" in merged and "BE SHORT" in merged
+
+
+# -- the cost of keeping contradictions --------------------------------------
+
+
+def test_scoring_a_tournament_is_order_independent():
+    """Scoring a candidate must not depend on what was scored before it.
+
+    `learned_eval` used to draw its noise from a shared stream, so the same
+    candidate got a different number depending on its position in the tournament
+    -- and this policy keeps every contradicting proposal, so tournaments here are
+    exactly the ones with several candidates in them. Seeded from the artifact
+    instead, a candidate scores the same wherever it sits.
+    """
+    from agentdescent.verifier import ThreeLayerVerifier
+
+    class Art:
+        def __init__(self, text): self.text = text
+        def render(self): return self.text
+
+    v = ThreeLayerVerifier(eval_fn=lambda a, t: 0.5, held_out=list(range(8)))
+    a, b = Art("one"), Art("two")
+    first = [v.cheap_eval(a), v.cheap_eval(b)]
+    reversed_order = [v.cheap_eval(b), v.cheap_eval(a)]
+    assert first == [reversed_order[1], reversed_order[0]]
+
+
