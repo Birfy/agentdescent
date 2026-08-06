@@ -449,15 +449,19 @@ Read `negative` before believing a high win rate: an empty losing tail usually
 means the held-out set is too small to separate the candidates, and `ties` is the
 tell.
 
-Three outcomes, all worth having. Well above 50% means merging recovers the N−1
-proposals best-of-N discards. Near 50% means fusion is noise, and ranking it was
-never worth the sweep. Below 50% *with the tournament catching it* means ranking
-is doing real work on this workload — which is a reason to turn it on there, and
-the reason the measurement is per-workload rather than a fact about the
-mechanism. Measured numbers go in
-[Measured results](https://github.com/Birfy/agentdescent/blob/main/docs/results.md);
-the synthetic router domain is not where they can come from, because its diffs
-are additive by construction and fusion there wins by definition.
+Three outcomes, all worth having on **your** workload. Well above 50% means
+merging recovers the N−1 proposals best-of-N discards. Near 50% means fusion is
+noise there, and ranking it is not worth the sweep. Below 50% *with the
+tournament catching it* means ranking is doing real work — a reason to leave it
+on for that artifact.
+
+**No number is published here, and that is deliberate.** The win rate is a
+property of the artifact's key space and of how much the workers' proposals
+overlap, not of the mechanism — so a figure measured on one dataset would be read
+as a fact about merging and would not transfer to the next one. It is a
+diagnostic to run on the workload you care about, which is why it is one keyword
+argument and not a benchmark. The synthetic router domain is the clearest case of
+why: its diffs are additive by construction, so fusion there wins by definition.
 
 ## Parallelism & asynchrony
 
