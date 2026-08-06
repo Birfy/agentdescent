@@ -218,3 +218,36 @@ def test_installing_the_fusion_alone_is_the_mistake_it_looks_like():
 
     paired = _evolve(policies=Policies(**reflective_merge(lambda p: "merged")))
     assert paired.fusion_stats().contested > 0
+
+
+def test_the_prompt_asks_for_a_union_of_deltas_not_a_rewrite():
+    """"Write one version keeping every improvement" invites a fresh composition
+    that happens to cover the same ground. "Work out what each proposal changed
+    relative to CURRENT, then apply all of those changes" is an operation whose
+    result can be checked, and it needs only what a FusionPolicy actually has --
+    the current value and the competing ones, never the evidence cards.
+    """
+    from agentdescent.fusion import MERGE_PROMPT
+
+    filled = MERGE_PROMPT.format(current="C", proposals="PROPOSAL 1\n---\nP\n---\n")
+    assert "UNION" in filled
+    assert "CHANGED relative to CURRENT" in filled
+    assert "{" not in filled and "}" not in filled, "every placeholder is filled"
+
+
+def test_the_union_is_verified_against_the_thing_it_replaces():
+    """`fuse_diffs` on one key is last-writer-wins. This is the contrast the
+    whole module exists for, asserted rather than described."""
+    from agentdescent.aggregator import fuse_diffs
+    from agentdescent.evolvable import Diff
+
+    a = Diff(diff_id="a", target="p", ops={"instruction": "base. CHECK BOTH."})
+    b = Diff(diff_id="b", target="p", ops={"instruction": "base. BE SHORT."})
+    plain = fuse_diffs([a, b]).ops["instruction"]
+    assert ("CHECK BOTH" in plain) != ("BE SHORT" in plain), \
+        "a dict update keeps exactly one of them -- that is the gap"
+
+    merged = ReflectiveFusion(
+        lambda p: "base. CHECK BOTH. BE SHORT.")._synthesise(
+            "base.", ["base. CHECK BOTH.", "base. BE SHORT."])
+    assert "CHECK BOTH" in merged and "BE SHORT" in merged

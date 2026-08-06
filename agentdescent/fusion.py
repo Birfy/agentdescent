@@ -57,24 +57,32 @@ __all__ = ["MERGE_PROMPT", "KeepContradictions", "ReflectiveFusion",
            "reflective_merge"]
 
 
-#: What the model is asked. Deliberately narrow: it rewrites *one key's value*,
-#: never the artifact, and it is told what each candidate was trying to fix so it
-#: can keep both intentions rather than averaging two strings.
+#: What the model is asked, and it is asked for a **union of deltas** rather than
+#: a rewrite. "Write one version that keeps every improvement" invites a fresh
+#: composition that happens to cover the same ground; "work out what each
+#: proposal changed relative to CURRENT, then apply all of those changes" is an
+#: operation with a checkable result, and it is derivable from exactly what a
+#: `FusionPolicy` has -- the current value and the competing ones. Nothing here
+#: needs the evidence cards, which fusion does not receive.
 MERGE_PROMPT = """\
-Several improvements to the same piece of text were proposed independently, each
-fixing a different failure. Write ONE version that keeps every improvement.
+Several independent improvements were made to the same text, each fixing a
+different failure. Produce their UNION.
 
-CURRENT VERSION
+CURRENT
 ---
 {current}
 ---
 
 {proposals}
+Do this:
+1. For each proposal, work out what it CHANGED relative to CURRENT.
+2. Output CURRENT with every one of those changes applied together.
+
 Rules:
-- Keep every distinct instruction, rule or correction that appears in any proposal.
-- Where two proposals genuinely disagree, prefer the more specific one.
-- Do not add anything that is in none of them.
-- Do not comment on the task. Output only the merged text, nothing else.
+- Every change introduced by any proposal must survive into your output.
+- Introduce nothing that no proposal introduced.
+- If two proposals changed the same point incompatibly, keep the more specific one.
+- Output only the merged text: no preamble, no explanation, no markers.
 """
 
 
