@@ -378,6 +378,13 @@ class Aggregator:
         # the code that used to be inline here, moved rather than rewritten.
         self.conflict_policy = conflict or DefaultConflict(verifier)
         self.fusion_policy = fusion or DefaultFusion(verifier)
+        # A fusion policy ranks candidates, so it needs the verifier -- and a
+        # caller building one cannot supply it, because the verifier is built
+        # inside the engine. Hand it over to any policy that asked by exposing
+        # `bind`; the shipped one takes it in its constructor and has none.
+        _bind = getattr(self.fusion_policy, "bind", None)
+        if callable(_bind):
+            _bind(verifier)
         cfg = self.config
         self.acceptance_policy = acceptance or DefaultAcceptance(
             cfg.base_delta, cfg.anneal_half_life, cfg.accept_samples)

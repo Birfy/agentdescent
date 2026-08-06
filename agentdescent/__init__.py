@@ -38,6 +38,7 @@ from .advantage import (
     TrustRegion,
     state_distance,
 )
+from .fusion import KeepContradictions, ReflectiveFusion, reflective_merge
 from .sampling import DifficultyWeighted, RoundRobin, TaskSampler
 from .selection import (
     Archive,
@@ -208,6 +209,9 @@ __all__ = [
     "DifficultyWeighted",
     "RoundRobin",
     "TaskSampler",
+    "ReflectiveFusion",
+    "KeepContradictions",
+    "reflective_merge",
     "GroupAdvantage",
     "AdvantageAcceptance",
     "AdvantageConflict",

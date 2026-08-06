@@ -953,6 +953,15 @@ class FusionStats:
     #: Why the rest were not contested.
     single_candidate: int = 0
     contradiction: int = 0
+    #: A model was asked to synthesise the competing values and its answer could
+    #: not be used -- a dead backend, an empty or oversized answer, or one that
+    #: merely repeated an input. Counted apart from `contradiction`, which means
+    #: no model was asked at all: both leave `contested` at zero and need
+    #: opposite fixes. Only :class:`~agentdescent.fusion.ReflectiveFusion`
+    #: produces it.
+    synthesis_failed: int = 0
+    #: Tournaments a model-synthesised candidate won outright.
+    synthesized_wins: int = 0
 
     fused_wins: int = 0
     single_wins: int = 0
@@ -993,7 +1002,13 @@ class FusionStats:
             contested=len(gains),
             single_candidate=sum(1 for t in trials if t.reason == "single-candidate"),
             contradiction=sum(1 for t in trials if t.reason == "contradiction"),
-            fused_wins=sum(1 for t in trials if t.winner == "fused"),
+            synthesis_failed=sum(1 for t in trials
+                                 if t.reason == "synthesis-failed"),
+            synthesized_wins=sum(1 for t in trials if t.winner == "synthesized"),
+            # A synthesised win is a fused win: both mean the merge beat every
+            # single diff. The narrower counter says *how* it was built.
+            fused_wins=sum(1 for t in trials
+                           if t.winner in ("fused", "synthesized")),
             single_wins=sum(1 for t in trials if t.winner == "single"),
             neither=sum(1 for t in trials if t.winner == "neither"),
             ties=sum(1 for g in gains if g == 0.0),

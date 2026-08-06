@@ -83,6 +83,17 @@ All notable changes to AgentDescent are documented here. The format follows
   difference between "which task" (`TaskScheduler`) and "which candidate"
   (`SelectionPolicy`), which the picture previously invited confusing.
 
+- `agentdescent.fusion` — `ReflectiveFusion`, which merges **competing values for
+  the same key** by asking a model to write one version keeping both. `fuse_diffs`
+  is a dictionary update, so on a one-key artifact (GEPA's `InstructionSlot`) the
+  last writer wins and no fused candidate is ever built: measured `contested = 0`
+  for an entire run, which makes `merge_of_n` there per-round best-of-N selection
+  rather than merging. Ships as a **pair** with `KeepContradictions` via
+  `reflective_merge()`, because conflict resolution runs first and would otherwise
+  hand the fusion policy a single diff. The synthesised candidate has no privilege
+  in the tournament — a tie loses — and every failure path falls back to shipped
+  behaviour. Off by default, not yet A/B'd.
+
 ### Changed
 
 - OpenEvolve's `--serial` now means the shared thing (one worker) rather than

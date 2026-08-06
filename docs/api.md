@@ -8,7 +8,7 @@ page and the code disagree, so a signature here is the signature you get.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-193 public names across 33 modules.
+196 public names across 34 modules.
 
 ---
 
@@ -627,6 +627,28 @@ Every worker starts from the current head. Today's behaviour, exactly.
 ### `pareto_front(candidates: Sequence[Candidate], *, tasks: Sequence[str]) -> List[Candidate]`
 
 Candidates no other candidate beats on every task and betters on one.
+
+---
+
+## Model-assisted fusion
+
+Combine competing values for the same key, when a dict update cannot. &nbsp;·&nbsp; `agentdescent.fusion` &nbsp;·&nbsp; [guide](aggregator.md)
+
+### `KeepContradictions()`
+
+A conflict policy that leaves contradicting diffs for fusion to resolve.
+
+### `ReflectiveFusion(...)`
+
+Combine contradicting diffs by asking a model to synthesise their values.
+
+| method | what it does |
+|---|---|
+| `bind(verifier: Any) -> None` | Receive the engine's verifier, if the caller did not supply one. |
+
+### `reflective_merge(complete, **kwargs) -> Dict[str, Any]`
+
+The two policies model-merging needs, as `Policies` keyword arguments.
 
 ---
 

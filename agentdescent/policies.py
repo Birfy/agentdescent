@@ -172,11 +172,20 @@ class FusionTrial:
     #: Distinguishing that from "the fusion lost" is the difference between a
     #: mechanism that fails and a mechanism that never ran.
     fused_score: Optional[float] = None
-    #: ``"fused"`` / ``"single"`` / ``"neither"``. ``"neither"`` means nothing in
-    #: the tournament beat the artifact it started from.
+    #: Score of a **model-synthesised** candidate, when a fusion policy built one
+    #: -- :class:`~agentdescent.fusion.ReflectiveFusion` does, for keys the diffs
+    #: disagree on. ``None`` when no model was involved, which is the default.
+    #: Separate from ``fused_score`` so "the union of independent edits helped"
+    #: and "a model rewrote two competing edits into one" are never one number.
+    synthesized_score: Optional[float] = None
+    #: ``"fused"`` / ``"synthesized"`` / ``"single"`` / ``"neither"``.
+    #: ``"neither"`` means nothing in the tournament beat the artifact it
+    #: started from.
     winner: str = "single"
-    #: Why no fusion was built: ``"single-candidate"`` or ``"contradiction"``.
-    #: Empty when one was.
+    #: Why no fusion was built: ``"single-candidate"``, ``"contradiction"``, or
+    #: ``"synthesis-failed"`` (a model was asked and could not be used -- a dead
+    #: backend, an empty answer, an oversized one, or one that merely repeated an
+    #: input). Empty when a fused candidate did reach the tournament.
     reason: str = ""
 
     @property
