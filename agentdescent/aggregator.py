@@ -124,6 +124,16 @@ class AggregatorConfig:
     #: two writers backing off by the same amount collide again on the same
     #: schedule.
     cas_backoff: float = 0.05
+    #: Rank candidates against their fusion on the cheap layer before putting one
+    #: forward. **Off**, because the ranking is paid every round while the only
+    #: decision it changes from the gate's is recoverable -- see
+    #: :class:`~agentdescent.defaults.DefaultFusion` for the case analysis.
+    #:
+    #: Turn it on to *measure*: `best_single_score`, and therefore
+    #: :attr:`~agentdescent.evolution.FusionStats.win_rate`, exist only when a
+    #: single was actually scored. Ignored by a fusion policy that does its own
+    #: thing, which :class:`~agentdescent.fusion.ReflectiveFusion` does.
+    fusion_tournament: bool = False
 
 
 class MergeOutcome(str, Enum):
@@ -377,7 +387,8 @@ class Aggregator:
         # The decisions, as objects. Swapping one is the point; the defaults are
         # the code that used to be inline here, moved rather than rewritten.
         self.conflict_policy = conflict or DefaultConflict(verifier)
-        self.fusion_policy = fusion or DefaultFusion(verifier)
+        self.fusion_policy = fusion or DefaultFusion(
+            verifier, tournament=self.config.fusion_tournament)
         # A fusion policy ranks candidates, so it needs the verifier -- and a
         # caller building one cannot supply it, because the verifier is built
         # inside the engine. Hand it over to any policy that asked by exposing

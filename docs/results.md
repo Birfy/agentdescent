@@ -230,16 +230,30 @@ search. The numbers are therefore not comparable with those ports' own results.
     all**. `merge_of_n` there is per-round *best-of-N selection*: a real
     mechanism, and not merging.
 
-    `ArmResult.fusion.contested` counts the tournaments a fused candidate
-    actually competed in. Measured on the two shipped artifacts:
+    `ArmResult.fusion.contested` counts the merges where a fused candidate was
+    built **and ranked** against the singles:
 
-    | artifact | keys | contested |
-    |---|---|---|
-    | GEPA `InstructionSlot` | 1 (`instruction`) | **0** — fusion never runs |
-    | ACE playbook | one per bullet | > 0 — fusion runs and can lose |
+    | artifact | keys | contested | where that comes from |
+    |---|---|---|---|
+    | GEPA `InstructionSlot` | 1 (`instruction`) | **0** — fusion never runs | measured, the HotpotQA runs below |
+    | ACE playbook | one per bullet | > 0 — fusion runs and can lose | `tests/test_fusion_stats.py`, offline, synthetic reward — **not** measured on FiNER |
+
+    The second row is a claim about the artifact's *shape*, which a unit test can
+    establish, and not a measurement on ACE's dataset. The header said "Measured
+    on the two shipped artifacts" over both.
+
+    Two more things keep `contested` at zero, and reading it without them is how
+    a non-event becomes a win rate:
+
+    - **Ranking is off by default.** `evolve(fusion_tournament=True)` turns it on;
+      without it the union goes straight to the gate, `contested` is zero by
+      construction and `unranked` counts the unions instead.
+    - **Survivors that agree.** `fuse_diffs` is `ops.update()`, so N copies of one
+      diff "fuse" into that diff. It used to count as contested — nine such
+      non-events in one measured run — and is now `nothing_to_fuse`.
 
     So a HotpotQA row belongs under *selection*, and only a multi-key artifact
-    can fill the table below. `tests/test_fusion_stats.py` pins both directions.
+    can fill the table below.
 
 | arm | dataset | rollouts | test quality (min/med/max) | fork oracle |
 |---|---|---|---|---|

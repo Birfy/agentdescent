@@ -95,24 +95,64 @@ class DefaultConflict:
 
 
 class DefaultFusion:
-    """Run each candidate, plus their fusion, in a cheap held-out tournament.
+    """Build the union of complementary diffs and hand it to the gate.
 
-    Also the only place that can answer "does merging actually help, or does it
-    average the improvements away?", so it records a :class:`FusionTrial` per
-    tournament. The scores were already being computed to rank the candidates;
-    keeping them costs nothing and is the difference between claiming a mechanism
-    and reporting one. See :meth:`EvolutionResult.fusion_stats`.
+    With ``tournament=True`` it instead ranks every candidate *and* their fusion
+    on the cheap layer first, and puts the winner forward.
+
+    **Why ranking is not the default.** Work out what the tournament decides
+    that the acceptance gate does not, and it is one cell:
+
+    ==========================================  ===============  ===============
+    case                                        union -> gate    tournament
+    ==========================================  ===============  ===============
+    fusion worse than the artifact              gate rejects     rejected
+    fusion better than every single             fusion commits   fusion commits
+    fusion beats the artifact, loses to a       fusion commits   that single
+    single                                                       commits
+    ==========================================  ===============  ===============
+
+    So the tournament is a *selection* refinement, not a safety mechanism: the
+    gate already scores the candidate on the **full** held-out set and stops a
+    regression. And the one cell it changes is recoverable, because
+    :func:`~agentdescent.aggregator.fuse_diffs` is ``ops.update()`` -- the union
+    is a **superset** of every single, so committing it loses no proposal, it
+    merely carries some that looked negative this round. The next round proposes
+    from there.
+
+    Against that: the ranking is paid every round, unconditionally, at one cheap
+    sweep per candidate. An unconditional cost for a conditional, recoverable
+    gain is the wrong default.
+
+    It stays available because it is the **only** instrument that can answer
+    "does merging just average the improvements away?" -- `best_single_score`
+    exists only when a single was actually scored. The win rate is a property of
+    the workload rather than of the mechanism, so this is a per-workload
+    measurement to run deliberately, not a tax on every run. See
+    :meth:`EvolutionResult.fusion_stats` and ``docs/aggregator.md``.
+
+    Note where the remaining cost goes. Once :class:`DefaultConflict` has run,
+    the surviving diffs are pairwise non-contradicting, so the union always
+    builds and this policy spends **nothing**. Ranking that genuinely has to
+    happen -- choosing between two diffs that contradict -- happens there, which
+    is where a choice is unavoidable.
     """
 
-    def __init__(self, verifier) -> None:
+    def __init__(self, verifier, tournament: bool = False) -> None:
         self.verifier = verifier
+        #: Rank candidates against each other before putting one forward. Off by
+        #: default; see the class docstring for the cost/benefit that decides it.
+        self.tournament = tournament
         #: Every tournament this policy has run, in order. Append-only, and read
         #: by the engine when it assembles the result.
         self.trials: List[FusionTrial] = []
 
     def select(self, artifact: Evolvable,
                diffs: List[Diff]) -> Tuple[Diff, Evolvable, bool]:
-        from .aggregator import diffs_contradict, fuse_diffs
+        union, reason = self._union_of(diffs)
+
+        if not self.tournament:
+            return self._commit_union(artifact, diffs, union, reason)
 
         # Score once and keep the numbers. `max(..., key=cheap_eval)` recomputed
         # them and threw them away, which is why the question below had no data
@@ -122,17 +162,9 @@ class DefaultFusion:
             (self.verifier.cheap_eval(candidate), d, candidate, False)
             for d, candidate in zip(diffs, applied)
         ]
-        # add a fused candidate if the survivors are mutually complementary.
-        reason = ""
-        if len(diffs) <= 1:
-            reason = "single-candidate"
-        elif any(diffs_contradict(a, b)
-                 for i, a in enumerate(diffs) for b in diffs[i + 1:]):
-            reason = "contradiction"
-        else:
-            fused = fuse_diffs(diffs)
-            candidate = artifact.apply(fused)
-            scored.append((self.verifier.cheap_eval(candidate), fused, candidate,
+        if union is not None:
+            candidate = artifact.apply(union)
+            scored.append((self.verifier.cheap_eval(candidate), union, candidate,
                            True))
 
         # `max` keeps the first of equal scores, so a fused candidate that merely
@@ -155,6 +187,67 @@ class DefaultFusion:
             baseline_score=baseline, fused_score=fused_score, winner=winner,
             reason=reason))
         return best[1], best[2], best[3]
+
+    def _union_of(self, diffs: List[Diff]) -> Tuple[Optional[Diff], str]:
+        """The fused candidate, or ``None`` and why there isn't one.
+
+        The third test is the one that was missing. ``fuse_diffs`` is
+        ``ops.update()``, so when every worker proposes the *same* edit the
+        "union" is that edit -- nothing was combined, and calling it a fusion put
+        a non-event in `contested`, which is `win_rate`'s denominator. Measured
+        on a mute-backend run: nine tournaments, all of them two identical
+        ``{'value': 'rule-0'}`` diffs, all nine counted as contested. The same
+        applies whenever the union merely equals one of its inputs -- that input
+        already dominates the others and no merging happened.
+
+        It is not a niche case. Workers that share a task, or converge on the
+        same fix, propose the same text; on a one-key strategy that is the *only*
+        way a fusion could ever be reported, so a `SingleSlot` run could report a
+        win rate for a mechanism `docs/results.md` says it can never run.
+        """
+        from .aggregator import diffs_contradict, fuse_diffs
+
+        if len(diffs) <= 1:
+            return None, "single-candidate"
+        if any(diffs_contradict(a, b)
+               for i, a in enumerate(diffs) for b in diffs[i + 1:]):
+            return None, "contradiction"
+        union = fuse_diffs(diffs)
+        if any(union.ops == d.ops for d in diffs):
+            return None, "nothing-to-fuse"
+        return union, ""
+
+    def _commit_union(self, artifact: Evolvable, diffs: List[Diff],
+                      union: Optional[Diff],
+                      reason: str) -> Tuple[Diff, Evolvable, bool]:
+        """The default path: no scoring here at all, in either branch.
+
+        A contradicting pair still needs one of the two dropped, but that is
+        :class:`DefaultConflict`'s job and it has already run. Whatever reaches
+        here contradicting came from a conflict policy that chose to keep it --
+        :class:`~agentdescent.fusion.KeepContradictions` does, so that a model
+        can merge the two -- and silently re-ranking behind such a policy's back
+        would undo the thing it was installed to do. Take the first instead, and
+        say so in the trial.
+        """
+        self._record(artifact, diffs, reason)
+        chosen = union if union is not None else diffs[0]
+        return chosen, artifact.apply(chosen), union is not None
+
+    def _record(self, artifact: Evolvable, diffs: List[Diff],
+                reason: str) -> None:
+        """A trial that carries no verdict, because nothing was compared.
+
+        `ranked=False` keeps these out of `win_rate`'s denominator. A union that
+        never met a single has not beaten one, and the statistic must not be
+        able to imply otherwise -- the same contract
+        :class:`~agentdescent.fusion.ReflectiveFusion` records under.
+        """
+        self.trials.append(FusionTrial(
+            artifact_id=getattr(artifact, "id", ""), n_candidates=len(diffs),
+            best_single_score=0.0, baseline_score=0.0,
+            winner="fused" if not reason else "single",
+            reason=reason, ranked=False))
 
 
 class DefaultAcceptance:

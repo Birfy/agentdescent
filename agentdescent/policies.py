@@ -189,6 +189,8 @@ class FusionTrial:
     #: that was never compared has not won anything.
     ranked: bool = True
     #: Why no fusion was built: ``"single-candidate"``, ``"contradiction"``,
+    #: ``"nothing-to-fuse"`` (the diffs agreed, so their union *is* one of them --
+    #: every worker proposed the same edit, or one already contained the others),
     #: ``"dominant-single"`` (one proposal was already clear of the field, so no
     #: union was bought -- a saving, not a failure), or ``"synthesis-failed"`` (a model was asked and could not be used -- a dead
     #: backend, an empty answer, an oversized one, or one that merely repeated an

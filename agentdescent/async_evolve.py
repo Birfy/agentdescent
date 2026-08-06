@@ -81,6 +81,7 @@ def async_evolve(
     aggregator_factory=None,
     oracle_budget: int = 200,
     cheap_eval_tasks: Optional[int] = None,
+    fusion_tournament: Optional[bool] = None,
     solved_threshold: float = SOLVED,
     shuffle: bool = False,
     seed: int = 0,
@@ -164,7 +165,13 @@ def async_evolve(
         the real reward, never against an acceptance probability.
     cheap_eval_tasks:
         As in :func:`evolve`: how many held-out tasks the cheap layer scores when
-        ranking candidates. ``None`` scores them all.
+        ranking candidates. ``None`` is 8, or the whole held-out set when that is
+        smaller.
+    fusion_tournament:
+        As in :func:`evolve`: rank the survivors against their fusion before
+        putting one forward. ``None`` defers to ``agg_config``, which is off. The
+        cost/benefit is identical on this path -- there is one merger thread here
+        too, and it pays the ranking on the critical path of every commit.
     solved_threshold:
         As in :func:`evolve`: the reward at which a task counts as solved and no
         proposal is requested. Lower it for a graded scorer.
@@ -250,7 +257,8 @@ def async_evolve(
         held_out_frac=held_out_frac, repo_path=repo_path, agg_config=agg_config,
         staleness_policy=staleness_policy, aggregator_factory=aggregator_factory,
         oracle_budget=oracle_budget, eval_concurrency=eval_concurrency,
-        cheap_eval_tasks=cheap_eval_tasks, shuffle=shuffle, seed=seed,
+        cheap_eval_tasks=cheap_eval_tasks, fusion_tournament=fusion_tournament,
+        shuffle=shuffle, seed=seed,
         usage=usage, verifier=_pol.verifier, ledger_impl=_pol.ledger,
         policies_bundle=_pol)
     eng.meter.start()
