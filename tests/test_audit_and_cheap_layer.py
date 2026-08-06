@@ -16,6 +16,11 @@ full held-out sweep wearing three names. The aggregator therefore paid a full
 sweep for every candidate it merely wanted to *rank*, and `oracle_budget` capped
 nothing -- its documented fallback (`rule_eval`) returned the very value it was
 trying to avoid buying.
+
+That second half was fixed twice. `cheap_eval_tasks=` made the sample settable,
+and the default stayed at the whole set -- so nothing in `bench/` or `examples/`
+ever passed it and every real run kept paying. The default is now 8, which is
+`ThreeLayerVerifier.rule_subset`'s own; `evolve()` had been overriding it.
 """
 
 import warnings
@@ -202,9 +207,39 @@ def test_the_full_set_still_decides_whether_to_commit(tmp_path):
         "the acceptance test must score the whole held-out set, not the cheap sample")
 
 
-def test_the_default_is_unchanged_so_existing_runs_are_not_silently_resampled(tmp_path):
-    """`cheap_eval_tasks=None` keeps exact scoring -- opting in is the caller's call."""
-    _, agg = _run(cheap_eval_tasks=None, repo_path=str(tmp_path))
+def test_the_default_samples_rather_than_scoring_everything(tmp_path):
+    """`cheap_eval_tasks=None` is 8, not the whole held-out set.
+
+    It used to be the whole set, which is what made this module's second
+    paragraph true: rule, learned and oracle were one full sweep wearing three
+    names, and ranking one candidate cost what committing one costs. The knob to
+    fix it shipped and nothing in `bench/` or `examples/` ever passed it, so
+    every real run paid it -- a default nobody sets is the only default there is.
+
+    `held_out_frac` is raised here on purpose: at the module default the held-out
+    set is smaller than 8, so `min(8, len)` is the whole set either way and the
+    assertion would pass without testing anything. It did, before this was
+    rewritten.
+    """
+    _, agg = _run(cheap_eval_tasks=None, held_out_frac=0.6, repo_path=str(tmp_path))
     v = agg.verifier
+    assert len(v.held_out) > 8, "premise: the held-out set can show a difference"
+    assert v.rule_subset == 8
+    assert len(v._subset(v.rule_subset)) == 8
+
+
+def test_a_held_out_set_smaller_than_the_default_is_not_padded(tmp_path):
+    """`min`, not a fixed 8: sampling 8 of 6 tasks would resample or crash."""
+    _, agg = _run(cheap_eval_tasks=None, held_out_frac=0.25, repo_path=str(tmp_path))
+    v = agg.verifier
+    assert len(v.held_out) < 8, "premise: fewer held-out tasks than the default"
     assert v.rule_subset == len(v.held_out)
-    assert list(v._subset(v.rule_subset)) == list(v.held_out)
+
+
+def test_the_full_set_is_still_what_commits(tmp_path):
+    """The new default only moves ranking. Same guarantee as `cheap_eval_tasks=2`
+    above, asserted on the path callers actually take."""
+    _, agg = _run(cheap_eval_tasks=None, held_out_frac=0.6, repo_path=str(tmp_path))
+    successes, failures = agg.verifier.eval_counts(
+        agg.ledger.snapshot("dev").get("artifact"))
+    assert round(successes + failures) == len(agg.verifier.held_out)

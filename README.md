@@ -376,9 +376,11 @@ optimizer step:
 2. **Conflict resolution (§4.3)** — syntactic (hunk overlap) and semantic
    (contradictory ops) detection; contradictions are projected out PCGrad-style,
    keeping the better of the pair on a shared subset.
-3. **Fusion tournament (§4.3)** — complementary diffs are fused (model-soup
-   analogy) and run against the individual candidates on held-out data. Every
-   tournament is recorded; see [Does merging just average the improvements
+3. **Fusion (§4.3)** — complementary diffs are fused (model-soup analogy) and the
+   union goes to the gate. `fusion_tournament=True` runs it against the
+   individual candidates on held-out data first, which costs a cheap sweep per
+   candidate and is the only way to get a win rate; see [Does merging just
+   average the improvements
    away?](#does-merging-just-average-the-improvements-away) below.
 4. **Audit gate (§5.3)** — the merge decision is itself submitted to the
    `AuditScheduler`; high-blast-radius / low-trust merges are forced through the
@@ -398,9 +400,28 @@ optimizer step:
 ### Does merging just average the improvements away?
 
 The sharpest objection to this whole design: two workers each make a local
-improvement, and the two together are worse than either alone. The tournament in
-step 3 is the answer — a fused candidate has to *win* on held-out before anything
-commits — but "we have a tournament" is a design, not evidence.
+improvement, and the two together are worse than either alone.
+
+**What stops it is the acceptance gate, not the tournament.** The gate scores the
+candidate on the *full* held-out set and refuses a measured regression, so a
+fusion that made things worse never commits either way. Work out what the
+tournament decides that the gate does not and it is one case — the fusion beats
+the artifact but loses to one of the singles — and even that is recoverable,
+because the union is a **superset** of every single diff, so committing it loses
+no proposal. It merely carries some that looked negative this round, and the next
+round proposes from there.
+
+That is why the tournament is **off by default**: an unconditional cost of one
+cheap sweep per candidate, every round, against a conditional and recoverable
+gain. `evolve()` builds the union and hands it to the gate.
+
+It stays available because it is the only thing that can *measure* the objection.
+Turn it on with `fusion_tournament=True`:
+
+```python
+result = evolve(tasks, reward, agent=agent, n_workers=4,
+                fusion_tournament=True)   # ranks singles, so win_rate exists
+```
 
 `result.fusion_stats()` is the evidence, with the denominators the old `fused`
 counter was missing:
@@ -413,17 +434,27 @@ stats.negative        # how often the fusion lost, and by how much
 stats.below_baseline  # how often it was worse than the artifact it started from
 ```
 
-Read `contested` before `win_rate`. A run where every round had a single
-survivor never tested fusion once, and `win_rate` is `None` rather than `0%` so
-that cannot be misread. Read `negative` before believing a high win rate: an
-empty losing tail usually means the held-out set is too small to separate the
-candidates, and `ties` is the tell.
+Read `contested` before `win_rate`. It counts tournaments where a fusion existed
+*and was ranked*, and three things keep it at zero: one survivor, survivors that
+contradict, and — the one that used to be counted as a fusion — survivors that
+**agree**. `fuse_diffs` is `ops.update()`, so N copies of one diff "fuse" into
+that diff; `nothing_to_fuse` names it, because the fix is the opposite of the fix
+for contradiction (workers duplicating each other, not a key space that is too
+coarse). Without `fusion_tournament=True`, `contested` is zero by construction
+and `unranked` counts the unions that were committed instead. `win_rate` is
+`None` rather than `0%` throughout, so none of that can be misread as "fusion
+always lost".
+
+Read `negative` before believing a high win rate: an empty losing tail usually
+means the held-out set is too small to separate the candidates, and `ties` is the
+tell.
 
 Three outcomes, all worth having. Well above 50% means merging recovers the N−1
-proposals best-of-N discards. Near 50% means fusion is noise and the tournament's
-extra held-out pass needs a different justification. Below 50% *with the
-tournament catching it* means the gate is doing real work — the optimizer audits
-itself. Measured numbers go in
+proposals best-of-N discards. Near 50% means fusion is noise, and ranking it was
+never worth the sweep. Below 50% *with the tournament catching it* means ranking
+is doing real work on this workload — which is a reason to turn it on there, and
+the reason the measurement is per-workload rather than a fact about the
+mechanism. Measured numbers go in
 [Measured results](https://github.com/Birfy/agentdescent/blob/main/docs/results.md);
 the synthetic router domain is not where they can come from, because its diffs
 are additive by construction and fusion there wins by definition.

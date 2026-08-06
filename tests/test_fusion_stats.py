@@ -122,6 +122,11 @@ def _propose(rendered, task, output, score):
 
 
 def _evolve(**kw):
+    # These tests are about the tournament, which is opt-in: the default commits
+    # the union straight to the gate and ranks nothing, so `win_rate` has no
+    # denominator there by construction. The default's own behaviour is pinned
+    # below, under "the default path".
+    kw.setdefault("fusion_tournament", True)
     kw.setdefault("rounds", 6)
     kw.setdefault("n_workers", 4)
     return evolve(_tasks(), _reward, run=_run, propose=_propose,
@@ -203,7 +208,66 @@ def test_append_only_strategies_still_produce_contested_tournaments():
     assert stats.contradiction == 0
 
 
+# -- the default path: union -> gate, nothing ranked -------------------------
+
+
+def test_the_default_commits_the_union_without_ranking_anything():
+    """No `fusion_tournament=`, so no candidate is scored to choose between them.
+
+    The union goes straight to the acceptance gate, which scores it on the full
+    held-out set and is the thing that stops a regression either way. What is
+    given up is the comparison, and `contested` -- `win_rate`'s denominator --
+    has to stay empty to say so."""
+    stats = _evolve(fusion_tournament=False).fusion_stats()
+    assert stats.unranked > 0, "the default has to build unions, not skip merging"
+    assert stats.contested == 0, "nothing was compared, so nothing can be contested"
+    assert stats.win_rate is None, "a rate over an empty denominator"
+
+
+def test_the_default_says_fusion_ran_rather_than_that_it_never_did():
+    """`summary()` said "fusion never ran" whenever `contested` was zero, which
+    on the default path is every run -- reporting the mechanism as absent on
+    exactly the runs that used it."""
+    line = _evolve(fusion_tournament=False).fusion_stats().summary()
+    assert "never ran" not in line, line
+    assert "unranked" in line, line
+
+
+def test_the_tournament_is_what_produces_a_win_rate():
+    """The contrast, and the reason the code stays: `best_single_score` only
+    exists where a single was actually scored."""
+    stats = _evolve(fusion_tournament=True).fusion_stats()
+    assert stats.contested > 0 and stats.win_rate is not None
+
+
 # -- can the workload exercise the mechanism at all? -------------------------
+
+
+def test_identical_proposals_are_not_a_fusion():
+    """`fuse_diffs` is `ops.update()`, so N copies of one diff "fuse" into that
+    diff -- and it was counted as a contested tournament.
+
+    Measured on a mute-backend run before the fix: nine tournaments, every one
+    of them two identical `{'value': 'rule-0'}` diffs, all nine in `contested`.
+    That is `win_rate`'s denominator, so the statistic issue #72 exists to
+    produce was counting non-events. Workers that draw the same task, or
+    converge on the same fix, propose the same text; it is not a corner case.
+    """
+    from agentdescent.evolution import SingleSlot
+
+    stats = evolve(
+        _tasks(), _reward,
+        run=lambda rendered, t: "?",                     # mute: never improves
+        propose=lambda rendered, t, o, s: "same-rule",   # every worker agrees
+        strategy=SingleSlot(key="instruction"), rounds=6, n_workers=3,
+        max_concurrency=1, held_out_frac=0.4, self_verify=False,
+        fusion_tournament=True,
+    ).fusion_stats()
+
+    assert stats.trials > 0, "the tournament has to have run at all"
+    assert stats.contested == 0, "identical diffs did not fuse into anything"
+    assert stats.nothing_to_fuse > 0, \
+        "and the reason has to be legible -- not filed under 'contradiction'"
 
 
 def test_a_single_slot_artifact_can_never_fuse():

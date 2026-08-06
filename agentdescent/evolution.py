@@ -34,7 +34,7 @@ import shutil
 import threading
 import time
 import warnings
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace as _replace
 from typing import (
     Any, Callable, Dict, List, Optional, Protocol, Sequence, Tuple,
     runtime_checkable,
@@ -962,6 +962,14 @@ class FusionStats:
     #: Why the rest were not contested.
     single_candidate: int = 0
     contradiction: int = 0
+    #: The diffs did not contradict, but their union was one of them -- every
+    #: worker proposed the same edit, or one proposal already contained the
+    #: others. ``fuse_diffs`` is ``ops.update()``, so it returns something in that
+    #: case and it looked like a fusion; nothing was combined. Counted apart from
+    #: `contradiction` because the fix is opposite: contradiction means the
+    #: artifact's key space is too coarse, this means the workers are duplicating
+    #: each other, which is a sampling-diversity problem.
+    nothing_to_fuse: int = 0
     #: One proposal was already clear of the field by
     #: :attr:`~agentdescent.fusion.ReflectiveFusion.skip_when_dominant`, so no
     #: union was bought. A deliberate saving, not a failure -- counted apart from
@@ -1016,22 +1024,42 @@ class FusionStats:
             trials=len(trials),
             contested=sum(1 for t in trials
                           if t.gain is not None and getattr(t, "ranked", True)),
+            # "A union was committed without being compared to anything" -- which
+            # is what the field means, so the test is whether a union was *built*,
+            # not which policy built it. Keyed on `winner == "synthesized"` it
+            # only ever saw `ReflectiveFusion`; `DefaultFusion` skips the ranking
+            # too now, and its union is `fuse_diffs`, not a model's answer.
             unranked=sum(1 for t in trials
                          if not getattr(t, "ranked", True)
-                         and t.winner == "synthesized"),
+                         and t.winner in ("fused", "synthesized")),
             single_candidate=sum(1 for t in trials if t.reason == "single-candidate"),
             contradiction=sum(1 for t in trials if t.reason == "contradiction"),
+            nothing_to_fuse=sum(1 for t in trials
+                                if t.reason == "nothing-to-fuse"),
             dominant_single=sum(1 for t in trials if t.reason == "dominant-single"),
             synthesis_failed=sum(1 for t in trials
                                  if t.reason == "synthesis-failed"),
-            synthesized_wins=sum(1 for t in trials if t.winner == "synthesized"),
+            # Guarded too, so the comment below it stays true: it is documented as
+            # the narrower `fused_wins`, and a counter that includes unranked
+            # merges cannot be narrower than one that excludes them. `unranked` is
+            # where a union that was committed without competing is reported.
+            synthesized_wins=sum(1 for t in trials if t.winner == "synthesized"
+                                 and getattr(t, "ranked", True)),
             # A synthesised win is a fused win: both mean the merge beat every
             # single diff. The narrower counter says *how* it was built.
             fused_wins=sum(1 for t in trials
                            if t.winner in ("fused", "synthesized")
                            and getattr(t, "ranked", True)),
-            single_wins=sum(1 for t in trials if t.winner == "single"),
-            neither=sum(1 for t in trials if t.winner == "neither"),
+            # Guarded on `ranked` for the same reason `fused_wins` is: a trial
+            # that ranked nothing has no winner. An unranked policy labels its
+            # non-merge cases "single" because a single diff went forward, and
+            # counting those as *wins* said singles were beating fusions on runs
+            # where the two never met -- `bench/results/equal-budget-hotpotqa-
+            # 3seed.json` carries `single_wins: 3` from exactly that.
+            single_wins=sum(1 for t in trials if t.winner == "single"
+                            and getattr(t, "ranked", True)),
+            neither=sum(1 for t in trials if t.winner == "neither"
+                        and getattr(t, "ranked", True)),
             ties=sum(1 for g in gains if g == 0.0),
             mean_gain=sum(gains) / len(gains) if gains else 0.0,
             negative=len(losses),
@@ -1044,6 +1072,15 @@ class FusionStats:
     def summary(self) -> str:
         """One line, and it says when there is nothing to report."""
         if not self.contested:
+            # "fusion never ran" is only true when no union was built. On the
+            # default path unions are built every round and committed straight to
+            # the gate, so saying it there would report a mechanism as absent on
+            # every run that used it -- the opposite of what this line is for.
+            if self.unranked:
+                return (f"fusion: {self.unranked} unions committed unranked "
+                        f"of {self.trials} merges -- no win rate, because "
+                        f"nothing was compared (fusion_tournament=True measures "
+                        f"it)")
             return (f"fusion: {self.trials} tournaments, none contested "
                     f"({self.single_candidate} single-candidate, "
                     f"{self.contradiction} contradicting) -- fusion never ran")
@@ -1549,6 +1586,7 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
                   staleness_policy, aggregator_factory, oracle_budget,
                   eval_concurrency: int = 8,
                   cheap_eval_tasks: Optional[int] = None,
+                  fusion_tournament: Optional[bool] = None,
                   shuffle: bool = False, seed: int = 0,
                   usage: Optional[Usage] = None,
                   verifier: Optional[Any] = None,
@@ -1722,7 +1760,20 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     # layer, which made that claim false; see `Aggregator._process`.) Noise stays at
     # zero: `eval_fn` is deterministic, so the sub-sample is the only approximation
     # and inventing more would just make the ranking worse.
-    cheap = (len(held_out) if cheap_eval_tasks is None
+    # `None` used to mean the full held-out set, which made the cheap layer cost
+    # exactly what the oracle costs and collapsed the three-layer ladder into one
+    # rung: ranking a candidate bought a full sweep of real agent calls, and
+    # `oracle_budget`'s documented fallback (`rule_eval`) saved nothing because it
+    # was the same measurement. The knob to fix it existed and nothing in `bench/`
+    # or `examples/` ever passed it, so every real run paid the full price.
+    #
+    # 8 is `ThreeLayerVerifier.rule_subset`'s own default; `evolve()` was
+    # overriding it. It costs ranking resolution -- 8 binary-scored tasks resolve
+    # 0.125, so candidates closer than that rank by whichever the sample favours.
+    # That is a real loss and it is bounded to *which* candidate goes forward:
+    # both commit gates read `eval_counts` on the full set. Pass the full length
+    # back to restore the old behaviour.
+    cheap = (min(8, len(held_out)) if cheap_eval_tasks is None
              else max(1, min(int(cheap_eval_tasks), len(held_out))))
     verifier = verifier if verifier is not None else ThreeLayerVerifier(
         eval_fn=lambda a, ts: a.score(ts), held_out=held_out,
@@ -1736,10 +1787,16 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
                           meter=meter, conflict=pol.conflict, fusion=pol.fusion,
                           acceptance=pol.acceptance, promotion=pol.promotion)
 
+    # `None` defers to whatever the config already says, so `agg_config=` keeps
+    # working and the two cannot silently disagree; an explicit True or False
+    # wins over it, which is the only reading under which passing both is not a
+    # trap.
+    cfg = agg_config or AggregatorConfig(batch_trigger=2, max_wait_rounds=1)
+    if fusion_tournament is not None:
+        cfg = _replace(cfg, fusion_tournament=fusion_tournament)
+
     aggregator = (aggregator_factory or _default_aggregator)(
-        ledger, verifier, AuditScheduler(),
-        agg_config or AggregatorConfig(batch_trigger=2, max_wait_rounds=1),
-        staleness_policy)
+        ledger, verifier, AuditScheduler(), cfg, staleness_policy)
     # A custom factory cannot know about the meter -- its signature predates it
     # and is part of the public surface. Attach it to whatever came back if that
     # object has the slot and left it empty, so an `aggregator_factory` returning
@@ -1835,6 +1892,7 @@ def evolve(
     aggregator_factory: Optional[AggregatorFactory] = None,
     oracle_budget: int = 200,
     cheap_eval_tasks: Optional[int] = None,
+    fusion_tournament: Optional[bool] = None,
     solved_threshold: float = SOLVED,
     shuffle: bool = False,
     seed: int = 0,
@@ -2040,16 +2098,38 @@ def evolve(
         knobs go together.
     cheap_eval_tasks:
         How many held-out tasks the *cheap* layer scores when the aggregator is
-        merely **ranking** candidates -- conflict resolution and the fusion
-        tournament, which run once per candidate. ``None`` (default) scores the
-        whole held-out set, which is exact but means a full sweep of real agent
-        calls per candidate. Set it to trade ranking precision for cost; the
-        commit gates always score the full set, so this never affects whether a
-        change is safe to commit, only which candidate is put forward. The
-        sample is fixed for the run, so candidates are always compared
-        like-for-like. Both commit gates -- the acceptance test and the regression
-        guard -- score the full set, so this never decides whether a change is
-        committed, only which candidate is put forward.
+        merely **ranking** candidates -- conflict resolution, and the fusion
+        tournament when it is on. ``None`` (default) is **8**, or the whole
+        held-out set when that is smaller.
+
+        It used to mean the whole set unconditionally, which made the cheap layer
+        cost exactly what the oracle costs: ranking one candidate bought a full
+        sweep of real agent calls, and ``oracle_budget``'s fallback saved nothing
+        because it was the same measurement. Nothing in ``bench/`` or
+        ``examples/`` ever passed this, so every real run paid it.
+
+        The cost of the new default is **ranking resolution**: 8 binary-scored
+        tasks resolve 0.125, so two candidates closer than that are ordered by
+        whichever the sample happens to favour. That is bounded to *which*
+        candidate goes forward -- both commit gates read ``eval_counts`` on the
+        full set, so it cannot decide whether a change is safe. Pass
+        ``len(held_out)`` to restore the exact behaviour. The sample is fixed for
+        the run, so candidates are always compared like-for-like.
+    fusion_tournament:
+        Rank the surviving diffs against their fusion before putting one forward.
+        ``None`` (default) defers to ``agg_config``, which is **off**.
+
+        Off, because the ranking is paid every round while the only decision it
+        changes from the acceptance gate's is recoverable: the union is a
+        superset of every single diff, so committing it unranked loses no
+        proposal. :class:`~agentdescent.defaults.DefaultFusion` carries the case
+        analysis.
+
+        On, because it is the only way to *measure*
+        :attr:`FusionStats.win_rate` -- ``best_single_score`` exists only where a
+        single was actually scored. That number is a property of the workload,
+        not of the mechanism, so it is worth measuring per workload and not worth
+        paying for on every run.
     on_round:
         Called with each :class:`RoundInfo` as the round completes -- progress
         for a long run, which otherwise reports nothing until it returns. An
@@ -2147,7 +2227,8 @@ def evolve(
             max_calls=max_calls, held_out_frac=held_out_frac,
             repo_path=repo_path, agg_config=agg_config, staleness_policy=staleness_policy,
             aggregator_factory=aggregator_factory, oracle_budget=oracle_budget,
-            cheap_eval_tasks=cheap_eval_tasks, shuffle=shuffle, seed=seed,
+            cheap_eval_tasks=cheap_eval_tasks, fusion_tournament=fusion_tournament,
+            shuffle=shuffle, seed=seed,
             solved_threshold=solved_threshold,
             self_verify=self_verify, task_sampler=task_sampler,
             target_reward=target_reward, patience=patience,
@@ -2194,7 +2275,8 @@ def evolve(
         held_out_frac=held_out_frac, repo_path=repo_path, agg_config=agg_config,
         staleness_policy=staleness_policy, aggregator_factory=aggregator_factory,
         oracle_budget=oracle_budget, eval_concurrency=eval_concurrency,
-        cheap_eval_tasks=cheap_eval_tasks, shuffle=shuffle, seed=seed,
+        cheap_eval_tasks=cheap_eval_tasks, fusion_tournament=fusion_tournament,
+            shuffle=shuffle, seed=seed,
         usage=usage, verifier=_pol.verifier, ledger_impl=_pol.ledger,
         policies_bundle=_pol)
     # Start the clock after the wiring, before the first unit of work: setup

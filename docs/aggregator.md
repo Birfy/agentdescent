@@ -66,7 +66,7 @@ Evidence cards are bucketed by artifact; a bucket fires on batch size `B` or a
 
 1. **Staleness filter** — per-diff `η` vs `α`; the [staleness policy](evolution.md#6-staleness-staleness_policy) decides `ACCEPT / REBASE / DISCARD`.
 2. **Conflict resolution** — contradictory diffs (same key, different value) are projected out PCGrad-style; keep the better of the pair, iterating until no surviving pair contradicts. Key *overlap* alone is not a conflict — identical proposals are duplicates and dedupe.
-3. **Fusion tournament** — complementary diffs are fused (model-soup style) and run against the singles on held-out; the best wins.
+3. **Fusion** — complementary diffs are fused (model-soup style) and the union goes to the gate. With `fusion_tournament=True` it is first run against the singles on held-out and the best wins; see [below](#is-ranking-the-fusion-worth-a-sweep-per-candidate).
 4. **Audit gate** — the candidate is submitted to the `AuditScheduler`; a high-blast-radius / low-trust merge is forced through the oracle, which can **veto it outright** (`oracle-rejected`) before the acceptance test runs. *The optimizer audits itself.* This is a blocking gate on the accept path, not a post-commit spot-check.
 5. **Statistical acceptance** — commit only if `P(Δ > 0) > 1 − δ` under a Beta posterior comparison (not a point threshold); `δ` anneals with version.
 6. **Commit** — compare-and-swap on `dev`, one artifact per merge. The `Ledger` *also* offers `commit_atomic` (2PC across several artifacts, for a contract-breaking diff that must land with its adapters), but the reference aggregator buckets by artifact and never needs it — no engine path calls it today.
@@ -74,17 +74,54 @@ Evidence cards are bucketed by artifact; a bucket fires on batch size `B` or a
 
 Deep dive on the *why*: [concepts §4](concepts.md#4-the-aggregator-a-discrete-space-optimizer).
 
+### Is ranking the fusion worth a sweep per candidate?
+
+It is **off by default**, and this is the argument.
+
+Write out what the tournament decides that step 5 does not:
+
+| | union → gate | tournament |
+|---|---|---|
+| fusion worse than the artifact | gate rejects | rejected |
+| fusion beats every single | fusion commits | fusion commits |
+| fusion beats the artifact, loses to a single | fusion commits | that single commits |
+
+One cell. So the tournament is a **selection refinement, not a safety
+mechanism** — the safety is step 5, which scores the candidate on the *full*
+held-out set and refuses a measured regression. And that one cell is recoverable:
+`fuse_diffs` is `ops.update()`, so the union is a **superset** of every single
+diff. Committing it unranked loses no proposal; it carries some that looked
+negative this round, and the next round proposes from there.
+
+Against that, the ranking costs one cheap held-out sweep per candidate, every
+round, unconditionally. An unconditional cost against a conditional and
+recoverable gain is the wrong default.
+
+Note where the remaining cost lands. After step 2 the survivors are pairwise
+non-contradicting, so on the default path the union always builds and step 3
+spends **nothing**. Ranking that genuinely has to happen — choosing between two
+diffs that *do* contradict — happens in step 2, where a choice is unavoidable.
+
 ### Reading step 3: did fusion actually help?
 
-The tournament is the whole answer to "two local improvements might be worse
-together than either alone", so it is worth knowing whether it ever fires and
-whether it wins. `RoundStat.fused` counted **committed** fusions, which cannot
-tell you: the tournament only commits a fusion that won, so that count is a tally
+The objection is "two local improvements might be worse together than either
+alone". Step 5 stops it either way; what only the tournament can do is **measure**
+it, because `best_single_score` exists only where a single was actually scored.
+`RoundStat.fused` counted **committed** fusions, which cannot answer it: a tally
 of successes with the denominator missing.
 
-The shipped `FusionPolicy` records a `FusionTrial` per tournament — it was already
-computing the scores to rank the candidates — and `result.fusion_stats()` reads
-them back:
+The win rate is a property of the workload, not of the mechanism — one dataset's
+number does not transfer to the next — so this is a measurement to run
+deliberately per workload rather than a tax on every run:
+
+```python
+result = evolve(tasks, reward, agent=agent, n_workers=4,
+                fusion_tournament=True)
+```
+
+The shipped `FusionPolicy` then records a `FusionTrial` per tournament — it was
+already computing the scores to rank the candidates — and `result.fusion_stats()`
+reads them back:
 
 ```python
 stats = result.fusion_stats()
@@ -95,8 +132,10 @@ print(stats.summary())
 
 | field | what it answers |
 |---|---|
-| `trials` / `contested` | how many tournaments ran, and how many had a fusion in them at all |
+| `trials` / `contested` | how many merges ran, and how many had a fusion that was **ranked** against the singles |
+| `unranked` | unions committed without being compared — every merge on the default path, and every one on the [reflective path](#when-a-dictionary-update-cannot-merge-reflectivefusion) |
 | `single_candidate` / `contradiction` | why the rest did not — one survivor, or survivors that contradicted |
+| `nothing_to_fuse` | the survivors **agreed**, so `ops.update()` returned one of them and nothing was combined. Counted apart from `contradiction` because the fix is the opposite one: the workers are duplicating each other, not the key space being too coarse |
 | `win_rate` | fused wins over `contested`; `None` when nothing was contested, so "never ran" cannot be read as "always lost" |
 | `mean_gain` | mean `fused − best single` |
 | `negative` / `mean_loss` / `worst_loss` | the losing tail — the number the objection is actually about |
@@ -223,6 +262,7 @@ evolve(tasks, reward, agent=agent, agg_config=AggregatorConfig(
     alpha_tail=1,         # ...and for cold ones
     trust_region_ops=6,   # max edits per diff
     promote_after_k=3,    # dev -> stable after K regression-free rounds (EMA)
+    fusion_tournament=False,  # rank the fusion against the singles first
 ))
 ```
 
@@ -233,6 +273,7 @@ evolve(tasks, reward, agent=agent, agg_config=AggregatorConfig(
 | `alpha_head` / `alpha_tail` | staleness tolerance `α` (hot vs cold artifacts) |
 | `trust_region_ops` | diff-size cap (the trust region) |
 | `promote_after_k` | dev→stable after this many regression-free rounds (EMA) |
+| `fusion_tournament` | rank candidates against their fusion before putting one forward — off, [and why](#is-ranking-the-fusion-worth-a-sweep-per-candidate) |
 | `anneal_half_life` | how fast the acceptance threshold tightens with version |
 | `accept_samples` | Monte-Carlo draws behind each acceptance decision |
 
@@ -258,7 +299,7 @@ evolve(tasks, reward, agent=agent, agg_config=AggregatorConfig(
 
     | | what it decides | cost |
     |---|---|---|
-    | **cheap layer** | which candidate to *put forward* — conflict resolution, the fusion tournament | once **per candidate** |
+    | **cheap layer** | which candidate to *put forward* — conflict resolution, and the fusion tournament when `fusion_tournament=True` | once **per candidate** |
     | **acceptance test** (`eval_counts`) | whether to *commit* it | once per merge |
 
     `evolve()` used to pin the cheap layer to the whole held-out set, so rule /
@@ -274,7 +315,14 @@ evolve(tasks, reward, agent=agent, agg_config=AggregatorConfig(
     The sample is **fixed for the run** — it used to be redrawn on every call,
     which is harmless only while the "sample" is the whole set, and silently scores
     candidate A on `{1,3,5}` against candidate B on `{2,4,6}` the moment it is not.
-    Default is `None` (exact), so nothing changes unless you opt in.
+
+    **The default is now 8**, or the whole held-out set when that is smaller. It
+    was `None` meaning "exact", which made the paragraph above describe the
+    shipped behaviour rather than a bug that had been fixed: the knob existed and
+    nothing in `bench/` or `examples/` passed it, so every real run paid the full
+    price. What 8 costs is resolution — 8 binary-scored tasks resolve 0.125, so
+    candidates closer than that rank by whichever the sample favours. Pass
+    `len(held_out)` to get the old behaviour back.
 
 ---
 

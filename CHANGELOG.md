@@ -6,6 +6,61 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **The fusion tournament is off by default; the union goes straight to the
+  acceptance gate.** Work out what the tournament decides that the gate does not
+  and it is one case — the fusion beats the artifact but loses to one of the
+  singles — so it is a *selection refinement*, not a safety mechanism: the gate
+  already scores on the full held-out set and refuses a measured regression. Even
+  that case is recoverable, because `fuse_diffs` is `ops.update()` and the union
+  is a **superset** of every single, so committing it unranked loses no proposal.
+  Against that, the ranking costs one cheap sweep per candidate every round,
+  unconditionally. Measured on `tests/test_fusion_stats.py`'s multi-key fixture:
+  **88 → 48 task evaluations, same `final_reward=1.000`**. On an `AppendRules`
+  run the same change committed the round's four proposals as one merge instead
+  of four, reaching the identical six-rule artifact in 2 commits where it took 6.
+  `evolve(fusion_tournament=True)` (or `AggregatorConfig(fusion_tournament=True)`)
+  restores ranking — and is the only way to get `FusionStats.win_rate`, since
+  `best_single_score` exists only where a single was actually scored. That number
+  is a property of the workload rather than of the mechanism, so it is worth
+  measuring per workload and not worth paying for on every run.
+- **`cheap_eval_tasks=None` now means 8**, or the whole held-out set when that is
+  smaller — `ThreeLayerVerifier.rule_subset`'s own default, which `evolve()` had
+  been overriding. It meant "score everything", which made the cheap layer cost
+  exactly what the oracle costs: rule / learned / oracle were one full sweep
+  wearing three names, ranking one candidate bought a full sweep of real agent
+  calls, and `oracle_budget`'s documented fallback saved nothing because it was
+  the same measurement. The knob to fix that shipped and **nothing in `bench/` or
+  `examples/` ever passed it**, so every real run paid the full price. The cost is
+  ranking resolution: 8 binary-scored tasks resolve 0.125, so candidates closer
+  than that rank by whichever the sample favours. Both commit gates still read
+  `eval_counts` on the full set. Pass `len(held_out)` for the old behaviour.
+
+### Fixed
+
+- **Identical proposals were counted as a fusion.** `fuse_diffs` is
+  `ops.update()`, so N copies of one diff "fuse" into that diff — nothing is
+  combined, and it went into `contested`, which is `win_rate`'s denominator.
+  Measured on a mute-backend run: nine tournaments, every one of them two
+  identical `{'value': 'rule-0'}` diffs, all nine counted. The same applied
+  whenever the union merely equalled one of its inputs. `FusionStats` gained
+  `nothing_to_fuse` to name it, counted apart from `contradiction` because the fix
+  is the opposite one — workers duplicating each other, not a key space that is
+  too coarse. This also made a `SingleSlot` run able to report a win rate for a
+  mechanism `docs/results.md` says can never run there.
+- `FusionStats.single_wins`, `neither` and `synthesized_wins` counted trials that
+  ranked nothing, so a run where fusions and singles never met still reported
+  singles beating them — `bench/results/equal-budget-hotpotqa-3seed.json` carries
+  `single_wins: 3` from exactly that. All three are now guarded on `ranked`, like
+  `fused_wins` already was. `unranked` counts by whether a union was *built*
+  rather than by which policy built it, so it sees `DefaultFusion` too, and
+  `summary()` no longer reports "fusion never ran" on runs that merged every
+  round.
+- `docs/results.md` presented "ACE playbook → `contested` > 0" under the heading
+  "Measured on the two shipped artifacts". It comes from an offline unit test with
+  a synthetic reward, not from a run on FiNER; the table now says so per row.
+
 ### Added
 
 - `evolve(max_rollouts=, max_calls=)` — a budget the engine enforces, in the two

@@ -151,7 +151,13 @@ def test_the_default_synchronous_loop_has_no_staleness_to_decide():
 def test_a_refresh_interval_makes_every_staleness_action_reachable():
     """Above 1, workers hold a staggered spread of versions, so their diffs
     arrive with a spread of eta and the policy actually decides."""
-    seen, result = _observed_etas(refresh_interval=3)
+    # 4, not 3. Merging the round's diffs into one commit instead of committing
+    # the best one made this run converge in 2 commits where it used to take 6
+    # (same 6 rules in the artifact at the end, three times fewer version bumps),
+    # so head no longer moves far enough for any eta to exceed alpha and DISCARD
+    # became unreachable. The fixture needs a wider stagger to produce the spread
+    # it is asserting over; the policy branch itself is as reachable as ever.
+    seen, result = _observed_etas(refresh_interval=4)
     etas = {eta for eta, _ in seen}
     actions = {a for _, a in seen}
     assert max(etas) > 0, f"still no staleness on the synchronous path: {sorted(etas)}"
