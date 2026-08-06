@@ -222,6 +222,25 @@ grow-and-refine: those are search strategies, and running them would leave the
 comparison unable to say whether a difference came from merging or from the
 search. The numbers are therefore not comparable with those ports' own results.
 
+!!! danger "Check `contested` before reading any merge-vs-fork row"
+    A strategy that keeps the whole artifact in **one key** — GEPA's
+    `InstructionSlot`, and therefore the HotpotQA workload — makes every pair of
+    worker proposals contradict by construction. Conflict resolution collapses
+    them to one, and **the fusion tournament never builds a fused candidate at
+    all**. `merge_of_n` there is per-round *best-of-N selection*: a real
+    mechanism, and not merging.
+
+    `ArmResult.fusion.contested` counts the tournaments a fused candidate
+    actually competed in. Measured on the two shipped artifacts:
+
+    | artifact | keys | contested |
+    |---|---|---|
+    | GEPA `InstructionSlot` | 1 (`instruction`) | **0** — fusion never runs |
+    | ACE playbook | one per bullet | > 0 — fusion runs and can lose |
+
+    So a HotpotQA row belongs under *selection*, and only a multi-key artifact
+    can fill the table below. `tests/test_fusion_stats.py` pins both directions.
+
 | arm | dataset | rollouts | test quality (min/med/max) | fork oracle |
 |---|---|---|---|---|
 | serial | — | — | *not yet measured* | — |

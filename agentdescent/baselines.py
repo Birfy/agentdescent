@@ -54,6 +54,20 @@ never conflict and merging necessarily wins. Demonstrating "diffs can be merged"
 there is circular: the property being measured was put in by the domain. Use this
 module on a workload where diffs can genuinely contradict each other.
 
+**...and it has to be able to say yes.** The opposite failure is subtler and cost
+a real run to find. A strategy that keeps the whole artifact in **one key** --
+GEPA's ``InstructionSlot`` is the shipped example -- makes every pair of worker
+proposals contradict by construction, so conflict resolution collapses them to
+one and the fusion tournament never builds a fused candidate at all. On such a
+workload ``merge_of_n`` is per-round **best-of-N selection**, which is a real
+mechanism and is *not* merging; a table reporting it as merge-vs-fork is
+measuring the wrong thing under the right name.
+
+Check before believing a row: ``ArmResult.fusion.contested`` is the number of
+tournaments a fused candidate actually competed in. Zero means the mechanism
+never ran (``tests/test_fusion_stats.py`` pins both directions). ACE's playbook,
+one key per bullet, is the shipped artifact where it does.
+
 A negative result is a result. If merge-of-N lands within the spread of
 best-of-N fork at equal budget, that says parallel merging is a throughput
 optimisation on this workload and not a new mechanism, and the claim that

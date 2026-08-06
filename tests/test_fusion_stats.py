@@ -201,3 +201,40 @@ def test_append_only_strategies_still_produce_contested_tournaments():
                     max_concurrency=1, held_out_frac=0.4)
     stats = result.fusion_stats()
     assert stats.contradiction == 0
+
+
+# -- can the workload exercise the mechanism at all? -------------------------
+
+
+def test_a_single_slot_artifact_can_never_fuse():
+    """The check a merge-vs-fork table has to pass before it means anything.
+
+    A strategy that keeps the whole artifact in one key -- GEPA's
+    `InstructionSlot` is the shipped example -- makes every pair of worker
+    proposals contradict by construction. Conflict resolution collapses them to
+    one, so the tournament has a single candidate and no fusion is ever built.
+    `merge_of_n` on such a workload is per-round best-of-N *selection*, and
+    reporting it as evidence about merging measures the wrong thing.
+
+    `contested == 0` is how a reader finds that out without reading the strategy.
+    """
+    from agentdescent.evolution import SingleSlot
+
+    stats = evolve(
+        _tasks(), _reward,
+        run=lambda rendered, t: t.meta["gold"] if t.meta["gold"] in rendered else "?",
+        propose=lambda rendered, t, o, s: f"{rendered}\n{t.meta['gold']}",
+        strategy=SingleSlot(key="instruction"), rounds=6, n_workers=3,
+        max_concurrency=1, held_out_frac=0.4, self_verify=False,
+    ).fusion_stats()
+
+    assert stats.trials > 0, "the tournament has to have run at all"
+    assert stats.contested == 0, \
+        "a one-key artifact cannot produce a fused candidate"
+
+
+def test_a_multi_key_artifact_can():
+    """The contrast, so the test above is about the artifact shape and not about
+    some unrelated reason fusion failed to fire."""
+    stats = _evolve().fusion_stats()
+    assert stats.contested > 0
