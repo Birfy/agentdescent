@@ -31,11 +31,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import threading
 from typing import Callable, List, Optional, Sequence
 
-from agentdescent import Usage
+from agentdescent import SingleSlot, Usage
+from agentdescent.dataloader import hf_rows
+from agentdescent.evolution import Task
 from agentdescent.baselines import (
     ArmResult, Budget, Workload, best_of_n_fork, compare, merge_of_n, serial,
     to_markdown,
@@ -45,11 +48,12 @@ from dataclasses import replace
 from agentdescent.evolution import EvolutionResult
 from agentdescent.fusion import reflective_merge
 from agentdescent.policies import Policies
-from examples._common import completion_for, confirm
+from examples._common import completion_for, confirm, score_tasks
 
 
 def _hotpotqa(fetch: int, seed: int, completion, *, self_verify: bool = True,
-              eval_concurrency: int = 8) -> Workload:
+              eval_concurrency: int = 8,
+              val_cap: Optional[int] = None) -> Workload:
     """GEPA's dataset and actor; the engine's own optimizer."""
     from examples.gepa import gepa_prompt_evolution as gepa
 
@@ -61,19 +65,51 @@ def _hotpotqa(fetch: int, seed: int, completion, *, self_verify: bool = True,
         return gepa.evaluate(agent, result.state.get("instruction", ""), ds.test,
                              reward)
 
+    tasks, val_frac = _capped(ds.trainval, ds.val_frac, val_cap)
     return Workload(
-        tasks=ds.trainval, reward=reward, test_eval=test_eval, agent=agent,
+        tasks=tasks, reward=reward, test_eval=test_eval, agent=agent,
         strategy=gepa.InstructionSlot(),
         evolve_kwargs={
             "initial_state": {"instruction": gepa._SEED_INSTRUCTION},
             "artifact_id": "gepa_prompt", "blast_radius": 0.2,
-            "held_out_frac": ds.val_frac, "rounds": 10_000,
+            "held_out_frac": val_frac, "rounds": 10_000,
             "self_verify": self_verify, "eval_concurrency": eval_concurrency,
         })
 
 
+def _capped(trainval, val_frac: float, val_cap: Optional[int]):
+    """Trim the gate's split without touching train or test.
+
+    The loaders split at fixed ratios, so `--pool` moves all three at once --
+    and the two that matter pull in opposite directions. **val** is what a run
+    costs: the gate sweeps it once per candidate, so it multiplies by every
+    proposal. **test** is what a run can resolve: it is scored twice, at the end.
+    Chasing a 20-task test split by raising `--pool` buys a 113-task gate nobody
+    asked for.
+
+    `evolve()` splits by position -- the last `held_out_frac` of the sequence --
+    so capping is a slice of the tail plus a recomputed fraction. Train keeps
+    everything the cap drops rather than discarding it.
+
+    The gate gets noisier, which is a real cost and not a free one: acceptance
+    decisions rest on fewer tasks. It is the same size of gate HotpotQA has been
+    running with throughout.
+    """
+    if not val_cap:
+        return list(trainval), val_frac
+    n = len(trainval)
+    n_val = max(1, round(n * val_frac))
+    if n_val <= val_cap:
+        return list(trainval), val_frac
+    train, val = list(trainval[:n - n_val]), list(trainval[n - n_val:])
+    kept, spare = val[:val_cap], val[val_cap:]
+    tasks = train + spare + kept          # the cap's leftovers become train
+    return tasks, len(kept) / len(tasks)
+
+
 def _finer(pool: int, top_k: int, seed: int, completion, *,
-           self_verify: bool = True, eval_concurrency: int = 8) -> Workload:
+           self_verify: bool = True, eval_concurrency: int = 8,
+           val_cap: Optional[int] = None) -> Workload:
     """ACE's dataset and actor; the engine's own optimizer."""
     from examples.ace import ace_context_evolution as ace
 
@@ -84,12 +120,214 @@ def _finer(pool: int, top_k: int, seed: int, completion, *,
     def test_eval(result: EvolutionResult) -> float:
         return ace.evaluate(agent, result.rendered, ds.test, reward)
 
+    tasks, val_frac = _capped(ds.trainval, ds.val_frac, val_cap)
     return Workload(
-        tasks=ds.trainval, reward=reward, test_eval=test_eval, agent=agent,
+        tasks=tasks, reward=reward, test_eval=test_eval, agent=agent,
         strategy=ace.ACEPlaybook(),
         evolve_kwargs={
             "artifact_id": "ace_playbook", "blast_radius": 0.2,
-            "held_out_frac": ds.val_frac, "rounds": 10_000,
+            "held_out_frac": val_frac, "rounds": 10_000,
+            "self_verify": self_verify, "eval_concurrency": eval_concurrency,
+        })
+
+
+def _gsm8k(fetch: int, seed: int, completion, *, self_verify: bool = True,
+           eval_concurrency: int = 8,
+           val_cap: Optional[int] = None) -> Workload:
+    """GSM8K: a grade-school word problem in, a number out.
+
+    The simplest real QA shape available, and the fastest. A HotpotQA prompt
+    carries ten context paragraphs and cost ~38 seconds a call on a reasoning
+    model; a GSM8K prompt is two sentences. Nothing else about the comparison
+    changes -- one evolving instruction, exact-match on the final number.
+
+    The artifact is an `InstructionSlot`, so this is a **one-key** workload: every
+    pair of worker proposals contradicts, and `merge_of_n` cannot fuse anything
+    without `--reflective-merge`. That is deliberate; it is the shape the merge
+    question is being asked on.
+    """
+    from agentdescent.dataloader import split_dataset
+    from agentdescent.evolution import LLMAgent
+
+    rows = hf_rows("openai/gsm8k", "train", config="main", limit=fetch)
+    tasks = [Task(id=str(i), prompt=r["question"],
+                  meta={"gold": r["answer"].rsplit("####", 1)[-1].strip()})
+             for i, r in enumerate(rows)]
+    ds = split_dataset(tasks, ratios=(0.5, 0.25, 0.25), seed=seed, name="GSM8K")
+
+    def reward(task, output: str) -> float:
+        found = re.findall(r"-?[\d,]*\.?\d+", output.replace(",", ""))
+        gold = task.meta["gold"].replace(",", "")
+        return 1.0 if found and found[-1].rstrip(".") == gold else 0.0
+
+    agent = LLMAgent(
+        completion,
+        solve_template="{artifact}\n\nProblem: {prompt}\n\n"
+                       "End with a line `Answer: <number>`.",
+        propose_template=(
+            "You are improving the instruction given to a maths solver. "
+            "It scored {reward:.2f} on this problem.\n\n"
+            "Current instruction:\n{artifact}\n\n"
+            "Problem:\n{prompt}\n\n"
+            "Its answer (wrong or low-scoring):\n{output}\n\n"
+            "Write an improved, general instruction. 2-3 sentences. "
+            "Output only the instruction."),
+    )
+
+    def test_eval(result: EvolutionResult) -> float:
+        return score_tasks(agent.solve, result.state.get("instruction", ""),
+                           ds.test, reward)
+
+    tasks_, val_frac = _capped(ds.trainval, ds.val_frac, val_cap)
+    return Workload(
+        tasks=tasks_, reward=reward, test_eval=test_eval, agent=agent,
+        strategy=SingleSlot(key="instruction"),
+        evolve_kwargs={
+            "initial_state": {"instruction": "Solve the problem."},
+            "artifact_id": "gsm8k_prompt", "blast_radius": 0.2,
+            "held_out_frac": val_frac, "rounds": 10_000,
+            "self_verify": self_verify, "eval_concurrency": eval_concurrency,
+        })
+
+
+def _bbh(fetch: int, seed: int, completion, *, task: str = "dyck_languages",
+         self_verify: bool = True, eval_concurrency: int = 8,
+         val_cap: Optional[int] = None) -> Workload:
+    """BIG-Bench Hard: a short prompt that a strong model still gets wrong.
+
+    The two properties an experiment here needs pull against each other on every
+    other dataset tried. HotpotQA is hard but carries ten context paragraphs, so
+    a call costs ~38 seconds. GSM8K and FiNER have short prompts and a reasoning
+    model is already at 0.967 and 0.900 on them -- nothing left to measure.
+
+    BBH was built to be the tasks large models fail, and several of its subtasks
+    are a single line: `word_sorting` is 65 characters, `dyck_languages` 99.
+    Short *and* unsolved is what makes it the right shape here, and `--bbh-task`
+    is the difficulty dial -- no context to lengthen, no label space to widen.
+
+    `InstructionSlot`, so this is a one-key workload: every pair of proposals
+    contradicts, and `merge_of_n` cannot fuse without `--reflective-merge`.
+    """
+    from agentdescent.dataloader import split_dataset
+    from agentdescent.evolution import LLMAgent
+
+    rows = hf_rows("lukaemon/bbh", "test", config=task, limit=fetch)
+    tasks = [Task(id=str(i), prompt=r["input"],
+                  meta={"gold": str(r["target"]).strip()})
+             for i, r in enumerate(rows)]
+    ds = split_dataset(tasks, ratios=(0.5, 0.25, 0.25), seed=seed, name=f"BBH/{task}")
+
+    def reward(t, output: str) -> float:
+        # The last non-empty line, so a model that reasons before answering is
+        # scored on its answer rather than on its working.
+        lines = [ln.strip() for ln in str(output).splitlines() if ln.strip()]
+        got = lines[-1] if lines else ""
+        got = got.split("Answer:")[-1].strip().strip(".").strip()
+        return 1.0 if got.lower() == t.meta["gold"].lower() else 0.0
+
+    agent = LLMAgent(
+        completion,
+        solve_template="{artifact}\n\n{prompt}\n\n"
+                       "End with a line containing only the final answer.",
+        propose_template=(
+            "You are improving the instruction given to a solver. It scored "
+            "{reward:.2f} on this problem.\n\n"
+            "Current instruction:\n{artifact}\n\n"
+            "Problem:\n{prompt}\n\n"
+            "Its answer (wrong or low-scoring):\n{output}\n\n"
+            "Write an improved, general instruction. 2-3 sentences. "
+            "Output only the instruction."),
+    )
+
+    def test_eval(result: EvolutionResult) -> float:
+        return score_tasks(agent.solve, result.state.get("instruction", ""),
+                           ds.test, reward)
+
+    tasks_, val_frac = _capped(ds.trainval, ds.val_frac, val_cap)
+    return Workload(
+        tasks=tasks_, reward=reward, test_eval=test_eval, agent=agent,
+        strategy=SingleSlot(key="instruction"),
+        evolve_kwargs={
+            "initial_state": {"instruction": "Solve the problem."},
+            "artifact_id": "bbh_prompt", "blast_radius": 0.2,
+            "held_out_frac": val_frac, "rounds": 10_000,
+            "self_verify": self_verify, "eval_concurrency": eval_concurrency,
+        })
+
+
+def _bbeh(fetch: int, seed: int, completion, *, task: str = "disambiguation qa",
+          self_verify: bool = True, eval_concurrency: int = 8,
+          val_cap: Optional[int] = None) -> Workload:
+    """BIG-Bench **Extra** Hard: short prompts a strong model still fails.
+
+    Every other dataset tried here failed one of the two requirements. HotpotQA
+    is hard and carries ten context paragraphs, so a call costs ~38 seconds.
+    GSM8K and FiNER have short prompts and this model is already at 0.967 and
+    0.900 -- nothing left to measure. BBH looked promising and turned out to be a
+    measurement bug: a seed score of 0.267 on `word_sorting` was the *scorer*
+    rejecting correct answers over comma-vs-space, and one commit that fixed the
+    formatting took dev to 1.000 with eight rollouts left unspent.
+
+    BBEH exists because BBH saturated -- Google built it by replacing each BBH
+    task with a harder one probing the same capability, and reports 9.8% for the
+    best general-purpose model and 44.8% for the best reasoning-specialised one.
+    `disambiguation qa` is its shortest subtask at ~750 characters, and it is
+    multiple-choice, so the answer is a label like ``(A)``.
+
+    **The scorer is a label match, deliberately.** Free-text comparison is what
+    produced the `word_sorting` mirage: a model that answers correctly in a
+    different shape scores zero, and the run then optimises formatting while the
+    numbers look like reasoning. A label cannot be right in two formats.
+    """
+    from agentdescent.dataloader import split_dataset
+    from agentdescent.evolution import LLMAgent
+
+    rows = [r for r in hf_rows("BBEH/bbeh", "train", limit=5000)
+            if r["task"] == task][:fetch]
+    if not rows:
+        raise ValueError(f"no BBEH rows for task {task!r}")
+    tasks = [Task(id=str(i), prompt=r["input"],
+                  meta={"gold": str(r["target"]).strip()})
+             for i, r in enumerate(rows)]
+    ds = split_dataset(tasks, ratios=(0.5, 0.25, 0.25), seed=seed,
+                       name=f"BBEH/{task}")
+
+    def _label(text: str) -> str:
+        found = re.findall(r"\(([A-Za-z0-9]+)\)", str(text))
+        return found[-1].upper() if found else ""
+
+    def reward(t, output: str) -> float:
+        gold = _label(t.meta["gold"])
+        got = _label(output)
+        return 1.0 if gold and got == gold else 0.0
+
+    agent = LLMAgent(
+        completion,
+        solve_template="{artifact}\n\n{prompt}\n\n"
+                       "End with a line containing only the chosen option, "
+                       "like (A).",
+        propose_template=(
+            "You are improving the instruction given to a solver. It scored "
+            "{reward:.2f} on this problem.\n\n"
+            "Current instruction:\n{artifact}\n\n"
+            "Problem:\n{prompt}\n\n"
+            "Its answer (wrong or low-scoring):\n{output}\n\n"
+            "Write an improved, general instruction. 2-3 sentences. "
+            "Output only the instruction."),
+    )
+
+    def test_eval(result: EvolutionResult) -> float:
+        return score_tasks(agent.solve, result.state.get("instruction", ""),
+                           ds.test, reward)
+
+    tasks_, val_frac = _capped(ds.trainval, ds.val_frac, val_cap)
+    return Workload(
+        tasks=tasks_, reward=reward, test_eval=test_eval, agent=agent,
+        strategy=SingleSlot(key="instruction"),
+        evolve_kwargs={
+            "initial_state": {"instruction": "Solve the problem."},
+            "artifact_id": "bbeh_prompt", "blast_radius": 0.2,
+            "held_out_frac": val_frac, "rounds": 10_000,
             "self_verify": self_verify, "eval_concurrency": eval_concurrency,
         })
 
@@ -120,6 +358,26 @@ def split_sizes(args) -> tuple:
     if args.dataset == "hotpotqa":
         from examples.gepa import gepa_prompt_evolution as gepa
         return gepa.load_dataset(args.fetch, seed=0).sizes()
+    if args.dataset == "bbeh":
+        from agentdescent.dataloader import split_dataset
+        rows = [r for r in hf_rows("BBEH/bbeh", "train", limit=5000)
+                if r["task"] == args.bbeh_task][:args.fetch]
+        tasks = [Task(id=str(i), prompt=r["input"], meta={})
+                 for i, r in enumerate(rows)]
+        return split_dataset(tasks, ratios=(0.5, 0.25, 0.25), seed=0).sizes()
+    if args.dataset == "bbh":
+        from agentdescent.dataloader import split_dataset
+        rows = hf_rows("lukaemon/bbh", "test", config=args.bbh_task,
+                       limit=args.fetch)
+        tasks = [Task(id=str(i), prompt=r["input"], meta={})
+                 for i, r in enumerate(rows)]
+        return split_dataset(tasks, ratios=(0.5, 0.25, 0.25), seed=0).sizes()
+    if args.dataset == "gsm8k":
+        from agentdescent.dataloader import split_dataset
+        rows = hf_rows("openai/gsm8k", "train", config="main", limit=args.fetch)
+        tasks = [Task(id=str(i), prompt=r["question"], meta={}) 
+                 for i, r in enumerate(rows)]
+        return split_dataset(tasks, ratios=(0.5, 0.25, 0.25), seed=0).sizes()
     from examples.ace import ace_context_evolution as ace
     return ace.load_dataset(args.pool, args.top_k, seed=0).sizes()
 
@@ -149,15 +407,28 @@ def _fmt(value) -> str:
 def _workload_for(args, seed: int, completion):
     """One workload, built the way the run builds it."""
     shared = {"self_verify": args.self_verify,
-              "eval_concurrency": args.eval_concurrency}
+              "eval_concurrency": args.eval_concurrency,
+              "val_cap": args.val_cap}
     if args.dataset == "hotpotqa":
         return _hotpotqa(args.fetch, seed, completion, **shared)
+    if args.dataset == "gsm8k":
+        return _gsm8k(args.fetch, seed, completion, **shared)
+    if args.dataset == "bbh":
+        return _bbh(args.fetch, seed, completion, task=args.bbh_task, **shared)
+    if args.dataset == "bbeh":
+        return _bbeh(args.fetch, seed, completion, task=args.bbeh_task, **shared)
     return _finer(args.pool, args.top_k, seed, completion, **shared)
 
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--dataset", choices=["hotpotqa", "finer"], default="hotpotqa")
+    p.add_argument("--dataset",
+                   choices=["hotpotqa", "finer", "gsm8k", "bbh", "bbeh"],
+                   default="hotpotqa")
+    p.add_argument("--bbeh-task", default="disambiguation qa",
+                   help="which BBEH subtask; the shortest is the default")
+    p.add_argument("--bbh-task", default="dyck_languages",
+                   help="which BIG-Bench Hard subtask; the difficulty dial")
     p.add_argument("--budget-rollouts", type=int, default=96)
     p.add_argument("--budget-calls", type=int, default=0,
                    help="0 leaves calls unbounded; see --fixed")
@@ -203,6 +474,13 @@ def build_parser() -> argparse.ArgumentParser:
                         "one call per test task -- a rounding error against a run, "
                         "and the only way to catch a workload that has no headroom, "
                         "which a split-size check cannot see")
+    p.add_argument("--val-cap", type=int, default=0,
+                   help="cap the gate's split at this many tasks, leaving train "
+                        "and test alone. `--pool`/`--fetch` move all three at "
+                        "once and the two that matter pull opposite ways: val is "
+                        "what a run costs (swept once per candidate), test is "
+                        "what it can resolve (scored twice, at the end). 0 keeps "
+                        "the loader's own split")
     p.add_argument("--reflective-merge", action="store_true",
                    help="give the merge arm `reflective_merge()`: contradicting "
                         "proposals survive to the merge step and a model writes "
@@ -210,6 +488,12 @@ def build_parser() -> argparse.ArgumentParser:
                         "Without it, a one-key artifact (GEPA's InstructionSlot) "
                         "cannot fuse at all and the merge arm is really per-round "
                         "best-of-N selection -- `fusion.contested` is 0 and says so")
+    p.add_argument("--allow-thin-headroom", action="store_true",
+                   help="run even when the seed artifact already scores above "
+                        f"{MAX_SEED_TEST_SCORE}. The refusal still prints and the "
+                        "number of tasks the whole comparison lives in is stated: "
+                        "a result from here is bounded by that, and any table "
+                        "carrying it has to say so")
     p.add_argument("--allow-small-test", action="store_true",
                    help=f"run even when the test split is under {MIN_TEST_TASKS} "
                         "tasks. It will not resolve a quality difference")
@@ -285,7 +569,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                   f"whole comparison lives in the {(1 - seed_score) * (nte or 0):.0f} "
                   "task(s) above it. Raise the difficulty (ACE: --top-k; GEPA: a "
                   "harder --fetch sample) rather than the size.", file=sys.stderr)
-            return 3
+            if not args.allow_thin_headroom:
+                return 3
+            print(f"    proceeding anyway: the comparison lives in "
+                  f"{(1 - seed_score) * (nte or 0):.0f} task(s), and every number "
+                  "from this run is bounded by that.", file=sys.stderr)
         if args.plan:
             return 0
 
