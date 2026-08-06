@@ -90,6 +90,14 @@ def _finer(pool: int, top_k: int, seed: int, completion, *,
         })
 
 
+#: A seed artifact already scoring above this on test leaves nothing to measure.
+#: The second lesson, after the first: `--pool 1600 --top-k 40` passed the split
+#: check with 26 test tasks and then reported 0.923 for almost every arm, because
+#: `--top-k` is ACE's *difficulty* knob and lowering it to buy a bigger split made
+#: the task easy. Split size and difficulty are separate properties and both have
+#: to hold; only one of them can be checked without spending anything.
+MAX_SEED_TEST_SCORE = 0.85
+
 #: Below this many test tasks the quality column cannot resolve anything worth
 #: reporting. Learned the expensive way: a run launched with a `--pool` that
 #: happened to yield a **2-task** test split reported `test=1.000` for two
@@ -110,6 +118,32 @@ def split_sizes(args) -> tuple:
         return gepa.load_dataset(args.fetch, seed=0).sizes()
     from examples.ace import ace_context_evolution as ace
     return ace.load_dataset(args.pool, args.top_k, seed=0).sizes()
+
+
+class _SeedOnly:
+    """The un-evolved artifact, shaped like an `EvolutionResult` for `test_eval`.
+
+    `test_eval` reads `rendered` (ACE) or `state` (GEPA), so the probe supplies
+    both from the workload's own starting point -- no run, no rollouts, and
+    nothing about the measurement differs from what an arm would be scored on.
+    """
+
+    def __init__(self, workload) -> None:
+        initial = dict(workload.evolve_kwargs.get("initial_state") or {})
+        strategy = workload.strategy
+        if not initial and strategy is not None:
+            initial = dict(strategy.initial())
+        self.state = initial
+        self.rendered = strategy.render(initial) if strategy is not None else ""
+
+
+def _workload_for(args, seed: int, completion):
+    """One workload, built the way the run builds it."""
+    shared = {"self_verify": args.self_verify,
+              "eval_concurrency": args.eval_concurrency}
+    if args.dataset == "hotpotqa":
+        return _hotpotqa(args.fetch, seed, completion, **shared)
+    return _finer(args.pool, args.top_k, seed, completion, **shared)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -154,6 +188,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="how many held-out tasks the gate scores at once. The "
                         "gate, not the rollouts, is what dominates wall-clock on "
                         "a small budget")
+    p.add_argument("--headroom", action="store_true",
+                   help="before anything else, score the *seed* artifact on the "
+                        "test split and refuse if it is already too good. Costs "
+                        "one call per test task -- a rounding error against a run, "
+                        "and the only way to catch a workload that has no headroom, "
+                        "which a split-size check cannot see")
     p.add_argument("--allow-small-test", action="store_true",
                    help=f"run even when the test split is under {MIN_TEST_TASKS} "
                         "tasks. It will not resolve a quality difference")
@@ -202,7 +242,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                   "number is genuinely what you want.", file=sys.stderr)
             if not args.allow_small_test:
                 return 2
-    if args.plan:
+    if args.plan and not args.headroom:
         return 0
     if len(seeds) < 3:
         print(f"warning: {len(seeds)} seed(s). docs/algo-ace.md records one "
@@ -214,17 +254,29 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     usage = Usage()
     completion = completion_for(args, usage=usage)
 
+    if args.headroom:
+        # The seed artifact is where every arm starts, so its score on test is
+        # the ceiling the run is trying to climb from. Measured on seed 0 only:
+        # this is a go/no-go on the *workload*, and paying for three of them to
+        # decide whether to pay for fifteen would defeat the point.
+        probe = _workload_for(args, 0, completion)
+        seed_score = probe.test_eval(_SeedOnly(probe))
+        print(f"Headroom : the seed artifact already scores {seed_score:.3f} "
+              f"on test")
+        if seed_score > MAX_SEED_TEST_SCORE:
+            print(f"\nREFUSED: nothing to measure. Every arm starts at "
+                  f"{seed_score:.3f} and the test split has {nte} tasks, so the "
+                  f"whole comparison lives in the {(1 - seed_score) * (nte or 0):.0f} "
+                  "task(s) above it. Raise the difficulty (ACE: --top-k; GEPA: a "
+                  "harder --fetch sample) rather than the size.", file=sys.stderr)
+            return 3
+        if args.plan:
+            return 0
+
     # Workloads are built once per seed and *before* any run starts, so every arm
     # at a seed sees byte-identical data -- and so a dataset download cannot
     # happen concurrently from several threads.
-    shared = {"self_verify": args.self_verify,
-              "eval_concurrency": args.eval_concurrency}
-    workloads = {
-        seed: (_hotpotqa(args.fetch, seed, completion, **shared)
-               if args.dataset == "hotpotqa"
-               else _finer(args.pool, args.top_k, seed, completion, **shared))
-        for seed in seeds
-    }
+    workloads = {seed: _workload_for(args, seed, completion) for seed in seeds}
 
     def _build(name: str, workload, seed: int) -> ArmResult:
         if name == "serial":
