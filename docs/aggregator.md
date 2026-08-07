@@ -110,9 +110,12 @@ it, because `best_single_score` exists only where a single was actually scored.
 `RoundStat.fused` counted **committed** fusions, which cannot answer it: a tally
 of successes with the denominator missing.
 
-The win rate is a property of the workload, not of the mechanism — one dataset's
-number does not transfer to the next — so this is a measurement to run
-deliberately per workload rather than a tax on every run:
+The win rate is a property of the workload, not of the mechanism — it depends on
+how coarse the artifact's key space is and on how much the workers' proposals
+overlap, so one dataset's number does not transfer to the next. That is why this
+project publishes no figure for it: a number measured on one benchmark would be
+read as a fact about merging. It is a diagnostic to run on the workload in front
+of you, rather than a tax on every run:
 
 ```python
 result = evolve(tasks, reward, agent=agent, n_workers=4,
