@@ -280,7 +280,14 @@ The backlog is organised by missing mechanism, not paper popularity. Assign an
 owner before implementation so fidelity questions have a person who read the
 released code.
 
-| Mechanism | Candidates | Existing coverage | Owner |
+The [candidate-method runtime study](algo-candidate-methods.md), authored by
+`cyanneko`, exercises 11 of these candidates through AgentDescent's serial,
+synchronous-parallel, and asynchronous runtimes. It deliberately reports them as
+mechanism microports or clearly named analogues rather than adding them to the
+faithful-port table above; each method's preserved control flow and substitution
+boundary is recorded alongside the live measurements.
+
+| Mechanism | Candidates | Existing faithful coverage | Owner |
 |---|---|---|---|
 | Evolution / program search | AlphaEvolve (OpenEvolve), PromptBreeder, AFlow | OpenEvolve | cyanneko |
 | Reflection / textual gradients | TextGrad, Reflexion, Self-Refine | partial (GEPA is reflective, not textual-gradient) | TBD |

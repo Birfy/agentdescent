@@ -149,6 +149,45 @@ All notable changes to AgentDescent are documented here. The format follows
   in the tournament — a tie loses — and every failure path falls back to shipped
   behaviour. Off by default, not yet A/B'd.
 
+- **The eleven issue #74 candidate methods now have an AgentDescent-native
+  runtime study.** PromptBreeder, AFlow, Reflexion, Self-Refine, Voyager,
+  SkillWeaver, Absolute Zero, R-Zero, Agent0, SICA, and Godel Agent reserve the
+  same candidate and proposal-call budgets across
+  `evolve(max_concurrency=1)`, synchronous `evolve(max_concurrency=workers)`,
+  and `async_evolve`. The benchmark records paired end-to-end, engine-window,
+  time-to-quality, provider, actor, staleness, and held-out quality metrics, and
+  refuses to report a matrix with a changed source fingerprint or mismatched
+  budget.
+
+  The fidelity boundary is explicit: four are compact mechanism ports, while
+  the environment, RL, and full-agent self-edit dependencies that do not fit the
+  available host are labelled analogues rather than paper reproductions. Offline
+  tests exercise every method in every runtime mode without an API key.
+
+  The methods are now **declarative**: each lives in its own `examples/<name>/`
+  folder as a `MethodPolicy` (artifact strategy, frozen datasets, pure
+  solve/propose/reward, and the engine `Policies` seams its mechanism plugs
+  into -- binary tournament and soft mixed selection, archive base selection,
+  difficulty-weighted curricula, group-relative acceptance), with one shared
+  runner owning phases, budgets, and modes. Validation happens once, in the
+  strategy's `to_diff`: an unparseable proposal costs its candidate, is
+  counted, and produces no diff -- no fallback substitution anywhere.
+  Merge batches are worker-sized and text-valued artifacts install
+  `reflective_merge`, so contradicting proposals are model-merged into one
+  gate evaluation instead of each paying a ranking pass. Self-play evaluation
+  splits are frozen per seed; the checked-in results predate this
+  restructuring and are pending a rerun under the new fingerprint.
+
+  Declared selection policies now actually run: `examples/_population.py`
+  generalises the GEPA/DGM pattern into a `PopulationAggregator` -- the
+  shipped merge pipeline plus an archive of committed heads, with any
+  standard `SelectionPolicy` picking the next parent by ledger commit and
+  `finalize()` landing the archive's best. The decision plane grew a
+  documentation suite: a choosing guide (`docs/policies.md`), one page per
+  policy kind listing every implementation, and an `aggregator_factory`
+  page recording the single-head fact that makes the factory exit the home
+  of population search.
+
 ### Changed
 
 - OpenEvolve's `--serial` now means the shared thing (one worker) rather than

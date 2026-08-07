@@ -51,7 +51,6 @@ nav:
     - The aggregator (the optimizer): aggregator.md
     - The ledger: ledger.md
     - The verifier: verifier.md
-    - Staleness policies: staleness.md
     - The data layer: dataloader.md
     - Rewards: rewards.md
     - Reference orchestrator & domain: orchestrator.md
@@ -60,9 +59,18 @@ nav:
     - Where rollouts run: execution.md
     - Sandboxes: sandboxes.md
     - Async — no round barrier: async.md
+    - Duration-aware scheduling: duration-scheduling.md
+  - The decision plane (policies):
+    - Choosing policies: policies.md
     - Task sampling: sampling.md
     - Candidate selection: selection.md
-    - Duration-aware scheduling: duration-scheduling.md
+    - Proposal policies: proposal-policies.md
+    - Conflict policies: conflict-policies.md
+    - Fusion policies: fusion-policies.md
+    - Acceptance policies: acceptance-policies.md
+    - Promotion policies: promotion-policies.md
+    - Staleness policies: staleness.md
+    - The aggregator_factory exit: aggregator-factory.md
   - API reference: api.md
   - Run everything, and extend it: usage.md
   - Examples and results:
@@ -80,6 +88,22 @@ nav:
     - ADAS — meta agent search (harness): algo-adas.md
     - DGM — Darwin Gödel Machine (harness): algo-dgm.md
     - OpenEvolve — program evolution: algo-openevolve.md
+    - Candidate methods:
+      - Overview: candidate-results-overview.md
+      - Runtime study (matrix report): algo-candidate-methods.md
+      - Parallel speedup: candidate-parallel-speedup.md
+      - Async behaviour: candidate-async.md
+      - PromptBreeder: algo-promptbreeder.md
+      - AFlow: algo-aflow.md
+      - Reflexion: algo-reflexion.md
+      - Self-Refine: algo-self-refine.md
+      - Voyager: algo-voyager.md
+      - SkillWeaver: algo-skillweaver.md
+      - Absolute Zero: algo-absolute-zero.md
+      - R-Zero: algo-r-zero.md
+      - Agent0: algo-agent0.md
+      - SICA: algo-sica.md
+      - Godel Agent: algo-godel-agent.md
   - Design records:
     - Evolving a directory: design-directory-evolution.md
 
