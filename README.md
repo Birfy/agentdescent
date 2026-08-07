@@ -39,9 +39,9 @@ improvement throughput, where serial self-improvement is bounded at 1 diff / T_i
   are forced through an oracle; safety/permissions (L0) are frozen.
 - **Provider-agnostic.** Any `prompt -> text` is a completion — Claude,
   OpenAI-compatible endpoints (GLM / DeepSeek), or a tool-using agent (OpenHands).
-- **Faithful algorithm ports.** Runnable, offline-tested examples of ACE, GEPA,
-  EvoSkill, SkillOpt, ADAS, and DGM — faithful to each repo's algorithm *and*
-  dataset choice.
+- **Eighteen algorithm ports.** Runnable, offline-tested examples — seven
+  benchmark-faithful (ACE, GEPA, EvoSkill, SkillOpt, ADAS, DGM, OpenEvolve)
+  and eleven declared microports/analogues measured in the runtime matrix.
 
 ## Install
 
@@ -149,7 +149,7 @@ Full docs live in [`docs/`](https://github.com/Birfy/agentdescent/tree/main/docs
 | [Duration-aware scheduling](https://github.com/Birfy/agentdescent/blob/main/docs/duration-scheduling.md) | Estimate rollout cost from task size; LPT dispatch + straggler checkpointing |
 | [Efficiency experiments](https://github.com/Birfy/agentdescent/blob/main/docs/efficiency.md) | Measured parallel scaling and async tail-hiding |
 | [Example: skill evolution](https://github.com/Birfy/agentdescent/blob/main/docs/skill-evolution.md) | One complete run — real dataset, real LLM, every module |
-| [Self-evolution algorithms](https://github.com/Birfy/agentdescent/blob/main/docs/self-evolution-examples.md) | Faithful ports of ACE, GEPA, EvoSkill, SkillOpt, ADAS, DGM |
+| [Self-evolution algorithms](https://github.com/Birfy/agentdescent/blob/main/docs/self-evolution-examples.md) | Eighteen algorithm ports — seven benchmark-faithful (ACE, GEPA, EvoSkill, SkillOpt, ADAS, DGM, OpenEvolve), eleven as declared microports/analogues |
 | [Runtime matrix](https://github.com/Birfy/agentdescent/blob/main/docs/matrix-report.md) | Live 11-method serial/sync/async matrix with explicit fidelity boundaries |
 
 ```bash
@@ -238,13 +238,13 @@ python -m examples.skill_dir_evolution        # offline, no API key
 Guide: [evolving a directory](https://github.com/Birfy/agentdescent/blob/main/docs/directory-evolution.md)
 · [design record](https://github.com/Birfy/agentdescent/blob/main/docs/design-directory-evolution.md).
 
-## Faithful ports of the latest self-evolution algorithms
+## Ports of the latest self-evolution algorithms
 
-To show the engine is faithful to the field, AgentDescent ships one runnable example
-per representative **skill** and **harness** self-evolution algorithm — each
-faithful to the original repo's *algorithm* and *dataset choice*, each with a
-zero-network `--dry-run` mode and an offline test suite. Real runs load their
-benchmarks through the shared [`agentdescent.dataloader`](https://github.com/Birfy/agentdescent/blob/main/docs/dataloader.md) data layer
+To show the engine is faithful to the field, AgentDescent ships one runnable
+example per **skill**, **harness**, and **self-play** self-evolution algorithm —
+eighteen in all, every one with a zero-network `--dry-run` mode and an offline
+test suite. The seven benchmark-faithful ports follow the original repo's
+*algorithm and dataset choice* and load their benchmarks through the shared [`agentdescent.dataloader`](https://github.com/Birfy/agentdescent/blob/main/docs/dataloader.md) data layer
 (HF datasets-server + raw files, cached, dependency-free). Full guide:
 [docs/self-evolution-examples.md](https://github.com/Birfy/agentdescent/blob/main/docs/self-evolution-examples.md).
 

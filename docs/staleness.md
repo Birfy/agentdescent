@@ -1,5 +1,9 @@
 # Staleness — diffs proposed against a version that moved
 
+!!! note "One field of the bundle"
+    This is the `staleness` field of the [Policies bundle](policies.md); where a keyword argument exists it is a shortcut onto that field, and an explicit argument wins over a bundle default.
+
+
 *Module:* [`agentdescent.staleness`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/staleness.py)
 · *API:* [`StalenessPolicy`, `FullStaleness`, `GuardedStaleness`, `ReflectiveStaleness`, `get_policy`](api.md#staleness-policies)
 
@@ -126,7 +130,7 @@ evolve(tasks, reward, agent=agent, staleness_policy=MyPolicy())
 
 Anything with a `name` and `decide(eta, alpha, contract_breaking) -> StaleAction`
 works. `get_policy(name)` resolves the three built-ins, which is what the
-examples' `--policy` flags use.
+policy loop in `examples/run_async.py` iterates over.
 
 ## Its relationship to `async_ratio`
 

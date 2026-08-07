@@ -263,73 +263,10 @@ else:
     answer = agent(prompt_with_material_inlined)      # fall back to the prompt
 ```
 
-### Domain adapters, kept separate — `document_agent`
+### Domain adapters and the OpenHands backend — see the backends page
 
-Some tasks need a *shape*, not just a prompt: [EvoSkill's OfficeQA](algo-evoskill.md)
-answer is a figure inside a 1 MB table that must be found by `grep` and then
-computed. That shape — `answer(question, document, skills)` — is a **domain
-adapter** built on the general contract, not the contract itself:
-
-```python
-from agentdescent.backends import document_agent
-
-backend = document_agent(openhands(model="openai/deepseek-v4-flash"))
-backend = document_agent(claude_code())                       # same task, other agent
-backend = document_agent(claude(model="claude-haiku-4-5"))    # no tools -> inline
-answer = backend.answer(question, document_text, skills=learned_skills)
-```
-
-It adapts to what it is given: a `WorkspaceAgent` gets a scratch directory with the
-document written into it (so it can genuinely grep a huge table), while a plain
-completion gets the document inline, truncated at `inline_chars`. That is why the
-same OfficeQA example runs on OpenHands, Claude Code, or a bare API model.
-
-Skills can travel as **files** instead of prompt text:
-
-```python
-backend.answer(question, document_text, skill_files={"lookup/SKILL.md": "..."})
-```
-
-For a workspace agent they are written to `.claude/skills/` in that same scratch
-directory and the prompt carries a pointer, so the agent opens the one skill it
-needs rather than reading the whole library on every question — the reason a skill
-*directory* is worth more than a concatenated string. A backend with no workspace
-has nowhere to put them, so it folds them back into the inline block rather than
-dropping them in silence. See [evolving a directory](directory-evolution.md).
-
-!!! warning "The inline path is a fallback, not an equivalent"
-    Measured on three real OfficeQA items (documents of 266–390 KB) with
-    `document_agent(openai_compatible(model="deepseek-v4-flash"))`: **1 of 3
-    correct**, because at `inline_chars=200_000` roughly half of each document
-    never reaches the model. Truncation emits a `RuntimeWarning` so a short answer
-    is never mistaken for a model failure.
-
-    If the material is bigger than a comfortable prompt, give the adapter a
-    workspace agent — it reads the file itself and nothing is dropped.
-
-EvoSkill selects one with `--backend openhands|toolloop|retrieval`; the measured
-gated lift with OpenHands + DeepSeek (**58.0% → 65.7%**) is on the
-[EvoSkill page](algo-evoskill.md#empirical-results-real-openhands-agent-deepseek-on-officeqa).
-
-### Running the OpenHands backend
-
-* **Model / provider.** The LLM is any LiteLLM model. `openai/<name>` + `base_url`
-  targets an OpenAI-compatible endpoint — e.g. DeepSeek with
-  `model="openai/deepseek-v4-pro"` + `base_url="https://api.deepseek.com"` (the
-  key comes from `OPENAI_API_KEY`). Native tool-calling drives the `terminal` /
-  `file_editor` tools; the agent `grep`s the document, `view`s the right rows, and
-  **computes** the answer.
-* **Environment.** The real OpenHands SDK needs **Python ≥ 3.12** (a `uv`-managed
-  venv works — no Docker, no admin): `pip install openhands-ai`.
-* **Structured-output gotcha.** OpenHands has no native structured output, so it
-  re-asks the model to reformat the answer as JSON. Its default uses OpenAI strict
-  `response_format:{type:"json_schema"}`, which **DeepSeek rejects** (HTTP 400
-  *"response_format type is unavailable"*) — use `{type:"json_object"}` with the
-  schema in the prompt instead. (Providers with native structured output — Claude,
-  OpenAI, Codex — need no shim.)
-* **Concurrent eval.** Backends are plain callables, so the aggregator fans out
-  its held-out eval concurrently (`eval_concurrency`) — this is where the
-  parallelism pays, since each OfficeQA question is an OpenHands rollout of
-  ~3–6 min. (When every candidate must be gated on the full held-out set,
-  barrier-free async adds nothing — the run is val-bound — so EvoSkill uses the
-  synchronous `evolve()` path; see the [EvoSkill results](algo-evoskill.md#empirical-results-real-openhands-agent-deepseek-on-officeqa).)
+Document-shaped tasks (`answer(question, document, skills)`) and the OpenHands
+container backend have their own layer and their own page:
+[backends](backends.md) is canonical for `document_agent`, `openhands`, and
+`tool_loop_backend`, including the OfficeQA inline-fallback warning. Nothing
+about them changes the completion contract on this page.

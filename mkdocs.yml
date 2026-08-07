@@ -84,6 +84,7 @@ nav:
   - Self-evolution algorithms:
     - Overview: self-evolution-examples.md
     - Porting checklist: porting-checklist.md
+    - MethodPolicy porting checklist: porting-methodpolicy.md
     - Port fidelity: port-fidelity.md
     - ACE — context evolution: algo-ace.md
     - GEPA — prompt evolution: algo-gepa.md

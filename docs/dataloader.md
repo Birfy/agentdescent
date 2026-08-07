@@ -4,7 +4,9 @@
 > model" layer, `agentdescent.dataloader` is the "load a dataset" layer. It is
 > deliberately separate from the evolution engine — *which* benchmark you evolve
 > against has nothing to do with the framework — and every
-> [self-evolution example](self-evolution-examples.md) loads its data through it.
+> dataset-backed [self-evolution example](self-evolution-examples.md) loads its data
+> through it (the seven benchmark-faithful ports; the eleven MethodPolicy ports
+> run bundled deterministic domains instead).
 
 The examples each need a public benchmark (FiNER, HotpotQA, SearchQA, MGSM,
 SWE-bench Verified, OfficeQA). Rather than re-implement HuggingFace paging and
@@ -76,7 +78,7 @@ tsv = fetch_text("https://raw.githubusercontent.com/ShengranHu/ADAS/main/"
 rows = load_gated_hf("databricks/officeqa", "test")   # needs HF_TOKEN, else None
 ```
 
-## How the examples use it
+## How the dataset-backed ports use it
 
 Each example keeps only its **dataset-specific shaping** (turning rows into
 `Task`s, building the reward) and delegates the fetch/cache to the data layer:

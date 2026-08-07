@@ -33,26 +33,10 @@ class AcceptEverything:
 evolve(tasks, reward, agent=agent, policies=Policies(acceptance=AcceptEverything()))
 ```
 
-| decision | default | what it is given |
-|---|---|---|
-| task sampling | `RoundRobin` | the shard's task ids and the round index |
-| proposal generation | your `propose=` callable | a `ProposalContext` |
-| conflict | `DefaultConflict` | the artifact and the surviving cards |
-| fusion | `DefaultFusion` | the artifact and the kept diffs |
-| staleness | `GuardedStaleness` | `eta`, `alpha`, whether the diff breaks a contract |
-| acceptance | `DefaultAcceptance` | a `MergeContext` |
-| promotion | `DefaultPromotion` | this round's `MergeReport`s |
-
-Two things the defaults know that a replacement should be told:
-
-* **Acceptance reads the full held-out set, never the cheap layer.**
-  `MergeContext` carries both (`base_counts` vs `base_cheap`) because the
-  regression guard once read the cheap one, which `cheap_eval_tasks`
-  sub-samples -- so a four-task sample could veto a commit the full-set test had
-  just approved.
-* **Promotion counts rounds *survived*, not commits.** Counting commits inverts
-  the incentive: an artifact that converges stops committing and so can never be
-  promoted, while one that thrashes promotes every K commits.
+The catalogue of every seam, its default, and every implementation lives on
+[Choosing policies](policies.md), with one page per decision kind. What each
+default *knows* that a replacement must be told is recorded on the kind pages
+([acceptance](acceptance-policies.md), [promotion](promotion-policies.md), …).
 
 Not replaceable, deliberately: the audit gate. It asks whether the cheap layer is
 still trustworthy -- a question about the measuring instrument, which belongs to
@@ -156,99 +140,9 @@ verdict.
 
 ### When a dictionary update cannot merge — `ReflectiveFusion`
 
-`fuse_diffs` is `ops.update()`. That is right when two workers touched
-**different** keys, and useless when they touched the same one: the last writer
-wins, so `DefaultFusion` declines to build a fused candidate at all. For an
-artifact held in **one key** that is every round — GEPA's `InstructionSlot`
-records `contested = 0` for a whole run.
-
-```python
-from agentdescent import Policies, evolve
-from agentdescent.fusion import reflective_merge
-
-evolve(tasks, reward, agent=agent, n_workers=4,
-       policies=Policies(**reflective_merge(completion)))
-```
-
-A model writes one value keeping what each proposal contributed, for the keys the
-diffs actually disagree on. Keys they agree on stay the plain union — a model
-asked to merge values that do not disagree can only make them worse.
-
-**It is asked for a union of deltas, not for a rewrite.** "Write one version that
-keeps every improvement" invites a fresh composition that happens to cover the
-same ground, and there is no way to check whether it did. The prompt
-(`fusion.MERGE_PROMPT`) instead says:
-
-```
-Several independent improvements were made to the same text, each fixing a
-different failure. Produce their UNION.
-
-CURRENT
---- {the value the workers started from} ---
-
-PROPOSAL 1 --- {worker 0's whole rewrite} ---
-PROPOSAL 2 --- {worker 1's} ---
-PROPOSAL 3 --- {worker 2's} ---
-
-Do this:
-1. For each proposal, work out what it CHANGED relative to CURRENT.
-2. Output CURRENT with every one of those changes applied together.
-```
-
-That is an operation whose result can be checked, and it needs only what a
-`FusionPolicy` receives — the current value and the competing ones. Fusion never
-sees the evidence cards, so "what was each proposal fixing" is not available and
-deriving the deltas from CURRENT is what makes it unnecessary rather than
-missing.
-
-Verified on `GLM-5.2` with three real GEPA-style rewrites of one instruction:
-
-| | |
-|---|---|
-| CURRENT | *Answer the question using the given context.* |
-| worker 0 | + *for comparison questions, verify the attribute for BOTH entities* |
-| worker 1 | + *reply with the shortest correct form, no explanation* |
-| worker 2 | + *for yes/no questions reply with exactly 'yes' or 'no'* |
-| **union** | all three survive into one instruction |
-| `fuse_diffs` on the same input | keeps **one**, the other two are lost |
-
-Four things it refuses to do, each because the obvious version would mislead: it
-will not accept an answer that merely repeats one of its inputs (that is not a
-merge, and would enter as a duplicate); it will not accept one over `max_chars`
-(the synthesised value reaches the ledger without passing the trust region, which
-filters *cards*); it will not commit a **partial** union when one contested key
-fails (that would ship some workers' contributions and silently drop the rest,
-which looks like success); and a dead backend falls back rather than raising —
-fusion sits on the commit path of every round.
-
-!!! danger "There is no tournament on this path, and that is the trade"
-    The union goes **straight to the acceptance gate**. Measured on a workload
-    where both paths reach the same final quality: **55 model calls against
-    114** — 52% cheaper, because ranking every candidate was the largest cost in
-    a merge and nothing here ranks anything.
-
-    | | |
-    |---|---|
-    | **acceptable** | the union can commit while being worse than the best single would have been. It can still never commit a **regression** — the gate scores it on the full held-out set and runs the Beta test and the regression guard, untouched |
-    | **gone** | `best_single_score`, and with it the answer to *"does merging just average the improvements away?"* Nothing scores a single, so every trial is `ranked=False`, `fusion_stats()` reports them as `unranked`, and `win_rate` is `None` |
-
-    A union that was never compared has not won anything, and the statistics
-    cannot pretend otherwise. To **measure** whether merging helps, use the
-    shipped `DefaultFusion` on a multi-key artifact instead.
-
-!!! warning "It needs two policies, which is why `reflective_merge` returns a pair"
-    Conflict resolution is **step 2** and fusion is **step 3**, so `DefaultConflict`
-    has already dropped the losing side of every contradiction before a fusion
-    policy runs. `ReflectiveFusion` alone is handed a single diff on exactly the
-    workloads it was written for, and correctly declines to merge it with itself.
-    `KeepContradictions` is the partner that leaves them for step 3.
-
-The one path that still ranks is the fallback: a dead backend, an empty or
-oversized answer, or one that merely repeats an input falls through to
-`DefaultFusion` rather than losing the round's work — counted as
-`synthesis_failed`, apart from `contradiction`, which means no model was asked.
-
----
+The full treatment — what the model is asked, what the union costs and gives
+up, and why it ships only as a pair with `KeepContradictions` — moved to
+[fusion policies](fusion-policies.md#the-deep-dive-when-a-dictionary-update-cannot-merge).
 
 ## Tuning — `agg_config=` (`AggregatorConfig`)
 
@@ -465,20 +359,6 @@ keeps the mini-batch bounded so one `step()` never faces an unbounded pile.
 
 ## Example optimizers (from the algorithm ports)
 
-The [self-evolution examples](self-evolution-examples.md) are, at heart, custom
-`aggregator_factory=` optimizers — each swaps the reference greedy hill-climb for
-a paper's own selection/acceptance rule. They are all `AggregatorProtocol`
-implementations you can read and reuse:
-
-| Aggregator | Example | Selection / acceptance rule |
-|---|---|---|
-| `ParetoAggregator` | [GEPA](algo-gepa.md) | per-instance **Pareto frontier** sampling (Algorithm 2); commits the sampled Pareto parent as the dev head |
-| `TopKFrontierAggregator` | [EvoSkill](algo-evoskill.md) | bounded **top-K aggregate frontier** (sync path); commits the best member as the head |
-| `SgdSkillAggregator` | [EvoSkill](algo-evoskill.md) | **async SGD-style descent**: apply skill updates, validate every `val_every` steps, roll back on no held-out gain |
-| `StrictGateAggregator` | [SkillOpt](algo-skillopt.md) | **strict held-out-EM gate** + rejected-edit buffer + integer LR budget |
-| `MetaSearchAggregator` | [ADAS](algo-adas.md) | **keep-all archive** with bootstrap-CI fitness (L1 harness) |
-| `DGMArchiveAggregator` | [DGM](algo-dgm.md) | **keep-all archive** + staged eval + `sigmoid(perf)×1/(1+children)` parent selection (L1) |
-
-They share one trick: the archive/frontier/gate sets the dev head to the
-*selected* parent each `step()`, so `evolve()`'s next round mutates it — that is
-how non-greedy selection rides the greedy loop.
+The canonical catalogue — the shipped `Aggregator`, the reusable
+`PopulationAggregator`, and every port-specific optimizer — lives on the
+[`aggregator_factory` page](aggregator-factory.md#implemented).

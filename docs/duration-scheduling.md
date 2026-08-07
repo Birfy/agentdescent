@@ -117,7 +117,7 @@ latest ledger — is where the mechanism stops:
     the engine's `run(rendered, task) -> output` is opaque. What actually prevents
     one slow rollout from stalling the rest today is removing the barrier — see
     [the async runtime](evolution.md#the-barrier-free-runtime-async_evolve), which
-    the [efficiency experiments](efficiency.md) measure at ~2.8x over a sync
+    the [efficiency experiments](efficiency.md) measure at ~2.65x over a sync
     barrier under heavy-tailed latency.
 
 ---

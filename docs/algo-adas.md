@@ -51,6 +51,7 @@ In [`examples/adas/adas_meta_agent_search.py`](https://github.com/Birfy/agentdes
 
 | Plug-in | `evolve()` slot | What it does |
 |---|---|---|
+| shipped [`Beam(1)`](selection.md) | selection ([seam](selection.md)) | best-of-archive head rule — exact match, no local subclass |
 | **`AgentDesignStrategy`** | `strategy=` | a proposed agent (JSON) becomes a `Diff` on the one-slot agentic system; `render` returns the program for the interpreter |
 | **`MetaSearchAggregator`** | `aggregator_factory=` | ADAS's keep-all archive with bootstrap-CI fitness |
 | `make_propose(...)` | `propose=` | the meta-agent, conditioned on the whole archive (+ two Reflexion rounds) |

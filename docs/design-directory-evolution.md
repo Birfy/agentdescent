@@ -12,7 +12,7 @@
 > `agentdescent/runners.py`（§3.4）、`agentdescent/skilldir.py`（§3.7），
 > 加上 `evolution.py` 里的两处改动（§3.6 的删除语义、`EvolutionResult.write_to`）。
 > **P6（EvoSkill 迁移，§5.2）也已完成** —— 见下方 5.2 的结论。
-> 未做：`SectionedFileTree`、Docker 沙箱、ADAS 真执行（§5.3）。
+> 未做（当时）：`SectionedFileTree`、Docker 沙箱、ADAS 真执行。其中 Docker 沙箱后续已以 `ContainerProvider`/`SandboxPool` 落地（见 [sandboxes](sandboxes.md)）（§5.3）。
 
 ---
 

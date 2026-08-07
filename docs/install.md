@@ -91,7 +91,7 @@ instead — same call everywhere else. Full walkthrough:
 [quickstart](quickstart-skill.md).
 
 !!! tip "Inspect a faithful port with `--dry-run`"
-    The six faithful algorithm ports print their configuration with no dataset
+    Every algorithm port (all eighteen) prints its configuration with no dataset
     download, model call, or API key. Other examples may still load or download data:
 
     ```bash

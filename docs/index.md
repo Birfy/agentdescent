@@ -126,6 +126,7 @@ pip install agentdescent
 </div>
 
 **Building blocks** (each plugs into `evolve`):
+- **[The decision plane](policies.md)** — every replaceable decision (selection, sampling, merge, acceptance, promotion) in one `Policies` bundle
 
 <div class="grid cards" markdown>
 

@@ -51,13 +51,17 @@ python -m examples.efficiency --only distribution
 **Latency variance is the cost, and the round barrier is where you pay it.** The
 aggregator is a synchronisation point, so a round lasts as long as its *slowest*
 worker — and a reasoning model's latency has a long tail (a short answer and a
-2000-token deliberation are the same call). 2.4× is what a barrier costs on a
-heavy-tailed distribution; a real HotpotQA run measured 2.0×, squarely in this
-regime.
+2000-token deliberation are the same call). On the re-measured table above the
+heavy-tail row overlaps at **1.7×** against 2.2–2.4× for moderate spreads — the
+tail is exactly what the barrier cannot hide; a real HotpotQA run measured
+2.0×, squarely in this regime.
 
 Removing the barrier is what [`asynchronous=True`](evolution.md#the-barrier-free-runtime-async_evolve)
-is for, and it recovers part of it — **2.4× → 3.0×** on the same heavy-tailed
-workload — because workers stop waiting for the merge.
+is for, and it recovers part of it — the async experiment below measures
+**2.65×** over the sync barrier on the same heavy-tailed workload — because
+workers stop waiting for the merge. On a live model the same comparison is the
+[runtime matrix](matrix-report.md): 1.36× end-to-end / 1.89× engine-window
+across eleven ports.
 
 ### The other axis — `eval_concurrency`
 
@@ -166,9 +170,12 @@ at from the other direction.
 
     Read this table as evidence that the *harness* works — deterministic, budget
     matched in calls, quality on an unseen split, spread rather than point
-    estimates. Answering [#52](https://github.com/Birfy/agentdescent/issues/52)'s
-    question needs a real port against a real model, which is the step that has
-    not been run.
+    estimates. The real-model answer to
+    [#52](https://github.com/Birfy/agentdescent/issues/52)'s question now
+    exists: the [runtime matrix](matrix-report.md) runs eleven ports against a
+    live model under serial/sync/async scheduling — 1.36× end-to-end, 1.89×
+    engine-window (n=33). This table and that one measure different substrates
+    (coordination cost here, latency hiding there); read them together.
 
 ### What the matrix does not vary yet
 
