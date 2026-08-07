@@ -265,13 +265,18 @@ def test_ports_table_covers_every_standardised_entrypoint():
     empty the moment the ports moved down a level -- passing by finding nothing.
     """
     examples_dir = pathlib.Path(common.__file__).resolve().parent
+    # Underscore-prefixed modules are shared infrastructure, not ports: _common
+    # defines the flags, _TEMPLATE demonstrates them, and _method_runner is the
+    # single entry point behind the candidate-method ports -- whose own
+    # contract (MethodPolicy, budgets, modes) lives in
+    # tests/test_candidate_methods.py rather than in PORTS.
     on_disk = {
         path.stem for path in examples_dir.rglob("*.py")
-        if path.stem not in ("_common", "__init__")
+        if not path.stem.startswith("_")
         and "add_standard_args" in path.read_text()
     }
     listed = {port.module.__name__.rsplit(".", 1)[-1] for port in PORTS}
-    assert on_disk == listed | {"_TEMPLATE"}
+    assert on_disk == listed
     assert len(on_disk) > 1, "the walk found nothing to check"
 
 

@@ -1,8 +1,12 @@
-"""Thread-safe model measurement helpers for the candidate-method ports.
+"""Thread-safe model measurement shared by the candidate-method ports.
 
 Scheduling deliberately does not live here. Serial, synchronous-parallel, and
 barrier-free asynchronous execution are provided by AgentDescent's ``evolve``
-and ``async_evolve`` runtimes in :mod:`examples.candidate_methods.framework`.
+and ``async_evolve`` runtimes in :mod:`examples._method_runner`.
+
+The one addition over plain measurement is :class:`PhasedLLM`: the runner hands
+each method a completion whose phase labels are derived from the method's name,
+so a definition never writes a phase string (or sees the recorder) itself.
 """
 
 from __future__ import annotations
@@ -74,6 +78,27 @@ class Recorder:
         }
 
 
+class PhasedLLM:
+    """A completion whose phase prefix is fixed by the runner, not the method.
+
+    ``llm(prompt, unit=task.id)`` records under the scope's own prefix;
+    ``llm(prompt, subphase="solver", unit=task.id)`` appends ``:solver``. A
+    definition can therefore distinguish its actors without ever choosing the
+    namespace they land in.
+    """
+
+    def __init__(self, recorder: Recorder, prefix: str) -> None:
+        self._recorder = recorder
+        self._prefix = prefix
+
+    def __call__(self, prompt: str, *, subphase: str = "", unit: str = "") -> str:
+        phase = f"{self._prefix}:{subphase}" if subphase else self._prefix
+        return self._recorder.call(prompt, phase=phase, unit=unit)
+
+    def scoped(self, suffix: str) -> "PhasedLLM":
+        return PhasedLLM(self._recorder, f"{self._prefix}:{suffix}")
+
+
 def parse_json_object(text: str) -> Dict[str, Any]:
     """Decode the first JSON object, tolerating prose and Markdown fences."""
     decoder = json.JSONDecoder()
@@ -100,6 +125,10 @@ def extract_python(text: str) -> str:
         if block.lower().startswith("python"):
             return block[6:].lstrip("\r\n ")
     return chunks[1].strip()
+
+
+def canonical_json(value: Dict[str, Any]) -> str:
+    return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
 
 
 def interval(values: Iterable[float]) -> List[float]:

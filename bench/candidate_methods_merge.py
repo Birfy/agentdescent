@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from examples.candidate_methods.benchmark import summarize, utc_now, write_json
+from bench.candidate_methods import summarize, utc_now, write_json
 
 
 RUNTIMES = {

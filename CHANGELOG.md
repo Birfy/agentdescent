@@ -164,6 +164,20 @@ All notable changes to AgentDescent are documented here. The format follows
   available host are labelled analogues rather than paper reproductions. Offline
   tests exercise every method in every runtime mode without an API key.
 
+  The methods are now **declarative**: each lives in its own `examples/<name>/`
+  folder as a `MethodPolicy` (artifact strategy, frozen datasets, pure
+  solve/propose/reward, and the engine `Policies` seams its mechanism plugs
+  into -- binary tournament and soft mixed selection, archive base selection,
+  difficulty-weighted curricula, group-relative acceptance), with one shared
+  runner owning phases, budgets, and modes. Validation happens once, in the
+  strategy's `to_diff`: an unparseable proposal costs its candidate, is
+  counted, and produces no diff -- no fallback substitution anywhere.
+  Merge batches are worker-sized and text-valued artifacts install
+  `reflective_merge`, so contradicting proposals are model-merged into one
+  gate evaluation instead of each paying a ranking pass. Self-play evaluation
+  splits are frozen per seed; the checked-in results predate this
+  restructuring and are pending a rerun under the new fingerprint.
+
 ### Changed
 
 - OpenEvolve's `--serial` now means the shared thing (one worker) rather than

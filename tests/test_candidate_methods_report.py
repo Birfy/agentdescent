@@ -4,8 +4,8 @@ import pytest
 
 from bench.candidate_methods_merge import merge_payloads
 from bench.candidate_methods_report import render_report
-from examples.candidate_methods.benchmark import summarize
-from examples.candidate_methods.runtime import MODES
+from bench.candidate_methods import summarize
+from examples._measure import MODES
 
 
 def _row(mode):
