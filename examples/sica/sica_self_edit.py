@@ -110,7 +110,7 @@ def build(seed: int) -> MethodPolicy:
         fidelity=FIDELITY,
         notes=(
             "The meta loop edits real Python policy source and the framework gate measures utility.",
-            "Archive selection in performance mode matches the pinned revision's best-mean-score base selection (the paper's cost/time composite is unimplemented upstream too).",
+            "Archive selection (performance mode, matching the pinned revision's best-mean-score rule) is declared at the selection seam; the engine's single-head ledger keeps it degenerate until multi-head support lands.",
             "An unparseable self-edit costs its candidate and produces no diff; there is no substitute source.",
             "The editable surface is one AST-gated function rather than SWE-bench Docker.",
         ),

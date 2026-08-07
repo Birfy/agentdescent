@@ -80,7 +80,22 @@ nav:
     - ADAS — meta agent search (harness): algo-adas.md
     - DGM — Darwin Gödel Machine (harness): algo-dgm.md
     - OpenEvolve — program evolution: algo-openevolve.md
-    - Candidate-method runtime study: algo-candidate-methods.md
+    - Candidate methods:
+      - Overview: candidate-results-overview.md
+      - Runtime study (matrix report): algo-candidate-methods.md
+      - Parallel speedup: candidate-parallel-speedup.md
+      - Async behaviour: candidate-async.md
+      - PromptBreeder: algo-promptbreeder.md
+      - AFlow: algo-aflow.md
+      - Reflexion: algo-reflexion.md
+      - Self-Refine: algo-self-refine.md
+      - Voyager: algo-voyager.md
+      - SkillWeaver: algo-skillweaver.md
+      - Absolute Zero: algo-absolute-zero.md
+      - R-Zero: algo-r-zero.md
+      - Agent0: algo-agent0.md
+      - SICA: algo-sica.md
+      - Godel Agent: algo-godel-agent.md
   - Design records:
     - Evolving a directory: design-directory-evolution.md
 

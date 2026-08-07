@@ -122,7 +122,7 @@ def build(seed: int) -> MethodPolicy:
         name="aflow",
         fidelity=FIDELITY,
         notes=(
-            "Selection is the pinned revision's soft mixed probability over top-k plus the seed workflow, not UCT.",
+            "The pinned revision's soft mixed selection (not UCT) is declared at the selection seam; the engine's single-head ledger keeps it degenerate until multi-head support lands.",
             "Expansion prompts carry the selected parent's modification experience, as upstream's experience.json does.",
             "Every candidate keeps the same two model nodes, fixing workflow topology across modes.",
         ),
