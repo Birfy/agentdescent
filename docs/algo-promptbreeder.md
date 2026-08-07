@@ -26,7 +26,7 @@ measured on a 100-item training batch; the paper runs a population of 50 for
 
 | Upstream mechanism | Where it lives here |
 |---|---|
-| Binary tournament replication | `BinaryTournament(SelectionPolicy)` — declared at the selection seam; degenerate (single live head) until the engine grows multi-head support |
+| Binary tournament replication | `BinaryTournament(SelectionPolicy)`, driven by the population aggregator: committed candidates enter an archive, the tournament's pick becomes the next parent by ledger commit |
 | Task/mutation-prompt unit | `FieldSlots` genome: two plain-text ledger keys that union-merge on disjoint edits and model-merge when contested |
 | Nine mutation operators | three implemented (zero-order, first-order, hyper-mutation), rotated per replication event |
 | Fitness on a training batch | the engine's held-out gate |

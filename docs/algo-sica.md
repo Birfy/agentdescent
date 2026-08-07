@@ -26,7 +26,7 @@ either). The selected agent then edits its own source and is re-benchmarked.
 |---|---|
 | Real self-edits | proposals are complete Python sources through an AST gate (function surface, arity, node whitelist, no builtins) |
 | Utility gate | the framework's held-out acceptance gate |
-| Archive base selection | `Archive('performance')` — declared at the selection seam; degenerate until multi-head support lands |
+| Archive base selection | `Archive('performance')`, driven by the population aggregator; the run finalises on the archive's best scorer |
 
 ## Boundaries
 

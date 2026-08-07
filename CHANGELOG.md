@@ -178,6 +178,16 @@ All notable changes to AgentDescent are documented here. The format follows
   splits are frozen per seed; the checked-in results predate this
   restructuring and are pending a rerun under the new fingerprint.
 
+  Declared selection policies now actually run: `examples/_population.py`
+  generalises the GEPA/DGM pattern into a `PopulationAggregator` -- the
+  shipped merge pipeline plus an archive of committed heads, with any
+  standard `SelectionPolicy` picking the next parent by ledger commit and
+  `finalize()` landing the archive's best. The decision plane grew a
+  documentation suite: a choosing guide (`docs/policies.md`), one page per
+  policy kind listing every implementation, and an `aggregator_factory`
+  page recording the single-head fact that makes the factory exit the home
+  of population search.
+
 ### Changed
 
 - OpenEvolve's `--serial` now means the shared thing (one worker) rather than

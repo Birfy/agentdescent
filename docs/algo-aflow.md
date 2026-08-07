@@ -26,7 +26,7 @@ modifications and whether each helped — injected into the prompt.
 
 | Upstream mechanism | Where it lives here |
 |---|---|
-| Soft mixed selection over top-k + seed | `SoftMixed(SelectionPolicy)` — declared at the selection seam; degenerate until multi-head support lands |
+| Soft mixed selection over top-k + seed | `SoftMixed(SelectionPolicy)`, driven by the population aggregator over the archive of committed workflows |
 | Per-father experience | a per-parent modification log injected into the expansion prompt |
 | Workflow as code | two fixed model nodes (Solve → ReviewAndRevise) as `FieldSlots` keys |
 | Convergence over 20 rounds | the candidate budget |

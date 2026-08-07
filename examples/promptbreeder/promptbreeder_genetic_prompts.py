@@ -127,7 +127,7 @@ def build(seed: int) -> MethodPolicy:
         name="promptbreeder",
         fidelity=FIDELITY,
         notes=(
-            "Binary tournament replication is declared at the selection seam; the engine's single-head ledger keeps it degenerate (every worker starts from the live head) until multi-head support lands.",
+            "Binary tournament replication runs through the population aggregator: committed candidates enter an archive and the tournament's pick is committed back as the next parent (the GEPA/DGM pattern, generalised).",
             "Task/mutation-prompt co-evolution follows Algorithm 1.",
             "Zero-order, first-order, and hyper-mutation operators rotate per replication event (3 of the paper's 9).",
             "Population and fitness batch are budget-sized; PromptBreeder has no official released implementation.",

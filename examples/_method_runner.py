@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable, Dict, List, Optional, Sequence
 
 from agentdescent.aggregator import AggregatorConfig
@@ -28,6 +28,7 @@ from agentdescent.fusion import reflective_merge
 from ._common import add_standard_args, completion_for, confirm
 from ._measure import MODES, PhasedLLM, Recorder, compact_events, usage_dict
 from ._method_policy import MethodPolicy
+from ._population import population_factory
 
 
 QUALITY_TARGET = 0.75
@@ -188,6 +189,21 @@ def run_port(
     if policy.reflective:
         engine = engine.merged_with(
             **reflective_merge(lambda prompt: merge_llm(prompt, unit="merge")))
+    aggregator_factory = None
+    if engine.selection is not None:
+        # The engine's own selection seam is single-head degenerate, so a
+        # declared selection policy runs through the sanctioned optimizer exit
+        # instead: PopulationAggregator keeps the archive and commits parent
+        # switches (the GEPA/DGM pattern, generalised). The factory path
+        # bypasses the bundle's decision fields, so they travel through the
+        # factory and are stripped from the bundle -- carried in both places,
+        # one copy would be silently ignored.
+        aggregator_factory = population_factory(
+            engine.selection, f"candidate-{policy.name}",
+            conflict=engine.conflict, fusion=engine.fusion,
+            acceptance=engine.acceptance)
+        engine = replace(engine, selection=None, conflict=None, fusion=None,
+                         acceptance=None)
     common = {
         "run": lambda rendered, task: policy.solve(run_llm, rendered, task),
         "propose": limiter,
@@ -209,6 +225,7 @@ def run_port(
         "usage": actor_usage,
         "verbose": False,
         "policies": engine,
+        "aggregator_factory": aggregator_factory,
     }
     if mode == "async_pipeline":
         result = async_evolve(

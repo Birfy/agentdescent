@@ -426,3 +426,38 @@ def test_benchmark_dry_run_is_offline_and_names_framework_runtime(monkeypatch, c
 def test_dry_run_counts_two_call_proposals(capsys):
     assert main(["--dry-run", "--algorithms", "self_refine", "r_zero"]) == 0
     assert "reserved proposal calls=24" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# The population aggregator: a declared selection policy really sees a
+# multi-candidate archive on the single-head ledger.
+# ---------------------------------------------------------------------------
+
+def test_population_aggregator_feeds_selection_a_real_archive():
+    from dataclasses import replace as _replace
+
+    from agentdescent.policies import Policies as _Policies
+
+    class RecordingTournament(BinaryTournament):
+        def __init__(self):
+            super().__init__(seed=0)
+            self.sizes = []
+
+        def select(self, ctx, n):
+            self.sizes.append(len(ctx.candidates))
+            return super().select(ctx, n)
+
+    spy = RecordingTournament()
+    _, builder = ALGORITHMS["promptbreeder"]
+    policy = _replace(builder(0), engine=_Policies(selection=spy))
+    usage = Usage()
+    recorder = Recorder(metered(fake_completion, usage), usage)
+    payload = run_port(
+        policy, recorder, mode="sync_parallel", seed=0, workers=2,
+        candidate_budget=4, max_seconds=30.0, shutdown_grace=5.0,
+    ).compact()
+    # The archive held the seed plus at least one committed candidate, so the
+    # tournament was run over a genuine population at least once.
+    assert spy.sizes, "selection policy was never consulted"
+    assert max(spy.sizes) >= 2, f"archive never grew: {spy.sizes}"
+    assert payload["final_quality"] >= payload["baseline_quality"]

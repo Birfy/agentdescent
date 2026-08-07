@@ -97,3 +97,18 @@ Every policy above is therefore usable *today* in the shape a run actually
 starts in: an archive of one, a beam over one candidate. That is what makes the
 seam checkable now instead of after the ledger changes. Making the ledger hold
 concurrent branches, and redefining `η` when `head` is plural, is separate work.
+
+## Examples-level policies, and how they actually run
+
+The candidate-method ports add two paper rules as ~15-line policies:
+
+| Policy | Rule | Port |
+|---|---|---|
+| `BinaryTournament` | sample two candidates, breed the winner (unscored wins, Beam's optimism) | [PromptBreeder](algo-promptbreeder.md) |
+| `SoftMixed` | `λ·uniform + (1−λ)·softmax(α·(s−s_max))` over top-k, seed always included | [AFlow](algo-aflow.md) |
+
+On a single-head ledger these (and `Archive`, `Beam`, …) get their population
+through the [population aggregator](aggregator-factory.md): committed heads
+enter an archive, the policy picks the next parent from it, and the pick is a
+ledger commit. Declare `Policies(selection=…)` as usual — the candidate runner
+routes it there automatically.
