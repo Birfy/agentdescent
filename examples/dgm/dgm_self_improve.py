@@ -110,6 +110,34 @@ def choose_selfimproves(archive: List["Agent"], k: int,
     return rng.choices(range(len(archive)), weights=weights, k=k)
 
 
+class DGMParentSelection:
+    """`choose_selfimproves` at the standard selection seam.
+
+    A :class:`~agentdescent.selection.SelectionPolicy` over `Candidate` records:
+    ``score`` carries the staged-eval score and ``selected`` carries DGM's
+    children-explored count, so `dgm_parent_weights` reads them unchanged and
+    the single ``rng.choices`` call keeps the exact random-consumption order of
+    the inline rule it replaces -- a seeded run picks identical parents.
+
+    Local rather than shipped on purpose: `Archive('novelty')` divides by
+    ``1+selected`` but scores with a temperature softmax, not DGM's
+    ``sigmoid(10*(s-0.5))`` -- close enough to look right and wrong enough to
+    change a measured run.
+    """
+
+    def __init__(self, rng: random.Random) -> None:
+        self.rng = rng
+
+    def select(self, ctx, n: int):
+        candidates = list(ctx.candidates)
+        if len(candidates) <= 1:
+            return [ctx.head] * n
+        weights = dgm_parent_weights(
+            [c.score or 0.0 for c in candidates],
+            [c.selected for c in candidates])
+        return self.rng.choices(candidates, weights=weights, k=n)
+
+
 # ===========================================================================
 # The self-improving coding agent (its harness = its editable "codebase")
 # ===========================================================================
@@ -288,10 +316,12 @@ class DGMArchiveAggregator(AggregatorProtocol):
     """DGM's optimizer: keep-all archive + staged eval + sigmoid×novelty selection."""
 
     def __init__(self, ledger: Ledger, verifier, ctx: DGMContext,
-                 artifact_id: str = "coding_agent"):
+                 artifact_id: str = "coding_agent",
+                 selection: Optional[DGMParentSelection] = None):
         self.ledger = ledger
         self.verifier = verifier
         self.ctx = ctx
+        self.selection = selection or DGMParentSelection(ctx.rng)
         self.aid = artifact_id
         self.cards: List[EvidenceCard] = []
         self._lock = threading.Lock()   # ingest: workers; step: one thread
@@ -343,8 +373,16 @@ class DGMArchiveAggregator(AggregatorProtocol):
             self.ctx.best_score = max(self.ctx.best_score, child.score)
         parent.children += 1                               # this parent was explored
 
-        # DGM parent selection: sample the next head ~ sigmoid(perf) x 1/(1+children).
-        self.head_index = choose_selfimproves(self.ctx.archive, 1, self.ctx.rng)[0]
+        # DGM parent selection at the standard seam: sample the next head
+        # ~ sigmoid(perf) x 1/(1+children). Candidate.version carries the
+        # archive index so the pick maps straight back.
+        from agentdescent.selection import Candidate, SelectionContext
+        rows = [Candidate(artifact_id=self.aid, version=i,
+                          score=a.score, selected=a.children)
+                for i, a in enumerate(self.ctx.archive)]
+        ctx = SelectionContext(head=rows[self.head_index],
+                               candidates=tuple(rows), n_workers=1)
+        self.head_index = self.selection.select(ctx, 1)[0].version
         target = ",".join(sorted(self.ctx.archive[self.head_index].capabilities))
         committed = None
         if target != head.state.get("capabilities"):
