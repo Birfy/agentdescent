@@ -191,6 +191,33 @@ def _program_summary(program: Program) -> Dict[str, Any]:
     }
 
 
+class EpsilonGreedy:
+    """OpenEvolve's in-pool parent rule at the standard selection seam.
+
+    A :class:`~agentdescent.selection.SelectionPolicy`: with probability
+    ``exploitation_ratio`` take the pool's best-fitness member (first maximal
+    wins, as the inline ``max`` did), otherwise draw uniformly. It shares the
+    archive's rng, and consumes it in the same order as the inline rule --
+    one ``random()`` then at most one ``choice`` -- so seeded runs pick
+    identical parents. Islands, MAP-Elites cells, and ring migration are the
+    upstream mechanism itself and stay on the archive.
+    """
+
+    def __init__(self, rng, exploitation_ratio: float) -> None:
+        self.rng = rng
+        self.exploitation_ratio = exploitation_ratio
+
+    def select(self, ctx, n: int):
+        candidates = list(ctx.candidates)
+        if not candidates:
+            return [ctx.head] * n
+        if self.rng.random() < self.exploitation_ratio:
+            pick = max(candidates, key=lambda c: c.score or 0.0)
+        else:
+            pick = self.rng.choice(candidates)
+        return [pick] * n
+
+
 @dataclass
 class OpenEvolveArchive:
     """Thread-safe MAP-Elites and island state shared by proposers and merger."""
@@ -308,10 +335,16 @@ class OpenEvolveArchive:
             pool_ids = island_ids or archive_ids
             if not pool_ids:
                 raise RuntimeError("OpenEvolve archive has no parent candidates")
-            if self._rng.random() < self.exploitation_ratio:
-                parent_id = max(pool_ids, key=lambda pid: self._fitness(self.programs[pid]))
-            else:
-                parent_id = self._rng.choice(pool_ids)
+            # The epsilon-greedy pick at the standard seam (version = pool index).
+            from agentdescent.selection import Candidate, SelectionContext
+            if not hasattr(self, "_selection") or self._selection is None:
+                self._selection = EpsilonGreedy(self._rng, self.exploitation_ratio)
+            rows = [Candidate(artifact_id="openevolve", version=i,
+                              score=self._fitness(self.programs[pid]))
+                    for i, pid in enumerate(pool_ids)]
+            sel_ctx = SelectionContext(head=rows[0], candidates=tuple(rows),
+                                       n_workers=1)
+            parent_id = pool_ids[self._selection.select(sel_ctx, 1)[0].version]
             parent = self.programs[parent_id]
             best = self.programs[self.best_id]
             inspiration_id = max(

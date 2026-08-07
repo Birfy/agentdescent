@@ -132,3 +132,12 @@ python -m examples.ace.ace_context_evolution --top-k 40 --pool 400 --rounds 8   
 ```
 
 Offline tests: `tests/test_ace_example.py`.
+
+## Where the mechanism lives (decision-plane note)
+
+ACE is the port that needed no optimizer surgery: its distinctive mechanism --
+incremental delta updates curated into a playbook -- is entirely an **artifact
+shape**, so it lives at the [strategy layer](strategies.md) (`ACEPlaybook`),
+and the shipped merge pipeline runs unchanged underneath. Of the three
+insertion layers in [choosing policies](policies.md), ACE uses the first alone;
+there is deliberately no custom aggregator and no local policy class here.

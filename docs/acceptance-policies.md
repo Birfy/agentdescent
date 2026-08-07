@@ -17,6 +17,7 @@ says it doesn't help" and "it never reached the gate" need opposite fixes.
 | `AdvantageAcceptance(inner, strength)` | shifts the prior by the candidate group's standardised advantage (`GroupAdvantage`), then defers to `inner` — wraps, never replaces, so the Beta test and regression guard survive | GRPO-shaped methods (R-Zero here); group evidence should nudge, not override |
 | `StableDistanceAcceptance` | penalises candidates that drift far from the `stable` branch — the KL-to-reference analogy with `stable` as the reference | long runs where dev can wander; distance as regularisation |
 | `AcceptAnyCompiling` (examples/godel_agent) | accepts everything the validator let through | faithfulness ablations of gateless methods; measuring what the gate is worth |
+| `StrictImprovement` (examples/skillopt) | commit only a strict full-held-out improvement — no Beta draw, no annealing | SkillOpt's deliberately harsher gate; small clean val sets where strictness is the algorithm |
 
 Related knobs that are *not* policies: `TrustRegion` / `AdaptiveTrustRegion`
 cap diff size before cards ever reach the gate.
