@@ -24,7 +24,7 @@ ledger commit that rewrites the head.**
 | Aggregator | What it adds | Where |
 |---|---|---|
 | `Aggregator` | the shipped pipeline: dedupe, staleness, conflict, fusion, statistical acceptance, transactional commit, promotion | `agentdescent.aggregator` |
-| `PopulationAggregator(Aggregator)` | an archive of every distinct committed head (with held-out score) + any standard `SelectionPolicy` picking the next parent, committed back to dev; `finalize()` lands the archive's best | `examples/_population.py` — how the candidate ports' `Policies(selection=…)` declarations actually run |
+| `PopulationAggregator(Aggregator)` | an archive of every distinct committed head (with held-out score) + any standard `SelectionPolicy` picking the next parent, committed back to dev; `finalize()` lands the archive's best | `examples/_population.py` — how the MethodPolicy ports' `Policies(selection=…)` declarations actually run |
 | `ParetoAggregator` | GEPA's pool with per-instance score rows and Algorithm-2 frontier sampling | `examples/gepa/` |
 | `DGMArchiveAggregator` | DGM's keep-all archive with `sigmoid(perf) × 1/(1+children)` parent selection | `examples/dgm/` |
 | `MetaSearchAggregator` | ADAS's keep-all archive over agent designs | `examples/adas/` |

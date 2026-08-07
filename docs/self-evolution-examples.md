@@ -280,12 +280,7 @@ The backlog is organised by missing mechanism, not paper popularity. Assign an
 owner before implementation so fidelity questions have a person who read the
 released code.
 
-The [candidate-method runtime study](algo-candidate-methods.md), authored by
-`cyanneko`, exercises 11 of these candidates through AgentDescent's serial,
-synchronous-parallel, and asynchronous runtimes. It deliberately reports them as
-mechanism microports or clearly named analogues rather than adding them to the
-faithful-port table above; each method's preserved control flow and substitution
-boundary is recorded alongside the live measurements.
+Eleven further ports -- PromptBreeder, AFlow, Reflexion, Self-Refine, Voyager, SkillWeaver, Absolute Zero, R-Zero, Agent0, SICA, and Gödel Agent -- are listed alongside the seven above, one page each, as declarative `MethodPolicy` definitions. Their preserved control flow, substitution boundaries, and fidelity classes are recorded per page, and the [runtime matrix](matrix-report.md) measures all of them under serial, synchronous, and asynchronous scheduling.
 
 | Mechanism | Candidates | Existing faithful coverage | Owner |
 |---|---|---|---|

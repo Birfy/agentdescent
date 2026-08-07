@@ -11,7 +11,7 @@ k > 1 usable, and silently keeping the first would report work that never ran.
 ## Implemented
 
 No shipped implementations yet — the field takes any object with the
-protocol's `propose` method. The candidate-method ports do not use this seam:
+protocol's `propose` method. The MethodPolicy ports do not use this seam:
 their proposal logic is plain actor code (a `propose` callable), which is the
 right home when there is no *decision* to swap, only text.
 

@@ -9,7 +9,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 
 DEFAULT_INPUT = Path("bench/results/candidate-methods-framework-final.json")
-DEFAULT_OUTPUT = Path("docs/algo-candidate-methods.md")
+DEFAULT_OUTPUT = Path("docs/matrix-report.md")
 
 DISPLAY_NAMES = {
     "promptbreeder": "PromptBreeder",

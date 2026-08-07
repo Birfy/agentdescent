@@ -1,6 +1,6 @@
 # Voyager — Embodied skill-library agent
 
-Candidate-method port onto the AgentDescent engine, as a declarative
+Port onto the AgentDescent engine, as a declarative
 [`MethodPolicy`](../_method_policy.py).
 
 | | |
@@ -29,7 +29,7 @@ and no API key**.
 - Mechanism notes, upstream trace, and every recorded boundary: [`docs/algo-voyager.md`](../../docs/algo-voyager.md)
 - Offline tests: [`tests/test_candidate_methods.py`](../../tests/test_candidate_methods.py)
 
-All candidate ports share one declarative contract (`examples/_method_policy.py`)
+All MethodPolicy ports share one declarative contract (`examples/_method_policy.py`)
 and one runner (`examples/_method_runner.py`); scheduling, budgets, and merging
 never appear in a definition. The full serial/sync/async matrix is
 `python -m bench.candidate_methods`.

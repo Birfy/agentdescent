@@ -150,7 +150,7 @@ Full docs live in [`docs/`](https://github.com/Birfy/agentdescent/tree/main/docs
 | [Efficiency experiments](https://github.com/Birfy/agentdescent/blob/main/docs/efficiency.md) | Measured parallel scaling and async tail-hiding |
 | [Example: skill evolution](https://github.com/Birfy/agentdescent/blob/main/docs/skill-evolution.md) | One complete run — real dataset, real LLM, every module |
 | [Self-evolution algorithms](https://github.com/Birfy/agentdescent/blob/main/docs/self-evolution-examples.md) | Faithful ports of ACE, GEPA, EvoSkill, SkillOpt, ADAS, DGM |
-| [Candidate-method runtime study](https://github.com/Birfy/agentdescent/blob/main/docs/algo-candidate-methods.md) | Live 11-method serial/sync/async matrix with explicit fidelity boundaries |
+| [Runtime matrix](https://github.com/Birfy/agentdescent/blob/main/docs/matrix-report.md) | Live 11-method serial/sync/async matrix with explicit fidelity boundaries |
 
 ```bash
 pip install -e ".[docs]"
@@ -269,7 +269,7 @@ is top-K aggregate, not per-instance Pareto — the example follows the code and
 says so); where a full setup needs heavy infra (SWE-bench Docker, gated data), the
 boundary is documented, never hidden.
 
-The separate [candidate-method runtime study](https://github.com/Birfy/agentdescent/blob/main/docs/algo-candidate-methods.md)
+The separate [runtime matrix](https://github.com/Birfy/agentdescent/blob/main/docs/matrix-report.md)
 runs 11 additional mechanisms through real `evolve()` and `async_evolve()` calls.
 It labels compact microports and environment, inference, and self-edit analogues
 explicitly; these are scheduling experiments, not paper-benchmark reproductions.
