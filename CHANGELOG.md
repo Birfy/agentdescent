@@ -149,6 +149,21 @@ All notable changes to AgentDescent are documented here. The format follows
   in the tournament — a tie loses — and every failure path falls back to shipped
   behaviour. Off by default, not yet A/B'd.
 
+- **The eleven issue #74 candidate methods now have an AgentDescent-native
+  runtime study.** PromptBreeder, AFlow, Reflexion, Self-Refine, Voyager,
+  SkillWeaver, Absolute Zero, R-Zero, Agent0, SICA, and Godel Agent reserve the
+  same candidate and proposal-call budgets across
+  `evolve(max_concurrency=1)`, synchronous `evolve(max_concurrency=workers)`,
+  and `async_evolve`. The benchmark records paired end-to-end, engine-window,
+  time-to-quality, provider, actor, staleness, and held-out quality metrics, and
+  refuses to report a matrix with a changed source fingerprint or mismatched
+  budget.
+
+  The fidelity boundary is explicit: four are compact mechanism ports, while
+  the environment, RL, and full-agent self-edit dependencies that do not fit the
+  available host are labelled analogues rather than paper reproductions. Offline
+  tests exercise every method in every runtime mode without an API key.
+
 ### Changed
 
 - OpenEvolve's `--serial` now means the shared thing (one worker) rather than
