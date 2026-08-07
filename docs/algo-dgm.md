@@ -52,6 +52,7 @@ In [`examples/dgm/dgm_self_improve.py`](https://github.com/Birfy/agentdescent/bl
 
 | Plug-in | `evolve()` slot | What it does |
 |---|---|---|
+| `DGMParentSelection` | selection ([seam](selection.md)) | `sigmoid(10·(s−0.5)) × 1/(1+children)` parent sampling; default of `DGMArchiveAggregator` |
 | **`HarnessStrategy`** | `strategy=` | a proposed capability becomes a `Diff` on the harness capability set |
 | **`DGMArchiveAggregator`** | `aggregator_factory=` | keep-all archive + staged eval (10→50→140) + sigmoid×novelty parent selection; sets the sampled parent as the dev head |
 | **`dgm_parent_weights` / `choose_selfimproves`** | (selection) | the exact DGM rule `p_i ∝ sigmoid(10·(score−0.5)) · 1/(1+children_i)` |

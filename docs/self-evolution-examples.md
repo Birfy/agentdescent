@@ -15,13 +15,18 @@ Three artifact categories, spanning the two governance layers:
 * **Program evolution** — evolve executable search code (an **L1** artifact,
   `blast_radius=0.6`, sandbox-evaluated): OpenEvolve.
 
-**All seven run through the AgentDescent evolution engines** — each is just a
-custom `strategy=` (how a proposal becomes a `Diff`) and/or a custom
-`aggregator_factory=` (the selection/acceptance optimizer). No example bypasses
-the engine; they differ only in those two plug-ins and the blast radius. Each has
-a dedicated page:
+**All eighteen run through the AgentDescent evolution engines.** The seven
+benchmark-faithful ports above are each a custom `strategy=` and/or a custom
+`aggregator_factory=`, with their parent/gate rules extracted as named policy
+classes at the standard seams ([selection](selection.md),
+[acceptance](acceptance-policies.md)). The eleven newer ports are declarative
+[`MethodPolicy`](policies.md) definitions over a shared runner — their
+mechanisms plug in as `Policies(...)` fields, their artifacts as shared
+[strategies](strategies.md), and the [runtime matrix](matrix-overview.md)
+measures them under all three schedulers. No example bypasses the engine. Each
+has a dedicated page:
 
-**All seven are parallel — and can run async.** In synchronous mode their workers
+**All eighteen are parallel — and can run async.** In synchronous mode their workers
 run **concurrently** (overlapping LLM rollouts) with the aggregator merge as the
 barrier (*synchronous data-parallelism*). Add **`--async`** and the same example
 runs **barrier-free** through
@@ -274,25 +279,24 @@ python -m examples.dgm.dgm_self_improve --generations 12 --archive keep_all
 
 ---
 
-## Candidate ports
+## Mechanism coverage
 
-The backlog is organised by missing mechanism, not paper popularity. Assign an
-owner before implementation so fidelity questions have a person who read the
-released code.
+Every mechanism family in the original backlog now has at least one
+implemented port. Fidelity differs by port and is recorded on each page (see
+[port fidelity](port-fidelity.md)):
 
-Eleven further ports -- PromptBreeder, AFlow, Reflexion, Self-Refine, Voyager, SkillWeaver, Absolute Zero, R-Zero, Agent0, SICA, and Gödel Agent -- are listed alongside the seven above, one page each, as declarative `MethodPolicy` definitions. Their preserved control flow, substitution boundaries, and fidelity classes are recorded per page, and the [runtime matrix](matrix-report.md) measures all of them under serial, synchronous, and asynchronous scheduling.
+| Mechanism | Benchmark-faithful | Microports / analogues |
+|---|---|---|
+| Evolution / program search | [OpenEvolve](algo-openevolve.md) | [PromptBreeder](algo-promptbreeder.md), [AFlow](algo-aflow.md) |
+| Reflection / refinement | [GEPA](algo-gepa.md) (reflective) | [Reflexion](algo-reflexion.md), [Self-Refine](algo-self-refine.md) |
+| Skills / lifelong learning | [EvoSkill](algo-evoskill.md), [SkillOpt](algo-skillopt.md), [ACE](algo-ace.md) | [Voyager](algo-voyager.md), [SkillWeaver](algo-skillweaver.md) |
+| Self-play / unlabeled data | — | [Absolute Zero](algo-absolute-zero.md), [R-Zero](algo-r-zero.md), [Agent0](algo-agent0.md) |
+| Self-modifying code / harness | [DGM](algo-dgm.md), [ADAS](algo-adas.md) | [SICA](algo-sica.md), [Gödel Agent](algo-godel-agent.md) |
 
-| Mechanism | Candidates | Existing faithful coverage | Owner |
-|---|---|---|---|
-| Evolution / program search | AlphaEvolve (OpenEvolve), PromptBreeder, AFlow | OpenEvolve | cyanneko |
-| Reflection / textual gradients | TextGrad, Reflexion, Self-Refine | partial (GEPA is reflective, not textual-gradient) | TBD |
-| Skills / lifelong learning | Voyager, SkillWeaver | adjacent (EvoSkill) | TBD |
-| Self-play / unlabeled data | Absolute Zero, R-Zero, Agent0 | **none; highest priority** | TBD |
-| Self-modifying code | SICA, Gödel Agent | DGM | TBD |
-
-The unlabeled path is the most important gap: all seven current ports derive reward
-from a benchmark with gold labels, although `evolve()` only requires a score in
-`[0, 1]` and does not require labels.
+The label-free path now exists — the three self-play ports derive reward from a
+grounded local verifier with no gold labels — but only as inference analogues:
+a benchmark-faithful label-free port (real RL updates, real task domains)
+remains open. TextGrad remains unimplemented in the reflection family.
 
 ### Deferred pending released code
 

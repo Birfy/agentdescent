@@ -117,5 +117,5 @@ says so too, because a gate that looks wired in and is not is worse than no gate
 | a learned verifier | `0.6`, and never name it `oracle` | it judges; audit it hard |
 
 `classify(artifact)` prints which layer you actually landed in — every
-[algorithm port](self-evolution-examples.md) does this at startup, which is how
+[algorithm port](self-evolution-examples.md) does this at startup (the seven benchmark-faithful ports; the MethodPolicy runner sets `blast_radius=0.6` directly), which is how
 you tell a configuration mistake from a result.

@@ -1,4 +1,11 @@
-# Remaining candidate methods: live runtime matrix
+# Runtime matrix — live report
+
+!!! warning "This report measures the pre-restructuring implementation"
+    The numbers below were produced by the implementation as of source
+    fingerprint `381b663…` — before the ports moved to their declarative
+    `MethodPolicy` form. The mechanisms and budgets are the same by design,
+    but the code has since changed and the matrix is pending a rerun; see the
+    [overview](matrix-overview.md).
 
 ## Scope
 
@@ -129,8 +136,8 @@ These fidelity labels are part of the result, not a disclaimer added after seein
 
 Only observations whose result records AgentDescent `evolve` or `async_evolve` are included. Earlier hand-scheduled pilots are excluded from every table and aggregate.
 
-- `examples/candidate_methods/results/candidate-methods-framework-calibration-all.json`: seeds 0; 33 completed observations.
-- `examples/candidate_methods/results/candidate-methods-framework-seeds-100-200.json`: seeds 100, 200; 66 completed observations.
+- `candidate-methods-framework-calibration-all.json (source run; not retained in the repository)`: seeds 0; 33 completed observations.
+- `candidate-methods-framework-seeds-100-200.json (source run; not retained in the repository)`: seeds 100, 200; 66 completed observations.
 
 ## Reproduction
 
@@ -139,13 +146,13 @@ python -m bench.candidate_methods --provider openai --model glm-5.2 \
   --workers 2 --candidates 2 --repeats 1 --seed 0 \
   --modes serial sync_parallel async_pipeline \
   --thinking disabled --temperature 0.0 --max-tokens 1024 \
-  --output examples/candidate_methods/results/candidate-methods-framework-calibration-all.json --yes
+  --output candidate-methods-framework-calibration-all.json (source run; not retained in the repository) --yes
 python -m bench.candidate_methods --provider openai --model glm-5.2 \
   --workers 2 --candidates 2 --repeats 2 --seed 100 \
   --modes serial sync_parallel async_pipeline \
   --thinking disabled --temperature 0.0 --max-tokens 1024 \
-  --output examples/candidate_methods/results/candidate-methods-framework-seeds-100-200.json --yes
-python -m bench.candidate_methods_merge --inputs examples/candidate_methods/results/candidate-methods-framework-calibration-all.json examples/candidate_methods/results/candidate-methods-framework-seeds-100-200.json \
+  --output candidate-methods-framework-seeds-100-200.json (source run; not retained in the repository) --yes
+python -m bench.candidate_methods_merge --inputs candidate-methods-framework-calibration-all.json (source run; not retained in the repository) candidate-methods-framework-seeds-100-200.json (source run; not retained in the repository) \
   --expected-seeds 0 100 200 --output bench/results/candidate-methods-framework-final.json
 python -m bench.candidate_methods_report --input bench/results/candidate-methods-framework-final.json
 ```

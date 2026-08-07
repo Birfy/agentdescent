@@ -6,6 +6,12 @@ so you can reproduce it.
 
 ## The algorithm ports
 
+The eleven MethodPolicy ports (PromptBreeder through Gödel Agent) are measured
+in the [runtime matrix](matrix-overview.md) — live model, equal budgets, three
+schedulers — rather than in per-port rows here; the
+[matrix report](matrix-report.md) carries the current numbers.
+
+
 | Algorithm | Dataset | Settings | Held-out, before → after | Cost | Difficulty knob |
 |---|---|---|---|---|---|
 | **[GEPA](algo-gepa.md)** | HotpotQA | `--rounds 5 --fetch 40` | Pareto EM **0.500 → 0.600**; test EM **0.700** | 80 calls, 10 min | none |
@@ -14,6 +20,7 @@ so you can reproduce it.
 | **[EvoSkill](algo-evoskill.md)** | FinQA | `--dataset finqa --iterations 5` | val **0.487 → 0.573**; test **0.617**, 1 skill | 115 calls, 4 min | none |
 | **[DGM](algo-dgm.md)** | surrogate | `--generations 4` | resolve-rate **0.000 → 0.300**; test 0.200 | offline | none |
 | **[ADAS](algo-adas.md)** | MGSM | `--hard`, all 11 languages | direct **0.919** → 222-item hard subset; lift **not yet measured** | ~2 h, 6k–17k calls | ⚠︎ `--hard` |
+| **[OpenEvolve](algo-openevolve.md)** | function optimisation | live GLM-5.2 run | see [the measured section](algo-openevolve.md) | — | none |
 
 **Every row above was measured with `deepseek-v4-flash`.** That is stated at the
 top of this page, and it is not decoration: ⚠︎ marks a row whose *difficulty*
@@ -268,7 +275,7 @@ this dataset recorded `fusion.contested == 0` for every arm: GEPA's
 `InstructionSlot` holds the whole instruction in one key, so conflict resolution
 collapsed every pair of proposals to one and no fusion was ever built. Those runs
 measured per-round *selection*. This one installs
-[`reflective_merge`](aggregator.md#when-a-dictionary-update-cannot-merge-reflectivefusion)
+[`reflective_merge`](fusion-policies.md#the-deep-dive-when-a-dictionary-update-cannot-merge)
 on the merge arm, so contradicting proposals survive to the merge step and a
 model writes their union.
 

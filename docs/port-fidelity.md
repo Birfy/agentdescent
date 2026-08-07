@@ -1,6 +1,6 @@
 # Port fidelity — what each port follows, and where it departs
 
-Seven published self-evolution algorithms run on this engine. Every one of them
+Eighteen published self-evolution algorithms run on this engine — seven as benchmark-faithful ports, eleven as declared microports and analogues. Every one of them
 was published as a **serial** loop, and every one of them here runs in parallel
 with a merge step the original does not have. That is only an interesting claim
 if the algorithm is otherwise untouched — a "parallelised GEPA" that quietly
@@ -78,7 +78,7 @@ column of each section below says exactly where to look.
   `--workers` is the minibatch size. The Pareto set is the held-out split.
 * **Departures**: one module rather than many. Recorded because "GEPA on
   HotpotQA" without it would imply the multi-module search ran.
-* **Selection rule lives in**: `ParetoAggregator` in
+* **Selection rule lives in**: `ParetoWinFrequency` — GEPA's Algorithm-2 sampling as a named `SelectionPolicy` ([selection](selection.md)); `ParetoAggregator` delegates to it
   `examples/gepa/gepa_prompt_evolution.py` — per-instance domination, the
   `per_instance` mode of [`ParetoFrontier`](selection.md).
 * **Details**: [algo-gepa.md](algo-gepa.md)
@@ -96,7 +96,7 @@ column of each section below says exactly where to look.
 * **Why this one matters most**: it is the clearest case of the rule. A port
   faithful to the paper here would be a *better-sounding* algorithm that the
   authors' own code does not implement.
-* **Selection rule lives in**: `TopKFrontierAggregator` (sync) /
+* **Selection rule lives in**: `FrontierBest` — the frontier's best member as a named `SelectionPolicy`; the bounded top-K admission stays on `Frontier`
   `SgdSkillAggregator` (async) in
   `examples/evoskill/evoskill_skill_discovery.py` — the `topk_aggregate` mode of
   [`ParetoFrontier`](selection.md).
@@ -112,8 +112,9 @@ column of each section below says exactly where to look.
   scores ~0.900 for a strong model, leaving no headroom to detect a change — and
   it is stated because a reported lift on a filtered set is not a lift on the
   benchmark.
-* **Selection rule lives in**: the strict-gate aggregator in
-  `examples/skillopt/skillopt_skill_training.py`.
+* **Selection rule lives in**: best-of-batch in the strict-gate aggregator;
+  the gate itself is `StrictImprovement`, a named `AcceptancePolicy`
+  ([acceptance](acceptance-policies.md)).
 * **Details**: [algo-skillopt.md](algo-skillopt.md)
 
 ## ADAS — Meta Agent Search
@@ -128,9 +129,9 @@ column of each section below says exactly where to look.
   one: running model-written Python through `exec` is arbitrary code execution.
   It bounds what the port demonstrates — the *search* is faithful, the space it
   searches is smaller than upstream's.
-* **Selection rule lives in**: the keep-all archive in
-  `examples/adas/adas_meta_agent_search.py` — [`Archive`](selection.md) with
-  `sampling="uniform"`.
+* **Selection rule lives in**: the shipped [`Beam(1)`](selection.md) over the
+  keep-all archive — best-of-archive, byte-identical to the inline
+  strictly-greater tracking it replaced.
 * **Details**: [algo-adas.md](algo-adas.md)
 
 ## DGM — Darwin Gödel Machine
@@ -150,7 +151,7 @@ column of each section below says exactly where to look.
 * **A past departure, now fixed**: the port once had a third staged-eval rung
   upstream's self-improve loop does not use. It passes exactly two subsets, and
   the test above pins that it stops at medium.
-* **Selection rule lives in**: `dgm_parent_weights` in
+* **Selection rule lives in**: `DGMParentSelection` — `sigmoid(10·(s−0.5)) × 1/(1+children)` as a named `SelectionPolicy` over the archive
   `examples/dgm/dgm_self_improve.py` — [`Archive`](selection.md) with
   `sampling="novelty"`.
 * **Details**: [algo-dgm.md](algo-dgm.md)
@@ -168,7 +169,7 @@ column of each section below says exactly where to look.
   token-Jaccard diversity instead of evolving min/max scaling; candidate
   execution is deterministic, budgeted, AST-gated and Bubblewrap-isolated
   (Linux-only — the offline suite skips only the sandbox test elsewhere).
-* **Selection rule lives in**: the MAP-Elites island archive in
+* **Selection rule lives in**: `EpsilonGreedy` for the in-pool pick, on the MAP-Elites island archive (the archive structure is the mechanism and stays)
   `examples/openevolve/openevolve_program_evolution.py`.
 * **Details**: [algo-openevolve.md](algo-openevolve.md)
 
@@ -211,3 +212,5 @@ two runs of itself.
 
 The cells are empty because they have not been measured. Filling them in with a
 one-seed run would be worse than leaving them.
+
+The eleven MethodPolicy ports *are* measured under all three schedulers — see the [runtime matrix](matrix-report.md).

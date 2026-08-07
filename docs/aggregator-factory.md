@@ -27,7 +27,10 @@ ledger commit that rewrites the head.**
 | `PopulationAggregator(Aggregator)` | an archive of every distinct committed head (with held-out score) + any standard `SelectionPolicy` picking the next parent, committed back to dev; `finalize()` lands the archive's best | `examples/_population.py` — how the MethodPolicy ports' `Policies(selection=…)` declarations actually run |
 | `ParetoAggregator` | GEPA's pool with per-instance score rows and Algorithm-2 frontier sampling | `examples/gepa/` |
 | `DGMArchiveAggregator` | DGM's keep-all archive with `sigmoid(perf) × 1/(1+children)` parent selection | `examples/dgm/` |
-| `MetaSearchAggregator` | ADAS's keep-all archive over agent designs | `examples/adas/` |
+| `MetaSearchAggregator` | ADAS's keep-all archive over agent designs (head rule: shipped `Beam(1)`) | `examples/adas/` |
+| `TopKFrontierAggregator` | EvoSkill's bounded top-K frontier (parent rule: `FrontierBest`) | `examples/evoskill/` |
+| `SgdSkillAggregator` | EvoSkill's async variant: apply-then-amortised-validate with rollback | `examples/evoskill/` |
+| `StrictGateAggregator` | SkillOpt's strict gate (acceptance rule: `StrictImprovement`) + rejected-edit buffer + LR schedule | `examples/skillopt/` |
 
 ## The one trap
 

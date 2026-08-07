@@ -49,6 +49,7 @@ In [`examples/skillopt/skillopt_skill_training.py`](https://github.com/Birfy/age
 
 | Plug-in | `evolve()` slot | What it does |
 |---|---|---|
+| `StrictImprovement` | acceptance ([seam](acceptance-policies.md)) | the strict full-held-out gate as a named policy |
 | **`SkillDocStrategy`** | `strategy=` | turns the analyst's bounded edit patch (`append/insert_after/replace/delete`) into a `Diff` on the one-slot skill document |
 | **`StrictGateAggregator`** | `aggregator_factory=` | strict held-out-EM accept gate + the rejected-edit buffer (remembered in-epoch) |
 | **`LRScheduler`** | (edit budget) | the integer "learning-rate" cap on edits per step (`constant`/`linear`/`cosine`) |

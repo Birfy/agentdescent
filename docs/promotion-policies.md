@@ -15,3 +15,9 @@ reads, and promotion is the EMA-style confirmation between them.
 A clean run also promotes on `finalize()`: `target_reward` can fire on the
 very commit that reaches it, and the artifact the run was *for* must reach the
 branch production reads.
+
+## What the default knows that a replacement must be told
+
+**Promotion counts rounds *survived*, not commits.** Counting commits inverts
+the incentive: an artifact that converges stops committing and so can never be
+promoted, while one that thrashes promotes every K commits.

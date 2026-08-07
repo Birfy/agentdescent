@@ -8,8 +8,8 @@ control plane and the process that performs a rollout.
 
 `evolve()` runs rollouts in threads, and for this workload that is the measured
 right answer: a rollout is almost entirely waiting on a model, and
-[the numbers](efficiency.md#where-the-parallelism-actually-goes) are **7.1x** on
-I/O against **1.0x** on CPU. Nothing here is an attempt to make rollouts faster
+[the numbers](efficiency.md#threads-and-the-gil-is-this-really-parallel) are **5.8x** on
+I/O against **1.1x** on CPU. Nothing here is an attempt to make rollouts faster
 with processes.
 
 What processes buy is different and unavailable any other way:

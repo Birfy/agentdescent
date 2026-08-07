@@ -178,3 +178,17 @@ Each is a real `Strategy` you can read and reuse:
 | `SkillDocStrategy` | [SkillOpt](algo-skillopt.md) | one markdown doc under bounded edit operations |
 | `AgentDesignStrategy` | [ADAS](algo-adas.md) | one agentic-system design |
 | `HarnessStrategy` | [DGM](algo-dgm.md) | a coding agent's capability set |
+
+## Examples-level strategies
+
+The eleven MethodPolicy ports ride four shared strategies in
+[`examples/_method_policy.py`](https://github.com/Birfy/agentdescent/blob/main/examples/_method_policy.py) —
+the same seam, packaged with validation (an unparseable proposal is counted and
+produces no diff):
+
+| Strategy | Shape | Ports |
+|---|---|---|
+| `ValidatedSlot` | `SingleSlot` + a `ValueError`-raising validator and an invalid-proposal counter | [Self-Refine](algo-self-refine.md), [Absolute Zero](algo-absolute-zero.md), [Agent0](algo-agent0.md), [SICA](algo-sica.md), [Gödel Agent](algo-godel-agent.md) |
+| `FieldSlots` | a genome of named plain-text fields, one ledger key each — disjoint edits union-merge, contested fields model-merge | [PromptBreeder](algo-promptbreeder.md), [AFlow](algo-aflow.md), [R-Zero](algo-r-zero.md) |
+| `WindowedMemory` | append-only entries rendered as the last Ω — appends never contradict | [Reflexion](algo-reflexion.md) |
+| `SkillLibrary` | one validated entry per goal key; different goals accumulate and union-merge | [Voyager](algo-voyager.md), [SkillWeaver](algo-skillweaver.md) |

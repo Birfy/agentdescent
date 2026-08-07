@@ -26,3 +26,11 @@ cap diff size before cards ever reach the gate.
 evolve(tasks, reward, agent=agent, policies=Policies(
     acceptance=AdvantageAcceptance(DefaultAcceptance(0.5, 64, 4000))))
 ```
+
+## What the default knows that a replacement must be told
+
+**Acceptance reads the full held-out set, never the cheap layer.**
+`MergeContext` carries both (`base_counts` vs `base_cheap`) because the
+regression guard once read the cheap one, which `cheap_eval_tasks` sub-samples
+— so a four-task sample could veto a commit the full-set test had just
+approved. Ranking may use the cheap numbers; deciding to commit may not.

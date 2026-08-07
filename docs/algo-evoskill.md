@@ -66,6 +66,7 @@ In [`examples/evoskill/evoskill_skill_discovery.py`](https://github.com/Birfy/ag
 
 | Plug-in | `evolve()` slot | What it does |
 |---|---|---|
+| `FrontierBest` | selection ([seam](selection.md)) | best-of-frontier parent rule as a named policy |
 | **`SkillLibraryTree`** | `strategy=` | a proposed `SKILL.md` (`name :: body`) becomes a `Diff` on the skill library — a [`FileTree`](directory-evolution.md), so the library is a real directory of `SKILL.md` files |
 | **`TopKFrontierAggregator`** + **`Frontier`** | `aggregator_factory=` (**sync**) | the bounded top-K aggregate frontier; scores every candidate on held-out, commits the best member as the dev head |
 | **`SgdSkillAggregator`** | `aggregator_factory=` (**async**) | SGD-style skill descent: apply updates, validate every `val_every` steps, checkpoint + roll back on no held-out gain |

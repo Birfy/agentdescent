@@ -80,6 +80,8 @@ and *how*, that is *what*.
 |---|---|---|
 | `aggregator` | the optimizer: staleness → conflict → fusion → acceptance → commit | [Aggregator](aggregator.md) |
 | `defaults` | the shipped algorithm as replaceable pieces: conflict, fusion, acceptance, promotion | [Aggregator](aggregator.md) |
+| `fusion` | model-assisted merging: `ReflectiveFusion` + `KeepContradictions` (`reflective_merge`) | [Fusion policies](fusion-policies.md) |
+| `advantage` | group-relative signals: `GroupAdvantage`, `AdvantageAcceptance`, trust regions | [Acceptance policies](acceptance-policies.md) |
 | `stats` | the acceptance maths: Beta posterior, `P(Δ>0)`, annealed δ, UCB, difficulty weight | [Aggregator](aggregator.md) |
 | `verifier` | rule / learned / oracle, and the budget on the expensive one | [Verifier](verifier.md) |
 | `evaluator` | the gate's own bounded, reusable concurrency, separate from the rollouts' | [Verifier](verifier.md#the-evaluation-group) |
@@ -92,7 +94,8 @@ and *how*, that is *what*.
 
 | module | what it is | page |
 |---|---|---|
-| `policies` | the contracts: which decisions are replaceable, and what each is given | [Architecture](architecture.md#35-what-the-infrastructure-owns-and-what-the-algorithm-owns) |
+| `policies` | the contracts: which decisions are replaceable, and what each is given | [Choosing policies](policies.md) |
+| `baselines` | equal-budget baselines the results pages compare against | [Measured results](results.md) |
 | `metrics` | what the run cost: time, calls, staleness ratio, cache hits, sandbox waits | [Usage](usage.md#what-a-run-cost) |
 | `bench` | the configuration matrix and the rules that make comparing them mean something | [Efficiency](efficiency.md#the-configuration-matrix-bench) |
 

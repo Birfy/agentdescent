@@ -1,5 +1,9 @@
 # Candidate selection — where the next batch starts
 
+!!! note "One field of the bundle"
+    This is the `selection` field of the [Policies bundle](policies.md); where a keyword argument exists it is a shortcut onto that field, and an explicit argument wins over a bundle default.
+
+
 `evolve()` has a replaceable rule for almost every decision it makes: which task
 a worker rolls out ([sampling](sampling.md)), what a stale diff is worth
 ([staleness](staleness.md)), which diffs contradict, whether to fuse, whether to
