@@ -1,7 +1,7 @@
 # SkillWeaver — Web agent API synthesis
 
 **Fidelity class: `environment_analogue`** — see [port fidelity](port-fidelity.md) for
-what the classes mean. This is a candidate-method port: the mechanism is
+what the classes mean. This port is measured in the runtime matrix: the mechanism is
 preserved and measured under AgentDescent's runtimes; it is **not** a
 paper-benchmark reproduction.
 
@@ -39,9 +39,9 @@ execution throws**). The product is a growing library of plug-and-play APIs.
 *Pending: this section is populated from the live matrix
 (`bench/results/candidate-methods-framework-final.json`) after the
 post-restructuring rerun. See the
-[candidate-method overview](candidate-results-overview.md) for the matrix-wide
-tables (quality, [parallel speedup](candidate-parallel-speedup.md), and
-[async behaviour](candidate-async.md)).*
+[matrix overview](matrix-overview.md) for the matrix-wide
+tables (quality, [parallel speedup](matrix-parallel-speedup.md), and
+[async behaviour](matrix-async.md)).*
 
 | Mode | Quality (test, before → after) | E2E seconds | Engine seconds | TTQ |
 |---|---|---|---|---|

@@ -24,6 +24,6 @@ evolve(tasks, reward, agent=agent, n_workers=4,
 `ReflectiveFusion` installed alone is a no-op: `DefaultConflict` has already
 dropped the contradictions it exists to merge.
 
-The candidate-method runner applies exactly this split: text-valued artifacts
+The method runner applies exactly this split: text-valued artifacts
 get reflective merge, code/JSON-valued artifacts keep `DefaultConflict` —
-see the [candidate overview](candidate-results-overview.md).
+see the [matrix overview](matrix-overview.md).

@@ -1,14 +1,14 @@
-# Candidate methods — results overview
+# The runtime matrix — results overview
 
 *This page aggregates the live serial/sync/async matrix across all eleven
-candidate ports. It is **pending the post-restructuring rerun** of
+MethodPolicy ports. It is **pending the post-restructuring rerun** of
 `python -m bench.candidate_methods`; every table below is populated from
 `bench/results/candidate-methods-framework-final.json` by
 `bench/candidate_methods_report.py`. The previous run's report (against the
 pre-restructuring implementation) remains at
-[Candidate-method runtime study](algo-candidate-methods.md) for provenance.*
+[Runtime matrix](matrix-report.md) for provenance.*
 
-## The eleven ports
+## The eleven newer ports
 
 | Method | Fidelity class | Mechanism seams |
 |---|---|---|
@@ -41,5 +41,5 @@ fallback substitution removed, any gain is learned, not injected.*
 matrix now runs worker-sized merge batches, with reflective merge on
 text-valued artifacts.*
 
-See also: [parallel speedup](candidate-parallel-speedup.md) ·
-[async behaviour](candidate-async.md)
+See also: [parallel speedup](matrix-parallel-speedup.md) ·
+[async behaviour](matrix-async.md)

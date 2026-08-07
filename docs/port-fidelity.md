@@ -19,12 +19,14 @@ the axis the differences actually fall on, and because the answer is not always
     and say so. A port faithful to a paper that the authors' own implementation
     contradicts reproduces something nobody ran.
 
-!!! note "Candidate mechanisms are tracked separately"
-    The [candidate-method runtime study](algo-candidate-methods.md) covers 11
-    additional methods, but does not count compact domains or substituted
-    environments as faithful benchmark ports. Its per-method table records what
-    is preserved and whether the implementation is a mechanism microport or an
-    environment, inference, or self-edit analogue.
+!!! note "Fidelity is a per-port property, not a tier"
+    All eighteen ports sit side by side in
+    [Self-evolution algorithms](self-evolution-examples.md); what differs is
+    each port's recorded fidelity class. Eleven of them run compact domains or
+    substituted environments and say so on their pages -- a mechanism
+    microport or an environment, inference, or self-edit analogue is not a
+    faithful benchmark port, and the [runtime matrix](matrix-report.md)
+    measures them without pretending otherwise.
 
 ---
 

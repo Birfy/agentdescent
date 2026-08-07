@@ -1,4 +1,4 @@
-# Candidate methods — async behaviour
+# The runtime matrix — async behaviour
 
 *Pending the post-restructuring rerun. This page will carry the
 async-vs-sync comparison: `async_evolve` (barrier-free, completion-order merge

@@ -77,7 +77,11 @@ nav:
     - Complete example — skill evolution: skill-evolution.md
     - Efficiency experiments: efficiency.md
     - Measured results: results.md
-  - Self-evolution algorithms (faithful ports):
+    - Runtime matrix — overview: matrix-overview.md
+    - Runtime matrix — report: matrix-report.md
+    - Runtime matrix — parallel speedup: matrix-parallel-speedup.md
+    - Runtime matrix — async behaviour: matrix-async.md
+  - Self-evolution algorithms:
     - Overview: self-evolution-examples.md
     - Porting checklist: porting-checklist.md
     - Port fidelity: port-fidelity.md
@@ -85,25 +89,20 @@ nav:
     - GEPA — prompt evolution: algo-gepa.md
     - EvoSkill — skill discovery: algo-evoskill.md
     - SkillOpt — skill-document training: algo-skillopt.md
-    - ADAS — meta agent search (harness): algo-adas.md
-    - DGM — Darwin Gödel Machine (harness): algo-dgm.md
+    - ADAS — meta agent search: algo-adas.md
+    - DGM — Darwin Gödel Machine: algo-dgm.md
     - OpenEvolve — program evolution: algo-openevolve.md
-    - Candidate methods:
-      - Overview: candidate-results-overview.md
-      - Runtime study (matrix report): algo-candidate-methods.md
-      - Parallel speedup: candidate-parallel-speedup.md
-      - Async behaviour: candidate-async.md
-      - PromptBreeder: algo-promptbreeder.md
-      - AFlow: algo-aflow.md
-      - Reflexion: algo-reflexion.md
-      - Self-Refine: algo-self-refine.md
-      - Voyager: algo-voyager.md
-      - SkillWeaver: algo-skillweaver.md
-      - Absolute Zero: algo-absolute-zero.md
-      - R-Zero: algo-r-zero.md
-      - Agent0: algo-agent0.md
-      - SICA: algo-sica.md
-      - Godel Agent: algo-godel-agent.md
+    - PromptBreeder — genetic prompts: algo-promptbreeder.md
+    - AFlow — workflow search: algo-aflow.md
+    - Reflexion — episodic memory: algo-reflexion.md
+    - Self-Refine — feedback refinement: algo-self-refine.md
+    - Voyager — skill library: algo-voyager.md
+    - SkillWeaver — web APIs: algo-skillweaver.md
+    - Absolute Zero — zero-data self-play: algo-absolute-zero.md
+    - R-Zero — challenger/solver: algo-r-zero.md
+    - Agent0 — tool curriculum: algo-agent0.md
+    - SICA — self-edit: algo-sica.md
+    - Gödel Agent — self-modification: algo-godel-agent.md
   - Design records:
     - Evolving a directory: design-directory-evolution.md
 

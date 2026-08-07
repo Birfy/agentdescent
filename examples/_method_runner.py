@@ -1,4 +1,4 @@
-"""The single runner behind every candidate-method port.
+"""The single runner behind every MethodPolicy port.
 
 This is the only module that touches the execution plane: it owns the recorder,
 phase naming, budgets, mode dispatch, and the merge configuration. A
