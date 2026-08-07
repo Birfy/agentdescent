@@ -83,7 +83,45 @@ def add_standard_args(
         action="store_true",
         help="run the upstream algorithm's own semantics: one worker, no merge",
     )
+    parser.add_argument(
+        "--budget-rollouts",
+        type=int,
+        default=None,
+        help=("total rollouts, held fixed as workers vary -- required to compare "
+              "--serial against a parallel run (see budget_kwargs)"),
+    )
     return parser
+
+
+def budget_kwargs(args: argparse.Namespace) -> dict:
+    """``max_rollouts=`` for ``evolve()``, or nothing when no budget was asked for.
+
+    **A speedup measured without this is not a speedup.** Six of the seven ports
+    pass a fixed ``rounds`` and let ``n_workers`` multiply it, so an ``N=8`` arm
+    performs *eight times* the rollouts of the ``--serial`` arm. Comparing their
+    wall-clocks then reports eight times the model spend as parallel efficiency,
+    and comparing their final quality credits the extra spend to parallelism.
+    That is the confound :mod:`agentdescent.baselines` exists to remove, and
+    ``docs/results.md`` already carries a warning that a speedup table cannot
+    distinguish merging from sampling.
+
+    OpenEvolve is the exception and got it right on its own: it derives
+    ``rounds = iterations // workers``, so its total work is fixed and workers
+    only change how it is divided. That is why its speedup row means something
+    different from the other six unless they are budgeted -- which is a fact the
+    matrix has to state, not one a reader should have to find.
+
+    The engine has enforced this since ``evolve(max_rollouts=)`` shipped, and no
+    port passed it. Left ``None`` by default, because a port run on its own is
+    not a comparison and should keep the configuration its own docs describe;
+    the moment two arms are compared, both need it.
+
+    The synchronous path checks at the round barrier, so an ``N`` -worker arm
+    overshoots by up to ``N-1`` rollouts. ``result.rollouts`` is what was
+    actually spent -- report that rather than the budget.
+    """
+    return ({"max_rollouts": args.budget_rollouts}
+            if getattr(args, "budget_rollouts", None) else {})
 
 
 def is_openai_compatible(args: argparse.Namespace) -> bool:

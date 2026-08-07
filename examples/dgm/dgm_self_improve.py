@@ -68,7 +68,8 @@ from agentdescent.evolution import EvolvingArtifact, Task, evolve
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
 from examples._common import (add_standard_args, completion_for, confirm,
-                              worker_count)
+                              worker_count,
+                              budget_kwargs)
 
 SWEBENCH = ("princeton-nlp/SWE-bench_Verified", "test", "default")   # (dataset, split, config)
 
@@ -373,6 +374,7 @@ def run_dgm(instances: List[dict], generations: int = 12,
             evaluate_fn: Optional[Callable[[Agent, List[dict]], float]] = None,
             complete: Optional[Callable[[str], str]] = None, seed: int = 0,
             asynchronous: bool = False, async_ratio: int = 3, max_seconds: float = 20.0,
+            max_rollouts: Optional[int] = None,
             verbose: bool = False) -> DGMResult:
     """Drive DGM through `evolve()` (SWE instances split into trigger/held-out)."""
     evaluate_fn = evaluate_fn or make_surrogate_evaluator()
@@ -402,7 +404,8 @@ def run_dgm(instances: List[dict], generations: int = 12,
            max_concurrency=1 if asynchronous else selfimprove_size,
            asynchronous=asynchronous, async_ratio=async_ratio,
            max_seconds=max_seconds if asynchronous else None,
-           held_out_frac=0.5, aggregator_factory=factory, verbose=verbose)
+           held_out_frac=0.5, aggregator_factory=factory, verbose=verbose,
+           max_rollouts=max_rollouts)
     best = max(ctx.archive, key=lambda a: a.score)
     return DGMResult(ctx.archive, best, ctx.seed_score, best.score)
 
@@ -488,6 +491,7 @@ def main(argv=None) -> None:
           f"L1 harness)...\n")
     result = run_dgm(ds.trainval, generations=args.generations,
                      selfimprove_size=args.selfimprove_size, archive_mode=args.archive,
+                     **budget_kwargs(args),
                      complete=complete, seed=args.seed, asynchronous=args.asynchronous,
                      async_ratio=args.async_ratio, max_seconds=args.max_seconds, verbose=True)
 

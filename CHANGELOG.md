@@ -6,6 +6,30 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`--budget-rollouts` on every algorithm port**, forwarded as
+  `evolve(max_rollouts=)` through `examples._common.budget_kwargs`. Without it the
+  parallelisation matrix in `docs/port-fidelity.md` cannot be filled honestly: six
+  of the seven ports pass a fixed iteration count and let `n_workers` multiply it,
+  so an `N=8` arm runs **eight times** the rollouts of the `--serial` arm.
+  Measured on the engine at `rounds=24` — 1 worker: 24 rollouts; 2: 48; 4: 96;
+  8: **192**; with the budget, all four land on exactly 24. Comparing wall-clocks
+  across that gap reports eight times the model spend as parallel efficiency, and
+  comparing final quality credits the extra spend to parallelism — the confound
+  `agentdescent.baselines` exists to remove. `evolve(max_rollouts=)` had shipped
+  and **no port passed it**, the same shape of miss as `cheap_eval_tasks`.
+  `tests/test_example_entrypoints.py::test_every_port_can_hold_its_rollout_budget_fixed`
+  now refuses a port that cannot hold its budget fixed.
+
+  OpenEvolve needed no fixing and is recorded as the exception: it derives
+  `rounds = iterations // workers`, so its total work was already fixed and the
+  shared flag simply sets `--iterations`. Its speedup row is therefore the only
+  one in the matrix that was equal-budget before this existed — which is itself a
+  "semantics changed" entry, since one row of a table meaning something different
+  from the other six is the failure the column is there to prevent.
+
+
 ### Changed
 
 - **The fusion tournament is off by default; the union goes straight to the

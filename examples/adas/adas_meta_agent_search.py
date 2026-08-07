@@ -61,7 +61,8 @@ from agentdescent.evolution import EvolvingArtifact, Task, evolve, rule_id
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
 from examples._common import (add_standard_args, completion_for, confirm,
-                              is_openai_compatible, worker_count)
+                              is_openai_compatible, worker_count,
+                              budget_kwargs)
 
 MGSM_URL = "https://raw.githubusercontent.com/ShengranHu/ADAS/main/dataset/mgsm/mgsm_{lang}.tsv"
 # ADAS's MGSM language set (utils.ALL_LANGUAGES).
@@ -917,7 +918,8 @@ def run_meta_agent_search(complete: Completion, val: List[Tuple[str, str]],
                           generations: int, select: str = "adas", seed: int = 0,
                           asynchronous: bool = False, async_ratio: int = 3,
                           max_seconds: float = 45.0, held_out_frac: float = 0.5,
-                          n_workers: int = 2, verbose: bool = False) -> SearchResult:
+                          n_workers: int = 2, max_rollouts: Optional[int] = None,
+                          verbose: bool = False) -> SearchResult:
     """Drive Meta Agent Search through `evolve()` (val split into trigger/held-out)."""
     tasks = [Task(id=f"mgsm{i}", prompt=q, meta={"answer": a})
              for i, (q, a) in enumerate(val)]
@@ -953,7 +955,8 @@ def run_meta_agent_search(complete: Completion, val: List[Tuple[str, str]],
            # example in the repo.
            self_verify=False,
            eval_concurrency=EVAL_CONCURRENCY,
-           held_out_frac=held_out_frac, aggregator_factory=factory, verbose=verbose)
+           held_out_frac=held_out_frac, aggregator_factory=factory, verbose=verbose,
+           max_rollouts=max_rollouts)
     return SearchResult(ctx.archive, ctx.best_agent or {}, ctx.seed_fitness,
                         ctx.best_fitness, ctx.best_seed or {},
                         out.outcomes(), out.stop_reason, out.error)
@@ -1151,7 +1154,8 @@ def main(argv=None) -> None:
                                    asynchronous=args.asynchronous, async_ratio=args.async_ratio,
                                    max_seconds=args.max_seconds, n_workers=args.workers,
                                    # the engine's held-out split IS ds.val
-                                   held_out_frac=ds.val_frac, verbose=True)
+                                   held_out_frac=ds.val_frac, verbose=True,
+                                   **budget_kwargs(args))
 
     # Both numbers on the SAME held-out split. Reporting only the searched agent's
     # test accuracy cannot answer the question the run exists to answer -- on a

@@ -917,6 +917,14 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     # one worker, nothing to merge. Applied to args so the printed plan,
     # the cost estimate and the run cannot disagree about what ran.
     args.workers = worker_count(args, args.workers)
+    # This port already had the property the other six were missing: `iterations`
+    # is the total candidate budget and `rounds = iterations // workers`, so work
+    # is fixed and workers only change how it is divided. `--budget-rollouts` is
+    # therefore the same quantity under the shared name, not a second knob -- and
+    # mapping it here is what lets one matrix row be produced the same way as the
+    # other six.
+    if args.budget_rollouts:
+        args.iterations = args.budget_rollouts
     mode = "async" if args.asynchronous else ("serial" if args.serial else "sync")
     print("Algorithm: OpenEvolve program evolution on AgentDescent")
     print("Evaluator: pinned function-minimization combined score, Bubblewrap isolated")

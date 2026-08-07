@@ -56,7 +56,8 @@ from agentdescent.evolution import EvolvingArtifact, LLMAgent, Task, evolve, rul
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
 from examples._common import (add_standard_args, completion_for, confirm,
-                              score_tasks, worker_count)
+                              score_tasks, worker_count,
+                              budget_kwargs)
 
 HOTPOTQA = ("hotpotqa/hotpot_qa", "validation", "distractor")   # (dataset, split, config)
 
@@ -460,7 +461,8 @@ def main(argv=None) -> None:
                     asynchronous=args.asynchronous, async_ratio=args.async_ratio,
                     max_seconds=args.max_seconds if args.asynchronous else None,
                     held_out_frac=ds.val_frac,
-                    aggregator_factory=factory, verbose=True)
+                    aggregator_factory=factory, verbose=True,
+                    **budget_kwargs(args))
 
     agg: ParetoAggregator = factory.holder["agg"]  # type: ignore[attr-defined]
     best = agg.best_state.get("instruction", _SEED_INSTRUCTION)

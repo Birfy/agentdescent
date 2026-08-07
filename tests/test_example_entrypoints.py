@@ -68,6 +68,7 @@ def test_standard_args_have_one_definition():
         "--dry-run",
         "--yes",
         "--serial",
+        "--budget-rollouts", "64",
     ])
     assert args.provider == "openai"
     assert args.model == "test-model"
@@ -78,6 +79,42 @@ def test_standard_args_have_one_definition():
     assert args.dry_run is True
     assert args.yes is True
     assert args.serial is True
+    assert args.budget_rollouts == 64
+
+
+def test_a_budget_is_only_passed_when_one_was_asked_for():
+    """`None` must not reach `evolve(max_rollouts=)` as a budget of nothing."""
+    parser = add_standard_args(argparse.ArgumentParser())
+    assert common.budget_kwargs(parser.parse_args([])) == {}
+    assert common.budget_kwargs(parser.parse_args(["--budget-rollouts", "40"])) == {
+        "max_rollouts": 40}
+
+
+@pytest.mark.parametrize("port", PORTS, ids=PORT_IDS)
+def test_every_port_can_hold_its_rollout_budget_fixed(port):
+    """Without this, no speedup row in `docs/port-fidelity.md` means anything.
+
+    Six of the seven ports pass a fixed `rounds` and let `n_workers` multiply it,
+    so an `N=8` arm runs *eight times* the rollouts of the `--serial` arm.
+    Comparing their wall-clocks reports eight times the model spend as parallel
+    efficiency; comparing their final quality credits the extra spend to
+    parallelism. `evolve(max_rollouts=)` has existed since the equal-budget work
+    and **no port passed it** -- the same failure as `cheap_eval_tasks`, where the
+    knob shipped and the default nobody sets stayed the only default there is.
+
+    OpenEvolve is the exception: `rounds = iterations // workers` already fixes
+    total work, so it maps the shared flag onto `iterations` instead of adding a
+    second budget beside it.
+    """
+    source = pathlib.Path(inspect.getfile(port.module)).read_text(encoding="utf-8")
+    if port.module is openevolve:
+        assert "args.iterations = args.budget_rollouts" in source, (
+            "OpenEvolve's own iteration budget is the rollout budget; map it")
+        return
+    assert "budget_kwargs(args)" in source, (
+        f"{PORT_IDS[PORTS.index(port)]} cannot hold its budget fixed, so its "
+        "serial and parallel arms are not comparable")
+    assert "max_rollouts" in source or "budget_kwargs(args))" in source
 
 
 @pytest.mark.parametrize("port", PORTS, ids=PORT_IDS)
