@@ -112,3 +112,17 @@ through the [population aggregator](aggregator-factory.md): committed heads
 enter an archive, the policy picks the next parent from it, and the pick is a
 ledger commit. Declare `Policies(selection=…)` as usual — the candidate runner
 routes it there automatically.
+
+## Legacy-port policies
+
+The mechanism-heavy ports express their parent rules as policy classes at this
+seam (local where the upstream rule differs from a shipped policy — the
+difference is always documented on the class):
+
+| Policy | Rule | Port |
+|---|---|---|
+| `DGMParentSelection` | `sigmoid(10·(s−0.5)) × 1/(1+children)` sampling | [DGM](algo-dgm.md) |
+| `ParetoWinFrequency` | per-instance Pareto frontier, sampled by unique wins | [GEPA](algo-gepa.md) |
+| `FrontierBest` | best member of the bounded top-K frontier | [EvoSkill](algo-evoskill.md) |
+| shipped `Beam(1)` | best of the keep-all archive (exact match, no subclass) | [ADAS](algo-adas.md) |
+| `EpsilonGreedy` | exploit best with probability ε, else uniform | [OpenEvolve](algo-openevolve.md) |
