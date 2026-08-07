@@ -12,6 +12,8 @@ The comparison changes AgentDescent scheduling, not the candidate or proposal-ca
 
 A value above 1.0x means the comparison mode is faster. Every speedup is paired by method and seed.
 
+Port author: `cyanneko`.
+
 ## Main results
 
 | Method | Fidelity | Serial quality | Sync quality | Async quality | Serial E2E | Sync E2E | Async E2E | Sync / serial | Async / sync |
@@ -144,8 +146,8 @@ python -m bench.candidate_methods --provider openai --model glm-5.2 \
   --thinking disabled --temperature 0.0 --max-tokens 1024 \
   --output examples/candidate_methods/results/candidate-methods-framework-seeds-100-200.json --yes
 python -m bench.candidate_methods_merge --inputs examples/candidate_methods/results/candidate-methods-framework-calibration-all.json examples/candidate_methods/results/candidate-methods-framework-seeds-100-200.json \
-  --expected-seeds 0 100 200 --output examples/candidate_methods/results/candidate-methods-framework-final.json
-python -m bench.candidate_methods_report --input examples/candidate_methods/results/candidate-methods-framework-final.json
+  --expected-seeds 0 100 200 --output bench/results/candidate-methods-framework-final.json
+python -m bench.candidate_methods_report --input bench/results/candidate-methods-framework-final.json
 ```
 
 The runner reads `OPENAI_API_KEY` and `OPENAI_BASE_URL` from the environment, rotates mode order, writes each paid observation atomically, and stops if the implementation fingerprint changes.
@@ -158,4 +160,4 @@ The runner reads `OPENAI_API_KEY` and `OPENAI_BASE_URL` from the environment, ro
 - The principal supported claim is timing: equal candidate/proposal work can overlap; framework gate calls are measured because async can perform a different number of merge sweeps.
 - Async helps TTQ only when a useful completion can commit before a sync barrier; it need not improve full-return E2E time.
 
-Machine-readable source: `examples/candidate_methods/results/candidate-methods-framework-final.json`.
+Machine-readable source: `bench/results/candidate-methods-framework-final.json`.

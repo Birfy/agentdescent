@@ -80,6 +80,7 @@ nav:
     - ADAS — meta agent search (harness): algo-adas.md
     - DGM — Darwin Gödel Machine (harness): algo-dgm.md
     - OpenEvolve — program evolution: algo-openevolve.md
+    - Candidate-method runtime study: algo-candidate-methods.md
   - Design records:
     - Evolving a directory: design-directory-evolution.md
 

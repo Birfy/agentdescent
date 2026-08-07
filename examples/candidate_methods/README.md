@@ -66,9 +66,12 @@ python -m bench.candidate_methods \
 python -m bench.candidate_methods_merge \
   --inputs examples/candidate_methods/results/candidate-methods-framework-raw.json \
   --expected-seeds 0 100 200 \
-  --output examples/candidate_methods/results/candidate-methods-framework-final.json
+  --output bench/results/candidate-methods-framework-final.json
 python -m bench.candidate_methods_report
 ```
+
+Published outputs are the [live report](../../docs/algo-candidate-methods.md)
+and its [compact machine-readable result](../../bench/results/candidate-methods-framework-final.json).
 
 The runner reads `OPENAI_API_KEY` and `OPENAI_BASE_URL` from the environment,
 rotates mode order, writes every paid observation atomically, supports `--resume`,

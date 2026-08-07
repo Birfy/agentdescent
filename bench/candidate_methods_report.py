@@ -8,12 +8,8 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 
-DEFAULT_INPUT = Path(
-    "examples/candidate_methods/results/candidate-methods-framework-final.json"
-)
-DEFAULT_OUTPUT = Path(
-    "examples/candidate_methods/results/candidate-methods-framework-report.md"
-)
+DEFAULT_INPUT = Path("bench/results/candidate-methods-framework-final.json")
+DEFAULT_OUTPUT = Path("docs/algo-candidate-methods.md")
 
 DISPLAY_NAMES = {
     "promptbreeder": "PromptBreeder",
@@ -209,6 +205,8 @@ def render_report(payload: Mapping[str, Any], *, input_path: Path) -> str:
         "- `async_pipeline`: `async_evolve(...)` with completion-order merge sweeps.",
         "",
         "A value above 1.0x means the comparison mode is faster. Every speedup is paired by method and seed.",
+        "",
+        "Port author: `cyanneko`.",
         "",
         "## Main results",
         "",
