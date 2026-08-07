@@ -141,7 +141,7 @@ where it pays — the held-out eval runs concurrently (`eval_concurrency`) and a
 round's workers run concurrently (`max_concurrency`). Wall-clock was ~3 h,
 essentially `15 candidates × 30-item val`. The OpenHands backend's setup, the
 DeepSeek structured-output shim, and the Python ≥ 3.12 requirement are documented
-in [Connecting agents & LLMs → Tool-using agent backends](agents.md#running-the-openhands-backend).
+in [Backends → `openhands`](backends.md#openhands-a-real-openhands-agent).
 
 ## Dataset caveat
 
