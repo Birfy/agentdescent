@@ -83,12 +83,14 @@ def _spread(values: Iterable[Optional[float]], digits: int = 2) -> str:
 
 
 def _budget_note(arms: Dict[str, List[dict]], width: int) -> str:
-    """Empty when the arms really did spend the same budget, a warning when not.
+    """Empty when the arms really did spend the same budget, a note when not.
 
-    The pin is the whole comparison, so it is checked against what the cells
-    measured rather than trusted because a flag was passed. The synchronous path
-    checks at the round barrier, so a `width`-worker arm may legitimately
-    overshoot by up to `width - 1`.
+    The pin is checked against what the cells measured rather than trusted
+    because a flag was passed. The synchronous path checks at the round barrier,
+    so a `width`-worker arm may legitimately overshoot by up to `width - 1`; the
+    async path has no barrier and overshoots on its own schedule. A mismatch no
+    longer withholds the speedup -- :func:`_seconds_per_rollout` divides it out
+    -- but it is still worth saying which cells needed dividing.
     """
     spent = {arm: _median(c.get("engine_rollouts") for c in cells)
              for arm, cells in arms.items() if cells}
@@ -98,18 +100,44 @@ def _budget_note(arms: Dict[str, List[dict]], width: int) -> str:
     low, high = min(known.values()), max(known.values())
     if high - low <= max(0, width - 1):
         return ""
-    return (f"**unequal budget**: rollouts actually spent differ across arms "
-            f"({', '.join(f'{a}={v:.0f}' for a, v in sorted(known.items()))}) "
-            f"by more than the barrier overshoot — speedup withheld")
+    return (f"rollouts actually spent differ across arms "
+            f"({', '.join(f'{a}={v:.0f}' for a, v in sorted(known.items()))})")
 
 
-def _speedup(arms: Dict[str, List[dict]], arm: str, blocked: bool) -> str:
-    if blocked:
-        return "withheld"
-    base = _median(_net_wall(c) for c in arms["serial"])
-    other = _median(_net_wall(c) for c in arms[arm])
+def _seconds_per_rollout(cell: dict) -> Optional[float]:
+    """Wall-clock per rollout actually completed -- the unit a speedup divides.
+
+    Raw wall-clock only compares arms that spent the same budget, and they do
+    not: the sync path overshoots its budget at the round barrier by up to
+    `n_workers - 1`, and the async path, having no barrier, overshoots on its
+    own. Measured on the GEPA pilot the async arm completed **19** rollouts
+    against the control's 16 -- so a raw wall-clock ratio there is a rate
+    compared against a different amount of work, and it happens to *understate*
+    the wider arm, since that arm did more.
+
+    Dividing by the rollouts each cell actually completed makes the two sides
+    the same unit: seconds per rollout. `engine_rollouts` is the engine's own
+    count, not the requested budget, which is why the ports print it.
+    """
+    wall = _net_wall(cell)
+    done = cell.get("engine_rollouts")
+    if wall is None or not done:
+        return None
+    return wall / float(done)
+
+
+def _speedup(arms: Dict[str, List[dict]], arm: str, blocked: bool = False) -> str:
+    base = _median(_seconds_per_rollout(c) for c in arms["serial"])
+    other = _median(_seconds_per_rollout(c) for c in arms[arm])
     if not base or not other:
-        return "—"
+        # No `engine_rollouts` on one side: cells written before the ports
+        # printed it. Fall back to raw wall-clock rather than to nothing, and
+        # mark it, because that ratio carries whatever budget gap the arms had.
+        base = _median(_net_wall(c) for c in arms["serial"])
+        other = _median(_net_wall(c) for c in arms[arm])
+        if not base or not other:
+            return "—"
+        return f"{base / other:.2f}× ‡"
     return f"{base / other:.2f}×"
 
 
@@ -166,11 +194,14 @@ def render(payload: dict) -> str:
                f"async lag budget {payload.get('async_ratio', '?')}; "
                f"model `{payload.get('model')}` via `{payload.get('provider')}`.")
     out.append("")
-    out.append("Speedup is computed from wall-clock **net of time lost inside "
-               "failed calls**, so one arm's retry storm is not reported as the "
-               "other arm's scheduler. Quality is the held-out test score: "
-               "median across seeds, with the range, and the delta against the "
-               "serial control.")
+    out.append("Speedup is seconds per completed rollout, from wall-clock **net "
+               "of time lost inside failed calls** — so one arm's retry storm is "
+               "not reported as the other arm's scheduler, and an arm that "
+               "overran its budget is not credited with the extra work. Quality "
+               "is the held-out test score: median across seeds, with the range, "
+               "and the delta against the serial control. A `‡` marks a row "
+               "whose cells predate `engine_rollouts` and fall back to raw "
+               "wall-clock.")
     out.append("")
     out.append("| Algorithm | Dataset | Serial | Parallel N=" + str(width)
                + " | Async N=" + str(width) + " | Speedup sync / async "
@@ -189,7 +220,6 @@ def render(payload: dict) -> str:
         if name not in measured:
             out.append(f"| {name} | {row['dataset']} | — | — | — | — | — | — |")
             continue
-        blocked = bool(_budget_note(arms, width))
         walls = {arm: _spread((_net_wall(c) for c in arms[arm]), digits=0)
                  for arm in ARMS}
         # The dagger travels with the row so a reader scanning only the table
@@ -198,8 +228,7 @@ def render(payload: dict) -> str:
         out.append(
             f"| {label} | {row['dataset']} "
             f"| {walls['serial']} s | {walls['parallel']} s | {walls['async']} s "
-            f"| {_speedup(arms, 'parallel', blocked)} / "
-            f"{_speedup(arms, 'async', blocked)} "
+            f"| {_speedup(arms, 'parallel')} / {_speedup(arms, 'async')} "
             f"| {_quality(arms, 'parallel')} / {_quality(arms, 'async')} "
             f"| {_stale(arms)} |")
         for marker, text in (("", _budget_note(arms, width)),

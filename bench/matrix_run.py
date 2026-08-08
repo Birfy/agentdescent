@@ -18,6 +18,12 @@ as a converged run. Read `stale_discarded`/`stale_considered` on every async
 cell: a quality drop with a high stale rate is the lag budget, not the
 algorithm, and those need opposite fixes.
 
+The serial control runs with `--eval-concurrency 1`. `--serial` only lowers
+`n_workers`, so the control used to score its gate and its test split
+concurrently -- measured on GEPA, 3849s of model time inside a 2148s wall-clock
+on a *one-worker* run. A control that is already 1.8x parallel makes every
+speedup beside it the leftover parallelism rather than the parallelism.
+
 **Results are written after every cell**, because a full sweep is many hours of
 real model time and a sweep that only reports at the end reports nothing when it
 is interrupted. Re-running skips cells already in the output file, so a stopped
@@ -226,9 +232,24 @@ def _parse(text: str) -> Dict:
 
 def _cell(row: dict, arm: str, seed: int, args) -> Dict:
     """Run one cell and return what it cost and what it reached."""
+    # `--serial` only lowers `n_workers`; it does not touch `--eval-concurrency`,
+    # so the "serial" arm was still scoring its gate and its test split
+    # concurrently. Measured on GEPA: 3849s of model time inside a 2148s
+    # wall-clock on a one-worker run -- a 1.8x compression that can only come
+    # from overlapped evaluation. The control arm was therefore already
+    # partly parallel, and every speedup measured against it was the *remaining*
+    # parallelism rather than the parallelism.
+    #
+    # The published loop scores one task at a time, so the control does too.
+    # It is a real cost -- the serial arm gets slower and the speedups get
+    # larger -- which is why the value used is recorded in the output rather
+    # than hidden here.
+    eval_conc = args.serial_eval_concurrency if arm == "serial" else args.eval_concurrency
     cmd = [sys.executable, "-u", "-m", row["module"], "--yes",
            "--seed", str(seed), "--budget-rollouts", str(args.budget)]
-    cmd += row["size"] + ["--eval-concurrency", str(args.eval_concurrency)]
+    cmd += row["size"] + ["--eval-concurrency", str(eval_conc)]
+    if args.no_thinking:
+        cmd += ["--no-thinking"]
     if arm == "serial":
         cmd += ["--serial"]
     else:
@@ -267,6 +288,10 @@ def _cell(row: dict, arm: str, seed: int, args) -> Dict:
 
     cell = dict(row=row["name"], dataset=row["dataset"], arm=arm, seed=seed,
                 width=1 if arm == "serial" else args.width,
+                # Recorded per cell, not only in the header: it is the second
+                # concurrency in the run and it differs BY ARM, so a reader who
+                # only has the cells can still tell what the control was.
+                eval_concurrency=eval_conc,
                 budget=args.budget, wall_seconds=round(wall, 1), **_parse(text))
     if failed:
         # Keep the tail rather than a boolean: a row that failed is a finding, and
@@ -289,6 +314,9 @@ def _save(path: Optional[str], cells: List[Dict], args) -> None:
     with open(path, "w", encoding="utf-8") as handle:
         json.dump({"budget_rollouts": args.budget, "width": args.width,
                    "async_ratio": args.async_ratio,
+                   "eval_concurrency": args.eval_concurrency,
+                   "serial_eval_concurrency": args.serial_eval_concurrency,
+                   "no_thinking": bool(args.no_thinking),
                    "model": args.model, "provider": args.provider,
                    "cells": cells}, handle, indent=2)
 
@@ -307,7 +335,17 @@ def main(argv=None) -> None:
     p.add_argument("--provider", default="claude")
     p.add_argument("--model", default="GLM-5.2")
     p.add_argument("--eval-concurrency", type=int, default=16,
-                   help="held-out evaluations in flight; wall-clock only")
+                   help="held-out evaluations in flight on the parallel and "
+                        "async arms; wall-clock only")
+    p.add_argument("--serial-eval-concurrency", type=int, default=1,
+                   help="the same, for the serial control -- 1 by default "
+                        "because the published loop scores one task at a time, "
+                        "and a control that evaluates concurrently is already "
+                        "partly parallel (see _cell)")
+    p.add_argument("--no-thinking", action="store_true",
+                   help="pass --no-thinking to every cell: ask the backend to "
+                        "skip reasoning tokens. Changes model output, not just "
+                        "speed -- it lands in the recorded configuration")
     p.add_argument("--timeout", type=float, default=7200.0, help="seconds per cell")
     p.add_argument("--json", default="bench/results/matrix.json")
     p.add_argument("--logs", default="bench/results/matrix-logs",
@@ -332,7 +370,10 @@ def main(argv=None) -> None:
           f"= {len(rows) * len(arms) * len(seeds)} cells, {len(done)} already done, "
           f"{len(todo)} to run")
     print(f"budget: {args.budget} rollouts on EVERY arm; parallel/async width "
-          f"{args.width}, async lag budget {args.async_ratio}\n")
+          f"{args.width}, async lag budget {args.async_ratio}")
+    print(f"eval concurrency: {args.eval_concurrency} on the parallel/async arms, "
+          f"{args.serial_eval_concurrency} on the serial control"
+          f"{'; reasoning tokens disabled' if args.no_thinking else ''}\n")
     if not args.yes:
         print("pass --yes to run (this spends real model time)")
         return
