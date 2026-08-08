@@ -180,10 +180,19 @@ def test_a_worker_does_not_read_the_ledger_once_per_rollout():
     and shutdown cost a handful. A worker reading per rollout adds a term this
     bound has no room for -- measured on this workload, 46 reads before and 22
     after, against a budget of 27.
+
+    The constant is 16 rather than the 12 this workload actually spends, and the
+    slack is the point. At 12 the bound sat exactly on the observed value: ten
+    local runs all reported 27 reads against a budget of 27, so any single extra
+    read failed the run, and CI duly produced one (31 reads for 6 sweeps, a
+    constant of 13 -- the startup/shutdown path is timing-dependent in a way the
+    per-sweep term is not). A zero-margin assertion is a flake, not a guarantee.
+    What it exists to catch is an order-of-magnitude term: a per-rollout read
+    adds ~21 on this workload, which clears any of these budgets by a mile.
     """
     result, seen = _counting_run()
     assert result.rollouts > 0 and result.history, "premise: the run did something"
-    budget = 3 * len(result.history) + 12
+    budget = 3 * len(result.history) + 16
     assert seen["reads"] <= budget, (
         f"{seen['reads']} ledger reads for {len(result.history)} sweeps and "
         f"{result.rollouts} rollouts (budget {budget}) -- a worker is asking git "
