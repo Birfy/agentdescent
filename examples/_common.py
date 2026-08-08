@@ -111,6 +111,14 @@ def add_standard_args(
               "the cheap layer (see agentdescent.fusion.reflective_merge)"),
     )
     parser.add_argument(
+        "--eval-cache",
+        default="",
+        metavar="DIR",
+        help=("memoise held-out evaluations to this directory, shared across "
+              "processes (see eval_cache_kwargs). Off by default: a cache that "
+              "outlives the run changes what a rerun measures"),
+    )
+    parser.add_argument(
         "--no-thinking",
         action="store_true",
         help=("ask the backend not to emit reasoning tokens (Anthropic-shaped "
@@ -232,6 +240,34 @@ def report_engine(result) -> None:
           f"stale_considered={result.stale_considered}  "
           f"stale_discarded={result.stale_discarded}  "
           f"redispatched={result.redispatched}", flush=True)
+
+
+def eval_cache_kwargs(args: argparse.Namespace) -> dict:
+    """``policies=Policies(eval_cache=...)`` for ``--eval-cache``, or nothing.
+
+    The engine has shipped :class:`~agentdescent.evalcache.FileCache` -- "two
+    processes on one machine stop paying twice for the same gate" -- and every
+    port used the in-process default, so every gate was re-paid on every run.
+
+    ADAS is the clearest case: its seed archive is seven *hand-designed* programs
+    scored over the whole validation split before round 0, and each program is
+    itself several model calls, so a run begins by spending several hundred calls
+    on an evaluation whose inputs never change. A three-arm, three-seed sweep pays
+    that nine times, and a calibration session pays it once per attempt.
+
+    Off by default, and that is not timidity: a persistent cache makes a rerun
+    return the first run's numbers. That is exactly what you want while sizing a
+    configuration and exactly what you do not want when the question is run-to-run
+    variance -- which, on these workloads, is often the question. Turn it on for
+    a sweep whose cells share a dataset and a seed; leave it off when measuring
+    spread.
+    """
+    directory = getattr(args, "eval_cache", "")
+    if not directory:
+        return {}
+    from agentdescent import Policies
+    from agentdescent.evalcache import FileCache
+    return {"policies": Policies(eval_cache=FileCache(directory))}
 
 
 def is_openai_compatible(args: argparse.Namespace) -> bool:

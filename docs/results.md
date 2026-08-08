@@ -84,7 +84,7 @@ comes from a knob calibrated against that model. Those rows do not transfer.
     a reasoning model. At the library default the meta-agent returns empty content
     on every call and no design reaches the archive — and an empty completion
     scores as a wrong answer rather than raising.
-    [Details](algo-adas.md#measured-mgsm-with-deepseek).
+    [Details](algo-adas.md#give-a-reasoning-model-a-real-token-budget).
 
 Each learned something specific to the failure it was shown:
 

@@ -60,9 +60,10 @@ from agentdescent.evolvable import Diff, EvidenceCard
 from agentdescent.evolution import EvolvingArtifact, Task, evolve, rule_id
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
+from agentdescent.staleness import get_policy
 from examples._common import (add_standard_args, completion_for, confirm,
                               is_openai_compatible, worker_count,
-                              budget_kwargs, report_engine)
+                              budget_kwargs, eval_cache_kwargs, report_engine)
 
 MGSM_URL = "https://raw.githubusercontent.com/ShengranHu/ADAS/main/dataset/mgsm/mgsm_{lang}.tsv"
 # ADAS's MGSM language set (utils.ALL_LANGUAGES).
@@ -89,6 +90,20 @@ def _extract_int(text: str) -> Optional[str]:
     else:
         m_val = m.group(1)
     return m_val.replace(",", "")
+
+
+def _extract_choice(text: str) -> Optional[str]:
+    """Pull the final A-D choice out of free-form model output.
+
+    The DSL's blocks are answer-format agnostic -- they compose calls -- but the
+    thing they return has to be comparable to a gold answer, and MGSM's is an
+    integer while GPQA's is a option label. So the extractor travels with the
+    dataset rather than being wired into the blocks.
+    """
+    m = re.findall(r"Answer:\s*\(?([A-D])\)?", text, re.IGNORECASE)
+    if not m:
+        m = re.findall(r"\b([A-D])\b", text)
+    return m[-1].upper() if m else None
 
 
 def _majority(answers: List[Optional[str]]) -> Optional[str]:
@@ -164,10 +179,20 @@ def program_cost(program: dict, depth: int = 0) -> int:
 
 @dataclass
 class Interpreter:
-    """Runs a DSL agent program over one MGSM question via LLM calls."""
+    """Runs a DSL agent program over one question via LLM calls.
+
+    ``extract`` and ``verb`` are the only things that differ between the domains
+    ADAS searches on: MGSM wants an integer out of "solve the math problem",
+    GPQA a choice letter out of "answer the multiple-choice question". The
+    control-flow blocks -- which are what Meta Agent Search actually searches
+    over -- are identical either way.
+    """
 
     complete: Completion
     max_samples: int = 5
+    extract: Callable[[str], Optional[str]] = _extract_int
+    verb: str = "Solve the math problem."
+    tail: str = "the line `Answer: <integer>`"
 
     def run(self, program: dict, question: str) -> Optional[str]:
         block = program["block"]
@@ -195,26 +220,26 @@ class Interpreter:
         return self.complete(prompt)
 
     def _cot(self, q: str) -> Optional[str]:
-        return _extract_int(self._ask(
-            f"Solve the math problem. Think step by step, then end with "
-            f"`Answer: <integer>`.\n\nProblem: {q}"))
+        return self.extract(self._ask(
+            f"{self.verb} Think step by step, then end with "
+            f"{self.tail}.\n\nProblem: {q}"))
 
     def _step_back(self, q: str) -> Optional[str]:
         principles = self._ask(f"What general principles/steps solve this kind of "
                                f"problem? Be brief.\n\nProblem: {q}")
-        return _extract_int(self._ask(
+        return self.extract(self._ask(
             f"Using these principles:\n{principles}\n\nNow solve step by step and "
-            f"end with `Answer: <integer>`.\n\nProblem: {q}"))
+            f"end with {self.tail}.\n\nProblem: {q}"))
 
     def _reflexion(self, q: str, n: int) -> Optional[str]:
-        answer = self._ask(f"Solve step by step, end with `Answer: <integer>`.\n\n"
-                           f"Problem: {q}")
+        answer = self._ask(f"{self.verb} Think step by step, end with {self.tail}."
+                           f"\n\nProblem: {q}")
         for _ in range(max(0, n)):
             answer = self._ask(
                 f"Problem: {q}\n\nYour previous attempt:\n{answer}\n\nCritique it "
                 f"for errors, then give a corrected solution ending with "
-                f"`Answer: <integer>`.")
-        return _extract_int(answer)
+                f"{self.tail}.")
+        return self.extract(answer)
 
     def _debate(self, q: str, roles: List[str], rounds: int) -> Optional[str]:
         transcript = ""
@@ -222,18 +247,18 @@ class Interpreter:
             for role in roles:
                 reply = self._ask(
                     f"You are a {role}. Problem: {q}\n\nDebate so far:\n{transcript}\n\n"
-                    f"Give your reasoning and a tentative `Answer: <integer>`.")
+                    f"Give your reasoning and a tentative {self.tail}.")
                 transcript += f"\n[{role}] {reply}\n"
-        return _extract_int(self._ask(
+        return self.extract(self._ask(
             f"Given this debate, state the final consensus ending with "
-            f"`Answer: <integer>`.\n\n{transcript}"))
+            f"{self.tail}.\n\n{transcript}"))
 
     def _role_assignment(self, q: str, roles: List[str]) -> Optional[str]:
         choice = self._ask(f"Which single expert is best for this problem? "
                            f"Choose one of {roles}. Reply with just the name.\n\n{q}")
         role = next((r for r in roles if r.lower() in choice.lower()), roles[0])
-        return _extract_int(self._ask(
-            f"You are a {role}. Solve step by step, end with `Answer: <integer>`."
+        return self.extract(self._ask(
+            f"You are a {role}. {self.verb} Step by step, end with {self.tail}."
             f"\n\nProblem: {q}"))
 
 
@@ -526,15 +551,87 @@ def evaluate_agent(interp: Interpreter, program: dict, examples: List[Tuple[str,
 
     def one(ex):
         q, a = ex
-        return 1.0 if score_mgsm(a, interp.run(program, q)) else 0.0
+        return 1.0 if score_answer(a, interp.run(program, q)) else 0.0
 
     with ThreadPoolExecutor(max(1, min(concurrency, len(examples)))) as pool:
         return list(pool.map(one, examples))
 
 
+GPQA_URL = "https://raw.githubusercontent.com/ShengranHu/ADAS/main/dataset/gpqa_diamond.csv"
+
+#: The domain's answer contract, in one place. ADAS searches four domains
+#: upstream (`_mgsm`, `_gpqa`, `_drop`, `_arc`); what differs between them is the
+#: question source, how an answer is pulled out of free text, and how it is
+#: compared to gold. The control-flow blocks Meta Agent Search actually searches
+#: over are identical, which is why swapping the domain is a *configuration*
+#: change here and not a fidelity one.
+DOMAINS = {
+    "mgsm": dict(name="MGSM", extract=_extract_int,
+                 verb="Solve the math problem.",
+                 tail="the line `Answer: <integer>`"),
+    "gpqa": dict(name="GPQA Diamond", extract=_extract_choice,
+                 verb="Answer the multiple-choice question.",
+                 tail="the line `Answer: <letter>`"),
+}
+
+
+def build_gpqa_examples(limit: int, seed: int = 0) -> List[Tuple[str, str]]:
+    """GPQA Diamond as (question-with-choices, gold-label) pairs.
+
+    The 198 rows ship with ADAS itself (`dataset/gpqa_diamond.csv`), so this
+    needs no HuggingFace gate. **The options are shuffled per item**: the CSV
+    stores the correct answer in its own column and the three distractors in
+    theirs, so presenting them in file order would put the answer at A every
+    time and the search would discover "always say A".
+    """
+    import csv
+    import io
+    rows = list(csv.DictReader(io.StringIO(fetch_text(GPQA_URL))))
+    rng = random.Random(seed)
+    rng.shuffle(rows)
+    out: List[Tuple[str, str]] = []
+    for i, r in enumerate(rows[:limit]):
+        options = [r["Correct Answer"], r["Incorrect Answer 1"],
+                   r["Incorrect Answer 2"], r["Incorrect Answer 3"]]
+        order = list(range(4))
+        random.Random(seed * 1000 + i).shuffle(order)
+        body = "\n".join(f"{'ABCD'[pos]}. {options[o].strip()}"
+                          for pos, o in enumerate(order))
+        out.append((f"{r['Question'].strip()}\n\nChoices:\n{body}",
+                    "ABCD"[order.index(0)]))
+    return out
+
+
+#: The active domain, set once by ``main`` from ``--dataset``. A module global
+#: because the scorer and the interpreter are constructed in four places that do
+#: not otherwise share state, and threading a config object through all of them
+#: would be a bigger change than the domain swap itself.
+DOMAIN = "mgsm"
+
+
+def interpreter(complete: Completion) -> "Interpreter":
+    """An `Interpreter` wired to the active domain's answer contract."""
+    d = DOMAINS[DOMAIN]
+    return Interpreter(complete, extract=d["extract"], verb=d["verb"], tail=d["tail"])
+
+
+def score_answer(target: str, prediction: Optional[str]) -> bool:
+    """Compare a prediction to gold under the active domain's rule."""
+    return (score_choice(target, prediction) if DOMAIN == "gpqa"
+            else score_mgsm(target, prediction))
+
+
+def score_choice(target: str, prediction: Optional[str]) -> bool:
+    """Label equality -- GPQA's scoring, and the whole of it."""
+    return prediction is not None and target.strip().upper() == prediction.strip().upper()
+
+
 def load_dataset(langs: List[str], per_lang: int, seed: int = 0,
-                 ratios=(0.5, 0.25, 0.25)) -> Dataset:
-    """MGSM (q, a) examples split into train / val (search) / test."""
+                 ratios=(0.5, 0.25, 0.25), dataset: str = "mgsm") -> Dataset:
+    """(q, a) examples split into train / val (search) / test."""
+    if dataset == "gpqa":
+        return split_dataset(build_gpqa_examples(per_lang * max(1, len(langs)), seed=seed),
+                             ratios=ratios, seed=seed, name="GPQA Diamond")
     return split_dataset(build_examples(langs, per_lang, seed=seed),
                          ratios=ratios, seed=seed, name="MGSM")
 
@@ -598,7 +695,8 @@ def fmt_score(x: Optional[float]) -> str:
 
 
 def estimate_calls(generations: int, n_train: int, n_val: int, n_test: int,
-                   n_workers: int = 2) -> Tuple[int, int]:
+                   n_workers: int = 2,
+                   budget_rollouts: Optional[int] = None) -> Tuple[int, int]:
     """``(typical, ceiling)`` model calls for a run of this shape.
 
     The old estimate was ``(7 + generations) * (n_val + n_test) * 3`` computed
@@ -613,6 +711,14 @@ def estimate_calls(generations: int, n_train: int, n_val: int, n_test: int,
     a candidate at the mean seed cost, the ceiling at the cap. Not every
     generation yields a candidate either (a proposal is only requested when the
     trigger rollout fails), so even the low end is an over-estimate."""
+    # `--budget-rollouts` is what stops a run whenever it is set, and the idiom
+    # for using it is `--generations 9999` so the iteration knob cannot bind
+    # first. Pricing the run at 9999 generations then reports a ceiling of ten
+    # million calls for a twelve-rollout run -- the estimate is the number a
+    # caller uses to decide whether they can afford this at all, so it has to
+    # price what will actually happen.
+    if budget_rollouts:
+        generations = max(1, -(-budget_rollouts // max(1, n_workers)))
     seeds = seed_archive()
     costs = [program_cost(s["program"]) for s in seeds]
     seed_calls = sum(costs) * n_val
@@ -683,7 +789,7 @@ def evaluate(complete: Completion, program: dict,
     """Mean MGSM accuracy of an agent program on a held-out split."""
     if not examples:
         return 0.0
-    return sum(evaluate_agent(Interpreter(complete), program, examples,
+    return sum(evaluate_agent(interpreter(complete), program, examples,
                               concurrency=EVAL_CONCURRENCY)) / len(examples)
 
 
@@ -829,8 +935,30 @@ class MetaSearchAggregator(AggregatorProtocol):
             return
         self._seeded = True
         head = self.ledger.snapshot(Ledger.DEV).get(self.aid)
-        for a in seed_archive():
-            mean, ci = self._fitness(head, canonical(a["program"]))
+        # The seven designs are scored **concurrently**, not one after another.
+        # `_fitness` already fans out over the held-out items, but its width is
+        # `min(EVAL_CONCURRENCY, len(held_out))` -- so at a 7-item validation
+        # split it runs 7 calls at a time no matter what `--eval-concurrency`
+        # says, and the seven designs queue behind each other. Measured on
+        # GPQA at 44 s a call: 19 calls per question serialised across designs is
+        # a quarter-hour before round 0 begins.
+        #
+        # Nothing here depends on anything else: the designs are fixed, the
+        # split is fixed, and a design's score is independent of the others'.
+        # `_record` is the one shared write, so it stays on this thread.
+        seeds = seed_archive()
+        # Outer width divides rather than multiplies: `_fitness` already opens
+        # `min(EVAL_CONCURRENCY, len(held_out))` threads of its own, so an outer
+        # pool of `EVAL_CONCURRENCY` would put `EVAL_CONCURRENCY x len(held_out)`
+        # calls in flight -- the squared fan-out this repo has already been bitten
+        # by once, on GEPA's D_pareto sweep.
+        inner = max(1, min(EVAL_CONCURRENCY, len(self.verifier.held_out) or 1))
+        outer = max(1, min(len(seeds), EVAL_CONCURRENCY // inner))
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(outer) as pool:
+            scored = list(pool.map(
+                lambda a: self._fitness(head, canonical(a["program"])), seeds))
+        for a, (mean, ci) in zip(seeds, scored):
             self._record(a["name"], a["thought"], a["program"], mean, ci, seed=True)
         self.ctx.seed_fitness = self.ctx.best_fitness
         self.ctx.best_seed = dict(self.ctx.best_agent)
@@ -936,13 +1064,15 @@ def run_meta_agent_search(complete: Completion, val: List[Tuple[str, str]],
                           generations: int, select: str = "adas", seed: int = 0,
                           asynchronous: bool = False, async_ratio: int = 3,
                           max_seconds: float = 45.0, held_out_frac: float = 0.5,
+                          staleness: str = "guarded",
+                          policy_kwargs: Optional[dict] = None,
                           n_workers: int = 2, max_rollouts: Optional[int] = None,
                           verbose: bool = False) -> SearchResult:
     """Drive Meta Agent Search through `evolve()` (val split into trigger/held-out)."""
     tasks = [Task(id=f"mgsm{i}", prompt=q, meta={"answer": a})
              for i, (q, a) in enumerate(val)]
     ctx = AdasContext(select=select, rng_seed=seed)
-    interp = Interpreter(complete)
+    interp = interpreter(complete)
 
     def run(rendered, task):
         try:
@@ -952,7 +1082,7 @@ def run_meta_agent_search(complete: Completion, val: List[Tuple[str, str]],
         return interp.run(program, task.prompt) or ""
 
     def reward(task, output):
-        return 1.0 if score_mgsm(task.meta["answer"], output) else 0.0
+        return 1.0 if score_answer(task.meta["answer"], output) else 0.0
 
     def factory(ledger, verifier, audit, config, policy):
         agg = MetaSearchAggregator(ledger, verifier, ctx,
@@ -973,6 +1103,13 @@ def run_meta_agent_search(complete: Completion, val: List[Tuple[str, str]],
            # example in the repo.
            self_verify=False,
            eval_concurrency=EVAL_CONCURRENCY,
+           # A discarded card is a whole meta-agent proposal plus its two
+           # Reflexion refinement rounds -- the most expensive unit of work in
+           # this port -- and the archive is keep-all, so a design that arrives
+           # late still belongs in it. `full` rebases onto the current head and
+           # lets the archive record it, which is the only "gate" ADAS has.
+           staleness_policy=get_policy(staleness),
+           **(policy_kwargs or {}),
            held_out_frac=held_out_frac, aggregator_factory=factory, verbose=verbose,
            max_rollouts=max_rollouts)
     if verbose:
@@ -991,6 +1128,16 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
     add_standard_args(p, max_seconds_default=60.0, eval_concurrency_default=16)
     p.add_argument("--generations", type=int, default=6)
+    p.add_argument("--dataset", default="mgsm", choices=["mgsm", "gpqa"],
+                   help=("which of ADAS's own domains to search on. MGSM is "
+                         "saturated for a strong model -- measured, "
+                         "deepseek-v4-flash scores 1.000 on Chain-of-Thought in "
+                         "every language including sw/te/th/bn, so all seven "
+                         "seed designs tie and the meta-agent has no signal to "
+                         "condition on. GPQA Diamond ships with ADAS too "
+                         "(`dataset/gpqa_diamond.csv`, no HF gate) and measures "
+                         "0.625 there: above random (0.250) and well below the "
+                         "ceiling"))
     p.add_argument("--langs", default="en,es,fr",
                    help=f"comma-separated MGSM languages (of {','.join(ALL_LANGUAGES)})")
     p.add_argument("--per-lang", type=int, default=8, help="validation examples per language")
@@ -1005,6 +1152,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "budget is spent on hidden reasoning first, so too small a "
                         "cap returns EMPTY content -- which scores as a wrong "
                         "answer and silently understates every agent")
+    p.add_argument("--staleness", default="guarded",
+                   choices=["guarded", "reflective", "full"],
+                   help=("what to do with a design proposed against an archive "
+                         "the merger has since moved (agentdescent.staleness)"))
     p.add_argument("--workers", type=int, default=2,
                    help="meta-agents proposing per generation. A proposal is only "
                         "requested when the generation's trigger rollout FAILS, so "
@@ -1036,6 +1187,7 @@ def main(argv=None) -> None:
     # the cost estimate and the run cannot disagree about what ran.
     args.workers = worker_count(args, args.workers)
 
+    globals()["DOMAIN"] = args.dataset
     langs = [l.strip() for l in args.langs.split(",") if l.strip() in ALL_LANGUAGES]
     # `not` binds tighter than `and`, so the guard needs its own parentheses --
     # without them `--train-frac 0.9 --test-frac 0.5` passed and produced a
@@ -1056,19 +1208,30 @@ def main(argv=None) -> None:
         print(f"Parallel : {args.workers} meta-agents propose concurrently each "
               "generation (synchronous DP; the archive merge is the barrier)")
     if args.dry_run:
-        print(f"Data     : langs={langs}, per-lang={args.per_lang}; deferred "
+        print(f"Data     : {DOMAINS[DOMAIN]['name']}, "
+              + (f"langs={langs}, " if args.dataset == "mgsm" else "")
+              + f"per-lang={args.per_lang}; deferred "
               "(dry-run performs no network access)")
         print("\n[dry-run] plan only; no dataset or model API was accessed.")
         return
 
-    langmap = language_of(langs, args.per_lang, seed=args.seed)
-    pool = build_examples(langs, args.per_lang, seed=args.seed)
-    ds = split_dataset(pool, ratios=ratios, seed=args.seed, name="MGSM",
-                       stratify_key=lambda ex: langmap.get(ex[0], "?"))
+    if args.dataset == "gpqa":
+        pool = build_gpqa_examples(args.per_lang * max(1, len(langs)), seed=args.seed)
+        # Stratify on the gold label so val and test get the same mix of correct
+        # positions -- an unstratified split can hand one arm a label the model
+        # happens to favour, and that difference reads as a lift.
+        ds = split_dataset(pool, ratios=ratios, seed=args.seed, name="GPQA Diamond",
+                           stratify_key=lambda ex: ex[1])
+    else:
+        langmap = language_of(langs, args.per_lang, seed=args.seed)
+        pool = build_examples(langs, args.per_lang, seed=args.seed)
+        ds = split_dataset(pool, ratios=ratios, seed=args.seed, name="MGSM",
+                           stratify_key=lambda ex: langmap.get(ex[0], "?"))
     harness = EvolvingArtifact("agentic_system", blast_radius=0.6)
     print(f"Governance: harness artifact blast_radius={harness.blast_radius} "
           f"-> {classify(harness).name} (harness changes are high-blast-radius)")
-    print(f"Loaded   : langs={langs}; {len(pool)} items")
+    print(f"Loaded   : {DOMAINS[DOMAIN]['name']}; {len(pool)} items"
+          + (f"; langs={langs}" if args.dataset == "mgsm" else ""))
     print(f"Seeds    : {', '.join(a['name'] for a in seed_archive())}")
     print("\nExample problem:")
     print("  Q:", ds.train[0][0][:150])
@@ -1124,7 +1287,7 @@ def main(argv=None) -> None:
             # and the run then measures the agents against items they were never
             # actually wrong about. One extractor for both sides, so the subset
             # means what it says.
-            score = 1.0 if score_mgsm(a, _extract_int(out or "")) else 0.0
+            score = 1.0 if score_answer(a, DOMAINS[DOMAIN]["extract"](out or "")) else 0.0
             cache.put(q, score)
             verdicts[q] = score
             return score
@@ -1153,7 +1316,8 @@ def main(argv=None) -> None:
 
     ntr, nva, nte = ds.sizes()
     print(f"Split    : {ntr} trigger / {nva} val (fitness) / {nte} test")
-    lo, hi = estimate_calls(args.generations, ntr, nva, nte, args.workers)
+    lo, hi = estimate_calls(args.generations, ntr, nva, nte, args.workers,
+                            budget_rollouts=args.budget_rollouts)
     print(f"Budget   : ~{lo}-{hi} model calls (each candidate is a multi-step "
           f"program, run on every val item)")
     if nva < 20 or nte < 20:
@@ -1167,7 +1331,10 @@ def main(argv=None) -> None:
                                    asynchronous=args.asynchronous, async_ratio=args.async_ratio,
                                    max_seconds=args.max_seconds, n_workers=args.workers,
                                    # the engine's held-out split IS ds.val
-                                   held_out_frac=ds.val_frac, verbose=True,
+                                   held_out_frac=ds.val_frac,
+                                   staleness=args.staleness,
+                                   policy_kwargs=eval_cache_kwargs(args),
+                                   verbose=True,
                                    **budget_kwargs(args))
 
     # Both numbers on the SAME held-out split. Reporting only the searched agent's

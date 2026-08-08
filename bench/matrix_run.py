@@ -222,6 +222,17 @@ SEMANTICS = {
     "adas": {
         "serial": "upstream Meta Agent Search over the DSL substrate "
                   "(the substrate is this port's standing departure), one worker",
+        # `--reflective-merge` is deliberately NOT passed to this row, and the
+        # reason is the archive. ADAS is keep-all: every proposed design is
+        # appended, and the meta-agent's entire conditioning signal is that
+        # archive (designs plus fitness). Fusing a round's N designs into one
+        # would remove N-1 archive entries per round, which shrinks what the next
+        # generation is designed against -- the algorithm's central mechanism,
+        # not its merge timing. The usual justification does not apply either: the
+        # aggregator here drops nothing, so there is no "all but one discarded"
+        # for fusion to recover. And a proposal is a whole agent *program*, not a
+        # delta, so "merge these two designs" is itself an ADAS-shaped design
+        # operation smuggled in below the archive.
         "parallel": SCHEDULING_ONLY,
         "async": SCHEDULING_ONLY,
     },
