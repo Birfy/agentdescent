@@ -66,70 +66,108 @@ The example provides these plug-ins to `evolve()` (in
 
 ## Empirical results — FiNER-139 with DeepSeek
 
-Run through `evolve()` (synchronous DP, 4 workers, 8 rounds) with
-`deepseek-v4-flash` on the real FiNER-139 validation split, 57 single-entity
-sentences over the 40 most frequent XBRL concepts, split train / val / test:
+Barrier-free (`--async`), 4 workers, 120 rollouts pinned, `deepseek-v4-flash`,
+`--pool 3200 --top-k 139` — 364 single-entity sentences over the full concept
+set, split 176 train / 118 val (gate capped to 64) / 70 test. One seed; the
+model is not deterministic, so read the shape rather than the third digit.
 
-**Three runs, so the spread is visible.** The model is not deterministic, so a
-single run is a sample, not a result:
+**Three configurations, changing one thing at a time.** The first is what this
+port used to do; the last is what upstream does:
 
-| Run | Sampler | Baseline | Final val | Held-out test | Bullets |
-|---|---|---|---|---|---|
-| A | round-robin | 87.0% | **95.7%** | **90.5%** | 2 |
-| B | difficulty | — | 91.3% | 85.7% | 2 |
-| C | round-robin | 90.9% | 90.9% | 85.7% | 2 |
+| acceptance | staleness | bullets | val | test | stale discarded | wall |
+|---|---|---|---:|---:|---:|---:|
+| Beta gate (was the default) | guarded | **0** | 0.781 → 0.781 | 0.757 | 0 / 12 | 621 s |
+| `--grow-and-refine` | guarded | 6 | 0.703 → **0.750** | 0.786 | **9 / 15 (60%)** | 490 s |
+| `--grow-and-refine` | `--staleness reflective` | **10** | 0.719 → **0.766** | 0.786 | **0 / 10** | 812 s |
 
-Two runs of the *identical* configuration (A and C, same `--seed 1`) landed 4.8
-val points apart and reported different baselines, because `deepseek-v4-flash`
-does not return identical text for identical prompts. On ~23 val / ~21 test items
-one item is worth 4–5 points, so **differences of this size are noise**. What
-reproduces across all three is the shape, not the number: the Curator admits
-about two bullets and rejects the rest, and the playbook never regresses below
-baseline — which is the acceptance gate doing its job.
+**The first row is the finding.** Gating each bullet on held-out reward commits
+*nothing*, and it is not a difficulty problem — the baseline leaves 20 points of
+headroom and the Reflector produces sound, specific lessons throughout. A single
+bullet teaches one XBRL concept, so it can only move a validation split that
+happens to contain that concept: at `--val-cap 32` the five bullets an earlier
+run admitted covered **4 of 32** val tasks, and widening the gate's sample to 64
+dropped commits from 5 to 0. The gate gets *more* correct as it gets more
+statistical power, and the playbook empties. ACE's claim is accumulation, and
+per-bullet gating cannot accumulate.
 
-!!! warning "Do not read +8.7 as the effect size"
-    An earlier version of this page reported run A alone as "87.0% → 95.7%
-    (+8.7)". With n≈23 held-out items and a non-deterministic model, that is
-    within run-to-run variance. Reporting a single LLM run as a point estimate is
-    the easiest way to fool yourself; if you need an effect size, run it several
-    times and report the spread.
+`--grow-and-refine` restores upstream's Curator, which applies every validated
+delta and tracks utility afterwards. Six bullets, val +4.7 points — and 21%
+*cheaper*, because a gate that scores every candidate across 64 val tasks is the
+expensive part.
 
-**What it cost** (run C, instrumented with [`Usage`](agents.md#what-did-the-run-cost-usage)):
-125 model calls, 48,724 prompt + 27,313 completion tokens, 295 s inside the model
-for 8 rounds over 57 tasks — well under a cent at `deepseek-v4-flash` prices.
+**The third row is the async cost showing up where it should.** Once every
+proposal commits, head moves on every sweep, and the default `guarded` band
+(`--async-ratio 3`) discards 60% of the evidence — a whole rollout thrown away
+per card. On a multi-key playbook that is waste rather than safety: a worker's
+bullet rarely conflicts with the bullets committed while it was working.
+`--staleness reflective` rebases instead of discarding, and the re-verification
+is scored on the card's *own* trajectories (one or two tasks), not the held-out
+set. Discards go to zero, commits double (2 → 4 sweeps), bullets 6 → 10.
+
+The 66% wall-clock rise that comes with it is not the re-verification — it is
+the extra work the recovered cards create: twice the commits, each paying a
+64-task gate sweep, over a playbook that is now 10 bullets long in every prompt
+(completion tokens 181k → 246k).
+
+**Concurrency is unaffected by any of this** — 4.83× / 4.32× / 4.35× of
+model-time-over-wall-clock — because the rebase re-verification runs on the
+merger thread, not the workers.
 
 !!! warning "Pick a configuration that isn't saturated"
-    With the default `--top-k 10` (the ten *most frequent* tags) a strong model
-    scores **100% at baseline**, so there are no failures to reflect on and ACE
+    With `--top-k 10` (the ten *most frequent* tags) a strong model scores
+    **100% at baseline**, so there are no failures to reflect on and ACE
     correctly curates nothing. Self-evolution can only work where the base agent
-    actually fails: widen `--top-k` (rarer, more confusable concepts) until the
-    baseline leaves headroom. The same effect is visible in
+    actually fails.
+
+    Raising `--top-k` alone does not fix it, because FiNER is stratified by
+    concept and a small pool never surfaces the rare ones: at `--pool 1600` the
+    120- and 139-concept selections are the **same 211 tasks** at a 0.875
+    baseline. Measured there, 32 rollouts produced `+0/-0` on nearly every round
+    and val never moved. `--pool 3200` puts the baseline at 0.667. The same
+    saturation effect is visible in
     [EvoSkill](algo-evoskill.md#empirical-results-real-openhands-agent-deepseek-on-officeqa),
-    and it is why [`DifficultyWeighted` task sampling](sampling.md)
-    exists — it steers rollouts toward the tasks that still fail.
+    and it is why [`DifficultyWeighted` task sampling](sampling.md) exists.
 
-### `--top-k` sets the difficulty
+### What the playbook actually contains
 
-The number of XBRL concepts *is* the difficulty: it is a k-way choice. Measured
-with `deepseek-v4-flash`, 8 rounds, 4 workers:
+Not paraphrase — three of the ten bullets from the last row above:
 
-| `--top-k` | tasks | val, before → after | test | bullets |
-|---|---|---|---|---|
-| 10 | 37 | 1.000 → 1.000 | 1.000 | 0 |
-| 40 | 57 | 0.850 → 0.850 | 0.921 | 0 |
-| **120** (the default) | 121 | **0.844 → 0.889** | **0.884** | **2** |
+```
+## debt
+  - For a variable-rate debt instrument, report the rate in effect at the
+    balance sheet date as the effective interest rate, not the stated percentage.
+  - Do not map "reserve" to a loss-contingency accrual; in credit-facility
+    context, "outstanding reserve" refers to outstanding letters of credit.
+  - For prepayment/repayment of debt amounts, use RepaymentsOfDebt, not
+    DebtInstrumentFaceAmount, which describes the instrument's principal
+    balance, not a cash flow transaction.
+```
 
-At 10 the task is already solved. At 40 there is headroom, but no bullet beats the
-baseline and the Curator's gate rejects every proposal. At 120 two bullets survive
-the gate and validation accuracy rises 4.5 points.
+These are the reason the Beta-gate row is a measurement artefact rather than a
+verdict on the algorithm: the lessons were always there, and the gate could not
+see them because each one is worth about one validation task.
+
+One rough edge worth knowing: the Reflector invented both `business combination`
+and `business combinations` as section names in one run. Grow-and-refine's
+near-duplicate check is scoped *within* a section, so a singular/plural split
+walks past it.
 
 ## Run it
 
 ```bash
 python -m examples.ace.ace_context_evolution --dry-run
 python -m examples.ace.ace_context_evolution --model claude-haiku-4-5
-python -m examples.ace.ace_context_evolution --top-k 40 --pool 400 --rounds 8   # the run above
+
+# the last row of the table above
+python -m examples.ace.ace_context_evolution --pool 3200 --top-k 139 \
+    --val-cap 64 --budget-rollouts 120 --rounds 9999 \
+    --grow-and-refine --staleness reflective \
+    --async --async-ratio 3 --max-seconds 3600 --workers 4 \
+    --model deepseek-v4-flash --yes
 ```
+
+`--grow-and-refine` is off by default: it changes what the run measures, so it
+has to be asked for rather than inherited.
 
 Offline tests: `tests/test_ace_example.py`.
 

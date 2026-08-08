@@ -75,8 +75,26 @@ column of each section below says exactly where to look.
   Curator role is the engine's default aggregator.
 * **Departures**: the dataset is FiNER-139 as upstream, with `--top-k` capping
   the concept vocabulary — a *difficulty* knob, not an algorithm change, and one
-  the page documents because the measured lift depends on it (0.844 → 0.889 at
-  `--top-k 120`; nothing to learn at 10).
+  the page documents because the measured lift depends on it (nothing to learn
+  at 10; the baseline only leaves headroom once `--pool` is wide enough to
+  surface rare concepts).
+* **A departure that was the acceptance rule, now fixed and behind a flag.**
+  Upstream's Curator (`ace/core/curator.py`) validates the Reflector's output
+  *structurally* — reasoning is a string, operations is a list — and applies it.
+  There is no held-out evaluation of a bullet before it enters the playbook;
+  utility is tracked afterwards by per-bullet `helpful=X harmful=Y` counters and
+  size by de-duplication plus a token budget. This port instead ran the engine's
+  shipped `DefaultAcceptance`, a Beta posterior requiring each bullet to raise
+  held-out reward — which is the **acceptance rule**, the row the table above
+  puts under *must not change*.
+
+  It is not a harmless substitution. A bullet teaches one XBRL concept, so it can
+  only move a validation split containing that concept: measured, five committed
+  bullets covered 4 of 32 val tasks, and widening the gate to 64 tasks dropped
+  commits from 5 to **0**. The gate becomes more correct as it gains statistical
+  power, and the playbook empties — while ACE's entire claim is accumulation.
+  `--grow-and-refine` restores upstream's rule; it is opt-in because turning it
+  on changes what a row measures. See [algo-ace.md](algo-ace.md#empirical-results-finer-139-with-deepseek).
 * **Selection rule lives in**: nowhere separate — ACE has no candidate archive.
 * **Details**: [algo-ace.md](algo-ace.md)
 

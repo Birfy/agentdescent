@@ -1,0 +1,32 @@
+{
+  "budget_rollouts": 120,
+  "width": 4,
+  "async_ratio": 3,
+  "eval_concurrency": 4,
+  "serial_eval_concurrency": 1,
+  "no_thinking": false,
+  "model": "deepseek-v4-flash",
+  "provider": "claude",
+  "cells": [
+    {
+      "row": "ace",
+      "dataset": "FiNER-139",
+      "arm": "async",
+      "seed": 0,
+      "width": 4,
+      "eval_concurrency": 4,
+      "budget": 120,
+      "wall_seconds": 489.8,
+      "calls": 432,
+      "prompt_tokens": 73587,
+      "completion_tokens": 181113,
+      "model_seconds": 2116.4,
+      "test": 0.786,
+      "val_end": 0.75,
+      "engine_rollouts": 123,
+      "stale_considered": 15,
+      "stale_discarded": 9,
+      "redispatched": 0
+    }
+  ]
+}

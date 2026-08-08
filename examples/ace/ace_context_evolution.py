@@ -56,11 +56,13 @@ from agentdescent.dataloader import Dataset, hf_feature_names, hf_rows, split_da
 from agentdescent.evolvable import Diff
 from agentdescent.evolution import EvolvingArtifact, LLMAgent, Task, evolve, rule_id
 from agentdescent.governance import classify
+from agentdescent.policies import Policies
+from agentdescent.staleness import get_policy
 from agentdescent.parallel import DataParallel
 from agentdescent.sampling import DifficultyWeighted, RoundRobin
 from examples._common import (add_standard_args, completion_for, confirm,
                               score_tasks, worker_count,
-                              budget_kwargs, report_engine)
+                              budget_kwargs, capped_val, report_engine)
 
 FINER = ("nlpaueb/finer-139", "validation", "finer-139")   # (dataset, split, config)
 
@@ -140,6 +142,45 @@ class ACEPlaybook:
                 return None
         return Diff(diff_id=f"{author}:{bid}:{base_version}", target=target,
                     ops={bid: entry}, author=author)
+
+
+class GrowAndRefine:
+    """ACE's Curator at the acceptance seam: apply the delta, do not gate it.
+
+    Upstream (`ace/core/curator.py`) validates the Reflector's operations
+    *structurally* -- reasoning is a string, operations is a list -- and applies
+    them. There is no held-out evaluation of a bullet before it enters the
+    playbook, and no acceptance threshold; utility is tracked afterwards by
+    per-bullet `helpful=X harmful=Y` counters, and size is managed by the
+    de-duplication this port already performs in `ACEPlaybook.to_diff` plus a
+    token budget (upstream default 80,000).
+
+    The port previously used the engine's shipped `DefaultAcceptance` -- a Beta
+    posterior requiring each bullet to raise held-out reward. That is a different
+    algorithm, and on a 139-way concept space it is a *strictly* different one:
+    a single bullet teaches one concept, so it can only move a validation split
+    that happens to contain that concept. Measured on FiNER at `--pool 3200`,
+    five committed bullets covered **4 of 32** validation tasks; widening the
+    gate's sample to 64 dropped commits from 5 to **0**. The playbook therefore
+    never accumulates, and ACE's whole claim is that it accumulates -- the
+    reported +8.6% comes from a large playbook whose *aggregate* coverage is
+    high, not from bullets that each prove themselves.
+
+    So this is a fidelity fix, and the effect on the numbers is a consequence of
+    it rather than the reason for it. What is given up is real and belongs in
+    the row's notes: nothing now stops a wrong lesson entering the playbook,
+    which is exactly the exposure upstream carries and manages with counters.
+    """
+
+    def accept(self, ctx):
+        from agentdescent.policies import AcceptDecision, MergeContext
+        base = MergeContext.rate(ctx.base_counts)
+        cand = MergeContext.rate(ctx.cand_counts)
+        return AcceptDecision(
+            accept=True, category="",
+            detail=f"grow-and-refine (upstream Curator applies; val {base:.3f} "
+                   f"-> {cand:.3f} is recorded, not gated on)",
+            observed_delta=cand - base)
 
 
 # ACE separates the Reflector from the Curator "to avoid conflating what to learn
@@ -272,9 +313,19 @@ def load_dataset(pool: int, top_k: int, ratios=(0.5, 0.25, 0.25), seed: int = 0)
                          stratify_key=lambda t: t.meta["target"], name="FiNER-139")
 
 
-def evaluate(agent, rendered: str, tasks: List[Task], reward) -> float:
-    """Score a rendered playbook on a held-out split (the reported test metric)."""
-    return score_tasks(agent.solve, rendered, tasks, reward)
+def evaluate(agent, rendered: str, tasks: List[Task], reward,
+             concurrency: int = 8) -> float:
+    """Score a rendered playbook on a held-out split (the reported test metric).
+
+    ``concurrency`` is not decorative: it defaulted to ``score_tasks``' 8 and
+    nothing passed it, so a run asked for ``--eval-concurrency 1`` still scored
+    its test split eight at a time. Measured on the serial matrix arm -- one
+    worker, eval concurrency 1 -- that put 334s of model time inside a 209s
+    wall-clock, an overlap of 1.6x on the run that is supposed to be the
+    fully-serial control.
+    """
+    return score_tasks(agent.solve, rendered, tasks, reward,
+                       concurrency=concurrency)
 
 
 # ===========================================================================
@@ -298,6 +349,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--sampler", choices=["round-robin", "difficulty"],
                    default="round-robin",
                    help="which task a worker rolls out next (agentdescent.sampling)")
+    p.add_argument("--staleness", default="guarded",
+                   choices=["guarded", "reflective", "full"],
+                   help=("what to do with a diff proposed against a head the "
+                         "merger has since moved: `guarded` rebases inside the "
+                         "--async-ratio band and discards beyond it, "
+                         "`reflective` rebases regardless (agentdescent.staleness)"))
+    p.add_argument("--grow-and-refine", action="store_true",
+                   help="upstream's Curator: apply every validated delta rather "
+                        "than gating each bullet on held-out reward (see "
+                        "GrowAndRefine). Off by default because it changes what "
+                        "the row measures, and the change has to be declared")
     return p
 
 
@@ -361,7 +423,16 @@ def main(argv=None) -> None:
     mode = "async, barrier-free" if args.asynchronous else "synchronous DP"
     print(f"\nEvolving context (Generator + Reflector + deterministic Curator, L2; {mode})...\n")
     # fit on train, gate on val (evolve's held-out); test stays fully held out.
-    result = evolve(ds.trainval, reward, agent=agent,
+    # FiNER's stratified split hands back a *large* val -- 82 of 211 tasks at
+    # `--pool 1600 --top-k 120`, because a 120-way concept key leaves most strata
+    # with one member. The Curator scores every admitted candidate across all of
+    # it, so val, not the rollout, is what a run costs: at 82 the gate is 97% of
+    # the work and `n_workers` has almost nothing left to parallelise. `--val-cap`
+    # is the only lever on that ratio and it moves neither train nor test -- the
+    # cap's leftovers become train. A capped gate is a noisier gate, which is a
+    # real cost and the reason this is a flag rather than a default.
+    trainval, val_frac = capped_val(ds.trainval, ds.val_frac, args.val_cap)
+    result = evolve(trainval, reward, agent=agent,
                     strategy=ACEPlaybook(), parallel=DataParallel(),
                     blast_radius=0.2, artifact_id="ace_playbook",
                     rounds=args.rounds, n_workers=args.workers,
@@ -370,10 +441,30 @@ def main(argv=None) -> None:
                                   else RoundRobin()),
                     asynchronous=args.asynchronous, async_ratio=args.async_ratio,
                     max_seconds=args.max_seconds if args.asynchronous else None,
-                    held_out_frac=ds.val_frac, verbose=True,
+                    held_out_frac=val_frac,
+                    # Never passed, so the gate ran at `evolve()`'s default of 8
+                    # whatever `--eval-concurrency` said. The flag reached only
+                    # the final test measurement, and even a `--serial
+                    # --eval-concurrency 1` arm scored its candidates eight at a
+                    # time: measured 563s of model time inside a 476s wall-clock
+                    # on the one-worker control, which is 1.18x of concurrency in
+                    # the arm whose whole job is to have none.
+                    eval_concurrency=args.eval_concurrency,
+                    # Under grow-and-refine every proposal commits, so head moves
+                    # on every sweep and the default `guarded` band is exhausted
+                    # fast: measured 9 of 15 cards discarded at `--async-ratio 3`.
+                    # A discarded card is a whole rollout thrown away, and on a
+                    # multi-key playbook it is thrown away for nothing -- a
+                    # worker's bullet rarely conflicts with the bullets committed
+                    # while it was working, so the rebase almost always holds.
+                    staleness_policy=get_policy(args.staleness),
+                    policies=(Policies(acceptance=GrowAndRefine())
+                              if args.grow_and_refine else None),
+                    verbose=True,
                     **budget_kwargs(args))
 
-    test_acc = evaluate(agent, result.rendered, ds.test, reward)
+    test_acc = evaluate(agent, result.rendered, ds.test, reward,
+                        concurrency=args.eval_concurrency)
     print("\n=== evolved ACE playbook ===")
     print(result.rendered)
     # Round 0's score, not the seed playbook's: by the time `history[0]` is
