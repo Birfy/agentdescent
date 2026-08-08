@@ -282,7 +282,8 @@ def load_gated_hf(dataset: str, split: str, *,
 
 def select_hard(items: Sequence[Any], score: Callable[[Any], float],
                 keep: Optional[int] = None, threshold: float = 0.999,
-                concurrency: int = 8, min_items: int = 12) -> List[Any]:
+                concurrency: int = 8, min_items: int = 12,
+                passes: int = 1) -> List[Any]:
     """Keep the items a baseline gets **wrong** -- headroom, from a saturated set.
 
     A benchmark a model already solves cannot demonstrate a skill: there is
@@ -301,6 +302,17 @@ def select_hard(items: Sequence[Any], score: Callable[[Any], float],
     numbers from the full set -- say which you used. ``keep`` caps the result
     (the hardest are kept in their original order); if nothing fails, everything
     is returned rather than an empty set.
+
+    ``passes`` is how many independent baseline measurements an item has to fail
+    before it counts as hard, and 1 is not enough for a non-deterministic model.
+    Selecting on a single noisy measurement selects the *unlucky* answers, and
+    re-measuring them regresses to the mean -- measured on SkillOpt/SearchQA with
+    ``deepseek-v4-flash``: the filter kept only items the seed skill got wrong,
+    and the gate then scored that same split at **1.000**. Every one of them was
+    answered correctly the second time. A run set up that way cannot show
+    anything: the strict gate needs `candidate > current` and there is nothing
+    above 1.000. Raise this to 2 or 3 where the actor is a sampled model; the
+    filter costs `passes` times as much and stops selecting for luck.
     """
     from concurrent.futures import ThreadPoolExecutor
 
@@ -308,7 +320,12 @@ def select_hard(items: Sequence[Any], score: Callable[[Any], float],
     if not items:
         return items
     with ThreadPoolExecutor(max(1, min(concurrency, len(items)))) as pool:
+        # An item is hard only if it fails *every* pass; `scores` keeps the best
+        # one it ever achieved, so the top-up below still orders by difficulty.
         scores = list(pool.map(score, items))
+        for _ in range(max(0, passes - 1)):
+            scores = [max(prev, new) for prev, new
+                      in zip(scores, pool.map(score, items))]
     hard = [it for it, sc in zip(items, scores) if sc < threshold]
     if not hard:
         return items                      # nothing failed: caller keeps the full set

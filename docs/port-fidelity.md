@@ -159,7 +159,18 @@ column of each section below says exactly where to look.
   wrong. This is a *measurement* decision, not an algorithm one — plain SearchQA
   scores ~0.900 for a strong model, leaving no headroom to detect a change — and
   it is stated because a reported lift on a filtered set is not a lift on the
-  benchmark.
+  benchmark. It takes `--hard-passes` measurements per item (default 3) because
+  filtering on one selects the model's unlucky answers rather than hard
+  questions: at one pass the filtered val split scored **1.000** on re-measurement
+  and the strict gate could accept nothing above it.
+* **Checked against upstream, and clean.** All four load-bearing invariants match
+  the released code line for line: the op set `{append, insert_after, replace,
+  delete}` (`optimizer/skill.py`), the strict `candidate > current` gate with no
+  tolerance or tie-break and `gate_metric=hard` by default
+  (`evaluation/gate.py`), the textual learning rate as an integer cap on edits
+  per step (`optimizer/scheduler.py`), and the per-epoch rejected-edit buffer fed
+  back to the optimizer (`engine/trainer.py`'s `_format_step_buffer`). Unlike ACE
+  and EvoSkill, nothing here had to be put back.
 * **Selection rule lives in**: best-of-batch in the strict-gate aggregator;
   the gate itself is `StrictImprovement`, a named `AcceptancePolicy`
   ([acceptance](acceptance-policies.md)).
@@ -268,7 +279,7 @@ be speedups over.
 | ACE | FiNER-139 | — | — | — | — | scheduling and merge timing; budget must be pinned |
 | GEPA | HotpotQA | 1424 s / 97 calls | sync 1022 s / 70 · async 742 s / 95 | 1.39× / **1.92×** | 0.75 → 0.60 / 0.65 (1–3 tasks of 20; noise-range) | round's diffs merged into one pool candidate (`--reflective-merge`); empty seed instruction; 1 seed — [full setup](results.md#merging-as-a-cost-lever-serial-vs-8-wide-sync-and-async-gepahotpotqa) |
 | EvoSkill | FinQA (OfficeQA is HF-gated) | — | async N=4: 0.527 → 0.707 val over 120 rollouts | — | — | scheduling and merge timing; budget must be pinned. `--reflective-merge` offers the frontier one fused candidate per sweep instead of one per worker (`update_frontier` and the parent draw unchanged). The async arm used to swap in `SgdSkillAggregator` — no frontier, per-batch validation — which is now removed rather than optional |
-| SkillOpt | SearchQA | — | — | — | — | scheduling and merge timing; budget must be pinned. `--minibatch` is this port's name for the worker count, not upstream's minibatch of tasks |
+| SkillOpt | SearchQA (`--hard` subset) | — | async N=4: 0.053 → 0.211 val over 60 rollouts | — | — | scheduling and merge timing; budget must be pinned. `--minibatch` is this port's name for the worker count, not upstream's minibatch of tasks. `--reflective-merge` scores one fused patch per step, which is *upstream's* shape (a ReflACT step emits one patch of up to `lr` edits) rather than a departure from it |
 | ADAS | MGSM | — | — | — | — | scheduling and merge timing; budget must be pinned |
 | DGM | surrogate | — | — | — | — | scheduling and merge timing; budget must be pinned. `--serial` sets `selfimprove_size=1`, which is a population of one, so this row's control is the degenerate archive rather than upstream's default |
 | OpenEvolve | function minimization | — | — | — | — | **none** — `rounds = iterations // workers` already fixes total work, so this row's speedup is the only one that was equal-budget before the flag existed |
