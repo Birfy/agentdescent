@@ -60,7 +60,7 @@ from agentdescent.parallel import DataParallel
 from agentdescent.sampling import DifficultyWeighted, RoundRobin
 from examples._common import (add_standard_args, completion_for, confirm,
                               score_tasks, worker_count,
-                              budget_kwargs, report_engine)
+                              budget_kwargs, capped_val, report_engine)
 
 FINER = ("nlpaueb/finer-139", "validation", "finer-139")   # (dataset, split, config)
 
@@ -272,9 +272,19 @@ def load_dataset(pool: int, top_k: int, ratios=(0.5, 0.25, 0.25), seed: int = 0)
                          stratify_key=lambda t: t.meta["target"], name="FiNER-139")
 
 
-def evaluate(agent, rendered: str, tasks: List[Task], reward) -> float:
-    """Score a rendered playbook on a held-out split (the reported test metric)."""
-    return score_tasks(agent.solve, rendered, tasks, reward)
+def evaluate(agent, rendered: str, tasks: List[Task], reward,
+             concurrency: int = 8) -> float:
+    """Score a rendered playbook on a held-out split (the reported test metric).
+
+    ``concurrency`` is not decorative: it defaulted to ``score_tasks``' 8 and
+    nothing passed it, so a run asked for ``--eval-concurrency 1`` still scored
+    its test split eight at a time. Measured on the serial matrix arm -- one
+    worker, eval concurrency 1 -- that put 334s of model time inside a 209s
+    wall-clock, an overlap of 1.6x on the run that is supposed to be the
+    fully-serial control.
+    """
+    return score_tasks(agent.solve, rendered, tasks, reward,
+                       concurrency=concurrency)
 
 
 # ===========================================================================
@@ -361,7 +371,16 @@ def main(argv=None) -> None:
     mode = "async, barrier-free" if args.asynchronous else "synchronous DP"
     print(f"\nEvolving context (Generator + Reflector + deterministic Curator, L2; {mode})...\n")
     # fit on train, gate on val (evolve's held-out); test stays fully held out.
-    result = evolve(ds.trainval, reward, agent=agent,
+    # FiNER's stratified split hands back a *large* val -- 82 of 211 tasks at
+    # `--pool 1600 --top-k 120`, because a 120-way concept key leaves most strata
+    # with one member. The Curator scores every admitted candidate across all of
+    # it, so val, not the rollout, is what a run costs: at 82 the gate is 97% of
+    # the work and `n_workers` has almost nothing left to parallelise. `--val-cap`
+    # is the only lever on that ratio and it moves neither train nor test -- the
+    # cap's leftovers become train. A capped gate is a noisier gate, which is a
+    # real cost and the reason this is a flag rather than a default.
+    trainval, val_frac = capped_val(ds.trainval, ds.val_frac, args.val_cap)
+    result = evolve(trainval, reward, agent=agent,
                     strategy=ACEPlaybook(), parallel=DataParallel(),
                     blast_radius=0.2, artifact_id="ace_playbook",
                     rounds=args.rounds, n_workers=args.workers,
@@ -370,10 +389,20 @@ def main(argv=None) -> None:
                                   else RoundRobin()),
                     asynchronous=args.asynchronous, async_ratio=args.async_ratio,
                     max_seconds=args.max_seconds if args.asynchronous else None,
-                    held_out_frac=ds.val_frac, verbose=True,
+                    held_out_frac=val_frac,
+                    # Never passed, so the gate ran at `evolve()`'s default of 8
+                    # whatever `--eval-concurrency` said. The flag reached only
+                    # the final test measurement, and even a `--serial
+                    # --eval-concurrency 1` arm scored its candidates eight at a
+                    # time: measured 563s of model time inside a 476s wall-clock
+                    # on the one-worker control, which is 1.18x of concurrency in
+                    # the arm whose whole job is to have none.
+                    eval_concurrency=args.eval_concurrency,
+                    verbose=True,
                     **budget_kwargs(args))
 
-    test_acc = evaluate(agent, result.rendered, ds.test, reward)
+    test_acc = evaluate(agent, result.rendered, ds.test, reward,
+                        concurrency=args.eval_concurrency)
     print("\n=== evolved ACE playbook ===")
     print(result.rendered)
     # Round 0's score, not the seed playbook's: by the time `history[0]` is

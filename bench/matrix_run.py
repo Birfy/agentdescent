@@ -58,7 +58,29 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 ROWS = [
     dict(name="ace", module="examples.ace.ace_context_evolution",
          dataset="FiNER-139", width_flag="--workers",
-         size=["--pool", "60", "--top-k", "24"]),
+         # `--top-k 24` was below the port's own demonstrated floor: its docs
+         # measure 1.000 at 10 (nothing to learn) and no admitted bullet at 40.
+         # 120 is the first value where the Curator's gate passes anything, so a
+         # row run below it reports "parallelism changed nothing" about a
+         # configuration where *nothing* changes anything.
+         #
+         # `--pool 3200` is the *difficulty*, not just the split. FiNER is
+         # stratified by concept, and a small pool never surfaces the rare ones:
+         # at `--pool 1600` only ~120 distinct concepts appear, so `--top-k 139`
+         # and `--top-k 120` select the identical 211 tasks and the baseline sits
+         # at 0.875 -- high enough that `solved_threshold` answers most rollouts
+         # before a reflection is ever requested. Measured: 32 rollouts there
+         # produced `+0/-0` for most rounds and val never moved. At `--pool 3200`
+         # the baseline is 0.667 and two rollouts already commit two bullets.
+         # A row measured on a saturated configuration reports "parallelism
+         # changed nothing" about a setup where nothing changes anything.
+         #
+         # `--val-cap 24` is the cost lever: the 118-task val is scored in full
+         # for every candidate the Curator admits. Capped to 16 the gate goes
+         # quiet again (val flat at 0.688 with bullets committed); 24 is the
+         # smallest cap measured that still resolves the lift.
+         size=["--pool", "3200", "--top-k", "139", "--val-cap", "32",
+               "--rounds", "9999"]),
     dict(name="gepa", module="examples.gepa.gepa_prompt_evolution",
          dataset="HotpotQA", width_flag="--workers",
          # `--rounds 9999`: the ports' own iteration defaults sit BELOW the
