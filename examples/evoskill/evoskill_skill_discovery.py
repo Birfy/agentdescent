@@ -260,6 +260,23 @@ class Frontier:
         return max(self.members, key=lambda m: m[1])       # strategy="best"
 
 
+class FrontierBest:
+    """EvoSkill's parent rule at the standard selection seam.
+
+    A :class:`~agentdescent.selection.SelectionPolicy`: pick the frontier's
+    best-scoring member (upstream ``strategy="best"``). Local rather than the
+    shipped ``Beam(1)`` so the tie-break stays byte-identical to the inline
+    ``max`` it replaces (first maximal member wins, in admission order).
+    """
+
+    def select(self, ctx, n: int):
+        candidates = list(ctx.candidates)
+        if not candidates:
+            return [ctx.head] * n
+        best = max(candidates, key=lambda c: c.score or 0.0)
+        return [best] * n
+
+
 # ===========================================================================
 # Dataset: OfficeQA (real, HF-gated) with a bundled-sample fallback
 # ===========================================================================
@@ -462,10 +479,12 @@ class TopKFrontierAggregator(AggregatorProtocol):
     """EvoSkill's optimizer: the bounded top-K aggregate frontier."""
 
     def __init__(self, ledger: Ledger, verifier, ctx: EvoSkillContext,
-                 artifact_id: str = "skill_library"):
+                 artifact_id: str = "skill_library",
+                 selection: Optional[FrontierBest] = None):
         self.ledger = ledger
         self.verifier = verifier
         self.ctx = ctx
+        self.selection = selection or FrontierBest()
         self.aid = artifact_id
         self.cards: List[EvidenceCard] = []
         self._lock = threading.Lock()   # ingest: workers; step: one thread
@@ -512,7 +531,15 @@ class TopKFrontierAggregator(AggregatorProtocol):
                 f"{skill_name(list(card.diff.ops)[0])}: "
                 f"{'admitted' if admitted else 'discarded'} (val {score:.3f})")
 
-        parent_state, _ = self.ctx.frontier.select_parent()   # strategy="best"
+        # strategy="best" at the standard seam: frontier members become
+        # Candidates (version = member index) and FrontierBest picks the parent.
+        from agentdescent.selection import Candidate, SelectionContext
+        rows = [Candidate(artifact_id=self.aid, version=i, state=dict(state),
+                          score=score)
+                for i, (state, score) in enumerate(self.ctx.frontier.members)]
+        sel_ctx = SelectionContext(head=rows[0] if rows else None,
+                                   candidates=tuple(rows), n_workers=1)
+        parent_state = dict(self.selection.select(sel_ctx, 1)[0].state)
         report_diff = committed = None
         if parent_state != head.state:
             try:

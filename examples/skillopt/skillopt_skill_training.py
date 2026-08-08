@@ -330,14 +330,39 @@ def make_propose(ctx: SkillOptContext, complete: Completion):
     return propose
 
 
+class StrictImprovement:
+    """SkillOpt's gate at the standard acceptance seam.
+
+    An :class:`~agentdescent.policies.AcceptancePolicy` over genuine
+    ``MergeContext`` records: commit only a candidate whose **full held-out**
+    EM strictly beats the current document's. No Beta draw, no annealing --
+    SkillOpt's rule is deliberately harsher than the shipped statistical gate,
+    and naming it at the seam records that as a decision rather than a loop
+    detail.
+    """
+
+    def accept(self, ctx):
+        from agentdescent.policies import AcceptDecision, MergeContext
+        base = MergeContext.rate(ctx.base_counts)
+        cand = MergeContext.rate(ctx.cand_counts)
+        improved = cand > base
+        return AcceptDecision(
+            accept=improved,
+            category="" if improved else "strict-gate",
+            detail=f"val EM {base:.3f} -> {cand:.3f}",
+            observed_delta=cand - base)
+
+
 class StrictGateAggregator(AggregatorProtocol):
     """SkillOpt's optimizer: strict held-out EM gate + rejected-edit buffer + LR."""
 
     def __init__(self, ledger: Ledger, verifier, ctx: SkillOptContext,
-                 artifact_id: str = "skill_document"):
+                 artifact_id: str = "skill_document",
+                 acceptance: Optional[StrictImprovement] = None):
         self.ledger = ledger
         self.verifier = verifier
         self.ctx = ctx
+        self.acceptance = acceptance or StrictImprovement()
         self.aid = artifact_id
         self.cards: List[EvidenceCard] = []
         self._lock = threading.Lock()   # ingest: workers; step: one thread
@@ -359,9 +384,16 @@ class StrictGateAggregator(AggregatorProtocol):
         with self._lock:
             cards, self.cards = self.cards, []
         best = None
+        n = max(1, len(self.verifier.held_out))
         for card in cards:                                 # pick the best strict improver
-            em = head.apply(card.diff).score(self.verifier.held_out)
-            if em > self.current_em and (best is None or em > best[1]):
+            from agentdescent.policies import MergeContext
+            candidate = head.apply(card.diff)
+            em = candidate.score(self.verifier.held_out)
+            decision = self.acceptance.accept(MergeContext(
+                artifact=head, candidate=candidate, cards=[card],
+                base_counts=(self.current_em * n, (1 - self.current_em) * n),
+                cand_counts=(em * n, (1 - em) * n), diff=card.diff))
+            if decision.accept and (best is None or em > best[1]):
                 best = (card, em)
 
         report_diff = committed = None

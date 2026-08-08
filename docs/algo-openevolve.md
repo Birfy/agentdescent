@@ -14,6 +14,7 @@ execution through `async_evolve()`.
 
 | OpenEvolve mechanism | AgentDescent representation |
 |---|---|
+| `EpsilonGreedy` | the in-pool parent pick as a named [`SelectionPolicy`](selection.md) |
 | Python program candidate | `Task` rollouts over a source-code artifact |
 | Model mutation | `propose(rendered, task, output, reward)` |
 | Full program replacement | `OpenEvolveStrategy.to_diff()` |

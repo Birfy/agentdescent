@@ -56,6 +56,7 @@ In [`examples/gepa/gepa_prompt_evolution.py`](https://github.com/Birfy/agentdesc
 
 | Plug-in | `evolve()` slot | What it does |
 |---|---|---|
+| `ParetoWinFrequency` | selection ([seam](selection.md)) | Algorithm-2 frontier sampling as a named policy; `ParetoAggregator` delegates to it |
 | **`InstructionSlot`** | `strategy=` | a single evolvable instruction module; each proposal replaces it (content-addressed) |
 | **`ParetoAggregator`** / `pareto_aggregator_factory` | `aggregator_factory=` | GEPA's per-instance Pareto candidate selection; commits the sampled Pareto parent as the dev head |
 | **`pareto_frontier` / `pareto_select`** | (pure, unit-tested) | Algorithm 2: per-instance best → union of winners → dominance pruning → frequency-weighted sampling |

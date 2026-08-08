@@ -66,6 +66,7 @@ In [`examples/evoskill/evoskill_skill_discovery.py`](https://github.com/Birfy/ag
 
 | Plug-in | `evolve()` slot | What it does |
 |---|---|---|
+| `FrontierBest` | selection ([seam](selection.md)) | best-of-frontier parent rule as a named policy |
 | **`SkillLibraryTree`** | `strategy=` | a proposed `SKILL.md` (`name :: body`) becomes a `Diff` on the skill library — a [`FileTree`](directory-evolution.md), so the library is a real directory of `SKILL.md` files |
 | **`TopKFrontierAggregator`** + **`Frontier`** | `aggregator_factory=` (**sync**) | the bounded top-K aggregate frontier; scores every candidate on held-out, commits the best member as the dev head |
 | **`SgdSkillAggregator`** | `aggregator_factory=` (**async**) | SGD-style skill descent: apply updates, validate every `val_every` steps, checkpoint + roll back on no held-out gain |
@@ -140,7 +141,7 @@ where it pays — the held-out eval runs concurrently (`eval_concurrency`) and a
 round's workers run concurrently (`max_concurrency`). Wall-clock was ~3 h,
 essentially `15 candidates × 30-item val`. The OpenHands backend's setup, the
 DeepSeek structured-output shim, and the Python ≥ 3.12 requirement are documented
-in [Connecting agents & LLMs → Tool-using agent backends](agents.md#running-the-openhands-backend).
+in [Backends → `openhands`](backends.md#openhands-a-real-openhands-agent).
 
 ## Dataset caveat
 

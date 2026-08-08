@@ -1,7 +1,6 @@
 # The reference orchestrator and the reference domain
 
 *Modules:* [`agentdescent.orchestrator`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/orchestrator.py)
-· [`agentdescent.worker`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/worker.py)
 · [`agentdescent.domains.router`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/domains/router.py)
 · *API:* [`AgentDescent`, `RoundStat`, `run_fork_baseline`](api.md#the-reference-orchestrator)
 

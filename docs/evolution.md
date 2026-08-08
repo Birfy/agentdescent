@@ -100,6 +100,7 @@ nothing else in the call changes.
 
 | `evolve(...)` parameter | Module | What it plugs in | Default |
 |---|---|---|---|
+| `policies=` | [`policies`](policies.md) | every replaceable decision in one bundle — selection, sampling, conflict, fusion, acceptance, promotion, staleness, machinery | `Policies()` (today's behaviour) |
 | `agent=` / `run=`+`propose=` | [`agentdescent.agents`](agents.md) + `LLMAgent` | the actor: solve a task, propose a change | — (required) |
 | `strategy=` | [`Strategy`](strategies.md) (`SingleSlot` / `AppendRules` / `KeyedRules` / [`FileTree`](directory-evolution.md) / yours) | the **evolution rule** — what the artifact is and how a proposal becomes a diff | `AppendRules()` |
 | `parallel=` | [`agentdescent.parallel`](parallelism.md) | the **parallelism method** — DP / TP / PP | `DataParallel()` |
@@ -224,6 +225,11 @@ each is a real `Strategy` you can read and reuse:
 | `SkillDocStrategy` | [SkillOpt](algo-skillopt.md) | one markdown skill doc mutated by bounded `append/insert_after/replace/delete` edits |
 | `AgentDesignStrategy` | [ADAS](algo-adas.md) | one agentic-system design (a control-flow program) each proposal replaces |
 | `HarnessStrategy` | [DGM](algo-dgm.md) | a coding-agent harness's capability set (a proposal adds one) |
+| `OpenEvolveStrategy` | [OpenEvolve](algo-openevolve.md) | one evolved program each proposal replaces, behind a validity gate |
+
+The eleven MethodPolicy ports ride four shared strategies — `ValidatedSlot`,
+`FieldSlots`, `WindowedMemory`, `SkillLibrary` — see
+[examples-level strategies](strategies.md#examples-level-strategies).
 
 ---
 

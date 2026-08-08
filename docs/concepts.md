@@ -223,8 +223,9 @@ artifacts don't starve). Then, in order:
    for. Contradictions are projected out PCGrad-style — keep the better of the
    pair on a shared verification subset — iterating until no surviving pair
    contradicts.
-3. **Fusion tournament** — complementary diffs are fused (model-soup analogy)
-   and run against the individual candidates on held-out data; the best wins.
+3. **Fusion** — complementary diffs are fused into one union candidate
+   (model-soup analogy) and handed to the gate; ranking the union against the
+   singles is opt-in (`fusion_tournament=True`, a per-workload diagnostic).
 4. **Audit gate** — the candidate is submitted to the AuditScheduler, and a
    high-blast-radius or low-trust one is forced through the oracle, which can
    **veto it here** (`oracle-rejected`) before the acceptance test runs. **The

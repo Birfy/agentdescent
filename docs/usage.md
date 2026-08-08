@@ -63,14 +63,16 @@ offline in seconds; `--agent claude-code` swaps in the real CLI agent, and
 `--install-to <dir>` writes the evolved skill back. See
 [evolving a directory](directory-evolution.md).
 
-### Self-evolution algorithm ports (real datasets)
+### Self-evolution algorithm ports
 
-Faithful ports of the latest skill- and harness-self-evolution algorithms — ACE,
-GEPA, EvoSkill, SkillOpt, ADAS, DGM (see
-[the catalog](self-evolution-examples.md)). Each loads a real benchmark through
-the [`agentdescent.dataloader`](dataloader.md) data layer on a real run.
-`--dry-run` prints the requested dataset and runtime configuration, then returns
-before loading data or models: it needs no network and no API key.
+Eighteen ports of the latest self-evolution algorithms (see
+[the catalog](self-evolution-examples.md)). The seven benchmark-faithful ones
+load real benchmarks through the [`agentdescent.dataloader`](dataloader.md)
+data layer; the eleven [`MethodPolicy`](policies.md) ports run bundled
+deterministic domains and are measured together in the
+[runtime matrix](matrix-overview.md) (`python -m bench.candidate_methods`).
+Every port's `--dry-run` prints its configuration, then returns before loading
+data or models: no network, no API key.
 
 ```bash
 python -m examples.ace.ace_context_evolution --dry-run     # ACE   / FiNER-139
@@ -147,13 +149,13 @@ The sandbox fields are zero on the default path: one throwaway workspace per
 rollout, nothing to queue for and no image to warm. They exist so that when a
 pool does, "8 workers only bought 2x" can be attributed rather than guessed at.
 
-### The reference stack — `AgentDescent` / `AsyncAgentDescent`
+### The reference classes — `AgentDescent` / `AsyncAgentDescent`
 
-A **separate** runtime used by the RQ1/RQ2 and efficiency experiments on the
-built-in synthetic router domain. It has the `TaskScheduler` / `EvidenceBuffer` /
-duration-estimator machinery that `evolve()` does not — see the
-[two-stack note](architecture.md#4-the-two-runtimes). Reach for it to reproduce
-those experiments, not to evolve your own artifact.
+The entry points the RQ1/RQ2 and efficiency experiments were published against,
+on the built-in synthetic router domain. **They are adapters over the one
+engine now** — see [the note](architecture.md#4-the-two-runtimes) — kept so
+those measurements stay reproducible under their original names. Reach for
+them to reproduce the experiments, not to evolve your own artifact.
 
 ```python
 import tempfile
@@ -199,6 +201,11 @@ with tempfile.TemporaryDirectory() as repo:
 | `trust_region_chars` | 32 000 | max characters in **one** op's value — for a [`FileTree`](directory-evolution.md) that is a per-file cap, and `TreeSpec.max_file_bytes` must stay under it |
 | `anneal_half_life` | 64 | versions over which the acceptance risk decays |
 | `promote_after_k` | 3 | dev→stable survival rounds (EMA) |
+| `trust_region_policy` | `None` | an [`AdaptiveTrustRegion`](acceptance-policies.md) that widens/tightens the caps |
+| `accept_samples` | 4000 | Monte-Carlo draws behind each acceptance decision |
+| `cas_attempts` | 3 | commit retries under CAS conflict (jittered backoff) |
+| `cas_backoff` | 0.05 | base backoff (seconds) for those retries |
+| `fusion_tournament` | `False` | rank the union against the singles ([fusion](fusion-policies.md)); off by default |
 
 ### `AsyncConfig` ([async](async.md))
 
@@ -257,10 +264,10 @@ class MyArtifact:
     def diff(self, other) -> Diff: ...              # difference to another instance
     def apply(self, diff: Diff) -> "MyArtifact":    # return a NEW instance, version+1
         ...
-    def cheap_eval(self, evidence: EvidenceCard) -> float:
-        # score on the tasks the evidence card carries (used by rebase re-verify)
-        ...
-    def full_eval(self, task_set) -> dict:          # ground-truth metrics
+    def evidence_eval(self, evidence: EvidenceCard) -> float:
+        # score on the tasks the evidence card carries (used by rebase
+        # re-verify); the full protocol -- and why `full_eval` no longer
+        # exists -- is on [the data model page](data-model.md)
         ...
 ```
 
@@ -297,9 +304,11 @@ verifier = ThreeLayerVerifier(eval_fn=my_eval, held_out=held_out_tasks)
 
 ### 4.4 A worker that proposes diffs
 
-Workers turn observed failures into a `Diff` + `EvidenceCard`. The reference
-`Worker` (agentdescent/worker.py) is a deterministic corrector; in a real system
-this is where an LLM reflects on a trajectory and proposes an edit. Emit a card
+Workers turn observed failures into a `Diff` + `EvidenceCard`. There is no
+`Worker` class — the role is the `run`/`propose` callables the engine takes
+(`domains/router.py`'s `router_propose` is the deterministic reference); in a
+real system this is where an LLM reflects on a trajectory and proposes an
+edit. Emit a card
 with the `base_version` you read, the `touched` artifacts, and a local
 `before_after_delta`, then `aggregator.ingest(card)`.
 
@@ -311,10 +320,5 @@ paradigms — works unchanged.
 
 ## 5. Building the documentation site
 
-These docs render as a website via [MkDocs](https://www.mkdocs.org/):
-
-```bash
-pip install -e ".[docs]"
-mkdocs serve      # live preview at http://127.0.0.1:8000
-mkdocs build      # static HTML into ./site
-```
+See [install](install.md#building-the-docs) — one canonical copy of the
+commands lives there.

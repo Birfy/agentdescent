@@ -39,9 +39,9 @@ improvement throughput, where serial self-improvement is bounded at 1 diff / T_i
   are forced through an oracle; safety/permissions (L0) are frozen.
 - **Provider-agnostic.** Any `prompt -> text` is a completion — Claude,
   OpenAI-compatible endpoints (GLM / DeepSeek), or a tool-using agent (OpenHands).
-- **Faithful algorithm ports.** Runnable, offline-tested examples of ACE, GEPA,
-  EvoSkill, SkillOpt, ADAS, and DGM — faithful to each repo's algorithm *and*
-  dataset choice.
+- **Eighteen algorithm ports.** Runnable, offline-tested examples — seven
+  benchmark-faithful (ACE, GEPA, EvoSkill, SkillOpt, ADAS, DGM, OpenEvolve)
+  and eleven declared microports/analogues measured in the runtime matrix.
 
 ## Install
 
@@ -149,7 +149,8 @@ Full docs live in [`docs/`](https://github.com/Birfy/agentdescent/tree/main/docs
 | [Duration-aware scheduling](https://github.com/Birfy/agentdescent/blob/main/docs/duration-scheduling.md) | Estimate rollout cost from task size; LPT dispatch + straggler checkpointing |
 | [Efficiency experiments](https://github.com/Birfy/agentdescent/blob/main/docs/efficiency.md) | Measured parallel scaling and async tail-hiding |
 | [Example: skill evolution](https://github.com/Birfy/agentdescent/blob/main/docs/skill-evolution.md) | One complete run — real dataset, real LLM, every module |
-| [Self-evolution algorithms](https://github.com/Birfy/agentdescent/blob/main/docs/self-evolution-examples.md) | Faithful ports of ACE, GEPA, EvoSkill, SkillOpt, ADAS, DGM |
+| [Self-evolution algorithms](https://github.com/Birfy/agentdescent/blob/main/docs/self-evolution-examples.md) | Eighteen algorithm ports — seven benchmark-faithful (ACE, GEPA, EvoSkill, SkillOpt, ADAS, DGM, OpenEvolve), eleven as declared microports/analogues |
+| [Runtime matrix](https://github.com/Birfy/agentdescent/blob/main/docs/matrix-report.md) | Live 11-method serial/sync/async matrix with explicit fidelity boundaries |
 
 ```bash
 pip install -e ".[docs]"
@@ -237,13 +238,13 @@ python -m examples.skill_dir_evolution        # offline, no API key
 Guide: [evolving a directory](https://github.com/Birfy/agentdescent/blob/main/docs/directory-evolution.md)
 · [design record](https://github.com/Birfy/agentdescent/blob/main/docs/design-directory-evolution.md).
 
-## Faithful ports of the latest self-evolution algorithms
+## Ports of the latest self-evolution algorithms
 
-To show the engine is faithful to the field, AgentDescent ships one runnable example
-per representative **skill** and **harness** self-evolution algorithm — each
-faithful to the original repo's *algorithm* and *dataset choice*, each with a
-zero-network `--dry-run` mode and an offline test suite. Real runs load their
-benchmarks through the shared [`agentdescent.dataloader`](https://github.com/Birfy/agentdescent/blob/main/docs/dataloader.md) data layer
+To show the engine is faithful to the field, AgentDescent ships one runnable
+example per **skill**, **harness**, and **self-play** self-evolution algorithm —
+eighteen in all, every one with a zero-network `--dry-run` mode and an offline
+test suite. The seven benchmark-faithful ports follow the original repo's
+*algorithm and dataset choice* and load their benchmarks through the shared [`agentdescent.dataloader`](https://github.com/Birfy/agentdescent/blob/main/docs/dataloader.md) data layer
 (HF datasets-server + raw files, cached, dependency-free). Full guide:
 [docs/self-evolution-examples.md](https://github.com/Birfy/agentdescent/blob/main/docs/self-evolution-examples.md).
 
@@ -267,6 +268,11 @@ Fidelity is to the **released code**, not just the paper (e.g. EvoSkill's fronti
 is top-K aggregate, not per-instance Pareto — the example follows the code and
 says so); where a full setup needs heavy infra (SWE-bench Docker, gated data), the
 boundary is documented, never hidden.
+
+The separate [runtime matrix](https://github.com/Birfy/agentdescent/blob/main/docs/matrix-report.md)
+runs 11 additional mechanisms through real `evolve()` and `async_evolve()` calls.
+It labels compact microports and environment, inference, and self-edit analogues
+explicitly; these are scheduling experiments, not paper-benchmark reproductions.
 
 ## Efficiency (measured)
 
@@ -449,15 +455,19 @@ Read `negative` before believing a high win rate: an empty losing tail usually
 means the held-out set is too small to separate the candidates, and `ties` is the
 tell.
 
-Three outcomes, all worth having. Well above 50% means merging recovers the N−1
-proposals best-of-N discards. Near 50% means fusion is noise, and ranking it was
-never worth the sweep. Below 50% *with the tournament catching it* means ranking
-is doing real work on this workload — which is a reason to turn it on there, and
-the reason the measurement is per-workload rather than a fact about the
-mechanism. Measured numbers go in
-[Measured results](https://github.com/Birfy/agentdescent/blob/main/docs/results.md);
-the synthetic router domain is not where they can come from, because its diffs
-are additive by construction and fusion there wins by definition.
+Three outcomes, all worth having on **your** workload. Well above 50% means
+merging recovers the N−1 proposals best-of-N discards. Near 50% means fusion is
+noise there, and ranking it is not worth the sweep. Below 50% *with the
+tournament catching it* means ranking is doing real work — a reason to leave it
+on for that artifact.
+
+**No number is published here, and that is deliberate.** The win rate is a
+property of the artifact's key space and of how much the workers' proposals
+overlap, not of the mechanism — so a figure measured on one dataset would be read
+as a fact about merging and would not transfer to the next one. It is a
+diagnostic to run on the workload you care about, which is why it is one keyword
+argument and not a benchmark. The synthetic router domain is the clearest case of
+why: its diffs are additive by construction, so fusion there wins by definition.
 
 ## Parallelism & asynchrony
 

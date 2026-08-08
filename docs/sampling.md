@@ -1,5 +1,9 @@
 # Task sampling — which rollout to spend
 
+!!! note "One field of the bundle"
+    This is the `task_sampler` field of the [Policies bundle](policies.md); where a keyword argument exists it is a shortcut onto that field, and an explicit argument wins over a bundle default.
+
+
 *Module:* [`agentdescent.sampling`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/sampling.py)
 · *API:* [`TaskSampler`, `RoundRobin`, `DifficultyWeighted`](api.md#task-sampling)
 

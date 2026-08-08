@@ -51,7 +51,6 @@ nav:
     - The aggregator (the optimizer): aggregator.md
     - The ledger: ledger.md
     - The verifier: verifier.md
-    - Staleness policies: staleness.md
     - The data layer: dataloader.md
     - Rewards: rewards.md
     - Reference orchestrator & domain: orchestrator.md
@@ -60,26 +59,51 @@ nav:
     - Where rollouts run: execution.md
     - Sandboxes: sandboxes.md
     - Async — no round barrier: async.md
+    - Duration-aware scheduling: duration-scheduling.md
+  - The decision plane (policies):
+    - Choosing policies: policies.md
     - Task sampling: sampling.md
     - Candidate selection: selection.md
-    - Duration-aware scheduling: duration-scheduling.md
+    - Proposal policies: proposal-policies.md
+    - Conflict policies: conflict-policies.md
+    - Fusion policies: fusion-policies.md
+    - Acceptance policies: acceptance-policies.md
+    - Promotion policies: promotion-policies.md
+    - Staleness policies: staleness.md
+    - The aggregator_factory exit: aggregator-factory.md
   - API reference: api.md
   - Run everything, and extend it: usage.md
   - Examples and results:
     - Complete example — skill evolution: skill-evolution.md
     - Efficiency experiments: efficiency.md
     - Measured results: results.md
-  - Self-evolution algorithms (faithful ports):
+    - Runtime matrix — overview: matrix-overview.md
+    - Runtime matrix — report: matrix-report.md
+    - Runtime matrix — parallel speedup: matrix-parallel-speedup.md
+    - Runtime matrix — async behaviour: matrix-async.md
+  - Self-evolution algorithms:
     - Overview: self-evolution-examples.md
     - Porting checklist: porting-checklist.md
+    - MethodPolicy porting checklist: porting-methodpolicy.md
     - Port fidelity: port-fidelity.md
     - ACE — context evolution: algo-ace.md
     - GEPA — prompt evolution: algo-gepa.md
     - EvoSkill — skill discovery: algo-evoskill.md
     - SkillOpt — skill-document training: algo-skillopt.md
-    - ADAS — meta agent search (harness): algo-adas.md
-    - DGM — Darwin Gödel Machine (harness): algo-dgm.md
+    - ADAS — meta agent search: algo-adas.md
+    - DGM — Darwin Gödel Machine: algo-dgm.md
     - OpenEvolve — program evolution: algo-openevolve.md
+    - PromptBreeder — genetic prompts: algo-promptbreeder.md
+    - AFlow — workflow search: algo-aflow.md
+    - Reflexion — episodic memory: algo-reflexion.md
+    - Self-Refine — feedback refinement: algo-self-refine.md
+    - Voyager — skill library: algo-voyager.md
+    - SkillWeaver — web APIs: algo-skillweaver.md
+    - Absolute Zero — zero-data self-play: algo-absolute-zero.md
+    - R-Zero — challenger/solver: algo-r-zero.md
+    - Agent0 — tool curriculum: algo-agent0.md
+    - SICA — self-edit: algo-sica.md
+    - Gödel Agent — self-modification: algo-godel-agent.md
   - Design records:
     - Evolving a directory: design-directory-evolution.md
 

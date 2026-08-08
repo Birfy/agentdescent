@@ -781,10 +781,17 @@ class MetaSearchAggregator(AggregatorProtocol):
     """ADAS's optimizer: a keep-all archive with bootstrap-CI fitness."""
 
     def __init__(self, ledger: Ledger, verifier, ctx: AdasContext,
-                 artifact_id: str = "agentic_system", boot_seed: int = 0):
+                 artifact_id: str = "agentic_system", boot_seed: int = 0,
+                 selection=None):
+        from agentdescent.selection import Beam
         self.ledger = ledger
         self.verifier = verifier
         self.ctx = ctx
+        # ADAS keeps the archive's best design as head. That rule is exactly
+        # the shipped Beam(1): stable sort, first maximal wins -- the same
+        # tie-break as the incremental strictly-greater tracking it replaces.
+        # The first legacy port whose rule needed no local subclass.
+        self.selection = selection or Beam(1)
         self.aid = artifact_id
         self.boot_seed = boot_seed
         self.cards: List[EvidenceCard] = []
@@ -858,11 +865,22 @@ class MetaSearchAggregator(AggregatorProtocol):
                          card.diff.ops.get("thought", ""),
                          json.loads(design), mean, ci)
 
-        best_design = canonical(self.ctx.best_agent["program"])
+        # Best-of-archive at the standard seam (version = archive index).
+        from agentdescent.selection import Candidate, SelectionContext
+        rows = [Candidate(artifact_id=self.aid, version=i,
+                          score=a["fitness"])
+                for i, a in enumerate(self.ctx.archive)]
+        best_agent = self.ctx.best_agent
+        if rows:
+            sel = SelectionContext(head=rows[0], candidates=tuple(rows),
+                                   n_workers=1)
+            best_agent = self.ctx.archive[
+                self.selection.select(sel, 1)[0].version]
+        best_design = canonical(best_agent["program"])
         diff = Diff(diff_id="best", target=self.aid,
                     ops={"design": best_design,
-                         "name": self.ctx.best_agent["name"],
-                         "thought": self.ctx.best_agent.get("thought", "")},
+                         "name": best_agent["name"],
+                         "thought": best_agent.get("thought", "")},
                     author="adas")
         committed, category = None, ALREADY_BEST
         if not cards:

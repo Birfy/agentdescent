@@ -1,5 +1,9 @@
 # Candidate selection — where the next batch starts
 
+!!! note "One field of the bundle"
+    This is the `selection` field of the [Policies bundle](policies.md); where a keyword argument exists it is a shortcut onto that field, and an explicit argument wins over a bundle default.
+
+
 `evolve()` has a replaceable rule for almost every decision it makes: which task
 a worker rolls out ([sampling](sampling.md)), what a stale diff is worth
 ([staleness](staleness.md)), which diffs contradict, whether to fuse, whether to
@@ -97,3 +101,32 @@ Every policy above is therefore usable *today* in the shape a run actually
 starts in: an archive of one, a beam over one candidate. That is what makes the
 seam checkable now instead of after the ledger changes. Making the ledger hold
 concurrent branches, and redefining `η` when `head` is plural, is separate work.
+
+## Examples-level policies, and how they actually run
+
+The MethodPolicy ports add two paper rules as ~15-line policies:
+
+| Policy | Rule | Port |
+|---|---|---|
+| `BinaryTournament` | sample two candidates, breed the winner (unscored wins, Beam's optimism) | [PromptBreeder](algo-promptbreeder.md) |
+| `SoftMixed` | `λ·uniform + (1−λ)·softmax(α·(s−s_max))` over top-k, seed always included | [AFlow](algo-aflow.md) |
+
+On a single-head ledger these (and `Archive`, `Beam`, …) get their population
+through the [population aggregator](aggregator-factory.md): committed heads
+enter an archive, the policy picks the next parent from it, and the pick is a
+ledger commit. Declare `Policies(selection=…)` as usual — the method runner
+routes it there automatically.
+
+## Legacy-port policies
+
+The mechanism-heavy ports express their parent rules as policy classes at this
+seam (local where the upstream rule differs from a shipped policy — the
+difference is always documented on the class):
+
+| Policy | Rule | Port |
+|---|---|---|
+| `DGMParentSelection` | `sigmoid(10·(s−0.5)) × 1/(1+children)` sampling | [DGM](algo-dgm.md) |
+| `ParetoWinFrequency` | per-instance Pareto frontier, sampled by unique wins | [GEPA](algo-gepa.md) |
+| `FrontierBest` | best member of the bounded top-K frontier | [EvoSkill](algo-evoskill.md) |
+| shipped `Beam(1)` | best of the keep-all archive (exact match, no subclass) | [ADAS](algo-adas.md) |
+| `EpsilonGreedy` | exploit best with probability ε, else uniform | [OpenEvolve](algo-openevolve.md) |

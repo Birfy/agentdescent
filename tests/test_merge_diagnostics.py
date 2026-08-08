@@ -10,7 +10,15 @@ TASKS = [Task(id=str(i), prompt="p", meta={"gold": "g"}) for i in range(6)]
 
 
 def _run(**kw):
-    return evolve(TASKS, lambda t, o: 0.5, run=lambda a, t: "x",
+    # The proposal must be *decisively* unhelpful: with candidate and baseline
+    # held-out rewards exactly equal, P(delta>0) sits on the annealed threshold
+    # and the accept draw is a near coin flip -- ~3% of seeded runs committed
+    # the no-op diff in round 1, after which SingleSlot deduped every later
+    # proposal and `below-threshold` never appeared. A strictly worse candidate
+    # keeps the test's point (proposals reach the gate and fail) without the
+    # knife edge; defaults.py labels the measured drop `below-threshold` too.
+    return evolve(TASKS, lambda t, o: 0.5 if o == "x" else 0.2,
+                  run=lambda a, t: "x" if a == "v" else "y",
                   propose=lambda *a: "does not help",
                   strategy=SingleSlot(initial_value="v"),
                   rounds=4, held_out_frac=0.5, **kw)

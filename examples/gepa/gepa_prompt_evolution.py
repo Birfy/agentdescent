@@ -171,6 +171,34 @@ def pareto_select(scores: List[List[float]], rng: random.Random) -> int:
     return rng.choices(cands, weights=weights, k=1)[0]
 
 
+class ParetoWinFrequency:
+    """GEPA's Algorithm-2 sampling at the standard selection seam.
+
+    A :class:`~agentdescent.selection.SelectionPolicy` whose candidates carry
+    their per-instance rows in ``Candidate.per_task``; ``select`` rebuilds the
+    aligned score matrix and defers to :func:`pareto_select`, so the rng call
+    order -- and therefore every seeded run -- is identical to the inline rule
+    it replaces.
+
+    Local rather than the shipped ``ParetoFrontier`` on purpose: the shipped
+    policy walks the frontier round-robin, GEPA samples it weighted by how many
+    instances a candidate *uniquely* wins. Same frontier, different draw --
+    close enough to look right and wrong enough to change a measured run.
+    """
+
+    def __init__(self, rng: random.Random) -> None:
+        self.rng = rng
+
+    def select(self, ctx, n: int):
+        candidates = list(ctx.candidates)
+        if len(candidates) <= 1:
+            return [ctx.head] * n
+        tasks = sorted({t for c in candidates for t in c.per_task})
+        scores = [[c.per_task.get(t, 0.0) for t in tasks] for c in candidates]
+        k = pareto_select(scores, self.rng)
+        return [candidates[k]] * n
+
+
 # ===========================================================================
 # The optimizer: swap evolve()'s greedy aggregator for Pareto illumination
 # ===========================================================================
@@ -196,7 +224,8 @@ class ParetoAggregator(AggregatorProtocol):
 
     def __init__(self, ledger: Ledger, verifier, audit, config, policy,
                  artifact_id: str = "gepa_prompt", seed: int = 0,
-                 eval_concurrency: int = 8, merge_round=None):
+                 eval_concurrency: int = 8, merge_round=None,
+                 selection: Optional["ParetoWinFrequency"] = None):
         self.ledger = ledger
         self.eval_concurrency = eval_concurrency
         #: Optional :class:`~agentdescent.policies.FusionPolicy`. When set, the
@@ -218,6 +247,7 @@ class ParetoAggregator(AggregatorProtocol):
         self.verifier = verifier
         self.artifact_id = artifact_id
         self.rng = random.Random(seed)
+        self.selection = selection or ParetoWinFrequency(self.rng)
         self._cards: List[EvidenceCard] = []
         self._lock = threading.Lock()   # ingest: workers; step: one thread
         # pool: list of (state_dict, per_instance_scores, avg). Parallel lists so
@@ -371,8 +401,17 @@ class ParetoAggregator(AggregatorProtocol):
                 survivors = [merged]
         admitted = self._admit_many([head.apply(d) for d in survivors])
 
-        # Algorithm 2: sample the next parent from the Pareto frontier.
-        k = pareto_select(self.scores, self.rng)
+        # Algorithm 2 at the standard seam: candidates carry their per-instance
+        # rows in Candidate.per_task; version carries the pool index.
+        from agentdescent.selection import Candidate, SelectionContext
+        task_ids = [t.id for t in self.verifier.held_out]
+        rows = [Candidate(artifact_id=self.artifact_id, version=i,
+                          state=dict(state),
+                          score=sum(row) / len(row) if row else 0.0,
+                          per_task=dict(zip(task_ids, row)))
+                for i, (state, row) in enumerate(zip(self.states, self.scores))]
+        ctx = SelectionContext(head=rows[0], candidates=tuple(rows), n_workers=1)
+        k = self.selection.select(ctx, 1)[0].version
         target_state = self.states[k]
         report_diff = None
         committed_version = None
