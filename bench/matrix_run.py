@@ -123,6 +123,36 @@ ROWS = [
          # task_count and the flag never was, so this row crashed argparse on
          # its first live cell.
          size=["--tasks", "8"], needs="bwrap"),
+
+    # The eleven declarative MethodPolicy ports. They reach the same three
+    # arms through `examples._method_runner.standard_main`, and their budget
+    # is already equal by construction: `rounds = candidates // workers` on
+    # the synchronous path and `max_iters = candidates` on the async one, so
+    # width divides the work rather than multiplying it. `--budget-rollouts`
+    # is mapped onto `--candidates` in the runner -- one quantity, two
+    # vocabularies -- and must be divisible by `--width`.
+    dict(name="promptbreeder", module="examples.promptbreeder.promptbreeder_genetic_prompts",
+         dataset="compact QA (mechanism microport)", width_flag="--workers", size=[], method_policy=True),
+    dict(name="aflow", module="examples.aflow.aflow_workflow_search",
+         dataset="compact QA (mechanism microport)", width_flag="--workers", size=[], method_policy=True),
+    dict(name="reflexion", module="examples.reflexion.reflexion_episodic_memory",
+         dataset="compact QA (mechanism microport)", width_flag="--workers", size=[], method_policy=True),
+    dict(name="self_refine", module="examples.self_refine.self_refine_feedback_loop",
+         dataset="compact QA (mechanism microport)", width_flag="--workers", size=[], method_policy=True),
+    dict(name="voyager", module="examples.voyager.voyager_skill_library",
+         dataset="skill library (environment analogue)", width_flag="--workers", size=[], method_policy=True),
+    dict(name="skillweaver", module="examples.skillweaver.skillweaver_web_apis",
+         dataset="web APIs (environment analogue)", width_flag="--workers", size=[], method_policy=True),
+    dict(name="absolute_zero", module="examples.absolute_zero.absolute_zero_selfplay",
+         dataset="self-play (inference analogue)", width_flag="--workers", size=[], method_policy=True),
+    dict(name="r_zero", module="examples.r_zero.r_zero_challenger_solver",
+         dataset="challenger/solver (inference analogue)", width_flag="--workers", size=[], method_policy=True),
+    dict(name="agent0", module="examples.agent0.agent0_tool_curriculum",
+         dataset="calculator tasks (inference analogue)", width_flag="--workers", size=[], method_policy=True),
+    dict(name="sica", module="examples.sica.sica_self_edit",
+         dataset="self-edit (analogue)", width_flag="--workers", size=[], method_policy=True),
+    dict(name="godel_agent", module="examples.godel_agent.godel_agent_self_modify",
+         dataset="self-edit (analogue)", width_flag="--workers", size=[], method_policy=True),
 ]
 
 #: The expected answer in the "semantics changed" column, for every row and every
@@ -213,6 +243,122 @@ SEMANTICS = {
         "parallel": SCHEDULING_ONLY,
         "async": SCHEDULING_ONLY,
     },
+
+    # The eleven MethodPolicy ports. Their merge behaviour is not a matrix
+    # knob: `MethodPolicy.reflective` is declared by each method, because
+    # for these the merger is part of the definition rather than an
+    # execution choice -- so `--reflective-merge` is deliberately not passed
+    # to them and their rows carry the clean string.
+    "promptbreeder": {
+        "serial": "PromptBreeder as a declared `mechanism_microport` -- see "
+                  "docs/port-fidelity.md for what that class claims and does "
+                  "not. **Serial here is not a one-worker loop**: these express "
+                  "it as `max_concurrency=1` over the same `candidates // "
+                  "workers` rounds, so the arm runs identical work without "
+                  "concurrency rather than a narrower algorithm",
+        "parallel": SCHEDULING_ONLY,
+        "async": SCHEDULING_ONLY,
+    },
+    "aflow": {
+        "serial": "AFlow as a declared `mechanism_microport` -- see "
+                  "docs/port-fidelity.md for what that class claims and does "
+                  "not. **Serial here is not a one-worker loop**: these express "
+                  "it as `max_concurrency=1` over the same `candidates // "
+                  "workers` rounds, so the arm runs identical work without "
+                  "concurrency rather than a narrower algorithm",
+        "parallel": SCHEDULING_ONLY,
+        "async": SCHEDULING_ONLY,
+    },
+    "reflexion": {
+        "serial": "Reflexion as a declared `mechanism_microport` -- see "
+                  "docs/port-fidelity.md for what that class claims and does "
+                  "not. **Serial here is not a one-worker loop**: these express "
+                  "it as `max_concurrency=1` over the same `candidates // "
+                  "workers` rounds, so the arm runs identical work without "
+                  "concurrency rather than a narrower algorithm",
+        "parallel": SCHEDULING_ONLY,
+        "async": SCHEDULING_ONLY,
+    },
+    "self_refine": {
+        "serial": "Self-Refine as a declared `mechanism_microport` -- see "
+                  "docs/port-fidelity.md for what that class claims and does "
+                  "not. **Serial here is not a one-worker loop**: these express "
+                  "it as `max_concurrency=1` over the same `candidates // "
+                  "workers` rounds, so the arm runs identical work without "
+                  "concurrency rather than a narrower algorithm",
+        "parallel": SCHEDULING_ONLY,
+        "async": SCHEDULING_ONLY,
+    },
+    "voyager": {
+        "serial": "Voyager as a declared `environment_analogue` -- see "
+                  "docs/port-fidelity.md for what that class claims and does "
+                  "not. **Serial here is not a one-worker loop**: these express "
+                  "it as `max_concurrency=1` over the same `candidates // "
+                  "workers` rounds, so the arm runs identical work without "
+                  "concurrency rather than a narrower algorithm",
+        "parallel": SCHEDULING_ONLY,
+        "async": SCHEDULING_ONLY,
+    },
+    "skillweaver": {
+        "serial": "SkillWeaver as a declared `environment_analogue` -- see "
+                  "docs/port-fidelity.md for what that class claims and does "
+                  "not. **Serial here is not a one-worker loop**: these express "
+                  "it as `max_concurrency=1` over the same `candidates // "
+                  "workers` rounds, so the arm runs identical work without "
+                  "concurrency rather than a narrower algorithm",
+        "parallel": SCHEDULING_ONLY,
+        "async": SCHEDULING_ONLY,
+    },
+    "absolute_zero": {
+        "serial": "Absolute Zero as a declared `inference_analogue` -- see "
+                  "docs/port-fidelity.md for what that class claims and does "
+                  "not. **Serial here is not a one-worker loop**: these express "
+                  "it as `max_concurrency=1` over the same `candidates // "
+                  "workers` rounds, so the arm runs identical work without "
+                  "concurrency rather than a narrower algorithm",
+        "parallel": SCHEDULING_ONLY,
+        "async": SCHEDULING_ONLY,
+    },
+    "r_zero": {
+        "serial": "R-Zero as a declared `inference_analogue` -- see "
+                  "docs/port-fidelity.md for what that class claims and does "
+                  "not. **Serial here is not a one-worker loop**: these express "
+                  "it as `max_concurrency=1` over the same `candidates // "
+                  "workers` rounds, so the arm runs identical work without "
+                  "concurrency rather than a narrower algorithm",
+        "parallel": SCHEDULING_ONLY,
+        "async": SCHEDULING_ONLY,
+    },
+    "agent0": {
+        "serial": "Agent0 as a declared `inference_analogue` -- see "
+                  "docs/port-fidelity.md for what that class claims and does "
+                  "not. **Serial here is not a one-worker loop**: these express "
+                  "it as `max_concurrency=1` over the same `candidates // "
+                  "workers` rounds, so the arm runs identical work without "
+                  "concurrency rather than a narrower algorithm",
+        "parallel": SCHEDULING_ONLY,
+        "async": SCHEDULING_ONLY,
+    },
+    "sica": {
+        "serial": "SICA as a declared `self_edit_analogue` -- see "
+                  "docs/port-fidelity.md for what that class claims and does "
+                  "not. **Serial here is not a one-worker loop**: these express "
+                  "it as `max_concurrency=1` over the same `candidates // "
+                  "workers` rounds, so the arm runs identical work without "
+                  "concurrency rather than a narrower algorithm",
+        "parallel": SCHEDULING_ONLY,
+        "async": SCHEDULING_ONLY,
+    },
+    "godel_agent": {
+        "serial": "Godel Agent as a declared `self_edit_analogue` -- see "
+                  "docs/port-fidelity.md for what that class claims and does "
+                  "not. **Serial here is not a one-worker loop**: these express "
+                  "it as `max_concurrency=1` over the same `candidates // "
+                  "workers` rounds, so the arm runs identical work without "
+                  "concurrency rather than a narrower algorithm",
+        "parallel": SCHEDULING_ONLY,
+        "async": SCHEDULING_ONLY,
+    },
 }
 
 #: Pulled out of each port's own stdout rather than re-derived, so a row reports
@@ -292,6 +438,16 @@ def _cell(row: dict, arm: str, seed: int, args) -> Dict:
         cmd += ["--serial"]
     else:
         cmd += [row["width_flag"], str(args.width)]
+    if row.get("method_policy"):
+        # These size their work as `candidates // workers` rounds, so the worker
+        # count is part of the budget arithmetic rather than only of the
+        # schedule -- and their `--serial` sets `max_concurrency=1` without
+        # touching it. Passing the width on every arm is therefore what keeps
+        # the budget equal: leave it off the serial arm and that arm silently
+        # runs the 2-worker default, i.e. a different number of rounds over the
+        # same candidate budget.
+        if arm == "serial":
+            cmd += [row["width_flag"], str(args.width)]
     if arm == "async":
         # The cell timeout as the wall-clock budget: the async runtime refuses to
         # run unbounded, and the ports' own --max-seconds defaults (15-45s) would
@@ -403,6 +559,16 @@ def main(argv=None) -> None:
         raise SystemExit(f"unknown arm(s) {bad}; choose from {known}")
     todo = [(r, a, s) for r in rows for s in seeds for a in arms
             if (r["name"], a, s) not in done]
+
+    # `run_port` refuses a candidate budget that is not a multiple of the worker
+    # count, and it refuses it *after* the sweep has started paying for earlier
+    # cells. Checked here instead, before anything runs.
+    mp = [r["name"] for r in rows if r.get("method_policy")]
+    if mp and (args.budget % args.width or args.budget < args.width):
+        raise SystemExit(
+            f"--budget {args.budget} must be a positive multiple of --width "
+            f"{args.width} for the MethodPolicy rows ({', '.join(mp[:3])}...), "
+            f"which size their work as `candidates // workers` rounds")
 
     print(f"matrix: {len(rows)} rows x {len(arms)} arms x {len(seeds)} seeds "
           f"= {len(rows) * len(arms) * len(seeds)} cells, {len(done)} already done, "
