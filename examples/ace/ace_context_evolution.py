@@ -60,7 +60,7 @@ from agentdescent.parallel import DataParallel
 from agentdescent.sampling import DifficultyWeighted, RoundRobin
 from examples._common import (add_standard_args, completion_for, confirm,
                               score_tasks, worker_count,
-                              budget_kwargs)
+                              budget_kwargs, report_engine)
 
 FINER = ("nlpaueb/finer-139", "validation", "finer-139")   # (dataset, split, config)
 
@@ -388,6 +388,7 @@ def main(argv=None) -> None:
     print(f"test accuracy: {test_acc:.3f}  (held out, never seen by the Curator)")
     print(f"bullets curated: {len(result.state)}")
     print(f"stop reason  : {result.stop_reason}")
+    report_engine(result)
     if result.error:
         print(f"WARNING: the run did not finish cleanly -- {result.error}")
     print(f"model usage  : {usage.summary()}")

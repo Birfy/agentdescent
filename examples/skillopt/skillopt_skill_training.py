@@ -59,7 +59,7 @@ from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
 from examples._common import (add_standard_args, completion_for, confirm,
                               worker_count,
-                              budget_kwargs)
+                              budget_kwargs, report_engine)
 
 SEARCHQA = ("lucadiliello/searchqa", "default")   # (dataset, config)
 Completion = Callable[[str], str]
@@ -475,6 +475,8 @@ def run_skillopt(complete: Completion, train: List[dict], val: List[dict],
                     held_out_frac=len(val) / max(1, len(tasks)),
                     aggregator_factory=factory, verbose=verbose,
                     max_rollouts=max_rollouts)
+    if verbose:
+        report_engine(result)
     return SkillOptResult(result.rendered, ctx.seed_em, ctx.best_em,
                           ctx.accepted, ctx.rejected,
                           [h.held_out_reward for h in result.history],

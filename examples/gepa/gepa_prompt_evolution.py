@@ -57,7 +57,7 @@ from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
 from examples._common import (add_standard_args, completion_for, confirm,
                               score_tasks, worker_count,
-                              budget_kwargs, capped_val)
+                              budget_kwargs, capped_val, report_engine)
 
 HOTPOTQA = ("hotpotqa/hotpot_qa", "validation", "distractor")   # (dataset, split, config)
 
@@ -648,6 +648,7 @@ def main(argv=None) -> None:
     print(f"best D_pareto EM   : {agg.best_avg:.3f}")
     print(f"test EM            : {test_em:.3f}  (held out, never seen by the optimizer)")
     print(f"stopped            : {result.stop_reason}")
+    report_engine(result)
     if result.error:
         print(f"WARNING: the run did not finish cleanly -- {result.error}")
     print(f"model usage: {usage.summary()}")

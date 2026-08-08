@@ -62,7 +62,7 @@ from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
 from examples._common import (add_standard_args, completion_for, confirm,
                               is_openai_compatible, worker_count,
-                              budget_kwargs)
+                              budget_kwargs, report_engine)
 
 MGSM_URL = "https://raw.githubusercontent.com/ShengranHu/ADAS/main/dataset/mgsm/mgsm_{lang}.tsv"
 # ADAS's MGSM language set (utils.ALL_LANGUAGES).
@@ -975,6 +975,8 @@ def run_meta_agent_search(complete: Completion, val: List[Tuple[str, str]],
            eval_concurrency=EVAL_CONCURRENCY,
            held_out_frac=held_out_frac, aggregator_factory=factory, verbose=verbose,
            max_rollouts=max_rollouts)
+    if verbose:
+        report_engine(out)
     return SearchResult(ctx.archive, ctx.best_agent or {}, ctx.seed_fitness,
                         ctx.best_fitness, ctx.best_seed or {},
                         out.outcomes(), out.stop_reason, out.error)

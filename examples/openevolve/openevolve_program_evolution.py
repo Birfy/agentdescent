@@ -61,6 +61,7 @@ from examples._common import (
     confirm,
     worker_count,
     is_openai_compatible,
+    report_engine,
 )
 from examples.openevolve._openevolve_support import (
     INITIAL_PROGRAM,
@@ -878,6 +879,8 @@ def run_agentdescent_openevolve(
             max_concurrency=1 if mode == "serial" else workers,
             **common,
         )
+    if verbose:
+        report_engine(result)
     wall_seconds = time.monotonic() - started
     test_seed = seed + task_count
     _, baseline_test, _ = evaluate_program_metrics(

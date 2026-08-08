@@ -69,7 +69,7 @@ from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
 from examples._common import (add_standard_args, completion_for, confirm,
                               worker_count,
-                              budget_kwargs)
+                              budget_kwargs, report_engine)
 
 SWEBENCH = ("princeton-nlp/SWE-bench_Verified", "test", "default")   # (dataset, split, config)
 
@@ -436,14 +436,16 @@ def run_dgm(instances: List[dict], generations: int = 12,
     def factory(ledger, verifier, audit, config, policy):
         return DGMArchiveAggregator(ledger, verifier, ctx, artifact_id="coding_agent")
 
-    evolve(tasks, reward, run=run, propose=propose, strategy=HarnessStrategy(),
-           blast_radius=0.6, artifact_id="coding_agent", rounds=generations,
-           n_workers=selfimprove_size,
-           max_concurrency=1 if asynchronous else selfimprove_size,
-           asynchronous=asynchronous, async_ratio=async_ratio,
-           max_seconds=max_seconds if asynchronous else None,
-           held_out_frac=0.5, aggregator_factory=factory, verbose=verbose,
-           max_rollouts=max_rollouts)
+    result = evolve(tasks, reward, run=run, propose=propose, strategy=HarnessStrategy(),
+                    blast_radius=0.6, artifact_id="coding_agent", rounds=generations,
+                    n_workers=selfimprove_size,
+                    max_concurrency=1 if asynchronous else selfimprove_size,
+                    asynchronous=asynchronous, async_ratio=async_ratio,
+                    max_seconds=max_seconds if asynchronous else None,
+                    held_out_frac=0.5, aggregator_factory=factory, verbose=verbose,
+                    max_rollouts=max_rollouts)
+    if verbose:
+        report_engine(result)
     best = max(ctx.archive, key=lambda a: a.score)
     return DGMResult(ctx.archive, best, ctx.seed_score, best.score)
 

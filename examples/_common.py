@@ -209,6 +209,24 @@ def budget_kwargs(args: argparse.Namespace) -> dict:
             if getattr(args, "budget_rollouts", None) else {})
 
 
+def report_engine(result) -> None:
+    """Print the engine's own counters in the one format the matrix parses.
+
+    ``bench/matrix_run.py`` reads a port through its stdout, and until this line
+    existed the ports printed *their* numbers (test score, usage) but never the
+    engine's: measured rollouts rather than the budget, and staleness with its
+    denominator. The async arm's quality column is unreadable without the
+    latter -- "the score dropped" with no ``stale_discarded`` beside it cannot
+    distinguish a lag-budget problem from a reflector problem, which need
+    opposite fixes. One shared implementation, because seven hand-rolled copies
+    of a parsed format is how the ACE ``model usage  :`` two-space bug happened.
+    """
+    print(f"engine counters: rollouts={result.rollouts}  "
+          f"stale_considered={result.stale_considered}  "
+          f"stale_discarded={result.stale_discarded}  "
+          f"redispatched={result.redispatched}", flush=True)
+
+
 def is_openai_compatible(args: argparse.Namespace) -> bool:
     """Whether ``--provider`` selects the OpenAI-compatible adapter."""
     return args.provider in OPENAI_COMPATIBLE

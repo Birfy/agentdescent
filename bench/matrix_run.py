@@ -1,12 +1,22 @@
-"""The parallelisation matrix: every port, serial against N workers, equal budget.
+"""The parallelisation matrix: every port, serial / parallel / async, equal budget.
 
-One row per algorithm, two arms per row, `--budget-rollouts` pinned to the same
-value on both. That pin is the whole point. Six of the seven ports pass a fixed
+One row per algorithm, three arms per row, `--budget-rollouts` pinned to the
+same value on all of them. That pin is the whole point. Six of the seven ports
+pass a fixed
 iteration count and let `n_workers` multiply it, so an unbudgeted `N=8` arm runs
 eight times the rollouts of the `--serial` arm -- measured on the engine at
 `rounds=24`: 192 rollouts against 24. A wall-clock read across that gap is eight
 times the model spend reported as parallel efficiency, and the quality column
 beside it credits the extra spend to parallelism.
+
+The `async` arm is the same width barrier-free (`--async`), where a diff can be
+proposed against a head the merger has since moved. Its `--max-seconds` is set
+to the cell timeout so the wall-clock never binds before the rollout budget --
+the async runtime has no unbounded mode, and its own defaults (tens of seconds)
+would otherwise silently become the stop condition, reporting a wall-clock cap
+as a converged run. Read `stale_discarded`/`stale_considered` on every async
+cell: a quality drop with a high stale rate is the lag budget, not the
+algorithm, and those need opposite fixes.
 
 **Results are written after every cell**, because a full sweep is many hours of
 real model time and a sweep that only reports at the end reports nothing when it
@@ -70,7 +80,10 @@ ROWS = [
          width_flag="--selfimprove-size", size=[]),
     dict(name="openevolve", module="examples.openevolve.openevolve_program_evolution",
          dataset="function minimization", width_flag="--workers",
-         size=["--task-count", "8"], needs="bwrap"),
+         # `--tasks`, not `--task-count`: the run function's parameter is named
+         # task_count and the flag never was, so this row crashed argparse on
+         # its first live cell.
+         size=["--tasks", "8"], needs="bwrap"),
 ]
 
 #: Pulled out of each port's own stdout rather than re-derived, so a row reports
@@ -92,6 +105,14 @@ PATTERNS = {
     # which is what a speedup between two arms should be computed from when one
     # arm was unlucky. Only printed by ports once Usage carries it.
     "failure_seconds": r"failed \(([\d.]+)s lost\)",
+    # The engine's own counters, printed by `examples._common.report_engine` in
+    # one shared format. `engine_rollouts` is measured spend where `rollouts`
+    # above is what the port's stdout happened to say; the stale pair is the
+    # async arm's quality-drop diagnosis, numerator WITH denominator.
+    "engine_rollouts": r"engine counters: rollouts=([\d,]+)",
+    "stale_considered": r"stale_considered=([\d,]+)",
+    "stale_discarded": r"stale_discarded=([\d,]+)",
+    "redispatched": r"redispatched=([\d,]+)",
 }
 
 
@@ -127,6 +148,13 @@ def _cell(row: dict, arm: str, seed: int, args) -> Dict:
         cmd += ["--serial"]
     else:
         cmd += [row["width_flag"], str(args.width)]
+    if arm == "async":
+        # The cell timeout as the wall-clock budget: the async runtime refuses to
+        # run unbounded, and the ports' own --max-seconds defaults (15-45s) would
+        # otherwise stop the arm long before `--budget-rollouts` binds -- the one
+        # comparison this matrix exists to make.
+        cmd += ["--async", "--async-ratio", str(args.async_ratio),
+                "--max-seconds", str(args.timeout)]
     if not row.get("offline"):
         cmd += ["--provider", args.provider, "--model", args.model]
 
@@ -175,6 +203,7 @@ def _save(path: Optional[str], cells: List[Dict], args) -> None:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w", encoding="utf-8") as handle:
         json.dump({"budget_rollouts": args.budget, "width": args.width,
+                   "async_ratio": args.async_ratio,
                    "model": args.model, "provider": args.provider,
                    "cells": cells}, handle, indent=2)
 
@@ -186,6 +215,10 @@ def main(argv=None) -> None:
     p.add_argument("--width", type=int, default=8, help="workers in the parallel arm")
     p.add_argument("--seeds", default="0,1,2")
     p.add_argument("--rows", default="", help="comma-separated subset of row names")
+    p.add_argument("--arms", default="serial,parallel,async",
+                   help="comma-separated subset of arms to run")
+    p.add_argument("--async-ratio", type=int, default=3,
+                   help="staleness lag budget for the async arm")
     p.add_argument("--provider", default="claude")
     p.add_argument("--model", default="GLM-5.2")
     p.add_argument("--eval-concurrency", type=int, default=16,
@@ -203,15 +236,18 @@ def main(argv=None) -> None:
 
     cells = _load(args.json)
     done = {(c["row"], c["arm"], c["seed"]) for c in cells}
-    arms = ("serial", "parallel")
+    known = ("serial", "parallel", "async")
+    arms = tuple(a.strip() for a in args.arms.split(",") if a.strip())
+    if bad := [a for a in arms if a not in known]:
+        raise SystemExit(f"unknown arm(s) {bad}; choose from {known}")
     todo = [(r, a, s) for r in rows for s in seeds for a in arms
             if (r["name"], a, s) not in done]
 
     print(f"matrix: {len(rows)} rows x {len(arms)} arms x {len(seeds)} seeds "
           f"= {len(rows) * len(arms) * len(seeds)} cells, {len(done)} already done, "
           f"{len(todo)} to run")
-    print(f"budget: {args.budget} rollouts on BOTH arms; parallel arm width "
-          f"{args.width}\n")
+    print(f"budget: {args.budget} rollouts on EVERY arm; parallel/async width "
+          f"{args.width}, async lag budget {args.async_ratio}\n")
     if not args.yes:
         print("pass --yes to run (this spends real model time)")
         return
