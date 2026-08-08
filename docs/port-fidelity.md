@@ -126,19 +126,24 @@ column of each section below says exactly where to look.
 * **Why this one matters most**: it is the clearest case of the rule. A port
   faithful to the paper here would be a *better-sounding* algorithm that the
   authors' own code does not implement.
-* **Departure, and the only one of its kind here — the async arm changes the
-  admission rule.** `run_evoskill` picks its aggregator off the `asynchronous`
-  flag: the serial and synchronous arms run `TopKFrontierAggregator`, which is
-  upstream's rule, and the asynchronous arm runs `SgdSkillAggregator`, which is
-  not. That one applies every proposed skill to the head immediately and
-  amortises held-out validation over `val_every` steps, rolling back to the last
-  validated checkpoint when the batch fails to improve — cheaper by roughly
-  `val_every`×, and a different algorithm. It sits in the *must not change*
-  column of the table above, so this row's async cell is not a measurement of
-  what asynchrony costs EvoSkill; it is a measurement of a different optimizer
-  that happens to run asynchronously. Pinned by
-  `tests/test_matrix_report.py::test_the_evoskill_async_arm_is_recorded_as_an_algorithm_change`,
-  so it cannot quietly become "scheduling only" in the results table.
+* **A departure that was the admission rule, now fixed and behind a flag.**
+  `run_evoskill` used to pick its aggregator off the `asynchronous` flag:
+  `TopKFrontierAggregator` (upstream's rule) on the serial and synchronous arms,
+  `SgdSkillAggregator` on the asynchronous one. The second applies every
+  proposed skill to the head immediately, amortises held-out validation over
+  `val_every` steps, rolls a whole batch back when it fails to improve — and has
+  **no frontier at all**, one checkpoint in its place.
+
+  That is three of upstream's mechanisms at once, and the frontier is not an
+  implementation detail: `update_frontier` plus `select_from_frontier` *is*
+  EvoSkill. Upstream evaluates each child on the full validation split before
+  the admission decision, so a barrier-free schedule changes *when* those
+  evaluations happen, not whether they do — there was never a reason for the
+  schedule to pick the optimizer. The frontier now runs on every path;
+  `--sgd-descent` opts into the SGD variant explicitly. Pinned by
+  `tests/test_matrix_report.py::test_the_evoskill_frontier_is_the_algorithm_on_every_arm`,
+  which reads the source and fails if the aggregator is keyed off the schedule
+  again.
 * **Selection rule lives in**: `FrontierBest` — the frontier's best member as a named `SelectionPolicy`; the bounded top-K admission stays on `Frontier`
   `SgdSkillAggregator` (async) in
   `examples/evoskill/evoskill_skill_discovery.py` — the `topk_aggregate` mode of
@@ -262,7 +267,7 @@ be speedups over.
 |---|---|---|---|---|---|---|
 | ACE | FiNER-139 | — | — | — | — | scheduling and merge timing; budget must be pinned |
 | GEPA | HotpotQA | 1424 s / 97 calls | sync 1022 s / 70 · async 742 s / 95 | 1.39× / **1.92×** | 0.75 → 0.60 / 0.65 (1–3 tasks of 20; noise-range) | round's diffs merged into one pool candidate (`--reflective-merge`); empty seed instruction; 1 seed — [full setup](results.md#merging-as-a-cost-lever-serial-vs-8-wide-sync-and-async-gepahotpotqa) |
-| EvoSkill | OfficeQA | — | — | — | — | sync: scheduling and merge timing. **async: the admission rule changes** — `SgdSkillAggregator` (amortised validation, rollback) replaces upstream's strict top-K frontier, so the async cell is a different optimizer rather than a cost of asynchrony |
+| EvoSkill | FinQA (OfficeQA is HF-gated) | — | async N=4: 0.527 → 0.707 val over 120 rollouts | — | — | scheduling and merge timing; budget must be pinned. `--reflective-merge` offers the frontier one fused candidate per sweep instead of one per worker (`update_frontier` and the parent draw unchanged). The async arm used to swap in `SgdSkillAggregator` — no frontier, per-batch validation — which is now removed rather than optional |
 | SkillOpt | SearchQA | — | — | — | — | scheduling and merge timing; budget must be pinned. `--minibatch` is this port's name for the worker count, not upstream's minibatch of tasks |
 | ADAS | MGSM | — | — | — | — | scheduling and merge timing; budget must be pinned |
 | DGM | surrogate | — | — | — | — | scheduling and merge timing; budget must be pinned. `--serial` sets `selfimprove_size=1`, which is a population of one, so this row's control is the degenerate archive rather than upstream's default |

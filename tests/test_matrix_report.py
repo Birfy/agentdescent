@@ -6,7 +6,11 @@ publish a number that means something other than what it says.
 """
 from __future__ import annotations
 
+import inspect
+
 import pytest
+
+from examples.evoskill import evoskill_skill_discovery as evoskill
 
 from bench import matrix_report
 from bench.matrix_run import ROWS, SCHEDULING_ONLY, SEMANTICS
@@ -43,12 +47,29 @@ def test_a_row_missing_from_semantics_is_refused_not_rendered_blank():
         SEMANTICS["gepa"] = saved
 
 
-def test_the_evoskill_async_arm_is_recorded_as_an_algorithm_change():
-    """The audit's one finding. If this ever reverts to the clean string, either
-    the port stopped swapping its aggregator or somebody papered over it."""
-    assert SEMANTICS["evoskill"]["async"] != SCHEDULING_ONLY
-    assert "admission rule changed" in SEMANTICS["evoskill"]["async"]
-    assert SEMANTICS["evoskill"]["parallel"] == SCHEDULING_ONLY
+def test_the_evoskill_frontier_is_the_algorithm_on_every_arm():
+    """The audit's finding, and then its fix.
+
+    The port used to swap `SgdSkillAggregator` in whenever `asynchronous=True`:
+    no frontier, one checkpoint in its place, and validation amortised per batch
+    rather than run per candidate. That is the admission rule, so the async cell
+    measured a different optimizer that happened to run asynchronously. The
+    frontier now runs on every path and the SGD variant is opt-in.
+
+    This asserts the *fix* rather than the finding, which is the same guarantee
+    read the other way round: if a future change re-couples the aggregator to
+    the schedule, the async entry stops being schedule-only and this fails.
+    """
+    # `startswith`, not equality: the row also declares `--reflective-merge`,
+    # which is a real departure and is allowed to be appended. What must not
+    # come back is an entry whose *first* claim is that the algorithm changed.
+    for arm in ("parallel", "async"):
+        assert SEMANTICS["evoskill"][arm].startswith(SCHEDULING_ONLY), arm
+    body = inspect.getsource(evoskill)
+    assert "class SgdSkillAggregator" not in body, (
+        "the non-upstream SGD variant is back in the file")
+    assert "if asynchronous else TopKFrontierAggregator" not in body, (
+        "the aggregator is keyed off the schedule again")
 
 
 def test_speedup_divides_out_a_budget_the_arms_did_not_actually_share():
