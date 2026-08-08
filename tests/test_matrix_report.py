@@ -51,33 +51,48 @@ def test_the_evoskill_async_arm_is_recorded_as_an_algorithm_change():
     assert SEMANTICS["evoskill"]["parallel"] == SCHEDULING_ONLY
 
 
-def test_speedup_is_withheld_when_the_arms_did_not_spend_the_same_budget():
-    """The pin is the comparison. Checked against what the cells measured, not
-    trusted because a flag was passed."""
+def test_speedup_divides_out_a_budget_the_arms_did_not_actually_share():
+    """An arm that ran 64 rollouts in 50s did not go 4x faster than one that ran
+    16 in 200s -- it went 4x faster *per rollout* only if the work matches. Here
+    it is 12.5 s/rollout against 0.78, i.e. 16x, and a raw wall ratio would have
+    reported a quarter of that."""
     cells = [_cell(arm="serial", wall=200.0, engine_rollouts=16),
              _cell(arm="parallel", wall=50.0, engine_rollouts=64)]
     text = matrix_report.render(_payload(cells))
-    assert "withheld" in text
-    assert "unequal budget" in text
+    assert "16.00×" in text
     assert "4.00×" not in text
 
 
-def test_the_barrier_overshoot_is_not_treated_as_an_unequal_budget():
-    """The synchronous path checks at the round barrier, so an N-worker arm may
-    legitimately overshoot by up to N-1 -- refusing that would refuse every
-    honest sync cell."""
-    cells = [_cell(arm="serial", wall=200.0, engine_rollouts=16),
-             _cell(arm="parallel", wall=100.0, engine_rollouts=23)]
+def test_the_overshoot_the_async_pilot_actually_produced_is_divided_out():
+    """The measured case: 19 rollouts against the control's 16. Raw wall-clock
+    reads 4.35x and understates it; per rollout it is 5.17x."""
+    cells = [_cell(arm="serial", wall=609.0, engine_rollouts=16),
+             _cell(arm="async", wall=140.0, engine_rollouts=19)]
     text = matrix_report.render(_payload(cells))
-    assert "unequal budget" not in text
-    assert "2.00×" in text
+    assert "5.17×" in text
+    assert "4.35×" not in text
+
+
+def test_a_budget_mismatch_is_still_reported_even_though_it_no_longer_blocks():
+    cells = [_cell(arm="serial", wall=200.0, engine_rollouts=16),
+             _cell(arm="parallel", wall=50.0, engine_rollouts=64)]
+    assert "rollouts actually spent differ" in matrix_report.render(_payload(cells))
+
+
+def test_cells_without_the_rollout_count_fall_back_and_say_so():
+    """Cells written before the ports printed `engine_rollouts` still render --
+    on raw wall-clock, marked, rather than not at all."""
+    cells = [_cell(arm="serial", wall=200.0), _cell(arm="parallel", wall=100.0)]
+    text = matrix_report.render(_payload(cells))
+    assert "2.00× ‡" in text
 
 
 def test_speedup_is_net_of_time_lost_in_failed_calls():
     """A retry storm in one arm is endpoint weather, not the other arm's
     scheduler. 300-100 against 100 is 2x, not 3x."""
-    cells = [_cell(arm="serial", wall=300.0, failure_seconds=100.0),
-             _cell(arm="parallel", wall=100.0)]
+    cells = [_cell(arm="serial", wall=300.0, failure_seconds=100.0,
+                   engine_rollouts=16),
+             _cell(arm="parallel", wall=100.0, engine_rollouts=16)]
     assert "2.00×" in matrix_report.render(_payload(cells))
 
 

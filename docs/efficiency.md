@@ -200,6 +200,57 @@ table. Now counted at the inline gate, it reads 83%, which is the explanation fo
 the row above it.
 
 
+## On a live model, on a published algorithm
+
+Everything above is the engine measured on stub or synthetic latency. This is the
+same question asked of a faithful port of somebody else's serial algorithm, on a
+real dataset, against a real endpoint: **GEPA on HotpotQA, `deepseek-v4-flash`,
+16 rollouts pinned on every arm.**
+
+```bash
+python -m bench.matrix_run --rows gepa --budget 16 --width 4 --seeds 0 \
+    --provider claude --model deepseek-v4-flash --yes
+```
+
+The number reported here is **concurrency: model seconds ÷ wall-clock**, or how
+much of the run was genuinely in flight at once. It is the quantity a worker pool
+is responsible for, and the only one that is bounded by the pool's width.
+
+| arm | wall | model seconds | rollouts | concurrency |
+|---|---:|---:|---:|---:|
+| serial (upstream loop) | 609 s | 607 | 16 | 1.00× |
+| sync parallel, N=4 | 239 s | 443 | 16 | **1.85×** |
+| async, N=4, lag 3 | 140 s | 451 | 19 | **3.22×** |
+
+The control is the published serial loop and nothing else: one worker, and
+`eval_concurrency=1`, so the gate scores one task at a time the way the original
+does. That matters more than it sounds — `--serial` on its own lowers only
+`n_workers`, and a control that still evaluates concurrently is already partly
+parallel. The row above is the first one measured here that is not: 607 model
+seconds inside a 609 second wall-clock, an overlap of exactly 1.00×.
+
+**The barrier is the whole difference between the two parallel rows.** Both run
+four workers. The synchronous arm reaches 1.85× because the round boundary keeps
+the rollout pool and the gate pool from ever being busy at the same time —
+consistent with the 1.7–1.8× the heavy-tail stub measures further up this page.
+Removing the barrier lets them overlap, and the same four workers reach 3.22×.
+
+!!! note "Why the wall-clock falls faster than the concurrency rises"
+    239 s and 140 s are less than 609 s divided by 1.85 and 3.22. The remainder
+    is work that did not happen rather than work done in parallel: model seconds
+    per rollout fall 37.9 → 27.7 → 23.8 across the three arms, as
+    `--reflective-merge` collapses each round's diffs into one gate sweep, and as
+    the async arm **discards 4 of 4 stale proposals** — a proposal thrown away
+    before it reaches the gate costs nothing to score.
+
+    That saving is real but it is not parallelism, so it is not in the column
+    above. The stale rate is the one to watch: at `async_ratio=3` this workload
+    discards everything the staleness filter sees, which buys wall-clock and
+    spends proposals.
+
+The async arm also overran the pinned budget — 19 rollouts against 16 — because
+the barrier-free path has no round boundary at which to stop.
+
 ## Threads and the GIL — is this *really* parallel?
 
 Yes, for this workload, and no amount of arguing about the GIL settles it — so
