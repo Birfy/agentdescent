@@ -60,7 +60,7 @@ from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
 from examples._common import (add_standard_args, completion_for, confirm,
                               is_openai_compatible, worker_count,
-                              budget_kwargs)
+                              budget_kwargs, report_engine)
 
 RAW = "https://raw.githubusercontent.com/sentient-agi/EvoSkill/main/examples/officeqa/data"
 Completion = Callable[[str], str]
@@ -744,6 +744,8 @@ def run_evoskill(complete: Completion, docs: Dict[str, str],
                     self_verify=False,   # repo evaluates the child on val only -- no per-trajectory re-run
                     aggregator_factory=factory, verbose=verbose,
                     max_rollouts=max_rollouts)
+    if verbose:
+        report_engine(result)
 
     best = ctx.best_score
     if eval_at_end and val:
@@ -823,6 +825,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
     add_standard_args(p, max_seconds_default=40.0)
     p.add_argument("--iterations", type=int, default=6)
+    p.add_argument("--workers", type=int, default=3,
+                   help="failure-analysis workers per round; the upstream loop "
+                        "is serial, so this is the AgentDescent-added width")
     p.add_argument("--frontier", type=int, default=5,
                    help="bounded top-K frontier size "
                         "(src/registry/manager.py:update_frontier uses 5)")
@@ -844,7 +849,7 @@ def main(argv=None) -> None:
     # --serial collapses this to the upstream algorithm's own semantics:
     # one worker, nothing to merge. Applied to args so the printed plan,
     # the cost estimate and the run cannot disagree about what ran.
-    args.workers = worker_count(args, 3)
+    args.workers = worker_count(args, args.workers)
 
     print("Algorithm: EvoSkill -- failure-driven skill discovery (top-K frontier)")
     print(f"Dataset  : selection={args.dataset} (OfficeQA preferred; FinQA fallback)")
