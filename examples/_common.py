@@ -110,6 +110,13 @@ def add_standard_args(
         help=("merge contradicting diffs with a model instead of ranking them on "
               "the cheap layer (see agentdescent.fusion.reflective_merge)"),
     )
+    parser.add_argument(
+        "--no-thinking",
+        action="store_true",
+        help=("ask the backend not to emit reasoning tokens (Anthropic-shaped "
+              "endpoints only). A throughput knob, and a quality one -- see "
+              "completion_for"),
+    )
     return parser
 
 
@@ -315,7 +322,24 @@ def completion_for(args: argparse.Namespace, *, usage: Optional[Usage] = None,
     Extra keyword arguments reach whichever factory is chosen, so pass only
     options both accept; branch in the caller for genuinely one-sided ones (ADAS
     does this for the OpenAI-only ``--timeout``).
+
+    ``--no-thinking`` becomes ``thinking={"type": "disabled"}`` on the Anthropic
+    path, where the endpoint's reasoning preamble dominates latency. Measured on
+    GLM-5.2 behind an Anthropic-shaped endpoint: a GEPA reflective-proposal call
+    went 23.5s -> 5.4s and 783 output tokens -> 37, and both replies were usable
+    instructions -- the shorter one simply terser. **That is a change to the
+    model's output, not only its speed**, so a run that uses it has to say so:
+    it belongs in the reported configuration next to the model id, and it must
+    be identical across every arm of a comparison or the arms are not comparable.
+
+    Silently ignored on the OpenAI-compatible path rather than translated. The
+    equivalent knob there is per-vendor (``enable_thinking``,
+    ``chat_template_kwargs``, a ``/no_think`` prefix), and guessing wrong would
+    leave reasoning *on* while the run reports it off -- which is the failure
+    that matters, since the wall-clock would then be attributed to the scheduler.
     """
     if is_openai_compatible(args):
         return openai_compatible(model=args.model, usage=usage, **kwargs)
+    if getattr(args, "no_thinking", False):
+        kwargs.setdefault("thinking", {"type": "disabled"})
     return claude(model=args.model, usage=usage, **kwargs)
