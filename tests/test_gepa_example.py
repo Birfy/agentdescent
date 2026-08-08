@@ -9,6 +9,7 @@ import random
 from agentdescent.evolution import Task, evolve
 from examples.gepa.gepa_prompt_evolution import (
     InstructionSlot,
+    ParetoAggregator,
     _extract_answer,
     build_tasks,
     estimate_calls,
@@ -111,3 +112,97 @@ def test_pareto_optimizer_integrates_with_evolve():
 def test_estimate_calls_scales():
     assert estimate_calls(10, 3, 12) > estimate_calls(5, 3, 12)
     assert estimate_calls(10, 4, 12) > estimate_calls(10, 2, 12)
+
+
+def test_admitting_a_round_of_candidates_scores_their_rows_together():
+    """The port's largest cost was serial in two dimensions, not one.
+
+    `_score_row` swept D_pareto one instance at a time, and `step()` admitted one
+    card at a time -- so a round from eight workers queued eight full sweeps back
+    to back. On a 20-instance D_pareto at ~34s a call that is the whole run.
+
+    Both are flattened into one pool now, which must not change the result: the
+    pool contents, their order, and every row have to match one-at-a-time
+    admission exactly. Dedup stays sequential so *which* candidates enter, and in
+    what order, never depends on thread timing.
+    """
+    import threading
+    import time
+
+    class _Verifier:
+        def __init__(self):
+            self.held_out = list(range(6))
+            self.live = self.peak = 0
+            self.lock = threading.Lock()
+
+        def eval_fn(self, artifact, tasks):
+            with self.lock:
+                self.live += 1
+                self.peak = max(self.peak, self.live)
+            # A real eval is a model call; without some duration the threads
+            # never overlap and `peak` cannot observe concurrency that is there.
+            time.sleep(0.01)
+            try:
+                return float((hash((artifact.render(), tasks[0])) % 2))
+            finally:
+                with self.lock:
+                    self.live -= 1
+
+    class _Artifact:
+        def __init__(self, key):
+            self.key = key
+            self.state = {"instruction": key}
+
+        def render(self):
+            return self.key
+
+    def _blank(concurrency):
+        agg = ParetoAggregator.__new__(ParetoAggregator)
+        agg.verifier = _Verifier()
+        agg.eval_concurrency = concurrency
+        agg.states, agg.scores, agg._seen = [], [], set()
+        return agg
+
+    candidates = [_Artifact(f"c{i}") for i in range(5)]
+
+    one_at_a_time = _blank(1)
+    for candidate in candidates:
+        one_at_a_time._admit(candidate)
+
+    batched = _blank(8)
+    assert batched._admit_many(candidates) == len(candidates)
+
+    assert batched.scores == one_at_a_time.scores, "batching changed a score row"
+    assert ([s["instruction"] for s in batched.states]
+            == [s["instruction"] for s in one_at_a_time.states]), \
+        "pareto_frontier reads states/scores as parallel lists; order must hold"
+    assert batched.verifier.peak > 1, "the batch did not actually run concurrently"
+    assert batched.verifier.peak <= 8, \
+        "nesting a pool per row inside a pool per candidate would put " \
+        "concurrency^2 requests on the endpoint"
+
+
+def test_duplicate_candidates_are_dropped_before_they_are_scored():
+    """Dedup is what keeps the pool from paying twice for the same instruction."""
+    class _V:
+        held_out = [0, 1]
+        calls = 0
+
+        def eval_fn(self, artifact, tasks):
+            type(self).calls += 1
+            return 1.0
+
+    class _A:
+        def __init__(self, key):
+            self.key, self.state = key, {"instruction": key}
+
+        def render(self):
+            return self.key
+
+    agg = ParetoAggregator.__new__(ParetoAggregator)
+    agg.verifier, agg.eval_concurrency = _V(), 4
+    agg.states, agg.scores, agg._seen = [], [], set()
+
+    assert agg._admit_many([_A("x"), _A("x"), _A("y")]) == 2
+    assert [s["instruction"] for s in agg.states] == ["x", "y"]
+    assert _V.calls == 4, "a duplicate must not be scored"

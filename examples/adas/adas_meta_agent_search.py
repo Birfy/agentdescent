@@ -969,7 +969,7 @@ def run_meta_agent_search(complete: Completion, val: List[Tuple[str, str]],
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
-    add_standard_args(p, max_seconds_default=60.0)
+    add_standard_args(p, max_seconds_default=60.0, eval_concurrency_default=16)
     p.add_argument("--generations", type=int, default=6)
     p.add_argument("--langs", default="en,es,fr",
                    help=f"comma-separated MGSM languages (of {','.join(ALL_LANGUAGES)})")
@@ -980,13 +980,6 @@ def build_parser() -> argparse.ArgumentParser:
                    help="cap the hard subset -- evaluation cost is candidates x "
                         "items x (multi-step calls), so this is the strongest lever "
                         "on how long a run takes")
-    p.add_argument("--eval-concurrency", type=int, default=16,
-                   help="how many examples to score at once (I/O bound)")
-    p.add_argument("--timeout", type=float, default=300.0,
-                   help="per-call timeout. A reasoning model given a large "
-                        "--max-tokens can spend minutes on one call, and the "
-                        "library default of 120s then turns a working run into "
-                        "retries and lost rounds")
     p.add_argument("--max-tokens", type=int, default=MAX_TOKENS,
                    help="token budget per model call. On a reasoning model the "
                         "budget is spent on hidden reasoning first, so too small a "

@@ -57,7 +57,7 @@ from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
 from examples._common import (add_standard_args, completion_for, confirm,
                               score_tasks, worker_count,
-                              budget_kwargs)
+                              budget_kwargs, capped_val)
 
 HOTPOTQA = ("hotpotqa/hotpot_qa", "validation", "distractor")   # (dataset, split, config)
 
@@ -195,8 +195,26 @@ class ParetoAggregator(AggregatorProtocol):
     ``D_pareto`` row and is unaffected."""
 
     def __init__(self, ledger: Ledger, verifier, audit, config, policy,
-                 artifact_id: str = "gepa_prompt", seed: int = 0):
+                 artifact_id: str = "gepa_prompt", seed: int = 0,
+                 eval_concurrency: int = 8, merge_round=None):
         self.ledger = ledger
+        self.eval_concurrency = eval_concurrency
+        #: Optional :class:`~agentdescent.policies.FusionPolicy`. When set, the
+        #: round's surviving diffs are combined into **one** candidate before
+        #: admission, so the pool grows by one per round instead of one per
+        #: worker.
+        #:
+        #: A policy, not a bare callable, because the shipped one needs the
+        #: verifier: `ReflectiveFusion` builds its synthesis-failure fallback in
+        #: `bind()`, which only the engine calls when the policy is installed
+        #: through `Policies`. Used from here that never happens, and the
+        #: fallback stays `None` until a merge fails and the run dies on
+        #: `'NoneType' has no attribute 'select'` -- twenty minutes in, on the
+        #: rare path. Binding here is what makes the policy reusable outside the
+        #: engine's own wiring.
+        self.merge_round = merge_round
+        if merge_round is not None and hasattr(merge_round, "bind"):
+            merge_round.bind(verifier)
         self.verifier = verifier
         self.artifact_id = artifact_id
         self.rng = random.Random(seed)
@@ -210,9 +228,67 @@ class ParetoAggregator(AggregatorProtocol):
 
     # -- per-instance evaluation over D_pareto -------------------------------
 
+    def _score_rows(self, artifacts) -> List[List[float]]:
+        """Per-instance rows over D_pareto for several candidates at once.
+
+        The port's largest cost, and it was serial in **two** dimensions. Within
+        a row it was a comprehension over D_pareto -- on 20 instances at ~34 s a
+        call, eleven minutes per candidate, in silence. Across rows, `step()`
+        admitted one card at a time, so a round from eight workers queued eight
+        of those sweeps back to back. `evolve(eval_concurrency=)` reaches
+        neither, because that knob bounds the *engine's* gate and this aggregator
+        replaces the engine's.
+
+        Both dimensions flatten into one pool rather than nesting, so in-flight
+        work is exactly ``eval_concurrency`` instead of its square -- nesting two
+        pools of 16 would put 256 requests on the endpoint and measure its rate
+        limiter rather than the algorithm.
+
+        Concurrency changes no result: each (candidate, instance) score is
+        independent, ``eval_fn`` is pure, rows are reassembled in order, and the
+        evaluation cache already memoises per (artifact, task).
+        """
+        artifacts = list(artifacts)
+        tasks = list(self.verifier.held_out)
+        if not artifacts or not tasks:
+            return [[] for _ in artifacts]
+        pairs = [(a, t) for a in artifacts for t in tasks]
+        if len(pairs) < 2 or self.eval_concurrency < 2:
+            flat = [self.verifier.eval_fn(a, [t]) for a, t in pairs]
+        else:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(
+                    max_workers=min(self.eval_concurrency, len(pairs))) as pool:
+                flat = list(pool.map(
+                    lambda pair: self.verifier.eval_fn(pair[0], [pair[1]]), pairs))
+        width = len(tasks)
+        return [flat[i * width:(i + 1) * width] for i in range(len(artifacts))]
+
     def _score_row(self, artifact) -> List[float]:
-        # eval_fn is a.score(ts); binary reward -> {0,1} per instance, cached.
-        return [self.verifier.eval_fn(artifact, [t]) for t in self.verifier.held_out]
+        """One candidate's row. For callers that admit a single artifact."""
+        return self._score_rows([artifact])[0]
+
+    def _admit_many(self, artifacts) -> int:
+        """Admit several candidates, scoring all their rows in one pass.
+
+        Dedup runs first and sequentially, so which candidates enter the pool --
+        and in what order -- never depends on thread timing. Only the scoring is
+        concurrent, and `states`/`scores` are appended in dedup order because
+        `pareto_frontier` reads them as parallel lists.
+        """
+        fresh = []
+        for artifact in artifacts:
+            key = artifact.render()
+            if key in self._seen:
+                continue
+            self._seen.add(key)
+            fresh.append(artifact)
+        if not fresh:
+            return 0
+        for artifact, row in zip(fresh, self._score_rows(fresh)):
+            self.states.append(dict(artifact.state))
+            self.scores.append(row)
+        return len(fresh)
 
     def _admit(self, artifact) -> None:
         key = artifact.render()
@@ -252,7 +328,7 @@ class ParetoAggregator(AggregatorProtocol):
 
         with self._lock:
             cards, self._cards = self._cards, []
-        admitted = 0
+        survivors: List[Diff] = []
         for card in cards:
             # GEPA Alg. 1 admits a child whose score on the feedback minibatch is
             # not worse than its parent's. Here that "minibatch" has size **1**:
@@ -271,10 +347,29 @@ class ParetoAggregator(AggregatorProtocol):
             # domination pruning, which is what illumination is supposed to do.
             if card.before_after_delta < 0:
                 continue
-            candidate = head.apply(card.diff)
-            before = len(self.states)
-            self._admit(candidate)
-            admitted += len(self.states) - before
+            survivors.append(card.diff)
+
+        # **One candidate per round instead of one per worker.** Admission is what
+        # this aggregator pays for: every candidate that enters the pool is scored
+        # across the whole of D_pareto, so a round from N workers costs N sweeps.
+        # Combining the round's survivors into a single diff first makes that one
+        # sweep, which is the only way widening N makes the run *cheaper* rather
+        # than merely wider.
+        #
+        # `fuse_diffs` is `ops.update()`, so on this port's one-key artifact it
+        # would keep the last rewrite and silently drop the rest -- N-1 proposals
+        # paid for and thrown away. `merge_round` is therefore a *model* merger
+        # (`ReflectiveFusion`), which writes the union of the deltas.
+        #
+        # It changes what the Pareto pool contains: merged candidates rather than
+        # individual mutations. Algorithm 2 itself -- the per-instance frontier,
+        # domination pruning, win-frequency sampling -- is untouched and still
+        # runs on whatever is in the pool. A row measured this way has to say so.
+        if self.merge_round is not None and len(survivors) > 1:
+            merged, _, _ = self.merge_round.select(head, survivors)
+            if merged is not None:
+                survivors = [merged]
+        admitted = self._admit_many([head.apply(d) for d in survivors])
 
         # Algorithm 2: sample the next parent from the Pareto frontier.
         k = pareto_select(self.scores, self.rng)
@@ -296,14 +391,17 @@ class ParetoAggregator(AggregatorProtocol):
                             f"pool={len(self.states)} parent=#{k} best_avg={self.best_avg:.3f}")]
 
 
-def pareto_aggregator_factory(artifact_id: str = "gepa_prompt", seed: int = 0):
+def pareto_aggregator_factory(artifact_id: str = "gepa_prompt", seed: int = 0,
+                              eval_concurrency: int = 8, merge_round=None):
     """Build the `aggregator_factory=` callable evolve() expects, capturing the
     live aggregator in `.last` so the example can read GEPA's best candidate."""
     holder = {}
 
     def factory(ledger, verifier, audit, config, policy):
         agg = ParetoAggregator(ledger, verifier, audit, config, policy,
-                               artifact_id=artifact_id, seed=seed)
+                               artifact_id=artifact_id, seed=seed,
+                               eval_concurrency=eval_concurrency,
+                               merge_round=merge_round)
         holder["agg"] = agg
         return agg
 
@@ -377,9 +475,14 @@ def load_dataset(fetch: int, ratios=(0.5, 0.25, 0.25), seed: int = 0) -> Dataset
     return split_dataset(tasks, ratios=ratios, seed=seed, name="HotpotQA")
 
 
-def evaluate(agent, instruction: str, tasks: List[Task], reward) -> float:
-    """Score an instruction on a held-out split (the reported test metric)."""
-    return score_tasks(agent.solve, instruction, tasks, reward)
+def evaluate(agent, instruction: str, tasks: List[Task], reward,
+             concurrency: int = 8) -> float:
+    """Score an instruction on a held-out split (the reported test metric).
+
+    `concurrency` was `score_tasks`'s default, so `--eval-concurrency` reached
+    the Pareto rows but not the number the run is finally judged by."""
+    return score_tasks(agent.solve, instruction, tasks, reward,
+                       concurrency=concurrency)
 
 
 # ===========================================================================
@@ -393,6 +496,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rounds", type=int, default=10)
     p.add_argument("--workers", type=int, default=3)
     p.add_argument("--fetch", type=int, default=48, help="HotpotQA rows to fetch")
+    p.add_argument("--seed-instruction", default=_SEED_INSTRUCTION,
+                   help=("the instruction the run starts from. The default is "
+                         "already tuned, which starves the loop: most rollouts "
+                         "answer correctly, propose nothing, and the gate rejects "
+                         "the rest. Pass '' to start from nothing when the point "
+                         "is to watch the loop work"))
     return p
 
 
@@ -446,27 +555,46 @@ def main(argv=None) -> None:
               "for claude set ANTHROPIC_API_KEY (or `ant auth login`).")
         return
 
-    factory = pareto_aggregator_factory(artifact_id="gepa_prompt", seed=args.seed)
+    # `--reflective-merge` keeps GEPA's Pareto selection and changes only what
+    # enters its pool: the round's surviving diffs are merged into one candidate,
+    # so admission costs one D_pareto sweep instead of one per worker. The merger
+    # has to be the model one -- `fuse_diffs` on a one-key artifact keeps the last
+    # rewrite and drops the rest.
+    merge_round = None
+    if args.reflective_merge:
+        from agentdescent.fusion import ReflectiveFusion
+        merge_round = ReflectiveFusion(completion)
+        print("NOTE: --reflective-merge admits ONE merged candidate per round "
+              "instead of one per worker. Pareto selection is unchanged; what "
+              "the pool contains is not.")
+    factory = pareto_aggregator_factory(artifact_id="gepa_prompt", seed=args.seed,
+                                        eval_concurrency=args.eval_concurrency,
+                                        merge_round=merge_round)
     print("\nEvolving instruction (reflective mutation + Pareto selection, L2)...\n")
     # fit on train, Pareto-select on val (D_pareto); test stays fully held out.
     # Keep the result: `error` is the engine's one signal that a long, paid run
     # ended on a rate limit rather than converging, and dropping it on the floor
     # is exactly what its docstring tells callers not to do.
-    result = evolve(ds.trainval, reward, agent=agent,
-                    strategy=InstructionSlot(),
-                    initial_state={"instruction": _SEED_INSTRUCTION},
+    # D_pareto is the gate split and every admitted candidate is scored across
+    # all of it, so this ratio decides how much of the run `n_workers` can
+    # parallelise. Test is untouched.
+    trainval, val_frac = capped_val(ds.trainval, ds.val_frac, args.val_cap)
+    result = evolve(trainval, reward, agent=agent,
+                    strategy=InstructionSlot(seed=args.seed_instruction),
+                    initial_state={"instruction": args.seed_instruction},
                     blast_radius=0.2, artifact_id="gepa_prompt",
                     rounds=args.rounds, n_workers=args.workers,
                     max_concurrency=1 if args.asynchronous else args.workers,
                     asynchronous=args.asynchronous, async_ratio=args.async_ratio,
                     max_seconds=args.max_seconds if args.asynchronous else None,
-                    held_out_frac=ds.val_frac,
+                    held_out_frac=val_frac,
                     aggregator_factory=factory, verbose=True,
                     **budget_kwargs(args))
 
     agg: ParetoAggregator = factory.holder["agg"]  # type: ignore[attr-defined]
-    best = agg.best_state.get("instruction", _SEED_INSTRUCTION)
-    test_em = evaluate(agent, best, ds.test, reward)
+    best = agg.best_state.get("instruction", args.seed_instruction)
+    test_em = evaluate(agent, best, ds.test, reward,
+                       concurrency=args.eval_concurrency)
     print("\n=== GEPA-optimised instruction (best average on D_pareto) ===")
     print(best)
     print(f"\ncandidates explored: {len(agg.states)}")
