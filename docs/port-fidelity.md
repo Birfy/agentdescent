@@ -46,6 +46,18 @@ The "semantics changed" column of the matrix below is expected to read *"rollout
 scheduling and merge timing only"* on every row. A row saying anything else is
 either a bug or a finding, and either way it has to be written down.
 
+!!! note "That column is generated, not typed"
+    It is [`bench.matrix_run.SEMANTICS`](https://github.com/Birfy/agentdescent/blob/main/bench/matrix_run.py)
+    — one entry per row **per arm**, declared beside the rows the sweep runs, and
+    `bench/matrix_report.py` refuses to render a row that has no entry. A column
+    filled in afterwards is filled in from memory by whoever is writing up the
+    results, with the numbers already on the page; a blank one reads as "nothing
+    changed" rather than as "nobody checked".
+
+    Auditing the arms that way has already found one: **EvoSkill's async arm runs
+    a different admission rule from its own serial arm** (below). Six of the
+    seven ports use the same aggregator on all three arms; that one does not.
+
 Until [#75](selection.md)'s selection seam is wired to a multi-head ledger, each
 port's candidate-selection rule still lives in its own example file — so for now
 "we did not change it" is a claim a reader verifies by reading, and the last
@@ -96,6 +108,19 @@ column of each section below says exactly where to look.
 * **Why this one matters most**: it is the clearest case of the rule. A port
   faithful to the paper here would be a *better-sounding* algorithm that the
   authors' own code does not implement.
+* **Departure, and the only one of its kind here — the async arm changes the
+  admission rule.** `run_evoskill` picks its aggregator off the `asynchronous`
+  flag: the serial and synchronous arms run `TopKFrontierAggregator`, which is
+  upstream's rule, and the asynchronous arm runs `SgdSkillAggregator`, which is
+  not. That one applies every proposed skill to the head immediately and
+  amortises held-out validation over `val_every` steps, rolling back to the last
+  validated checkpoint when the batch fails to improve — cheaper by roughly
+  `val_every`×, and a different algorithm. It sits in the *must not change*
+  column of the table above, so this row's async cell is not a measurement of
+  what asynchrony costs EvoSkill; it is a measurement of a different optimizer
+  that happens to run asynchronously. Pinned by
+  `tests/test_matrix_report.py::test_the_evoskill_async_arm_is_recorded_as_an_algorithm_change`,
+  so it cannot quietly become "scheduling only" in the results table.
 * **Selection rule lives in**: `FrontierBest` — the frontier's best member as a named `SelectionPolicy`; the bounded top-K admission stays on `Frontier`
   `SgdSkillAggregator` (async) in
   `examples/evoskill/evoskill_skill_discovery.py` — the `topk_aggregate` mode of
@@ -219,7 +244,7 @@ be speedups over.
 |---|---|---|---|---|---|---|
 | ACE | FiNER-139 | — | — | — | — | scheduling and merge timing; budget must be pinned |
 | GEPA | HotpotQA | 1424 s / 97 calls | sync 1022 s / 70 · async 742 s / 95 | 1.39× / **1.92×** | 0.75 → 0.60 / 0.65 (1–3 tasks of 20; noise-range) | round's diffs merged into one pool candidate (`--reflective-merge`); empty seed instruction; 1 seed — [full setup](results.md#merging-as-a-cost-lever-serial-vs-8-wide-sync-and-async-gepahotpotqa) |
-| EvoSkill | OfficeQA | — | — | — | — | scheduling and merge timing; budget must be pinned |
+| EvoSkill | OfficeQA | — | — | — | — | sync: scheduling and merge timing. **async: the admission rule changes** — `SgdSkillAggregator` (amortised validation, rollback) replaces upstream's strict top-K frontier, so the async cell is a different optimizer rather than a cost of asynchrony |
 | SkillOpt | SearchQA | — | — | — | — | scheduling and merge timing; budget must be pinned. `--minibatch` is this port's name for the worker count, not upstream's minibatch of tasks |
 | ADAS | MGSM | — | — | — | — | scheduling and merge timing; budget must be pinned |
 | DGM | surrogate | — | — | — | — | scheduling and merge timing; budget must be pinned. `--serial` sets `selfimprove_size=1`, which is a population of one, so this row's control is the degenerate archive rather than upstream's default |
@@ -239,5 +264,13 @@ two runs of itself.
 
 The cells are empty because they have not been measured. Filling them in with a
 one-seed run would be worse than leaving them.
+
+Once they are, `python -m bench.matrix_report --json bench/results/matrix.json`
+renders them — speedup off wall-clock net of time lost in failed calls, quality
+as a median with its range, the async arm's stale rate with its denominator, and
+a row daggered whenever it rests on fewer than three seeds. It withholds a
+speedup outright where the cells show the arms did not spend the same budget,
+which is the one check that cannot be done by reading the flags that were
+passed.
 
 The eleven MethodPolicy ports *are* measured under all three schedulers — see the [runtime matrix](matrix-report.md).
