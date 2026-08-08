@@ -58,46 +58,106 @@ In [`examples/adas/adas_meta_agent_search.py`](https://github.com/Birfy/agentdes
 | **`Interpreter`** + **`seed_archive`** | (agent substrate) | the safe control-flow DSL (`cot`/`cot_sc`/`reflexion`/`debate`/`step_back`/`role_assignment`/`ensemble`) and the seven MGSM seeds |
 | **`dgm_parent_weights`** | `--select dgm` | DGM's sigmoid×novelty rule as an alternative archive-conditioning strategy |
 
-## Measured — MGSM with DeepSeek
+## Measured — the cost, and why there is no lift number
 
-MGSM is saturated for a strong model, so the search has no gradient without
-`--hard`. Measured with `deepseek-v4-flash` over the **whole benchmark** — all 11
-languages, 250 items each:
+**This row is not measurable with `deepseek-v4-flash`.** Not "not measured yet":
+the two constraints that would make it measurable point in opposite directions,
+and the middle is empty. What follows is the evidence, because a page that leaves
+a lift row blank without saying why invites someone to spend the two hours again.
+
+### MGSM is saturated, in every language
+
+The port's own dataset is a 2022 grade-school benchmark, and a current model has
+finished with it. Measured, Chain-of-Thought alone:
+
+| languages | CoT accuracy |
+|---|---|
+| `en` | **1.000** |
+| `sw`, `te` | **1.000** |
+| `th`, `bn` | **1.000** |
+
+The hard-language escape does not exist. And saturation here is worse than a
+missing lift: ADAS conditions its meta-agent on **the whole archive with its
+fitness values**, so when all seven hand-designed seeds score 1.000 the archive
+carries no signal about which control flow is better. The search is not merely
+unable to improve — it is unable to *learn*, because everything it is shown is
+tied.
+
+### GPQA has the headroom, and costs ten times as much per call
+
+Switching domain is not a fidelity break: ADAS searches four upstream (`_mgsm`,
+`_gpqa`, `_drop`, `_arc`), and **GPQA Diamond's 198 rows ship inside the ADAS
+repo** (`dataset/gpqa_diamond.csv`, no HuggingFace gate). `--dataset gpqa` selects
+it. Chain-of-Thought measures **0.625** there — above the 0.250 floor of a
+four-way choice and well under the ceiling.
+
+The bill arrives with it. From a completed run:
 
 | | |
 |---|---|
-| pool | 2750 items |
-| direct, structure-free single call | **0.919** |
-| items it answers incorrectly | **222** (8.1%) |
+| model calls | 28 |
+| completion tokens | **143,246** — 5,116 per call |
+| time in the model | 1,385 s — **49 s per call** |
 
-Those 222 are what the search runs on, split 15 / 50 / 35:
+A graduate-level science question makes this model generate five thousand tokens
+of reasoning before it answers, and the reasoning is not optional: at
+`max_tokens=512` and `4096` the reply comes back **empty**, the budget spent
+before any visible text. `MAX_TOKENS` is 16384 for exactly this reason.
 
-```
-Split    : 34 trigger / 110 val (fitness) / 78 test
-```
+### Why that is fatal *here* specifically
 
-The train share only *triggers* proposals — the meta-agent conditions on the
-archive, not on the task `evolve()` hands it, so a generation consumes `--workers`
-items and ignores the rest. Everything else measures. Splits are stratified by
-language, because MGSM's languages differ by 8 points of baseline accuracy (`en`
-0.964, `ja` 0.880) and an unstratified draw hands validation one mixture and test
-another.
+Every port on this page's sibling pages pays per rollout. ADAS pays
+`|val| x program_cost` per **candidate**, where a candidate is itself a
+multi-call program — the seed archive alone is 19 calls per question:
 
-On a `--hard` subset the structure-free baseline is 0.000 by construction, so the
-searched agent's test accuracy on its own says nothing. The run scores the best
-hand-designed seed on the same split and reports both:
+| seed design | calls/question |
+|---|---|
+| Chain-of-Thought | 1 |
+| Self-Refine (Reflexion) | 2 |
+| Step-back Abstraction | 2 |
+| Dynamic Assignment of Roles | 2 |
+| Self-Consistency (CoT-SC) | 3 |
+| LLM Debate | 4 |
+| Quality-Diversity | 5 |
+| **total, before round 0** | **19** |
 
-```
-                                  val (search)   test (held out)
-  best hand-designed seed              ?.???           ?.???
-  best searched design                 ?.???           ?.???
-  lift                                +?.???          +?.???
-```
+At 49 s a call that is 19 x |val| x 49 s of seeding before the search starts.
+And the calls inside one design are **serial** — Debate's second round waits on
+its first — so concurrency parallelises across questions, never within a design.
+Raising `--eval-concurrency` past `len(val)` buys nothing, which is why the seed
+archive is now scored across designs concurrently as well, with the nested
+fan-out bounded so `inner x outer` stays inside the budget.
 
-!!! note "The lift row is not filled in yet"
-    A run over the split above is ~2 hours and 6k–17k model calls. One has not
-    been completed against the current code, so this page does not claim a
-    demonstrated lift — the table is the shape of the answer, not the answer.
+**The two constraints are opposed.** Shrink `|val|` to afford the run and the
+validation split returns to a ceiling — measured at `|val| = 7`, CoT scores
+1.000 again and the strict comparison has nothing to rank. Keep `|val|` large
+enough to separate designs and a single run is hours. There is no size that is
+both affordable and readable on this model.
+
+### What was tried
+
+| configuration | outcome |
+|---|---|
+| MGSM, all languages | saturated, 1.000 |
+| GPQA, `\|val\| = 45`, 16 rollouts | stopped at 40 min, still seeding |
+| GPQA, `\|val\| = 29`, 12 rollouts | stopped at 40 min, still seeding |
+| GPQA, `\|val\| = 7`, 8 rollouts, `--no-thinking` | completed; 7 seeds + 2 searched; val back to 1.000 |
+| GPQA, `\|val\| = 7`, 4 rollouts | completed; 7 seeds + **0** searched; val 1.000, test 0.667, lift +0.000 |
+
+`--no-thinking` deserves its own line, because it looks like the answer and is
+not. It cuts a GPQA call from 52.6 s to 5.8 s for six items with 5/6 still
+correct — a ninefold saving at no visible accuracy cost. But what ADAS searches
+over is *reasoning orchestration*: Debate, Step-back and Self-Consistency are
+ways of spending reasoning. Switch reasoning off and they collapse into
+"answer directly", the seven seeds tie again, and the flag has deleted the thing
+under measurement rather than accelerated it.
+
+!!! danger "What would make this row measurable"
+    A cheaper actor with genuine headroom on a reasoning benchmark — the two
+    properties this model has one of at a time. Failing that, an actor whose
+    per-call latency is small enough that `|val| >= 30` is affordable, since the
+    ceiling problem is entirely a small-sample problem. Neither is a change to
+    this port.
 
 ### Give a reasoning model a real token budget
 
@@ -123,9 +183,19 @@ empty. You are billed for tokens generated, not for the cap.
 
     | chain | length |
     |---|---|
-    | seed archive | 19 sequential calls per item (7 seeds) |
+    | seed archive | 19 calls per item across the 7 seeds; the designs are scored **concurrently**, the calls inside one design are not |
     | `propose` | 3 Reflexion rounds, ~84 s |
-    | candidate evaluation | `program_cost` calls per item, candidates run one after another |
+    | candidate evaluation | `program_cost` calls per item, and Debate's second round waits on its first |
+
+    Measured on GPQA with `deepseek-v4-flash`: **49 s and 5,116 completion tokens
+    per call**. Multiply that by 19 x `|val|` and the seed archive alone is the
+    length of an entire run of any other port on this site.
+
+    The nested fan-out is bounded rather than multiplied: `_fitness` opens
+    `min(--eval-concurrency, |val|)` threads, so the outer pool over designs is
+    sized `--eval-concurrency // inner`. Without that the two levels multiply,
+    which is the squared fan-out this repo was bitten by once already on GEPA's
+    D_pareto sweep.
 
     A proposed design may cost up to `MAX_PROGRAM_CALLS` (10) calls per question
     against a seed average of 2.7, which is what dominates a generation. The
@@ -158,16 +228,22 @@ python -m examples.adas.adas_meta_agent_search --dry-run
 python -m examples.adas.adas_meta_agent_search --select dgm --langs en,es
 ```
 
-The settings the numbers above come from — the whole benchmark, hard subset, a
-split that leaves something to measure. The baseline pass is cached per
-(model, question), so only the first run pays for it:
+GPQA instead of MGSM, since MGSM is saturated (see above). `--generations 9999`
+lets `--budget-rollouts` be what stops the run; `--eval-cache` memoises held-out
+scores across processes, which is worth setting for a sweep whose cells share a
+split and worth nothing for a single run:
 
 ```bash
-python -m examples.adas.adas_meta_agent_search \
-    --provider openai --model deepseek-v4-flash \
-    --hard --langs bn,de,en,es,fr,ja,ru,sw,te,th,zh --per-lang 250 \
-    --generations 4 --workers 3 --eval-concurrency 128 \
-    --train-frac 0.15 --test-frac 0.35 --yes
+python -m examples.adas.adas_meta_agent_search --yes \
+    --dataset gpqa --langs en --per-lang 56 \
+    --budget-rollouts 12 --generations 9999 --workers 4 \
+    --async --staleness full --eval-concurrency 32 \
+    --eval-cache ~/.cache/agentdescent/adas-gpqa \
+    --model deepseek-v4-flash
 ```
+
+That configuration did **not** finish inside 40 minutes on the endpoint measured
+here — it was still scoring the seed archive. The section above is the honest
+account of why, and of what would have to change for a lift number to exist.
 
 Offline tests: `tests/test_adas_example.py`.

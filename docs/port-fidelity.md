@@ -188,6 +188,18 @@ column of each section below says exactly where to look.
   one: running model-written Python through `exec` is arbitrary code execution.
   It bounds what the port demonstrates — the *search* is faithful, the space it
   searches is smaller than upstream's.
+* **Checked against upstream, and clean otherwise.** Keep-all archive, the
+  meta-agent conditioned on the entire archive *with* fitness, exactly two
+  Reflexion refinement rounds, bootstrap-CI fitness, and the seven hand-designed
+  seeds by name (`_mgsm/search.py`, `_mgsm/mgsm_prompt.py`) all match. `--dataset
+  gpqa` is a *domain* change within ADAS's own four, not a dataset swap: GPQA
+  Diamond ships in the ADAS repo.
+* **Not measurable on `deepseek-v4-flash`, and the page says why.** MGSM is
+  saturated in every language (CoT 1.000), which does not merely remove the lift
+  — it ties all seven seeds and so removes the meta-agent's conditioning signal.
+  GPQA has headroom but costs 49 s and 5,116 completion tokens per call, and a
+  candidate is `|val| x program_cost` of those. Shrinking `|val|` to afford it
+  returns the split to a ceiling. The two constraints are opposed.
 * **Selection rule lives in**: the shipped [`Beam(1)`](selection.md) over the
   keep-all archive — best-of-archive, byte-identical to the inline
   strictly-greater tracking it replaced.
@@ -280,7 +292,7 @@ be speedups over.
 | GEPA | HotpotQA | 1424 s / 97 calls | sync 1022 s / 70 · async 742 s / 95 | 1.39× / **1.92×** | 0.75 → 0.60 / 0.65 (1–3 tasks of 20; noise-range) | round's diffs merged into one pool candidate (`--reflective-merge`); empty seed instruction; 1 seed — [full setup](results.md#merging-as-a-cost-lever-serial-vs-8-wide-sync-and-async-gepahotpotqa) |
 | EvoSkill | FinQA (OfficeQA is HF-gated) | — | async N=4: 0.527 → 0.707 val over 120 rollouts | — | — | scheduling and merge timing; budget must be pinned. `--reflective-merge` offers the frontier one fused candidate per sweep instead of one per worker (`update_frontier` and the parent draw unchanged). The async arm used to swap in `SgdSkillAggregator` — no frontier, per-batch validation — which is now removed rather than optional |
 | SkillOpt | SearchQA (`--hard` subset) | — | async N=4: 0.053 → 0.211 val over 60 rollouts | — | — | scheduling and merge timing; budget must be pinned. `--minibatch` is this port's name for the worker count, not upstream's minibatch of tasks. `--reflective-merge` scores one fused patch per step, which is *upstream's* shape (a ReflACT step emits one patch of up to `lr` edits) rather than a departure from it |
-| ADAS | MGSM | — | — | — | — | scheduling and merge timing; budget must be pinned |
+| ADAS | GPQA Diamond (MGSM is saturated) | — | **not measurable on this model** — see [algo-adas.md](algo-adas.md#measured-the-cost-and-why-there-is-no-lift-number) | — | — | scheduling and merge timing; budget must be pinned. `--reflective-merge` is deliberately *not* passed: the archive is keep-all and is the meta-agent's whole conditioning signal, so fusing a round's designs would remove archive entries rather than change merge timing |
 | DGM | surrogate | — | — | — | — | scheduling and merge timing; budget must be pinned. `--serial` sets `selfimprove_size=1`, which is a population of one, so this row's control is the degenerate archive rather than upstream's default |
 | OpenEvolve | function minimization | — | — | — | — | **none** — `rounds = iterations // workers` already fixes total work, so this row's speedup is the only one that was equal-budget before the flag existed |
 
