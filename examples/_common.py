@@ -36,6 +36,7 @@ def add_standard_args(
     model_default: Optional[str] = DEFAULT_MODEL,
     model_help: str = "model id",
     max_seconds_default: float = 30.0,
+    eval_concurrency_default: int = 8,
 ) -> argparse.ArgumentParser:
     """Add the provider/runtime flags shared by every algorithm port.
 
@@ -83,7 +84,129 @@ def add_standard_args(
         action="store_true",
         help="run the upstream algorithm's own semantics: one worker, no merge",
     )
+    parser.add_argument(
+        "--budget-rollouts",
+        type=int,
+        default=None,
+        help=("total rollouts, held fixed as workers vary -- required to compare "
+              "--serial against a parallel run (see budget_kwargs)"),
+    )
+    parser.add_argument(
+        "--val-cap",
+        type=int,
+        default=None,
+        help=("cap the gate/D_pareto split without shrinking test -- the only "
+              "lever on the rollout/evaluation ratio (see capped_val)"),
+    )
+    parser.add_argument(
+        "--eval-concurrency",
+        type=int,
+        default=eval_concurrency_default,
+        help="held-out evaluations in flight at once; wall-clock only",
+    )
+    parser.add_argument(
+        "--reflective-merge",
+        action="store_true",
+        help=("merge contradicting diffs with a model instead of ranking them on "
+              "the cheap layer (see agentdescent.fusion.reflective_merge)"),
+    )
     return parser
+
+
+def merge_kwargs(args: argparse.Namespace, complete) -> dict:
+    """``policies=`` for ``--reflective-merge``, or nothing.
+
+    The default aggregator resolves a contradiction by **scoring both sides on
+    the cheap layer and dropping the loser**. On a one-key artifact -- GEPA's
+    ``InstructionSlot``, and so this dataset -- *every* pair of proposals
+    contradicts, so that ranking runs on every pair, every round, and the merge
+    step it feeds then has a single candidate and never merges at all.
+
+    :func:`~agentdescent.fusion.reflective_merge` replaces both halves of that:
+    :class:`~agentdescent.fusion.KeepContradictions` stops the pairwise scoring,
+    and :class:`~agentdescent.fusion.ReflectiveFusion` asks a model for the
+    **union of the deltas** and hands it straight to the acceptance gate. One
+    model call in place of a sweep per pair, and the round's proposals survive
+    together instead of all but one being dropped.
+
+    It is a change to *how diffs are merged*, which is the column
+    ``docs/port-fidelity.md`` calls changeable -- but it is not free of meaning:
+    the union that goes forward is not the pairwise winner, so a row measured
+    with this on has to say so.
+    """
+    if not getattr(args, "reflective_merge", False):
+        return {}
+    from agentdescent import Policies
+    from agentdescent.fusion import reflective_merge
+    return {"policies": Policies(**reflective_merge(complete))}
+
+
+def capped_val(trainval, val_frac: float, val_cap: Optional[int]):
+    """Trim the gate's split without touching train or test.
+
+    The loaders split at fixed ratios, so a ``--fetch``/``--pool`` knob moves all
+    three at once -- and the two that matter pull in **opposite** directions.
+    **val** is what a run costs: every admitted candidate is scored across it, so
+    it multiplies by every proposal. **test** is what a run can *resolve*: it is
+    scored once, at the end, and a split under 20 tasks cannot separate anything.
+    Chasing a 20-task test split by raising the fetch buys a 20-task gate nobody
+    asked for.
+
+    Measured on GEPA/HotpotQA: a rollout costs 3 model calls and the D_pareto
+    sweep it triggers costs ``len(val)``. At ``val=20`` the rollout is 3/23 of the
+    work, so the part ``n_workers`` can parallelise is 13% of the run and the
+    speedup ceiling is ~1.13x **whatever the budget** -- both sides scale
+    together. Halving val is the only lever that moves that ratio.
+
+    ``evolve()`` splits by position -- the last ``held_out_frac`` of the sequence
+    -- so capping is a slice of the tail plus a recomputed fraction. Train keeps
+    everything the cap drops rather than discarding it.
+
+    The gate gets noisier, and that is a real cost rather than a free one:
+    acceptance decisions rest on fewer tasks. Lifted from
+    ``bench/baselines_run.py``, where the equal-budget work needed exactly this.
+    """
+    if not val_cap:
+        return list(trainval), val_frac
+    n = len(trainval)
+    n_val = max(1, round(n * val_frac))
+    if n_val <= val_cap:
+        return list(trainval), val_frac
+    train, val = list(trainval[:n - n_val]), list(trainval[n - n_val:])
+    kept, spare = val[:val_cap], val[val_cap:]
+    tasks = train + spare + kept          # the cap's leftovers become train
+    return tasks, len(kept) / len(tasks)
+
+
+def budget_kwargs(args: argparse.Namespace) -> dict:
+    """``max_rollouts=`` for ``evolve()``, or nothing when no budget was asked for.
+
+    **A speedup measured without this is not a speedup.** Six of the seven ports
+    pass a fixed ``rounds`` and let ``n_workers`` multiply it, so an ``N=8`` arm
+    performs *eight times* the rollouts of the ``--serial`` arm. Comparing their
+    wall-clocks then reports eight times the model spend as parallel efficiency,
+    and comparing their final quality credits the extra spend to parallelism.
+    That is the confound :mod:`agentdescent.baselines` exists to remove, and
+    ``docs/results.md`` already carries a warning that a speedup table cannot
+    distinguish merging from sampling.
+
+    OpenEvolve is the exception and got it right on its own: it derives
+    ``rounds = iterations // workers``, so its total work is fixed and workers
+    only change how it is divided. That is why its speedup row means something
+    different from the other six unless they are budgeted -- which is a fact the
+    matrix has to state, not one a reader should have to find.
+
+    The engine has enforced this since ``evolve(max_rollouts=)`` shipped, and no
+    port passed it. Left ``None`` by default, because a port run on its own is
+    not a comparison and should keep the configuration its own docs describe;
+    the moment two arms are compared, both need it.
+
+    The synchronous path checks at the round barrier, so an ``N`` -worker arm
+    overshoots by up to ``N-1`` rollouts. ``result.rollouts`` is what was
+    actually spent -- report that rather than the budget.
+    """
+    return ({"max_rollouts": args.budget_rollouts}
+            if getattr(args, "budget_rollouts", None) else {})
 
 
 def is_openai_compatible(args: argparse.Namespace) -> bool:

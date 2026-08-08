@@ -65,6 +65,7 @@ honoured locally is how a port grows a `--yes` it never reads.
 | `--dry-run` | print the plan; zero network, zero API key | the port's early return |
 | `--yes` | skip the confirmation before real API calls | `confirm` |
 | `--serial` | **the upstream algorithm's own semantics**: one worker, nothing to merge | `worker_count` |
+| `--budget-rollouts` | total rollouts, held fixed as workers vary | `budget_kwargs` |
 
 The iteration count is deliberately *not* standardised: `--rounds` (ACE, GEPA),
 `--generations` (ADAS, DGM), `--iterations` (EvoSkill, OpenEvolve) and `--steps`
@@ -79,6 +80,19 @@ them had no baseline in the repository at all. It is refused together with
 `--serial --async` is a one-worker *asynchronous* run whose diffs can still go
 stale against a moved head, and staleness in the control arm is the one thing a
 control must not have.
+
+**`--serial` on its own is still not a comparison.** Six of these seven ports pass
+a fixed iteration count and let the worker count multiply it, so an `N=8` run does
+eight times the rollouts of the serial one — measured on the engine at
+`rounds=24`: 192 rollouts against 24. A wall-clock read across that gap is eight
+times the model spend reported as parallel efficiency. `--budget-rollouts N` pins
+both arms to the same total; pass it to both, at the same value, and report
+`result.rollouts` rather than the budget, because the synchronous path checks at
+the round barrier and can overshoot by up to `n_workers - 1`.
+
+OpenEvolve is the exception and needed no fixing: it derives
+`rounds = iterations // workers`, so its total work was already fixed and the flag
+simply sets `--iterations`.
 
 Every example takes `--dry-run`, which prints its configuration and returns with
 **zero network access and no API key**, and has an offline test suite

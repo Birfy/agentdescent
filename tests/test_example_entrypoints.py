@@ -68,6 +68,7 @@ def test_standard_args_have_one_definition():
         "--dry-run",
         "--yes",
         "--serial",
+        "--budget-rollouts", "64",
     ])
     assert args.provider == "openai"
     assert args.model == "test-model"
@@ -78,6 +79,42 @@ def test_standard_args_have_one_definition():
     assert args.dry_run is True
     assert args.yes is True
     assert args.serial is True
+    assert args.budget_rollouts == 64
+
+
+def test_a_budget_is_only_passed_when_one_was_asked_for():
+    """`None` must not reach `evolve(max_rollouts=)` as a budget of nothing."""
+    parser = add_standard_args(argparse.ArgumentParser())
+    assert common.budget_kwargs(parser.parse_args([])) == {}
+    assert common.budget_kwargs(parser.parse_args(["--budget-rollouts", "40"])) == {
+        "max_rollouts": 40}
+
+
+@pytest.mark.parametrize("port", PORTS, ids=PORT_IDS)
+def test_every_port_can_hold_its_rollout_budget_fixed(port):
+    """Without this, no speedup row in `docs/port-fidelity.md` means anything.
+
+    Six of the seven ports pass a fixed `rounds` and let `n_workers` multiply it,
+    so an `N=8` arm runs *eight times* the rollouts of the `--serial` arm.
+    Comparing their wall-clocks reports eight times the model spend as parallel
+    efficiency; comparing their final quality credits the extra spend to
+    parallelism. `evolve(max_rollouts=)` has existed since the equal-budget work
+    and **no port passed it** -- the same failure as `cheap_eval_tasks`, where the
+    knob shipped and the default nobody sets stayed the only default there is.
+
+    OpenEvolve is the exception: `rounds = iterations // workers` already fixes
+    total work, so it maps the shared flag onto `iterations` instead of adding a
+    second budget beside it.
+    """
+    source = pathlib.Path(inspect.getfile(port.module)).read_text(encoding="utf-8")
+    if port.module is openevolve:
+        assert "args.iterations = args.budget_rollouts" in source, (
+            "OpenEvolve's own iteration budget is the rollout budget; map it")
+        return
+    assert "budget_kwargs(args)" in source, (
+        f"{PORT_IDS[PORTS.index(port)]} cannot hold its budget fixed, so its "
+        "serial and parallel arms are not comparable")
+    assert "max_rollouts" in source or "budget_kwargs(args))" in source
 
 
 @pytest.mark.parametrize("port", PORTS, ids=PORT_IDS)
@@ -355,3 +392,46 @@ def test_score_tasks_runs_them_concurrently():
 
 def test_an_empty_split_scores_zero_rather_than_dividing_by_it():
     assert common.score_tasks(lambda a, t: "x", "a", [], lambda t, o: 1.0) == 0.0
+
+
+@pytest.mark.parametrize("port", PORTS, ids=PORT_IDS)
+def test_every_name_main_uses_is_actually_imported(port):
+    """`--dry-run` returns before `main()` reaches its real body, so the only
+    thing exercising the rest of it is a paid run.
+
+    A helper added to a port's `main` without its import passes every test here
+    and then raises `NameError` twenty minutes into a sweep, after the first cell
+    has been paid for. That is exactly how `capped_val` shipped. Resolving the
+    names statically costs nothing and catches it before the API key is read.
+
+    Deliberately conservative: it collects every binding anywhere in the module
+    rather than tracking scopes, so it cannot flag a real name and will miss a
+    name bound in the wrong scope. Catching the import that is simply absent is
+    the whole job.
+    """
+    import ast
+    import builtins
+
+    source = pathlib.Path(inspect.getfile(port.module)).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    bound = set(dir(builtins)) | {"__name__", "__file__", "__doc__"}
+
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            bound |= {(a.asname or a.name).split(".")[0] for a in node.names}
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            bound.add(node.id)
+        elif isinstance(node, ast.arg):
+            bound.add(node.arg)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, ast.Global):
+            bound |= set(node.names)
+
+    used = {n.id for n in ast.walk(tree)
+            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
+    unresolved = sorted(used - bound)
+    assert not unresolved, (
+        f"{PORT_IDS[PORTS.index(port)]} reads names it never binds: {unresolved}")

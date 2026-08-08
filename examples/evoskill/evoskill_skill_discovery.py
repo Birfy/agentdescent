@@ -59,7 +59,8 @@ from agentdescent.treestrategy import FileTree
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
 from examples._common import (add_standard_args, completion_for, confirm,
-                              is_openai_compatible, worker_count)
+                              is_openai_compatible, worker_count,
+                              budget_kwargs)
 
 RAW = "https://raw.githubusercontent.com/sentient-agi/EvoSkill/main/examples/officeqa/data"
 Completion = Callable[[str], str]
@@ -683,6 +684,7 @@ def run_evoskill(complete: Completion, docs: Dict[str, str],
                  async_ratio: int = 3, max_seconds: float = 30.0, backend=None,
                  eval_concurrency: int = 8, batch_size: int = 4, val_every: int = 3,
                  eval_at_end: bool = False, max_workers: int = 3,
+                 max_rollouts: Optional[int] = None,
                  verbose: bool = False) -> EvoResult:
     """Drive EvoSkill through `evolve()` (`val` is the held-out frontier metric).
 
@@ -740,7 +742,8 @@ def run_evoskill(complete: Completion, docs: Dict[str, str],
                     max_seconds=max_seconds if asynchronous else None,
                     held_out_frac=len(val) / max(1, len(tasks)),
                     self_verify=False,   # repo evaluates the child on val only -- no per-trajectory re-run
-                    aggregator_factory=factory, verbose=verbose)
+                    aggregator_factory=factory, verbose=verbose,
+                    max_rollouts=max_rollouts)
 
     best = ctx.best_score
     if eval_at_end and val:
@@ -912,7 +915,8 @@ def main(argv=None) -> None:
                           max_frontier=args.frontier, seed=args.seed,
                           asynchronous=args.asynchronous, async_ratio=args.async_ratio,
                           max_seconds=args.max_seconds, backend=backend,
-                          max_workers=args.workers, verbose=True)
+                          max_workers=args.workers, verbose=True,
+                          **budget_kwargs(args))
 
     test_score = evaluate(completion, docs, result.skills, ds.test, backend=backend)
     print("\n=== discovered skill library ===")

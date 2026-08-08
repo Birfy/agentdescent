@@ -6,6 +6,86 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A work-budget stop on the async path abandoned the evidence it had paid
+  for.** `max_rollouts` counts a rollout when it completes, so when the budget
+  trips, up to `n_workers - 1` rollouts are still in flight -- legitimately
+  started, their model calls already billed. The merger drained the intake once
+  and returned, dropping whatever landed after; and since a failing rollout runs
+  propose + self-verify after solve (three sequential calls to a success's one),
+  the abandoned set was enriched with exactly the rollouts that produce
+  evidence. Measured on an 8-worker GEPA run: 8 cards produced, **7 abandoned**,
+  the pool never grew past the seed, and the arm reported a wall-clock it had
+  not earned. The merger now keeps draining until the workers exit whenever the
+  stop was a work budget (bounded by `max_seconds`, the run's own outer limit);
+  a time-budget stop keeps the short grace, because the caller bounded
+  wall-clock and waiting would overshoot it.
+- `evolve(policies=..., aggregator_factory=...)` silently ignored the merge-side
+  policies: a custom factory replaces the optimizer, so `conflict`/`fusion`/
+  `acceptance`/`promotion` never reached anything. It now warns, naming the
+  dropped policies -- a caller who paid for a model-merging run deserves to know
+  they got the factory's behaviour instead.
+
+### Added
+
+- **`Usage.failure_seconds`** -- model time spent inside calls that ultimately
+  failed (retry waits, hung connections, timeouts), kept apart from `seconds`
+  because `wall - failure_seconds` is the wall-clock net of endpoint weather:
+  the number a comparison between two arms should quote when one was unlucky.
+  Printed by `Usage.summary()` as `N failed (X.Xs lost)`.
+- **`bench.matrix_run`** -- the parallelisation-matrix runner: one row per port,
+  serial vs N-wide arms, `--budget-rollouts` pinned on both, results written
+  after every cell (a sweep this long must survive interruption), per-cell
+  transcripts kept because the parsed row answers "what did it cost", not "what
+  did it do".
+- **GEPA: `--reflective-merge` merges the round's diffs into one pool
+  candidate.** Admission is what `ParetoAggregator` pays for -- every candidate
+  is scored across all of D_pareto -- so a round from N workers costs N sweeps;
+  merged, it costs one. Measured at equal budget (16 rollouts, seed 0, net of
+  failures): serial 1424s/97 calls, sync N=8 1022s/70 calls (-28%), async N=8
+  742s/95 calls, test EM within noise across arms. Pareto selection itself is
+  untouched -- what changes is what the pool contains, recorded in
+  `docs/port-fidelity.md`. The merger must be `ReflectiveFusion`: `fuse_diffs`
+  on a one-key artifact keeps the last rewrite and drops the rest.
+- GEPA's `_score_rows` batches D_pareto scoring across the round's candidates in
+  one flattened pool (in-flight = `eval_concurrency`, not its square); admission
+  order stays deterministic because dedup runs first and sequentially.
+- Shared port flags: `--eval-concurrency` (held-out evaluations in flight),
+  `--val-cap` (trim the gate split without touching test, via
+  `examples._common.capped_val`), `--reflective-merge`, and GEPA's
+  `--seed-instruction`.
+- A static name-resolution guard over every port
+  (`test_every_name_main_uses_is_actually_imported`): `--dry-run` returns before
+  `main()`'s real body, so a missing import passes every test and then raises
+  `NameError` twenty minutes into a paid sweep -- which is exactly how one
+  shipped.
+
+
+### Added
+
+- **`--budget-rollouts` on every algorithm port**, forwarded as
+  `evolve(max_rollouts=)` through `examples._common.budget_kwargs`. Without it the
+  parallelisation matrix in `docs/port-fidelity.md` cannot be filled honestly: six
+  of the seven ports pass a fixed iteration count and let `n_workers` multiply it,
+  so an `N=8` arm runs **eight times** the rollouts of the `--serial` arm.
+  Measured on the engine at `rounds=24` — 1 worker: 24 rollouts; 2: 48; 4: 96;
+  8: **192**; with the budget, all four land on exactly 24. Comparing wall-clocks
+  across that gap reports eight times the model spend as parallel efficiency, and
+  comparing final quality credits the extra spend to parallelism — the confound
+  `agentdescent.baselines` exists to remove. `evolve(max_rollouts=)` had shipped
+  and **no port passed it**, the same shape of miss as `cheap_eval_tasks`.
+  `tests/test_example_entrypoints.py::test_every_port_can_hold_its_rollout_budget_fixed`
+  now refuses a port that cannot hold its budget fixed.
+
+  OpenEvolve needed no fixing and is recorded as the exception: it derives
+  `rounds = iterations // workers`, so its total work was already fixed and the
+  shared flag simply sets `--iterations`. Its speedup row is therefore the only
+  one in the matrix that was equal-budget before this existed — which is itself a
+  "semantics changed" entry, since one row of a table meaning something different
+  from the other six is the failure the column is there to prevent.
+
+
 ### Changed
 
 - **The fusion tournament is off by default; the union goes straight to the

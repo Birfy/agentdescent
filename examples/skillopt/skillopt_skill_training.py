@@ -58,7 +58,8 @@ from agentdescent.evolution import EvolvingArtifact, Task, evolve, rule_id
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
 from examples._common import (add_standard_args, completion_for, confirm,
-                              worker_count)
+                              worker_count,
+                              budget_kwargs)
 
 SEARCHQA = ("lucadiliello/searchqa", "default")   # (dataset, config)
 Completion = Callable[[str], str]
@@ -441,6 +442,7 @@ def run_skillopt(complete: Completion, train: List[dict], val: List[dict],
                  steps: int = 8, lr: int = 4, minibatch: int = 4,
                  lr_mode: str = "cosine", seed: int = 0, asynchronous: bool = False,
                  async_ratio: int = 3, max_seconds: float = 30.0,
+                 max_rollouts: Optional[int] = None,
                  verbose: bool = False) -> SkillOptResult:
     """Drive SkillOpt through `evolve()` (`val` becomes the held-out gate set)."""
     def to_task(i, ex):
@@ -471,7 +473,8 @@ def run_skillopt(complete: Completion, train: List[dict], val: List[dict],
                     asynchronous=asynchronous, async_ratio=async_ratio,
                     max_seconds=max_seconds if asynchronous else None,
                     held_out_frac=len(val) / max(1, len(tasks)),
-                    aggregator_factory=factory, verbose=verbose)
+                    aggregator_factory=factory, verbose=verbose,
+                    max_rollouts=max_rollouts)
     return SkillOptResult(result.rendered, ctx.seed_em, ctx.best_em,
                           ctx.accepted, ctx.rejected,
                           [h.held_out_reward for h in result.history],
@@ -601,7 +604,8 @@ def main(argv=None) -> None:
     result = run_skillopt(completion, ds.train, ds.val, steps=args.steps, lr=args.lr,
                           minibatch=args.minibatch, lr_mode=args.lr_mode, seed=args.seed,
                           asynchronous=args.asynchronous, async_ratio=args.async_ratio,
-                          max_seconds=args.max_seconds, verbose=True)
+                          max_seconds=args.max_seconds, verbose=True,
+                          **budget_kwargs(args))
 
     test_em = eval_hard_em(Rollout(completion), result.skill, ds.test)
     print("\n=== trained skill document ===")

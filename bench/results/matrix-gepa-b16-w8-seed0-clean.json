@@ -1,0 +1,57 @@
+{
+  "budget_rollouts": 16,
+  "width": 8,
+  "model": "GLM-5.2",
+  "provider": "claude",
+  "cells": [
+    {
+      "row": "gepa",
+      "dataset": "HotpotQA",
+      "arm": "serial",
+      "seed": 0,
+      "width": 1,
+      "budget": 16,
+      "wall_seconds": 2148.4,
+      "calls": 97,
+      "prompt_tokens": 137867,
+      "completion_tokens": 77010,
+      "model_seconds": 3849.7,
+      "test": 0.75,
+      "val_end": 40,
+      "stopped": "max_rollouts",
+      "failure_seconds": 723.6
+    },
+    {
+      "row": "gepa",
+      "dataset": "HotpotQA",
+      "arm": "parallel",
+      "seed": 0,
+      "width": 8,
+      "budget": 16,
+      "wall_seconds": 1021.6,
+      "calls": 70,
+      "prompt_tokens": 100097,
+      "completion_tokens": 49510,
+      "model_seconds": 1838.8,
+      "test": 0.6,
+      "val_end": 40,
+      "stopped": "max_rollouts"
+    },
+    {
+      "row": "gepa",
+      "dataset": "HotpotQA",
+      "arm": "async",
+      "seed": 0,
+      "width": 8,
+      "budget": 16,
+      "wall_seconds": 742.0,
+      "calls": 95,
+      "prompt_tokens": 131660,
+      "completion_tokens": 61918,
+      "model_seconds": 2146.3,
+      "test": 0.65,
+      "stopped": "max_iters",
+      "note": "run after the work-budget drain fix; before it the same cell reported 347s with candidates=1 -- fast because 7 of 8 evidence cards were abandoned in the intake buffer at shutdown"
+    }
+  ]
+}

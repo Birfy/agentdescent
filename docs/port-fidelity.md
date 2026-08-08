@@ -188,15 +188,42 @@ which runs the published loop: one worker, nothing to merge. That is the control
 column. Without it the speedups already in [results](results.md) had nothing to
 be speedups over.
 
+!!! danger "`--serial` alone does not make the two arms comparable"
+    Six of the seven ports pass a **fixed `rounds`** and let `n_workers` multiply
+    it, so an `N=8` arm performs **eight times the rollouts** of the `--serial`
+    arm. Measured on the engine directly, `rounds=24`:
+
+    | workers | no budget | `--budget-rollouts 24` |
+    |---|---|---|
+    | 1 | 24 rollouts | 24 |
+    | 2 | 48 | 24 |
+    | 4 | 96 | 24 |
+    | 8 | **192** | 24 |
+
+    Comparing wall-clocks across the left column reports eight times the model
+    spend as parallel efficiency, and comparing final quality credits the extra
+    spend to parallelism. It is the confound
+    [`agentdescent.baselines`](results.md) was built to remove, and the warning
+    on that page — that a speedup table cannot distinguish merging from sampling
+    — applies here first.
+
+    **So every cell below has to be produced with `--budget-rollouts`, on both
+    arms, at the same value.** `evolve(max_rollouts=)` has existed since the
+    equal-budget work and no port passed it;
+    `tests/test_example_entrypoints.py::test_every_port_can_hold_its_rollout_budget_fixed`
+    now refuses a port that cannot. The synchronous path checks at the round
+    barrier, so an `N`-worker arm may overshoot by up to `N-1` — report
+    `result.rollouts`, not the budget.
+
 | Algorithm | Dataset | Serial (upstream) | AgentDescent N=8 | Speedup | Final held-out Δ | Semantics changed |
 |---|---|---|---|---|---|---|
-| ACE | FiNER-139 | — | — | — | — | rollout scheduling and merge timing only |
-| GEPA | HotpotQA | — | — | — | — | rollout scheduling and merge timing only |
-| EvoSkill | OfficeQA | — | — | — | — | rollout scheduling and merge timing only |
-| SkillOpt | SearchQA | — | — | — | — | rollout scheduling and merge timing only |
-| ADAS | MGSM | — | — | — | — | rollout scheduling and merge timing only |
-| DGM | surrogate | — | — | — | — | rollout scheduling and merge timing only |
-| OpenEvolve | function minimization | — | — | — | — | rollout scheduling and merge timing only |
+| ACE | FiNER-139 | — | — | — | — | scheduling and merge timing; budget must be pinned |
+| GEPA | HotpotQA | 1424 s / 97 calls | sync 1022 s / 70 · async 742 s / 95 | 1.39× / **1.92×** | 0.75 → 0.60 / 0.65 (1–3 tasks of 20; noise-range) | round's diffs merged into one pool candidate (`--reflective-merge`); empty seed instruction; 1 seed — [full setup](results.md#merging-as-a-cost-lever-serial-vs-8-wide-sync-and-async-gepahotpotqa) |
+| EvoSkill | OfficeQA | — | — | — | — | scheduling and merge timing; budget must be pinned |
+| SkillOpt | SearchQA | — | — | — | — | scheduling and merge timing; budget must be pinned. `--minibatch` is this port's name for the worker count, not upstream's minibatch of tasks |
+| ADAS | MGSM | — | — | — | — | scheduling and merge timing; budget must be pinned |
+| DGM | surrogate | — | — | — | — | scheduling and merge timing; budget must be pinned. `--serial` sets `selfimprove_size=1`, which is a population of one, so this row's control is the degenerate archive rather than upstream's default |
+| OpenEvolve | function minimization | — | — | — | — | **none** — `rounds = iterations // workers` already fixes total work, so this row's speedup is the only one that was equal-budget before the flag existed |
 
 **The quality column is allowed to go down, and a table of all-green is probably
 wrong.** Asynchrony has to cost something somewhere: stale diffs get discarded, a

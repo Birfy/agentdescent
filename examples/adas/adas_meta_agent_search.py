@@ -61,7 +61,8 @@ from agentdescent.evolution import EvolvingArtifact, Task, evolve, rule_id
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
 from examples._common import (add_standard_args, completion_for, confirm,
-                              is_openai_compatible, worker_count)
+                              is_openai_compatible, worker_count,
+                              budget_kwargs)
 
 MGSM_URL = "https://raw.githubusercontent.com/ShengranHu/ADAS/main/dataset/mgsm/mgsm_{lang}.tsv"
 # ADAS's MGSM language set (utils.ALL_LANGUAGES).
@@ -935,7 +936,8 @@ def run_meta_agent_search(complete: Completion, val: List[Tuple[str, str]],
                           generations: int, select: str = "adas", seed: int = 0,
                           asynchronous: bool = False, async_ratio: int = 3,
                           max_seconds: float = 45.0, held_out_frac: float = 0.5,
-                          n_workers: int = 2, verbose: bool = False) -> SearchResult:
+                          n_workers: int = 2, max_rollouts: Optional[int] = None,
+                          verbose: bool = False) -> SearchResult:
     """Drive Meta Agent Search through `evolve()` (val split into trigger/held-out)."""
     tasks = [Task(id=f"mgsm{i}", prompt=q, meta={"answer": a})
              for i, (q, a) in enumerate(val)]
@@ -971,7 +973,8 @@ def run_meta_agent_search(complete: Completion, val: List[Tuple[str, str]],
            # example in the repo.
            self_verify=False,
            eval_concurrency=EVAL_CONCURRENCY,
-           held_out_frac=held_out_frac, aggregator_factory=factory, verbose=verbose)
+           held_out_frac=held_out_frac, aggregator_factory=factory, verbose=verbose,
+           max_rollouts=max_rollouts)
     return SearchResult(ctx.archive, ctx.best_agent or {}, ctx.seed_fitness,
                         ctx.best_fitness, ctx.best_seed or {},
                         out.outcomes(), out.stop_reason, out.error)
@@ -984,7 +987,7 @@ def run_meta_agent_search(complete: Completion, val: List[Tuple[str, str]],
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
-    add_standard_args(p, max_seconds_default=60.0)
+    add_standard_args(p, max_seconds_default=60.0, eval_concurrency_default=16)
     p.add_argument("--generations", type=int, default=6)
     p.add_argument("--langs", default="en,es,fr",
                    help=f"comma-separated MGSM languages (of {','.join(ALL_LANGUAGES)})")
@@ -995,13 +998,6 @@ def build_parser() -> argparse.ArgumentParser:
                    help="cap the hard subset -- evaluation cost is candidates x "
                         "items x (multi-step calls), so this is the strongest lever "
                         "on how long a run takes")
-    p.add_argument("--eval-concurrency", type=int, default=16,
-                   help="how many examples to score at once (I/O bound)")
-    p.add_argument("--timeout", type=float, default=300.0,
-                   help="per-call timeout. A reasoning model given a large "
-                        "--max-tokens can spend minutes on one call, and the "
-                        "library default of 120s then turns a working run into "
-                        "retries and lost rounds")
     p.add_argument("--max-tokens", type=int, default=MAX_TOKENS,
                    help="token budget per model call. On a reasoning model the "
                         "budget is spent on hidden reasoning first, so too small a "
@@ -1169,7 +1165,8 @@ def main(argv=None) -> None:
                                    asynchronous=args.asynchronous, async_ratio=args.async_ratio,
                                    max_seconds=args.max_seconds, n_workers=args.workers,
                                    # the engine's held-out split IS ds.val
-                                   held_out_frac=ds.val_frac, verbose=True)
+                                   held_out_frac=ds.val_frac, verbose=True,
+                                   **budget_kwargs(args))
 
     # Both numbers on the SAME held-out split. Reporting only the searched agent's
     # test accuracy cannot answer the question the run exists to answer -- on a

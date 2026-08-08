@@ -49,6 +49,15 @@ class Usage:
     completion_tokens: int = 0
     seconds: float = 0.0
     failures: int = 0
+    #: Model seconds spent inside calls that ultimately **failed** -- retry
+    #: waits, hung connections, timeouts. Kept apart from `seconds` because the
+    #: two answer different questions: `seconds` is what the run cost, and
+    #: `seconds - failure_seconds` is what the run cost *net of endpoint
+    #: weather* -- the number a wall-clock comparison between two arms should
+    #: quote when one arm was unlucky. Measured need: a serial arm hit a
+    #: network outage mid-sweep and its 43-minute wall carried ~17 minutes of
+    #: stall that had nothing to do with the architecture under test.
+    failure_seconds: float = 0.0
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     @property
@@ -62,7 +71,9 @@ class Usage:
             self.prompt_tokens += prompt_tokens
             self.completion_tokens += completion_tokens
             self.seconds += seconds
-            self.failures += 1 if failed else 0
+            if failed:
+                self.failures += 1
+                self.failure_seconds += seconds
 
     def estimated_cost(self, per_1m_prompt: float, per_1m_completion: float) -> float:
         """Cost at the given per-million-token prices (both provider-specific)."""
@@ -73,7 +84,8 @@ class Usage:
         return (f"{self.calls} calls, {self.prompt_tokens:,} prompt + "
                 f"{self.completion_tokens:,} completion tokens, "
                 f"{self.seconds:.1f}s in the model"
-                + (f", {self.failures} failed" if self.failures else ""))
+                + (f", {self.failures} failed ({self.failure_seconds:.1f}s lost)"
+                   if self.failures else ""))
 
 
 def metered(completion: Completion, usage: Usage) -> Completion:

@@ -59,7 +59,8 @@ from agentdescent.governance import classify
 from agentdescent.parallel import DataParallel
 from agentdescent.sampling import DifficultyWeighted, RoundRobin
 from examples._common import (add_standard_args, completion_for, confirm,
-                              score_tasks, worker_count)
+                              score_tasks, worker_count,
+                              budget_kwargs)
 
 FINER = ("nlpaueb/finer-139", "validation", "finer-139")   # (dataset, split, config)
 
@@ -369,7 +370,8 @@ def main(argv=None) -> None:
                                   else RoundRobin()),
                     asynchronous=args.asynchronous, async_ratio=args.async_ratio,
                     max_seconds=args.max_seconds if args.asynchronous else None,
-                    held_out_frac=ds.val_frac, verbose=True)
+                    held_out_frac=ds.val_frac, verbose=True,
+                    **budget_kwargs(args))
 
     test_acc = evaluate(agent, result.rendered, ds.test, reward)
     print("\n=== evolved ACE playbook ===")

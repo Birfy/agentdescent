@@ -69,3 +69,55 @@ def test_default_async_call_is_quiet():
         warnings.simplefilter("always")
         _flat_run(max_seconds=1.0)
     assert not [x for x in w if "ignores" in str(x.message)]
+
+
+def test_a_work_budget_stop_merges_the_evidence_it_paid_for():
+    """`max_rollouts` counts a rollout when it completes, so when it trips, up to
+    `n_workers - 1` rollouts are still in flight -- started legitimately, their
+    model calls already made. The shutdown used to drain the intake once and
+    return, abandoning whatever those rollouts submitted after the drain.
+
+    And not uniformly: a failing rollout runs propose + self-verify after solve
+    (three sequential calls to a success's one), so the in-flight set is enriched
+    with exactly the rollouts that produce evidence. Measured on a real 8-worker
+    run: 8 cards produced, 7 abandoned, the pool never grew past the seed -- the
+    arm looked fast because it had silently skipped its merging.
+
+    Every card from a *completed* rollout must now reach the aggregator. Time
+    stops (`max_seconds`) keep the short grace -- the user bounded wall-clock,
+    and waiting would overshoot the one thing they fixed.
+    """
+    import time as _time
+
+    from agentdescent.aggregator import Aggregator
+
+    ingested = []
+
+    def counting_factory(ledger, verifier, audit, config, policy):
+        agg = Aggregator(ledger, verifier, audit, config, staleness_policy=policy)
+        real = agg.ingest
+
+        def spy(card):
+            ingested.append(card.diff.diff_id)
+            real(card)
+
+        agg.ingest = spy
+        return agg
+
+    tasks = [Task(id=str(i), prompt=f"q{i}", meta={"gold": "x"}) for i in range(12)]
+    result = evolve(
+        tasks, lambda t, o: 0.0,                       # every rollout fails...
+        run=lambda rendered, t: _time.sleep(0.1) or "wrong",
+        propose=lambda rendered, t, o, s: f"rule-{t.id}",  # ...so every one proposes
+        strategy=SingleSlot(initial_value="v"),
+        asynchronous=True, n_workers=4, rounds=100, max_rollouts=6,
+        max_seconds=30.0, self_verify=False,
+        aggregator_factory=counting_factory)
+
+    # The async path reports the budget under its own name. That naming split
+    # predates this test and is not what it pins.
+    assert result.stop_reason in ("max_rollouts", "max_iters")
+    assert len(ingested) == result.rollouts, (
+        f"{result.rollouts} rollouts completed and were paid for, but only "
+        f"{len(ingested)} cards reached the aggregator -- the rest were "
+        f"abandoned in the intake buffer at shutdown")
