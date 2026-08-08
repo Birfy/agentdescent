@@ -208,7 +208,7 @@ be speedups over.
 | Algorithm | Dataset | Serial (upstream) | AgentDescent N=8 | Speedup | Final held-out Δ | Semantics changed |
 |---|---|---|---|---|---|---|
 | ACE | FiNER-139 | — | — | — | — | scheduling and merge timing; budget must be pinned |
-| GEPA | HotpotQA | — | — | — | — | scheduling and merge timing; budget must be pinned |
+| GEPA | HotpotQA | 1424 s / 97 calls | sync 1022 s / 70 · async 742 s / 95 | 1.39× / **1.92×** | 0.75 → 0.60 / 0.65 (1–3 tasks of 20; noise-range) | round's diffs merged into one pool candidate (`--reflective-merge`); empty seed instruction; 1 seed — [full setup](results.md#merging-as-a-cost-lever-serial-vs-8-wide-sync-and-async-gepahotpotqa) |
 | EvoSkill | OfficeQA | — | — | — | — | scheduling and merge timing; budget must be pinned |
 | SkillOpt | SearchQA | — | — | — | — | scheduling and merge timing; budget must be pinned. `--minibatch` is this port's name for the worker count, not upstream's minibatch of tasks |
 | ADAS | MGSM | — | — | — | — | scheduling and merge timing; budget must be pinned |

@@ -338,6 +338,91 @@ To make the mechanism fire more than twice, raise `--budget-rollouts` so a run
 has more rounds, or lower `AggregatorConfig.batch_trigger` so a merge fires on
 fewer cards. Both cost model time; neither was affordable at ~38 s a call.
 
+## Merging as a cost lever: serial vs 8-wide, sync and async — GEPA/HotpotQA
+
+The section above asks whether merging changes *quality*. This one measures the
+other claim: that merging changes **cost** — a round's N diffs fused into one
+candidate mean one admission sweep instead of N, so widening the run makes it
+cheaper rather than merely wider.
+
+**Setup.** GEPA's own Pareto optimizer throughout — Algorithm 2 (per-instance
+frontier, domination pruning, win-frequency sampling) untouched. What changes is
+what enters its pool: with `--reflective-merge` the round's surviving diffs are
+combined by [`ReflectiveFusion`](aggregator.md#when-a-dictionary-update-cannot-merge-reflectivefusion)
+into **one** candidate before admission (`fuse_diffs` cannot do it: on a one-key
+artifact it keeps the last rewrite and silently drops the rest). HotpotQA
+`--fetch 80 --val-cap 8`: train 52 / D_pareto 8 / test 20. **Empty seed
+instruction** — the tuned default answers ~75% correctly, which starves the loop
+of proposals; even empty, GLM-5.2 scores 0.75 on D_pareto, so the lever is
+weaker than intended and admissions stay scarce. Budget **16 rollouts pinned on
+every arm** (`--budget-rollouts 16 --rounds 9999` — the port's own `rounds=10`
+default binds *below* the budget and had silently short-changed the serial arm
+10 vs 16). `--eval-concurrency 8`, GLM-5.2, seed 0, **one seed** — cost
+mechanics, not a quality claim.
+
+| arm | wall (net of failures) | calls | effective concurrency | pool | test EM |
+|---|---|---|---|---|---|
+| serial | 1424 s | 97 | 1.31× | 6 | 0.75 |
+| sync, N=8 | 1022 s (**1.39×**) | **70** | 1.80× | 3 | 0.60 |
+| async, N=8 | **742 s (1.92×)** | 95 | **2.89×** | 3 | 0.65 |
+
+"Net of failures": `Usage.failure_seconds` now meters the model time lost inside
+calls that failed — the serial arm hit two ~6-minute hung calls (SDK timeout
+600 s) and its raw 2148 s wall carries 724 s of that. Endpoint weather is not a
+property of the architecture, so the table subtracts it; raw numbers are in
+`bench/results/matrix-gepa-b16-w8-seed0-clean.json` with per-cell transcripts
+beside it.
+
+#### What it establishes
+
+- **The merge lever works, and only where admissions are the cost.** Sync N=8
+  spends 70 calls against serial's 97 (−28%): six single-candidate admissions
+  collapse into two merged ones. Async gives most of that back (95 calls) — its
+  merger sweeps on its own cadence, so batches shrink and the fusion has less to
+  fuse. Wall-clock and call count pull in opposite directions across the two
+  parallel arms.
+- **The endpoint was never the ceiling.** Raw `curl` probes against the same
+  endpoint: 7.04× effective concurrency at width 8 on reasoning-length requests
+  (10.09× at width 16 on short ones, all HTTP 200). The measured ladder — 1.31×
+  serial, 1.80× sync, 2.89× async — is the *engine's* structure: the rollout
+  chain (solve → propose → self-verify) is three sequential calls per failing
+  worker, the sync path adds a round barrier plus serial merge and admission
+  phases between rounds, and the async path removes the barrier but keeps the
+  chains.
+- **Test EM 0.75 / 0.60 / 0.65 across the arms is one to three tasks on a
+  20-task split** — inside the noise this model shows on identical
+  configurations. One seed; the quality question stays with the three-seed
+  section above.
+
+#### A shutdown bug this measurement caught
+
+The async arm first reported **347 s with a pool that never grew past the
+seed** — faster than every other arm because it had silently skipped its
+merging. `max_rollouts` counts a rollout when it *completes*, so when the
+budget trips, up to `n_workers − 1` rollouts are still in flight; the merger
+drained the intake once and returned, abandoning whatever landed after. And not
+uniformly: a failing rollout runs three sequential calls against a success's
+one, so the abandoned set is enriched with exactly the rollouts that produce
+evidence — measured, 7 of the run's 8 cards. `async_evolve` now keeps draining
+until the workers exit whenever the stop was a *work* budget (bounded by
+`max_seconds`, the run's own outer limit); a *time* budget keeps the short
+grace, because waiting would overshoot the one thing the caller fixed.
+`tests/test_async_early_stop.py` pins completed-rollouts == ingested-cards.
+
+#### Reproduce
+
+```bash
+# serial / sync arms
+python -m bench.matrix_run --rows gepa --budget 16 --width 8 --seeds 0 \
+    --eval-concurrency 8 --provider claude --model GLM-5.2 \
+    --json bench/results/matrix.json --yes
+# async arm (same flags the runner passes, plus --async)
+python -m examples.gepa.gepa_prompt_evolution --yes --seed 0 \
+    --budget-rollouts 16 --fetch 80 --val-cap 8 --reflective-merge \
+    --seed-instruction "" --rounds 9999 --eval-concurrency 8 \
+    --workers 8 --async --max-seconds 3600 --provider claude --model GLM-5.2
+```
+
 ## Reproducing
 
 ```bash
