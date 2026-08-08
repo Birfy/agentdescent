@@ -86,6 +86,91 @@ ROWS = [
          size=["--tasks", "8"], needs="bwrap"),
 ]
 
+#: The expected answer in the "semantics changed" column, for every row and every
+#: arm: parallelising is allowed to change *when* work is scheduled and *when*
+#: diffs are merged, and nothing else (`docs/port-fidelity.md`).
+SCHEDULING_ONLY = "rollout scheduling and merge timing only"
+
+#: What each arm of each row changed about the published algorithm, keyed
+#: `row -> arm`. This lives beside :data:`ROWS` rather than in a doc because a
+#: column filled in after the fact is filled in by whoever is writing the
+#: results, from memory, once the numbers are already on the page -- and a blank
+#: or optimistic entry there makes the whole table unreadable rather than
+#: slightly incomplete. `bench/matrix_report.py` refuses to render a row that has
+#: no entry here, and `tests/test_matrix_semantics.py` refuses a row added to
+#: `ROWS` without one.
+#:
+#: The `serial` arm's entry describes the control itself: it is the upstream loop
+#: for six of the seven, and where it is *not* -- DGM -- saying so is the point,
+#: because a speedup is measured against whatever is written here.
+SEMANTICS = {
+    "ace": {
+        "serial": "upstream ACE: one worker, no merge",
+        "parallel": SCHEDULING_ONLY,
+        "async": SCHEDULING_ONLY,
+    },
+    "gepa": {
+        "serial": "upstream GEPA (single instruction module), one worker",
+        # `--reflective-merge` is in this row's `size`, so it is on in every arm
+        # including the control -- which is what keeps the arms comparable. On
+        # one worker there is nothing to merge and it is inert; from two workers
+        # up it changes what the Pareto pool *contains* (one merged candidate per
+        # round instead of one per worker) while leaving the selection rule
+        # itself untouched. That is a merge-timing change by the letter of the
+        # rule and a pool-contents change in effect, so it is named rather than
+        # folded into SCHEDULING_ONLY.
+        "parallel": SCHEDULING_ONLY + "; `--reflective-merge` admits one merged "
+                    "candidate per round instead of one per worker (Pareto "
+                    "selection unchanged, its input is not)",
+        "async": SCHEDULING_ONLY + "; `--reflective-merge` as above",
+    },
+    "evoskill": {
+        "serial": "upstream EvoSkill: bounded top-K aggregate frontier "
+                  "(`manager.py:update_frontier`), one worker",
+        "parallel": SCHEDULING_ONLY,
+        # Found by auditing the arms rather than by running them: the port swaps
+        # the aggregator on `asynchronous=True`. This is the admission rule, which
+        # `docs/port-fidelity.md` lists under "must not change" -- so this row's
+        # async cell measures a different algorithm from its serial cell, and its
+        # quality delta cannot be read as a cost of asynchrony.
+        "async": "**admission rule changed**: `SgdSkillAggregator` replaces the "
+                 "strict per-candidate top-K frontier -- every update is applied "
+                 "cheaply and held-out validation is amortised over `val_every` "
+                 "steps with rollback on regression. Not upstream's rule, and not "
+                 "the sync arm's either",
+    },
+    "skillopt": {
+        "serial": "upstream ReflACT: one edit batch per step, strict gate",
+        "parallel": SCHEDULING_ONLY + "; `--minibatch` is this port's name for "
+                    "the worker count, not upstream's minibatch of tasks",
+        "async": SCHEDULING_ONLY + "; `--minibatch` as above",
+    },
+    "adas": {
+        "serial": "upstream Meta Agent Search over the DSL substrate "
+                  "(the substrate is this port's standing departure), one worker",
+        "parallel": SCHEDULING_ONLY,
+        "async": SCHEDULING_ONLY,
+    },
+    "dgm": {
+        # Not a clean control, and the matrix has to say so before any speedup is
+        # read off this row: `--serial` reaches n_workers through
+        # `--selfimprove-size`, and for DGM that is the population, so the control
+        # arm is a population of one rather than upstream's default.
+        "serial": "**degenerate control**: `--serial` sets `selfimprove_size=1`, "
+                  "a population of one -- upstream's archive search with a "
+                  "single child per generation, not its default configuration",
+        "parallel": SCHEDULING_ONLY,
+        "async": SCHEDULING_ONLY,
+    },
+    "openevolve": {
+        "serial": "upstream OpenEvolve; `rounds = iterations // workers` already "
+                  "fixed total work, so this row was equal-budget before "
+                  "`--budget-rollouts` existed",
+        "parallel": SCHEDULING_ONLY,
+        "async": SCHEDULING_ONLY,
+    },
+}
+
 #: Pulled out of each port's own stdout rather than re-derived, so a row reports
 #: what the port reported. `rollouts` is the measured count, not the budget: the
 #: synchronous path checks at the round barrier and a wide arm can overshoot.
