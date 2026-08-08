@@ -57,6 +57,7 @@ from agentdescent.evolvable import Diff, EvidenceCard
 from agentdescent.evolution import EvolvingArtifact, Task, evolve, rule_id
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
+from agentdescent.staleness import get_policy
 from examples._common import (add_standard_args, completion_for, confirm,
                               worker_count,
                               budget_kwargs, report_engine)
@@ -286,8 +287,13 @@ class SkillOptContext:
     budget: int
     rejected_buffer: List[dict] = field(default_factory=list)
     edits_by_diff: dict = field(default_factory=dict)
-    seed_em: float = 0.0
-    best_em: float = 0.0
+    #: ``None`` until the gate has measured the seed document, which happens
+    #: inside ``step()`` -- and ``step()`` only runs when a card reaches the
+    #: merger. A run that proposes nothing therefore never measures its own
+    #: baseline, and a 0.0 default printed ``val hard-EM : 0.000 -> 0.000`` for
+    #: that case: indistinguishable from a seed document that answers nothing.
+    seed_em: Optional[float] = None
+    best_em: Optional[float] = None
     accepted: int = 0
     rejected: int = 0
     lock: threading.Lock = field(default_factory=threading.Lock)   # workers run concurrently
@@ -358,7 +364,8 @@ class StrictGateAggregator(AggregatorProtocol):
 
     def __init__(self, ledger: Ledger, verifier, ctx: SkillOptContext,
                  artifact_id: str = "skill_document",
-                 acceptance: Optional[StrictImprovement] = None):
+                 acceptance: Optional[StrictImprovement] = None,
+                 merge_round=None):
         self.ledger = ledger
         self.verifier = verifier
         self.ctx = ctx
@@ -367,6 +374,18 @@ class StrictGateAggregator(AggregatorProtocol):
         self.cards: List[EvidenceCard] = []
         self._lock = threading.Lock()   # ingest: workers; step: one thread
         self.current_em = None
+        #: Fuse the sweep's edit patches into ONE before the gate scores them
+        #: (`--reflective-merge`). Closer to upstream than the default, not
+        #: further from it: ReflACT's step emits **one patch of up to `lr`
+        #: edits** and evaluates it once (`engine/trainer.py`'s `ranked_patch`),
+        #: where this loop scores one candidate per worker and takes the best.
+        #: The gate is untouched either way -- still `cand > current` on the
+        #: full held-out split -- but N held-out sweeps become one, and the
+        #: surviving edits go forward together instead of all but one being
+        #: dropped.
+        self.merge_round = merge_round
+        if merge_round is not None and hasattr(merge_round, "bind"):
+            merge_round.bind(verifier)
 
     def ingest(self, card: EvidenceCard) -> None:
         # ingest runs on worker threads, step on one: see AggregatorProtocol.
@@ -385,36 +404,54 @@ class StrictGateAggregator(AggregatorProtocol):
             cards, self.cards = self.cards, []
         best = None
         n = max(1, len(self.verifier.held_out))
-        for card in cards:                                 # pick the best strict improver
+        # One fused patch per sweep instead of one candidate per worker. The
+        # strict gate is unchanged; what it scores is.
+        diffs = [card.diff for card in cards]
+        if self.merge_round is not None and len(diffs) > 1:
+            merged, _, _ = self.merge_round.select(head, diffs)
+            if merged is not None:
+                diffs = [merged]
+        for diff in diffs:                                 # pick the best strict improver
             from agentdescent.policies import MergeContext
-            candidate = head.apply(card.diff)
+            candidate = head.apply(diff)
             em = candidate.score(self.verifier.held_out)
             decision = self.acceptance.accept(MergeContext(
-                artifact=head, candidate=candidate, cards=[card],
+                artifact=head, candidate=candidate, cards=list(cards),
                 base_counts=(self.current_em * n, (1 - self.current_em) * n),
-                cand_counts=(em * n, (1 - em) * n), diff=card.diff))
+                cand_counts=(em * n, (1 - em) * n), diff=diff))
             if decision.accept and (best is None or em > best[1]):
-                best = (card, em)
+                best = (diff, em)
 
         report_diff = committed = None
         if best is not None:
-            card, em = best
+            diff, em = best
             try:
                 _, committed = self.ledger.commit(
-                    head.apply(card.diff), base_vv, branch=Ledger.DEV,
-                    message=f"skillopt accept {card.diff.diff_id}")
+                    head.apply(diff), base_vv, branch=Ledger.DEV,
+                    message=f"skillopt accept {diff.diff_id}")
                 self.current_em = em
-                self.ctx.best_em = max(self.ctx.best_em, em)
+                self.ctx.best_em = em if self.ctx.best_em is None else max(self.ctx.best_em, em)
                 self.ctx.accepted += 1
                 self.ctx.rejected_buffer.clear()           # accepted -> reset buffer
-                report_diff = card.diff
+                report_diff = diff
             except CASConflict:
                 committed = None
-        # every non-accepted candidate's edits are remembered in-epoch.
+        # Every non-accepted candidate's edits are remembered in-epoch, which is
+        # upstream's `step_buffer`: "use it to avoid repeating ineffective edits".
+        # Compared by diff id, not object identity: under `--reflective-merge`
+        # the accepted candidate is a *fused* diff that is none of the cards, so
+        # an identity test would file every contributing edit as rejected -- and
+        # then feed the optimizer a list telling it not to re-propose the edits
+        # it had just accepted.
+        accepted_ids = ({best[0].diff_id} if best is not None else set())
+        contributing = ({c.diff.diff_id for c in cards}
+                        if best is not None and best[0].diff_id not in
+                        {c.diff.diff_id for c in cards} else set())
         for card in cards:
-            if best is None or card is not best[0]:
-                self.ctx.rejected += 1
-                self.ctx.rejected_buffer.extend(self.ctx.edits_by_diff.get(card.diff.diff_id, []))
+            if card.diff.diff_id in accepted_ids or card.diff.diff_id in contributing:
+                continue
+            self.ctx.rejected += 1
+            self.ctx.rejected_buffer.extend(self.ctx.edits_by_diff.get(card.diff.diff_id, []))
 
         self.ctx.budget = self.ctx.scheduler.step()        # advance the LR schedule
         return [MergeReport(self.aid, report_diff, False, len(cards), len(cards), 0, 0,
@@ -425,8 +462,8 @@ class StrictGateAggregator(AggregatorProtocol):
 @dataclass
 class SkillOptResult:
     skill: str
-    seed_em: float
-    best_em: float
+    seed_em: Optional[float]
+    best_em: Optional[float]
     accepted: int
     rejected: int
     history: List[float]
@@ -442,7 +479,8 @@ def run_skillopt(complete: Completion, train: List[dict], val: List[dict],
                  steps: int = 8, lr: int = 4, minibatch: int = 4,
                  lr_mode: str = "cosine", seed: int = 0, asynchronous: bool = False,
                  async_ratio: int = 3, max_seconds: float = 30.0,
-                 max_rollouts: Optional[int] = None,
+                 max_rollouts: Optional[int] = None, staleness: str = "guarded",
+                 merge_round=None, eval_concurrency: int = 8,
                  verbose: bool = False) -> SkillOptResult:
     """Drive SkillOpt through `evolve()` (`val` becomes the held-out gate set)."""
     def to_task(i, ex):
@@ -463,7 +501,9 @@ def run_skillopt(complete: Completion, train: List[dict], val: List[dict],
         return em_score(output, task.meta["answers"])
 
     def factory(ledger, verifier, audit, config, policy):
-        return StrictGateAggregator(ledger, verifier, ctx, artifact_id="skill_document")
+        return StrictGateAggregator(ledger, verifier, ctx,
+                                    artifact_id="skill_document",
+                                    merge_round=merge_round)
 
     result = evolve(tasks, reward, run=run, propose=make_propose(ctx, complete),
                     strategy=SkillDocStrategy(ctx), initial_state={"skill": SEED_SKILL},
@@ -473,6 +513,13 @@ def run_skillopt(complete: Completion, train: List[dict], val: List[dict],
                     asynchronous=asynchronous, async_ratio=async_ratio,
                     max_seconds=max_seconds if asynchronous else None,
                     held_out_frac=len(val) / max(1, len(tasks)),
+                    eval_concurrency=eval_concurrency,
+                    # A discarded card is a whole optimizer step thrown away.
+                    # `full` rebases onto the current head and leaves the strict
+                    # gate as the only verification -- which it already is: the
+                    # candidate is scored on the full held-out split before it
+                    # can commit, so nothing unverified reaches the document.
+                    staleness_policy=get_policy(staleness),
                     aggregator_factory=factory, verbose=verbose,
                     max_rollouts=max_rollouts)
     if verbose:
@@ -499,7 +546,7 @@ def download_searchqa(split: str, limit: int) -> List[dict]:
 
 
 def load_dataset(n_train: int, n_val: int, seed: int = 0, hard: bool = False,
-                 rollout: "Rollout" = None) -> Dataset:
+                 rollout: "Rollout" = None, hard_passes: int = 3) -> Dataset:
     """SearchQA using its native `train` split, and splitting `validation` into
     the val (gate) and test halves.
 
@@ -516,8 +563,13 @@ def load_dataset(n_train: int, n_val: int, seed: int = 0, hard: bool = False,
         from agentdescent.dataloader import select_hard
         scorer = lambda ex: em_score(rollout.answer(SEED_SKILL, ex), ex["answers"])
         before = len(train) + len(pool_rows)
-        train = select_hard(train, scorer)
-        pool_rows = select_hard(pool_rows, scorer)
+        # `hard_passes` measurements, and an item has to fail all of them. One
+        # pass selects the answers the model got unlucky on, and the gate then
+        # re-measures them back to correct: at `passes=1` this filter produced a
+        # val split the seed skill scored **1.000** on -- a ceiling, where a
+        # strict `candidate > current` gate can accept nothing by construction.
+        train = select_hard(train, scorer, passes=hard_passes)
+        pool_rows = select_hard(pool_rows, scorer, passes=hard_passes)
         print(f"Hard mode: kept {len(train) + len(pool_rows)} of {before} items the "
               f"seed skill answers incorrectly")
     pool = split_dataset(pool_rows, ratios=(0.0, 0.5, 0.5), seed=seed, name="SearchQA")
@@ -535,6 +587,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--steps", type=int, default=8)
     p.add_argument("--lr", type=int, default=4, help="max edits/step (learning rate)")
     p.add_argument("--lr-mode", default="cosine", choices=["constant", "linear", "cosine"])
+    p.add_argument("--staleness", default="guarded",
+                   choices=["guarded", "reflective", "full"],
+                   help=("what to do with an edit patch proposed against a doc "
+                         "the merger has since moved: `guarded` rebases inside "
+                         "the --async-ratio band and discards beyond it, `full` "
+                         "rebases regardless and leaves the strict gate as the "
+                         "only verification"))
     p.add_argument("--minibatch", type=int, default=4)
     p.add_argument("--train", type=int, default=40)
     p.add_argument("--val", type=int, default=20)
@@ -542,6 +601,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="keep only questions the seed skill answers wrong -- plain "
                         "SearchQA is already ~0.900 for a strong model, so there is "
                         "nothing for a skill document to add")
+    p.add_argument("--hard-passes", type=int, default=3,
+                   help="baseline measurements an item must fail before --hard "
+                        "keeps it; 1 selects unlucky answers rather than hard ones")
     return p
 
 
@@ -591,6 +653,7 @@ def main(argv=None) -> None:
         # Needs the model, which is built above, so the dataset is re-selected here
         # rather than at load time.
         ds = load_dataset(args.train, args.val, seed=args.seed, hard=True,
+                          hard_passes=args.hard_passes,
                           rollout=Rollout(completion))
         ntr, nva, nte = ds.sizes()
         print(f"Splits   : {ntr} train / {nva} val / {nte} test  (hard subset)")
@@ -602,17 +665,35 @@ def main(argv=None) -> None:
               "for claude set ANTHROPIC_API_KEY (or `ant auth login`).")
         return
 
+    # `--reflective-merge` was declared by `add_standard_args` and never read.
+    # `StrictGateAggregator` implements `AggregatorProtocol` itself, so the
+    # engine's fusion policy never reaches it -- GEPA hands its aggregator the
+    # merger explicitly, and so does this one now.
+    merge_round = None
+    if args.reflective_merge:
+        from agentdescent.fusion import ReflectiveFusion
+        merge_round = ReflectiveFusion(completion)
+        print("NOTE: --reflective-merge scores ONE fused patch per step instead "
+              "of one candidate per worker -- which is upstream's shape (a step "
+              "emits one patch of up to `lr` edits). The strict gate is "
+              "unchanged; what it scores is.")
+
     print("\nTraining skill document (ReflACT: edits + strict gate + LR + buffer, L2)...\n")
     result = run_skillopt(completion, ds.train, ds.val, steps=args.steps, lr=args.lr,
                           minibatch=args.minibatch, lr_mode=args.lr_mode, seed=args.seed,
                           asynchronous=args.asynchronous, async_ratio=args.async_ratio,
-                          max_seconds=args.max_seconds, verbose=True,
+                          max_seconds=args.max_seconds, staleness=args.staleness,
+                          merge_round=merge_round,
+                          eval_concurrency=args.eval_concurrency, verbose=True,
                           **budget_kwargs(args))
 
     test_em = eval_hard_em(Rollout(completion), result.skill, ds.test)
     print("\n=== trained skill document ===")
     print(result.skill)
-    print(f"\nval hard-EM : {result.seed_em:.3f} -> {result.best_em:.3f}")
+    seed = ("not measured (no patch reached the gate)"
+            if result.seed_em is None else f"{result.seed_em:.3f}")
+    best = "—" if result.best_em is None else f"{result.best_em:.3f}"
+    print(f"\nval hard-EM : {seed} -> {best}")
     print(f"test hard-EM: {test_em:.3f}  (held out, never seen by the gate)")
     print(f"edits accepted / rejected: {result.accepted} / {result.rejected}")
     print(f"stopped     : {result.stop_reason}")

@@ -182,8 +182,12 @@ SEMANTICS = {
     "skillopt": {
         "serial": "upstream ReflACT: one edit batch per step, strict gate",
         "parallel": SCHEDULING_ONLY + "; `--minibatch` is this port's name for "
-                    "the worker count, not upstream's minibatch of tasks",
-        "async": SCHEDULING_ONLY + "; `--minibatch` as above",
+                    "the worker count, not upstream's minibatch of tasks. "
+                    "`--reflective-merge` scores one fused patch per step, which "
+                    "is upstream's shape -- a ReflACT step emits one patch of up "
+                    "to `lr` edits and evaluates it once -- rather than a "
+                    "departure from it",
+        "async": SCHEDULING_ONLY + "; `--minibatch` and `--reflective-merge` as above",
     },
     "adas": {
         "serial": "upstream Meta Agent Search over the DSL substrate "

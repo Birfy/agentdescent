@@ -1,0 +1,30 @@
+{
+  "model": "deepseek-v4-flash",
+  "provider": "claude",
+  "budget_rollouts": 60,
+  "width": 4,
+  "cells": [
+    {
+      "row": "skillopt",
+      "dataset": "SearchQA (--hard subset)",
+      "arm": "async",
+      "seed": 0,
+      "width": 4,
+      "budget": 60,
+      "staleness": "full",
+      "reflective_merge": true,
+      "hard_passes": 2,
+      "hard_kept": 93,
+      "hard_pool": 500,
+      "engine_rollouts": 63,
+      "stale_considered": 0,
+      "stale_discarded": 0,
+      "val_seed": 0.053,
+      "val_end": 0.211,
+      "test": 0.316,
+      "edits_accepted": 3,
+      "edits_rejected": 40,
+      "sweeps": 10
+    }
+  ]
+}
