@@ -125,7 +125,7 @@ merger thread, not the workers.
     baseline. Measured there, 32 rollouts produced `+0/-0` on nearly every round
     and val never moved. `--pool 3200` puts the baseline at 0.667. The same
     saturation effect is visible in
-    [EvoSkill](algo-evoskill.md#empirical-results-real-openhands-agent-deepseek-on-officeqa),
+    [EvoSkill](algo-evoskill.md#empirical-results-claude-code-as-the-base-agent-on-finqa),
     and it is why [`DifficultyWeighted` task sampling](sampling.md) exists.
 
 ### What the playbook actually contains

@@ -58,6 +58,7 @@ from agentdescent.filetree import parse_tree
 from agentdescent.treestrategy import FileTree
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
+from agentdescent.staleness import get_policy
 from examples._common import (add_standard_args, completion_for, confirm,
                               is_openai_compatible, worker_count,
                               budget_kwargs, report_engine)
@@ -369,8 +370,15 @@ class EvoSkillContext:
     frontier: Frontier
     feedback: List[str] = field(default_factory=list)
     recent_failures: List[Tuple[str, str, str]] = field(default_factory=list)
-    seed_score: float = 0.0
-    best_score: float = 0.0
+    #: ``None`` until the frontier has actually measured the base agent, which
+    #: only happens inside ``step()`` -- and ``step()`` only runs when a card
+    #: reaches the merger. A run that never induces a skill therefore never
+    #: measures its own baseline, and defaulting this to 0.0 printed
+    #: ``val score : 0.000 -> 0.000`` for that case: indistinguishable from a
+    #: base agent that scores nothing, which is what it looked like. Measured on
+    #: FinQA, the same configuration reports 0.727 as soon as one card lands.
+    seed_score: Optional[float] = None
+    best_score: Optional[float] = None
     eval_concurrency: int = 8     # parallelise the aggregator's held-out (val) re-eval
     batch_size: int = 4           # failures per induction BATCH (repo is batch-level, not per-trajectory)
     val_every: int = 3            # async SGD: validate the head every N applied skill updates (else roll back)
@@ -480,7 +488,8 @@ class TopKFrontierAggregator(AggregatorProtocol):
 
     def __init__(self, ledger: Ledger, verifier, ctx: EvoSkillContext,
                  artifact_id: str = "skill_library",
-                 selection: Optional[FrontierBest] = None):
+                 selection: Optional[FrontierBest] = None,
+                 merge_round=None):
         self.ledger = ledger
         self.verifier = verifier
         self.ctx = ctx
@@ -489,6 +498,17 @@ class TopKFrontierAggregator(AggregatorProtocol):
         self.cards: List[EvidenceCard] = []
         self._lock = threading.Lock()   # ingest: workers; step: one thread
         self._seeded = False
+        #: Fuse the sweep's proposals into ONE candidate before the frontier sees
+        #: them (`--reflective-merge`). Off by default, because it changes what
+        #: the frontier is offered: upstream evaluates each child on the full
+        #: validation split and admits per candidate, so N workers cost N val
+        #: sweeps. That per-candidate evaluation is this port's dominant cost and
+        #: the only thing a wider run adds -- which is what makes fusing them a
+        #: lever worth having and a departure worth naming. The admission rule
+        #: itself is untouched; what it admits is not.
+        self.merge_round = merge_round
+        if merge_round is not None and hasattr(merge_round, "bind"):
+            merge_round.bind(verifier)
 
     def ingest(self, card: EvidenceCard) -> None:
         # ingest runs on worker threads, step on one: see AggregatorProtocol.
@@ -522,13 +542,24 @@ class TopKFrontierAggregator(AggregatorProtocol):
 
         with self._lock:
             cards, self.cards = self.cards, []
-        for card in cards:
-            candidate = head.apply(card.diff)
+        # One fused candidate per sweep instead of one per worker. `update_frontier`
+        # is unchanged -- bounded top-K on mean validation accuracy, admit on room
+        # or strictly-greater -- and so is the parent draw; only the number of
+        # children offered to it changes, from N to 1. The saving is the whole
+        # point: admission costs a full validation sweep *per child*, so the cost
+        # of a wider run is the part fusing removes.
+        diffs = [card.diff for card in cards]
+        if self.merge_round is not None and len(diffs) > 1:
+            merged, _, _ = self.merge_round.select(head, diffs)
+            if merged is not None:
+                diffs = [merged]
+        for diff in diffs:
+            candidate = head.apply(diff)
             score = self._eval(candidate)
             admitted = self.ctx.frontier.update(dict(candidate.state), score)
             self.ctx.best_score = max(self.ctx.best_score, score)
             self.ctx.feedback.append(
-                f"{skill_name(list(card.diff.ops)[0])}: "
+                f"{skill_name(list(diff.ops)[0])}: "
                 f"{'admitted' if admitted else 'discarded'} (val {score:.3f})")
 
         # strategy="best" at the standard seam: frontier members become
@@ -554,118 +585,21 @@ class TopKFrontierAggregator(AggregatorProtocol):
                             f"frontier={len(self.ctx.frontier.members)} best={self.ctx.best_score:.3f}")]
 
 
-class SgdSkillAggregator(AggregatorProtocol):
-    """Async SGD-style skill descent -- the *reasonable* async acceleration.
-
-    The merger's job is only to **apply** each proposed skill as an update step
-    (cheap, no val), so the head keeps moving and the workers build on it -- like
-    taking gradient steps.  Held-out validation is **amortised**: only every
-    ``val_every`` applied updates does it score the accumulated head; it keeps the
-    mini-batch of updates iff val improved, otherwise it **rolls back** to the
-    last validated checkpoint.  This costs ~``val_every``x fewer held-out evals
-    than validating every candidate (the frontier), while keeping the faithful
-    failure-driven skill-induction flow.  Used on the async path; the sync path
-    keeps the strict per-candidate :class:`TopKFrontierAggregator` (the repo)."""
-
-    def __init__(self, ledger: Ledger, verifier, ctx: EvoSkillContext,
-                 artifact_id: str = "skill_library"):
-        self.ledger = ledger
-        self.verifier = verifier
-        self.ctx = ctx
-        self.aid = artifact_id
-        self.cards: List[EvidenceCard] = []
-        self._lock = threading.Lock()   # ingest: workers; step: one thread
-        self._seeded = False
-        self.checkpoint: Dict[str, str] = {}   # last val-confirmed skill library
-        self.ckpt_score = 0.0
-        self.steps = 0                          # applied updates since last validation
-
-    def ingest(self, card: EvidenceCard) -> None:
-        # ingest runs on worker threads, step on one: see AggregatorProtocol.
-        with self._lock:
-            self.cards.append(card)
-
-    def _eval(self, artifact) -> float:
-        tasks = self.verifier.held_out
-        if not tasks:
-            return 0.0
-        n = min(self.ctx.eval_concurrency, len(tasks))
-        if n <= 1:
-            return artifact.score(tasks)
-        from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=n) as pool:
-            scores = list(pool.map(lambda t: artifact.score([t]), tasks))
-        return sum(scores) / len(scores)
-
-    def _commit_state(self, state: Dict[str, str], msg: str) -> Optional[int]:
-        """Set the DEV head to *exactly* ``state`` (apply() only merges, so a
-        rollback that drops skills needs a full replacement artifact)."""
-        snap = self.ledger.snapshot(Ledger.DEV)
-        head = snap.get(self.aid)
-        base_vv = {self.aid: snap.version.get(self.aid, 0)}
-        art = EvolvingArtifact(self.aid, dict(state), head.version + 1,
-                               head.blast_radius, head._rt, head._strategy)
-        try:
-            _, v = self.ledger.commit(art, base_vv, branch=Ledger.DEV, message=msg)
-            return v
-        except CASConflict:
-            return None
-
-    def step(self) -> List[MergeReport]:
-        head = self.ledger.snapshot(Ledger.DEV).get(self.aid)
-        if not self._seeded:
-            self.ckpt_score = self._eval(head)              # base agent, no skills
-            self.ctx.seed_score = self.ckpt_score
-            self.ctx.best_score = self.ckpt_score
-            self.checkpoint = dict(head.state)
-            self._seeded = True
-
-        with self._lock:
-            cards, self.cards = self.cards, []
-        if not cards:
-            # Always report ckpt_score so the async runtime never falls back to a
-            # full held-out re-eval (which would defeat eval-at-end / val_every).
-            return [MergeReport(self.aid, None, False, 0, 0, 0, 0, self.ckpt_score, None, "idle")]
-
-        # 1) APPLY the skill updates as SGD steps -- cheap, NO val. Commit so the
-        #    workers immediately build on the moved head.
-        working = head
-        for card in cards:
-            working = working.apply(card.diff)
-            self.steps += 1
-        committed = self._commit_state(dict(working.state), f"sgd: apply {len(cards)} skill update(s)")
-
-        # 2) Validate only every ``val_every`` steps -> keep the batch or ROLL BACK.
-        did_val = False
-        score = None
-        if self.steps >= self.ctx.val_every:
-            did_val = True
-            n_updates = self.steps
-            score = self._eval(working)
-            kept = score > self.ckpt_score
-            if kept:                                        # improved -> new checkpoint
-                self.checkpoint = dict(working.state)
-                self.ckpt_score = score
-            else:                                           # no gain -> roll back to checkpoint
-                committed = self._commit_state(dict(self.checkpoint), "sgd: rollback (no val gain)")
-            self.ctx.best_score = self.ckpt_score
-            self.ctx.feedback.append(
-                f"+{n_updates} update(s) {'kept' if kept else 'rolled back'} "
-                f"(val {score:.3f} vs ckpt {self.ckpt_score:.3f})")
-            self.steps = 0
-
-        reason = (f"val {score:.3f} ckpt={self.ckpt_score:.3f}" if did_val
-                  else f"applied {len(cards)} (val in {max(0, self.ctx.val_every - self.steps)} steps)")
-        return [MergeReport(self.aid, None, False, len(cards), len(cards), 0, 0,
-                            self.ckpt_score, committed, reason)]
-
-
 @dataclass
 class EvoResult:
+    #: The skills on the ledger head -- i.e. those belonging to the frontier's
+    #: best member. Empty whenever nothing beat the seed, which is *not* the
+    #: same as nothing having been induced: see :attr:`frontier`.
     skills: Dict[str, str]
-    seed_score: float
-    best_score: float
+    #: ``None`` when the base agent was never measured, which happens when no
+    #: card ever reached the merger (``step()`` does the seeding). Printing 0.0
+    #: there claimed a measurement that was never taken.
+    seed_score: Optional[float]
+    best_score: Optional[float]
     iterations: int
+    #: Every member the bounded top-K frontier holds, best-first: what induction
+    #: actually produced, whether or not it displaced the seed.
+    frontier: List[Tuple[Dict[str, str], float]] = field(default_factory=list)
     #: The same library as a file tree (`{path: body}`) -- what
     #: :func:`agentdescent.filetree.materialize` or
     #: :meth:`~agentdescent.evolution.EvolutionResult.write_to` install.
@@ -684,8 +618,8 @@ def run_evoskill(complete: Completion, docs: Dict[str, str],
                  async_ratio: int = 3, max_seconds: float = 30.0, backend=None,
                  eval_concurrency: int = 8, batch_size: int = 4, val_every: int = 3,
                  eval_at_end: bool = False, max_workers: int = 3,
-                 max_rollouts: Optional[int] = None,
-                 verbose: bool = False) -> EvoResult:
+                 max_rollouts: Optional[int] = None, staleness: str = "guarded",
+                 merge_round=None, verbose: bool = False) -> EvoResult:
     """Drive EvoSkill through `evolve()` (`val` is the held-out frontier metric).
 
     ``backend`` (an :class:`~agentdescent.backends.AgentBackend`) replaces the passive
@@ -722,11 +656,24 @@ def run_evoskill(complete: Completion, docs: Dict[str, str],
         return score_multi_tolerance(output, task.meta["answer"])
 
     def factory(ledger, verifier, audit, config, policy):
-        # Async path -> SGD-style skill descent (apply updates, validate every
-        # val_every steps, roll back on no gain).  Sync path -> the strict
-        # per-candidate top-K frontier (faithful to registry/manager.py).
-        cls = SgdSkillAggregator if asynchronous else TopKFrontierAggregator
-        return cls(ledger, verifier, ctx, artifact_id="skill_library")
+        # The frontier is the algorithm, on every path. `update_frontier` plus
+        # `select_from_frontier` *is* EvoSkill: a bounded top-K leaderboard on
+        # mean validation accuracy, admitting when there is room and otherwise
+        # replacing the worst member only if strictly greater, with the next
+        # parent drawn from it. Upstream evaluates each child on the full
+        # validation split before that admission decision -- so a barrier-free
+        # schedule changes *when* those evaluations happen, not whether they do.
+        #
+        # This used to swap in `SgdSkillAggregator` whenever `asynchronous=True`,
+        # which is not a scheduling change: it amortises validation over
+        # `val_every` applied updates, keeps or rolls back a whole batch instead
+        # of admitting per candidate, and has no frontier at all -- one
+        # checkpoint in its place. The async cell then measured a different
+        # optimizer that happened to run asynchronously, which is exactly what
+        # the matrix's "semantics changed" column exists to refuse.
+        return TopKFrontierAggregator(ledger, verifier, ctx,
+                                      artifact_id="skill_library",
+                                      merge_round=merge_round)
 
     # `max_workers` is the ceiling `--serial` lowers to 1; the shard size is
     # still bounded by the data, because a worker with an empty shard is not a
@@ -742,6 +689,14 @@ def run_evoskill(complete: Completion, docs: Dict[str, str],
                     max_seconds=max_seconds if asynchronous else None,
                     held_out_frac=len(val) / max(1, len(tasks)),
                     self_verify=False,   # repo evaluates the child on val only -- no per-trajectory re-run
+                    # A discarded card is an induction batch thrown away -- four
+                    # failures collected, a Proposer and a Generator call spent,
+                    # and nothing offered to the frontier. Measured at
+                    # `--async-ratio 3` under `guarded`: 12 of 12 discarded, and
+                    # the frontier filled 3 of its 5 slots. Skills are separate
+                    # files, so a card that lands late rarely conflicts with what
+                    # committed meanwhile and the rebase holds.
+                    staleness_policy=get_policy(staleness),
                     aggregator_factory=factory, verbose=verbose,
                     max_rollouts=max_rollouts)
     if verbose:
@@ -762,8 +717,19 @@ def run_evoskill(complete: Completion, docs: Dict[str, str],
         if verbose:
             print(f"\n[eval-at-end] final held-out score over {len(val_tasks)} items: {best:.3f}")
     # the artifact is path-keyed; the algorithm's own vocabulary is names.
+    #
+    # `result.state` is the ledger head, and the head only moves when the
+    # frontier's *best* member changes. A run whose candidates all score below
+    # the seed leaves it empty, and reporting that as `skills discovered: 0`
+    # said "the Proposer produced nothing" about a run that produced six
+    # candidates and admitted every one of them -- opposite diagnoses, and the
+    # measured case: 43 rollouts, 6 cards, an empty head. The frontier's own
+    # membership is the count that answers "did induction happen"; the head
+    # answers "did anything beat the baseline", and both are now carried.
     return EvoResult(skills_of(dict(result.state)), ctx.seed_score, best,
                      iterations, tree=dict(result.state),
+                     frontier=[(skills_of(state), score)
+                               for state, score in ctx.frontier.members],
                      error=result.error, stop_reason=result.stop_reason)
 
 
@@ -801,19 +767,32 @@ def load_dataset(seed: int = 0, ratios=(0.5, 0.25, 0.25),
 
 
 def evaluate(complete: Completion, docs: Dict[str, str], skills: Dict[str, str],
-             items: List[dict], backend=None) -> float:
-    """Mean multi-tolerance score of a skill library on a held-out split."""
+             items: List[dict], backend=None, concurrency: int = 8) -> float:
+    """Mean multi-tolerance score of a skill library on a held-out split.
+
+    Concurrent, and it was not: this is the *reported* metric, so it runs after
+    `evolve()` returns, outside everything the engine parallelises, and
+    `--eval-concurrency` never reached it. On the `claude-code` backend at ~25 s
+    a question that is six silent minutes for a 15-item split -- longer than the
+    frontier work it is reporting on. Concurrency changes no result here: each
+    item is scored independently and the mean is order-independent.
+    """
     if not items:
         return 0.0
     rendered = render_skills(skills)
-    total = 0.0
-    for it in items:
+
+    def score_one(it: dict) -> float:
         task = Task(id=it["uid"], prompt=it["question"],
                     meta={"answer": it["answer"], "source_files": it["source_files"]})
         pred = (backend.answer(it["question"], docs.get(it["source_files"], ""), skills=rendered)
                 if backend is not None else agent_answer(complete, docs, rendered, task))
-        total += score_multi_tolerance(pred, it["answer"])
-    return total / len(items)
+        return score_multi_tolerance(pred, it["answer"])
+
+    if len(items) < 2 or concurrency < 2:
+        return sum(score_one(it) for it in items) / len(items)
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(concurrency, len(items))) as pool:
+        return sum(pool.map(score_one, items)) / len(items)
 
 
 # ===========================================================================
@@ -828,6 +807,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--workers", type=int, default=3,
                    help="failure-analysis workers per round; the upstream loop "
                         "is serial, so this is the AgentDescent-added width")
+    p.add_argument("--staleness", default="guarded",
+                   choices=["guarded", "reflective", "full"],
+                   help=("what to do with a skill proposed against a head the "
+                         "merger has since moved: `guarded` rebases inside the "
+                         "--async-ratio band and discards beyond it, "
+                         "`reflective` rebases regardless"))
     p.add_argument("--frontier", type=int, default=5,
                    help="bounded top-K frontier size "
                         "(src/registry/manager.py:update_frontier uses 5)")
@@ -915,20 +900,47 @@ def main(argv=None) -> None:
         backend = tool_loop_backend(completion)
         print("Backend  : local grep/read ReAct loop")
 
+    # `--reflective-merge` was declared by `add_standard_args` and never read by
+    # this port -- the flag parsed, printed nothing, and changed nothing. It could
+    # not have worked by the usual route either: `TopKFrontierAggregator`
+    # implements `AggregatorProtocol` itself, so the engine's conflict/fusion
+    # policies never reach it. GEPA hands its aggregator the merger explicitly;
+    # so does this one now.
+    merge_round = None
+    if args.reflective_merge:
+        from agentdescent.fusion import ReflectiveFusion
+        merge_round = ReflectiveFusion(completion)
+        print("NOTE: --reflective-merge offers the frontier ONE fused candidate "
+              "per sweep instead of one per worker. update_frontier and the "
+              "parent draw are unchanged; the number of children they see is not.")
+
     print("\nDiscovering skills (failure analysis + top-K frontier, L2)...\n")
     result = run_evoskill(completion, docs, ds.train, ds.val, iterations=args.iterations,
                           max_frontier=args.frontier, seed=args.seed,
                           asynchronous=args.asynchronous, async_ratio=args.async_ratio,
                           max_seconds=args.max_seconds, backend=backend,
-                          max_workers=args.workers, verbose=True,
+                          max_workers=args.workers,
+                          eval_concurrency=args.eval_concurrency,
+                          merge_round=merge_round, staleness=args.staleness,
+                          verbose=True,
                           **budget_kwargs(args))
 
-    test_score = evaluate(completion, docs, result.skills, ds.test, backend=backend)
+    test_score = evaluate(completion, docs, result.skills, ds.test, backend=backend,
+                          concurrency=args.eval_concurrency)
     print("\n=== discovered skill library ===")
     print(render_skills(result.skills))
-    print(f"\nval score : {result.seed_score:.3f} -> {result.best_score:.3f}")
+    seed = ("not measured (no card reached the frontier)"
+            if result.seed_score is None else f"{result.seed_score:.3f}")
+    best = "—" if result.best_score is None else f"{result.best_score:.3f}"
+    print(f"\nval score : {seed} -> {best}")
     print(f"test score: {test_score:.3f}  (held out, never seen by the frontier)")
-    print(f"skills discovered: {len(result.skills)}")
+    # Two counts, because they answer different questions and used to be one.
+    # `frontier` is what induction produced; `skills` is what displaced the seed.
+    print(f"frontier  : {len(result.frontier)}/{args.frontier} member(s) "
+          + (", ".join(f"{s:.3f}" for _, s in
+                       sorted(result.frontier, key=lambda m: -m[1])) or "—"))
+    print(f"on head   : {len(result.skills)} skill(s) "
+          f"({'nothing beat the seed' if not result.skills else 'best frontier member'})")
     print(f"stopped   : {result.stop_reason}")
     if result.error:
         print(f"WARNING: the run did not finish cleanly -- {result.error}")

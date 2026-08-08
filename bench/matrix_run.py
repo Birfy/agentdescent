@@ -92,7 +92,17 @@ ROWS = [
          size=["--fetch", "80", "--val-cap", "8", "--reflective-merge",
                "--seed-instruction", "", "--rounds", "9999"]),
     dict(name="evoskill", module="examples.evoskill.evoskill_skill_discovery",
-         dataset="OfficeQA/FinQA", width_flag="--workers", size=[]),
+         # `--iterations 9999` for the same reason GEPA passes `--rounds 9999`:
+         # the port's own default (6) sits below the budget and stops the run
+         # first, so the budget would be a ceiling nothing reaches.
+         #
+         # `--reflective-merge` because admission costs a **full validation
+         # sweep per child** here -- upstream evaluates each one before the
+         # frontier decides -- so an N-wide sweep costs N sweeps of val, and
+         # that is the entire cost of going wider. Declared in SEMANTICS: the
+         # frontier rule is untouched, the number of children it sees is not.
+         dataset="OfficeQA/FinQA", width_flag="--workers",
+         size=["--iterations", "9999", "--reflective-merge"]),
     dict(name="skillopt", module="examples.skillopt.skillopt_skill_training",
          dataset="SearchQA", width_flag="--minibatch",
          size=["--train", "16", "--val", "8"]),
@@ -156,17 +166,18 @@ SEMANTICS = {
     "evoskill": {
         "serial": "upstream EvoSkill: bounded top-K aggregate frontier "
                   "(`manager.py:update_frontier`), one worker",
-        "parallel": SCHEDULING_ONLY,
-        # Found by auditing the arms rather than by running them: the port swaps
-        # the aggregator on `asynchronous=True`. This is the admission rule, which
-        # `docs/port-fidelity.md` lists under "must not change" -- so this row's
-        # async cell measures a different algorithm from its serial cell, and its
-        # quality delta cannot be read as a cost of asynchrony.
-        "async": "**admission rule changed**: `SgdSkillAggregator` replaces the "
-                 "strict per-candidate top-K frontier -- every update is applied "
-                 "cheaply and held-out validation is amortised over `val_every` "
-                 "steps with rollback on regression. Not upstream's rule, and not "
-                 "the sync arm's either",
+        "parallel": SCHEDULING_ONLY + "; `--reflective-merge` offers the frontier "
+                    "one fused candidate per sweep instead of one per worker "
+                    "(`update_frontier` and the parent draw unchanged, the number "
+                    "of children they see is not)",
+        # Was: the port swapped in `SgdSkillAggregator` on `asynchronous=True`,
+        # which replaced the frontier with a single checkpoint and validated per
+        # batch instead of per candidate -- the admission rule, which
+        # `docs/port-fidelity.md` lists under "must not change". Found by
+        # auditing the arms rather than by running them, and now fixed: the
+        # frontier runs on every path and the SGD variant is opt-in behind
+        # `--sgd-descent`.
+        "async": SCHEDULING_ONLY + "; `--reflective-merge` as above",
     },
     "skillopt": {
         "serial": "upstream ReflACT: one edit batch per step, strict gate",

@@ -1,0 +1,46 @@
+{
+  "model": "deepseek-v4-flash",
+  "provider": "claude",
+  "backend": "claude-code",
+  "budget_rollouts": 120,
+  "width": 4,
+  "reflective_merge": true,
+  "cells": [
+    {
+      "row": "evoskill",
+      "dataset": "FinQA",
+      "arm": "async",
+      "staleness": "guarded",
+      "seed": 0,
+      "width": 4,
+      "budget": 120,
+      "engine_rollouts": 123,
+      "stale_considered": 12,
+      "stale_discarded": 12,
+      "val_seed": 0.547,
+      "val_end": 0.68,
+      "test": 0.633,
+      "frontier": 3,
+      "skills_on_head": 5,
+      "sweeps": 10
+    },
+    {
+      "row": "evoskill",
+      "dataset": "FinQA",
+      "arm": "async",
+      "staleness": "full",
+      "seed": 0,
+      "width": 4,
+      "budget": 120,
+      "engine_rollouts": 123,
+      "stale_considered": 0,
+      "stale_discarded": 0,
+      "val_seed": 0.527,
+      "val_end": 0.707,
+      "test": 0.633,
+      "frontier": 5,
+      "skills_on_head": 12,
+      "sweeps": 6
+    }
+  ]
+}
