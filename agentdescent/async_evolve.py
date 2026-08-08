@@ -339,6 +339,11 @@ def async_evolve(
     stall = StallGuard(patience=stall_patience)
     max_merger_errors = max(3, max_worker_errors)   # sweeps it may fail in a row
 
+    #: Set once the clock starts; the merger reads it to bound the budget-stop
+    #: drain below. A list, because it is assigned after the closures are built.
+    run_deadline = [float("inf")]
+    worker_threads: List[threading.Thread] = []
+
     def _worker(wid: int, shard: List[Task]) -> None:
         snap = eng.ledger.snapshot(Ledger.DEV)
         base_v = snap.version.get(eng.artifact_id, 0)
@@ -606,6 +611,28 @@ def async_evolve(
         while True:
             try:
                 if stop.is_set():
+                    # A stop on a WORK budget (max_iters / max_calls) owes the run
+                    # a full drain. The budget counts a rollout when it completes,
+                    # so at the moment it trips, up to n_workers-1 rollouts are
+                    # still in flight -- legitimately started, their model calls
+                    # already made and billed. Returning after one drain abandoned
+                    # their evidence, and not uniformly: a failing rollout runs
+                    # propose + self-verify after solve, three sequential calls
+                    # against a successful rollout's one, so the in-flight set is
+                    # *enriched with exactly the rollouts that produce cards*.
+                    # Measured on an 8-worker run: 8 cards produced, 7 abandoned,
+                    # the pool never grew past the seed, and the arm looked fast
+                    # because it had silently skipped its merging.
+                    #
+                    # A stop on the TIME budget keeps the old behaviour: the user
+                    # bounded wall-clock, and waiting would overshoot the one
+                    # thing they fixed. Bounded either way by `max_seconds`, the
+                    # run's own outer limit, so a wedged rollout cannot turn the
+                    # drain into a hang.
+                    if stop_reason[0] in ("max_iters", "max_calls"):
+                        while (any(t.is_alive() for t in worker_threads)
+                               and time.time() < run_deadline[0]):
+                            _drain_and_merge()
                     _drain_and_merge()       # final drain after stop
                     return
                 _drain_and_merge()
@@ -642,8 +669,10 @@ def async_evolve(
 
     workers = [threading.Thread(target=_worker, args=(w, s), daemon=True)
                for w, s in enumerate(shards) if s]
+    worker_threads.extend(workers)
     merger = threading.Thread(target=_merger, daemon=True)
     t0 = time.time()
+    run_deadline[0] = t0 + max_seconds
     for t in workers:
         t.start()
     merger.start()
@@ -654,7 +683,12 @@ def async_evolve(
     # overshoot scale with n_workers -- a 1s budget could return 16s later. The
     # threads are daemons and the merger does a final drain, so share one short
     # deadline across all the joins instead of paying it per thread.
-    shutdown_deadline = time.time() + shutdown_grace
+    # Same rule as the merger's drain: a work-budget stop waits for the paid-for
+    # rollouts (bounded by max_seconds); a time-budget stop keeps the short grace.
+    if stop_reason[0] in ("max_iters", "max_calls"):
+        shutdown_deadline = max(time.time() + shutdown_grace, run_deadline[0])
+    else:
+        shutdown_deadline = time.time() + shutdown_grace
     for t in workers:
         t.join(timeout=max(0.0, shutdown_deadline - time.time()))
     merger.join(timeout=max(0.0, shutdown_deadline - time.time()))

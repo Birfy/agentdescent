@@ -1782,6 +1782,23 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
 
     pol = policies_bundle or Policies()
 
+    # A custom factory builds its own optimizer, so the merge-side policies never
+    # reach anything -- `policies=Policies(**reflective_merge(...))` alongside
+    # `aggregator_factory=` looks configured and changes nothing. Silence there is
+    # the bug: the caller paid for a model-merging run and got the factory's own
+    # behaviour. The task/proposal/eval-cache halves of `Policies` are read above
+    # and are unaffected, so only the merge side is named.
+    if aggregator_factory is not None:
+        dropped = [name for name in ("conflict", "fusion", "acceptance", "promotion")
+                   if getattr(pol, name, None) is not None]
+        if dropped:
+            warnings.warn(
+                f"aggregator_factory= replaces the optimizer, so policies "
+                f"{sorted(dropped)} are not used. Drop one or the other -- an "
+                f"aggregator that ignores the policies it was given is "
+                f"indistinguishable from one that honours them.",
+                RuntimeWarning, stacklevel=3)
+
     def _default_aggregator(ledger, verifier, audit, config, policy):
         return Aggregator(ledger, verifier, audit, config, staleness_policy=policy,
                           meter=meter, conflict=pol.conflict, fusion=pol.fusion,
