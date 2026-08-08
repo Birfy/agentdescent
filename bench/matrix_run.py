@@ -79,7 +79,8 @@ ROWS = [
          # for every candidate the Curator admits. Capped to 16 the gate goes
          # quiet again (val flat at 0.688 with bullets committed); 24 is the
          # smallest cap measured that still resolves the lift.
-         size=["--pool", "3200", "--top-k", "139", "--val-cap", "32",
+         size=["--pool", "3200", "--top-k", "139", "--val-cap", "64",
+               "--grow-and-refine", "--staleness", "reflective",
                "--rounds", "9999"]),
     dict(name="gepa", module="examples.gepa.gepa_prompt_evolution",
          dataset="HotpotQA", width_flag="--workers",

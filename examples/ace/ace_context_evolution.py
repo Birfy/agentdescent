@@ -56,6 +56,8 @@ from agentdescent.dataloader import Dataset, hf_feature_names, hf_rows, split_da
 from agentdescent.evolvable import Diff
 from agentdescent.evolution import EvolvingArtifact, LLMAgent, Task, evolve, rule_id
 from agentdescent.governance import classify
+from agentdescent.policies import Policies
+from agentdescent.staleness import get_policy
 from agentdescent.parallel import DataParallel
 from agentdescent.sampling import DifficultyWeighted, RoundRobin
 from examples._common import (add_standard_args, completion_for, confirm,
@@ -140,6 +142,45 @@ class ACEPlaybook:
                 return None
         return Diff(diff_id=f"{author}:{bid}:{base_version}", target=target,
                     ops={bid: entry}, author=author)
+
+
+class GrowAndRefine:
+    """ACE's Curator at the acceptance seam: apply the delta, do not gate it.
+
+    Upstream (`ace/core/curator.py`) validates the Reflector's operations
+    *structurally* -- reasoning is a string, operations is a list -- and applies
+    them. There is no held-out evaluation of a bullet before it enters the
+    playbook, and no acceptance threshold; utility is tracked afterwards by
+    per-bullet `helpful=X harmful=Y` counters, and size is managed by the
+    de-duplication this port already performs in `ACEPlaybook.to_diff` plus a
+    token budget (upstream default 80,000).
+
+    The port previously used the engine's shipped `DefaultAcceptance` -- a Beta
+    posterior requiring each bullet to raise held-out reward. That is a different
+    algorithm, and on a 139-way concept space it is a *strictly* different one:
+    a single bullet teaches one concept, so it can only move a validation split
+    that happens to contain that concept. Measured on FiNER at `--pool 3200`,
+    five committed bullets covered **4 of 32** validation tasks; widening the
+    gate's sample to 64 dropped commits from 5 to **0**. The playbook therefore
+    never accumulates, and ACE's whole claim is that it accumulates -- the
+    reported +8.6% comes from a large playbook whose *aggregate* coverage is
+    high, not from bullets that each prove themselves.
+
+    So this is a fidelity fix, and the effect on the numbers is a consequence of
+    it rather than the reason for it. What is given up is real and belongs in
+    the row's notes: nothing now stops a wrong lesson entering the playbook,
+    which is exactly the exposure upstream carries and manages with counters.
+    """
+
+    def accept(self, ctx):
+        from agentdescent.policies import AcceptDecision, MergeContext
+        base = MergeContext.rate(ctx.base_counts)
+        cand = MergeContext.rate(ctx.cand_counts)
+        return AcceptDecision(
+            accept=True, category="",
+            detail=f"grow-and-refine (upstream Curator applies; val {base:.3f} "
+                   f"-> {cand:.3f} is recorded, not gated on)",
+            observed_delta=cand - base)
 
 
 # ACE separates the Reflector from the Curator "to avoid conflating what to learn
@@ -308,6 +349,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--sampler", choices=["round-robin", "difficulty"],
                    default="round-robin",
                    help="which task a worker rolls out next (agentdescent.sampling)")
+    p.add_argument("--staleness", default="guarded",
+                   choices=["guarded", "reflective", "full"],
+                   help=("what to do with a diff proposed against a head the "
+                         "merger has since moved: `guarded` rebases inside the "
+                         "--async-ratio band and discards beyond it, "
+                         "`reflective` rebases regardless (agentdescent.staleness)"))
+    p.add_argument("--grow-and-refine", action="store_true",
+                   help="upstream's Curator: apply every validated delta rather "
+                        "than gating each bullet on held-out reward (see "
+                        "GrowAndRefine). Off by default because it changes what "
+                        "the row measures, and the change has to be declared")
     return p
 
 
@@ -398,6 +450,16 @@ def main(argv=None) -> None:
                     # on the one-worker control, which is 1.18x of concurrency in
                     # the arm whose whole job is to have none.
                     eval_concurrency=args.eval_concurrency,
+                    # Under grow-and-refine every proposal commits, so head moves
+                    # on every sweep and the default `guarded` band is exhausted
+                    # fast: measured 9 of 15 cards discarded at `--async-ratio 3`.
+                    # A discarded card is a whole rollout thrown away, and on a
+                    # multi-key playbook it is thrown away for nothing -- a
+                    # worker's bullet rarely conflicts with the bullets committed
+                    # while it was working, so the rebase almost always holds.
+                    staleness_policy=get_policy(args.staleness),
+                    policies=(Policies(acceptance=GrowAndRefine())
+                              if args.grow_and_refine else None),
                     verbose=True,
                     **budget_kwargs(args))
 
