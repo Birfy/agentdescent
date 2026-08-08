@@ -22,6 +22,7 @@ from typing import Callable, Dict, List, Optional, Sequence
 from agentdescent.aggregator import AggregatorConfig
 from agentdescent.agents import Usage
 from agentdescent.async_evolve import async_evolve
+from agentdescent.staleness import get_policy
 from agentdescent.evolution import EvolutionResult, Task, evolve
 from agentdescent.fusion import reflective_merge
 
@@ -160,6 +161,7 @@ def run_port(
     async_ratio: int = 1,
     max_seconds: float = 300.0,
     shutdown_grace: float = 120.0,
+    staleness: str = "guarded",
 ) -> MethodRunResult:
     """Run one method through AgentDescent with an equal candidate budget."""
     if mode not in MODES:
@@ -226,6 +228,11 @@ def run_port(
         "verbose": False,
         "policies": engine,
         "aggregator_factory": aggregator_factory,
+        # A discarded card is a candidate from the budget spent on nothing, and
+        # the budget is what makes these rows comparable. `full` rebases onto the
+        # current head and leaves the acceptance gate as the verification, which
+        # it already is.
+        "staleness_policy": get_policy(staleness),
     }
     if mode == "async_pipeline":
         result = async_evolve(
@@ -352,11 +359,23 @@ def standard_main(build: Callable[[int], MethodPolicy],
     add_standard_args(parser, model_default="glm-5.2")
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--candidates", type=int, default=2)
+    parser.add_argument("--staleness", default="guarded",
+                        choices=["guarded", "reflective", "full"],
+                        help="what to do with a diff proposed against a head the "
+                             "merger has since moved (agentdescent.staleness)")
     parser.add_argument("--max-tokens", type=int, default=1024)
     parser.add_argument("--timeout", type=float, default=180.0)
     args = parser.parse_args(argv)
 
     policy = build(args.seed)
+    # `--budget-rollouts` is `add_standard_args`' name for the quantity these
+    # methods call `--candidates`: the total number of proposals the run may
+    # spend. It was declared for every port and read by none of them here, so a
+    # sweep pinning the budget got the 2-candidate default and a row that
+    # measured nothing it asked for. One quantity, two vocabularies -- mapped
+    # rather than duplicated, the way OpenEvolve maps it onto `iterations`.
+    if getattr(args, "budget_rollouts", None):
+        args.candidates = args.budget_rollouts
     mode = ("serial" if args.serial
             else "async_pipeline" if args.asynchronous
             else "sync_parallel")
@@ -381,6 +400,7 @@ def standard_main(build: Callable[[int], MethodPolicy],
     outcome = run_port(
         policy, recorder, mode=mode, seed=args.seed, workers=args.workers,
         candidate_budget=args.candidates, max_seconds=args.max_seconds,
+        staleness=args.staleness,
     )
     print(f"{policy.name}/{mode}: quality {outcome.baseline_quality:.3f} -> "
           f"{outcome.final_quality:.3f}, validation "
