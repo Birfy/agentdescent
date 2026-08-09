@@ -144,3 +144,54 @@ def test_r_zero_samples_the_solver_more_than_twice():
     from examples.r_zero import r_zero_challenger_solver as rz
 
     assert rz.SOLVER_SAMPLES >= 4
+
+
+# -- Agent0 -------------------------------------------------------------------
+
+
+def test_the_tool_reward_is_the_capped_weighted_call_count():
+    """`calculate_tool_reward(predict, weight=0.05, cap=4)`:
+    `min(tool_call_count, cap) * weight`. The port's prompt said "with a
+    tool-use bonus" and carried no number, while its notes claimed the component
+    was surfaced."""
+    from examples.agent0.agent0_tool_curriculum import tool_reward, TOOL_CAP
+
+    assert tool_reward(0) == 0.0
+    assert tool_reward(1) == 0.05
+    assert tool_reward(4) == 0.2
+    assert tool_reward(9) == tool_reward(TOOL_CAP), "the cap does not bind"
+    assert tool_reward(-1) == 0.0
+
+
+def test_agent0_uncertainty_is_self_consistency_not_the_grounded_reward():
+    """`min(score, 1 - score)` over `generate_results`' majority share -- the
+    same computation R-Zero uses. The port fed it the single rollout's grounded
+    reward, which is 0 or 1, and `1 - 2|p - 0.5|` is zero at both: the
+    curriculum signal did not exist on any item of any run.
+
+    Upstream's term is also `min(p, 1-p)`, where the port used `1 - 2|p - 0.5|`
+    -- exactly twice it.
+    """
+    from examples._selfplay_domain import majority_share
+    from examples.agent0 import agent0_tool_curriculum as ag
+
+    assert ag.EXECUTOR_SAMPLES >= 4
+
+    for finals, want in ((["300"] * 4, 0.0),
+                         (["300", "300", "300", "9"], 0.25),
+                         (["300", "300", "9", "9"], 0.5)):
+        p_hat = majority_share(finals)
+        assert min(p_hat, 1 - p_hat) == want, finals
+
+    # The grounded reward, which the port used, is 0 or 1 -- and both give zero.
+    for score in (0.0, 1.0):
+        assert 1.0 - 2.0 * abs(score - 0.5) == 0.0
+
+
+def test_the_two_ports_share_one_majority_share():
+    """R-Zero's `question_evaluate/evaluate.py` and Agent0's `generate_results`
+    are the same computation, so a fix to one should not leave the other."""
+    from examples._selfplay_domain import majority_share as shared
+    from examples.r_zero import r_zero_challenger_solver as rz
+
+    assert rz.majority_share is shared

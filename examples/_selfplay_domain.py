@@ -150,6 +150,26 @@ def trajectory(cart: CartTask, final: str, *, valid: bool) -> str:
     )
 
 
+def majority_share(finals: Sequence[str]) -> float:
+    """`score = max_count / len(results)`: the share agreeing with the majority.
+
+    R-Zero's `question_evaluate/evaluate.py` and Agent0's `generate_results` are
+    the same computation, and neither uses ground truth -- both reward a
+    generated question the solver is *self-inconsistent* on, which is the whole
+    point of a method with no labels for what it just wrote.
+
+    Unparseable replies count as their own distinct answers rather than being
+    dropped: a solver that cannot state an answer is not one that agrees with
+    itself, and dropping them makes an incoherent batch read as certain.
+    """
+    counts: Dict[object, int] = {}
+    for index, final in enumerate(finals):
+        parsed = parse_integer_answer(final.strip())
+        key = parsed if parsed is not None else f"__unparsed_{index}"
+        counts[key] = counts.get(key, 0) + 1
+    return max(counts.values()) / float(len(finals)) if finals else 1.0
+
+
 def trajectory_reward(_task: Task, output: str) -> float:
     """Verifier-grounded reward with the domain's tolerant integer parse."""
     try:

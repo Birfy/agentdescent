@@ -1,0 +1,78 @@
+{
+ "experiment": "Agent0 tool curriculum on AgentDescent",
+ "model": "deepseek-v4-flash",
+ "provider": "claude",
+ "reference": "aiming-lab/Agent0@f775b510",
+ "config": {
+  "arm": "async_pipeline",
+  "budget_rollouts": 80,
+  "workers": 8,
+  "async_ratio": 2,
+  "staleness": "full",
+  "reflective_merge": true,
+  "executor_samples": 4,
+  "tool_weight": 0.05,
+  "tool_cap": 4,
+  "temperature": 0.7,
+  "thinking": "disabled",
+  "domain": "self-play carts, 16 slots + 16/16 frozen"
+ },
+ "cells": [
+  {
+   "seed": 0,
+   "test": [
+    0.0,
+    0.5
+   ],
+   "validation": [
+    0.0,
+    0.438
+   ],
+   "accepted": 2,
+   "invalid": 0,
+   "wall_s": 340.8,
+   "engine_s": 206.9,
+   "calls": 1616
+  },
+  {
+   "seed": 1,
+   "test": [
+    0.125,
+    0.625
+   ],
+   "validation": [
+    0.0,
+    0.5
+   ],
+   "accepted": 2,
+   "invalid": 0,
+   "wall_s": 384.2,
+   "engine_s": 218.9,
+   "calls": 1584
+  },
+  {
+   "seed": 2,
+   "test": [
+    0.0,
+    0.5
+   ],
+   "validation": [
+    0.0,
+    0.688
+   ],
+   "accepted": 2,
+   "invalid": 0,
+   "wall_s": 353.0,
+   "engine_s": 211.4,
+   "calls": 1678
+  }
+ ],
+ "summary": {
+  "test_gain": {
+   "mean": 0.5
+  },
+  "test_final_mean": 0.542,
+  "seeds_that_moved": 3,
+  "total_seeds": 3
+ }
+}
