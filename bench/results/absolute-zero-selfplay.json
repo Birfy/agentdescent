@@ -1,0 +1,79 @@
+{
+ "experiment": "Absolute Zero self-play on AgentDescent",
+ "model": "deepseek-v4-flash",
+ "provider": "claude",
+ "reference": "LeapLabTHU/Absolute-Zero-Reasoner@484afa48",
+ "config": {
+  "arm": "async_pipeline",
+  "budget_rollouts": 80,
+  "workers": 8,
+  "async_ratio": 2,
+  "staleness": "full",
+  "reflective_merge": true,
+  "solver_samples": 2,
+  "temperature": 0.7,
+  "thinking": "disabled",
+  "domain": "self-play carts, 16 slots + 16/16 frozen"
+ },
+ "cells": [
+  {
+   "seed": 0,
+   "test": [
+    0.125,
+    0.375
+   ],
+   "validation": [
+    0.125,
+    0.438
+   ],
+   "accepted": 4,
+   "invalid": 1,
+   "wall_s": 192.2,
+   "engine_s": 108.9,
+   "calls": 575
+  },
+  {
+   "seed": 1,
+   "test": [
+    0.0,
+    0.438
+   ],
+   "validation": [
+    0.062,
+    0.438
+   ],
+   "accepted": 3,
+   "invalid": 6,
+   "wall_s": 184.3,
+   "engine_s": 104.6,
+   "calls": 657
+  },
+  {
+   "seed": 2,
+   "test": [
+    0.0,
+    0.25
+   ],
+   "validation": [
+    0.0,
+    0.375
+   ],
+   "accepted": 2,
+   "invalid": 3,
+   "wall_s": 717.2,
+   "engine_s": 629.1,
+   "calls": 641
+  }
+ ],
+ "summary": {
+  "test_gain": {
+   "min": 0.25,
+   "median": 0.313,
+   "max": 0.438,
+   "mean": 0.313
+  },
+  "test_final_mean": 0.354,
+  "seeds_that_moved": 3,
+  "total_seeds": 3
+ }
+}
