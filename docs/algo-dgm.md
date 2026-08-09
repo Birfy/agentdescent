@@ -71,6 +71,19 @@ pytest. 64 vendored bugs in `examples/dgm/tasks/` (32 train / 32 held-out),
 | archive | 3 agents: 0.906, 0.906, 0.844 |
 | the agent's own `solve.py` | 18 lines → **79 lines** |
 
+!!! warning "Two of the 64 fixtures were a coin flip when this was measured"
+    `dedupe-order` and `set-difference-order` both encode "used a `set`, lost the
+    order", and both asserted it on **strings**. Python randomises string hashing
+    per process, so the buggy implementation came out in the right order on about
+    one hash seed in fifteen for the first and one in five for the second — the
+    task then had nothing failing, and the agent was handed a free solve for
+    reasons that had nothing to do with the agent. CI drew such a seed and caught
+    it. Both now assert on integers, which hash to themselves, and
+    `test_a_bug_about_ordering_fails_on_every_hash_seed` pins the seven
+    `set`/`dict`-touching fixtures against a repeat. The numbers above were
+    recorded before that fix and so carry up to ±1 task of seed luck in each
+    32-task split.
+
 **What it wrote for itself.** The seed agent sends `lib.py` and the pytest output
 to a model and writes the reply straight back. Its own diagnosis produced three
 changes, all of them aimed at failures that actually occurred:

@@ -14,6 +14,7 @@ import math
 import os
 import re
 import shutil
+import sys
 import signal
 import subprocess
 import tempfile
@@ -159,6 +160,102 @@ def _current_user_task_count() -> int:
         except (OSError, StopIteration, ValueError):
             continue
     return total
+
+
+#: The macOS analogue of the Bubblewrap profile below. Seatbelt is the only
+#: sandbox this platform ships, and it covers the two guarantees that matter for
+#: running model-written code: **no network**, and **no writing outside a
+#: scratch directory**. Everything else bwrap provides here -- CPU seconds,
+#: address space, file size, fd count, process count -- is imposed by
+#: `_openevolve_runner.py` with `setrlimit`, which is portable, so the two
+#: backends enforce the same limits by different means.
+#:
+#: What Seatbelt does *not* give is bwrap's `--clearenv` and read-only root: the
+#: candidate can read the filesystem, and it inherits the environment. That is a
+#: weaker boundary and it is stated rather than glossed -- this is a
+#: defence-in-depth layer over an AST gate that has already rejected imports and
+#: attribute access, not the only thing standing between a model and the disk.
+#:
+#: Writes are denied globally and then re-allowed for the scratch directory
+#: alone; the three character devices are listed because CPython writes to them
+#: during ordinary startup and shutdown. Rule order matters -- Seatbelt takes
+#: the last matching rule -- so the `allow` lines must follow the blanket
+#: `deny`.
+_SEATBELT_PROFILE = """(version 1)
+(allow default)
+(deny network*)
+(deny file-write*)
+(allow file-write-data (literal "/dev/null") (literal "/dev/urandom") (literal "/dev/zero"))
+(allow file-write* (subpath "{scratch}"))
+"""
+
+
+def _seatbelt_command(
+    candidate: Path,
+    trials: int,
+    budget: int,
+    seed: int,
+    timeout: float,
+    nproc_limit: int,
+) -> List[str]:
+    profile = candidate.parent / "sandbox.sb"
+    profile.write_text(
+        # `.resolve()` matters: `tempfile` hands back `/var/folders/...`, `/var`
+        # is a symlink to `/private/var`, and Seatbelt matches the resolved path.
+        # Without it the `allow` never fires and the scratch directory is denied
+        # along with everything else.
+        _SEATBELT_PROFILE.format(scratch=str(candidate.parent.resolve())),
+        encoding="utf-8")
+    return [
+        "/usr/bin/sandbox-exec", "-f", str(profile),
+        sys.executable, "-I", str(RUNNER), str(candidate),
+        "--trials", str(trials),
+        "--budget", str(budget),
+        "--seed", str(seed),
+        "--cpu-seconds", str(max(2, int(math.ceil(timeout)))),
+        "--nproc-limit", str(nproc_limit),
+    ]
+
+
+def sandbox_backend() -> Optional[str]:
+    """Which isolation backend `sandbox_command` would pick, or None.
+
+    Separate from the dispatcher only so the CLI banner can name the backend
+    without re-deriving the choice -- a second copy of this `if` is how a banner
+    ends up claiming Bubblewrap on a host running Seatbelt.
+    """
+    if shutil.which("bwrap"):
+        return "Bubblewrap"
+    if sys.platform == "darwin" and Path("/usr/bin/sandbox-exec").exists():
+        return "Seatbelt (sandbox-exec)"
+    return None
+
+
+def sandbox_command(
+    candidate: Path,
+    trials: int,
+    budget: int,
+    seed: int,
+    timeout: float,
+    nproc_limit: int,
+) -> List[str]:
+    """The isolation backend this platform has.
+
+    Bubblewrap where it exists, Seatbelt on macOS. Neither is optional: a
+    candidate here is model-written Python that gets executed, and running it
+    unconfined because the sandbox is missing would be the wrong way to make an
+    example portable.
+    """
+    backend = sandbox_backend()
+    if backend == "Bubblewrap":
+        return _bubblewrap_command(candidate, trials, budget, seed, timeout,
+                                   nproc_limit)
+    if backend is not None:
+        return _seatbelt_command(candidate, trials, budget, seed, timeout,
+                                 nproc_limit)
+    raise RuntimeError(
+        "no candidate isolation available: install Bubblewrap (bwrap) on Linux, "
+        "or run on macOS where sandbox-exec ships with the system")
 
 
 def _bubblewrap_command(
@@ -313,7 +410,7 @@ def evaluate_source(
         candidate = Path(directory) / "candidate.py"
         candidate.write_text(source, encoding="utf-8")
         nproc_limit = max(512, _current_user_task_count() + 64)
-        command = _bubblewrap_command(
+        command = sandbox_command(
             candidate, trials, budget, seed, timeout, nproc_limit
         )
         for sandbox_attempt in range(3):

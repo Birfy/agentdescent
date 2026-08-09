@@ -17,7 +17,10 @@ Preserved from that revision:
 Intentional differences:
 
 * The small genome is rewritten in full instead of SEARCH/REPLACE diffs.
-* Candidate execution is deterministic, budgeted, and isolated with Bubblewrap.
+* Candidate execution is deterministic, budgeted, and sandboxed -- Bubblewrap
+  on Linux, Seatbelt (`sandbox-exec`) on macOS. Both deny the network and
+  writes outside a scratch directory; the CPU/memory/fd limits come from
+  `setrlimit` inside the runner, so they are the same on both.
 * AgentDescent supplies workers, the ledger, evidence cards, staleness handling,
   synchronous barriers, and the barrier-free async runtime. OpenEvolve's process
   controller and database are therefore represented by a Strategy and Aggregator.
@@ -36,6 +39,7 @@ import sys
 import tempfile
 import threading
 import time
+import warnings
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -64,6 +68,7 @@ from examples._common import (
     report_engine,
 )
 from examples.openevolve._openevolve_support import (
+    sandbox_backend,
     INITIAL_PROGRAM,
     UPSTREAM_COMMIT,
     Program,
@@ -75,6 +80,9 @@ from examples.openevolve._openevolve_support import (
     program_id,
 )
 
+
+#: Mutation replies that parsed to nothing, for the warning in `make_propose`.
+_EMPTY_PROPOSALS = {"n": 0}
 
 ARTIFACT_ID = "openevolve_program"
 ARCHIVE_UPDATED = "archive-updated"
@@ -101,11 +109,16 @@ def _make_completion(args: argparse.Namespace, usage: Usage) -> Completion:
     both factories, exactly as ADAS does for its OpenAI-only ``--timeout``.
     """
     options: Dict[str, Any] = {}
-    if (
-        is_openai_compatible(args)
-        and args.thinking != "default"
-        and (args.provider == "glm" or args.model.lower().startswith("glm"))
-    ):
+    if args.thinking != "default":
+        # Was gated on the GLM path only, so `--thinking disabled` -- the default
+        # -- silently did nothing against an Anthropic-shaped endpoint. It is not
+        # cosmetic here: measured on deepseek-v4-flash, a mutation call with
+        # reasoning on spends 96% of its output on thinking (75k characters of it
+        # against a 3.2k program), takes a median 234 s, and hit the 32000-token
+        # ceiling in 3 of 6 samples -- at which point the visible content never
+        # starts and the reply arrives empty. With it off: 512-990 output tokens,
+        # 7 s, 0 of 6 unparseable. What is being asked for is a search routine,
+        # not a proof.
         options["thinking"] = {"type": args.thinking}
     return completion_for(
         args,
@@ -454,6 +467,23 @@ def make_propose(
             )
         ).strip()
         code, summary = extract_program(raw)
+        if not code:
+            # `extract_program` falls back to the whole reply when there is no
+            # <PROGRAM> block, so an empty `code` means the completion itself was
+            # empty -- which on a reasoning model means the token budget went
+            # entirely to hidden thinking and the visible content never started.
+            # Untracked, that round records a candidate that simply did not
+            # improve, and a budget problem reads as a search that found nothing.
+            _EMPTY_PROPOSALS["n"] += 1
+            if _EMPTY_PROPOSALS["n"] in (1, 5, 25):
+                warnings.warn(
+                    f"{_EMPTY_PROPOSALS['n']} mutation repl(y/ies) came back "
+                    f"empty, so no program could be parsed. On a reasoning model "
+                    f"that is the token budget being spent on hidden thinking: "
+                    f"pass --thinking disabled, and note this port rewrites the "
+                    f"whole genome, so --max-tokens has to be well above "
+                    f"upstream's diff-sized 16000.",
+                    RuntimeWarning, stacklevel=2)
         return json.dumps(
             {
                 "code": code,
@@ -790,6 +820,7 @@ def run_agentdescent_openevolve(
     seed: int = 0,
     usage: Optional[Usage] = None,
     evaluator: Evaluator = evaluate_source,
+    staleness: str = "guarded",
     verbose: bool = False,
 ) -> OpenEvolveRun:
     """Run one fixed-candidate-budget serial, sync, or async experiment."""
@@ -860,6 +891,11 @@ def run_agentdescent_openevolve(
         "usage": usage,
         "aggregator_factory": factory,
         "verbose": verbose,
+        # A discarded card is a whole candidate program -- generated, then
+        # executed in the sandbox across every trial -- and this archive is
+        # MAP-Elites: a late arrival still has a cell to occupy, because the grid
+        # is indexed by program length and code diversity rather than by recency.
+        "staleness_policy": get_policy(staleness),
     }
     if mode == "async":
         result = async_evolve(
@@ -915,6 +951,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     add_standard_args(parser, model_default="glm-5.2", max_seconds_default=300.0)
     parser.set_defaults(provider="openai", async_ratio=1)
+    parser.add_argument("--staleness", default="guarded",
+                        choices=["guarded", "reflective", "full"],
+                        help=("what to do with a program proposed against an "
+                              "archive the merger has since moved. Note that "
+                              "`--reflective-merge` is deliberately NOT honoured "
+                              "here: fusing a round's candidates would delete "
+                              "MAP-Elites cells, and a candidate is a whole "
+                              "program rather than a delta"))
     parser.add_argument("--iterations", type=int, default=6)
     parser.add_argument("--workers", type=int, default=3)
     parser.add_argument("--tasks", type=int, default=12)
@@ -928,7 +972,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--migration-interval", type=int, default=4)
     parser.add_argument("--candidate-timeout", type=float, default=15.0)
     parser.add_argument("--max-code-length", type=int, default=20_000)
-    parser.add_argument("--max-tokens", type=int, default=2048)
+    parser.add_argument(
+        "--max-tokens", type=int, default=32000,
+        help=("upstream's config.yaml says 16000, and upstream mutates with "
+              "SEARCH/REPLACE diffs. This port rewrites the whole genome -- a "
+              "declared difference -- so it needs more, not the same. Measured "
+              "on deepseek-v4-flash over six samples: 2048 produced no parseable "
+              "program at all, 16000 failed 5 of 6, 32000 failed 2 of 6. When the "
+              "budget runs out the reply arrives empty, and the round then looks "
+              "like a search that found no improvement"))
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--thinking", choices=("disabled", "enabled", "default"), default="disabled")
     parser.add_argument("--api-timeout", type=float, default=180.0)
@@ -961,9 +1013,24 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     # other six.
     if args.budget_rollouts:
         args.iterations = args.budget_rollouts
+    if getattr(args, "reflective_merge", False):
+        # `--reflective-merge` comes from the shared parser, and this port has no
+        # use for it: fusing a round's candidates into one would collapse the
+        # MAP-Elites cells that are the whole point of the archive, and a
+        # candidate here is a whole program rather than a delta that could be
+        # merged with another. Accepting the flag and quietly doing nothing is
+        # the failure mode this repository keeps finding, so it is refused
+        # instead. `--staleness` is the knob that does apply.
+        raise SystemExit(
+            "--reflective-merge is not supported by the OpenEvolve port: fusing "
+            "a round's candidates would delete MAP-Elites cells, and a candidate "
+            "is a whole program rather than a delta. Use --staleness "
+            "{guarded,reflective,full} to choose what happens to a program "
+            "proposed against an archive the merger has since moved.")
     mode = "async" if args.asynchronous else ("serial" if args.serial else "sync")
     print("Algorithm: OpenEvolve program evolution on AgentDescent")
-    print("Evaluator: pinned function-minimization combined score, Bubblewrap isolated")
+    print("Evaluator: pinned function-minimization combined score, "
+          f"{sandbox_backend() or 'NO SANDBOX -- this run will fail'} isolated")
     print(
         f"Plan     : mode={mode}, model={args.model}, iterations={args.iterations}, "
         f"workers={args.workers}, temperature={args.temperature}"
@@ -1001,6 +1068,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         candidate_timeout=args.candidate_timeout,
         max_code_length=args.max_code_length,
         async_ratio=args.async_ratio,
+        staleness=args.staleness,
         max_seconds=args.max_seconds,
         shutdown_grace=args.shutdown_grace,
         seed=args.seed,

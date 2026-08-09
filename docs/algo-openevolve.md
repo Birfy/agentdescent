@@ -55,14 +55,32 @@ Intentional differences:
    barrier-free runtime. OpenEvolve's process controller and database therefore
    become a `Strategy` and custom `Aggregator`.
 4. Candidate execution is deterministic and budgeted. An AST gate rejects
-   unsafe syntax and hard-coded evaluator optima before Bubblewrap starts.
-5. Bubblewrap clears the environment, removes network access, mounts the
-   candidate read-only, and applies CPU, address-space, file-size, open-file,
-   and process limits inside the sandbox runner.
+   unsafe syntax and hard-coded evaluator optima before the sandbox starts.
+5. Candidate isolation clears the environment, removes network access, mounts
+   the candidate read-only, and applies CPU, address-space, file-size,
+   open-file, and process limits inside the sandbox runner.
 
-The evaluator is Linux-specific because it requires `bwrap`. The offline test
-suite skips only the sandbox execution test when Bubblewrap is unavailable; all
-strategy, archive, engine, and CLI tests still run.
+Isolation has two backends and picks whichever the host offers: **Bubblewrap**
+(`bwrap`) on Linux, and **Seatbelt** (`sandbox-exec`) on macOS. Both deny
+network access and confine writes to a scratch directory; the resource limits
+come from `setrlimit` inside the runner and so are the same on either platform,
+except that Darwin has no `RLIMIT_AS` and the runner reports which limits the
+platform refused rather than pretending it applied them. A host with neither
+backend raises rather than running model-written code unsandboxed. The offline
+test suite skips only the sandbox execution test when no backend is available;
+all strategy, archive, engine, and CLI tests still run.
+
+The two backends are not equivalent, and the difference is stated rather than
+glossed: Bubblewrap additionally clears the environment and mounts the root
+read-only, where Seatbelt leaves reads and the environment alone. The Seatbelt
+profile is therefore a defence-in-depth layer over an AST gate that has already
+rejected imports and attribute access, not the only thing between a model and
+the disk. What it does enforce is checked against the kernel rather than by
+reading the profile back:
+`test_seatbelt_actually_blocks_the_writes_the_profile_claims_to_block` runs a
+process under the real profile and asserts that a write outside the scratch
+directory fails, a write inside it succeeds, and `socket.create_connection`
+cannot reach the network.
 
 ## Running the port
 
@@ -83,107 +101,98 @@ Add `--async` for the barrier-free engine, or `--serial` for the upstream serial
 algorithm. `OPENAI_API_KEY` and `OPENAI_BASE_URL` must be set for the `glm`
 provider.
 
-!!! note "`--serial` and the benchmark's `serial` row are two different baselines"
+!!! note "`--serial` and the benchmark's `serial` mode are two different baselines"
     `--serial` is the [shared port flag](self-evolution-examples.md#the-shared-command-line):
     **one worker**, so there is nothing to merge and the loop is the published
-    one. The benchmark table below has a row also called `serial`, and it means
-    something narrower — `evolve(max_concurrency=1)` with the full three workers,
-    i.e. the same algorithm run without thread concurrency. That row isolates
-    threading; the flag isolates merging. The benchmark reaches its mode directly
-    through `run_agentdescent_openevolve(mode="serial", workers=3)`, so the two
-    are independent and the recorded numbers below are unaffected by the flag.
+    one. `bench/openevolve_agentdescent.py` also has a mode called `serial`, and it
+    means something narrower — `evolve(max_concurrency=1)` with the full worker
+    count, i.e. the same algorithm run without thread concurrency. That mode
+    isolates threading; the flag isolates merging.
 
 ## Live benchmark method
 
-The benchmark is
-[`bench/openevolve_agentdescent.py`](https://github.com/Birfy/agentdescent/blob/main/bench/openevolve_agentdescent.py),
-and its compact recorded output is
-[`bench/results/openevolve-agentdescent-live.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/openevolve-agentdescent-live.json).
-It compares three executions of the same port:
-
-| Mode | Engine configuration |
-|---|---|
-| serial | `evolve(max_concurrency=1)` |
-| sync | `evolve(max_concurrency=3)` |
-| async | `async_evolve(n_workers=3, async_ratio=1)` |
-
-The recorded experiment used:
-
 | Setting | Value |
 |---|---|
-| Model | GLM-5.2, OpenAI-compatible API |
-| Sampling | temperature 0.7, thinking disabled |
-| Repeats | 3, with evaluator seeds 0, 100, and 200 |
-| Mode order | rotated each repeat to reduce order and warm-up bias |
-| Mutation budget | exactly 6 reserved model calls per mode and repeat |
-| Workers | 3 |
-| Evaluator tasks | 12: 6 train and 6 held out |
-| Independent test | 6 disjoint seeds after each run |
+| Model | `deepseek-v4-flash`, Anthropic-shaped API |
+| Sampling | temperature 0.7, **thinking disabled**, `--max-tokens 32000` |
+| Mode | `async_evolve(n_workers=4, async_ratio=3)`, `--staleness full` |
+| Budget | 24 rollouts, hard-capped; `--max-seconds 1800` |
+| Islands | 3, migration interval 4 |
+| Evaluator tasks | 8: 6 train and 2 held out |
+| Independent test | 6 disjoint seeds after the run |
 | Objective budget | 200 objective calls per evaluator seed |
-| Quality target | fixed normalized validation reward of 0.8 |
-| Replay | none; every observation is a live engine run |
-
-The quality target was fixed before the matrix run. The three random-search
-baselines measured 0.681 to 0.729, so 0.8 required a real improvement and still
-left headroom. Validation reward is the mean per-seed evaluator score normalized
-to `[0, 1]`; the independent test table reports OpenEvolve's aggregate combined
-score, whose upper range is 1.5.
-
-Async shutdown grace was 120 seconds. This matters because a model request that
-has started cannot be cancelled: the benchmark waits for in-flight work so its
-end-to-end time and token count include the full cost rather than stopping the
-clock at the first useful commit.
+| Isolation | Seatbelt (`sandbox-exec`), macOS |
+| Replay | none; a single live engine run |
 
 Exact reproduction command:
 
 ```bash
-python -m bench.openevolve_agentdescent --yes \
-  --model glm-5.2 --repeats 3 --modes serial sync async \
-  --iterations 6 --workers 3 --tasks 12 --test-trials 6 \
-  --temperature 0.7 --thinking disabled --quality-target 0.8
+python -m examples.openevolve.openevolve_program_evolution --yes --seed 0 --tasks 8 --budget-rollouts 24 --workers 4 --islands 3 --migration-interval 4 --async --async-ratio 3 --staleness full --max-seconds 1800 --max-tokens 32000 --model deepseek-v4-flash
 ```
 
-## Results
+The recorded output is
+[`bench/results/openevolve-quality-run.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/openevolve-quality-run.json).
+The three-mode timing harness is still
+[`bench/openevolve_agentdescent.py`](https://github.com/Birfy/agentdescent/blob/main/bench/openevolve_agentdescent.py);
+this page reports quality, and the cross-algorithm speedup numbers live in
+[efficiency.md](efficiency.md).
 
-All 9 runs completed. They made 54 mutation-model calls, used 138,947 tokens,
-and recorded 0 API failures. Each interval below is minimum / median / maximum
-across three repeats. TTQ includes only runs that reached the fixed target.
+## Results — quality, on `deepseek-v4-flash`
 
-| Mode | Reached | End-to-end seconds | TTQ seconds | Final validation reward | Independent test gain |
-|---|---:|---:|---:|---:|---:|
-| serial | 3/3 | 153.23 / 164.88 / 205.09 | 63.52 / 66.93 / 67.58 | 0.889 / 0.919 / 1.000 | -0.049 / +0.115 / +0.777 |
-| sync | 2/3 | 57.33 / 63.28 / 70.74 | 57.21 / 63.91 / 70.62 | 0.777 / 0.875 / 0.998 | -0.186 / +0.179 / +0.513 |
-| async | 2/3 | 53.27 / 71.53 / 85.72 | 25.71 / 27.26 / 28.80 | 0.729 / 1.000 / 1.000 | +0.000 / +0.300 / +0.520 |
+24 rollouts, 3 islands, `--staleness full`, 4 workers, 24 mutation calls,
+76,294 tokens, 0 failures, 50.8 seconds of wall clock. Every figure below is
+scored on the **held-out** trial seeds, which the search never saw:
 
-Speedups are paired by repeat and evaluator seed. A value above 1 means the
-comparison mode was faster.
+| | baseline | best found | |
+|---|---:|---:|---:|
+| combined score | 0.9638 | **1.4995** | ceiling is 1.5 |
+| framework reward | 0.7620 | **0.9997** | |
+| mean distance to the global optimum | 0.5260 | **0.00057** | 920× closer |
+| mean value found (optimum: -1.5187) | -1.2892 | **-1.5187** | |
+| value standard deviation | 0.1392 | **0.0** | same answer every seed |
 
-| Comparison | Paired runs | Speedup min / median / max |
-|---|---:|---:|
-| sync vs serial, end-to-end | 3 | 2.42 / 2.88 / 2.90 |
-| async vs sync, end-to-end | 3 | 0.74 / 0.99 / 1.08 |
-| sync vs serial, TTQ | 2 | 0.95 / 1.06 / 1.18 |
-| async vs sync, TTQ | 2 | 1.99 / 2.37 / 2.75 |
+The ceiling is 1.5 because `combined_score` is
+`(0.5·value + 0.3·distance + 0.2·reliability)` times a basin multiplier that
+tops out at 1.5, and the winner scores 0.9997 / 0.9994 / 1.0 on the three terms.
+The evolved program is not merely better than random search; it has effectively
+solved the benchmark.
 
-The median raw end-to-end time fell from 164.88 seconds in serial mode to 63.28
-seconds in sync mode. The paired result is consistent across all three seeds,
-so synchronous parallelism is the strongest result in this small experiment.
+The winning program appeared at iteration 15 on island 2 and its own summary
+reads: *"Replaced the final random perturbation phase with a Nelder-Mead simplex
+refinement step ... then adds a lighter fine-tuning pass."* 586 characters of
+uniform random search became 7,848 characters of coarse grid, adaptive-step
+compass search, and simplex refinement.
 
-Async reached the target about 2.37 times sooner than sync on the two paired runs
-where both reached it. This demonstrates the intended completion-order benefit:
-a useful candidate can commit without waiting for the rest of its cohort.
-However, async did not reduce full return time: its paired median end-to-end
-speedup was 0.99, with two slower runs and one faster run. Waiting for in-flight
-requests accounts for much of that difference.
+The archive machinery is all live: 25 programs evaluated, 22 valid, island cell
+counts `[3, 2, 2]`, and **3 ring migrations**. `--staleness full` considered 24
+stale cards and discarded none.
 
-The independent test gains range from negative to strongly positive. That is a
-visible small-sample overfitting warning, not a result to discard. The experiment
-supports a timing claim about the runtime; it does not establish that one runtime
-produces better programs than another. The evaluator itself took less than one
-second at the median in every mode, so the observed timing is dominated by model
-latency rather than CPU evaluation.
+!!! danger "Two settings made this look like a search that found nothing"
+    Before these were fixed the same configuration reported
+    `reward 0.7639 -> 0.7639` twice, with no warning anywhere.
 
-Finally, `n=3` is deliberately reported as a demonstration, not a production
-latency estimate. Async discarded 0, 2, and 1 stale cards across its three runs,
-and no worker retired. Larger repeated studies should report the same TTQ,
-end-to-end, held-out test, staleness, retirement, call, token, and failure fields.
+    **`--thinking disabled` was gated on the GLM path.** It is the default, but
+    the condition also required `is_openai_compatible(args)` and a GLM model, so
+    against an Anthropic-shaped endpoint it silently did nothing. Measured on
+    `deepseek-v4-flash`: with reasoning on, a mutation call spends **96% of its
+    output on thinking** -- 75k characters of it against a 3.2k program -- takes
+    a median 234 s, and hit the 32000-token ceiling in 3 of 6 samples. With it
+    off: 512–990 output tokens, 7 s, and 0 of 6 unparseable.
+
+    **`--max-tokens` defaulted to 2048.** Upstream's `config.yaml` says 16000 and
+    upstream mutates with SEARCH/REPLACE diffs; this port rewrites the whole
+    genome, which needs *more* than upstream, not less. Six samples: 2048 gave no
+    parseable program at all, 16000 failed 5 of 6, 32000 failed 2 of 6.
+
+    Both failures are the same shape. The budget runs out before any visible
+    content is emitted, the reply arrives **empty**, and the round records a
+    candidate that simply did not improve -- which is exactly what a search that
+    found nothing also looks like. `make_propose` now counts empty replies and
+    warns, naming both `--thinking` and `--max-tokens` as the causes.
+
+!!! note "This run is why the row is no longer Linux-only"
+    Candidate isolation was Bubblewrap-only, so the matrix skipped this row on
+    any non-Linux host (`needs="bwrap"`). The Seatbelt backend described under
+    [Fidelity and boundaries](#fidelity-and-boundaries) was added to run it here,
+    and the `needs` marker is gone.
+

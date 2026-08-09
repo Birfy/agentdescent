@@ -7,6 +7,7 @@ monotonically upward. Every test here exists because the real one can.
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -238,3 +239,40 @@ def test_the_baseline_is_measured_even_when_no_self_edit_ever_lands():
         "the baseline was never measured")
     assert len(getattr(result, "dgm_archive", [])) == 1, (
         "the seed itself belongs in the archive before round 0")
+
+
+HASH_ORDER_TASKS = ("cache-eviction", "dedupe-order", "dict-invert-dupes",
+                    "set-difference-order", "strip-prefix", "sum-nested-dict",
+                    "unique-preserve-key")
+
+
+@pytest.mark.parametrize("task_id", HASH_ORDER_TASKS)
+def test_a_bug_about_ordering_fails_on_every_hash_seed(task_id):
+    """These seven fixtures are the ones whose `lib.py` or `test_lib.py` touches
+    a `set` or a `dict`, which is where a task can stop being a fixed measurement
+    and become a coin flip.
+
+    `dedupe-order` was one. Its bug was `list(set(xs))` losing order, asserted on
+    strings -- and Python randomises string hashing per process, so on about one
+    seed in fifteen the buggy code came out in the right order, the task had
+    nothing failing, and `test_every_task_starts_with_exactly_one_failing_test`
+    failed in CI while passing on every local run. `set-difference-order` was
+    worse at roughly one seed in five. Both now assert on integers, which hash to
+    themselves.
+
+    A flaky fixture is not only a flaky test: the DGM agent is scored on these,
+    so a seed that hid the bug would have handed it a free solve.
+    """
+    import subprocess
+    import sys
+
+    case = {c.id: c for c in R.load_tasks()}[task_id]
+    for seed in ("0", "11", "24", "48", "55"):   # seeds that used to hide it
+        proc = subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", "--no-header", "-rN",
+             "--tb=no", "test_lib.py"],
+            cwd=str(case.path), capture_output=True, text=True, timeout=120,
+            env={**os.environ, "PYTHONHASHSEED": seed})
+        assert proc.returncode != 0, (
+            f"{task_id} passes under PYTHONHASHSEED={seed}: the bug is hidden by "
+            f"hash order, so this task measures the seed rather than the agent")

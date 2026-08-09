@@ -248,8 +248,13 @@ column of each section below says exactly where to look.
 * **Departures**: the genome is rewritten whole rather than patched with
   SEARCH/REPLACE; feature bins use fixed length boundaries and insertion-time
   token-Jaccard diversity instead of evolving min/max scaling; candidate
-  execution is deterministic, budgeted, AST-gated and Bubblewrap-isolated
-  (Linux-only — the offline suite skips only the sandbox test elsewhere).
+  execution is deterministic, budgeted, AST-gated and sandbox-isolated —
+  Bubblewrap on Linux, Seatbelt (`sandbox-exec`) on macOS, and a refusal to run
+  at all on a host with neither. Both backends deny network access and confine
+  writes to a scratch directory; the CPU / memory / file-size / fd limits come
+  from `setrlimit` in the runner, so they are identical on both, except that
+  Darwin has no `RLIMIT_AS` and the runner reports the refusal rather than
+  claiming it applied.
 * **Selection rule lives in**: `EpsilonGreedy` for the in-pool pick, on the MAP-Elites island archive (the archive structure is the mechanism and stays)
   `examples/openevolve/openevolve_program_evolution.py`.
 * **Details**: [algo-openevolve.md](algo-openevolve.md)
