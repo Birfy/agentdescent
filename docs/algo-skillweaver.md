@@ -36,15 +36,67 @@ execution throws**). The product is a growing library of plug-and-play APIs.
 
 ## Measured results
 
-*Pending: this section is populated from the live matrix
-(`bench/results/candidate-methods-framework-final.json`) after the
-post-restructuring rerun. See the
-[matrix overview](matrix-overview.md) for the matrix-wide
-tables (quality, [parallel speedup](matrix-parallel-speedup.md), and
-[async behaviour](matrix-async.md)).*
+Three seeds, `async_pipeline`, 80 rollouts each, 8 workers, `--staleness full`,
+`self_verify` on (the reward model), `deepseek-v4-flash` at temperature 0.7.
+Recorded in
+[`bench/results/skillweaver-web-apis.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/skillweaver-web-apis.json).
 
-| Mode | Quality (test, before → after) | E2E seconds | Engine seconds | TTQ |
+| seed | test quality | validation | accepted | calls |
 |---|---|---|---|---|
-| serial | *TBD* | *TBD* | *TBD* | *TBD* |
-| sync_parallel | *TBD* | *TBD* | *TBD* | *TBD* |
-| async_pipeline | *TBD* | *TBD* | *TBD* | *TBD* |
+| 0 | 0.000 → **0.750** | 0.000 → 0.875 | 3/80 | 1137 |
+| 1 | 0.000 → **0.688** | 0.000 → 0.938 | 2/80 | 1253 |
+| 2 | 0.000 → **0.875** | 0.000 → 1.000 | 3/80 | 1121 |
+
+Mean 0.771, all three seeds moved. Compare
+[Voyager](algo-voyager.md#measured-results)'s 1.000 / 1.000 / 0.000 on the same
+runtime and budget: this site *names the concepts* its API needs — "the page
+hydrates before accepting input and confirms with a toast" — where Voyager's
+world named neither the vessel nor its `X+Y` syntax. Even after both were made
+learnable, the site that says more is the one whose seeds agree.
+
+See the caveat on [PromptBreeder](algo-promptbreeder.md#measured-results): one
+run per seed does not pin a number here either.
+
+!!! danger "The site hinted the concepts and still demanded the exact tokens"
+    Its message says the page hydrates and confirms with a toast. Under string
+    equality it required `wait:hydration-complete` and `assert:saved-toast`
+    exactly, so every one of these did the right thing and was refused:
+
+    | written | refused because |
+    |---|---|
+    | `wait:hydration`, `wait:page-hydrated` | not the exact token |
+    | `assert:toast`, `assert:success-toast` | not the exact token |
+    | `fill:timezone = UTC` | spaces around the equals sign |
+
+    Steps are matched on **verb plus content** now, declared once in `_STEPS`: a
+    verb whose argument the site only gestures at is matched on the verb, and a
+    verb whose argument comes from the task — the page, the field, the value —
+    must carry it. The wrong page, the wrong field and the wrong value all still
+    fail.
+
+!!! danger "Missing, misplaced and wrong-argument were one message"
+    The site reported *"a 'fill' step never succeeded"* to an agent that had
+    written a `fill` in the wrong place, and the same words to one whose `fill`
+    carried the wrong value. Three failures, three repairs: an agent told a step
+    is missing writes another one, and an agent told a wrong value is out of
+    order reorders it. Neither ever fixes what is actually wrong — the loop that
+    held Voyager at 0.000 across three seeds.
+
+    The site now separates *absent* from *present but late* from *present with
+    an argument the page did not act on*, and still names neither the expected
+    argument nor the steps to come.
+
+!!! note "Two departures that are not just \"a deterministic service replaces WebArena\""
+    **The success check is a model upstream and the environment here.**
+    `check_success_simple` asks a separate LM (`success_check_lm`, gpt-4o) to
+    judge the trajectory and a screenshot. A model critic errs in both
+    directions; the deterministic site cannot. This port therefore has a
+    *cleaner* reward than the paper, not merely a cheaper one.
+
+    **Upstream separates exploring from testing on a schedule.**
+    `_should_perform_test` alternates the two, and `update` shows the synthesis
+    model only functions with `test_count > 0` (`is_tested`). Verification is a
+    scheduled phase over the library there, and a per-proposal re-roll here.
+
+    The domain was also 12 tasks in 4/4/4 splits, which `run_port` refuses at
+    eight workers; it is 48 in 16/16/16 now.
