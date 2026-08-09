@@ -1,0 +1,78 @@
+{
+ "experiment": "SICA self-editing policy source on AgentDescent",
+ "model": "deepseek-v4-flash",
+ "provider": "claude",
+ "reference": "MaximeRobeyns/self_improving_coding_agent@ed8275dc",
+ "config": {
+  "arm": "async_pipeline",
+  "budget_rollouts": 80,
+  "workers": 8,
+  "async_ratio": 2,
+  "staleness": "full",
+  "reflective_merge": false,
+  "selection": "Archive(sampling='best')",
+  "temperature": 0.7,
+  "thinking": "disabled",
+  "domain": "money, 48 items, 16/16/16 splits"
+ },
+ "cells": [
+  {
+   "seed": 0,
+   "test": [
+    0.0,
+    0.562
+   ],
+   "validation": [
+    0.0,
+    0.812
+   ],
+   "accepted": 3,
+   "invalid": 0,
+   "wall_s": 135.7,
+   "engine_s": 75.3,
+   "calls": 599
+  },
+  {
+   "seed": 1,
+   "test": [
+    0.0,
+    0.188
+   ],
+   "validation": [
+    0.0,
+    0.625
+   ],
+   "accepted": 1,
+   "invalid": 2,
+   "wall_s": 294.8,
+   "engine_s": 231.1,
+   "calls": 1351
+  },
+  {
+   "seed": 2,
+   "test": [
+    0.0,
+    0.938
+   ],
+   "validation": [
+    0.0,
+    1.0
+   ],
+   "accepted": 3,
+   "invalid": 1,
+   "wall_s": 196.0,
+   "engine_s": 127.3,
+   "calls": 807
+  }
+ ],
+ "summary": {
+  "test_quality": {
+   "min": 0.188,
+   "median": 0.562,
+   "max": 0.938,
+   "mean": 0.563
+  },
+  "seeds_that_moved": 3,
+  "total_seeds": 3
+ }
+}

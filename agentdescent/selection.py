@@ -238,11 +238,21 @@ class Archive(SingleHead):
     like a greedy hill climb. ``'uniform'`` is the ablation, and having it here
     means the archive's contribution can be measured rather than assumed.
 
+    ``'best'`` does not sample at all: it returns the highest scorer every time,
+    which is SICA's rule -- ``get_best_agent_iteration`` takes ``idxmax()`` of
+    the mean benchmark score and the next meta-improvement starts from exactly
+    that agent. It is here rather than inside one example because it is a
+    published archive rule, and because the difference from ``'performance'`` is
+    easy to miss: a softmax over scores in ``[0, 1]`` at temperature 1 puts
+    ``exp(1)/exp(0) = 2.7`` between the best and worst candidate, so a run
+    configured as "performance" picks the worst entry roughly a quarter of the
+    time where SICA would never pick it.
+
     Deterministic given ``seed``: an archive that samples differently on a
     re-run makes a seeded comparison meaningless.
     """
 
-    MODES = ("performance", "novelty", "uniform")
+    MODES = ("performance", "novelty", "uniform", "best")
 
     def __init__(self, sampling: str = "novelty", temperature: float = 1.0,
                  seed: int = 0) -> None:
@@ -268,6 +278,12 @@ class Archive(SingleHead):
 
         if len(ctx.candidates) <= 1:
             return super().select(ctx, n)
+        if self.sampling == "best":
+            # First maximum, as `idxmax` takes: ties go to the earlier entry, so
+            # a later candidate has to actually beat the incumbent to displace it.
+            best = max(ctx.candidates,
+                       key=lambda c: (0.0 if c.score is None else c.score))
+            return [best] * n
         # An int, not a tuple: tuple seeding is deprecated from 3.9 and would
         # eventually start raising in the middle of a long run.
         rng = random.Random(self.seed * 1_000_003 + ctx.round)
