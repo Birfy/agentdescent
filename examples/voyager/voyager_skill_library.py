@@ -1,23 +1,36 @@
 """Environment analogue: **Voyager** (MineDojo/Voyager@55e45a88).
 
-Preserved: an **add-only skill library** (one entry per goal key; entries
-accumulate and union-merge, matching upstream's versioned, never-overwritten
-library); repair driven by **environment feedback** -- the deterministic world
-executes the attempt and reports the first failed step, which is what the
-repair prompt sees (never a gold trace); the **critic** as the engine's worker
-self-check (`self_verify`): every proposal is re-rolled and judged by the
-environment reward before it reaches the gate, upstream's "judge success from
-the environment, not the agent's claim"; and frontier task focus via the
+Preserved: a skill is added **only when the critic says the task succeeded**
+(`voyager.py`: ``if info["success"]: self.skill_manager.add_new_skill(info)``);
+repair driven by **environment feedback** -- the deterministic world executes
+the attempt and reports the first failed step, which is what the repair prompt
+sees (never a gold trace); the **critic** as the engine's worker self-check
+(`self_verify`): every proposal is re-rolled and judged by the environment
+reward before it reaches the gate, upstream's "judge success from the
+environment, not the agent's claim"; and frontier task focus via the
 :class:`~agentdescent.sampling.DifficultyWeighted` sampler.
 
+**The library is not add-only, and this port used to say it was.**
+`SkillManager.add_new_skill` prints *"Skill {name} already exists. Rewriting!"*,
+deletes the vector-store entry and reassigns ``self.skills[program_name]``. The
+older code is dumped to disk as ``{name}V2.js`` and **retrieval never reads
+it**: ``retrieve_skills`` returns ``self.skills[...]["code"]``, so the live
+library holds exactly one version per name -- the newest. Versioned-on-disk and
+overwritten-in-memory are different libraries, and only the second one is the
+algorithm. Each goal key here therefore holds the latest accepted skill rather
+than an accumulation.
+
 Boundaries: a deterministic crafting world replaces Minecraft; key-match
-retrieval replaces embedding retrieval; the task pool plus difficulty sampling
-is an analogue of the generative curriculum, which proposes novel tasks.
+retrieval replaces embedding retrieval over descriptions (``retrieval_top_k=5``,
+so upstream shows the action agent several skills and this shows one); the task
+pool plus difficulty sampling is an analogue of the generative curriculum, which
+proposes novel tasks.
 """
 
 from __future__ import annotations
 
 import random
+import re
 from typing import List, Optional, Sequence, Tuple
 
 from agentdescent.evolution import Task
@@ -31,23 +44,54 @@ from examples._method_runner import standard_main
 
 FIDELITY = "environment_analogue"
 
+#: 48, not 12, and the size is a constraint rather than a garnish: `run_port`
+#: refuses a run whose train split is smaller than the worker count, so twelve
+#: goals split 4/4/4 capped this port at four workers with a four-goal gate.
 INGREDIENTS = (
     "mint", "berry", "lemon", "ginger", "apple", "peach",
     "pear", "plum", "orange", "basil", "cherry", "melon",
+    "thyme", "sage", "clove", "fennel", "anise", "cocoa",
+    "papaya", "guava", "lychee", "quince", "damson", "medlar",
+    "nutmeg", "cassia", "sorrel", "borage", "hyssop", "lovage",
+    "banana", "mango", "grape", "fig", "date", "apricot",
+    "rosehip", "elder", "juniper", "lavender", "chamomile", "verbena",
+    "tamarind", "persimmon", "kumquat", "pomelo", "cranberry", "blackcurrant",
 )
 
 PRIMITIVES = "sanitize, collect, heat, combine, serve (as 'primitive:argument')"
 
 
+#: What each required step needs, beyond its verb. A step whose argument the
+#: world never names -- the *vessel* that gets sanitized, the *drink* that gets
+#: served -- is matched on the verb alone; a step whose argument is derivable
+#: from the goal must contain it.
+#:
+#: Measured against string equality, both unnamed arguments were lotteries. The
+#: solver discovered all three missing steps and still scored zero, writing
+#: `sanitize:water` / `sanitize:berry` (never `vessel`, a word that appears
+#: nowhere it can see) and `combine:berry:water` / `combine:water_clove` /
+#: `combine:thyme_water` (never `water+berry`). Three seeds, 0.000 each,
+#: `accepted=0/80`, and **no invalid proposals** -- well-formed skills against an
+#: unreachable target.
+_STEPS = (
+    ("sanitize", ()),               # of what, the world does not say
+    ("collect", ("water",)),
+    ("collect", ("{ingredient}",)),
+    ("heat", ("water",)),
+    ("combine", ("water", "{ingredient}")),
+    ("serve", ()),                  # what is served, the world does not say
+)
+
+
 def _required(ingredient: str) -> List[str]:
-    return [
-        "sanitize:vessel",
-        "collect:water",
-        f"collect:{ingredient}",
-        "heat:water",
-        f"combine:water+{ingredient}",
-        "serve:drink",
-    ]
+    """The canonical rendering of the required sequence, for display and tests."""
+    out = []
+    for verb, terms in _STEPS:
+        filled = [t.replace("{ingredient}", ingredient) for t in terms]
+        out.append(f"{verb}:{'+'.join(filled)}" if filled else f"{verb}:vessel"
+                   if verb == "sanitize" else f"{verb}:drink" if not filled
+                   else f"{verb}:{'+'.join(filled)}")
+    return [item.lower() for item in out]
 
 
 def _action_list(text: str, key: str) -> List[str]:
@@ -60,6 +104,21 @@ def _action_list(text: str, key: str) -> List[str]:
     return [item.strip().lower() for item in value]
 
 
+def _matches(action: str, index: int, ingredient: str) -> bool:
+    """Does this action perform the required step at `index`?
+
+    Verb plus *content*, not string equality -- see `_STEPS` for why. What still
+    has to be discovered is the **sequence**, which is the skill the paper is
+    about; the spelling of an argument the world never names is not.
+    """
+    verb, _, argument = action.partition(":")
+    want_verb, terms = _STEPS[index]
+    if verb.strip() != want_verb:
+        return False
+    return all(term.replace("{ingredient}", ingredient) in argument
+               for term in terms)
+
+
 def simulate(actions: Sequence[str], ingredient: str) -> Tuple[bool, str]:
     """Execute an action sequence; report the first unmet step, Voyager-style.
 
@@ -69,15 +128,32 @@ def simulate(actions: Sequence[str], ingredient: str) -> Tuple[bool, str]:
     required = _required(ingredient)
     cursor = 0
     for action in actions:
-        if cursor < len(required) and action == required[cursor]:
+        if cursor < len(required) and _matches(action, cursor, ingredient):
             cursor += 1
     if cursor == len(required):
         return True, "goal reached: drink served"
-    missing = required[cursor]
-    verb = missing.split(":", 1)[0]
+    verb = _STEPS[cursor][0]
+    # Whether the verb is *absent* or merely *late* is the difference between
+    # "add a step" and "reorder". Saying only "a 'collect' step never happened"
+    # to an agent that wrote two of them is not a terse error, it is a wrong
+    # one -- and the agent does the only thing it says, which is add a third.
+    #
+    # Measured: the solver had already discovered all six actions and was
+    # writing `[collect, collect, sanitize, heat, combine, serve]` against a
+    # world that wants sanitize first. Three seeds, 0.000, `accepted=0/80`.
+    # Naming the ordering keeps the rule the docstring claims -- no gold trace,
+    # nothing about the steps still to come -- while describing what happened.
+    written = [a.partition(":")[0].strip() for a in actions]
+    late = written.count(verb) > sum(
+        1 for i in range(cursor) if _STEPS[i][0] == verb)
+    if late:
+        detail = (f"a '{verb}' step is present but out of order: the "
+                  f"environment reached it after steps it has to come before")
+    else:
+        detail = (f"the environment expected a '{verb}' step that never "
+                  f"happened")
     return False, (
-        f"execution stopped before '{verb}' succeeded: the environment "
-        f"expected a '{verb}' step that never happened in order (progress "
+        f"execution stopped before '{verb}' succeeded: {detail} (progress "
         f"{cursor}/{len(required)}). Available primitives: {PRIMITIVES}."
     )
 
@@ -101,7 +177,8 @@ def _tasks() -> List[Task]:
 def _split(seed: int) -> Tuple[List[Task], List[Task], List[Task]]:
     rows = _tasks()
     random.Random(seed).shuffle(rows)
-    return rows[:4], rows[4:8], rows[8:12]
+    third = len(rows) // 3
+    return rows[:third], rows[third:2 * third], rows[2 * third:3 * third]
 
 
 def _retrieve(rendered: str, ingredient: str) -> str:
@@ -176,7 +253,8 @@ def build(seed: int) -> MethodPolicy:
         name="voyager",
         fidelity=FIDELITY,
         notes=(
-            "Skills accumulate under goal keys and are never overwritten, matching the add-only library.",
+            "A skill is added only when the environment judges the attempt successful, as add_new_skill is called only under info['success'].",
+            "A goal key holds the latest accepted skill, not an accumulation: add_new_skill rewrites self.skills in place and retrieve_skills reads that, so upstream's on-disk V2 dumps are never retrieved.",
             "Repair sees the environment's first-failure feedback, never a gold trace.",
             "The critic is the engine's self-verify rollout: proposals are re-run and judged by the environment reward.",
             "A deterministic crafting world replaces Minecraft; the task pool plus difficulty sampling stands in for the generative curriculum.",
