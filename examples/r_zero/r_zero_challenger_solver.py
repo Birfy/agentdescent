@@ -39,6 +39,28 @@ FIDELITY = "inference_analogue"
 _FALLBACK = CartTask((125, 240), (1, 2))
 CHALLENGER_SEED = "Increase curriculum difficulty gradually."
 
+#: Solver samples per generated question. `question_evaluate/evaluate.py` uses
+#: `--num_samples`, default **9**, and takes `score = max_count / len(results)`:
+#: the share agreeing with the *majority* answer. Four is the smallest count
+#: that gives that share more than two values while keeping a training rollout
+#: affordable.
+SOLVER_SAMPLES = 4
+
+
+def majority_share(finals: list) -> float:
+    """`max_count / len(results)`: the share agreeing with the majority answer.
+
+    Unparseable replies count as their own distinct answers rather than being
+    dropped -- a Solver that cannot state an answer is not a Solver that agrees
+    with itself, and dropping them would make an incoherent batch look certain.
+    """
+    counts: dict = {}
+    for index, final in enumerate(finals):
+        parsed = parse_integer_answer(final.strip())
+        key = parsed if parsed is not None else f"__unparsed_{index}"
+        counts[key] = counts.get(key, 0) + 1
+    return max(counts.values()) / float(len(finals)) if finals else 1.0
+
 
 def build(seed: int) -> MethodPolicy:
     def solve(llm, rendered: str, task: Task) -> str:
@@ -57,26 +79,27 @@ def build(seed: int) -> MethodPolicy:
             cart = validate_generated(parse_json_object(raw))
         except ValueError:
             cart, valid = _FALLBACK, False
-        # Two solver samples give the Challenger its uncertainty signal; the
-        # first is the trajectory's answer.
+        # `score = max_count / len(results)` -- the share of solver samples
+        # agreeing with the majority answer. R-Zero has **no ground truth** for
+        # a question its Challenger just wrote, which is the premise of the
+        # method; the Challenger is rewarded for producing questions the Solver
+        # is *self-inconsistent* on. Mixing the grounded verifier's reward into
+        # this number, as this port did, measures something the paper cannot.
         finals = [
             llm(solver_prompt(cart.question, solver_memory),
                 subphase="solver", unit=task.id)
-            for _ in range(2)
+            for _ in range(SOLVER_SAMPLES)
         ]
-        parsed = [parse_integer_answer(f.strip()) for f in finals]
-        agreement = float(parsed[0] is not None and parsed[0] == parsed[1])
         record = parse_json_object(trajectory(cart, finals[0], valid=valid))
-        record["agreement"] = agreement
+        record["self_consistency"] = majority_share(finals)
         return canonical_json(record)
 
     def propose(llm, rendered: str, task: Task, output: str,
                 score: float) -> Optional[str]:
         try:
-            agreement = float(parse_json_object(output).get("agreement", 1.0))
+            p_hat = float(parse_json_object(output).get("self_consistency", 1.0))
         except ValueError:
-            agreement = 1.0
-        p_hat = (score + agreement * score) / 2 if score else agreement / 2
+            p_hat = 1.0
         uncertainty = min(p_hat, 1.0 - p_hat)
         challenger = llm(
             (
@@ -112,7 +135,7 @@ def build(seed: int) -> MethodPolicy:
         fidelity=FIDELITY,
         notes=(
             "Separate Challenger and Solver role memories receive separate updates and union-merge across fields.",
-            "Two solver samples per generated task give the Challenger upstream's min(p,1-p) uncertainty signal.",
+            "The Challenger's p-hat is the solver's self-consistency over repeated samples -- the majority answer's share, as score = max_count / len(results) is -- and carries no ground truth, because R-Zero has none for a question it just wrote.",
             "AdvantageAcceptance carries GRPO's group-relative shape at the acceptance seam; DifficultyWeighted's 4p(1-p) matches the frontier target.",
             "Verbal role memories replace two GRPO checkpoints; the BLEU repetition penalty is omitted; evaluation carts are frozen.",
         ),

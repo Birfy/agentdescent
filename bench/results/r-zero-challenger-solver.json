@@ -1,0 +1,90 @@
+{
+ "experiment": "R-Zero challenger/solver co-evolution on AgentDescent",
+ "model": "deepseek-v4-flash",
+ "provider": "claude",
+ "reference": "Chengsong-Huang/R-Zero@5699329d",
+ "config": {
+  "arm": "async_pipeline",
+  "budget_rollouts": 80,
+  "workers": 8,
+  "async_ratio": 2,
+  "staleness": "full",
+  "reflective_merge": true,
+  "solver_samples": 4,
+  "temperature": 0.7,
+  "thinking": "disabled",
+  "domain": "self-play carts, 16 slots + 16/16 frozen"
+ },
+ "before_clip_text_clipped": {
+  "test": [
+   0.25,
+   0.375,
+   0.438
+  ],
+  "invalid": [
+   41,
+   44,
+   48
+  ],
+  "note": "`clip_text` discarded any value over 900 characters instead of truncating it, and R-Zero's two update prompts ask for a policy statement. Over half of every run's proposals were dropped before the gate and counted as invalid"
+ },
+ "cells": [
+  {
+   "seed": 0,
+   "test": [
+    0.062,
+    0.188
+   ],
+   "validation": [
+    0.125,
+    0.438
+   ],
+   "accepted": 2,
+   "invalid": 0,
+   "wall_s": 279.4,
+   "engine_s": 203.8,
+   "calls": 943
+  },
+  {
+   "seed": 1,
+   "test": [
+    0.062,
+    0.375
+   ],
+   "validation": [
+    0.125,
+    0.375
+   ],
+   "accepted": 3,
+   "invalid": 0,
+   "wall_s": 293.3,
+   "engine_s": 214.8,
+   "calls": 941
+  },
+  {
+   "seed": 2,
+   "test": [
+    0.062,
+    0.312
+   ],
+   "validation": [
+    0.062,
+    0.312
+   ],
+   "accepted": 1,
+   "invalid": 0,
+   "wall_s": 311.3,
+   "engine_s": 235.1,
+   "calls": 926
+  }
+ ],
+ "summary": {
+  "test_gain": {
+   "mean": 0.23
+  },
+  "test_final_mean": 0.292,
+  "invalid_total": 0,
+  "seeds_that_moved": 3,
+  "total_seeds": 3
+ }
+}
