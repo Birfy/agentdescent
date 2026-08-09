@@ -1,10 +1,15 @@
 """Self-edit analogue: **SICA** (MaximeRobeyns/self_improving_coding_agent@ed8275dc).
 
 Preserved: the meta loop edits real Python policy source through an AST gate,
-utility is the measured benchmark score, and the next base is drawn from an
-**archive of prior versions** -- the pinned revision selects by best mean score
-(its paper's cost/time composite is unimplemented upstream too), which is the
-`Archive` selection policy's performance mode.
+utility is the measured benchmark score, and the next base is the **best agent
+in the archive of prior versions** -- `get_best_agent_iteration` takes
+``idxmax()`` of the mean benchmark score, and `runner.py` then runs
+``archive.agent_{best_iter}.agent_code``. That is `Archive`'s ``best`` mode, not
+its ``performance`` one: a softmax over scores in ``[0, 1]`` at temperature 1
+leaves only ``exp(1)/exp(0) = 2.7`` between the best and worst entry, so a run
+configured as "performance" starts from the worst agent in the archive about a
+quarter of the time. (The paper's cost/time composite is unimplemented upstream
+too.)
 
 An unparseable self-edit costs its candidate and produces no diff -- there is
 no substitute source. ``reflective=False``: synthesised merges of Python source
@@ -110,7 +115,7 @@ def build(seed: int) -> MethodPolicy:
         fidelity=FIDELITY,
         notes=(
             "The meta loop edits real Python policy source and the framework gate measures utility.",
-            "Archive selection (performance mode, matching the pinned revision's best-mean-score rule) runs through the population aggregator; the run finalises on the archive's best scorer.",
+            "Archive selection in `best` mode -- `get_best_agent_iteration` takes idxmax() of the mean benchmark score, so the next meta-improvement starts from exactly that agent and never from a sampled one; the run finalises on the archive's best scorer.",
             "An unparseable self-edit costs its candidate and produces no diff; there is no substitute source.",
             "The editable surface is one AST-gated function rather than SWE-bench Docker.",
         ),
@@ -123,7 +128,7 @@ def build(seed: int) -> MethodPolicy:
         propose=propose,
         reward=money_reward,
         proposal_calls_per_candidate=1,
-        engine=Policies(selection=Archive(sampling="performance", seed=seed)),
+        engine=Policies(selection=Archive(sampling="best", seed=seed)),
         reflective=False,
     )
 
