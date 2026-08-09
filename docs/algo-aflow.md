@@ -38,15 +38,68 @@ modifications and whether each helped — injected into the prompt.
 
 ## Measured results
 
-*Pending: this section is populated from the live matrix
-(`bench/results/candidate-methods-framework-final.json`) after the
-post-restructuring rerun. See the
-[matrix overview](matrix-overview.md) for the matrix-wide
-tables (quality, [parallel speedup](matrix-parallel-speedup.md), and
-[async behaviour](matrix-async.md)).*
+Three seeds, `async_pipeline`, 80 rollouts each, 8 workers, `--staleness full`,
+`--reflective-merge`, `deepseek-v4-flash` at temperature 0.7 with thinking
+disabled. Recorded in
+[`bench/results/aflow-upstream-selection.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/aflow-upstream-selection.json).
 
-| Mode | Quality (test, before → after) | E2E seconds | Engine seconds | TTQ |
-|---|---|---|---|---|
-| serial | *TBD* | *TBD* | *TBD* | *TBD* |
-| sync_parallel | *TBD* | *TBD* | *TBD* | *TBD* |
-| async_pipeline | *TBD* | *TBD* | *TBD* | *TBD* |
+| seed | test quality | validation | accepted | calls | wall |
+|---|---|---|---|---|---|
+| 0 | 0.000 → **0.812** | 0.000 → 0.938 | 3/80 | 767 | 248 s |
+| 1 | 0.000 → **0.938** | 0.000 → 0.938 | 2/80 | 728 | 227 s |
+| 2 | 0.000 → **0.938** | 0.000 → 1.000 | 3/80 | 767 | 220 s |
+
+Three of three seeds moved, mean 0.896, against a domain whose ceiling is 1.000.
+
+### Why this clears the domain when PromptBreeder does not
+
+[PromptBreeder](algo-promptbreeder.md) reaches 0.271 on the same 48 items, the
+same model, the same budget, and its successful seeds stall just under the
+*format-only* ceiling of 0.479: it discovers what the grader wants and not that
+it may reason first. AFlow does both, and the reason is topology rather than
+tuning. Its workflow is two nodes — **Solve**, then **ReviewAndRevise** — so the
+arithmetic and the output convention have separate places to live. A single
+instruction has to hold both at once, and the prompts that nail the format are
+the ones that forbid the working.
+
+That is the comparison the matrix exists for: same domain, same runtime, same
+budget, and the mechanism is the variable.
+
+!!! danger "The selection rule was uniform, and said it was not"
+    The port implemented `λ·uniform + (1−λ)·softmax(α·(s−s_max))` and dropped
+    one line of upstream's `select_round`:
+
+    ```python
+    scores = [item["score"] * 100 for item in sorted_items]
+    ```
+
+    Upstream's α is 0.2 *against percentages*, so the effective temperature is
+    20 against accuracies in `[0, 1]` — and this port's scores are accuracies in
+    `[0, 1]` exactly as upstream's are, so the scaling is not a unit conversion.
+    It **is** the temperature. Over a pool scoring 0.50 / 0.40 / 0.25 / 0.10:
+
+    | | pick distribution |
+    |---|---|
+    | upstream | `[0.688, 0.158, 0.079, 0.075]` |
+    | this port, before | `[0.265, 0.257, 0.245, 0.233]` |
+    | uniform | `[0.250, 0.250, 0.250, 0.250]` |
+
+    Uniform to three digits. The port ran, logged "soft mixed probability", and
+    had no exploitation at all.
+
+    Three smaller departures went with it. **α and λ were the paper's 0.4 / 0.2**
+    rather than the pinned code's own `DEFAULT_ALPHA = 0.2` /
+    `DEFAULT_LAMBDA = 0.3` — where released code and paper disagree about a
+    constant, the code is what produced the published numbers. **The seed
+    workflow was force-appended to the pool**; upstream's `get_top_rounds` moves
+    round 1 to the front only when it already made the cut, and `select_round`
+    re-sorts by score immediately after, so that move changes nothing and
+    membership is the whole rule. And **experience carried neither the parent's
+    score nor whether each past modification helped**, where upstream's
+    `format_experience` reports both and `check_modification` regenerates rather
+    than accept a repeat.
+
+    An offline test had pinned the wrong behaviour:
+    `test_soft_mixed_keeps_the_seed_and_favours_scores` asserted the seed was
+    always reachable, which was true only because of the force-append. The test
+    was protecting the bug.
