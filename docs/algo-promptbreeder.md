@@ -73,13 +73,49 @@ disabled. Recorded in
 
 | seed | test quality | validation | accepted | calls | wall |
 |---|---|---|---|---|---|
-| 0 | 0.000 → **0.438** | 0.000 → 0.312 | 5/80 | 631 | 365 s |
-| 1 | 0.000 → 0.000 | 0.000 → 0.000 | 1/80 | 638 | 594 s |
-| 2 | 0.000 → **0.375** | 0.000 → 0.375 | 4/80 | 640 | 377 s |
+| 0 | 0.000 → **0.875** | 0.000 → 0.688 | 4/80 | 627 | 400 s |
+| 1 | 0.000 → **1.000** | 0.000 → 1.000 | 3/80 | 638 | 427 s |
+| 2 | 0.000 → **1.000** | 0.000 → 1.000 | 3/80 | 592 | 372 s |
 
-**Two of three seeds moved; one found nothing.** The mean is 0.271 and the range
-is the result, not noise around it — a single seed here would have supported
-either "it works" or "it does not", depending which one was run.
+Mean 0.958 against a ceiling of 1.000. All three seeds moved.
+
+!!! warning "One run per seed does not pin a number, and this row proves it"
+    An earlier run of **this exact command, at these exact seeds, on this exact
+    code** produced 0.438 / 0.000 / 0.375 — mean 0.271 against the 0.958 above.
+    Nothing changed between them but the model's sampling.
+
+    The seed fixes the data splits and the operator sampler. It does not fix the
+    model, which is sampled at temperature 0.7, so a "three seeds" label here
+    buys three *split* draws and three *sampling* draws at once, and the second
+    kind is large. Both sets of numbers are real runs; neither is the number.
+
+    Read the table as evidence that Algorithm 1 executes end to end and evolves a
+    prompt that clears the domain. A ranking against the other ports would need
+    repeats per seed, which these runs do not have.
+
+### The merge that costs 2.8x fewer calls
+
+Paired runs at the same seed, with the model merge on and off:
+
+| seed | | test | calls |
+|---|---|---:|---:|
+| 0 | merge on | 0.875 | **627** |
+| 0 | merge off | 0.875 | 1749 |
+| 1 | merge on | 1.000 | **638** |
+| 1 | merge off | 0.938 | 1739 |
+
+`reflective_merge` replaces *ranking* contested diffs on the cheap layer, and
+ranking needs evaluations — so turning it off does not remove a model call, it
+adds a pile of evaluation ones. Quality is unchanged within the run-to-run
+spread above.
+
+That control could not have been run before this change: `--reflective-merge`
+was accepted by all eleven MethodPolicy ports and **never read**. `run_port`
+used `policy.reflective`, a per-method constant, so a run that passed the flag
+printed `reflective_merge=True` because the *policy* said so and was identical
+to a run that did not. An earlier version of this control compared two identical
+configurations, found them identical, and concluded the merge layer was not
+implicated in a failure — a refutation built on a no-op.
 
 ### What the numbers mean against the domain's own ceilings
 

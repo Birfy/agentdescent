@@ -187,6 +187,7 @@ def run_port(
     max_seconds: float = 300.0,
     shutdown_grace: float = 120.0,
     staleness: str = "guarded",
+    reflective: Optional[bool] = None,
 ) -> MethodRunResult:
     """Run one method through AgentDescent with an equal candidate budget."""
     if mode not in MODES:
@@ -218,7 +219,19 @@ def run_port(
         candidate_budget,
     )
     engine = policy.engine
-    if policy.reflective:
+    # `reflective=None` means "whatever the method declares", which is the
+    # fidelity statement: AFlow's contested workflow fields are model-merged
+    # because its optimizer rewrites a whole workflow, and Voyager's are not
+    # because its library overwrites a key. An explicit True/False is a
+    # deliberate override, for a control run that needs to vary exactly this.
+    #
+    # It used to be `policy.reflective` alone while `--reflective-merge` sat in
+    # the shared parser being ignored, so a run could pass the flag, print
+    # `reflective_merge=True` because the *policy* said so, and be identical to
+    # a run that did not pass it. A control experiment built on that flag
+    # measured nothing, and one in this series did.
+    use_reflective = policy.reflective if reflective is None else bool(reflective)
+    if use_reflective:
         engine = engine.merged_with(
             **reflective_merge(lambda prompt: merge_llm(prompt, unit="merge")))
     aggregator_factory = None
@@ -371,7 +384,7 @@ def run_port(
             "max_concurrency": (
                 workers if mode in ("sync_parallel", "async_pipeline") else 1
             ),
-            "reflective_merge": policy.reflective,
+            "reflective_merge": use_reflective,
             "self_verify": policy.self_verify,
             "baseline_reward": baseline_validation,
             "final_reward": result.final_reward,
@@ -391,6 +404,26 @@ def run_port(
     )
 
 
+def _reflective_override(args, policy: MethodPolicy) -> Optional[bool]:
+    """`True`/`False` when a flag says so, `None` to keep the method's own.
+
+    Both flags at once is refused rather than silently resolved: a run that asked
+    for the merge and against it has not said what it wants, and picking one is
+    how a control arm ends up measuring the other.
+    """
+    on = bool(getattr(args, "reflective_merge", False))
+    off = bool(getattr(args, "no_reflective_merge", False))
+    if on and off:
+        raise SystemExit(
+            "--reflective-merge and --no-reflective-merge are contradictory; "
+            "pass neither to use the method's own declaration")
+    if on:
+        return True
+    if off:
+        return False
+    return None
+
+
 def standard_main(build: Callable[[int], MethodPolicy],
                   argv: Optional[Sequence[str]] = None) -> int:
     """The shared ``main`` for one method's folder module.
@@ -403,6 +436,12 @@ def standard_main(build: Callable[[int], MethodPolicy],
     add_standard_args(parser, model_default="glm-5.2")
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--candidates", type=int, default=2)
+    parser.add_argument(
+        "--no-reflective-merge", action="store_true",
+        help=("turn the model merge off for a method that declares it. The "
+              "shared `--reflective-merge` turns it on for a method that does "
+              "not; without either, the method's own declaration stands, and "
+              "that declaration is a fidelity statement rather than a knob"))
     parser.add_argument("--staleness", default="guarded",
                         choices=["guarded", "reflective", "full"],
                         help="what to do with a diff proposed against a head the "
@@ -431,11 +470,14 @@ def standard_main(build: Callable[[int], MethodPolicy],
     mode = ("serial" if args.serial
             else "async_pipeline" if args.asynchronous
             else "sync_parallel")
+    override = _reflective_override(args, policy)
+    merge_on = policy.reflective if override is None else override
     if args.dry_run:
         print(f"{policy.name} [{policy.fidelity}] mode={mode} "
               f"candidates={args.candidates} workers={args.workers} "
               f"proposal calls={args.candidates * policy.proposal_calls_per_candidate} "
-              f"reflective_merge={policy.reflective} self_verify={policy.self_verify}")
+              f"reflective_merge={merge_on}{'' if override is None else ' (overridden)'} "
+              f"self_verify={policy.self_verify}")
         for note in policy.notes:
             print(f"  - {note}")
         print("[dry-run] no dataset or model API was accessed.")
@@ -452,7 +494,7 @@ def standard_main(build: Callable[[int], MethodPolicy],
     outcome = run_port(
         policy, recorder, mode=mode, seed=args.seed, workers=args.workers,
         candidate_budget=args.candidates, max_seconds=args.max_seconds,
-        staleness=args.staleness,
+        staleness=args.staleness, reflective=_reflective_override(args, policy),
     )
     print(f"{policy.name}/{mode}: quality {outcome.baseline_quality:.3f} -> "
           f"{outcome.final_quality:.3f}, validation "

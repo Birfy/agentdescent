@@ -65,6 +65,15 @@ the ones that forbid the working.
 That is the comparison the matrix exists for: same domain, same runtime, same
 budget, and the mechanism is the variable.
 
+
+!!! note "These cross-algorithm figures demonstrate that each port runs, not which is best"
+    Every row is one run per seed, and the seed fixes the data splits and the
+    method's own sampler -- **not the model**, which is sampled at temperature
+    0.7. Re-running an identical command at an identical seed moves the number:
+    PromptBreeder's seed 0 scored 0.438 on one run and 0.875 on the next, from
+    the same script and the same code. Read the table as evidence the mechanism
+    executes end to end and produces a plausible artifact; a ranking would need
+    repeats per seed, which these runs do not have.
 !!! danger "The selection rule was uniform, and said it was not"
     The port implemented `λ·uniform + (1−λ)·softmax(α·(s−s_max))` and dropped
     one line of upstream's `select_round`:

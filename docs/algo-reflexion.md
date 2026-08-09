@@ -64,6 +64,15 @@ Reflexion is being asked a question its paper does not ask. Upstream's memory is
 port shares one memory across the domain, so what is measured is whether verbal
 reflection **transfers**. The answer here is "partly, and unreliably".
 
+
+!!! note "These cross-algorithm figures demonstrate that each port runs, not which is best"
+    Every row is one run per seed, and the seed fixes the data splits and the
+    method's own sampler -- **not the model**, which is sampled at temperature
+    0.7. Re-running an identical command at an identical seed moves the number:
+    PromptBreeder's seed 0 scored 0.438 on one run and 0.875 on the next, from
+    the same script and the same code. Read the table as evidence the mechanism
+    executes end to end and produces a plausible artifact; a ranking would need
+    repeats per seed, which these runs do not have.
 !!! danger "Without the worked examples, the reflector answered the arithmetic"
     `_generate_reflection_query` prepends `FEW_SHOT_EXAMPLES` under *"Here are
     two examples:"* — two failed trajectories each followed by its `New plan:`.
