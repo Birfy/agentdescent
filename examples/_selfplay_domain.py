@@ -78,8 +78,22 @@ def frozen_cart(rng: random.Random, kind: str) -> CartTask:
     )
 
 
+#: Self-play training slots, and frozen evaluation carts per split. 16, not 4:
+#: `run_port` refuses a run whose train split is smaller than the worker count,
+#: so four slots capped all three inference-analogue ports at four workers with
+#: a four-cart gate, where one item moves the score by 0.25.
+SELFPLAY_SLOTS = 16
+FROZEN_PER_SPLIT = 16
+
+
 def selfplay_splits(seed: int, name: str) -> Tuple[List[Task], List[Task], List[Task]]:
-    """4 self-play training slots; 4 + 4 frozen evaluation carts."""
+    """`SELFPLAY_SLOTS` self-play training slots; two frozen evaluation splits.
+
+    The evaluation carts are drawn from the seed at build time, so the evolved
+    memory cannot shape its own test set -- the property the three ports that
+    share this domain each claim, and the reason the carts are generated here
+    rather than by the proposer.
+    """
     rng = random.Random((seed, name).__repr__())
     train = [
         Task(
@@ -87,7 +101,7 @@ def selfplay_splits(seed: int, name: str) -> Tuple[List[Task], List[Task], List[
             prompt="Generate and solve one verifier-grounded latent curriculum item.",
             meta={"kind": "selfplay", "slot": seed + index},
         )
-        for index in range(4)
+        for index in range(SELFPLAY_SLOTS)
     ]
 
     def frozen(split: str, count: int) -> List[Task]:
@@ -101,7 +115,8 @@ def selfplay_splits(seed: int, name: str) -> Tuple[List[Task], List[Task], List[
             ))
         return rows
 
-    return train, frozen("held-out", 4), frozen("test", 4)
+    return (train, frozen("held-out", FROZEN_PER_SPLIT),
+            frozen("test", FROZEN_PER_SPLIT))
 
 
 def proposer_prompt(role: str, slot: int, memory: str) -> str:
