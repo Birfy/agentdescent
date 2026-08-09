@@ -1,0 +1,4 @@
+{
+  "id": "dict-invert-dupes",
+  "why": "loses keys that share a value"
+}

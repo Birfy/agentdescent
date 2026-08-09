@@ -1,0 +1,4 @@
+{
+  "id": "prefix-sum-init",
+  "why": "omits the leading zero"
+}

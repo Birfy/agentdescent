@@ -1,0 +1,4 @@
+{
+  "id": "queue-fifo",
+  "why": "pops from the wrong end, making it a stack"
+}

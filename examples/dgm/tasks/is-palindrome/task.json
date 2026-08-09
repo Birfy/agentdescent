@@ -1,0 +1,4 @@
+{
+  "id": "is-palindrome",
+  "why": "counts punctuation and case"
+}

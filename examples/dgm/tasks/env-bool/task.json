@@ -1,0 +1,4 @@
+{
+  "id": "env-bool",
+  "why": "treats the literal string false as true"
+}

@@ -1,0 +1,4 @@
+{
+  "id": "rate-limit-window",
+  "why": "counts all calls ever, not those in the window"
+}

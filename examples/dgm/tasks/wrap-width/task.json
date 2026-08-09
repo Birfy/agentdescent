@@ -1,0 +1,4 @@
+{
+  "id": "wrap-width",
+  "why": "breaks mid-word instead of on spaces"
+}

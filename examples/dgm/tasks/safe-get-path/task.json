@@ -1,0 +1,4 @@
+{
+  "id": "safe-get-path",
+  "why": "raises instead of returning the default"
+}

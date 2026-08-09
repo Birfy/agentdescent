@@ -1,0 +1,4 @@
+{
+  "id": "abs-diff-unsigned",
+  "why": "returns a negative difference"
+}

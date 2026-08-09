@@ -1,0 +1,4 @@
+{
+  "id": "percent-of-zero",
+  "why": "divides by zero when the total is 0"
+}

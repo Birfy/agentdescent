@@ -1,0 +1,4 @@
+{
+  "id": "dedent-common",
+  "why": "removes a fixed amount instead of the common prefix"
+}

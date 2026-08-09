@@ -1,0 +1,4 @@
+{
+  "id": "word-count",
+  "why": "counts punctuation as part of a word"
+}

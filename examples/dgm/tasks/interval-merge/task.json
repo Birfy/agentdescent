@@ -1,0 +1,4 @@
+{
+  "id": "interval-merge",
+  "why": "does not merge touching intervals"
+}

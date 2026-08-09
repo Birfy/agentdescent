@@ -1,0 +1,4 @@
+{
+  "id": "csv-quote",
+  "why": "quoted field containing the delimiter is split"
+}

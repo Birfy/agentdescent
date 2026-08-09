@@ -1,0 +1,31 @@
+{
+  "model": "deepseek-v4-flash",
+  "provider": "claude",
+  "eval_concurrency": 16,
+  "cells": [
+    {
+      "row": "dgm",
+      "dataset": "vendored bugs w/ pytest",
+      "arm": "async",
+      "seed": 0,
+      "objective": "real",
+      "width": 2,
+      "budget": 16,
+      "staleness": "full",
+      "tasks": 64,
+      "held_out": 32,
+      "engine_rollouts": 17,
+      "stale_considered": 0,
+      "stale_discarded": 0,
+      "seed_score": 0.844,
+      "final_reward": 0.844,
+      "archive_scores": [
+        0.906,
+        0.906,
+        0.844
+      ],
+      "kept_below_seed": 0,
+      "solve_py_lines": 79
+    }
+  ]
+}

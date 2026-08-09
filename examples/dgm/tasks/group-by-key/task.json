@@ -1,0 +1,4 @@
+{
+  "id": "group-by-key",
+  "why": "overwrites instead of appending"
+}

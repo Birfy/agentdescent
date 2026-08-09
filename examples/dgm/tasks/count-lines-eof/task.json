@@ -1,0 +1,4 @@
+{
+  "id": "count-lines-eof",
+  "why": "miscounts a file with no trailing newline"
+}

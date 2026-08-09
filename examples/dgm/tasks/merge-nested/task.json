@@ -1,0 +1,4 @@
+{
+  "id": "merge-nested",
+  "why": "nested dicts are replaced instead of merged"
+}

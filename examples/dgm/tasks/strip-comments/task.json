@@ -1,0 +1,4 @@
+{
+  "id": "strip-comments",
+  "why": "a '#' inside a string literal is treated as a comment"
+}
