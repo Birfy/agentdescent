@@ -1,0 +1,4 @@
+{
+  "id": "levenshtein-empty",
+  "why": "crashes on an empty string"
+}

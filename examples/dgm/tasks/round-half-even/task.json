@@ -1,0 +1,4 @@
+{
+  "id": "round-half-even",
+  "why": "rounds half away from zero"
+}

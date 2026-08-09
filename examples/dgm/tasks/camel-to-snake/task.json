@@ -1,0 +1,4 @@
+{
+  "id": "camel-to-snake",
+  "why": "acronyms become one letter per underscore"
+}

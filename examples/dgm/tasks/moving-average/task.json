@@ -1,0 +1,4 @@
+{
+  "id": "moving-average",
+  "why": "includes the incomplete leading window"
+}

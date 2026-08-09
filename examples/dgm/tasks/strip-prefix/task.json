@@ -1,0 +1,4 @@
+{
+  "id": "strip-prefix",
+  "why": "uses lstrip, which strips characters not a prefix"
+}

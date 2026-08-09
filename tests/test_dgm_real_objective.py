@@ -168,3 +168,73 @@ def test_the_loop_commits_self_edits_and_grows_the_archive():
     assert seen["n"] > 0, "the proposer was never asked for a self-modification"
     committed = sum(h.committed for h in result.history)
     assert committed > 0, "no self-edit ever reached the head"
+
+
+def test_an_agent_that_retries_gets_more_than_one_model_call():
+    """The bridge must not decide how many calls an agent may make.
+
+    It used to: the harness ran the agent once to capture a prompt, answered it,
+    and re-ran with that single reply served from a file. "One call per task" was
+    then a property of the harness, and the first self-modification this
+    objective ever produced was a retry loop -- the one improvement that scheme
+    made impossible. It scored 0.875 -> 0.500 and the regression was the
+    harness's.
+    """
+    cases = {c.id: c for c in R.load_tasks()}
+    retrying = dict(R.SEED_AGENT)
+    retrying["agent/solve.py"] = (
+        'from tools import read_source, run_tests, write_source\n\n'
+        'def solve(task_dir, llm):\n'
+        '    for _ in range(3):\n'
+        '        reply = llm("attempt")\n'
+        '        write_source(task_dir, reply)\n'
+        '        passed, failed, _ = run_tests(task_dir)\n'
+        '        if failed == 0 and passed > 0:\n'
+        '            return\n')
+    seen = {"n": 0}
+    good = ('def expand(spec):\n    if "-" not in spec:\n        return [int(spec)]\n'
+            '    lo, hi = spec.split("-")\n    return list(range(int(lo), int(hi) + 1))\n')
+
+    def flaky(_prompt):
+        seen["n"] += 1
+        return "# not python at all(" if seen["n"] < 3 else good
+
+    ok, _ = R.run_agent_on_task(retrying, cases["range-end"], flaky)
+    assert seen["n"] == 3, f"the agent got {seen['n']} call(s), not the 3 it asked for"
+    assert ok, "the third attempt was correct and should have resolved the task"
+
+
+def test_a_runaway_agent_is_cut_off_rather_than_billed_forever():
+    cases = {c.id: c for c in R.load_tasks()}
+    looping = dict(R.SEED_AGENT)
+    looping["agent/solve.py"] = (
+        'def solve(task_dir, llm):\n'
+        '    while True:\n        llm("again")\n')
+    seen = {"n": 0}
+
+    def counting(_prompt):
+        seen["n"] += 1
+        return "# nope\n"
+
+    ok, detail = R.run_agent_on_task(looping, cases["range-end"], counting,
+                                     max_calls=4)
+    assert not ok
+    assert seen["n"] <= 4, f"the budget did not hold: {seen['n']} calls"
+    assert "exceeded" in detail
+
+
+def test_the_baseline_is_measured_even_when_no_self_edit_ever_lands():
+    """`seed_score` used to be set inside `step()`, which only runs when a card
+    reaches the merger -- so a run whose self-modifications all failed reported
+    `DGMContext.seed_score`'s 0.0 default as though it had measured it. The
+    final number came from the engine and was right; only the thing it was
+    compared against was invented, which is the more dangerous half.
+    """
+    cases = R.load_tasks()[:6]
+    # An actor that fixes nothing and proposes nothing: no card can ever arrive.
+    result = R.run_dgm_real(lambda _p: "", cases=cases, generations=1,
+                            selfimprove_size=2, max_rollouts=2)
+    assert getattr(result, "dgm_seed_score", None) is not None, (
+        "the baseline was never measured")
+    assert len(getattr(result, "dgm_archive", [])) == 1, (
+        "the seed itself belongs in the archive before round 0")

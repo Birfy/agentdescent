@@ -38,6 +38,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import warnings
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple
@@ -138,8 +139,8 @@ def _materialise(agent_files: Dict[str, str], root: pathlib.Path) -> None:
 
 
 def run_agent_on_task(agent_files: Dict[str, str], case: TaskCase,
-                      llm: Callable[[str], str],
-                      timeout: float = 120.0) -> Tuple[bool, str]:
+                      llm: Callable[[str], str], timeout: float = 180.0,
+                      max_calls: int = 6) -> Tuple[bool, str]:
     """Run one candidate agent against one task in a scratch copy.
 
     Returns ``(resolved, detail)``. **A broken agent scores zero rather than
@@ -156,43 +157,68 @@ def run_agent_on_task(agent_files: Dict[str, str], case: TaskCase,
 
         driver = work / "_run.py"
         driver.write_text(
-            "import sys, json\n"
+            "import sys\n"
             "sys.path.insert(0, 'agent')\n"
             "from solve import solve\n"
             "import _bridge\n"
             "solve(sys.argv[1], _bridge.llm)\n")
-        # The model call crosses a process boundary: the agent runs in its own
-        # interpreter (a self-edit can and does break imports), so replies are
-        # pre-computed here and served from a file. One prompt per task keeps
-        # that honest -- an agent that wants two calls cannot have them, and the
-        # seed's own `solve` makes exactly one.
-        prompt_file, reply_file = work / "_prompt.txt", work / "_reply.txt"
+        # A line-delimited request/reply channel on the child's stdio, because
+        # the agent runs in its own interpreter (a self-edit can and does break
+        # imports) and the model lives in this one.
+        #
+        # This replaced a pre-fetch scheme: run the agent once to capture its
+        # prompt, answer it here, then re-run with that single reply served from
+        # a file. That made "one model call per task" a property of the *harness*
+        # rather than of the agent -- and the first self-modification this
+        # objective ever produced was a retry loop, which is exactly the
+        # improvement the pre-fetch made impossible. It scored 0.875 -> 0.500,
+        # and the regression was the harness's, not the agent's.
         (work / "_bridge.py").write_text(
-            "import pathlib\n"
+            "import json, sys\n"
             "def llm(prompt):\n"
-            f"    pathlib.Path({str(prompt_file)!r}).write_text(prompt)\n"
-            "    raise SystemExit(17)\n")
+            "    sys.stdout.write(json.dumps({'prompt': prompt}) + '\\n')\n"
+            "    sys.stdout.flush()\n"
+            "    line = sys.stdin.readline()\n"
+            "    if not line:\n"
+            "        raise RuntimeError('the harness closed the channel')\n"
+            "    return json.loads(line)['reply']\n")
 
-        # Pass 1: let the agent build its prompt, then stop at the boundary.
-        subprocess.run([sys.executable, str(driver), str(task_dir)],
-                       cwd=str(work), capture_output=True, text=True,
-                       timeout=timeout)
-        if not prompt_file.is_file():
+        proc = subprocess.Popen(
+            [sys.executable, "-u", str(driver), str(task_dir)],
+            cwd=str(work), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True)
+        calls, deadline = 0, time.monotonic() + timeout
+        try:
+            while True:
+                if time.monotonic() > deadline:
+                    proc.kill()
+                    return False, f"timed out after {calls} model call(s)"
+                line = proc.stdout.readline()
+                if not line:                       # the agent finished or died
+                    break
+                try:
+                    request = json.loads(line)
+                except json.JSONDecodeError:
+                    continue                       # the agent printed something else
+                if calls >= max_calls:
+                    # A budget, not a correctness rule: an agent is free to
+                    # learn a retry loop, and not free to loop forever on the
+                    # matrix's money. Closing the channel surfaces as an error
+                    # inside the agent, which is scoreable.
+                    proc.kill()
+                    return False, f"exceeded {max_calls} model calls"
+                calls += 1
+                reply = llm(request.get("prompt", ""))
+                proc.stdin.write(json.dumps({"reply": reply}) + "\n")
+                proc.stdin.flush()
+            proc.wait(timeout=max(1.0, deadline - time.monotonic()))
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+        if calls == 0:
             return False, "agent never reached a model call"
-        reply = llm(prompt_file.read_text())
-        reply_file.write_text(reply)
-
-        # Pass 2: same agent, replies served from disk.
-        (work / "_bridge.py").write_text(
-            "import pathlib\n"
-            f"_r = pathlib.Path({str(reply_file)!r}).read_text()\n"
-            "def llm(prompt):\n"
-            "    return _r\n")
-        proc = subprocess.run([sys.executable, str(driver), str(task_dir)],
-                              cwd=str(work), capture_output=True, text=True,
-                              timeout=timeout)
         if proc.returncode != 0:
-            tail = (proc.stderr or proc.stdout).strip().splitlines()
+            tail = (proc.stderr.read() or "").strip().splitlines()
             return False, "agent crashed: " + (tail[-1][:160] if tail else "?")
 
         check = subprocess.run(
@@ -395,10 +421,12 @@ def run_dgm_real(llm: Callable[[str], str], *, cases: Optional[List[TaskCase]] =
         return json.dumps({"edits": [{"path": path, "content": body}]})
 
     def factory(ledger, verifier, audit, config, policy):
-        return SourceArchiveAggregator(ledger, verifier, ctx,
-                                       artifact_id="coding_agent")
+        agg = SourceArchiveAggregator(ledger, verifier, ctx,
+                                      artifact_id="coding_agent")
+        agg.seed()          # measure the baseline before round 0, not on first card
+        return agg
 
-    return evolve(
+    result = evolve(
         tasks, reward, run=run, propose=propose, strategy=strategy,
         initial_state=dict(SEED_AGENT), blast_radius=0.6,
         artifact_id="coding_agent", rounds=generations,
@@ -410,6 +438,13 @@ def run_dgm_real(llm: Callable[[str], str], *, cases: Optional[List[TaskCase]] =
         staleness_policy=get_policy(staleness),
         eval_concurrency=eval_concurrency,
         verbose=verbose, max_rollouts=max_rollouts)
+    # The `EvolutionResult` alone cannot answer "did the agent improve": the
+    # seed's own score and the archive live on `ctx`, and returning only the
+    # result leaves a run reporting a final number with nothing to compare it
+    # against -- the same reporting gap ACE, EvoSkill and SkillOpt each had.
+    result.dgm_seed_score = ctx.seed_score
+    result.dgm_archive = ctx.archive
+    return result
 
 
 # ===========================================================================
@@ -465,6 +500,29 @@ class SourceArchiveAggregator:
         self.head_index = 0
         self._seeded = False
 
+    def seed(self) -> None:
+        """Score the seed agent -- once, and *before* any card arrives.
+
+        This lived inside `step()`, which only runs when a card reaches the
+        merger. A run whose self-modifications all failed therefore never
+        measured its own baseline, and `DGMContext.seed_score` defaults to 0.0 --
+        so the report read `0.000 -> 0.844` for a seed that actually scored
+        0.844 itself. The final number came from the engine and was right; only
+        the thing it was compared against was invented. ADAS moved its seeding
+        out of `step()` for the same reason, and EvoSkill and SkillOpt each
+        shipped this exact bug.
+        """
+        if self._seeded:
+            return
+        from agentdescent.ledger import Ledger
+        head = self.ledger.snapshot(Ledger.DEV).get(self.aid)
+        seed = SourceAgent(dict(head.state), parent=None, generation=0)
+        seed.score = self._staged(seed.files)
+        self.ctx.archive.append(seed)
+        self.ctx.seen.add(seed.key())
+        self.ctx.seed_score = self.ctx.best_score = seed.score
+        self.head_index, self._seeded = 0, True
+
     def _staged(self, files: Dict[str, str]) -> float:
         from examples.dgm.dgm_self_improve import (STAGE_MEDIUM, STAGE_SMALL,
                                                    staged_evaluate)
@@ -486,13 +544,7 @@ class SourceArchiveAggregator:
         snap = self.ledger.snapshot(Ledger.DEV)
         head = snap.get(self.aid)
         base_vv = {self.aid: snap.version.get(self.aid, 0)}
-        if not self._seeded:
-            seed = SourceAgent(dict(head.state), parent=None, generation=0)
-            seed.score = self._staged(seed.files)
-            self.ctx.archive.append(seed)
-            self.ctx.seen.add(seed.key())
-            self.ctx.seed_score = self.ctx.best_score = seed.score
-            self.head_index, self._seeded = 0, True
+        self.seed()                                # no-op after construction
 
         parent_idx = self.head_index
         parent = self.ctx.archive[parent_idx]

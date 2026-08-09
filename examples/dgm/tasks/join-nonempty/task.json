@@ -1,0 +1,4 @@
+{
+  "id": "join-nonempty",
+  "why": "joins empty strings too, doubling separators"
+}

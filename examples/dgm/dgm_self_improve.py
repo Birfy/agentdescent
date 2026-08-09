@@ -487,6 +487,10 @@ def build_parser() -> argparse.ArgumentParser:
         p, model_default=None, max_seconds_default=15.0,
         model_help="optional: let an LLM propose self-modifications (else deterministic)")
     p.add_argument("--generations", type=int, default=12)
+    p.add_argument("--write-agent", default="", metavar="DIR",
+                   help=("write the evolved agent's source here (--objective "
+                         "real). The ledger is scratch and is reaped on exit, so "
+                         "without this the thing the run produced is not kept"))
     p.add_argument("--objective", default="surrogate",
                    choices=["surrogate", "real"],
                    help=("`surrogate` hashes each SWE instance id into a latent "
@@ -552,7 +556,26 @@ def _main_real(args) -> None:
     print("\n=== best self-improved agent ===")
     for path in sorted(files):
         print(f"--- {path} ({len(files[path].splitlines())} lines) ---")
-    print(f"\nheld-out resolve-rate: {result.final_reward:.3f}")
+    if args.write_agent:
+        # The ledger is a scratch git repo that `evolve` reaps on exit, so the
+        # evolved source is gone the moment the run ends unless it is asked for.
+        # For a self-editing agent that source *is* the result -- a line count is
+        # not a finding.
+        plan = result.write_to(args.write_agent)
+        print(f"\nwrote {len(plan['written'])} file(s) to {args.write_agent}")
+    seed = getattr(result, "dgm_seed_score", None)
+    archive = getattr(result, "dgm_archive", []) or []
+    base = "not measured" if seed is None else f"{seed:.3f}"
+    print(f"\nheld-out resolve-rate: {base} -> {result.final_reward:.3f}")
+    if archive:
+        scores = sorted((a.score for a in archive), reverse=True)
+        worse = sum(1 for a in archive[1:] if a.score < archive[0].score)
+        print(f"archive  : {len(archive)} agent(s), scores "
+              + ", ".join(f"{s:.3f}" for s in scores[:6])
+              + (" ..." if len(scores) > 6 else ""))
+        # The point of keep-all, and the thing the surrogate objective cannot
+        # produce: children that scored *below* the seed and were kept anyway.
+        print(f"           {worse} kept below the seed (stepping stones)")
     print(f"stopped   : {result.stop_reason}")
     if result.error:
         print(f"WARNING: the run did not finish cleanly -- {result.error}")
@@ -582,7 +605,7 @@ def main(argv=None) -> None:
               "generation (synchronous DP; the archive merge is the barrier)")
     if args.objective == "real":
         print("\nObjective: REAL -- the agent edits its own Python source and is "
-              "scored by pytest.\n           Not SWE-bench: six vendored bugs, so "
+              "scored by pytest.\n           Not SWE-bench: a vendored bug set, so "
               "these numbers are not comparable with the paper.")
     else:
         print("\nObjective: SURROGATE (capability-cover) -- real DGM runs SWE-bench in "

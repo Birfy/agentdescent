@@ -1,0 +1,4 @@
+{
+  "id": "clamp-bounds",
+  "why": "excludes the upper bound"
+}

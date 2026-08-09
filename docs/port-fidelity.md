@@ -222,6 +222,16 @@ column of each section below says exactly where to look.
 * **A past departure, now fixed**: the port once had a third staged-eval rung
   upstream's self-improve loop does not use. It passes exactly two subsets, and
   the test above pins that it stops at medium.
+* **The surrogate objective is monotone, and `--objective real` is the way out.**
+  Hashing an instance id into a capability set means adding a capability can
+  never un-resolve a task, so a self-modification can never regress -- which
+  removes the reason DGM keeps an archive at all. `--objective real` evolves the
+  agent's own Python source against vendored bugs with real pytest runs: not
+  SWE-bench, but real execution, real regressions, and self-edits that can leave
+  the agent unable to run. Measured there, the seed scores 0.844 and the best
+  archived child 0.906, and an earlier run archived children at 0.875 and 0.500
+  -- the worse one kept, which is what `keep-all` is for and what the surrogate
+  cannot produce. See [algo-dgm.md](algo-dgm.md#measured-the-real-objective).
 * **Selection rule lives in**: `DGMParentSelection` — `sigmoid(10·(s−0.5)) × 1/(1+children)` as a named `SelectionPolicy` over the archive
   `examples/dgm/dgm_self_improve.py` — [`Archive`](selection.md) with
   `sampling="novelty"`.
@@ -293,7 +303,7 @@ be speedups over.
 | EvoSkill | FinQA (OfficeQA is HF-gated) | — | async N=4: 0.527 → 0.707 val over 120 rollouts | — | — | scheduling and merge timing; budget must be pinned. `--reflective-merge` offers the frontier one fused candidate per sweep instead of one per worker (`update_frontier` and the parent draw unchanged). The async arm used to swap in `SgdSkillAggregator` — no frontier, per-batch validation — which is now removed rather than optional |
 | SkillOpt | SearchQA (`--hard` subset) | — | async N=4: 0.053 → 0.211 val over 60 rollouts | — | — | scheduling and merge timing; budget must be pinned. `--minibatch` is this port's name for the worker count, not upstream's minibatch of tasks. `--reflective-merge` scores one fused patch per step, which is *upstream's* shape (a ReflACT step emits one patch of up to `lr` edits) rather than a departure from it |
 | ADAS | GPQA Diamond (MGSM is saturated) | — | **not measurable on this model** — see [algo-adas.md](algo-adas.md#measured-the-cost-and-why-there-is-no-lift-number) | — | — | scheduling and merge timing; budget must be pinned. `--reflective-merge` is deliberately *not* passed: the archive is keep-all and is the meta-agent's whole conditioning signal, so fusing a round's designs would remove archive entries rather than change merge timing |
-| DGM | surrogate | — | — | — | — | scheduling and merge timing; budget must be pinned. `--serial` sets `selfimprove_size=1`, which is a population of one, so this row's control is the degenerate archive rather than upstream's default |
+| DGM | vendored bugs w/ pytest (`--objective real`) | — | async N=2: seed 0.844, best archived child **0.906** over 16 rollouts | — | — | scheduling and merge timing; budget must be pinned. `--serial` sets `selfimprove_size=1`, which is a population of one, so this row's control is the degenerate archive rather than upstream's default |
 | OpenEvolve | function minimization | — | — | — | — | **none** — `rounds = iterations // workers` already fixes total work, so this row's speedup is the only one that was equal-budget before the flag existed |
 
 **The quality column is allowed to go down, and a table of all-green is probably

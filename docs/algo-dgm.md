@@ -58,31 +58,90 @@ In [`examples/dgm/dgm_self_improve.py`](https://github.com/Birfy/agentdescent/bl
 | **`dgm_parent_weights` / `choose_selfimproves`** | (selection) | the exact DGM rule `p_i ∝ sigmoid(10·(score−0.5)) · 1/(1+children_i)` |
 | `propose` + `make_surrogate_evaluator` | `propose=` / objective | add the most-needed capability; the transparent surrogate objective (swap in a real Docker harness via `evaluate_fn`) |
 
-## Measured — surrogate objective
+## Measured — the real objective
 
-`--generations 4 --provider openai --model deepseek-v4-flash`:
+`--objective real` evolves the agent's own Python source and scores it by running
+pytest. 64 vendored bugs in `examples/dgm/tasks/` (32 train / 32 held-out),
+16 rollouts, `--staleness full`, `deepseek-v4-flash`, one seed:
 
 | | resolve rate |
 |---|---|
-| val, before → after | 0.000 → **0.300** |
-| test (held out, never seen by selection) | 0.200 |
+| seed agent, held out | **0.844** (27 of 32) |
+| best archived child | **0.906** (29 of 32) |
+| archive | 3 agents: 0.906, 0.906, 0.844 |
+| the agent's own `solve.py` | 18 lines → **79 lines** |
 
-Archive: 4 agents (keep-all). The best lineage reached generation 3 with
-capabilities `context-retrieval`, `dependency-resolver`, `diff-minimization`,
-`regression-test-runner`.
+**What it wrote for itself.** The seed agent sends `lib.py` and the pytest output
+to a model and writes the reply straight back. Its own diagnosis produced three
+changes, all of them aimed at failures that actually occurred:
 
-!!! warning "This is the surrogate, not SWE-bench"
-    The objective is a capability-cover stand-in; real DGM evaluates on SWE-bench
-    Verified inside Docker, which this example does not run. What is faithful is
-    the **archive, the selection rule and the staged escalation** — the numbers
-    above measure those mechanics, not coding ability.
+```python
+def _strip_code_fences(reply):     # replies arrived wrapped in ``` and broke the import
+    if text.startswith("```"): ...
+    match = re.search(r"```[a-zA-Z0-9_+-]*\s*\n(.*?)```", text, re.DOTALL)
+
+def _is_success(out):              # "passed" alone is not success
+    return " passed" in out and " failed" not in out and " error" not in out
+
+test_source = (task_path / "test_lib.py").read_text()   # read the tests too
+```
+
+The fence stripper is the one that mattered: measured before the run, six of the
+sixteen tasks the seed failed came back as `1 error` rather than `1 failed` --
+the reply had been written into `lib.py` complete with its Markdown fence, so the
+module would not import. Reading the test file is not a fix for anything that
+failed; it is the agent giving itself an input the seed never had.
+
+!!! warning "This is not SWE-bench"
+    64 hand-written bugs are not 500 repository issues, and a number here cannot
+    be compared with the paper. What this reproduces is the *shape*: real source,
+    real execution, real pass/fail, and self-edits that can leave the agent worse
+    -- or unable to run at all.
+
+    The [surrogate objective](#honesty-boundary) remains the default, and its
+    limitation is worth stating precisely: it is **monotone**. Adding a
+    capability can never un-resolve a task, so a self-modification can never
+    regress -- which removes the reason to keep an archive. Open-ended search
+    retains stepping stones because a worse intermediate can lead somewhere
+    better, and under a monotone objective there are no worse intermediates.
+    Under the real objective there are: an earlier run archived children at
+    **0.875 and 0.500**, the worse one kept, which is the behaviour `keep-all`
+    exists for and which the surrogate cannot produce.
+
+!!! danger "Two numbers on this page were wrong before they were right"
+    An earlier version of this run reported **0.000 → 0.844**. The final figure
+    was correct and the baseline was invented: the archive seeded itself inside
+    `step()`, which only runs once a card reaches the merger, so a run whose
+    self-modifications all failed never measured its own seed and printed
+    `DGMContext.seed_score`'s 0.0 default. A wrong denominator under a right
+    numerator reads as a large success. Seeding now happens when the archive is
+    built, and a test pins it with an actor that proposes nothing at all.
+
+    Before that, a self-edit that added a **retry loop** scored 0.875 → 0.500 and
+    looked like a regression. It was not: the harness pre-fetched a single model
+    reply and served it to every call, so the second and third attempts received
+    the first answer again. "One model call per task" was a property of the
+    harness, and the first improvement the agent ever proposed was the one thing
+    that made impossible. The bridge is now a real request/reply channel with a
+    call budget.
 
 ## Run it
 
 ```bash
-python -m examples.dgm.dgm_self_improve                      # runs offline (surrogate)
+python -m examples.dgm.dgm_self_improve                      # offline (surrogate)
 python -m examples.dgm.dgm_self_improve --generations 12 --archive keep_all
 python -m examples.dgm.dgm_self_improve --model claude-haiku-4-5   # LLM proposes modifications
+
+# the real objective, as measured above
+python -m examples.dgm.dgm_self_improve --yes --seed 0 --objective real \
+    --selfimprove-size 2 --generations 9999 --budget-rollouts 16 \
+    --staleness full --async --async-ratio 3 --max-seconds 2700 \
+    --eval-concurrency 16 --model deepseek-v4-flash \
+    --write-agent /tmp/evolved-agent
 ```
 
-Offline tests: `tests/test_dgm_example.py`.
+`--write-agent` is not optional if you want to see what the run produced: the
+ledger is a scratch git repo that `evolve` reaps on exit, and for a self-editing
+agent that source *is* the result.
+
+Offline tests: `tests/test_dgm_example.py`, `tests/test_dgm_real_objective.py`.

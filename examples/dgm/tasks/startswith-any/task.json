@@ -1,0 +1,4 @@
+{
+  "id": "startswith-any",
+  "why": "only checks the first candidate"
+}

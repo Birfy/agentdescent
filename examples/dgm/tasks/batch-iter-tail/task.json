@@ -1,0 +1,4 @@
+{
+  "id": "batch-iter-tail",
+  "why": "silently drops a partial final batch"
+}
