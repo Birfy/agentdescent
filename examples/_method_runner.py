@@ -385,6 +385,8 @@ def run_port(
                 workers if mode in ("sync_parallel", "async_pipeline") else 1
             ),
             "reflective_merge": use_reflective,
+            "acceptance": (type(policy.engine.acceptance).__name__
+                           if policy.engine.acceptance is not None else "default"),
             "self_verify": policy.self_verify,
             "baseline_reward": baseline_validation,
             "final_reward": result.final_reward,
@@ -424,13 +426,22 @@ def _reflective_override(args, policy: MethodPolicy) -> Optional[bool]:
     return None
 
 
-def standard_main(build: Callable[[int], MethodPolicy],
-                  argv: Optional[Sequence[str]] = None) -> int:
+def standard_main(build: Callable[..., MethodPolicy],
+                  argv: Optional[Sequence[str]] = None,
+                  extra_args: Optional[Callable[[argparse.ArgumentParser], None]] = None,
+                  build_kwargs: Optional[Callable[[argparse.Namespace], dict]] = None) -> int:
     """The shared ``main`` for one method's folder module.
 
     ``--dry-run`` prints the plan with zero network access; a live run drives
     the method through :func:`run_port` once, in the mode picked by
     ``--serial`` / ``--async`` (default: synchronous parallel).
+
+    ``extra_args`` and ``build_kwargs`` are the seam for a method that has a
+    switch of its own. Gödel Agent's ``--gateless`` was documented in five
+    places -- its module docstring, its README, `algo-godel-agent.md`,
+    `acceptance-policies.md` and `matrix-overview.md` -- while the parser
+    rejected it outright, because `build` took a keyword nothing could reach.
+    A method-specific flag needs somewhere to be declared, or it becomes prose.
     """
     parser = argparse.ArgumentParser()
     add_standard_args(parser, model_default="glm-5.2")
@@ -455,10 +466,13 @@ def standard_main(build: Callable[[int], MethodPolicy],
               "at 0.0 / 0.7 / 1.0, so it is second-order next to what the prompt "
               "says -- but it is not nothing, and it was not reportable"))
     parser.add_argument("--max-tokens", type=int, default=1024)
+    if extra_args is not None:
+        extra_args(parser)
     parser.add_argument("--timeout", type=float, default=180.0)
     args = parser.parse_args(argv)
+    extra = dict(build_kwargs(args)) if build_kwargs is not None else {}
 
-    policy = build(args.seed)
+    policy = build(args.seed, **extra)
     # `--budget-rollouts` is `add_standard_args`' name for the quantity these
     # methods call `--candidates`: the total number of proposals the run may
     # spend. It was declared for every port and read by none of them here, so a
@@ -477,7 +491,11 @@ def standard_main(build: Callable[[int], MethodPolicy],
               f"candidates={args.candidates} workers={args.workers} "
               f"proposal calls={args.candidates * policy.proposal_calls_per_candidate} "
               f"reflective_merge={merge_on}{'' if override is None else ' (overridden)'} "
-              f"self_verify={policy.self_verify}")
+              f"self_verify={policy.self_verify}"
+              # A switch that changes the acceptance rule belongs in the run's
+              # own record, not only in the flag that set it.
+              + (f" acceptance={type(policy.engine.acceptance).__name__}"
+                 if policy.engine.acceptance is not None else ""))
         for note in policy.notes:
             print(f"  - {note}")
         print("[dry-run] no dataset or model API was accessed.")

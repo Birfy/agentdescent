@@ -86,7 +86,7 @@ def build(seed: int, *, gateless: bool = False) -> MethodPolicy:
         fidelity=FIDELITY,
         notes=(
             "The artifact owns both solve and self-improvement prompt functions; each proposal is produced by the artifact's own current self-improvement prompt.",
-            "Upstream is gateless (edits kept unless they crash); the held-out gate here is a deliberate substitution, not a preserved mechanism. --gateless runs the faithful accept-any-compiling variant.",
+            "Upstream is gateless (edits kept unless they crash); the held-out gate here is a deliberate substitution, not a preserved mechanism. --gateless runs the faithful accept-any-compiling variant -- a flag five documents described and the parser rejected until it was wired.",
             "An unparseable self-edit costs its candidate and produces no diff; there is no substitute source.",
             "AST-gated replacement stands in for monkey-patching the full scaffold.",
         ),
@@ -105,8 +105,20 @@ def build(seed: int, *, gateless: bool = False) -> MethodPolicy:
     )
 
 
+def _gateless_flag(parser) -> None:
+    parser.add_argument(
+        "--gateless",
+        action="store_true",
+        help=("run the faithful variant: every edit that compiles is kept, as "
+              "upstream keeps every monkey-patch that does not crash. The "
+              "default installs the framework's held-out gate instead, which is "
+              "a deliberate substitution rather than a preserved mechanism -- "
+              "this study measures methods under that gate"))
+
+
 def main(argv=None) -> int:
-    return standard_main(build, argv)
+    return standard_main(build, argv, extra_args=_gateless_flag,
+                         build_kwargs=lambda args: {"gateless": args.gateless})
 
 
 if __name__ == "__main__":

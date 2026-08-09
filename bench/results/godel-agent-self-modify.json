@@ -1,0 +1,78 @@
+{
+ "experiment": "Godel Agent recursive self-modification on AgentDescent",
+ "model": "deepseek-v4-flash",
+ "provider": "claude",
+ "reference": "Arvid-pku/Godel_Agent@bbb50879",
+ "config": {
+  "arm": "async_pipeline",
+  "budget_rollouts": 80,
+  "workers": 8,
+  "async_ratio": 2,
+  "staleness": "full",
+  "reflective_merge": false,
+  "gateless": false,
+  "temperature": 0.7,
+  "thinking": "disabled",
+  "domain": "money, 48 items, 16/16/16 splits"
+ },
+ "cells": [
+  {
+   "seed": 0,
+   "test": [
+    0.0,
+    0.562
+   ],
+   "validation": [
+    0.0,
+    0.875
+   ],
+   "accepted": 3,
+   "invalid": 1,
+   "wall_s": 226.0,
+   "engine_s": 160.4,
+   "calls": 1079
+  },
+  {
+   "seed": 1,
+   "test": [
+    0.0,
+    0.375
+   ],
+   "validation": [
+    0.0,
+    0.75
+   ],
+   "accepted": 3,
+   "invalid": 1,
+   "wall_s": 236.1,
+   "engine_s": 178.0,
+   "calls": 1159
+  },
+  {
+   "seed": 2,
+   "test": [
+    0.0,
+    1.0
+   ],
+   "validation": [
+    0.0,
+    1.0
+   ],
+   "accepted": 3,
+   "invalid": 0,
+   "wall_s": 209.3,
+   "engine_s": 148.6,
+   "calls": 1079
+  }
+ ],
+ "summary": {
+  "test_quality": {
+   "min": 0.375,
+   "median": 0.562,
+   "max": 1.0,
+   "mean": 0.646
+  },
+  "seeds_that_moved": 3,
+  "total_seeds": 3
+ }
+}
