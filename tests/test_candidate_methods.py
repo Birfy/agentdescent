@@ -315,16 +315,57 @@ def test_binary_tournament_prefers_the_pair_winner():
     assert tally[0.9] > tally[0.1]
 
 
-def test_soft_mixed_keeps_the_seed_and_favours_scores():
+def test_soft_mixed_pool_is_top_k_by_score_with_no_seat_reserved_for_the_seed():
+    """This used to assert the seed was always reachable, which the port
+    guaranteed by appending it to the pool. Upstream does not: `get_top_rounds`
+    moves round 1 to the *front* only when it already made the cut, and
+    `select_round` re-sorts by score immediately afterwards -- so the reordering
+    changes nothing and membership is the whole rule."""
     policy = SoftMixed(alpha=5.0, lam=0.2, top_k=2, seed=0)
     seed_candidate = SimpleNamespace(score=0.0)
     ctx = SimpleNamespace(
         candidates=[seed_candidate] + _candidates([0.2, 0.9, 0.8]))
     picks = policy.select(ctx, 200)
     scores = [p.score for p in picks]
-    assert scores.count(0.9) > scores.count(0.8) >= 0
-    # λ-uniform keeps the seed reachable even at score 0.
-    assert 0.0 in scores
+    assert set(scores) <= {0.9, 0.8}, "a candidate outside the top-2 was picked"
+    assert scores.count(0.9) > scores.count(0.8) > 0
+
+    # Inside the pool, λ-uniform keeps even a zero-scoring workflow reachable.
+    wide = SoftMixed(alpha=5.0, lam=0.2, top_k=4, seed=0)
+    reachable = [p.score for p in wide.select(ctx, 400)]
+    assert 0.0 in reachable
+
+
+def test_soft_mixed_scales_scores_by_a_hundred_or_it_is_a_coin_flip():
+    """`select_round` computes `scores = [item["score"] * 100 ...]` before the
+    softmax, and upstream's benchmark scores are accuracies in [0, 1] exactly
+    like this port's -- so the scaling is not a unit conversion, it *is* the
+    temperature.
+
+    Dropping it does not raise, does not change the shape of the code, and does
+    not stop the port reporting "soft mixed probability". It just deletes AFlow's
+    exploitation: over a pool scoring 0.50 / 0.40 / 0.25 / 0.10 the distribution
+    goes from [0.688, 0.158, 0.079, 0.075] to [0.265, 0.257, 0.245, 0.233],
+    which is uniform to three digits.
+    """
+    scores = [0.50, 0.40, 0.25, 0.10]
+    upstream = SoftMixed().probabilities(scores)
+    assert [round(p, 3) for p in upstream] == [0.688, 0.158, 0.079, 0.075]
+
+    unscaled = SoftMixed(scale=1.0).probabilities(scores)
+    assert max(unscaled) - min(unscaled) < 0.05, (
+        "without the scaling this should be indistinguishable from uniform")
+    assert upstream[0] > 4 * upstream[1], "the top workflow is barely preferred"
+
+
+def test_soft_mixed_uses_the_pinned_revisions_own_constants():
+    """0.2 / 0.3 are `DataUtils.DEFAULT_ALPHA` / `DEFAULT_LAMBDA`; the paper says
+    0.4 / 0.2. Where released code and paper disagree about a constant, the code
+    is what produced the published numbers -- the same call as OpenEvolve's
+    `exploitation_ratio`, where the example's own config beat the library default.
+    """
+    policy = SoftMixed()
+    assert (policy.alpha, policy.lam, policy.top_k) == (0.2, 0.3, 4)
 
 
 # ---------------------------------------------------------------------------

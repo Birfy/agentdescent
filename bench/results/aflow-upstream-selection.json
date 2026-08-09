@@ -1,0 +1,81 @@
+{
+ "experiment": "AFlow soft-mixed workflow search on AgentDescent",
+ "model": "deepseek-v4-flash",
+ "provider": "claude",
+ "reference": "FoundationAgents/AFlow@3f457218 (ICLR 2025)",
+ "config": {
+  "arm": "async_pipeline",
+  "budget_rollouts": 80,
+  "workers": 8,
+  "async_ratio": 2,
+  "staleness": "full",
+  "reflective_merge": true,
+  "temperature": 0.7,
+  "thinking": "disabled",
+  "alpha": 0.2,
+  "lambda": 0.3,
+  "top_k": 4,
+  "score_scale": 100,
+  "domain": "money, 48 items, 16/16/16 splits"
+ },
+ "cells": [
+  {
+   "seed": 0,
+   "test": [
+    0.0,
+    0.812
+   ],
+   "validation": [
+    0.0,
+    0.938
+   ],
+   "accepted": 3,
+   "invalid": 0,
+   "wall_s": 247.6,
+   "engine_s": 136.1,
+   "calls": 767
+  },
+  {
+   "seed": 1,
+   "test": [
+    0.0,
+    0.938
+   ],
+   "validation": [
+    0.0,
+    0.938
+   ],
+   "accepted": 2,
+   "invalid": 1,
+   "wall_s": 226.8,
+   "engine_s": 117.7,
+   "calls": 728
+  },
+  {
+   "seed": 2,
+   "test": [
+    0.0,
+    0.938
+   ],
+   "validation": [
+    0.0,
+    1.0
+   ],
+   "accepted": 3,
+   "invalid": 1,
+   "wall_s": 219.7,
+   "engine_s": 116.4,
+   "calls": 767
+  }
+ ],
+ "summary": {
+  "test_quality": {
+   "min": 0.812,
+   "median": 0.938,
+   "max": 0.938,
+   "mean": 0.896
+  },
+  "seeds_that_moved": 3,
+  "total_seeds": 3
+ }
+}
