@@ -27,59 +27,91 @@
    "seed": 0,
    "test": [
     0.0,
-    0.438
+    0.875
    ],
    "validation": [
     0.0,
-    0.312
+    0.688
    ],
-   "accepted": 5,
-   "invalid": 2,
-   "wall_s": 364.9,
-   "engine_s": 307.1,
-   "calls": 631
+   "accepted": 4,
+   "invalid": 11,
+   "wall_s": 400.4,
+   "engine_s": 329.8,
+   "calls": 627
   },
   {
    "seed": 1,
    "test": [
     0.0,
-    0.0
+    1.0
    ],
    "validation": [
     0.0,
-    0.0
+    1.0
    ],
-   "accepted": 1,
-   "invalid": 4,
-   "wall_s": 594.4,
-   "engine_s": 532.1,
+   "accepted": 3,
+   "invalid": 10,
+   "wall_s": 426.6,
+   "engine_s": 350.8,
    "calls": 638
   },
   {
    "seed": 2,
    "test": [
     0.0,
-    0.375
+    1.0
    ],
    "validation": [
     0.0,
-    0.375
+    1.0
    ],
-   "accepted": 4,
-   "invalid": 2,
-   "wall_s": 376.9,
-   "engine_s": 315.1,
-   "calls": 640
+   "accepted": 3,
+   "invalid": 9,
+   "wall_s": 372.1,
+   "engine_s": 306.9,
+   "calls": 592
   }
  ],
  "summary": {
   "test_quality": {
-   "min": 0.0,
-   "median": 0.375,
-   "max": 0.438,
-   "mean": 0.271
+   "min": 0.875,
+   "median": 1.0,
+   "max": 1.0,
+   "mean": 0.958
   },
-  "seeds_that_moved": 2,
+  "seeds_that_moved": 3,
   "total_seeds": 3
+ },
+ "an_earlier_run_of_this_exact_command": {
+  "test": [
+   0.438,
+   0.0,
+   0.375
+  ],
+  "note": "same script, same code, same seeds. The seed fixes the data splits and the operator sampler, not the model, which is sampled at temperature 0.7 -- so one run per seed does not pin a number"
+ },
+ "reflective_merge_control": {
+  "note": "paired runs at the same seed with the model merge on and off. `--reflective-merge` was accepted by all eleven ports and never read, so an earlier version of this control compared two identical configurations",
+  "seed_0": {
+   "on": {
+    "test": 0.875,
+    "calls": 627
+   },
+   "off": {
+    "test": 0.875,
+    "calls": 1749
+   }
+  },
+  "seed_1": {
+   "on": {
+    "test": 1.0,
+    "calls": 638
+   },
+   "off": {
+    "test": 0.938,
+    "calls": 1739
+   }
+  },
+  "finding": "the model merge costs 2.7-2.8x fewer calls at no cost in quality, because it replaces ranking contested diffs on the cheap layer and ranking needs evaluations"
  }
 }

@@ -64,6 +64,15 @@ that the fidelity fix below restored — where AFlow spends two calls per *rollo
 on its two workflow nodes. Fixing the fidelity halved the cost and did not trade
 anything for it.
 
+
+!!! note "These cross-algorithm figures demonstrate that each port runs, not which is best"
+    Every row is one run per seed, and the seed fixes the data splits and the
+    method's own sampler -- **not the model**, which is sampled at temperature
+    0.7. Re-running an identical command at an identical seed moves the number:
+    PromptBreeder's seed 0 scored 0.438 on one run and 0.875 on the next, from
+    the same script and the same code. Read the table as evidence the mechanism
+    executes end to end and produces a plausible artifact; a ranking would need
+    repeats per seed, which these runs do not have.
 !!! danger "FEEDBACK and REFINE are one call in the task whose domain this is"
     `GSMFeedback.__call__` makes a **single** request and splits the completion
     on a marker: `entire_output.split("def solution():")`, prose before is the
