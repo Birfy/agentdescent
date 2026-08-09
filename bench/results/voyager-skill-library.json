@@ -1,0 +1,96 @@
+{
+ "experiment": "Voyager skill library on AgentDescent",
+ "model": "deepseek-v4-flash",
+ "provider": "claude",
+ "reference": "MineDojo/Voyager@55e45a88",
+ "config": {
+  "arm": "async_pipeline",
+  "budget_rollouts": 80,
+  "workers": 8,
+  "async_ratio": 2,
+  "staleness": "full",
+  "reflective_merge": false,
+  "self_verify": true,
+  "temperature": 0.7,
+  "thinking": "disabled",
+  "domain": "crafting world, 48 goals, 16/16/16 splits"
+ },
+ "before_the_world_was_learnable": {
+  "test": [
+   0.0,
+   0.0,
+   0.0
+  ],
+  "accepted": [
+   0,
+   0,
+   0
+  ],
+  "invalid": [
+   0,
+   0,
+   0
+  ],
+  "note": "well-formed skills against an unreachable target: two required arguments the world never named, and a feedback message that reported an out-of-order step as a missing one"
+ },
+ "cells": [
+  {
+   "seed": 0,
+   "test": [
+    0.0,
+    1.0
+   ],
+   "validation": [
+    0.0,
+    1.0
+   ],
+   "accepted": 2,
+   "invalid": 0,
+   "wall_s": 300.5,
+   "engine_s": 218.0,
+   "calls": 1207
+  },
+  {
+   "seed": 1,
+   "test": [
+    0.0,
+    1.0
+   ],
+   "validation": [
+    0.0,
+    1.0
+   ],
+   "accepted": 1,
+   "invalid": 0,
+   "wall_s": 333.3,
+   "engine_s": 251.5,
+   "calls": 1207
+  },
+  {
+   "seed": 2,
+   "test": [
+    0.0,
+    0.0
+   ],
+   "validation": [
+    0.0,
+    0.0
+   ],
+   "accepted": 0,
+   "invalid": 0,
+   "wall_s": 366.4,
+   "engine_s": 279.2,
+   "calls": 1287
+  }
+ ],
+ "summary": {
+  "test_quality": {
+   "min": 0.0,
+   "median": 1.0,
+   "max": 1.0,
+   "mean": 0.667
+  },
+  "seeds_that_moved": 2,
+  "total_seeds": 3
+ }
+}
