@@ -64,31 +64,67 @@ In [`examples/gepa/gepa_prompt_evolution.py`](https://github.com/Birfy/agentdesc
 
 ## Measured — HotpotQA with DeepSeek
 
-`--rounds 5 --fetch 40 --provider openai --model deepseek-v4-flash`:
+The only row in the [parallelisation matrix](port-fidelity.md#the-parallelisation-matrix)
+measured on **all three arms**, so the only one with a speedup that has a
+denominator. 16 rollouts pinned on every arm, `--val-cap 8`,
+`--reflective-merge`, `deepseek-v4-flash`, one seed:
 
-| | exact match |
-|---|---|
-| seed instruction, on the Pareto set | 0.500 |
-| best candidate found | **0.600** |
-| **test set** (held out, never seen by the optimizer) | **0.700** |
+| arm | wall | rollouts | calls | concurrency | test EM |
+|---|---:|---:|---:|---:|---:|
+| serial (upstream loop) | 609 s | 16 | 85 | **1.00×** | 0.600 |
+| sync parallel, N=4 | 239 s | 16 | 75 | **1.85×** | 0.600 |
+| async, N=4 | 140 s | 19 | 83 | **3.22×** | 0.850 |
 
-4 candidates explored, 80 model calls, ~10 min wall-clock. The instruction it
-found:
+**Concurrency is model-seconds over wall-clock** -- the part a worker pool is
+responsible for. The control is the published loop and nothing else: one worker
+*and* `eval_concurrency=1`, giving 607 model-seconds inside a 609-second
+wall-clock. `--serial` alone only lowers `n_workers`, and a control that still
+evaluates concurrently is already partly parallel; this is the first row here
+that is not. The barrier is the whole difference between the two parallel rows,
+and 1.85× lands where the heavy-tail stub in [efficiency](efficiency.md)
+predicted (1.7–1.8×).
+
+!!! warning "The test column is not a result"
+    One seed, 20 test items: 0.600 → 0.850 is five questions. The async arm also
+    spent **19 rollouts against the pinned 16** -- the barrier-free path has no
+    round boundary to stop at -- so part of that column is extra budget rather
+    than a scheduler. Read the concurrency column; the quality column needs the
+    three seeds this repository asks for everywhere else.
+
+!!! note "What this row was measured *before*"
+    Three things were learned after it ran and are not reflected in it:
+
+    * it used `--staleness guarded`, the default. ACE and EvoSkill were later
+      measured discarding **60%** and **100%** of their evidence under it, and
+      GEPA's single-key artifact should be worse still — every proposal edits the
+      same key, so the head moves on every commit. The stale counters did not
+      exist yet, so this row does not report how much it threw away.
+    * `--reflective-merge` is on, and for this port that is a real semantics
+      change, not only a cost lever: the round's diffs become **one** Pareto
+      candidate instead of one per worker. It is why the parallel arm's model
+      time falls 607 → 443 s — part of the speedup is work not done rather than
+      work divided, and the `SEMANTICS` entry for this row says so.
+    * the wall-clock is this machine and this endpoint.
+
+The instruction the search found, from an earlier run on the same benchmark:
 
 > *"Read the context carefully and connect information across multiple paragraphs
 > to identify who matches all the clues in the question. Then give only the final
 > answer as a short phrase, without explanation."*
 
-Both halves of that are real HotpotQA failures: multi-hop evidence, and a model
-that answers a short-span question with a paragraph. This is the one shipped port
-whose benchmark still has headroom for `deepseek-v4-flash` — see
-[Measured results](results.md) for why the others do not.
+Both halves are real HotpotQA failures: multi-hop evidence, and a model that
+answers a short-span question with a paragraph.
 
 ## Run it
 
 ```bash
 python -m examples.gepa.gepa_prompt_evolution --dry-run
 python -m examples.gepa.gepa_prompt_evolution --model claude-haiku-4-5
+
+# the three arms above
+python -m bench.matrix_run --rows gepa --budget 16 --width 4 --seeds 0 \
+    --eval-concurrency 4 --serial-eval-concurrency 1 \
+    --provider claude --model deepseek-v4-flash --yes
 ```
 
 Offline tests: `tests/test_gepa_example.py` (incl. the Algorithm-2 selection).
