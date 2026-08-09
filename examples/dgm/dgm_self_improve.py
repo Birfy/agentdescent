@@ -67,6 +67,7 @@ from agentdescent.evolvable import Diff, EvidenceCard
 from agentdescent.evolution import EvolvingArtifact, Task, evolve
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
+from agentdescent.staleness import get_policy
 from examples._common import (add_standard_args, completion_for, confirm,
                               worker_count,
                               budget_kwargs, report_engine)
@@ -412,7 +413,7 @@ def run_dgm(instances: List[dict], generations: int = 12,
             evaluate_fn: Optional[Callable[[Agent, List[dict]], float]] = None,
             complete: Optional[Callable[[str], str]] = None, seed: int = 0,
             asynchronous: bool = False, async_ratio: int = 3, max_seconds: float = 20.0,
-            max_rollouts: Optional[int] = None,
+            max_rollouts: Optional[int] = None, staleness: str = "guarded",
             verbose: bool = False) -> DGMResult:
     """Drive DGM through `evolve()` (SWE instances split into trigger/held-out)."""
     evaluate_fn = evaluate_fn or make_surrogate_evaluator()
@@ -443,6 +444,14 @@ def run_dgm(instances: List[dict], generations: int = 12,
                     asynchronous=asynchronous, async_ratio=async_ratio,
                     max_seconds=max_seconds if asynchronous else None,
                     held_out_frac=0.5, aggregator_factory=factory, verbose=verbose,
+                    # A discarded card is a whole self-improvement -- the parent
+                    # reads its own evaluation log, diagnoses a weakness and
+                    # rewrites a file. And a child branches from its *parent*
+                    # rather than deltas onto a moving head, so arriving late
+                    # costs it nothing: the archive is keep-all and still wants
+                    # it. Under the real objective the rebase is also self-
+                    # checking, since a child that no longer runs scores zero.
+                    staleness_policy=get_policy(staleness),
                     max_rollouts=max_rollouts)
     if verbose:
         report_engine(result)
@@ -478,9 +487,75 @@ def build_parser() -> argparse.ArgumentParser:
         p, model_default=None, max_seconds_default=15.0,
         model_help="optional: let an LLM propose self-modifications (else deterministic)")
     p.add_argument("--generations", type=int, default=12)
+    p.add_argument("--objective", default="surrogate",
+                   choices=["surrogate", "real"],
+                   help=("`surrogate` hashes each SWE instance id into a latent "
+                         "capability set -- offline, deterministic, and MONOTONE, "
+                         "so a self-edit can never regress and the keep-all "
+                         "archive has no stepping stones to keep. `real` evolves "
+                         "the agent's own Python source against vendored bugs "
+                         "with real pytest runs: not SWE-bench, but real code, "
+                         "real execution, and self-edits that can break the "
+                         "agent (see examples/dgm/real_objective.py)"))
+    p.add_argument("--staleness", default="guarded",
+                   choices=["guarded", "reflective", "full"],
+                   help="what to do with a self-edit proposed against a head the "
+                        "merger has since moved (agentdescent.staleness)")
     p.add_argument("--selfimprove-size", type=int, default=2)
     p.add_argument("--archive", default="keep_all", choices=["keep_all", "keep_better"])
     return p
+
+
+def _main_real(args) -> None:
+    """The `--objective real` path: self-editing source, scored by pytest.
+
+    Kept apart from the surrogate `main` rather than threaded through it,
+    because almost nothing is shared below the algorithm: a different artifact,
+    a different actor, a different scorer. What *is* shared is the part that
+    matters -- `run_dgm_real` builds the same `DGMArchiveAggregator`.
+    """
+    from examples.dgm.real_objective import load_tasks, run_dgm_real
+    from agentdescent.filetree import parse_tree
+
+    art = EvolvingArtifact("coding_agent", blast_radius=0.6)
+    cases = load_tasks()
+    print(f"Governance: coding-agent source blast_radius={art.blast_radius} "
+          f"-> {classify(art).name} (the agent edits its own code)")
+    print(f"Loaded   : {len(cases)} vendored bugs -- "
+          + ", ".join(c.id for c in cases))
+    if not args.model:
+        print("\nThis objective needs a model: the agent's own `solve` calls one, "
+              "and so does the self-modification. Pass --model.")
+        return
+    if not confirm(args):
+        return
+    from examples.dgm.real_objective import MAX_TOKENS
+    complete = completion_for(args, max_tokens=MAX_TOKENS)
+    try:
+        complete("Reply with the single word: ok")
+    except Exception as e:  # noqa: BLE001
+        print(f"\nLLM unreachable ({type(e).__name__}: {e}).")
+        return
+
+    print(f"\nRunning DGM (real objective, selfimprove_size="
+          f"{args.selfimprove_size}, L1 harness)...\n")
+    result = run_dgm_real(
+        complete, cases=cases, generations=args.generations,
+        selfimprove_size=args.selfimprove_size, seed=args.seed,
+        asynchronous=args.asynchronous, async_ratio=args.async_ratio,
+        max_seconds=args.max_seconds, staleness=args.staleness,
+        eval_concurrency=args.eval_concurrency, verbose=True,
+        **budget_kwargs(args))
+    report_engine(result)
+
+    files = parse_tree(result.rendered)
+    print("\n=== best self-improved agent ===")
+    for path in sorted(files):
+        print(f"--- {path} ({len(files[path].splitlines())} lines) ---")
+    print(f"\nheld-out resolve-rate: {result.final_reward:.3f}")
+    print(f"stopped   : {result.stop_reason}")
+    if result.error:
+        print(f"WARNING: the run did not finish cleanly -- {result.error}")
 
 
 def main(argv=None) -> None:
@@ -491,7 +566,11 @@ def main(argv=None) -> None:
     args.selfimprove_size = worker_count(args, args.selfimprove_size)
 
     print("Algorithm: Darwin Godel Machine (DGM) -- harness self-evolution")
-    print("Dataset  : SWE-bench Verified (real instance ids; surrogate objective)")
+    if args.objective == "real":
+        print("Dataset  : vendored Python bugs with real pytest suites "
+              "(examples/dgm/tasks) -- NOT SWE-bench")
+    else:
+        print("Dataset  : SWE-bench Verified (real instance ids; surrogate objective)")
     print(f"Plan     : model={args.model or 'deterministic'}, "
           f"generations={args.generations}, archive={args.archive}")
     if args.asynchronous:
@@ -501,12 +580,20 @@ def main(argv=None) -> None:
     else:
         print(f"Parallel : {args.selfimprove_size} agents self-modify concurrently each "
               "generation (synchronous DP; the archive merge is the barrier)")
-    print("\nObjective: SURROGATE (capability-cover) -- real DGM runs SWE-bench in "
-          "Docker.\n           The archive + selection + staged escalation are faithful.")
+    if args.objective == "real":
+        print("\nObjective: REAL -- the agent edits its own Python source and is "
+              "scored by pytest.\n           Not SWE-bench: six vendored bugs, so "
+              "these numbers are not comparable with the paper.")
+    else:
+        print("\nObjective: SURROGATE (capability-cover) -- real DGM runs SWE-bench in "
+              "Docker.\n           The archive + selection + staged escalation are faithful.")
     if args.dry_run:
         print("Data     : deferred (dry-run performs no network access)")
         print("\n[dry-run] plan only; no dataset or model API was accessed.")
         return
+
+    if args.objective == "real":
+        return _main_real(args)
 
     ds = load_dataset(STAGE_BIG, seed=args.seed)
     art = EvolvingArtifact("coding_agent", blast_radius=0.6)
