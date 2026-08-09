@@ -42,12 +42,33 @@ Reward = Callable[[Task, str], float]
 
 
 def clip_text(value, *, fallback: str = "", max_len: int = 900) -> str:
+    """Normalise whitespace and **truncate** to `max_len`.
+
+    It used to discard: `if not cleaned or len(cleaned) > max_len: return
+    fallback`. A function named `clip_text` that drops a 901-character answer
+    and keeps a 900-character one is not a validation rule anyone chose, and the
+    cost lands twice -- the proposal is lost, and it is counted as *invalid*,
+    which reads in the metrics as the model producing junk.
+
+    Measured on R-Zero, whose two update prompts ask for a policy statement and
+    get one: four of six replies ran 977-1632 characters, so both its fields
+    came back empty and the run reported `invalid=41/80`, `44/80`, `48/80`
+    against 2-11 for the ports whose prompts ask for a single sentence. Nothing
+    was wrong with those proposals except their length.
+
+    Truncation is on a word boundary where one is near the limit, so a clipped
+    instruction ends mid-sentence rather than mid-word.
+    """
     if not isinstance(value, str):
         return fallback
     cleaned = " ".join(value.split()).strip()
-    if not cleaned or len(cleaned) > max_len:
+    if not cleaned:
         return fallback
-    return cleaned
+    if len(cleaned) <= max_len:
+        return cleaned
+    head = cleaned[:max_len]
+    space = head.rfind(" ")
+    return head[:space] if space > max_len * 0.8 else head
 
 
 @dataclass

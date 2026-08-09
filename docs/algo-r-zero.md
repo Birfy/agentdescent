@@ -37,15 +37,61 @@ revision; the paper says 25–75%). Both are trained with GRPO.
 
 ## Measured results
 
-*Pending: this section is populated from the live matrix
-(`bench/results/candidate-methods-framework-final.json`) after the
-post-restructuring rerun. See the
-[matrix overview](matrix-overview.md) for the matrix-wide
-tables (quality, [parallel speedup](matrix-parallel-speedup.md), and
-[async behaviour](matrix-async.md)).*
+Three seeds, `async_pipeline`, 80 rollouts each, 8 workers, `--staleness full`,
+`deepseek-v4-flash` at temperature 0.7. Recorded in
+[`bench/results/r-zero-challenger-solver.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/r-zero-challenger-solver.json).
 
-| Mode | Quality (test, before → after) | E2E seconds | Engine seconds | TTQ |
-|---|---|---|---|---|
-| serial | *TBD* | *TBD* | *TBD* | *TBD* |
-| sync_parallel | *TBD* | *TBD* | *TBD* | *TBD* |
-| async_pipeline | *TBD* | *TBD* | *TBD* | *TBD* |
+| seed | test quality | validation | accepted | invalid | calls |
+|---|---|---|---|---|---|
+| 0 | 0.062 → **0.188** | 0.125 → 0.438 | 2/80 | 0 | 943 |
+| 1 | 0.062 → **0.375** | 0.125 → 0.375 | 3/80 | 0 | 941 |
+| 2 | 0.062 → **0.312** | 0.062 → 0.312 | 1/80 | 0 | 926 |
+
+All three seeds moved; mean gain +0.230. As on
+[Absolute Zero](algo-absolute-zero.md#measured-results), read the *gain*: the
+carts are generated, so the baseline is not 0.000 and the ceiling is not 1.000.
+
+See the caveat on [PromptBreeder](algo-promptbreeder.md#measured-results): one
+run per seed does not pin a number here either.
+
+!!! danger "Half of every run's proposals were being thrown away, and counted as invalid"
+    The first runs reported `invalid` of **41, 44 and 48 out of 80** — against 2
+    to 11 for every other port. The proposals were
+    `{"challenger_memory":"","solver_memory":""}`, and the update calls that
+    produced them were fine: asked directly, they return 564 to 1632 characters
+    of usable policy.
+
+    `clip_text` was the cause, and it is shared by all eleven ports:
+
+    ```python
+    if not cleaned or len(cleaned) > max_len:   # max_len = 900
+        return fallback                          # ""
+    ```
+
+    A function named `clip_text` that **discards** a 901-character answer and
+    keeps a 900-character one. The cost lands twice: the proposal is lost, and it
+    is counted as *invalid*, which reads in the metrics as the model producing
+    junk. R-Zero was hit hardest because its two update prompts ask for a policy
+    statement and the model writes one — four of six sampled replies ran over the
+    limit.
+
+    It truncates now, on a word boundary. `invalid` went to **0, 0, 0**.
+
+!!! danger "The Challenger's signal had ground truth in it"
+    `question_evaluate/evaluate.py` computes
+    `score = max_count / len(results)` over `--num_samples` (default **9**)
+    solver samples: the share agreeing with the **majority answer**. R-Zero has
+    no ground truth for a question its Challenger just wrote — that is the
+    premise — and rewards questions the Solver is *self-inconsistent* on.
+
+    This port computed `p_hat = (score + agreement * score) / 2`, mixing in the
+    grounded verifier's reward. `p_hat` is the majority share now, over four
+    samples rather than two: two give it only 0.5 and 1.0, so the Challenger saw
+    a coin flip rather than a frontier. Unparseable replies count as their own
+    distinct answers rather than being dropped — a Solver that cannot state an
+    answer is not one that agrees with itself, and dropping them makes an
+    incoherent batch read as certain.
+
+    `min(p, 1-p)` now peaks at a half, which is what `DifficultyWeighted`'s
+    `4p(1-p)` is attached here to match — and why it is *not* attached to
+    Absolute Zero, whose `1-r` is monotone.

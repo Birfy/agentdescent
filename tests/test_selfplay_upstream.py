@@ -90,3 +90,57 @@ def test_the_reward_is_zero_at_both_extremes():
         policy.propose(lambda p, **k: (seen.setdefault("p", p), "x")[1],
                        "memory", task, "{}", 0.0)
         assert f"1-r = {want}" in seen["p"], (outcomes, seen["p"])
+
+
+# -- R-Zero -------------------------------------------------------------------
+
+
+def test_the_challengers_signal_carries_no_ground_truth():
+    """`question_evaluate/evaluate.py` takes `score = max_count / len(results)`
+    over `--num_samples` solver samples: the share agreeing with the **majority
+    answer**. R-Zero has no ground truth for a question its Challenger just
+    wrote -- that is the premise -- and rewards questions the Solver is
+    *self-inconsistent* on.
+
+    This port computed `p_hat = (score + agreement * score) / 2`, mixing in the
+    grounded verifier's reward, which measures something the paper cannot.
+    """
+    from examples.r_zero.r_zero_challenger_solver import majority_share
+
+    assert majority_share(["300", "300", "300", "300"]) == 1.0
+    assert majority_share(["300", "300", "300", "999"]) == 0.75
+    assert majority_share(["300", "300", "999", "999"]) == 0.5
+    assert majority_share(["1", "2", "3", "4"]) == 0.25
+    # A correct majority and a wrong one are the same number: no truth involved.
+    assert (majority_share(["300", "300", "999"])
+            == majority_share(["999", "999", "300"]))
+
+
+def test_unparseable_replies_do_not_look_like_agreement():
+    """Dropping them would make an incoherent batch read as certain, which is
+    the opposite of the Challenger's target."""
+    from examples.r_zero.r_zero_challenger_solver import majority_share
+
+    assert majority_share(["$3.00", "three", "?", ""]) == 0.25
+
+
+def test_the_uncertainty_reward_peaks_at_a_half():
+    """`min(score, 1 - score)`, maximal when the Solver agrees with itself half
+    the time -- and this is why `DifficultyWeighted`'s 4p(1-p) is attached here
+    and not to Absolute Zero, whose 1-r is monotone instead."""
+    from examples.r_zero.r_zero_challenger_solver import majority_share
+
+    rates = [majority_share(f) for f in (["1", "1", "1", "1"],
+                                         ["1", "1", "1", "2"],
+                                         ["1", "1", "2", "2"])]
+    rewards = [min(p, 1 - p) for p in rates]
+    assert rewards == [0.0, 0.25, 0.5]
+    assert rewards[2] == max(rewards)
+
+
+def test_r_zero_samples_the_solver_more_than_twice():
+    """Two samples give the majority share only two values, 0.5 and 1.0, so the
+    Challenger sees a coin flip rather than a frontier."""
+    from examples.r_zero import r_zero_challenger_solver as rz
+
+    assert rz.SOLVER_SAMPLES >= 4
