@@ -29,9 +29,10 @@ from examples._method_policy import (FieldSlots, MethodPolicy, clip_text,
                                      read_fields)
 from examples._method_runner import standard_main
 from examples._money_domain import STARTING_INSTRUCTION, parse_integer_answer
-from examples._selfplay_domain import (CartTask, mixed_reward, proposer_prompt,
-                                       selfplay_splits, solver_prompt,
-                                       trajectory, validate_generated)
+from examples._selfplay_domain import (CartTask, majority_share, mixed_reward,
+                                       proposer_prompt, selfplay_splits,
+                                       solver_prompt, trajectory,
+                                       validate_generated)
 
 
 FIDELITY = "inference_analogue"
@@ -45,21 +46,6 @@ CHALLENGER_SEED = "Increase curriculum difficulty gradually."
 #: that gives that share more than two values while keeping a training rollout
 #: affordable.
 SOLVER_SAMPLES = 4
-
-
-def majority_share(finals: list) -> float:
-    """`max_count / len(results)`: the share agreeing with the majority answer.
-
-    Unparseable replies count as their own distinct answers rather than being
-    dropped -- a Solver that cannot state an answer is not a Solver that agrees
-    with itself, and dropping them would make an incoherent batch look certain.
-    """
-    counts: dict = {}
-    for index, final in enumerate(finals):
-        parsed = parse_integer_answer(final.strip())
-        key = parsed if parsed is not None else f"__unparsed_{index}"
-        counts[key] = counts.get(key, 0) + 1
-    return max(counts.values()) / float(len(finals)) if finals else 1.0
 
 
 def build(seed: int) -> MethodPolicy:

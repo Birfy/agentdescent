@@ -37,15 +37,52 @@ interpreter in stop-and-go fashion.
 
 ## Measured results
 
-*Pending: this section is populated from the live matrix
-(`bench/results/candidate-methods-framework-final.json`) after the
-post-restructuring rerun. See the
-[matrix overview](matrix-overview.md) for the matrix-wide
-tables (quality, [parallel speedup](matrix-parallel-speedup.md), and
-[async behaviour](matrix-async.md)).*
+Three seeds, `async_pipeline`, 80 rollouts each, 8 workers, `--staleness full`,
+`deepseek-v4-flash` at temperature 0.7. Recorded in
+[`bench/results/agent0-tool-curriculum.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/agent0-tool-curriculum.json).
 
-| Mode | Quality (test, before → after) | E2E seconds | Engine seconds | TTQ |
-|---|---|---|---|---|
-| serial | *TBD* | *TBD* | *TBD* | *TBD* |
-| sync_parallel | *TBD* | *TBD* | *TBD* | *TBD* |
-| async_pipeline | *TBD* | *TBD* | *TBD* | *TBD* |
+| seed | test quality | validation | accepted | invalid | calls |
+|---|---|---|---|---|---|
+| 0 | 0.000 → **0.500** | 0.000 → 0.438 | 2/80 | 0 | 1616 |
+| 1 | 0.125 → **0.625** | 0.000 → 0.500 | 2/80 | 0 | 1584 |
+| 2 | 0.000 → **0.500** | 0.000 → 0.688 | 2/80 | 0 | 1678 |
+
+All three seeds moved; mean gain **+0.458**, the largest of the three
+inference analogues ([Absolute Zero](algo-absolute-zero.md) +0.313,
+[R-Zero](algo-r-zero.md) +0.230) — and the most expensive, at ~1600 calls per
+seed against their ~600 and ~940. Four executor samples times two tool turns is
+eight model calls per training rollout.
+
+Read the *gain*: the carts are generated, so the baseline is not 0.000 and the
+ceiling is not 1.000. See the caveat on
+[PromptBreeder](algo-promptbreeder.md#measured-results) on one run per seed.
+
+!!! danger "Both curriculum reward components were missing"
+    `curriculum_reward.py`:
+
+    ```python
+    final_score = (min(score, 1 - score) if question else -1) - penalty \
+                  + calculate_tool_reward(predicts[i])
+    ```
+
+    **The uncertainty term was always zero.** `score` there is
+    `max_count / len(results)` from `generate_results` — the executor's
+    *self-consistency* over repeated samples, the same computation R-Zero uses.
+    This port fed the term the single rollout's **grounded reward**, which is 0
+    or 1, and `1 - 2|p - 0.5|` is zero at both. The curriculum signal did not
+    exist on any item of any run. It samples the executor four times now and
+    takes the majority share.
+
+    Upstream's term is `min(p, 1-p)`; the port's `1 - 2|p - 0.5|` is exactly
+    twice it. Same shape, and `DifficultyWeighted`'s `4p(1-p)` shares its peak
+    and zeros with either.
+
+    **The tool reward was never a number.** `calculate_tool_reward` is
+    `min(tool_call_count, 4) * 0.05`. The update prompt said "with a tool-use
+    bonus" and carried no value, while the notes claimed the component was
+    surfaced. It now reports `R_tool` and the call count that produced it.
+
+!!! note "One `majority_share`, two ports"
+    R-Zero's `question_evaluate/evaluate.py` and Agent0's `generate_results` are
+    the same computation, so it lives in `_selfplay_domain` — separate copies are
+    how a fix to one leaves the other, and both had the same defect.
