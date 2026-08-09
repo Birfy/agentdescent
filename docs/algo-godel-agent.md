@@ -35,15 +35,40 @@ trials dipping before improving. Steering comes from optional self-evaluation.
 
 ## Measured results
 
-*Pending: this section is populated from the live matrix
-(`bench/results/candidate-methods-framework-final.json`) after the
-post-restructuring rerun. See the
-[matrix overview](matrix-overview.md) for the matrix-wide
-tables (quality, [parallel speedup](matrix-parallel-speedup.md), and
-[async behaviour](matrix-async.md)).*
+Three seeds, `async_pipeline`, 80 rollouts each, 8 workers, `--staleness full`,
+**with** the framework gate (the default, and a declared substitution -- see
+below), `deepseek-v4-flash` at temperature 0.7. Recorded in
+[`bench/results/godel-agent-self-modify.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/godel-agent-self-modify.json).
 
-| Mode | Quality (test, before → after) | E2E seconds | Engine seconds | TTQ |
+| seed | test quality | validation | accepted | calls |
 |---|---|---|---|---|
-| serial | *TBD* | *TBD* | *TBD* | *TBD* |
-| sync_parallel | *TBD* | *TBD* | *TBD* | *TBD* |
-| async_pipeline | *TBD* | *TBD* | *TBD* | *TBD* |
+| 0 | 0.000 → **0.562** | 0.000 → 0.875 | 3/80 | 1079 |
+| 1 | 0.000 → **0.375** | 0.000 → 0.750 | 3/80 | 1159 |
+| 2 | 0.000 → **1.000** | 0.000 → 1.000 | 3/80 | 1079 |
+
+Mean 0.646, all three seeds moving. See the caveat on
+[PromptBreeder](algo-promptbreeder.md#measured-results): one run per seed does
+not pin a number here either.
+
+!!! danger "`--gateless` was documented in five places and the parser rejected it"
+    This module's docstring, `examples/godel_agent/README.md`,
+    this page, [acceptance-policies.md](acceptance-policies.md) and
+    [matrix-overview.md](matrix-overview.md) all described the flag and what it
+    does. The command line answered `unrecognized arguments: --gateless`.
+
+    `AcceptAnyCompiling` was written and `build(gateless=True)` took the keyword;
+    nothing could reach it, because `standard_main` had no seam for a
+    method-specific switch and called `build(args.seed)`.
+
+    That matters more here than a dead flag usually would. **Upstream has no
+    acceptance gate at all** -- a monkey-patched edit is kept unless it crashes,
+    and the paper reports 92% of trials dipping before improving. This study
+    measures methods *under* the framework gate, so the gate stays and is
+    labelled a substitution rather than a preserved mechanism. `--gateless` is
+    the control that makes that label checkable, and it is the one thing that
+    could not be run.
+
+    `standard_main` now takes `extra_args` and `build_kwargs`, and the banner and
+    the recorded configuration name the acceptance rule in force -- a switch that
+    changes what a run accepts belongs in the run's own record, not only in the
+    flag that set it.
