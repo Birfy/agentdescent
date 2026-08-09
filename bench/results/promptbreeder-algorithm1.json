@@ -1,0 +1,85 @@
+{
+ "experiment": "PromptBreeder Algorithm 1 on AgentDescent",
+ "model": "deepseek-v4-flash",
+ "provider": "claude",
+ "reference": "arXiv:2309.16797 (no released code)",
+ "config": {
+  "arm": "async_pipeline",
+  "budget_rollouts": 80,
+  "workers": 8,
+  "async_ratio": 2,
+  "staleness": "full",
+  "reflective_merge": true,
+  "temperature": 0.7,
+  "thinking": "disabled",
+  "population_size": 8,
+  "fitness_batch": 4,
+  "domain": "money, 48 items, 16/16/16 splits"
+ },
+ "domain_reference_points": {
+  "baseline_instruction": 0.0,
+  "format_only_prompt": 0.479,
+  "working_plus_final_line_prompt": 1.0,
+  "note": "measured directly on all 48 items at temperature 0.0; the two ceilings are what a prompt can reach by naming the convention alone versus also teaching the working"
+ },
+ "cells": [
+  {
+   "seed": 0,
+   "test": [
+    0.0,
+    0.438
+   ],
+   "validation": [
+    0.0,
+    0.312
+   ],
+   "accepted": 5,
+   "invalid": 2,
+   "wall_s": 364.9,
+   "engine_s": 307.1,
+   "calls": 631
+  },
+  {
+   "seed": 1,
+   "test": [
+    0.0,
+    0.0
+   ],
+   "validation": [
+    0.0,
+    0.0
+   ],
+   "accepted": 1,
+   "invalid": 4,
+   "wall_s": 594.4,
+   "engine_s": 532.1,
+   "calls": 638
+  },
+  {
+   "seed": 2,
+   "test": [
+    0.0,
+    0.375
+   ],
+   "validation": [
+    0.0,
+    0.375
+   ],
+   "accepted": 4,
+   "invalid": 2,
+   "wall_s": 376.9,
+   "engine_s": 315.1,
+   "calls": 640
+  }
+ ],
+ "summary": {
+  "test_quality": {
+   "min": 0.0,
+   "median": 0.375,
+   "max": 0.438,
+   "mean": 0.271
+  },
+  "seeds_that_moved": 2,
+  "total_seeds": 3
+ }
+}

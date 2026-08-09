@@ -235,6 +235,38 @@ class SkillLibrary:
 
 
 @dataclass(frozen=True)
+class PopulationContext:
+    """What a method's own population layer gets from the runner.
+
+    :class:`~examples._population.PopulationAggregator` covers the common case --
+    keep every committed head, ask a `SelectionPolicy` who the next parent is.
+    A method whose published algorithm says more than that needs more than that:
+    PromptBreeder's Algorithm 1 keeps a **fixed-size** population, evaluates the
+    two sampled units on a **training batch**, and **replaces the loser**, none
+    of which the shared aggregator does or should.
+
+    ``fitness(state, batch)`` scores a state on a **random batch** of the
+    *training* split, which is where several papers put their selection signal;
+    the shared aggregator's held-out score is the acceptance gate's, a different
+    question. The batch is the caller's: PromptBreeder's Algorithm 1 evaluates
+    "on a random batch of training data", and scoring the whole split instead is
+    both a departure -- the sampling noise is what keeps the tournament a
+    comparison rather than a verdict -- and, at one model call per item per unit
+    per tournament, the dominant cost of a run.
+    """
+
+    selection: object
+    artifact_id: str
+    conflict: object
+    fusion: object
+    acceptance: object
+    llm: Callable[..., str]
+    fitness: Callable[[Dict[str, str], int], float]
+    train_size: int
+    seed: int
+
+
+@dataclass(frozen=True)
 class MethodPolicy:
     """One candidate method, declaratively.
 
@@ -259,6 +291,16 @@ class MethodPolicy:
     engine: Policies = field(default_factory=Policies)
     reflective: bool = True
     self_verify: bool = False
+    #: Optional replacement for the shared population layer, for a method whose
+    #: paper specifies population dynamics the generic archive does not have.
+    #: Takes a :class:`PopulationContext`, returns an ``aggregator_factory``.
+    population: Optional[Callable[["PopulationContext"], object]] = None
+    #: Optional lines about what this method's own mechanism actually did, printed
+    #: after the run summary. For anything a run *chooses* rather than is told:
+    #: PromptBreeder samples its operator uniformly, so the realised mix is an
+    #: observation, and claiming it is reported without printing it anywhere is
+    #: how a documented property turns out to have no code behind it.
+    report: Optional[Callable[[], str]] = None
 
     @property
     def engine_tasks(self) -> List[Task]:
