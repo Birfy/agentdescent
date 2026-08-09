@@ -1,0 +1,78 @@
+{
+ "experiment": "Self-Refine feedback loop on AgentDescent",
+ "model": "deepseek-v4-flash",
+ "provider": "claude",
+ "reference": "madaan/self-refine@9a206d41, task `gsm`",
+ "config": {
+  "arm": "async_pipeline",
+  "budget_rollouts": 80,
+  "workers": 8,
+  "async_ratio": 2,
+  "staleness": "full",
+  "reflective_merge": true,
+  "temperature": 0.7,
+  "thinking": "disabled",
+  "proposal_calls_per_candidate": 1,
+  "domain": "money, 48 items, 16/16/16 splits"
+ },
+ "cells": [
+  {
+   "seed": 0,
+   "test": [
+    0.0,
+    1.0
+   ],
+   "validation": [
+    0.0,
+    1.0
+   ],
+   "accepted": 2,
+   "invalid": 0,
+   "wall_s": 123.7,
+   "engine_s": 59.4,
+   "calls": 395
+  },
+  {
+   "seed": 1,
+   "test": [
+    0.0,
+    0.938
+   ],
+   "validation": [
+    0.0,
+    1.0
+   ],
+   "accepted": 3,
+   "invalid": 0,
+   "wall_s": 124.6,
+   "engine_s": 59.2,
+   "calls": 400
+  },
+  {
+   "seed": 2,
+   "test": [
+    0.0,
+    1.0
+   ],
+   "validation": [
+    0.0,
+    1.0
+   ],
+   "accepted": 2,
+   "invalid": 0,
+   "wall_s": 129.2,
+   "engine_s": 62.0,
+   "calls": 416
+  }
+ ],
+ "summary": {
+  "test_quality": {
+   "min": 0.938,
+   "median": 1.0,
+   "max": 1.0,
+   "mean": 0.979
+  },
+  "seeds_that_moved": 3,
+  "total_seeds": 3
+ }
+}

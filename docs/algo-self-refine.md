@@ -34,15 +34,66 @@ No training of any kind.
 
 ## Measured results
 
-*Pending: this section is populated from the live matrix
-(`bench/results/candidate-methods-framework-final.json`) after the
-post-restructuring rerun. See the
-[matrix overview](matrix-overview.md) for the matrix-wide
-tables (quality, [parallel speedup](matrix-parallel-speedup.md), and
-[async behaviour](matrix-async.md)).*
+Three seeds, `async_pipeline`, 80 rollouts each, 8 workers, `--staleness full`,
+`--reflective-merge`, `deepseek-v4-flash` at temperature 0.7. Recorded in
+[`bench/results/self-refine-fused-call.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/self-refine-fused-call.json).
 
-| Mode | Quality (test, before → after) | E2E seconds | Engine seconds | TTQ |
+| seed | test quality | validation | accepted | calls |
 |---|---|---|---|---|
-| serial | *TBD* | *TBD* | *TBD* | *TBD* |
-| sync_parallel | *TBD* | *TBD* | *TBD* | *TBD* |
-| async_pipeline | *TBD* | *TBD* | *TBD* | *TBD* |
+| 0 | 0.000 → **1.000** | 0.000 → 1.000 | 2/80 | 395 |
+| 1 | 0.000 → **0.938** | 0.000 → 1.000 | 3/80 | 400 |
+| 2 | 0.000 → **1.000** | 0.000 → 1.000 | 2/80 | 416 |
+
+Mean 0.979 against a ceiling of 1.000, and validation reaches 1.000 on all three
+seeds. This row clears the domain.
+
+### Against the other mechanisms
+
+Same 48 items, same model, same 80-rollout budget:
+
+| | mean test | calls per seed |
+|---|---:|---:|
+| **Self-Refine** | **0.979** | ~400 |
+| [AFlow](algo-aflow.md) | 0.896 | ~750 |
+| [Reflexion](algo-reflexion.md) | 0.354 | ~460 |
+| [PromptBreeder](algo-promptbreeder.md) | 0.271 | ~630 |
+
+The best row is also the cheapest, and the two facts have the same cause. Every
+Self-Refine candidate costs **one** model call — the fused critique-and-refine
+that the fidelity fix below restored — where AFlow spends two calls per *rollout*
+on its two workflow nodes. Fixing the fidelity halved the cost and did not trade
+anything for it.
+
+!!! danger "FEEDBACK and REFINE are one call in the task whose domain this is"
+    `GSMFeedback.__call__` makes a **single** request and splits the completion
+    on a marker: `entire_output.split("def solution():")`, prose before is the
+    critique, code after is the improved solution. `iterative_gsm` then checks
+    the **critique half** for the stop signal.
+
+    Six of the repository's seven tasks *do* have a separate `task_iterate.py`
+    REFINE module. `gsm` does not — and `gsm` is the arithmetic-word-problem task
+    this port's domain matches, and the one the port takes its stop signal from.
+    The port had it both ways: two calls, citing gsm.
+
+    An offline test was pinning the old shape.
+    `test_dry_run_counts_two_call_proposals` asserted
+    `reserved proposal calls=24`, a number that is only reachable when
+    `self_refine` declares two calls per candidate.
+
+    The critique prompt now carries worked examples of the fused shape, as
+    `data/prompt/gsm/feedback.txt` carries four. Without them the model does not
+    emit the marker and the refinement half comes back empty — the same failure
+    [Reflexion](algo-reflexion.md) had, where a reflector with nothing to imitate
+    answered the arithmetic instead of planning.
+
+!!! note "The stop signal is stronger here than upstream's"
+    `iterative_gsm` breaks on `"it is correct" in feedback.lower()`, and that
+    phrase appears **nowhere** in `data/prompt/gsm/`. Nothing teaches the model to
+    emit it, so upstream's check never fires and its loop runs the full
+    `max_attempts`.
+
+    This port instructs the critique to say it when the attempt is already right,
+    which makes the check real. That is the paper's stopping criterion working
+    rather than upstream's vestigial check reproduced, and the notes say which —
+    a run that stops early is spending less than a run that does not, and the
+    reason belongs next to the number.

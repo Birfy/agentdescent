@@ -564,9 +564,16 @@ def test_benchmark_dry_run_is_offline_and_names_framework_runtime(monkeypatch, c
     assert "async runtime=async_evolve" in output
 
 
-def test_dry_run_counts_two_call_proposals(capsys):
+def test_dry_run_counts_each_methods_declared_calls_per_candidate(capsys):
+    """This asserted 24, which was self_refine reserving *two* calls -- a FEEDBACK
+    request and a REFINE request. Upstream's gsm task, whose domain this is, makes
+    **one** call and splits the completion on a marker, so self_refine declares 1
+    now and the total moves with it. The test was pinning the port's old shape."""
     assert main(["--dry-run", "--algorithms", "self_refine", "r_zero"]) == 0
-    assert "reserved proposal calls=24" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "reserved proposal calls=18" in out
+    assert "self_refine: 2 reserved proposal calls per mode" in out
+    assert "r_zero: 4 reserved proposal calls per mode" in out
 
 
 # ---------------------------------------------------------------------------
