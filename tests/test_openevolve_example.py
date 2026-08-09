@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 from pathlib import Path
@@ -79,8 +80,13 @@ def test_map_elites_islands_migrate_and_respect_candidate_cap():
     assert archive.select_parent() is None
 
 
-@pytest.mark.skipif(shutil.which("bwrap") is None, reason="Bubblewrap is not installed")
+@pytest.mark.skipif(evaluator.sandbox_backend() is None,
+                    reason="no candidate isolation backend on this host")
 def test_initial_program_runs_deterministically_in_sandbox():
+    """Gated on `bwrap` until the Seatbelt backend existed, which meant the new
+    backend had no test that actually executed anything through it -- the one
+    test that runs a candidate end to end skipped on the only platform the new
+    code path serves."""
     first = evaluator.evaluate_source(
         evaluator.INITIAL_PROGRAM, trials=3, budget=40, seed=7, timeout=5.0
     )
@@ -206,3 +212,214 @@ def test_resource_limits_are_applied_in_runner_not_threaded_parent():
     assert "preexec_fn" not in parent_source
     assert "start_new_session=True" in parent_source
     assert "resource.setrlimit" in runner_source
+
+
+# -- candidate isolation: two backends, and no third "run it unconfined" -----
+
+
+def test_the_backend_is_chosen_once_so_the_banner_cannot_claim_the_wrong_one():
+    """`main` used to re-derive the choice with its own `shutil.which("bwrap")`.
+    Two copies of one condition is how a banner ends up announcing Bubblewrap on
+    a host that is actually running Seatbelt."""
+    source = Path(port.__file__).read_text(encoding="utf-8")
+    assert 'shutil.which("bwrap")' not in source, (
+        "the CLI is deriving the backend itself instead of asking the dispatcher")
+    assert evaluator.sandbox_backend() in (
+        "Bubblewrap", "Seatbelt (sandbox-exec)", None)
+
+
+def test_a_host_with_no_sandbox_refuses_rather_than_running_the_candidate(
+    tmp_path, monkeypatch
+):
+    """The candidate is model-written Python that gets executed. Falling back to
+    an unsandboxed subprocess to keep the example portable would be trading the
+    only thing the sandbox is for."""
+    monkeypatch.setattr(evaluator.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(evaluator.sys, "platform", "linux")
+    with pytest.raises(RuntimeError, match="no candidate isolation"):
+        evaluator.sandbox_command(tmp_path / "c.py", 1, 10, 0, 5.0, 512)
+
+
+@pytest.mark.skipif(shutil.which("bwrap") is None, reason="bwrap not installed")
+def test_bubblewrap_is_preferred_where_it_exists(tmp_path):
+    command = evaluator.sandbox_command(tmp_path / "c.py", 1, 10, 0, 5.0, 512)
+    assert command[0].endswith("bwrap")
+
+
+def test_the_seatbelt_profile_denies_the_network_and_confines_writes(
+    tmp_path, monkeypatch
+):
+    """Seatbelt is `(allow default)` plus denials, the inverse of bwrap's
+    allowlist, so what it actually forbids is worth asserting rather than
+    assuming from the fact that a profile file exists."""
+    monkeypatch.setattr(evaluator.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(evaluator.sys, "platform", "darwin")
+    monkeypatch.setattr(evaluator.Path, "exists", lambda _self: True)
+    candidate = tmp_path / "c.py"
+    command = evaluator.sandbox_command(candidate, 3, 200, 7, 15.0, 512)
+
+    assert command[0] == "/usr/bin/sandbox-exec" and command[1] == "-f"
+    profile = Path(command[2]).read_text(encoding="utf-8")
+    assert "(deny network*)" in profile
+    # Blanket deny first, scratch re-allowed after it -- Seatbelt takes the last
+    # matching rule, so an `allow` above the `deny` would be silently overridden.
+    assert profile.index("(deny file-write*)") < profile.index("(allow file-write*")
+    assert f'(allow file-write* (subpath "{tmp_path.resolve()}"))' in profile
+    # The same runner, with the same limits, on either backend.
+    assert str(evaluator.RUNNER) in command
+    assert "--cpu-seconds" in command and command[command.index("--cpu-seconds") + 1] == "15"
+
+
+def test_a_platform_that_refuses_a_limit_says_so_instead_of_pretending(monkeypatch):
+    """`set_resource_limits` used to call `setrlimit(RLIMIT_AS, ...)`
+    unconditionally. Darwin has no usable `RLIMIT_AS` -- it raises whatever value
+    you pass -- so every candidate died inside the runner's own
+    `except BaseException` and was scored as a program that crashed: the sandbox
+    failing, reported as the candidate failing.
+
+    `setrlimit` is stubbed rather than called. Applying these to the pytest
+    process is not a hypothetical hazard -- an earlier version of this test did,
+    capping the whole run at 60 CPU seconds and 64 file descriptors, and the
+    suite died of SIGXCPU two thirds of the way through.
+    """
+    import resource
+
+    from examples.openevolve import _openevolve_runner as runner
+
+    applied = {}
+
+    def fake_setrlimit(which, value):
+        if which == getattr(resource, "RLIMIT_AS", object()):
+            raise ValueError("current limit exceeds maximum limit")
+        applied[which] = value
+
+    monkeypatch.setattr(resource, "setrlimit", fake_setrlimit)
+    unavailable = runner.set_resource_limits(60, 512)
+
+    assert unavailable == ["RLIMIT_AS"]
+    assert applied[resource.RLIMIT_CPU] == (60, 61), (
+        "the limit that actually stops a runaway candidate must still be applied")
+    assert resource.RLIMIT_FSIZE in applied and resource.RLIMIT_NOFILE in applied
+
+
+def test_the_runner_carries_the_refused_limits_out_of_the_sandbox():
+    """A caller that cannot say which guarantees it got is a caller that will
+    assume it got all of them."""
+    payload = evaluator.RUNNER.read_text(encoding="utf-8")
+    assert "limits_unavailable" in payload
+
+def test_an_unparseable_mutation_warns_rather_than_scoring_as_no_improvement():
+    """An empty completion and a mutation that genuinely failed to improve are
+    the same `code=""` and opposite diagnoses: one is the token budget, the other
+    is the search. Measured on deepseek-v4-flash, `--max-tokens 2048` gave 0 of 6
+    parseable replies and the run reported `reward 0.7639 -> 0.7639`."""
+    archive = port.OpenEvolveArchive(
+        archive_size=8, num_islands=1, feature_bins=4,
+        exploitation_ratio=1.0, migration_interval=99, candidate_limit=4)
+    archive.add_program(
+        evaluator.Program(
+            evaluator.program_id(evaluator.INITIAL_PROGRAM),
+            0, 0, None, evaluator.INITIAL_PROGRAM, "seed",
+            {"combined_score": 1.0, "framework_reward": 0.5}, True, ""),
+        baseline=True)
+
+    port._EMPTY_PROPOSALS["n"] = 0
+    propose = port.make_propose(
+        archive, lambda _prompt: "", objective_budget=200, held_out_trials=2)
+    with pytest.warns(RuntimeWarning, match="came back empty"):
+        payload = propose("rendered", object(), "", 0.0)
+    assert json.loads(payload)["code"] == ""
+
+
+def test_thinking_disabled_reaches_an_anthropic_shaped_endpoint():
+    """The option was gated on `is_openai_compatible(args) and model startswith
+    glm`, so the `--thinking disabled` default silently did nothing everywhere
+    else -- and on a reasoning model 96% of the output budget goes to thinking,
+    which is what truncated every mutation above."""
+    source = Path(port.__file__).read_text(encoding="utf-8")
+    body = source.split("def _make_completion", 1)[1].split("\ndef ", 1)[0]
+    assert "is_openai_compatible" not in body, (
+        "the thinking option is still gated on the OpenAI-compatible path")
+    assert 'args.thinking != "default"' in body
+
+
+def test_reflective_merge_is_refused_rather_than_silently_ignored():
+    """The shared parser offers `--reflective-merge` to every port. This one has
+    no use for it -- fusing a round's candidates would collapse the MAP-Elites
+    cells the archive exists to keep -- and a flag that is accepted and then
+    does nothing is indistinguishable, from the command line, from one that
+    worked."""
+    with pytest.raises(SystemExit, match="not supported by the OpenEvolve port"):
+        port.main(["--dry-run", "--reflective-merge"])
+
+
+def _flat_evaluator(source, *, trials, budget, seed, timeout, max_length):
+    """Enough shape for the archive to seed; the run never gets past `evolve`."""
+    rows = [{"seed": seed + i, "success": True, "value": -1.0, "distance": 1.0,
+             "x": 0.0, "y": 0.0, "runtime_seconds": 0.0, "objective_calls": budget}
+            for i in range(trials)]
+    return {"valid": True, "error": "",
+            "metrics": {"combined_score": 0.5, "framework_reward": 0.25},
+            "trials": rows}
+
+
+def test_the_staleness_flag_reaches_the_engine(monkeypatch):
+    """Five flags in this repository have been declared, documented, and never
+    read. This one is checked at the seam it has to cross: the kwargs handed to
+    `evolve`."""
+    captured = {}
+
+    def fake_evolve(*_args, **kwargs):
+        captured.update(kwargs)
+        raise RuntimeError("stop here -- the kwargs are the assertion")
+
+    monkeypatch.setattr(port, "evolve", fake_evolve)
+    with pytest.raises(RuntimeError, match="stop here"):
+        port.run_agentdescent_openevolve(
+            lambda _prompt: "", mode="serial", iterations=2, workers=1,
+            task_count=8, test_trials=1, staleness="full",
+            evaluator=_flat_evaluator)
+
+    policy = captured.get("staleness_policy")
+    assert policy is not None, "--staleness never reached the engine"
+    assert type(policy) is type(port.get_policy("full"))
+    assert type(policy) is not type(port.get_policy("guarded")), (
+        "the default was handed through regardless of the flag")
+
+
+@pytest.mark.skipif(evaluator.sandbox_backend() != "Seatbelt (sandbox-exec)",
+                    reason="Seatbelt is not the backend on this host")
+def test_seatbelt_actually_blocks_the_writes_the_profile_claims_to_block():
+    """Asserting on the text of the profile only proves the string was written.
+    The profile is `(allow default)` plus denials and rule order decides the
+    outcome, so the two guarantees are checked by asking the kernel."""
+    import subprocess
+    import sys
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as scratch:
+        candidate = Path(scratch) / "candidate.py"
+        candidate.write_text("", encoding="utf-8")
+        command = evaluator.sandbox_command(candidate, 1, 10, 0, 5.0, 512)
+        profile = command[2]
+
+        def under_sandbox(code):
+            return subprocess.run(
+                ["/usr/bin/sandbox-exec", "-f", profile, sys.executable, "-c", code],
+                capture_output=True, text=True, timeout=60)
+
+        outside = Path(tempfile.gettempdir()) / "agentdescent-sandbox-escape.txt"
+        blocked = under_sandbox(f"open({str(outside)!r}, 'w').write('escaped')")
+        assert blocked.returncode != 0, "a candidate could write outside its scratch dir"
+        assert not outside.exists()
+
+        allowed = under_sandbox(
+            f"open({str(Path(scratch) / 'ok.txt')!r}, 'w').write('fine')")
+        assert allowed.returncode == 0, (
+            f"the runner cannot write its own scratch dir: {allowed.stderr[:400]}")
+
+        # No network. `socket` is in the standard library, so this is the kernel
+        # refusing the connection rather than the AST gate refusing the import.
+        net = under_sandbox(
+            "import socket; socket.create_connection(('1.1.1.1', 80), timeout=5)")
+        assert net.returncode != 0, "a candidate could open a network connection"

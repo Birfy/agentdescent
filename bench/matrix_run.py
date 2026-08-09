@@ -122,7 +122,10 @@ ROWS = [
          # `--tasks`, not `--task-count`: the run function's parameter is named
          # task_count and the flag never was, so this row crashed argparse on
          # its first live cell.
-         size=["--tasks", "8"], needs="bwrap"),
+         # No `needs="bwrap"` any more: candidate isolation has a Seatbelt
+         # backend on macOS, and the runner's own `setrlimit` calls are what
+         # impose the CPU and memory limits on either platform.
+         size=["--tasks", "8"]),
 
     # The eleven declarative MethodPolicy ports. They reach the same three
     # arms through `examples._method_runner.standard_main`, and their budget

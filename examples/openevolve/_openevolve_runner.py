@@ -15,6 +15,7 @@ import math
 import random
 import resource
 import time
+from typing import List
 
 
 def objective_value(x: float, y: float) -> float:
@@ -36,16 +37,33 @@ class BudgetedObjective:
         return objective_value(x, y)
 
 
-def set_resource_limits(cpu_seconds: int, nproc_limit: int) -> None:
-    """Apply candidate limits after Bubblewrap starts, before importing its code."""
-    resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds + 1))
-    resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024, 512 * 1024 * 1024))
-    resource.setrlimit(resource.RLIMIT_FSIZE, (1024 * 1024, 1024 * 1024))
-    resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
-    try:
-        resource.setrlimit(resource.RLIMIT_NPROC, (nproc_limit, nproc_limit))
-    except (ValueError, OSError):
-        pass
+def set_resource_limits(cpu_seconds: int, nproc_limit: int) -> List[str]:
+    """Apply candidate limits inside the sandbox, before importing its code.
+
+    Returns the names of the limits this platform refused, so a caller can say
+    which guarantee it does not have rather than assume it has all of them.
+    Darwin has no `RLIMIT_AS` -- setting it raises "current limit exceeds
+    maximum limit" whatever the value -- and refusing to run there because one
+    of five limits is unavailable would be the wrong trade: the CPU-seconds
+    limit is what stops a runaway candidate, and that one applies.
+    """
+    unavailable: List[str] = []
+    for name, value in (
+        ("RLIMIT_CPU", (cpu_seconds, cpu_seconds + 1)),
+        ("RLIMIT_AS", (512 * 1024 * 1024, 512 * 1024 * 1024)),
+        ("RLIMIT_FSIZE", (1024 * 1024, 1024 * 1024)),
+        ("RLIMIT_NOFILE", (64, 64)),
+        ("RLIMIT_NPROC", (nproc_limit, nproc_limit)),
+    ):
+        limit = getattr(resource, name, None)
+        if limit is None:
+            unavailable.append(name)
+            continue
+        try:
+            resource.setrlimit(limit, value)
+        except (ValueError, OSError):
+            unavailable.append(name)
+    return unavailable
 
 
 def load_search(path: str):
@@ -107,13 +125,16 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        set_resource_limits(args.cpu_seconds, args.nproc_limit)
+        unavailable = set_resource_limits(args.cpu_seconds, args.nproc_limit)
         search = load_search(args.candidate)
         trials = [
             run_trial(search, args.seed + index, args.budget, args.bound)
             for index in range(args.trials)
         ]
-        payload = {"ok": True, "trials": trials}
+        # Carried out of the sandbox rather than swallowed: a run that could not
+        # cap a candidate's address space has a weaker guarantee than one that
+        # could, and the caller should be able to say which it got.
+        payload = {"ok": True, "trials": trials, "limits_unavailable": unavailable}
     except BaseException as exc:
         payload = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:500]}", "trials": []}
     print(json.dumps(payload, separators=(",", ":"), allow_nan=False))

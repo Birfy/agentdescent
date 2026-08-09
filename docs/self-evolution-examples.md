@@ -229,11 +229,12 @@ OpenEvolve evolves Python source with model mutations, MAP-Elites feature grids,
 island-local selection, and ring migration. The port maps source replacement to
 a `Strategy`, the archive to a custom `Aggregator`, and concurrency to
 `evolve()` / `async_evolve()`. Generated programs run behind an AST gate and a
-Bubblewrap sandbox with no network and explicit resource limits.
+sandbox with no network and explicit resource limits -- Bubblewrap on Linux,
+Seatbelt (`sandbox-exec`) on macOS, and a refusal to run where neither exists.
 
 The [dedicated page](algo-openevolve.md) documents the pinned upstream revision,
-intentional substitutions, live GLM-5.2 benchmark, equal model-call budget, and
-the distinction between time to quality and full end-to-end return time.
+the intentional substitutions, and a live run in which the evolved program
+reached the evaluator's ceiling on held-out seeds.
 
 ```bash
 python -m examples.openevolve.openevolve_program_evolution --dry-run

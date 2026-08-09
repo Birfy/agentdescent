@@ -1,0 +1,60 @@
+{
+ "model": "deepseek-v4-flash",
+ "provider": "claude",
+ "upstream_commit": "411fb59c886c18704caaffb611e17cf9e7d824d2",
+ "cells": [
+  {
+   "row": "openevolve",
+   "dataset": "function minimization",
+   "arm": "async",
+   "seed": 0,
+   "width": 4,
+   "budget": 24,
+   "staleness": "full",
+   "async_ratio": 3,
+   "tasks": 8,
+   "islands": 3,
+   "migration_interval": 4,
+   "thinking": "disabled",
+   "max_tokens": 32000,
+   "engine_rollouts": 27,
+   "stale_considered": 24,
+   "stale_discarded": 0,
+   "wall_seconds": 50.81,
+   "model_calls": 24,
+   "total_tokens": 76294,
+   "model_failures": 0,
+   "val_framework_reward": [
+    0.7639,
+    0.9997
+   ],
+   "test_combined_score": [
+    0.9638,
+    1.4995
+   ],
+   "test_framework_reward": [
+    0.762,
+    0.9997
+   ],
+   "test_avg_distance": [
+    0.52599,
+    0.00057
+   ],
+   "test_value_stddev": [
+    0.1392,
+    0.0
+   ],
+   "programs_evaluated": 25,
+   "valid_programs": 22,
+   "island_cell_counts": [
+    3,
+    2,
+    2
+   ],
+   "migrations": 3,
+   "best_iteration": 15,
+   "best_island": 2,
+   "best_change_summary": "Replaced the final random perturbation phase with a Nelder-Mead simplex refinement step that more efficiently exploits the local landscape around the best point found, then adds a lighter fine-tuning pass."
+  }
+ ]
+}
