@@ -50,19 +50,29 @@ def _money_answer(prompt):
 
 def fake_completion(prompt):
     lower = prompt.lower()
-    if "promptbreeder zero-order mutation" in lower:
-        return json.dumps(
-            {"task_prompt": "Compute carefully and return integer cents only."})
-    if "promptbreeder hyper-mutation" in lower:
-        return json.dumps(
-            {"mutation_prompt": "Generalize evaluator feedback into strict domain output rules."})
-    if "promptbreeder first-order mutation" in lower:
+    # PromptBreeder's nine operators and its population seeding all end with one
+    # of three JSON contracts, so the fake answers the contract rather than each
+    # operator's wording. Keying on the wording is how this stub silently stopped
+    # covering the port: the operators were rewritten, every match fell through
+    # to the prose fallback, `parse_json_object` rejected it, and the offline run
+    # produced no valid proposal at all while still passing a
+    # `final >= baseline` assertion.
+    if 'with "task_prompt" and "mutation_prompt" strings' in lower:
         return json.dumps(
             {
                 "task_prompt": "Compute carefully and return integer cents only.",
                 "mutation_prompt": "Generalize evaluator feedback into domain rules.",
             }
         )
+    if 'with a "mutation_prompt" string' in lower:
+        return json.dumps(
+            {"mutation_prompt": "Generalize evaluator feedback into strict domain output rules."})
+    if 'with a "task_prompt" string' in lower:
+        # Varied per prompt so the population is a population: identical units
+        # deduplicate to one entry and no tournament ever has two to sample.
+        tag = abs(hash(prompt)) % 1000
+        return json.dumps(
+            {"task_prompt": f"Compute carefully and return integer cents only. [{tag}]"})
     if "aflow's graph optimizer" in lower:
         return json.dumps(
             {
@@ -326,13 +336,103 @@ def test_strict_grader_is_the_one_the_ports_use():
     assert parse_integer_answer("415") == "415"
     assert parse_integer_answer("$4.15") is None
     assert parse_integer_answer("about 415 cents") is None
+    # The convention is still something a method has to discover -- these are the
+    # forms it must NOT accept, on the line it reads.
+    assert parse_integer_answer("2.75 + 1.40 = 4.15") is None
+    assert parse_integer_answer("") is None
 
 
-def test_money_splits_are_disjoint_and_complete():
-    train, held_out, test = money_splits(0)
+def test_the_grader_reads_the_final_line_so_working_and_format_are_not_exclusive():
+    """It used to `fullmatch` the whole reply, which made the output convention
+    and the reasoning mutually exclusive: a prompt that satisfied the format had
+    to forbid the working, and without the working the arithmetic collapsed.
+
+    Measured on `deepseek-v4-flash` across all 48 items -- same model, same
+    convention: no working scored 0.562, *with* working scored **0.000** because
+    the working itself failed the grader, and with working under a final-line
+    grader scored 0.979. The middle number is the point: a correct answer scored
+    zero for having shown its arithmetic.
+    """
+    worked = ("Notebook 2.75 and pen 1.40.\n"
+              "2.75 + 1.40 = 4.15 dollars\n"
+              "4.15 x 100 = 415 cents\n"
+              "Answer: 415")
+    assert parse_integer_answer(worked) == "415"
+    # A reply that stops mid-working still scores zero: the last line is not an
+    # answer, and reading further back would start grading intermediate values.
+    assert parse_integer_answer("2.75 + 1.40 = 4.15\n4.15 x 100 = 415 cents") is None
+    assert parse_integer_answer("Answer: 415\nbut I am not sure") is None
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_money_splits_are_disjoint_and_complete(seed):
+    train, held_out, test = money_splits(seed)
     ids = [{task.id for task in rows} for rows in (train, held_out, test)]
-    assert [len(rows) for rows in ids] == [4, 4, 4]
+    assert [len(rows) for rows in ids] == [16, 16, 16]
     assert not (ids[0] & ids[1] or ids[0] & ids[2] or ids[1] & ids[2])
+
+
+def test_the_train_split_is_wide_enough_for_the_workers_the_matrix_runs():
+    """`run_port` refuses a run whose train split is smaller than the worker
+    count, so the domain's size *is* the ceiling on this family's parallelism.
+    At twelve items the splits were 4/4/4 and every one of these eleven ports
+    was capped at four workers with a four-item acceptance gate."""
+    train, held_out, _ = money_splits(0)
+    assert len(train) >= 16 and len(held_out) >= 16
+
+
+def test_every_money_answer_survives_an_independent_rederivation():
+    """A wrong answer in this table does not raise. It silently becomes a task no
+    method can solve, and the run then reads as a method that failed to learn --
+    so the arithmetic is checked rather than trusted.
+
+    The table is built in integer cents; this recomputes each row with `Decimal`
+    from the dollar figures the question itself prints, which is a different
+    numeric type applied to a different source of truth (the prose, not the
+    generator).
+    """
+    import re
+    from decimal import Decimal
+
+    checked = 0
+    for task in TASKS:
+        q = task.question
+        dollars = [Decimal(m) for m in re.findall(r"\$(\d+\.\d\d)", q)]
+        counts = [int(m) for m in re.findall(r"(?<![.\d$])\b(\d+)\b(?!\.\d)", q)]
+        pct = re.search(r"(\d+) percent", q)
+        counts = [c for c in counts if not (pct and str(c) == pct.group(1))]
+        # The original twelve spell their multipliers as words ("Three labels",
+        # "Four friends"); the generated rows use digits. Both are read here, so
+        # this check covers the hand-written half of the table too.
+        words = {"two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+                 "seven": 7, "eight": 8, "nine": 9, "ten": 10, "twelve": 12}
+        counts += [words[w] for w in re.findall(r"\b([A-Za-z]+)\b", q.lower())
+                   if w in words]
+
+        if "coupon removes" in q or "change is due" in q:
+            want = dollars[0] - dollars[1]
+        elif "split" in q:
+            want = dollars[0] / counts[0]
+        elif "tip to" in q or "percent tax" in q:
+            want = dollars[0] * (100 + Decimal(pct.group(1))) / 100
+        elif "discounted by" in q:
+            want = dollars[0] * (100 - Decimal(pct.group(1))) / 100
+        elif "each and" in q:                      # n of one, plus one other
+            want = counts[0] * dollars[0] + dollars[1]
+        elif " are $" in q:                        # one item, plus n of another
+            want = dollars[0] + counts[0] * dollars[1]
+        elif len(dollars) == 2:
+            want = dollars[0] + dollars[1]
+        elif counts:                               # n at one price
+            want = counts[0] * dollars[0]
+        else:
+            raise AssertionError(f"no rule matched, so nothing was checked: {q}")
+
+        assert int(want * 100) == int(task.answer_cents), (
+            f"{task.id}: prose says {want}, table says {task.answer_cents}")
+        assert f"${want}" not in q, f"{task.id} prints its own answer"
+        checked += 1
+    assert checked == len(TASKS) == 48
 
 
 def test_selfplay_evaluation_splits_are_frozen_and_seeded():
@@ -434,11 +534,21 @@ def test_dry_run_counts_two_call_proposals(capsys):
 # ---------------------------------------------------------------------------
 
 def test_population_aggregator_feeds_selection_a_real_archive():
+    """AFlow rather than PromptBreeder.
+
+    PromptBreeder used to be the vehicle here, and stopped being one when its
+    tournament moved out of the selection seam: Algorithm 1 has to *evaluate*
+    both sampled units on a training batch and *replace* the loser, and a
+    `SelectionPolicy` can do neither -- it receives candidates with cached scores
+    and returns one. AFlow's `SoftMixed` is a selection rule in the sense the
+    seam means, so it is the honest test of the shared aggregator.
+    """
     from dataclasses import replace as _replace
 
     from agentdescent.policies import Policies as _Policies
+    from examples.aflow.aflow_workflow_search import SoftMixed
 
-    class RecordingTournament(BinaryTournament):
+    class RecordingSelection(SoftMixed):
         def __init__(self):
             super().__init__(seed=0)
             self.sizes = []
@@ -447,8 +557,8 @@ def test_population_aggregator_feeds_selection_a_real_archive():
             self.sizes.append(len(ctx.candidates))
             return super().select(ctx, n)
 
-    spy = RecordingTournament()
-    _, builder = ALGORITHMS["promptbreeder"]
+    spy = RecordingSelection()
+    _, builder = ALGORITHMS["aflow"]
     policy = _replace(builder(0), engine=_Policies(selection=spy))
     usage = Usage()
     recorder = Recorder(metered(fake_completion, usage), usage)
@@ -457,7 +567,7 @@ def test_population_aggregator_feeds_selection_a_real_archive():
         candidate_budget=4, max_seconds=30.0, shutdown_grace=5.0,
     ).compact()
     # The archive held the seed plus at least one committed candidate, so the
-    # tournament was run over a genuine population at least once.
+    # selection rule ran over a genuine population at least once.
     assert spy.sizes, "selection policy was never consulted"
     assert max(spy.sizes) >= 2, f"archive never grew: {spy.sizes}"
     assert payload["final_quality"] >= payload["baseline_quality"]

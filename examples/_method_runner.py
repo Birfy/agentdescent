@@ -14,6 +14,7 @@ evaluation -- rather than each candidate paying its own ranking evaluation.
 from __future__ import annotations
 
 import argparse
+import random
 import threading
 import time
 from dataclasses import dataclass, replace
@@ -28,7 +29,7 @@ from agentdescent.fusion import reflective_merge
 
 from ._common import add_standard_args, completion_for, confirm
 from ._measure import MODES, PhasedLLM, Recorder, compact_events, usage_dict
-from ._method_policy import MethodPolicy
+from ._method_policy import MethodPolicy, PopulationContext
 from ._population import population_factory
 
 
@@ -128,6 +129,30 @@ class MethodRunResult:
         }
 
 
+def _batch(tasks, size: int, seed: int):
+    """A random batch of the training split, or all of it when `size` covers it.
+
+    Seeded from the run's seed and the requested size, so a run is reproducible
+    while still resampling as the size changes -- the sampling is part of the
+    algorithm for a method whose fitness is defined on a batch, not a caching
+    detail.
+    """
+    if size <= 0 or size >= len(tasks):
+        return list(tasks)
+    # An int, not a tuple: `Random(tuple)` seeds by hashing, which Python 3.9
+    # deprecates and which is `PYTHONHASHSEED`-dependent -- the batch would
+    # differ between processes and the run would stop being reproducible.
+    return random.Random(seed * 1_000_003 + size * 1009 + len(tasks)).sample(
+        list(tasks), size)
+
+
+def _default_population(ctx: PopulationContext):
+    """The shared archive: keep every committed head, ask `selection` who is next."""
+    return population_factory(
+        ctx.selection, ctx.artifact_id, conflict=ctx.conflict,
+        fusion=ctx.fusion, acceptance=ctx.acceptance)
+
+
 def _evaluate(policy: MethodPolicy, llm: PhasedLLM, rendered: str,
               tasks: Sequence[Task]) -> float:
     if not tasks:
@@ -175,6 +200,11 @@ def run_port(
     prop_llm = PhasedLLM(recorder, f"proposal:{policy.name}")
     eval_llm = PhasedLLM(recorder, f"eval:{policy.name}")
     merge_llm = PhasedLLM(recorder, f"fusion:{policy.name}")
+    # A population layer that seeds itself -- PromptBreeder generates its N
+    # initial units -- spends model calls that are not proposals. Recording them
+    # under `proposal:` would blow the budget check that makes these rows
+    # comparable, and hide initialisation cost inside the search's cost.
+    init_llm = PhasedLLM(recorder, f"init:{policy.name}")
 
     initial = policy.strategy.render(policy.strategy.initial())
     started = time.monotonic()
@@ -200,10 +230,24 @@ def run_port(
         # bypasses the bundle's decision fields, so they travel through the
         # factory and are stripped from the bundle -- carried in both places,
         # one copy would be silently ignored.
-        aggregator_factory = population_factory(
-            engine.selection, f"candidate-{policy.name}",
+        pop_ctx = PopulationContext(
+            selection=engine.selection,
+            artifact_id=f"candidate-{policy.name}",
             conflict=engine.conflict, fusion=engine.fusion,
-            acceptance=engine.acceptance)
+            acceptance=engine.acceptance,
+            llm=lambda prompt, **kw: init_llm(prompt, **kw),
+            # The *training* split, which is where PromptBreeder's Algorithm 1
+            # puts its tournament: "evaluate the fitness of both units on a
+            # random batch of training data". The held-out score the shared
+            # archive uses is the acceptance gate's signal, a different question,
+            # and using it to rank a population is a departure worth not making
+            # silently.
+            fitness=lambda state, batch: _evaluate(
+                policy, eval_llm, policy.strategy.render(state),
+                _batch(policy.train_tasks, batch, seed)),
+            train_size=len(policy.train_tasks),
+            seed=seed)
+        aggregator_factory = (policy.population or _default_population)(pop_ctx)
         engine = replace(engine, selection=None, conflict=None, fusion=None,
                          acceptance=None)
     common = {
@@ -363,6 +407,14 @@ def standard_main(build: Callable[[int], MethodPolicy],
                         choices=["guarded", "reflective", "full"],
                         help="what to do with a diff proposed against a head the "
                              "merger has since moved (agentdescent.staleness)")
+    parser.add_argument(
+        "--temperature", type=float, default=1.0,
+        help=("sampling temperature. Every other port in this repository takes "
+              "one; this runner passed none, so these eleven ran at the API "
+              "default. Measured on deepseek-v4-flash over the money domain, a "
+              "prompt that works the arithmetic out scores 1.000 / 0.958 / 0.875 "
+              "at 0.0 / 0.7 / 1.0, so it is second-order next to what the prompt "
+              "says -- but it is not nothing, and it was not reportable"))
     parser.add_argument("--max-tokens", type=int, default=1024)
     parser.add_argument("--timeout", type=float, default=180.0)
     args = parser.parse_args(argv)
@@ -394,7 +446,7 @@ def standard_main(build: Callable[[int], MethodPolicy],
     usage = Usage()
     recorder = Recorder(
         completion_for(args, usage=usage, max_tokens=args.max_tokens,
-                       timeout=args.timeout),
+                       timeout=args.timeout, temperature=args.temperature),
         usage,
     )
     outcome = run_port(
@@ -409,4 +461,8 @@ def standard_main(build: Callable[[int], MethodPolicy],
           f"invalid={outcome.invalid_candidates} "
           f"wall={outcome.wall_seconds:.1f}s engine={outcome.engine_wall_seconds:.1f}s "
           f"calls={outcome.model_usage['calls']} budget={outcome.budget['matched']}")
+    if policy.report is not None:
+        detail = policy.report()
+        if detail:
+            print(detail)
     return 0
