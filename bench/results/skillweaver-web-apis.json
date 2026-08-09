@@ -1,0 +1,78 @@
+{
+ "experiment": "SkillWeaver web API library on AgentDescent",
+ "model": "deepseek-v4-flash",
+ "provider": "claude",
+ "reference": "OSU-NLP-Group/SkillWeaver@f2a63d65",
+ "config": {
+  "arm": "async_pipeline",
+  "budget_rollouts": 80,
+  "workers": 8,
+  "async_ratio": 2,
+  "staleness": "full",
+  "reflective_merge": false,
+  "self_verify": true,
+  "temperature": 0.7,
+  "thinking": "disabled",
+  "domain": "settings site, 48 tasks, 16/16/16 splits"
+ },
+ "cells": [
+  {
+   "seed": 0,
+   "test": [
+    0.0,
+    0.75
+   ],
+   "validation": [
+    0.0,
+    0.875
+   ],
+   "accepted": 3,
+   "invalid": 6,
+   "wall_s": 338.5,
+   "engine_s": 223.0,
+   "calls": 1137
+  },
+  {
+   "seed": 1,
+   "test": [
+    0.0,
+    0.688
+   ],
+   "validation": [
+    0.0,
+    0.938
+   ],
+   "accepted": 2,
+   "invalid": 2,
+   "wall_s": 305.0,
+   "engine_s": 241.3,
+   "calls": 1253
+  },
+  {
+   "seed": 2,
+   "test": [
+    0.0,
+    0.875
+   ],
+   "validation": [
+    0.0,
+    1.0
+   ],
+   "accepted": 3,
+   "invalid": 6,
+   "wall_s": 266.0,
+   "engine_s": 200.7,
+   "calls": 1121
+  }
+ ],
+ "summary": {
+  "test_quality": {
+   "min": 0.688,
+   "median": 0.75,
+   "max": 0.875,
+   "mean": 0.771
+  },
+  "seeds_that_moved": 3,
+  "total_seeds": 3
+ }
+}

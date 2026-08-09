@@ -119,6 +119,23 @@ def _matches(action: str, index: int, ingredient: str) -> bool:
                for term in terms)
 
 
+def _diagnose(actions: Sequence[str], cursor: int, ingredient: str,
+              verb: str) -> str:
+    """Which of the three failures this is, without naming what is expected.
+
+    Missing, misplaced, and wrong-content call for three different repairs, and
+    collapsing the last two sends an agent reordering a step whose *argument* is
+    wrong -- `combine:water+berry` for a mint tea is not out of order.
+    """
+    if any(_matches(action, cursor, ingredient) for action in actions):
+        return (f"a '{verb}' step is present and does the right thing, but the "
+                f"environment reached it after steps it has to come after")
+    if any(action.partition(":")[0].strip() == verb for action in actions):
+        return (f"a '{verb}' step is present but its argument is not what the "
+                f"environment acted on")
+    return f"the environment expected a '{verb}' step that never happened"
+
+
 def simulate(actions: Sequence[str], ingredient: str) -> Tuple[bool, str]:
     """Execute an action sequence; report the first unmet step, Voyager-style.
 
@@ -143,15 +160,7 @@ def simulate(actions: Sequence[str], ingredient: str) -> Tuple[bool, str]:
     # world that wants sanitize first. Three seeds, 0.000, `accepted=0/80`.
     # Naming the ordering keeps the rule the docstring claims -- no gold trace,
     # nothing about the steps still to come -- while describing what happened.
-    written = [a.partition(":")[0].strip() for a in actions]
-    late = written.count(verb) > sum(
-        1 for i in range(cursor) if _STEPS[i][0] == verb)
-    if late:
-        detail = (f"a '{verb}' step is present but out of order: the "
-                  f"environment reached it after steps it has to come before")
-    else:
-        detail = (f"the environment expected a '{verb}' step that never "
-                  f"happened")
+    detail = _diagnose(actions, cursor, ingredient, verb)
     return False, (
         f"execution stopped before '{verb}' succeeded: {detail} (progress "
         f"{cursor}/{len(required)}). Available primitives: {PRIMITIVES}."

@@ -190,7 +190,7 @@ def test_the_feedback_distinguishes_a_missing_step_from_a_late_one():
             "combine:water+mint", "serve:drink"]
     ok, message = vy.simulate(late, "mint")
     assert not ok
-    assert "out of order" in message
+    assert "after steps it has to come after" in message
     assert "never happened" not in message
 
     absent = ["collect:water", "collect:mint", "heat:water",
@@ -198,6 +198,18 @@ def test_the_feedback_distinguishes_a_missing_step_from_a_late_one():
     ok, message = vy.simulate(absent, "mint")
     assert not ok
     assert "never happened" in message and "out of order" not in message
+
+
+def test_a_wrong_argument_is_not_reported_as_a_wrong_order():
+    """Three failures, three repairs. `combine:water+berry` for a mint tea is
+    not out of order -- an agent told it is reorders a step whose *argument* is
+    wrong, and the collapse costs it the round."""
+    required = vy._required("mint")
+    wrong = required[:4] + ["combine:water+berry", "serve:drink"]
+    ok, message = vy.simulate(wrong, "mint")
+    assert not ok
+    assert "argument is not what the environment acted on" in message
+    assert "never happened" not in message and "after steps" not in message
 
 
 def test_the_ordering_message_still_hands_over_nothing():
