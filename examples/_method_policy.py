@@ -174,12 +174,20 @@ class WindowedMemory:
     parallel workers' reflections merge as a plain union, with no ranking
     evaluation and no model call. ``render`` shows only the last ``window``
     entries -- the paper's Ω=1-3 sliding bound.
+
+    ``validator`` rejects entries that are the wrong *shape* for a memory, and
+    the runner also hands it to :class:`~agentdescent.fusion.ReflectiveFusion`
+    so a synthesised merge has to clear the same bar as an entry that arrived on
+    its own. It is a shape check and not a quality judgement: deciding whether a
+    reflection is *useful* is the held-out gate's job, and a strategy that
+    guessed at it would be scoring its own proposals.
     """
 
     seed_text: str
     window: int = 3
     title: str = "# Episodic memory (most recent last)"
     max_len: int = 900
+    validator: Optional[Callable[[str], bool]] = None
     invalid_proposals: int = 0
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
@@ -198,6 +206,10 @@ class WindowedMemory:
     def to_diff(self, state, proposal, author, base_version, target) -> Optional[Diff]:
         value = clip_text(proposal or "", max_len=self.max_len)
         if not value or value in state.values():
+            with self._lock:
+                self.invalid_proposals += 1
+            return None
+        if self.validator is not None and not self.validator(value):
             with self._lock:
                 self.invalid_proposals += 1
             return None

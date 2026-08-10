@@ -28,18 +28,30 @@ is stated here rather than implied by a window that happens to match.
 
 Boundary: upstream retries the same failed instance; the framework's held-out
 rerun is the analogue.
+
+**Domain: GSM-Hard, not GSM8K**, for a reason specific to this mechanism.
+Reflexion is fed by failures, and on GSM8K this port's held-out score was
+0.75-0.80 -- four rollouts in five succeeded and wrote nothing, so a 32-candidate
+probe produced 7 reflections. Worse, the failures that did occur had no shared
+cause: each was an idiosyncratic misreading, and a memory read against *other*
+questions has nothing to carry. GSM-Hard is the same 1319 questions with large
+numbers substituted, where the wrapper scores 0.391 and failures concentrate on
+one cause -- arithmetic done in the model's head. That is a failure mode a
+transferable rule can actually address, which is what this port is asking about.
 """
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from agentdescent.evolution import Task
 
 from examples._method_policy import MethodPolicy, WindowedMemory, read_fields
 from examples._method_runner import standard_main
-from examples._gsm8k_domain import (STARTING_INSTRUCTION, feedback,
-                                    gsm8k_reward, gsm8k_splits, solve_gsm8k)
+from examples._gsmhard_domain import (STARTING_INSTRUCTION, feedback,
+                                      gsmhard_reward, gsmhard_splits,
+                                      solve_gsmhard)
 
 
 FIDELITY = "mechanism_microport"
@@ -73,19 +85,38 @@ MEMORY_HEADER = (
 #: was well-formed, every one was refused by the gate, and the memory finished
 #: empty across three seeds.
 FEW_SHOT_EXAMPLES = """Attempt on a problem about a baker's trays of buns: FAILED.
-The evaluator read the last number in the reply: '62'
+The evaluator read the last number in your reply: '62'
 It wanted: '72'
 New plan: I did one of the multiplications in my head instead of writing it \
 down, and got it wrong. From now on every calculation goes on its own line \
 before I use its result, however small it looks.
 
 Attempt on a problem about a shop's crates: FAILED.
-The evaluator read the last number in the reply: '20'
+The evaluator read the last number in your reply: '20'
 It wanted: '17'
 New plan: My arithmetic reached the right value and then I wrote a closing \
 sentence that mentioned an earlier number. The grader reads the last number in \
 the reply, so anything after the answer replaces it. From now on I finish with \
 the answer and write nothing after it."""
+
+
+#: A reflection that states no rule is not a short reflection, it is a different
+#: kind of output. The prompt ends in "New plan:" and shows the failed question,
+#: so answering the question is a live continuation however firmly the
+#: instructions forbid it: measured on GSM8K, 2 of 7 reflections in a probe were
+#: the bare string `624` and `48`. Those merged into the window as entries and
+#: displaced real plans, because `WindowedMemory` is bounded and append-only.
+#:
+#: Six alphabetic words is a **shape** floor, not a quality bar -- "Write each
+#: calculation on its own line before using it" clears it and `624` cannot.
+#: Whether a plan that clears it is any good is the held-out gate's question,
+#: and answering it here would be the strategy scoring its own proposals.
+_WORD = re.compile(r"[A-Za-z]{2,}")
+
+
+def is_a_plan(entry: str) -> bool:
+    """Does this reflection state a rule rather than answer the question?"""
+    return len(_WORD.findall(entry or "")) >= 6
 
 
 def _for_instance(rendered: str, task: Task) -> str:
@@ -121,7 +152,7 @@ def build(seed: int, *, per_instance: bool = False) -> MethodPolicy:
         if per_instance:
             # Only this task's own entries, as upstream's per-env memory is.
             rendered = _for_instance(rendered, task)
-        return solve_gsm8k(llm, rendered, task)
+        return solve_gsmhard(llm, rendered, task)
 
     def propose(llm, rendered: str, task: Task, output: str,
                 reward: float) -> Optional[str]:
@@ -157,7 +188,7 @@ def build(seed: int, *, per_instance: bool = False) -> MethodPolicy:
         # still one ledger artifact, and only the *rendering* narrows.
         return f"{prefix}{raw.strip()}" if raw and raw.strip() else raw
 
-    train, held_out, test = gsm8k_splits(seed)
+    train, held_out, test = gsmhard_splits(seed)
     return MethodPolicy(
         name="reflexion",
         fidelity=FIDELITY,
@@ -168,16 +199,17 @@ def build(seed: int, *, per_instance: bool = False) -> MethodPolicy:
             "Memory is append-only and rendered as the last three entries, matching upstream's bounded window.",
             "Memory is global where upstream's is per task instance: Reflexion retries the same instance and claims no transfer, so this port asks whether reflection transfers at all. --per-instance runs the faithful variant.",
             "The reflection prompt asks for a rule that survives being read against other questions, because a shared memory needs one -- upstream asks for the specific steps that should have been taken, which is right when the next thing you do is retry that same instance.",
-            "GSM8K replaces HotpotQA/ALFWorld: real questions, a real answer key, and the standard grader.",
+            "An entry stating no rule is refused as malformed rather than appended: the prompt shows the failed question and ends in 'New plan:', so a bare answer is a live continuation, and the window is bounded so one displaces a real plan.",
+            "GSM-Hard replaces HotpotQA/ALFWorld: real questions, a real answer key, and the standard grader. GSM8K left this port at 0.75-0.80, where four rollouts in five wrote no reflection at all.",
         ),
         strategy=WindowedMemory(seed_text=STARTING_INSTRUCTION, window=3,
-                                title=MEMORY_HEADER),
+                                title=MEMORY_HEADER, validator=is_a_plan),
         train_tasks=tuple(train),
         held_out_tasks=tuple(held_out),
         test_tasks=tuple(test),
         solve=solve,
         propose=propose,
-        reward=gsm8k_reward,
+        reward=gsmhard_reward,
         proposal_calls_per_candidate=1,
         reflective=True,
     )
