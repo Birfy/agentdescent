@@ -85,13 +85,23 @@ construction. See
 [Self-Refine](algo-self-refine.md#measured-results-gsm8k) for why that fixture
 was replaced.
 
-!!! warning "The study's noise floor is ±0.09, and [Reflexion](algo-reflexion.md) measured it"
+!!! warning "The noise floor *for this configuration* is ±0.09, and [Reflexion](algo-reflexion.md) measured it"
     Reflexion accepted **nothing** on any of its three GSM8K seeds, so its
     artifact never changed — which makes each row's "baseline" and "final" two
     evaluations of the *same* instruction. They differ by **+0.094, −0.062 and
     −0.078**.
 
     That is what re-scoring one instruction on 64 items at temperature 0.7
-    costs, and it is the scale every gain on these pages should be read against.
-    A gain of +0.05 here would be indistinguishable from having changed nothing.
+    costs, and it is the scale every gain **on this page** should be read
+    against: PromptBreeder runs the same `solve_gsm8k` wrapper on the same
+    benchmark, so the figure transfers. A gain of +0.05 here would be
+    indistinguishable from having changed nothing.
+
+    It is **not** a constant of the study. Re-scoring one instruction five times
+    under the `policy_prompt` wrapper on GSM-Hard moved it by 0.02 (sd 0.021) —
+    four times tighter. The wrapper that suppresses working also suppresses the
+    variance in it, so a floor measured under one prompt shape does not license a
+    verdict under another. [SICA](algo-sica.md#measured-results-gsm-hard) reports
+    gains against the tighter figure because that is the one its own
+    configuration produces.
 

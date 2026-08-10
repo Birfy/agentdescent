@@ -1,0 +1,94 @@
+{
+ "experiment": "Reflexion episodic memory on GSM-Hard",
+ "reference": "noahshinn/reflexion@218cf0ef",
+ "dataset": {
+  "name": "reasoning-machines/gsm-hard",
+  "file": "gsmhardv2.jsonl",
+  "split_size": 64,
+  "splits": "train / held-out / test, one deterministic shuffle",
+  "transport": "jsonl via HF_ENDPOINT",
+  "grader": "the last number in the reply against `target`"
+ },
+ "model": "deepseek-v4-flash",
+ "provider": "claude",
+ "config": {
+  "arm": "async_pipeline",
+  "budget_rollouts": 80,
+  "workers": 8,
+  "async_ratio": 2,
+  "staleness": "full",
+  "reflective_merge": true,
+  "temperature": 0.7,
+  "thinking": "disabled",
+  "memory": "WindowedMemory(window=3, validator=is_a_plan)"
+ },
+ "supersedes": "bench/results/reflexion-gsm8k.json",
+ "cells": [
+  {
+   "seed": 0,
+   "test": [
+    0.656,
+    0.688
+   ],
+   "validation": [
+    0.406,
+    0.469
+   ],
+   "accepted": 1,
+   "invalid": 2,
+   "wall_s": 1012.4,
+   "engine_s": 128.9,
+   "calls": 445
+  },
+  {
+   "seed": 1,
+   "test": [
+    0.562,
+    0.547
+   ],
+   "validation": [
+    0.484,
+    0.531
+   ],
+   "accepted": 1,
+   "invalid": 4,
+   "wall_s": 1629.1,
+   "engine_s": 105.8,
+   "calls": 434
+  },
+  {
+   "seed": 2,
+   "test": [
+    0.531,
+    0.562
+   ],
+   "validation": [
+    0.547,
+    0.609
+   ],
+   "accepted": 1,
+   "invalid": 4,
+   "wall_s": 997.5,
+   "engine_s": 168.0,
+   "calls": 515
+  }
+ ],
+ "summary": {
+  "test_gain": {
+   "per_seed": [
+    0.032,
+    -0.015,
+    0.031
+   ],
+   "mean": 0.016
+  },
+  "validation_gain": {
+   "per_seed": [
+    0.063,
+    0.047,
+    0.062
+   ],
+   "mean": 0.057
+  }
+ }
+}

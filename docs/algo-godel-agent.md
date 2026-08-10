@@ -10,7 +10,7 @@ paper-benchmark reproduction.
 | Paper | "Gödel Agent: A Self-Referential Agent Framework for Recursive Self-Improvement", Yin et al., 2024 ([arXiv:2410.04444](https://arxiv.org/abs/2410.04444)) |
 | Upstream code (pinned) | [Arvid-pku/Godel_Agent@bbb50879](https://github.com/Arvid-pku/Godel_Agent/tree/bbb508796be31c7140cdfc7106efd830a1324242) |
 | Definition | [`examples/godel_agent/godel_agent_self_modify.py`](https://github.com/Birfy/agentdescent/blob/main/examples/godel_agent/godel_agent_self_modify.py) |
-| Domain | deterministic integer-cents arithmetic; two AST-gated policy functions |
+| Domain | **GSM-Hard** ([`reasoning-machines/gsm-hard`](https://huggingface.co/datasets/reasoning-machines/gsm-hard)); two AST-gated policy functions |
 
 ## The mechanism
 
@@ -33,22 +33,32 @@ trials dipping before improving. Steering comes from optional self-evaluation.
 - The held-out gate (default) is a deliberate substitution, not a preserved mechanism.
 - AST-gated replacement stands in for monkey-patching a full scaffold.
 
-## Measured results
+## Measured results — GSM-Hard
 
 Three seeds, `async_pipeline`, 80 rollouts each, 8 workers, `--staleness full`,
-**with** the framework gate (the default, and a declared substitution -- see
-below), `deepseek-v4-flash` at temperature 0.7. Recorded in
+`--reflective-merge`, **with** the framework gate (the default, and a declared
+substitution -- see below), `deepseek-v4-flash` at temperature 0.7, 64/64/64
+shuffled splits. Recorded in
 [`bench/results/godel-agent-self-modify.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/godel-agent-self-modify.json).
 
-| seed | test quality | validation | accepted | calls |
-|---|---|---|---|---|
-| 0 | 0.000 → **0.562** | 0.000 → 0.875 | 3/80 | 1079 |
-| 1 | 0.000 → **0.375** | 0.000 → 0.750 | 3/80 | 1159 |
-| 2 | 0.000 → **1.000** | 0.000 → 1.000 | 3/80 | 1079 |
+| seed | test quality | validation | accepted | invalid | calls |
+|---|---|---|---|---|---|
+| 0 | 0.672 → **0.750** | 0.547 → 0.656 | 2/80 | 14 | 941 |
+| 1 | 0.641 → **0.609** | 0.578 → 0.656 | 4/80 | 3 | 1007 |
+| 2 | 0.562 → **0.703** | 0.625 → 0.781 | 3/80 | 13 | 1006 |
 
-Mean 0.646, all three seeds moving. See the caveat on
-[PromptBreeder](algo-promptbreeder.md#measured-results-gsm8k): one run per seed does
-not pin a number here either.
+Mean gain **+0.062** on test and +0.114 on validation. Seed 1 regresses by
+0.032, which is inside the ±0.06 across-draw sd at n=64 and is the shape a
+gate that judges on a different draw is expected to produce sometimes. See the
+caveat on [PromptBreeder](algo-promptbreeder.md#measured-results-gsm8k): one run
+per seed does not pin a number here either.
+
+The invalid counts swing from 3 to 14 because the editable surface is **two**
+AST-gated functions where SICA has one, so a proposal that names only one of
+them, or writes a body the node whitelist refuses, is counted rather than
+merged. The same split fix described on
+[SICA](algo-sica.md#measured-results-gsm-hard) applies to this row: these numbers
+are from the shuffled-split run.
 
 !!! danger "`--gateless` was documented in five places and the parser rejected it"
     This module's docstring, `examples/godel_agent/README.md`,

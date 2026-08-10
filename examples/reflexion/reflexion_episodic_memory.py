@@ -84,16 +84,29 @@ MEMORY_HEADER = (
 #: which is useless in a memory read against *other* questions. Every proposal
 #: was well-formed, every one was refused by the gate, and the memory finished
 #: empty across three seeds.
-FEW_SHOT_EXAMPLES = """Attempt on a problem about a baker's trays of buns: FAILED.
+#: The block shape mirrors the live one exactly -- feedback, reward, ``STATUS:
+#: FAIL``, ``New plan:`` -- because that is what makes them *examples* of the
+#: completion being asked for rather than two paragraphs of advice. Upstream's
+#: file has the same property and `test_the_reflection_query_carries_worked_
+#: examples` pins it by counting the markers.
+FEW_SHOT_EXAMPLES = """Here is the attempt:
+Question: a problem about a baker's trays of buns
 The evaluator read the last number in your reply: '62'
 It wanted: '72'
+External evaluator reward: 0.0
+STATUS: FAIL
+
 New plan: I did one of the multiplications in my head instead of writing it \
 down, and got it wrong. From now on every calculation goes on its own line \
 before I use its result, however small it looks.
 
-Attempt on a problem about a shop's crates: FAILED.
+Here is the attempt:
+Question: a problem about a shop's crates
 The evaluator read the last number in your reply: '20'
 It wanted: '17'
+External evaluator reward: 0.0
+STATUS: FAIL
+
 New plan: My arithmetic reached the right value and then I wrote a closing \
 sentence that mentioned an earlier number. The grader reads the last number in \
 the reply, so anything after the answer replaces it. From now on I finish with \
@@ -107,16 +120,19 @@ the answer and write nothing after it."""
 #: the bare string `624` and `48`. Those merged into the window as entries and
 #: displaced real plans, because `WindowedMemory` is bounded and append-only.
 #:
-#: Six alphabetic words is a **shape** floor, not a quality bar -- "Write each
-#: calculation on its own line before using it" clears it and `624` cannot.
-#: Whether a plan that clears it is any good is the held-out gate's question,
+#: Four words is a **shape** floor, not a quality bar, and it is deliberately
+#: nowhere near the boundary: every degenerate output ever observed here scored
+#: **zero** -- `624`, `48`, `925`, `$32.15` contain no word at all -- while the
+#: tersest real plan in the tests, "check the units before answering", scores
+#: five. A threshold sitting between 0 and 5 does not have to be argued for.
+#: Whether a plan that clears it is any *good* is the held-out gate's question,
 #: and answering it here would be the strategy scoring its own proposals.
 _WORD = re.compile(r"[A-Za-z]{2,}")
 
 
 def is_a_plan(entry: str) -> bool:
     """Does this reflection state a rule rather than answer the question?"""
-    return len(_WORD.findall(entry or "")) >= 6
+    return len(_WORD.findall(entry or "")) >= 4
 
 
 def _for_instance(rendered: str, task: Task) -> str:
