@@ -23,6 +23,11 @@ the critique to say it when the attempt is already right, which makes the check
 fire. That is the paper's stopping criterion working rather than upstream's
 vestigial check reproduced, and the difference belongs in the notes.
 
+The domain is **GSM8K**, which is upstream's own `src/gsm` task. The money items
+this port used to share were written by this repository and graded by a rule it
+chose; here neither is true, and the grader is the standard one -- the integer
+after ``####`` against the last number the reply states.
+
 Boundary (fundamental, not a detail): upstream refines the *answer* to one
 instance; this port refines the *instruction artifact* and the held-out rerun
 plays the role of the refined attempt.
@@ -36,8 +41,8 @@ from agentdescent.evolution import Task
 
 from examples._method_policy import MethodPolicy, ValidatedSlot, clip_text
 from examples._method_runner import standard_main
-from examples._money_domain import (STARTING_INSTRUCTION, feedback,
-                                    money_reward, money_splits, solve_money)
+from examples._gsm8k_domain import (STARTING_INSTRUCTION, feedback,
+                                    gsm8k_reward, gsm8k_splits, solve_gsm8k)
 
 
 FIDELITY = "mechanism_microport"
@@ -54,46 +59,46 @@ REFINE_MARKER = "# Improved instruction:"
 #: example built from a real item hands its graded answer to every proposal in
 #: the run.
 FEW_SHOT = f"""Instruction: Solve the problem and give the answer.
-Attempt on "A ticket is $6.30 and a badge is $1.20. What is the total amount?": \
-The total is $7.50.
-The evaluator read the final line of the reply: '$7.50'
-It wanted: '750'
+Attempt on "A baker sells 3 trays of 12 buns for $2 each bun. What does he earn?": \
+3 trays is 36 buns, so 36 times 2. The answer is 62.
+The evaluator read the last number in the reply: '62'
+It wanted: '72'
 
 # There is an error above because of a lack of understanding of what the \
-evaluator accepts. What is the error? Go through the instruction part by part.
+instruction fails to demand. What is the error? Go through the instruction part \
+by part.
 
 # Let us check the instruction step by step.
-# "Solve the problem" -- fine, the arithmetic was right.
-# "give the answer" -- wrong! It does not say in what form. The attempt wrote \
-dollars and the evaluator wanted whole cents as a bare integer, so a correct \
-computation scored zero.
-# It also does not say where the answer goes, and only the final line is read.
+# "Solve the problem" -- it does not say to show the arithmetic, and the attempt \
+did 36 x 2 in its head and got 62. An instruction that permits silent arithmetic \
+gets silent arithmetic errors.
+# "give the answer" -- fine as far as it goes; the grader reads the last number.
 
 {REFINE_MARKER}
-Solve the problem. Work the arithmetic out in dollars, then convert to whole \
-cents. Put nothing but that integer on the final line.
+Solve the problem. Write each calculation out on its own line rather than doing \
+it in your head, then state the final number last.
 
 ### END ###
 
-Instruction: Solve the problem and put the amount in cents on the last line.
-Attempt on "Five friends split a $21.50 bill equally. What amount does each \
-pay?": 2150
-The evaluator read the final line of the reply: '2150'
-It wanted: '430'
+Instruction: Solve the problem, showing each calculation, and state the number last.
+Attempt on "A shop had 20 crates, sold 8, then received 5 more. How many now?": \
+20 - 8 = 12, then 12 + 5 = 17. So the shop had 20 crates to begin with.
+The evaluator read the last number in the reply: '20'
+It wanted: '17'
 
 # There is an error above because of a lack of understanding of what the \
-evaluator accepts. What is the error? Go through the instruction part by part.
+instruction fails to demand. What is the error? Go through the instruction part \
+by part.
 
 # Let us check the instruction step by step.
-# "put the amount in cents on the last line" -- fine, the form was right.
-# "Solve the problem" -- wrong! It does not say to check that every operation \
-the question asks for actually happens. The attempt converted the whole bill \
-instead of one share, so the form was right and the quantity was not.
+# "showing each calculation" -- fine, the working was right and reached 17.
+# "state the number last" -- wrong! It does not say that nothing may follow the \
+answer. The attempt added a closing sentence containing an earlier number, and \
+the grader reads the *last* one, so a correct solution scored zero.
 
 {REFINE_MARKER}
-Solve the problem. First restate which quantity is being asked for, then work \
-the arithmetic out in dollars, then convert to whole cents. Put nothing but \
-that integer on the final line.
+Solve the problem. Write each calculation out on its own line, then finish with \
+the final number and write nothing after it.
 
 ### END ###"""
 
@@ -107,7 +112,7 @@ def _instruction(text: str) -> str:
 
 def build(seed: int) -> MethodPolicy:
     def solve(llm, rendered: str, task: Task) -> str:
-        return solve_money(llm, rendered, task)
+        return solve_gsm8k(llm, rendered, task)
 
     def propose(llm, rendered: str, task: Task, output: str,
                 reward: float) -> Optional[str]:
@@ -135,7 +140,7 @@ def build(seed: int) -> MethodPolicy:
             return None
         return refinement.strip() or None
 
-    train, held_out, test = money_splits(seed)
+    train, held_out, test = gsm8k_splits(seed)
     return MethodPolicy(
         name="self_refine",
         fidelity=FIDELITY,
@@ -145,6 +150,7 @@ def build(seed: int) -> MethodPolicy:
             "The stop signal is checked on the critique half only, as iterative_gsm does.",
             "The stop signal is stronger than upstream's: 'it is correct' appears nowhere in data/prompt/gsm, so nothing teaches the model to emit it and upstream's loop runs its full max_attempts. This port asks for it, so the check fires.",
             "GENERATE, FEEDBACK, and REFINE map to rollout, proposal, and held-out rerun.",
+            "The domain is GSM8K -- upstream's own gsm task -- rather than the hand-written money items this port used to share, so neither the questions nor the grader are this repository's.",
             "Upstream refines the answer to one instance; this port refines the instruction artifact.",
         ),
         strategy=ValidatedSlot(initial_value=STARTING_INSTRUCTION,
@@ -154,7 +160,7 @@ def build(seed: int) -> MethodPolicy:
         test_tasks=tuple(test),
         solve=solve,
         propose=propose,
-        reward=money_reward,
+        reward=gsm8k_reward,
         proposal_calls_per_candidate=1,
         reflective=True,
     )

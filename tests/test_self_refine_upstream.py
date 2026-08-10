@@ -12,8 +12,8 @@ from examples.self_refine import self_refine_feedback_loop as sr
 
 
 def _task():
-    return Task(id="train:m00", prompt="A pen costs $1.40. What is the total?",
-                meta={"answer_cents": "140", "split": "train"})
+    return Task(id="train:0", prompt="A pen costs 3 dollars. Two pens cost?",
+                meta={"answer": "6", "split": "train"})
 
 
 def _fused(critique: str, refinement: str) -> str:
@@ -32,7 +32,7 @@ def test_feedback_and_refine_are_one_call():
         calls.append(prompt)
         return _fused("# wrong! it says nothing about units.", "Answer in cents.")
 
-    out = policy.propose(llm, "Solve it.", _task(), "$1.40", 0.0)
+    out = policy.propose(llm, "Solve it.", _task(), "the answer is 5", 0.0)
     assert len(calls) == 1, f"{len(calls)} calls; upstream's gsm makes one"
     assert out == "Answer in cents."
     assert policy.proposal_calls_per_candidate == 1
@@ -46,14 +46,14 @@ def test_the_stop_signal_is_read_from_the_critique_half_only():
     llm = lambda prompt, **kw: _fused(
         "# the instruction is missing the output form.",
         f"Answer in cents. Check the result until {sr.STOP_SIGNAL}.")
-    assert policy.propose(llm, "Solve it.", _task(), "$1.40", 0.0) is not None
+    assert policy.propose(llm, "Solve it.", _task(), "the answer is 5", 0.0) is not None
 
 
 def test_a_correct_attempt_stops_without_proposing():
     policy = sr.build(0)
     llm = lambda prompt, **kw: _fused(
         f"# {sr.STOP_SIGNAL}, nothing to change.", "unused")
-    assert policy.propose(llm, "Solve it.", _task(), "140", 1.0) is None
+    assert policy.propose(llm, "Solve it.", _task(), "6", 1.0) is None
 
 
 def test_a_reply_with_no_marker_proposes_nothing_rather_than_the_critique():
@@ -61,7 +61,7 @@ def test_a_reply_with_no_marker_proposes_nothing_rather_than_the_critique():
     critique instead would commit a *criticism* as the next instruction."""
     policy = sr.build(0)
     llm = lambda prompt, **kw: "# there is an error here and I will not say more"
-    assert policy.propose(llm, "Solve it.", _task(), "$1.40", 0.0) is None
+    assert policy.propose(llm, "Solve it.", _task(), "the answer is 5", 0.0) is None
 
 
 def test_the_prompt_carries_worked_examples_of_the_fused_shape():
@@ -76,7 +76,7 @@ def test_the_prompt_carries_worked_examples_of_the_fused_shape():
         seen["prompt"] = prompt
         return _fused("# fine", "Answer in cents.")
 
-    policy.propose(llm, "Solve it.", _task(), "$1.40", 0.0)
+    policy.propose(llm, "Solve it.", _task(), "the answer is 5", 0.0)
     prompt = seen["prompt"]
     assert prompt.count(sr.REFINE_MARKER) >= 3, (
         "the examples must demonstrate the marker, not merely ask for it")
@@ -86,13 +86,18 @@ def test_the_prompt_carries_worked_examples_of_the_fused_shape():
 def test_the_examples_do_not_hand_over_a_graded_answer():
     """A worked example built from a real item hands its answer to every proposal
     in the run; this is the leak `test_the_examples_do_not_hand_over_a_held_out_
-    answer` caught in Reflexion."""
-    from examples._money_domain import TASKS
+    answer` caught in Reflexion.
 
-    for task in TASKS:
-        assert f"It wanted: '{task.answer_cents}'" not in sr.FEW_SHOT, (
-            f"the examples hand over {task.id}'s answer")
-        assert task.question not in sr.FEW_SHOT
+    The two items here are invented. GSM8K is 8792 rows, so this checks the
+    whole benchmark rather than a sample -- the run only ever sees a window of
+    it, and which window depends on the seed.
+    """
+    from examples._gsm8k_domain import load_split
+
+    for split in ("train", "test"):
+        for row in load_split(split):
+            assert row["question"].strip() not in sr.FEW_SHOT, (
+                f"a {split} question appears verbatim in the worked examples")
 
 
 def test_the_stronger_stop_signal_is_declared():
