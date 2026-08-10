@@ -95,3 +95,32 @@ run per seed does not pin a number here either.
     `min(p, 1-p)` now peaks at a half, which is what `DifficultyWeighted`'s
     `4p(1-p)` is attached here to match — and why it is *not* attached to
     Absolute Zero, whose `1-r` is monotone.
+
+## Run it
+
+```bash
+python -m examples.r_zero.r_zero_challenger_solver --dry-run
+
+# the table above, one seed of the three (0, 1, 2)
+python -m examples.r_zero.r_zero_challenger_solver --yes --seed 0 \
+    --budget-rollouts 80 --workers 8 \
+    --async --async-ratio 1 --max-seconds 3600 \
+    --staleness full --temperature 0.7 --no-thinking \
+    --provider claude --model deepseek-v4-flash
+```
+
+**`--async-ratio 1` is what this row ran at.** The flag was declared by the
+shared parser and never passed to `run_port`, so the run took the runner's own
+default of 1 while
+[`bench/results/r-zero-challenger-solver.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/r-zero-challenger-solver.json)
+recorded the 2 its command line had asked for. The flag is threaded now and that
+file records 1 — see
+[the MethodPolicy command line](self-evolution-examples.md#the-methodpolicy-command-line)
+for why the default here is 1 rather than the shared 3.
+
+No `--reflective-merge`: the method's own `reflective` declaration set the merge,
+and that declaration is a fidelity statement rather than a knob. `--max-seconds`
+is the one setting the results file does not record; any value comfortably above
+the row's `engine_s` leaves `--budget-rollouts` as the binding stop.
+
+Offline tests: `tests/test_selfplay_upstream.py`.

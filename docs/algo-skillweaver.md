@@ -100,3 +100,32 @@ run per seed does not pin a number here either.
 
     The domain was also 12 tasks in 4/4/4 splits, which `run_port` refuses at
     eight workers; it is 48 in 16/16/16 now.
+
+## Run it
+
+```bash
+python -m examples.skillweaver.skillweaver_web_apis --dry-run
+
+# the table above, one seed of the three (0, 1, 2)
+python -m examples.skillweaver.skillweaver_web_apis --yes --seed 0 \
+    --budget-rollouts 80 --workers 8 \
+    --async --async-ratio 1 --max-seconds 3600 \
+    --staleness full --temperature 0.7 --no-thinking \
+    --provider claude --model deepseek-v4-flash
+```
+
+**`--async-ratio 1` is what this row ran at.** The flag was declared by the
+shared parser and never passed to `run_port`, so the run took the runner's own
+default of 1 while
+[`bench/results/skillweaver-web-apis.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/skillweaver-web-apis.json)
+recorded the 2 its command line had asked for. The flag is threaded now and that
+file records 1 — see
+[the MethodPolicy command line](self-evolution-examples.md#the-methodpolicy-command-line)
+for why the default here is 1 rather than the shared 3.
+
+No `--reflective-merge`: the method's own `reflective` declaration set the merge,
+and that declaration is a fidelity statement rather than a knob. `--max-seconds`
+is the one setting the results file does not record; any value comfortably above
+the row's `engine_s` leaves `--budget-rollouts` as the binding stop.
+
+Offline tests: `tests/test_skillweaver_upstream.py`.

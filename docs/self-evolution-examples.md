@@ -103,6 +103,72 @@ external dataset load it through the shared
 canonical source. Where a paper's full setup needs heavy infrastructure, the
 boundary is documented in the example's module docstring — never hidden.
 
+### The MethodPolicy command line
+
+The eleven [`MethodPolicy`](policies.md) ports share one `main`, so they share
+one parser: `build_parser()` in
+[`examples/_method_runner.py`](https://github.com/Birfy/agentdescent/blob/main/examples/_method_runner.py),
+which layers the flags below onto `add_standard_args`.
+
+| flag | what it does here |
+|---|---|
+| `--budget-rollouts N` | mapped onto `--candidates`: the proposals the run may spend in total |
+| `--workers N` | worker count, and the batch size the merge is sized to (`candidates // workers` rounds in the synchronous modes) |
+| `--async` / `--async-ratio N` | barrier-free runtime and its lag budget. **`--async-ratio` defaults to 1 here**, not the shared 3 — see below |
+| `--eval-concurrency N` | held-out evaluations in flight at once; wall-clock only. Left off, the runner's own rule applies: **1** under `--serial`, the worker count otherwise |
+| `--eval-cache DIR` | memoise the gate to a directory two processes can share ([`FileCache`](api.md)). Off by default: a cache that outlives the run makes a rerun return the first run's numbers |
+| `--staleness` | what to do with a diff proposed against a head the merger has since moved |
+| `--reflective-merge` / `--no-reflective-merge` | override the method's own `reflective` declaration in either direction |
+| `--val-cap` | **not offered.** These methods freeze train/held-out/test in `build()`, before the parser is consulted, so there is no gate split left to cap |
+
+`--reflective-merge` is absent from every reproduce command on the algorithm
+pages, and that is not an omission: nine of the eleven declare `reflective=True`
+and Voyager and SkillWeaver declare `False`, matching what each measured row
+recorded. The declaration is a fidelity statement, so the flag is for a control
+arm that needs to vary exactly it.
+
+!!! warning "Four of these reached this runner and were dropped — and one of them cost a number"
+    `--async-ratio`, `--eval-concurrency` and `--eval-cache` were declared by
+    the shared parser and never passed to `run_port`; `--val-cap` was accepted
+    and could not be honoured at all. A run that set all four was byte-identical
+    to a run that set none. All four are now wired or withdrawn, and
+    `tests/test_method_runner_flags.py` enumerates the parser and fails on a
+    flag with nowhere recorded that reads it.
+
+    **`--async-ratio` is the expensive one.** Every async row under
+    `bench/results/` recorded `async_ratio: 2` — the value its command line
+    asked for — and ran at `run_port`'s default of **1**, because the flag never
+    arrived. Those files now record 1, with a note, because that is what
+    happened.
+
+    So the default here is **1, not the shared 3**. Adopting 3 while fixing the
+    flag would have made every documented `--async` command mean something new
+    and left fifteen measured rows unreproducible from the command line.
+    `--async-ratio 3` is one argument away, and it is a real change: the lag
+    budget bounds both how far a worker's snapshot may drift behind head *and*
+    how many cards may sit un-merged ahead of the merger.
+
+    `--eval-concurrency` defaults to unset for the same class of reason. The
+    shared default is 8, and taking it would have made `--serial` — the control
+    arm, the upstream algorithm's own one-at-a-time loop — score its gate eight
+    ways at once. That is the confound `bench/matrix_run.py` already documents
+    for the other seven ports.
+
+Reproducing one of the measured rows on the algorithm pages has this shape; each
+page's **Run it** section gives the exact command:
+
+```bash
+python -m examples.<method>.<module> --yes --seed 0 \
+    --budget-rollouts 80 --workers 8 \
+    --async --async-ratio 1 --max-seconds 3600 \
+    --staleness full --temperature 0.7 --no-thinking \
+    --provider claude --model deepseek-v4-flash
+```
+
+`--max-seconds` is the one number the results files do not record. Any value
+comfortably above the `engine_s` in the row's own cell leaves `--budget-rollouts`
+as the binding stop, which is what those runs hit.
+
 ---
 
 ## Skill self-evolution

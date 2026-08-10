@@ -35,6 +35,19 @@ from ._population import population_factory
 
 QUALITY_TARGET = 0.75
 
+#: The lag budget these ports run at when ``--async-ratio`` is not given.
+#:
+#: The shared parser defaults to 3 and :func:`run_port` defaults to 1, and until
+#: the flag was threaded the parser's number reached nothing -- so every async
+#: row in ``bench/results/`` was produced at **1**, whatever its config block
+#: records. Adopting 3 here would have made fixing a dead flag silently change
+#: what a documented ``--async`` command does, and made those rows
+#: irreproducible from the command line. So the runner's own value wins and the
+#: flag is how you ask for another; the choice is stated here, in the parser's
+#: help, and in `docs/self-evolution-examples.md`, because a default that
+#: changes what a run measures is not an implementation detail.
+DEFAULT_ASYNC_RATIO = 1
+
 
 class ProposalLimiter:
     """Reserve exactly N algorithm proposals even if async workers overshoot.
@@ -183,19 +196,39 @@ def run_port(
     seed: int,
     workers: int = 2,
     candidate_budget: int = 2,
-    async_ratio: int = 1,
+    async_ratio: int = DEFAULT_ASYNC_RATIO,
     max_seconds: float = 300.0,
     shutdown_grace: float = 120.0,
     staleness: str = "guarded",
     reflective: Optional[bool] = None,
+    eval_concurrency: Optional[int] = None,
+    eval_cache: str = "",
 ) -> MethodRunResult:
-    """Run one method through AgentDescent with an equal candidate budget."""
+    """Run one method through AgentDescent with an equal candidate budget.
+
+    ``eval_concurrency`` bounds the gate's evaluations, and ``None`` keeps this
+    runner's own rule -- one in ``serial``, the worker count otherwise. It is a
+    wall-clock knob rather than a result knob, but it is not free of meaning
+    either: the serial arm is the *control*, and scoring its gate concurrently
+    is what ``bench/matrix_run.py`` found had already made one control arm
+    partly parallel. So an explicit value is honoured in every mode, and a
+    missing one never turns the control on.
+
+    ``eval_cache`` is a directory. Empty means the in-process default; a path
+    installs :class:`~agentdescent.evalcache.FileCache`, so two processes stop
+    paying twice for the same gate -- and a rerun returns the first run's
+    numbers, which is what you want while sizing a configuration and exactly
+    what you do not want when the question is run-to-run variance. Either way
+    the choice is recorded in ``framework``.
+    """
     if mode not in MODES:
         raise ValueError(f"unknown mode: {mode}")
     if workers < 2 or candidate_budget < workers or candidate_budget % workers:
         raise ValueError("candidate_budget must be divisible by workers and at least workers")
     if len(policy.train_tasks) < workers or len(policy.held_out_tasks) < 4:
         raise ValueError("ports require enough train tasks and at least four held-out tasks")
+    if eval_concurrency is not None and eval_concurrency < 1:
+        raise ValueError("eval_concurrency must be at least 1")
 
     run_llm = PhasedLLM(recorder, f"run:{policy.name}")
     prop_llm = PhasedLLM(recorder, f"proposal:{policy.name}")
@@ -272,6 +305,19 @@ def run_port(
         aggregator_factory = (policy.population or _default_population)(pop_ctx)
         engine = replace(engine, selection=None, conflict=None, fusion=None,
                          acceptance=None)
+    if eval_cache:
+        # Merged onto the bundle rather than built as a fresh one: the bundle is
+        # what this runner already hands to both engines, and `_common`'s
+        # `eval_cache_kwargs` returns `Policies(eval_cache=...)`, which would
+        # have replaced everything the method declared.
+        from agentdescent.evalcache import FileCache
+        engine = engine.merged_with(eval_cache=FileCache(eval_cache))
+    # `--serial` is the upstream algorithm's own loop, and the published loop
+    # scores one task at a time; an explicit flag overrides that, in every mode,
+    # and is reported below so a row says which control it had.
+    gate_concurrency = (
+        (1 if mode == "serial" else workers) if eval_concurrency is None
+        else eval_concurrency)
     common = {
         "run": lambda rendered, task: policy.solve(run_llm, rendered, task),
         "propose": limiter,
@@ -283,7 +329,7 @@ def run_port(
         "self_verify": policy.self_verify,
         "held_out_frac": policy.held_out_frac,
         "solved_threshold": 1.1,
-        "eval_concurrency": 1 if mode == "serial" else workers,
+        "eval_concurrency": gate_concurrency,
         # Batches sized to the worker count so concurrent proposals actually
         # meet in one merge -- with batch_trigger=1 every batch is a single
         # card and no merge machinery (union or reflective) ever runs.
@@ -394,6 +440,15 @@ def run_port(
                 workers if mode in ("sync_parallel", "async_pipeline") else 1
             ),
             "reflective_merge": use_reflective,
+            # The three settings that used to be unrecordable because nothing
+            # could set them. `async_ratio` only means something without a
+            # barrier, so it is `None` in the other two modes rather than a
+            # number a reader would compare across arms; `eval_cache` is a
+            # boolean because the directory is a local path, and what a reader
+            # needs is that the gate may not have been re-measured at all.
+            "async_ratio": async_ratio if mode == "async_pipeline" else None,
+            "eval_concurrency": gate_concurrency,
+            "eval_cache": bool(eval_cache),
             "acceptance": (type(policy.engine.acceptance).__name__
                            if policy.engine.acceptance is not None else "default"),
             "self_verify": policy.self_verify,
@@ -435,25 +490,30 @@ def _reflective_override(args, policy: MethodPolicy) -> Optional[bool]:
     return None
 
 
-def standard_main(build: Callable[..., MethodPolicy],
-                  argv: Optional[Sequence[str]] = None,
-                  extra_args: Optional[Callable[[argparse.ArgumentParser], None]] = None,
-                  build_kwargs: Optional[Callable[[argparse.Namespace], dict]] = None) -> int:
-    """The shared ``main`` for one method's folder module.
+def build_parser(
+    extra_args: Optional[Callable[[argparse.ArgumentParser], None]] = None,
+) -> argparse.ArgumentParser:
+    """The command line every MethodPolicy port accepts.
 
-    ``--dry-run`` prints the plan with zero network access; a live run drives
-    the method through :func:`run_port` once, in the mode picked by
-    ``--serial`` / ``--async`` (default: synchronous parallel).
+    Split out of :func:`standard_main` so that "which flags does this declare"
+    and "which flags does this honour" can be checked against each other --
+    ``tests/test_method_runner_flags.py`` enumerates this parser and requires
+    every declared flag to name where it is read. A parser built inside a
+    function body can only be inspected by running the function, which is how
+    four flags sat here unread through eleven ports and fifteen recorded runs.
 
-    ``extra_args`` and ``build_kwargs`` are the seam for a method that has a
-    switch of its own. Gödel Agent's ``--gateless`` was documented in five
-    places -- its module docstring, its README, `algo-godel-agent.md`,
-    `acceptance-policies.md` and `matrix-overview.md` -- while the parser
-    rejected it outright, because `build` took a keyword nothing could reach.
-    A method-specific flag needs somewhere to be declared, or it becomes prose.
+    ``--val-cap`` is deliberately **not** offered: these methods freeze their
+    three splits in ``build()``, before the parser is ever consulted, so there
+    is no gate split left to cap. Refusing it is loud; accepting it and moving
+    nothing is the failure this module exists to prevent.
     """
     parser = argparse.ArgumentParser()
-    add_standard_args(parser, model_default="glm-5.2")
+    add_standard_args(parser, model_default="glm-5.2",
+                      async_ratio_default=DEFAULT_ASYNC_RATIO,
+                      # `None`, not 8: an explicit flag wins, and without one the
+                      # runner keeps one-at-a-time gate scoring in `--serial`.
+                      eval_concurrency_default=None,
+                      include_val_cap=False)
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--candidates", type=int, default=2)
     parser.add_argument(
@@ -478,6 +538,34 @@ def standard_main(build: Callable[..., MethodPolicy],
     if extra_args is not None:
         extra_args(parser)
     parser.add_argument("--timeout", type=float, default=180.0)
+    return parser
+
+
+def standard_main(build: Callable[..., MethodPolicy],
+                  argv: Optional[Sequence[str]] = None,
+                  extra_args: Optional[Callable[[argparse.ArgumentParser], None]] = None,
+                  build_kwargs: Optional[Callable[[argparse.Namespace], dict]] = None) -> int:
+    """The shared ``main`` for one method's folder module.
+
+    ``--dry-run`` prints the plan with zero network access; a live run drives
+    the method through :func:`run_port` once, in the mode picked by
+    ``--serial`` / ``--async`` (default: synchronous parallel).
+
+    ``extra_args`` and ``build_kwargs`` are the seam for a method that has a
+    switch of its own. Gödel Agent's ``--gateless`` was documented in five
+    places -- its module docstring, its README, `algo-godel-agent.md`,
+    `acceptance-policies.md` and `matrix-overview.md` -- while the parser
+    rejected it outright, because `build` took a keyword nothing could reach.
+    A method-specific flag needs somewhere to be declared, or it becomes prose.
+
+    The reverse failure is the one this function shipped for longer:
+    ``--async-ratio``, ``--eval-concurrency`` and ``--eval-cache`` were declared
+    by the shared parser and never handed to :func:`run_port`, so a run could
+    pass all three and be byte-identical to one that passed none. They are
+    threaded below, and every flag :func:`build_parser` declares is now covered
+    by ``tests/test_method_runner_flags.py``.
+    """
+    parser = build_parser(extra_args)
     args = parser.parse_args(argv)
     extra = dict(build_kwargs(args)) if build_kwargs is not None else {}
 
@@ -495,12 +583,24 @@ def standard_main(build: Callable[..., MethodPolicy],
             else "sync_parallel")
     override = _reflective_override(args, policy)
     merge_on = policy.reflective if override is None else override
+    # What `run_port` will resolve `--eval-concurrency` to, computed here so the
+    # plan states a number rather than "whatever the runner decides".
+    gate_concurrency = (
+        (1 if mode == "serial" else args.workers)
+        if args.eval_concurrency is None else args.eval_concurrency)
     if args.dry_run:
         print(f"{policy.name} [{policy.fidelity}] mode={mode} "
               f"candidates={args.candidates} workers={args.workers} "
               f"proposal calls={args.candidates * policy.proposal_calls_per_candidate} "
               f"reflective_merge={merge_on}{'' if override is None else ' (overridden)'} "
-              f"self_verify={policy.self_verify}"
+              f"self_verify={policy.self_verify} "
+              f"eval_concurrency={gate_concurrency}"
+              # A lag budget means nothing with a barrier in the way, so it is
+              # printed only where it applies. A flag absent from the plan is a
+              # flag nobody checks, which is how these three went unnoticed.
+              + (f" async_ratio={args.async_ratio}"
+                 if mode == "async_pipeline" else "")
+              + (" eval_cache=on" if args.eval_cache else "")
               # A switch that changes the acceptance rule belongs in the run's
               # own record, not only in the flag that set it.
               + (f" acceptance={type(policy.engine.acceptance).__name__}"
@@ -526,6 +626,8 @@ def standard_main(build: Callable[..., MethodPolicy],
         policy, recorder, mode=mode, seed=args.seed, workers=args.workers,
         candidate_budget=args.candidates, max_seconds=args.max_seconds,
         staleness=args.staleness, reflective=_reflective_override(args, policy),
+        async_ratio=args.async_ratio, eval_concurrency=args.eval_concurrency,
+        eval_cache=args.eval_cache,
     )
     print(f"{policy.name}/{mode}: quality {outcome.baseline_quality:.3f} -> "
           f"{outcome.final_quality:.3f}, validation "
