@@ -216,8 +216,18 @@ def _tasks(rows: Sequence[dict], split: str, offset: int) -> List[Task]:
     return out
 
 
-def gsm8k_splits(seed: int, *, train: int = 16, held_out: int = 16,
-                 test: int = 16) -> Tuple[List[Task], List[Task], List[Task]]:
+#: Items per split. 64, not 16: at sixteen a single test item moves the score by
+#: 0.0625, so "1.000" says only that sixteen questions went right and two runs a
+#: hair apart are indistinguishable. Sixty-four costs about six minutes a seed
+#: against the thirty-minute budget for three, which buys a resolution of 0.016.
+#: It is still a *window* on GSM8K rather than the whole split -- 8792 rows at
+#: this budget would be hours.
+SPLIT_SIZE = 64
+
+
+def gsm8k_splits(seed: int, *, train: int = SPLIT_SIZE,
+                 held_out: int = SPLIT_SIZE,
+                 test: int = SPLIT_SIZE) -> Tuple[List[Task], List[Task], List[Task]]:
     """Disjoint train / held-out / test tasks for one seed.
 
     Train and held-out come from GSM8K's **train** split and the reported test
