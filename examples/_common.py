@@ -36,7 +36,9 @@ def add_standard_args(
     model_default: Optional[str] = DEFAULT_MODEL,
     model_help: str = "model id",
     max_seconds_default: float = 30.0,
-    eval_concurrency_default: int = 8,
+    async_ratio_default: int = 3,
+    eval_concurrency_default: Optional[int] = 8,
+    include_val_cap: bool = True,
 ) -> argparse.ArgumentParser:
     """Add the provider/runtime flags shared by every algorithm port.
 
@@ -44,6 +46,23 @@ def add_standard_args(
     DGM, for example, deliberately defaults ``model`` to ``None`` because its
     surrogate can run without an API, while async wall-clock budgets differ by
     workload.
+
+    ``async_ratio_default`` is caller-owned for the same reason: the lag budget
+    counts *artifact versions*, so how much wall-clock it buys depends entirely
+    on how long the caller's rollout takes. Three is sensible when a rollout is
+    a model call taking seconds; :mod:`examples._method_runner` sets one,
+    because that is the value every row in ``bench/results/`` was measured at.
+
+    ``eval_concurrency_default=None`` says "this runner has a rule of its own;
+    only override it when the flag is given". The MethodPolicy runner needs
+    that: its ``--serial`` control scores the gate one task at a time, and a
+    plain default of 8 would quietly make the control arm partly parallel --
+    the confound ``bench/matrix_run.py`` already documents for the other ports.
+
+    ``include_val_cap=False`` withholds ``--val-cap`` from a port whose splits
+    are frozen before the parser ever runs. Accepting it there would be exactly
+    the defect this module exists to prevent: a flag that parses, reports
+    nothing, and moves nothing.
     """
     parser.add_argument(
         "--provider",
@@ -62,7 +81,8 @@ def add_standard_args(
         help="run barrier-free (async_evolve)",
     )
     parser.add_argument(
-        "--async-ratio", type=int, default=3, help="staleness lag budget")
+        "--async-ratio", type=int, default=async_ratio_default,
+        help=f"staleness lag budget (default {async_ratio_default})")
     parser.add_argument(
         "--max-seconds",
         type=float,
@@ -91,18 +111,22 @@ def add_standard_args(
         help=("total rollouts, held fixed as workers vary -- required to compare "
               "--serial against a parallel run (see budget_kwargs)"),
     )
-    parser.add_argument(
-        "--val-cap",
-        type=int,
-        default=None,
-        help=("cap the gate/D_pareto split without shrinking test -- the only "
-              "lever on the rollout/evaluation ratio (see capped_val)"),
-    )
+    if include_val_cap:
+        parser.add_argument(
+            "--val-cap",
+            type=int,
+            default=None,
+            help=("cap the gate/D_pareto split without shrinking test -- the only "
+                  "lever on the rollout/evaluation ratio (see capped_val)"),
+        )
     parser.add_argument(
         "--eval-concurrency",
         type=int,
         default=eval_concurrency_default,
-        help="held-out evaluations in flight at once; wall-clock only",
+        help=("held-out evaluations in flight at once; wall-clock only"
+              + (" -- unset, the runner's own rule applies"
+                 if eval_concurrency_default is None
+                 else f" (default {eval_concurrency_default})")),
     )
     parser.add_argument(
         "--reflective-merge",

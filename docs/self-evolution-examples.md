@@ -136,7 +136,7 @@ docstring — never hidden.
 ### The MethodPolicy command line
 
 The eleven declarative ports share
-[`standard_main`](https://github.com/Birfy/agentdescent/blob/main/examples/_method_runner.py),
+[`build_parser`](https://github.com/Birfy/agentdescent/blob/main/examples/_method_runner.py),
 so their command line is the same on all eleven: the shared flags above plus
 `--workers`, `--candidates` (a synonym for `--budget-rollouts`),
 `--no-reflective-merge`, `--staleness`, `--temperature`, `--max-tokens` and
@@ -144,23 +144,37 @@ so their command line is the same on all eleven: the shared flags above plus
 `--per-instance` and Gödel Agent's `--gateless`, both controls for a declared
 departure.
 
-!!! warning "Four shared flags reach this runner and are dropped"
-    `add_standard_args` declares them for every port; `standard_main` does not
-    pass them to `run_port`, so on these eleven they do nothing:
+| flag | what it does here |
+|---|---|
+| `--async-ratio N` | the lag budget, passed to `async_evolve`. **Defaults to 1**, not the shared 3 — see below |
+| `--eval-concurrency N` | held-out evaluations in flight at once; wall-clock only. Left off, the runner's own rule applies: **1** under `--serial`, `--workers` otherwise |
+| `--eval-cache DIR` | memoise the gate to a directory two processes can share, merged onto the method's own `Policies` bundle. Off by default: a cache that outlives the run makes a rerun return the first run's numbers |
+| `--val-cap` | **not offered.** These ports freeze train/held-out/test in `build()`, before the parser is consulted, so it now fails as an unrecognised argument rather than parsing and moving nothing |
 
-    | flag | what happens instead |
-    |---|---|
-    | `--async-ratio` | `run_port`'s own default (`1`), whatever is passed |
-    | `--eval-concurrency` | fixed at `1` in serial mode and `--workers` otherwise |
-    | `--eval-cache` | no cache is installed |
-    | `--val-cap` | nothing — these ports freeze their splits in `build()` |
+The first three used to be declared by `add_standard_args` and never passed to
+`run_port`, so on these eleven a run that set all three was byte-identical to one
+that set none — the same defect as Gödel Agent's `--gateless`, which five
+documents described while the parser rejected it. All four are now wired or
+withdrawn, and `tests/test_method_runner_flags.py` enumerates the parser and
+fails on a flag with nowhere recorded that reads it, so the next one added here
+cannot be decorative. `run_port` also records all three in `framework`, and
+`--dry-run` prints them: a flag absent from the plan is a flag nobody checks.
 
-    This is the same defect as Gödel Agent's `--gateless`, which five documents
-    described while the parser rejected it — recorded here rather than left for
-    the next person to find it from a run that ignored their flag. It matters for
-    reproduction: the rows below were recorded at `async_ratio=2`, which no
-    documented command can currently set. `bench.candidate_methods` passes
-    `--async-ratio` through, which is where those runs came from.
+!!! note "Why `--async-ratio` defaults to 1 here and 3 for the seven above"
+    Two entry points reach `run_port` — this command line and
+    `bench.candidate_methods` — and a lag budget on which they disagree is a
+    trap, because the same nominal configuration would then run two different
+    searches depending on which one launched it. `run_port`'s signature says 1
+    and `bench.candidate_methods` defaults to 1, so this parser says 1 too;
+    `add_standard_args`' 3 stays the default for the seven ports above, which
+    is where it was measured.
+
+    It is one argument away and it is a real change, not a label: the budget
+    bounds both how far a worker's snapshot may drift behind head *and* how many
+    cards may sit un-merged ahead of the merger. The rows below were recorded at
+    `async_ratio=2`, so every **Run it** command on the algorithm pages passes
+    `--async-ratio 2` explicitly — which, now that the flag arrives, reproduces
+    them.
 
 ---
 

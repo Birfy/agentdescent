@@ -86,9 +86,12 @@ python -m examples.skillweaver.skillweaver_web_apis --dry-run
 # one seed of the three above
 python -m examples.skillweaver.skillweaver_web_apis --yes --seed 0 \
     --provider openai --model deepseek-v4-flash \
-    --async --workers 8 --budget-rollouts 80 --staleness full \
+    --async --async-ratio 2 --workers 8 --budget-rollouts 80 --staleness full \
     --temperature 0.7 --max-seconds 3600
 ```
+
+`--async-ratio 2` is explicit because the default here is 1, and 2 is what
+this row was recorded at.
 
 Flags: [the MethodPolicy command line](self-evolution-examples.md#the-methodpolicy-command-line).
 
