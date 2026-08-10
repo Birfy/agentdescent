@@ -1,5 +1,5 @@
 {
- "experiment": "Godel Agent recursive self-modification on AgentDescent",
+ "experiment": "Godel Agent self-modification on AgentDescent, GSM-Hard",
  "model": "deepseek-v4-flash",
  "provider": "claude",
  "reference": "Arvid-pku/Godel_Agent@bbb50879",
@@ -9,70 +9,78 @@
   "workers": 8,
   "async_ratio": 2,
   "staleness": "full",
-  "reflective_merge": false,
-  "gateless": false,
+  "reflective_merge": true,
   "temperature": 0.7,
   "thinking": "disabled",
-  "domain": "money, 48 items, 16/16/16 splits"
+  "domain": "GSM-Hard (reasoning-machines/gsm-hard), 64/64/64 shuffled splits",
+  "reflective_merge_note": "validated: ReflectiveFusion runs the strategy validator and falls back to ranking on rejection"
  },
  "cells": [
   {
    "seed": 0,
    "test": [
-    0.0,
-    0.562
+    0.672,
+    0.75
    ],
    "validation": [
-    0.0,
-    0.875
+    0.547,
+    0.656
    ],
-   "accepted": 3,
-   "invalid": 1,
-   "wall_s": 226.0,
-   "engine_s": 160.4,
-   "calls": 1079
+   "accepted": 2,
+   "invalid": 14,
+   "wall_s": 462.5,
+   "engine_s": 157.7,
+   "calls": 941
   },
   {
    "seed": 1,
    "test": [
-    0.0,
-    0.375
+    0.641,
+    0.609
    ],
    "validation": [
-    0.0,
-    0.75
+    0.578,
+    0.656
    ],
-   "accepted": 3,
-   "invalid": 1,
-   "wall_s": 236.1,
-   "engine_s": 178.0,
-   "calls": 1159
+   "accepted": 4,
+   "invalid": 3,
+   "wall_s": 488.7,
+   "engine_s": 170.0,
+   "calls": 1007
   },
   {
    "seed": 2,
    "test": [
-    0.0,
-    1.0
+    0.562,
+    0.703
    ],
    "validation": [
-    0.0,
-    1.0
+    0.625,
+    0.781
    ],
    "accepted": 3,
-   "invalid": 0,
-   "wall_s": 209.3,
-   "engine_s": 148.6,
-   "calls": 1079
+   "invalid": 13,
+   "wall_s": 579.6,
+   "engine_s": 191.4,
+   "calls": 1006
   }
  ],
  "summary": {
-  "test_quality": {
-   "min": 0.375,
-   "median": 0.562,
-   "max": 1.0,
-   "mean": 0.646
+  "test_gain": {
+   "per_seed": [
+    0.078,
+    -0.032,
+    0.141
+   ],
+   "mean": 0.062
   },
-  "seeds_that_moved": 3,
-  "total_seeds": 3
+  "validation_gain": {
+   "per_seed": [
+    0.109,
+    0.078,
+    0.156
+   ],
+   "mean": 0.114
+  }
  }
 }

@@ -1,5 +1,5 @@
 {
- "experiment": "SICA self-editing policy source on AgentDescent",
+ "experiment": "SICA self-editing policy source on AgentDescent, GSM-Hard",
  "model": "deepseek-v4-flash",
  "provider": "claude",
  "reference": "MaximeRobeyns/self_improving_coding_agent@ed8275dc",
@@ -9,70 +9,79 @@
   "workers": 8,
   "async_ratio": 2,
   "staleness": "full",
-  "reflective_merge": false,
-  "selection": "Archive(sampling='best')",
+  "reflective_merge": true,
   "temperature": 0.7,
   "thinking": "disabled",
-  "domain": "money, 48 items, 16/16/16 splits"
+  "domain": "GSM-Hard (reasoning-machines/gsm-hard), 64/64/64 shuffled splits",
+  "selection": "Archive(sampling='best')",
+  "reflective_merge_note": "validated: ReflectiveFusion runs the strategy validator and falls back to ranking on rejection"
  },
  "cells": [
   {
    "seed": 0,
    "test": [
-    0.0,
-    0.562
+    0.703,
+    0.75
    ],
    "validation": [
-    0.0,
-    0.812
+    0.562,
+    0.625
    ],
    "accepted": 3,
-   "invalid": 0,
-   "wall_s": 135.7,
-   "engine_s": 75.3,
-   "calls": 599
+   "invalid": 3,
+   "wall_s": 425.0,
+   "engine_s": 141.4,
+   "calls": 942
   },
   {
    "seed": 1,
    "test": [
-    0.0,
-    0.188
-   ],
-   "validation": [
-    0.0,
+    0.625,
     0.625
    ],
-   "accepted": 1,
-   "invalid": 2,
-   "wall_s": 294.8,
-   "engine_s": 231.1,
-   "calls": 1351
+   "validation": [
+    0.578,
+    0.625
+   ],
+   "accepted": 0,
+   "invalid": 1,
+   "wall_s": 441.3,
+   "engine_s": 138.0,
+   "calls": 880
   },
   {
    "seed": 2,
    "test": [
-    0.0,
-    0.938
+    0.594,
+    0.625
    ],
    "validation": [
-    0.0,
-    1.0
+    0.641,
+    0.719
    ],
-   "accepted": 3,
+   "accepted": 2,
    "invalid": 1,
-   "wall_s": 196.0,
-   "engine_s": 127.3,
-   "calls": 807
+   "wall_s": 460.9,
+   "engine_s": 131.8,
+   "calls": 876
   }
  ],
  "summary": {
-  "test_quality": {
-   "min": 0.188,
-   "median": 0.562,
-   "max": 0.938,
-   "mean": 0.563
+  "test_gain": {
+   "per_seed": [
+    0.047,
+    0.0,
+    0.031
+   ],
+   "mean": 0.026
   },
-  "seeds_that_moved": 3,
-  "total_seeds": 3
+  "validation_gain": {
+   "per_seed": [
+    0.063,
+    0.047,
+    0.078
+   ],
+   "mean": 0.063
+  }
  }
 }

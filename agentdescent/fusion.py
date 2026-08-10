@@ -56,7 +56,7 @@ for and correctly declines to merge it with itself.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .evolvable import Diff, Evolvable
 from .policies import FusionTrial
@@ -134,7 +134,8 @@ class ReflectiveFusion:
     """
 
     def __init__(self, complete, *, verifier: Any = None,
-                 max_chars: int = 8_000, max_proposals: int = 6) -> None:
+                 max_chars: int = 8_000, max_proposals: int = 6,
+                 validate: Optional[Callable[[Any], Any]] = None) -> None:
         if max_proposals < 2:
             raise ValueError("synthesising needs at least two proposals")
         self.complete = complete
@@ -152,6 +153,19 @@ class ReflectiveFusion:
         #: anything, and it exists so a dead backend costs a ranking pass rather
         #: than the round's work.
         self._fallback: Any = None
+        #: Applied to the synthesised value before it is returned; anything it
+        #: raises on is refused, and the caller's ranking fallback takes the
+        #: round instead.
+        #:
+        #: Without it an artifact with a *shape* -- Python source behind an AST
+        #: gate, JSON behind a schema -- cannot use model merging at all, because
+        #: the synthesised value reaches the ledger without passing the trust
+        #: region and would then fail at every rollout that reads it. SICA and
+        #: Godel Agent declared `reflective=False` for exactly that reason and
+        #: paid for it: ranking contested diffs costs evaluations, and a paired
+        #: control measured 2.7-2.8x the model calls of a merged run at no gain
+        #: in quality.
+        self.validate = validate
         #: One record per merge. They carry `ranked=False`, so `fusion_stats()`
         #: reports them as unranked rather than as wins or losses.
         self.trials: List[FusionTrial] = []
@@ -214,6 +228,17 @@ class ReflectiveFusion:
         # on a tie, be indistinguishable from the model having contributed.
         if any(merged == str(p).strip() for p in kept) or merged == str(current or "").strip():
             return None
+        if self.validate is not None:
+            # The one check `to_diff` would have made and this path skips. A
+            # merge that cannot be validated is refused rather than committed:
+            # returning None here is already the "fall back to ranking" signal.
+            try:
+                validated = self.validate(merged)
+            except Exception:  # noqa: BLE001 - any rejection is a rejection
+                return None
+            if not validated:
+                return None
+            merged = validated if isinstance(validated, str) else merged
         return merged
 
     def _union_of(self, artifact: Evolvable, diffs: Sequence[Diff]) -> Optional[Diff]:

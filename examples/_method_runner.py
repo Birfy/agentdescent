@@ -232,8 +232,17 @@ def run_port(
     # measured nothing, and one in this series did.
     use_reflective = policy.reflective if reflective is None else bool(reflective)
     if use_reflective:
+        # A strategy that validates its proposals must validate the *merge* too.
+        # `ReflectiveFusion`'s synthesis reaches the ledger without passing
+        # `to_diff`, so an artifact with a shape -- Python behind an AST gate --
+        # would otherwise take a merged value that fails at every rollout that
+        # reads it. Handing the validator over lets those ports merge at all;
+        # anything it rejects falls back to ranking, which is what they used to
+        # do for every diff.
+        validate = getattr(policy.strategy, "validator", None)
         engine = engine.merged_with(
-            **reflective_merge(lambda prompt: merge_llm(prompt, unit="merge")))
+            **reflective_merge(lambda prompt: merge_llm(prompt, unit="merge"),
+                               validate=validate))
     aggregator_factory = None
     if engine.selection is not None:
         # The engine's own selection seam is single-head degenerate, so a
