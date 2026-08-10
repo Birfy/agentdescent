@@ -55,7 +55,7 @@ eight model calls per training rollout.
 
 Read the *gain*: the carts are generated, so the baseline is not 0.000 and the
 ceiling is not 1.000. See the caveat on
-[PromptBreeder](algo-promptbreeder.md#measured-results) on one run per seed.
+[PromptBreeder](algo-promptbreeder.md#measured-results-gsm8k) on one run per seed.
 
 !!! danger "Both curriculum reward components were missing"
     `curriculum_reward.py`:

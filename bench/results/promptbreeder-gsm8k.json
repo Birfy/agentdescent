@@ -1,0 +1,78 @@
+{
+ "experiment": "PromptBreeder Algorithm 1 on GSM8K",
+ "reference": "arXiv:2309.16797 (no released code)",
+ "dataset": {
+  "name": "openai/gsm8k",
+  "config": "main",
+  "split_size": 64,
+  "transport": "parquet via HF_ENDPOINT",
+  "grader": "the integer after #### against the last number"
+ },
+ "model": "deepseek-v4-flash",
+ "provider": "claude",
+ "config": {
+  "arm": "async_pipeline",
+  "budget_rollouts": 80,
+  "workers": 8,
+  "async_ratio": 2,
+  "staleness": "full",
+  "temperature": 0.7,
+  "thinking": "disabled"
+ },
+ "cells": [
+  {
+   "seed": 0,
+   "test": [
+    0.562,
+    0.984
+   ],
+   "validation": [
+    0.547,
+    0.969
+   ],
+   "accepted": 2,
+   "invalid": 7,
+   "wall_s": 588.5,
+   "engine_s": 400.9,
+   "calls": 1480
+  },
+  {
+   "seed": 1,
+   "test": [
+    0.375,
+    0.953
+   ],
+   "validation": [
+    0.391,
+    0.906
+   ],
+   "accepted": 3,
+   "invalid": 0,
+   "wall_s": 816.0,
+   "engine_s": 569.9,
+   "calls": 1486
+  },
+  {
+   "seed": 2,
+   "test": [
+    0.484,
+    0.969
+   ],
+   "validation": [
+    0.531,
+    0.984
+   ],
+   "accepted": 3,
+   "invalid": 0,
+   "wall_s": 699.2,
+   "engine_s": 498.0,
+   "calls": 1367
+  }
+ ],
+ "summary": {
+  "test_final_mean": 0.969,
+  "test_gain_mean": 0.495,
+  "accepted_total": 8,
+  "seeds": 3
+ }
+}

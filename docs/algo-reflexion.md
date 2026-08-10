@@ -34,45 +34,54 @@ append-only and bounded to the last Ω entries (Ω=1–3 in the paper;
 - Upstream retries the same failed instance; the held-out rerun is the analogue.
 - The equal-budget design requests a reflection after every rollout, not only on failure.
 
-## Measured results
+## Measured results — GSM8K
 
 Three seeds, `async_pipeline`, 80 rollouts each, 8 workers, `--staleness full`,
-`--reflective-merge`, `deepseek-v4-flash` at temperature 0.7. Recorded in
-[`bench/results/reflexion-episodic-memory.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/reflexion-episodic-memory.json).
+`deepseek-v4-flash` at temperature 0.7. Recorded in
+[`bench/results/reflexion-gsm8k.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/reflexion-gsm8k.json).
 
 | seed | test quality | validation | accepted | calls |
 |---|---|---|---|---|
-| 0 | 0.000 → **0.125** | 0.000 → 0.312 | 4/80 | 440 |
-| 1 | 0.000 → **0.125** | 0.000 → 0.188 | 2/80 | 455 |
-| 2 | 0.000 → **0.812** | 0.000 → 0.875 | 1/80 | 487 |
+| 0 | 0.797 → 0.891 | 0.844 → 0.828 | **0/80** | 678 |
+| 1 | 0.750 → 0.688 | 0.688 → 0.719 | **0/80** | 683 |
+| 2 | 0.734 → 0.656 | 0.688 → 0.734 | **0/80** | 680 |
 
-Mean 0.354. All three seeds moved, and the spread — two at 0.125 against one at
-0.812 — is the result rather than noise around a central value.
+**Nothing was accepted, on any seed.** Eighty reflections a run, none of which
+improved the held-out split enough to clear the gate. This row does not show a
+method doing badly so much as a method whose premise the framework cannot host:
+Reflexion's memory is per *instance* upstream and its whole move is retrying
+**that** instance, and a shared memory asked to transfer across unseen questions
+is a question the paper does not ask.
 
-### Against the other mechanisms
+!!! danger "So the numbers above are the noise floor, not a result"
+    With nothing accepted the artifact never changed, which makes each row's
+    baseline and final **two evaluations of the same instruction**. They differ
+    by +0.094, −0.062 and −0.078.
 
-Same 48 items, same model, same 80-rollout budget:
+    That is what re-scoring one instruction on 64 GSM8K items at temperature 0.7
+    costs, and it is the scale every gain in this study should be read against —
+    [PromptBreeder](algo-promptbreeder.md)'s +0.495 and
+    [AFlow](algo-aflow.md)'s +0.458 are five times it; a +0.05 gain would be
+    indistinguishable from having changed nothing.
 
-| | mean test |
-|---|---|
-| [AFlow](algo-aflow.md) | 0.896 |
-| **Reflexion** | 0.354 |
-| [PromptBreeder](algo-promptbreeder.md) | 0.271 |
+    This row is the only one that could measure it, precisely because it accepted
+    nothing.
 
-Reflexion is being asked a question its paper does not ask. Upstream's memory is
-**per task instance** and its whole premise is retrying *that* instance; this
-port shares one memory across the domain, so what is measured is whether verbal
-reflection **transfers**. The answer here is "partly, and unreliably".
+!!! warning "And its baseline is not comparable with the others'"
+    `WindowedMemory.render` emits `MEMORY_HEADER` **even when the memory is
+    empty**, so this port's seed artifact reads:
 
+    > Solve the grade-school math word problem. Return only the final answer.
+    > \# Plans from past attempts. You have attempted problems like this before
+    > and failed; these plans say how to avoid failing the same way. Use them to
+    > improve your strategy (most recent last).
+    > (empty)
 
-!!! note "These cross-algorithm figures demonstrate that each port runs, not which is best"
-    Every row is one run per seed, and the seed fixes the data splits and the
-    method's own sampler -- **not the model**, which is sampled at temperature
-    0.7. Re-running an identical command at an identical seed moves the number:
-    PromptBreeder's seed 0 scored 0.438 on one run and 0.875 on the next, from
-    the same script and the same code. Read the table as evidence the mechanism
-    executes end to end and produces a plausible artifact; a ranking would need
-    repeats per seed, which these runs do not have.
+    Every other port starts from the first line alone. That header is itself an
+    instruction to be careful, and this row's baseline is 0.73–0.80 where theirs
+    are 0.38–0.61. Reflexion did not start where they started, so its *gain* is
+    not theirs to compare against — only its final score is.
+
 !!! danger "Without the worked examples, the reflector answered the arithmetic"
     `_generate_reflection_query` prepends `FEW_SHOT_EXAMPLES` under *"Here are
     two examples:"* — two failed trajectories each followed by its `New plan:`.

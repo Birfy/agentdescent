@@ -55,7 +55,7 @@ output convention, so a fresh solver already gets some of them — and the ceili
 is not 1.000 either. Read the *gain*, not the final value, against the other
 pages.
 
-See the caveat on [PromptBreeder](algo-promptbreeder.md#measured-results): one
+See the caveat on [PromptBreeder](algo-promptbreeder.md#measured-results-gsm8k): one
 run per seed does not pin a number here either.
 
 !!! danger "The learnability signal was the run's average, not the item's"

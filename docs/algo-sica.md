@@ -51,7 +51,7 @@ merge of Python source would bypass the AST gate that makes executing it safe â€
 so contested edits to the single policy slot are resolved by **ranking**, and
 ranking costs evaluations. The seed that accepted least spent most.
 
-See the caveat on [PromptBreeder](algo-promptbreeder.md#measured-results): one
+See the caveat on [PromptBreeder](algo-promptbreeder.md#measured-results-gsm8k): one
 run per seed does not pin a number here either.
 
 !!! danger "The next base was sampled where upstream takes the maximum"

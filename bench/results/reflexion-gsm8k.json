@@ -1,0 +1,89 @@
+{
+ "experiment": "Reflexion episodic memory on GSM8K",
+ "reference": "noahshinn/reflexion@218cf0ef",
+ "dataset": {
+  "name": "openai/gsm8k",
+  "config": "main",
+  "split_size": 64,
+  "transport": "parquet via HF_ENDPOINT",
+  "grader": "the integer after #### against the last number"
+ },
+ "model": "deepseek-v4-flash",
+ "provider": "claude",
+ "config": {
+  "arm": "async_pipeline",
+  "budget_rollouts": 80,
+  "workers": 8,
+  "async_ratio": 2,
+  "staleness": "full",
+  "temperature": 0.7,
+  "thinking": "disabled"
+ },
+ "cells": [
+  {
+   "seed": 0,
+   "test": [
+    0.797,
+    0.891
+   ],
+   "validation": [
+    0.844,
+    0.828
+   ],
+   "accepted": 0,
+   "invalid": 0,
+   "wall_s": 288.6,
+   "engine_s": 48.4,
+   "calls": 678
+  },
+  {
+   "seed": 1,
+   "test": [
+    0.75,
+    0.688
+   ],
+   "validation": [
+    0.688,
+    0.719
+   ],
+   "accepted": 0,
+   "invalid": 0,
+   "wall_s": 244.8,
+   "engine_s": 44.9,
+   "calls": 683
+  },
+  {
+   "seed": 2,
+   "test": [
+    0.734,
+    0.656
+   ],
+   "validation": [
+    0.688,
+    0.734
+   ],
+   "accepted": 0,
+   "invalid": 0,
+   "wall_s": 255.4,
+   "engine_s": 46.5,
+   "calls": 680
+  }
+ ],
+ "summary": {
+  "test_final_mean": 0.745,
+  "test_gain_mean": -0.015,
+  "accepted_total": 0,
+  "seeds": 3
+ },
+ "nothing_was_accepted": {
+  "accepted": [
+   0,
+   0,
+   0
+  ],
+  "what_that_means": "the artifact never changed, so each row's baseline and final are two evaluations of the *same* instruction. The differences -- +0.094, -0.062, -0.078 -- are the study's noise floor at 64 items and temperature 0.7, not a result"
+ },
+ "baseline_is_not_comparable": {
+  "note": "WindowedMemory renders MEMORY_HEADER even when the memory is empty, so this port's seed artifact carries 'You have attempted problems like this before and failed... use them to improve your strategy' where every other port starts from the bare instruction. Its baseline is 0.73-0.80 against their 0.38-0.61"
+ }
+}

@@ -55,7 +55,7 @@ Mean final **0.969**, mean gain **+0.458**, all three seeds moving.
 installed by construction; see
 [Self-Refine](algo-self-refine.md#measured-results-gsm8k) for why that fixture
 was replaced, and the caveat on
-[PromptBreeder](algo-promptbreeder.md#measured-results) on one run per seed.
+[PromptBreeder](algo-promptbreeder.md#measured-results-gsm8k) on one run per seed.
 
 ### Two nodes cost two calls
 

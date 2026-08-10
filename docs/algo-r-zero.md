@@ -51,7 +51,7 @@ All three seeds moved; mean gain +0.230. As on
 [Absolute Zero](algo-absolute-zero.md#measured-results), read the *gain*: the
 carts are generated, so the baseline is not 0.000 and the ceiling is not 1.000.
 
-See the caveat on [PromptBreeder](algo-promptbreeder.md#measured-results): one
+See the caveat on [PromptBreeder](algo-promptbreeder.md#measured-results-gsm8k): one
 run per seed does not pin a number here either.
 
 !!! danger "Half of every run's proposals were being thrown away, and counted as invalid"
