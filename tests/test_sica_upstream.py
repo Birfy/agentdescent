@@ -102,3 +102,48 @@ def test_an_unparseable_self_edit_costs_its_candidate_and_proposes_nothing():
     assert policy.reflective is False
     state = {"policy": sica.SICA_INITIAL_SOURCE}
     assert policy.strategy.to_diff(state, "not python at all", "w", 1, "a") is None
+
+
+# -- the domain ---------------------------------------------------------------
+
+
+def test_gsmhard_splits_are_disjoint_and_the_test_window_is_far_from_training():
+    """GSM-Hard ships one split, so the three come from disjoint windows of it.
+    The test window walks down from the end while the working windows walk up,
+    so a seed's reported tasks sit as far as possible from what it tuned on --
+    and the loader refuses outright if they would meet."""
+    from examples._gsmhard_domain import gsmhard_splits
+
+    for seed in (0, 1, 2):
+        train, held_out, test = gsmhard_splits(seed)
+        ids = [{t.id for t in g} for g in (train, held_out, test)]
+        assert not (ids[0] & ids[1] or ids[0] & ids[2] or ids[1] & ids[2]), seed
+        questions = [{t.prompt for t in g} for g in (train, held_out, test)]
+        assert not (questions[0] & questions[2]), f"seed {seed} tests what it trained on"
+
+
+def test_the_answer_key_survives_gsm_hard_s_float_targets():
+    """`target` ships as `-9867630.0`: signed, and a float where GSM8K's was a
+    positive integer. A pattern written for the latter reads the sign as a
+    separator and the `.0` as a different answer."""
+    from examples._gsmhard_domain import normalise, parse_answer, score_answer
+
+    assert normalise("-9867630.0") == "-9867630"
+    assert normalise("1,200") == "1200"
+    assert normalise(72.0) == "72"
+    assert parse_answer("...so the total is -9867630.0") == "-9867630"
+    assert score_answer("-9867630.0", "the answer is -9867630") == 1.0
+    assert score_answer("-9867630.0", "the answer is 9867630") == 0.0
+    assert parse_answer("no number here") is None
+
+
+def test_the_reference_solution_is_never_shown():
+    """GSM-Hard ships a `code` field holding the Python that computes the answer.
+    Handing it to a method being asked to write a better instruction turns
+    instruction search into transcription."""
+    from examples._gsmhard_domain import feedback, gsmhard_splits
+
+    train, _, _ = gsmhard_splits(0)
+    task = train[0]
+    assert "code" not in task.meta
+    assert "def solution" not in feedback(task, "1")
