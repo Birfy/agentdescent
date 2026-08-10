@@ -94,8 +94,6 @@ SECTIONS: List[Tuple[str, str, str, str]] = [
      "The reference barrier-free runtime and its statistics.", "async.md"),
     ("agentdescent.orchestrator", "The reference orchestrator",
      "The round loop the research results were measured with.", "orchestrator.md"),
-    ("agentdescent.worker", "The worker", "One worker's rollout and proposal.",
-     "orchestrator.md"),
 ]
 
 #: Symbols exported as plain values (not classes or functions) need a written
@@ -187,11 +185,31 @@ def _signature(name: str, obj: Any) -> str:
         sig = inspect.signature(obj)
     except (TypeError, ValueError):
         return name
-    # Every module uses `from __future__ import annotations`, so annotations reach
-    # us as strings and `str(signature)` renders them quoted -- `task: 'Task'`.
-    # Rebuild instead, unquoting annotations while leaving genuine string
-    # *defaults* quoted, which is the distinction str() cannot make.
+    parts, ret = _signature_parts(sig)
+    rendered = f"({', '.join(parts)}){ret}"
+    # Long signatures are unreadable on one line and mkdocs will not wrap them.
+    # The heading collapses; `_signature_block` prints the whole thing below it,
+    # one parameter per line, so nothing is actually lost.
+    if len(name) + len(rendered) > 96:
+        rendered = "(...)"
+    return f"{name}{rendered}"
+
+
+def _signature_parts(sig: inspect.Signature) -> Tuple[List[str], str]:
+    """The rendered parameters and return annotation of a signature.
+
+    Every module uses `from __future__ import annotations`, so annotations reach
+    us as strings and `str(signature)` renders them quoted -- `task: 'Task'`.
+    Rebuild instead, unquoting annotations while leaving genuine string
+    *defaults* quoted, which is the distinction `str()` cannot make.
+    """
     parts: List[str] = []
+    # The keyword-only marker is emitted **once**, before the first keyword-only
+    # parameter. The check used to read `"*" not in parts[-1:]`, which is true
+    # again as soon as one keyword-only parameter has been appended -- so
+    # `evolve`'s thirty-odd of them each got their own `*`. It was invisible
+    # while every long signature collapsed to `(...)`.
+    marked = False
     for pname, param in sig.parameters.items():
         # `cls` for the same reason as `self`: a caller writes
         # `EvolutionResult.load(path)`, and the bound first argument is noise in
@@ -200,26 +218,163 @@ def _signature(name: str, obj: Any) -> str:
         if pname in ("self", "cls"):
             continue
         prefix = {param.VAR_POSITIONAL: "*", param.VAR_KEYWORD: "**"}.get(param.kind, "")
-        if param.kind is param.KEYWORD_ONLY and "*" not in "".join(parts[-1:]):
+        if param.kind is param.KEYWORD_ONLY and not marked:
             parts.append("*")
+            marked = True
+        elif param.kind is param.VAR_POSITIONAL:
+            marked = True
         text = prefix + pname
         if param.annotation is not param.empty:
-            ann = param.annotation
-            text += f": {ann if isinstance(ann, str) else getattr(ann, '__name__', ann)}"
+            text += f": {_annotation(param.annotation)}"
         if param.default is not param.empty:
-            text += f" = {param.default!r}" if param.annotation is param.empty \
-                else f" = {param.default!r}"
+            text += f" = {param.default!r}"
         parts.append(text)
     ret = ""
     if sig.return_annotation is not sig.empty:
-        r = sig.return_annotation
-        ret = f" -> {r if isinstance(r, str) else getattr(r, '__name__', r)}"
-    rendered = f"({', '.join(parts)}){ret}"
-    # Long signatures are unreadable on one line and mkdocs will not wrap them;
-    # the full text stays available in the linked source.
-    if len(name) + len(rendered) > 96:
-        rendered = "(...)"
-    return f"{name}{rendered}"
+        ret = f" -> {_annotation(sig.return_annotation)}"
+    return parts, ret
+
+
+def _is_collapsed(name: str, obj: Any) -> bool:
+    return _signature(name, obj).endswith("(...)")
+
+
+def _signature_block(name: str, obj: Any) -> List[str]:
+    """The full signature, wrapped, for a heading that had to collapse."""
+    try:
+        sig = inspect.signature(obj)
+    except (TypeError, ValueError):
+        return []
+    parts, ret = _signature_parts(sig)
+    if not parts:
+        return []
+    body = ",\n".join(f"    {part}" for part in parts)
+    return ["```python", f"{name}(", body, f"){ret}", "```", ""]
+
+
+def _doc_params(obj: Any) -> Dict[str, str]:
+    """Per-parameter prose from a NumPy-style ``Parameters`` section.
+
+    The signature says a parameter's *type* and *default*; only the docstring
+    says what passing it does, and until this existed the page dropped every
+    word of it. ``evolve``'s ``solved_threshold`` paragraph -- "lower it for a
+    graded scorer, or every rollout asks the reflector to fix an answer that was
+    already good" -- was written, tested, and invisible to a reader of the
+    reference.
+
+    Grouped entries (``shuffle, seed:``) document several parameters with one
+    paragraph, which is how the sources already write them; each name gets the
+    shared text rather than the group being dropped for not matching a name.
+    """
+    doc = inspect.getdoc(obj) or ""
+    lines = doc.splitlines()
+    start = None
+    for index in range(len(lines) - 1):
+        if lines[index].strip() == "Parameters" and set(lines[index + 1].strip()) == {"-"}:
+            start = index + 2
+            break
+    if start is None:
+        return {}
+    out: Dict[str, str] = {}
+    names: List[str] = []
+    body: List[str] = []
+
+    def flush() -> None:
+        text = _clean(" ".join(body))
+        if not text:
+            return
+        # A grouped entry (`shuffle, seed:`) documents several parameters with
+        # one paragraph. Printing that paragraph in every row repeats it
+        # verbatim -- `max_rollouts` and `max_calls` share 800 words -- so the
+        # first name carries it and the rest point at it.
+        out[names[0]] = text
+        for name in names[1:]:
+            out[name] = f"As `{names[0]}`."
+
+    for index in range(start, len(lines)):
+        line = lines[index]
+        # Another underlined section header ends the block.
+        if (index + 1 < len(lines) and line.strip()
+                and set(lines[index + 1].strip()) == {"-"} and not line[:1].isspace()):
+            break
+        if line[:1] not in ("", " ", "\t") and line.rstrip().endswith(":"):
+            flush()
+            names = [n.strip() for n in line.rstrip()[:-1].split(",") if n.strip()]
+            body = []
+        elif names:
+            body.append(line.strip())
+    flush()
+    return out
+
+
+def _annotation(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    return getattr(value, "__name__", None) or str(value)
+
+
+def _parameters(obj: Any) -> List[Tuple[str, str, str, str]]:
+    """``(name, type, default, prose)`` for every parameter a caller can pass."""
+    if inspect.isclass(obj) and getattr(obj, "_is_protocol", False):
+        return []
+    if _is_enum(obj):
+        return []
+    try:
+        sig = inspect.signature(obj)
+    except (TypeError, ValueError):
+        return []
+    documented = _doc_params(obj)
+    rows: List[Tuple[str, str, str, str]] = []
+    for name, param in sig.parameters.items():
+        if name in ("self", "cls"):
+            continue
+        prefix = {param.VAR_POSITIONAL: "*", param.VAR_KEYWORD: "**"}.get(param.kind, "")
+        annotation = "" if param.annotation is param.empty else _annotation(param.annotation)
+        if param.default is param.empty:
+            default = "" if prefix else "*required*"
+        else:
+            rendered = repr(param.default)
+            # A default factory or a long literal reprs to something no reader
+            # wants in a table cell; the linked source has the whole of it.
+            default = f"`{rendered}`" if len(rendered) <= 40 else "*see source*"
+        # Sources write `**evolve_kwargs:` in the Parameters block, stars and
+        # all, so look the starred form up too rather than dropping the one
+        # entry that explains where every unlisted keyword goes.
+        prose = documented.get(name) or documented.get(f"{prefix}{name}", "")
+        rows.append((f"`{prefix}{name}`",
+                     f"`{_clean(annotation)}`" if annotation else "",
+                     default,
+                     prose))
+    return rows
+
+
+def _param_section(name: str, obj: Any) -> List[str]:
+    """The full signature and a parameter table, where a reader needs them.
+
+    The **signature block** is printed when the one-line heading had to collapse
+    to ``(...)`` -- 67 of them did, including `evolve`, `evolve_skill` and every
+    `evolve_*_dir`, so the page named the entry points and showed none of their
+    parameters.
+
+    The **table** is printed only when the docstring actually documents a
+    parameter. A table whose prose column is empty on every row says nothing the
+    signature above it did not, and a dataclass of eighteen counters produces
+    exactly that.
+    """
+    rows = _parameters(obj)
+    if not rows:
+        return []
+    collapsed = _is_collapsed(name, obj)
+    documented = any(prose for *_, prose in rows)
+    if not collapsed and not documented:
+        return []
+    lines = _signature_block(name, obj) if collapsed else []
+    if documented:
+        lines += ["| parameter | type | default | what it is |", "|---|---|---|---|"]
+        lines += [f"| {pname} | {ann} | {default} | {prose} |"
+                  for pname, ann, default, prose in rows]
+        lines += [""]
+    return lines
 
 
 def _kind(obj: Any) -> str:
@@ -299,6 +454,11 @@ def render() -> str:
         "`python -m tools.gen_api_docs` — `tests/test_api_reference.py` fails if this",
         "page and the code disagree, so a signature here is the signature you get.",
         "",
+        "A signature too long for its heading is printed in full below it, one",
+        "parameter per line, followed by a table of what each one does — type,",
+        "default, and the docstring's own prose. `*required*` in the default column",
+        "means the parameter has none.",
+        "",
         "Each section links to the page that explains *why* the module is shaped the",
         "way it is; this page is the *what*.",
         "",
@@ -333,6 +493,7 @@ def render() -> str:
                 lines += [f"| `{m.name}` | `{m.value!r}` |" for m in obj]
                 lines += [""]
                 continue
+            lines += _param_section(name, obj)
             if kind == "class":
                 methods = _methods(obj)
                 if methods:
