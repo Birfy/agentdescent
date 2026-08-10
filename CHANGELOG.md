@@ -6,6 +6,30 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`async_evolve` listed `selection` among the policies it honours and never
+  asked it.** `selection` is in `_ASYNC_WIRED_POLICIES`, so
+  `Policies.require_supported` let it through, and nothing in the barrier-free
+  loop read `_pol.selection` — the field was accepted and dropped. The two
+  drivers therefore disagreed about the same bundle: a policy naming a starting
+  point other than the head raised `NotImplementedError` from `evolve()` and ran
+  to completion under `async_evolve()`, returning a reward. That is precisely the
+  outcome `require_supported` and `_check_selection` were each written to make
+  impossible, arriving through the driver that called neither. The merger now
+  asks once per sweep — a sweep being that loop's round, which is what `history`
+  is indexed by.
+
+### Added
+
+- **`MultiHeadUnsupported`**, raised where `_check_selection` used to raise a
+  bare `NotImplementedError`. It subclasses both `NotImplementedError` (what
+  callers already catch) and `ContractError` (how it gets out). The second base
+  is not cosmetic: the merger runs on a background thread that absorbs ordinary
+  exceptions as backend failures and retries past them, so a plain
+  `NotImplementedError` would have been filed as a transient, retried until the
+  sweep budget ran out, and reported as though a provider had flaked.
+
 ## [0.4.2] — 2026-08-10
 
 ### Fixed

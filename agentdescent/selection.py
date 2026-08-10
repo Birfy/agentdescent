@@ -39,10 +39,16 @@ one.
 Multiple **live** heads. The ledger has one `dev` branch, staleness is defined as
 ``eta = max(head - base)``, and promotion compares `dev` against `stable` -- all
 three assume "head" names one thing. A policy that returns several distinct
-starting points is therefore *refused* by the engine rather than silently
+starting points is therefore *refused* by both drivers rather than silently
 collapsed to the first, and every policy below is usable today in the shape that
 returns one. Making the ledger hold concurrent branches, and redefining `eta`
 when `head` is plural, is a separate change.
+
+"Both drivers" is load-bearing and was not always true: `async_evolve` listed
+`selection` among the bundle fields it honours and then never consulted it, so
+the same `Policies(selection=...)` raised on the barrier path and finished with a
+reward on the barrier-free one. See :class:`MultiHeadUnsupported` for why the
+refusal needs a type of its own to survive the merger thread.
 """
 
 from __future__ import annotations
@@ -53,17 +59,36 @@ from typing import (
     Dict, List, Mapping, Optional, Protocol, Sequence, runtime_checkable,
 )
 
+from .evolvable import ContractError
+
 __all__ = [
     "Archive",
     "Beam",
     "Candidate",
     "MCTS",
+    "MultiHeadUnsupported",
     "ParetoFrontier",
     "SelectionContext",
     "SelectionPolicy",
     "SingleHead",
     "pareto_front",
 ]
+
+
+class MultiHeadUnsupported(ContractError, NotImplementedError):
+    """A policy named a starting point the ledger cannot hold yet.
+
+    Both bases carry their weight. ``NotImplementedError`` is what a caller
+    catches and what this raised before it had a name. ``ContractError`` is what
+    routes it: both engines run their merge on a background thread and absorb
+    ordinary exceptions there as backend failures, retrying past them -- so a
+    plain ``NotImplementedError`` raised inside the barrier-free merger would be
+    counted as a transient, retried until the sweep budget ran out, and reported
+    as though a provider had flaked. `ContractError` is the channel this
+    repository already uses for "the caller's own code makes this run
+    meaningless": it is stashed and re-raised on the caller's thread. Same
+    reasoning, same shape as `ProposalContractError` and `RewardContractError`.
+    """
 
 
 @dataclass(frozen=True)

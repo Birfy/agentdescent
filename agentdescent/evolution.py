@@ -814,8 +814,15 @@ def _check_selection(policy, artifact_id, artifact, base_v, round_index,
     also means every policy in `agentdescent.selection` is usable today in its
     degenerate, single-candidate shape -- ``Beam(1)``, an archive of one -- and
     only genuinely multi-head requests fail.
+
+    **Both drivers call this**, once per round and once per merger sweep
+    respectively. `async_evolve` listed `selection` as wired and then never
+    consulted it, so the two paths disagreed on the same bundle: `evolve` raised,
+    the barrier-free loop finished and reported a reward. That is the failure
+    this function exists to prevent, arriving through the driver that did not
+    call it -- so the shared check has to be shared, not merely available.
     """
-    from .selection import Candidate, SelectionContext
+    from .selection import Candidate, MultiHeadUnsupported, SelectionContext
 
     head = Candidate(
         artifact_id=artifact_id, version=base_v,
@@ -829,7 +836,7 @@ def _check_selection(policy, artifact_id, artifact, base_v, round_index,
                            n_workers=n_workers)
     chosen = list(policy.select(ctx, n_workers))
     if any(c.version != base_v or c.artifact_id != artifact_id for c in chosen):
-        raise NotImplementedError(
+        raise MultiHeadUnsupported(
             f"{type(policy).__name__}.select() asked to start from a candidate "
             f"other than the current head, and the ledger holds one live branch: "
             "`dev`, with staleness defined as eta = max(head - base). Multi-head "

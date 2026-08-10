@@ -15,11 +15,13 @@ beam and watches a run finish has every reason to believe the beam ran.
 
 import pytest
 
+from agentdescent.async_evolve import async_evolve
 from agentdescent.evolution import AppendRules, Task, evolve
+from agentdescent.evolvable import ContractError
 from agentdescent.policies import Policies
 from agentdescent.selection import (
-    Archive, Beam, Candidate, MCTS, ParetoFrontier, SelectionContext, SingleHead,
-    pareto_front,
+    Archive, Beam, Candidate, MCTS, MultiHeadUnsupported, ParetoFrontier,
+    SelectionContext, SingleHead, pareto_front,
 )
 
 
@@ -46,6 +48,20 @@ def _run(**kw):
                   propose=lambda rendered, t, o, s: t.meta["h"],
                   strategy=AppendRules(), rounds=6, n_workers=4,
                   max_concurrency=1, held_out_frac=0.4, seed=1, **kw)
+
+
+def _run_async(**kw):
+    return async_evolve(_tasks(), lambda t, o: 1.0 if o == "good" else 0.0,
+                        run=lambda rendered, t: "good" if t.meta["h"] in rendered else "bad",
+                        propose=lambda rendered, t, o, s: t.meta["h"],
+                        # async_ratio=0 resyncs every rollout: this domain scores
+                        # in microseconds, so any lag budget above zero has the
+                        # workers discarding ~95% of their cards as stale and
+                        # warning about it. Staleness is not what these tests are
+                        # about, and a warning nobody reads is one nobody reads.
+                        strategy=AppendRules(), n_workers=4, async_ratio=0,
+                        max_seconds=5.0, target_reward=1.0,
+                        held_out_frac=0.4, seed=1, **kw)
 
 
 def test_the_default_run_is_unchanged():
@@ -79,15 +95,72 @@ def test_every_policy_runs_on_the_single_candidate_path(policy):
     assert result.final_reward > 0.0
 
 
-def test_a_multi_head_answer_is_refused_rather_than_collapsed():
-    class Wanderer:
-        def select(self, ctx, n):
-            return [Candidate(artifact_id=ctx.head.artifact_id,
-                              version=ctx.head.version + 7)] * n
+class _Wanderer:
+    """Names a starting point that is not the head. Neither driver can honour it."""
 
+    def __init__(self):
+        self.calls = 0
+
+    def select(self, ctx, n):
+        self.calls += 1
+        return [Candidate(artifact_id=ctx.head.artifact_id,
+                          version=ctx.head.version + 7)] * n
+
+
+def test_a_multi_head_answer_is_refused_rather_than_collapsed():
     with pytest.raises(NotImplementedError) as excinfo:
-        _run(policies=Policies(selection=Wanderer()))
+        _run(policies=Policies(selection=_Wanderer()))
     assert "one live branch" in str(excinfo.value)
+
+
+# -- both drivers, one answer ------------------------------------------------
+
+
+def test_the_barrier_free_loop_asks_the_selection_policy():
+    """`selection` was listed as wired in `async_evolve` and never consulted.
+
+    The bundle's own check let it through, so the field was accepted and
+    dropped -- a caller who passed a beam and read a final reward had every
+    reason to believe the beam ran. Counting the calls is the only way to see
+    it: with one live candidate every shipped policy answers "the head", so the
+    run's numbers are identical whether the policy was asked or not.
+    """
+    class Counting(SingleHead):
+        def __init__(self):
+            self.calls = 0
+
+        def select(self, ctx, n):
+            self.calls += 1
+            return super().select(ctx, n)
+
+    policy = Counting()
+    result = _run_async(policies=Policies(selection=policy))
+    assert result.error is None
+    assert policy.calls >= 1, "async_evolve finished without asking where to start"
+
+
+def test_a_multi_head_answer_is_refused_on_the_async_path_too():
+    """The refusal is the shared one, and it reaches the caller's thread.
+
+    Both halves matter. Raising at all is parity with `evolve`; raising
+    `MultiHeadUnsupported` is what stops the merger from filing it under
+    "the provider flaked" and retrying until the sweep budget runs out.
+    """
+    policy = _Wanderer()
+    with pytest.raises(MultiHeadUnsupported) as excinfo:
+        _run_async(policies=Policies(selection=policy))
+    assert "one live branch" in str(excinfo.value)
+    assert policy.calls >= 1
+
+
+def test_the_refusal_stays_catchable_as_what_it_used_to_be():
+    """`MultiHeadUnsupported` gained a base; it must not have lost one.
+
+    Callers catch `NotImplementedError` -- the type this raised before it had a
+    name, and the type the sync test above still asks for.
+    """
+    assert issubclass(MultiHeadUnsupported, NotImplementedError)
+    assert issubclass(MultiHeadUnsupported, ContractError)
 
 
 # -- the policies themselves -------------------------------------------------

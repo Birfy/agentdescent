@@ -84,7 +84,10 @@ on a re-run makes a seeded comparison meaningless.
 Multiple **live** heads. The ledger holds one `dev` branch, staleness is defined
 as `η = max(head − base)`, and promotion compares `dev` against `stable` — all
 three assume "head" names one thing. So a policy that returns a starting point
-other than the head raises `NotImplementedError`:
+other than the head raises `MultiHeadUnsupported` — a `NotImplementedError`,
+which is what this raised before it had a name, *and* a `ContractError`, which
+is how it gets out of the barrier-free loop's merger thread instead of being
+absorbed there as a provider failure and retried:
 
 ```
 Beam.select() asked to start from a candidate other than the current head, and
@@ -101,6 +104,12 @@ Every policy above is therefore usable *today* in the shape a run actually
 starts in: an archive of one, a beam over one candidate. That is what makes the
 seam checkable now instead of after the ledger changes. Making the ledger hold
 concurrent branches, and redefining `η` when `head` is plural, is separate work.
+
+**Both drivers ask.** [`evolve()`](api.md) asks once per round, before the batch
+goes out; [`async_evolve()`](async.md) asks once per merger sweep, which is that
+loop's round — `history` is indexed by it. They were not always the same: the
+barrier-free loop listed `selection` as wired and then never consulted it, so
+the identical bundle raised on one path and finished with a reward on the other.
 
 ## Examples-level policies, and how they actually run
 
