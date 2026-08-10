@@ -6,92 +6,43 @@ so you can reproduce it.
 
 ## The algorithm ports
 
-The eleven MethodPolicy ports (PromptBreeder through Gödel Agent) are measured
-in the [runtime matrix](matrix-overview.md) — live model, equal budgets, three
-schedulers — rather than in per-port rows here; the
-[matrix report](matrix-report.md) carries the current numbers.
+All eighteen port results live in one place — **[measured results, all
+eighteen](self-evolution-examples.md#measured-results-all-eighteen)** — with each
+row linked to the page that carries its full setup, its caveats and the run file
+it came from. They are not repeated here: a second copy of a number is a copy
+that goes stale, and this page's copy did.
 
+What belongs here instead is the thing those rows share and none of them can say
+on its own.
 
-| Algorithm | Dataset | Settings | Held-out, before → after | Cost | Difficulty knob |
-|---|---|---|---|---|---|
-| **[GEPA](algo-gepa.md)** | HotpotQA | `--rounds 5 --fetch 40` | Pareto EM **0.500 → 0.600**; test EM **0.700** | 80 calls, 10 min | none |
-| **[ACE](algo-ace.md)** | FiNER-139 | `--top-k 120 --rounds 8 --workers 4` | val **0.844 → 0.889**; test **0.884**, 2 bullets | 403 calls, 20 min | ⚠︎ `--top-k` |
-| **[SkillOpt](algo-skillopt.md)** | SearchQA | `--hard --steps 6` | val hard-EM **0.250 → 0.500**; test **0.450** | 6 steps | ⚠︎ `--hard` |
-| **[EvoSkill](algo-evoskill.md)** | FinQA | `--dataset finqa --iterations 5` | val **0.487 → 0.573**; test **0.617**, 1 skill | 115 calls, 4 min | none |
-| **[DGM](algo-dgm.md)** | surrogate | `--generations 4` | resolve-rate **0.000 → 0.300**; test 0.200 | offline | none |
-| **[ADAS](algo-adas.md)** | MGSM | `--hard`, all 11 languages | direct **0.919** → 222-item hard subset; lift **not yet measured** | ~2 h, 6k–17k calls | ⚠︎ `--hard` |
-| **[OpenEvolve](algo-openevolve.md)** | function optimisation | live GLM-5.2 run | see [the measured section](algo-openevolve.md) | — | none |
+!!! danger "A difficulty knob calibrated on one model does not transfer"
+    Two of the ports set their own difficulty — ACE's `--top-k`, SkillOpt's
+    `--hard` — and an early calibration round measured what happens when the
+    model underneath changes and the knob does not. Same configuration, same
+    call counts, `deepseek-v4-flash` → `glm-5.2`:
 
-**Every row above was measured with `deepseek-v4-flash`.** That is stated at the
-top of this page, and it is not decoration: ⚠︎ marks a row whose *difficulty*
-comes from a knob calibrated against that model. Those rows do not transfer.
-
-!!! danger "Re-run on `glm-5.2`: the two ⚠︎ rows lost their lift entirely"
-    Not a contradiction of the numbers above — a different model, so a different
-    measurement. What it shows is which rows are portable:
-
-    | | `deepseek-v4-flash` (published) | `glm-5.2` (re-run) |
+    | | knob | outcome on the second model |
     |---|---|---|
-    | DGM | `0.000 → 0.300`, test 0.200 | identical, to the digit |
-    | GEPA | Pareto `0.500 → 0.600` | `0.500 → 0.600`, test 0.800 |
-    | EvoSkill | val `0.487 → 0.573`, 1 skill | val `0.500 → 0.577`, test 0.613, 1 skill |
-    | **ACE** ⚠︎ | val `0.844 → 0.889`, 2 bullets | val **`0.867 → 0.867`**, 1 bullet, 8 rounds, 413 calls |
-    | **SkillOpt** ⚠︎ | val hard-EM `0.250 → 0.500` | val **`1.000 → 1.000`**, **0 edits accepted** |
+    | DGM | none | identical to the digit — a deterministic surrogate objective |
+    | GEPA | none | reproduced; HotpotQA's multi-hop structure is hard regardless |
+    | EvoSkill | none | reproduced; a decimal-place *convention* is not something capability guesses |
+    | **ACE** | `--top-k` | **no lift at all** — 413 calls spent, one bullet, val flat |
+    | **SkillOpt** | `--hard` | **no lift at all** — `select_hard` found 2 hard items in 40, padded the rest with items the model solves, and validation sat at 1.000 from round one |
 
-    The mechanism ran correctly in all five — ACE spent 413 calls against a
-    published 403, so it did the same work. What changed is that there was
-    nothing left to learn:
+    The mechanism ran correctly in all five. What changed is that there was
+    nothing left to learn, and the two rows that lost their lift are exactly the
+    two whose difficulty was a knob rather than a property of the benchmark.
+    **Re-calibrate before comparing across models**: at a 5% hard rate, SkillOpt
+    needs roughly 240 items per split rather than 40 for `select_hard` to find
+    genuinely hard items without padding.
 
-    * **SkillOpt.** `--hard` keeps the items the seed gets wrong. `glm-5.2`
-      answers 95% of SearchQA correctly, so `select_hard` found **2 hard items in
-      40** and **1 in 20**, then padded to its 12-item floor with items the model
-      already solves. Validation was 1.000 from the first round; six rounds of
-      edits were all correctly rejected.
-    * **ACE.** `--top-k 120` sets how many XBRL concepts compete. `glm-5.2`
-      starts at 0.867 where `deepseek-v4-flash` starts at 0.844, and the residual
-      errors are not the kind one playbook bullet fixes.
-
-    The three unmarked rows reproduce because their difficulty does not depend on
-    the model: DGM's objective is a deterministic surrogate, HotpotQA's multi-hop
-    structure is hard regardless, and FinQA's decimal-place convention is a
-    *convention* — no amount of model capability guesses how many places the table
-    used.
-
-    **Re-calibrate the knob before comparing across models.** For SkillOpt that
-    means a pool large enough that `select_hard` finds genuinely hard items
-    without padding — at a 5% hard rate, roughly 240 items per split rather than
-    40.
-
-!!! note "What the *before* number is, per row"
-    GEPA, EvoSkill and SkillOpt score the **seed** artifact explicitly before
-    evolving it, so their "before" is a true baseline. ACE's is the **first round's**
-    held-out measurement, which is taken *after* that round's merge — the seed is
-    never scored on its own, because doing so would buy an extra val sweep of real
-    model calls and change the cost column. Read it as "where the run started
-    reporting", not "what the seed scored"; if round 0 committed, the real lift is
-    slightly larger than the row shows.
-
-!!! warning "ADAS is the exception: the lift row is still empty"
-    Everything else in this table is a completed before → after. ADAS is not, and
-    the honest reason is that no run against the current code has finished.
-
-    What *is* measured: over the whole benchmark (2750 items, 11 languages)
-    `deepseek-v4-flash` answers **0.919** directly, leaving **222** items with
-    real signal — enough for a 34 / 110 / 78 split, where the previous attempt had
-    47 items and split them 23 / 12 / 11.
-
-    One thing to know before running it: this example needs `--max-tokens` set for
-    a reasoning model. At the library default the meta-agent returns empty content
-    on every call and no design reaches the archive — and an empty completion
-    scores as a wrong answer rather than raising.
-    [Details](algo-adas.md#give-a-reasoning-model-a-real-token-budget).
-
-Each learned something specific to the failure it was shown:
-
-* **GEPA** — *"connect information across multiple paragraphs… then give only the
-  final answer as a short phrase, without explanation."*
-* **EvoSkill** — *"round your answer to the same number of decimal places shown in
-  that table… compute the unrounded value first, then round once at the end."*
+!!! note "Not every port's *before* is a seed measurement"
+    GEPA, EvoSkill, SkillOpt and all eleven `MethodPolicy` ports score the seed
+    artifact explicitly before evolving it, so their "before" is a true baseline.
+    ACE's is the **first round's** held-out measurement, taken *after* that
+    round's merge — scoring the seed on its own would buy an extra val sweep of
+    real model calls. Read it as "where the run started reporting"; if round 0
+    committed, the real lift is slightly larger than the row shows.
 
 ## Choosing a setting that can show a lift
 
@@ -104,13 +55,14 @@ Two levers set the difficulty:
 
 | lever | where | effect |
 |---|---|---|
-| the benchmark's own difficulty parameter | ACE `--top-k`, ADAS `--langs` | ACE at `--top-k 10` scores 1.000; at 120 it goes **0.844 → 0.889** |
-| [`select_hard`](dataloader.md#turning-a-saturated-benchmark-into-one-with-headroom-select_hard) (`--hard`) | SkillOpt, ADAS | keeps the items a baseline gets wrong — SkillOpt: 69 of 280 |
+| the benchmark's own difficulty parameter | ACE `--top-k` / `--pool`, ADAS `--dataset` / `--langs` | ACE at `--top-k 10` scores 1.000 and curates nothing; widening the pool puts the baseline at 0.667 |
+| [`select_hard`](dataloader.md#turning-a-saturated-benchmark-into-one-with-headroom-select_hard) (`--hard`) | SkillOpt, ADAS | keeps the items a baseline gets wrong — and needs `--hard-passes > 1`, or it selects the model's unlucky answers rather than hard questions |
+| a harder benchmark | the six `MethodPolicy` maths ports | GSM8K is half-solved by a current model; GSM-Hard is the same questions with numbers that do not fit in its head |
 
 !!! warning "A hard subset is a different benchmark"
-    SkillOpt's `0.250 → 0.500` is measured on the subset its seed skill fails, not
-    on the full split where it scores 0.900. The two are not comparable — say which
-    one you used.
+    SkillOpt's lift is measured on the subset its seed skill fails, not on the
+    full split where the same model scores ~0.900. The two are not comparable —
+    say which one you used.
 
 ## The one-call path
 

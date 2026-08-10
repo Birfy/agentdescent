@@ -1,16 +1,22 @@
 # Absolute Zero — Zero-data self-play (single model)
 
-**Fidelity class: `inference_analogue`** — see [port fidelity](port-fidelity.md) for
-what the classes mean. This port is measured in the runtime matrix: the mechanism is
-preserved and measured under AgentDescent's runtimes; it is **not** a
-paper-benchmark reproduction.
+> **Self-play policy evolution.** One model proposes and solves its own tasks,
+> graded by a local verifier and rewarded for *learnability*. Runs through the
+> shared [`MethodPolicy`](policies.md) runner. Example:
+> [`examples/absolute_zero/absolute_zero_selfplay.py`](https://github.com/Birfy/agentdescent/blob/main/examples/absolute_zero/absolute_zero_selfplay.py).
 
 | | |
 |---|---|
-| Paper | "Absolute Zero: Reinforced Self-play Reasoning with Zero Data", Zhao et al., 2025 ([arXiv:2505.03335](https://arxiv.org/abs/2505.03335)) |
-| Upstream code (pinned) | [LeapLabTHU/Absolute-Zero-Reasoner@484afa48](https://github.com/LeapLabTHU/Absolute-Zero-Reasoner/tree/484afa480c8f6fd77faa3d35451f24f287f58ee1) |
-| Definition | [`examples/absolute_zero/absolute_zero_selfplay.py`](https://github.com/Birfy/agentdescent/blob/main/examples/absolute_zero/absolute_zero_selfplay.py) |
-| Domain | self-generated cart arithmetic; frozen evaluation carts (deduction + abduction) |
+| **Paper** | *Absolute Zero: Reinforced Self-play Reasoning with Zero Data* — Zhao et al., 2025 ([arXiv:2505.03335](https://arxiv.org/abs/2505.03335)) |
+| **Upstream code** | [LeapLabTHU/Absolute-Zero-Reasoner@484afa48](https://github.com/LeapLabTHU/Absolute-Zero-Reasoner/tree/484afa480c8f6fd77faa3d35451f24f287f58ee1) |
+| **Example** | [`examples/absolute_zero/absolute_zero_selfplay.py`](https://github.com/Birfy/agentdescent/blob/main/examples/absolute_zero/absolute_zero_selfplay.py) |
+| **Domain** | self-generated cart arithmetic — 16 self-play slots + 16/16 frozen evaluation carts (deduction + abduction) |
+| **Layer** | L1 (`blast_radius=0.6`, set by the shared runner) |
+| **Fidelity** | `inference_analogue` — [what the classes mean](port-fidelity.md) |
+
+This port is measured in the [runtime matrix](matrix-overview.md): the mechanism
+is preserved and measured under AgentDescent's runtimes; it is **not** a
+paper-benchmark reproduction.
 
 ## The mechanism
 
@@ -35,10 +41,11 @@ difficulty, not peaked at 50%. Both roles update the same weights via TRR++
 - Verbal policy memory replaces TRR++ weight updates.
 - Deduction and abduction stand in for the paper's three task types; induction is omitted.
 
-## Measured results
+## Measured results — self-play carts
 
 Three seeds, `async_pipeline`, 80 rollouts each, 8 workers, `--staleness full`,
-`deepseek-v4-flash` at temperature 0.7. Recorded in
+reflective merge on (this method's own declaration), two solver samples per
+proposed item, `deepseek-v4-flash` at temperature 0.7. Recorded in
 [`bench/results/absolute-zero-selfplay.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/absolute-zero-selfplay.json).
 
 | seed | test quality | validation | accepted | calls |
@@ -58,56 +65,32 @@ pages.
 See the caveat on [PromptBreeder](algo-promptbreeder.md#measured-results-gsm8k): one
 run per seed does not pin a number here either.
 
-!!! danger "The learnability signal was the run's average, not the item's"
-    This page claimed the proposer's reward was "surfaced verbatim". Upstream's
-    `accuracies[uid]` is the solve rate of **that** problem over its rollout
-    group, and `1 - accuracy` is that item's learnability. The port computed a
-    running mean over every rollout so far, so the proposer was told a number
-    about problems it did not write.
+!!! note "Learnability is *per item*, which is why the solver is sampled twice"
+    Upstream's `accuracies[uid]` is the solve rate of **that** problem over its
+    rollout group, so `1 − r̄` is that item's learnability, not the run's. One
+    solver sample makes the rate 0 or 1, and `(1 − r̄) if r̄ > 0 else 0` is zero
+    at both — so two samples is the smallest number that produces a middle.
 
-    Worse, the solver was sampled **once** per proposed item, which makes the
-    rate 0 or 1 — and `(1 - accuracy) if accuracy > 0 else 0.0` is zero at both.
-    The signal the paper's proposer is trained on did not exist in this port at
-    all. It samples the solver twice now, the smallest number that produces a
-    middle, and reports that item's own rate.
-
-    The formula itself was right and stays: monotone in the solve rate and
-    **not** peaked at 0.5, which is why no difficulty-weighted sampler is
-    attached to this port where R-Zero and Agent0 have one.
-
-!!! note "The domain was four self-play slots"
-    `run_port` refuses a run whose train split is under the worker count, so
-    four slots capped this port — and R-Zero and Agent0, which share the domain
-    — at four workers with a four-cart gate, where one item moves the score by
-    0.25. It is 16 slots and 16/16 frozen carts now, and the carts are still
-    drawn from the seed at build time so the evolved memory cannot shape its own
-    test set.
+    The formula stays monotone in the solve rate and **not** peaked at 0.5, which
+    is why no difficulty-weighted sampler is attached here where
+    [R-Zero](algo-r-zero.md) and [Agent0](algo-agent0.md) have one.
 
 ## Run it
 
 ```bash
 python -m examples.absolute_zero.absolute_zero_selfplay --dry-run
 
-# the table above, one seed of the three (0, 1, 2)
+# one seed of the three above
 python -m examples.absolute_zero.absolute_zero_selfplay --yes --seed 0 \
-    --budget-rollouts 80 --workers 8 \
-    --async --async-ratio 1 --max-seconds 3600 \
-    --staleness full --temperature 0.7 --no-thinking \
-    --provider claude --model deepseek-v4-flash
+    --provider openai --model deepseek-v4-flash \
+    --async --async-ratio 2 --workers 8 --budget-rollouts 80 --staleness full \
+    --temperature 0.7 --max-seconds 3600
 ```
 
-**`--async-ratio 1` is what this row ran at.** The flag was declared by the
-shared parser and never passed to `run_port`, so the run took the runner's own
-default of 1 while
-[`bench/results/absolute-zero-selfplay.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/absolute-zero-selfplay.json)
-recorded the 2 its command line had asked for. The flag is threaded now and that
-file records 1 — see
-[the MethodPolicy command line](self-evolution-examples.md#the-methodpolicy-command-line)
-for why the default here is 1 rather than the shared 3.
+`--async-ratio 2` is explicit because the default here is 1, and 2 is what
+this row was recorded at.
 
-No `--reflective-merge`: the method's own `reflective` declaration set the merge,
-and that declaration is a fidelity statement rather than a knob. `--max-seconds`
-is the one setting the results file does not record; any value comfortably above
-the row's `engine_s` leaves `--budget-rollouts` as the binding stop.
+Flags: [the MethodPolicy command line](self-evolution-examples.md#the-methodpolicy-command-line).
 
-Offline tests: `tests/test_selfplay_upstream.py`.
+Offline tests: `tests/test_selfplay_upstream.py`,
+`tests/test_candidate_methods.py`.

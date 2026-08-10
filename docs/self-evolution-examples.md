@@ -1,30 +1,25 @@
-# Self-evolution algorithms — faithful ports
+# Self-evolution algorithms — eighteen ports
 
-AgentDescent is a *general* engine for parallel, merge-based evolution. To show it
-is faithful to the field — not a toy — this page ports a set of the most
-representative **skill self-evolution**, **program evolution**, and **harness
-self-evolution** algorithms from the literature, each as one runnable example,
-each faithful to the original paper/repo's **algorithm** and **dataset choice**.
+AgentDescent is a *general* engine for parallel, merge-based evolution. To show
+it is faithful to the field — not a toy — eighteen published **skill**,
+**program** and **harness** self-evolution algorithms run on it, each as one
+runnable example with a dedicated page. Seven reproduce their paper's own
+benchmark; eleven preserve the mechanism on a compact domain and say so. What
+each one follows and where it departs is recorded per port in
+[port fidelity](port-fidelity.md).
 
-Three artifact categories, spanning the two governance layers:
+**All eighteen run through the AgentDescent evolution engines.** No example
+bypasses the engine, and they reach it two ways:
 
-* **Skill self-evolution** — evolve a *skill / prompt / context* (an **L2**
-  artifact, `blast_radius=0.2`): ACE, GEPA, EvoSkill, SkillOpt.
-* **Harness self-evolution** — evolve the *agentic system / coding agent itself*
-  (an **L1** artifact, `blast_radius=0.6`, oracle-gated): ADAS, DGM.
-* **Program evolution** — evolve executable search code (an **L1** artifact,
-  `blast_radius=0.6`, sandbox-evaluated): OpenEvolve.
-
-**All eighteen run through the AgentDescent evolution engines.** The seven
-benchmark-faithful ports above are each a custom `strategy=` and/or a custom
-`aggregator_factory=`, with their parent/gate rules extracted as named policy
-classes at the standard seams ([selection](selection.md),
-[acceptance](acceptance-policies.md)). The eleven newer ports are declarative
-[`MethodPolicy`](policies.md) definitions over a shared runner — their
-mechanisms plug in as `Policies(...)` fields, their artifacts as shared
-[strategies](strategies.md), and the [runtime matrix](matrix-overview.md)
-measures them under all three schedulers. No example bypasses the engine. Each
-has a dedicated page:
+* the **seven benchmark-faithful ports** are each a custom `strategy=` and/or a
+  custom `aggregator_factory=`, with their parent/gate rules extracted as named
+  policy classes at the standard seams ([selection](selection.md),
+  [acceptance](acceptance-policies.md));
+* the **eleven microports and analogues** are declarative
+  [`MethodPolicy`](policies.md) definitions over one shared runner — their
+  mechanisms plug in as `Policies(...)` fields, their artifacts as shared
+  [strategies](strategies.md), and the [runtime matrix](matrix-overview.md)
+  measures them under all three schedulers.
 
 **All eighteen are parallel — and can run async.** In synchronous mode their workers
 run **concurrently** (overlapping LLM rollouts) with the aggregator merge as the
@@ -40,37 +35,66 @@ python -m examples.ace.ace_context_evolution --model claude-haiku-4-5           
 python -m examples.ace.ace_context_evolution --model claude-haiku-4-5 --async   # barrier-free
 ```
 
-| Algorithm | Port author | Kind | Dataset (faithful) | `evolve()` plug-ins | Page |
+### The seven benchmark-faithful ports
+
+| Algorithm | Port author | Kind | Domain (faithful) | `evolve()` plug-ins | Page |
 |---|---|---|---|---|---|
 | **ACE** (Agentic Context Engineering) | chendanyang | skill / context | FiNER-139 (XBRL tagging) | `strategy=ACEPlaybook`; Curator = default aggregator | [→](algo-ace.md) |
 | **GEPA** (Reflective Prompt Evolution) | chendanyang | skill / prompt | HotpotQA (EM) | `aggregator_factory=` Pareto optimizer | [→](algo-gepa.md) |
-| **EvoSkill** (Automated Skill Discovery) | chendanyang | skill library | OfficeQA (Treasury) | `strategy` + `aggregator_factory=` top-K frontier (sync) / SGD descent (async) | [→](algo-evoskill.md) |
+| **EvoSkill** (Automated Skill Discovery) | chendanyang | skill library | OfficeQA (Treasury), FinQA without HF access | `strategy` + `aggregator_factory=` bounded top-K frontier | [→](algo-evoskill.md) |
 | **SkillOpt** (ReflACT) | chendanyang | skill document | SearchQA (EM/F1) | `strategy` (edits) + `aggregator_factory=` strict gate | [→](algo-skillopt.md) |
-| **ADAS** (Meta Agent Search) | chendanyang | harness (L1) | MGSM | `strategy` + `aggregator_factory=` keep-all archive | [→](algo-adas.md) |
-| **DGM** (Darwin Gödel Machine) | chendanyang | harness (L1) | SWE-bench Verified | `strategy` + `aggregator_factory=` archive + selection | [→](algo-dgm.md) |
+| **ADAS** (Meta Agent Search) | chendanyang | harness (L1) | MGSM, GPQA Diamond | `strategy` + `aggregator_factory=` keep-all archive | [→](algo-adas.md) |
+| **DGM** (Darwin Gödel Machine) | chendanyang | harness (L1) | SWE-bench Verified ids; vendored bugs w/ pytest | `strategy` + `aggregator_factory=` archive + selection | [→](algo-dgm.md) |
 | **OpenEvolve** (Program Evolution) | cyanneko | program (L1) | Function minimization | `strategy` + `aggregator_factory=` MAP-Elites islands | [→](algo-openevolve.md) |
+
+### The eleven microports and analogues
+
+All eleven are `MethodPolicy` definitions over
+[`examples/_method_runner.py`](https://github.com/Birfy/agentdescent/blob/main/examples/_method_runner.py),
+so they share a runner, a budget contract and a command line. Port author:
+`cyanneko`.
+
+| Algorithm | Fidelity class | Domain | Mechanism seams | Page |
+|---|---|---|---|---|
+| **PromptBreeder** | `mechanism_microport` | GSM8K | binary tournament as the population layer; `FieldSlots` genome | [→](algo-promptbreeder.md) |
+| **AFlow** | `mechanism_microport` | GSM8K | `SoftMixed` selection; per-parent experience | [→](algo-aflow.md) |
+| **Self-Refine** | `mechanism_microport` | GSM8K | two-call FEEDBACK→REFINE, stop signal | [→](algo-self-refine.md) |
+| **Reflexion** | `mechanism_microport` | GSM-Hard | `WindowedMemory` (bounded append-only) | [→](algo-reflexion.md) |
+| **SICA** | `self_edit_analogue` | GSM-Hard | AST gate; `Archive('best')` selection | [→](algo-sica.md) |
+| **Gödel Agent** | `self_edit_analogue` | GSM-Hard | AST gate; optional `--gateless` acceptance | [→](algo-godel-agent.md) |
+| **Voyager** | `environment_analogue` | crafting world | `SkillLibrary`, `DifficultyWeighted`, self-verify critic | [→](algo-voyager.md) |
+| **SkillWeaver** | `environment_analogue` | settings site | `SkillLibrary`, `DifficultyWeighted`, self-verify reward model | [→](algo-skillweaver.md) |
+| **Absolute Zero** | `inference_analogue` | self-play carts | frozen self-play evaluation; learnability signal | [→](algo-absolute-zero.md) |
+| **R-Zero** | `inference_analogue` | self-play carts | `AdvantageAcceptance` (GRPO shape), `DifficultyWeighted` | [→](algo-r-zero.md) |
+| **Agent0** | `inference_analogue` | self-play carts | `DifficultyWeighted`; calculator stop-and-go | [→](algo-agent0.md) |
 
 ### The shared command line
 
-Eight flags have one definition, in
-[`examples/_common.py`](https://github.com/Birfy/agentdescent/blob/main/examples/_common.py),
+Every port's shared flags have one definition, in
+[`add_standard_args`](https://github.com/Birfy/agentdescent/blob/main/examples/_common.py),
 and the behaviour behind each lives there too — a flag declared centrally and
 honoured locally is how a port grows a `--yes` it never reads.
 
-| flag | what it does | honoured by |
+| flag | what it does | where the behaviour lives |
 |---|---|---|
 | `--provider` / `--model` | pick Claude or any OpenAI-compatible endpoint | `completion_for` |
 | `--seed` | the run's seed | the port |
 | `--async` / `--async-ratio` / `--max-seconds` | barrier-free runtime and its lag budget | the port |
-| `--dry-run` | print the plan; zero network, zero API key | the port's early return |
-| `--yes` | skip the confirmation before real API calls | `confirm` |
 | `--serial` | **the upstream algorithm's own semantics**: one worker, nothing to merge | `worker_count` |
 | `--budget-rollouts` | total rollouts, held fixed as workers vary | `budget_kwargs` |
+| `--val-cap` | shrink the gate's split without shrinking test | `capped_val` |
+| `--eval-concurrency` | held-out evaluations in flight at once; wall-clock only | the port |
+| `--reflective-merge` | merge contradicting diffs with a model instead of ranking them | `merge_kwargs` |
+| `--eval-cache DIR` | memoise held-out scores across processes; off by default | `eval_cache_kwargs` |
+| `--no-thinking` | ask an Anthropic-shaped endpoint for no reasoning tokens | `completion_for` |
+| `--dry-run` | print the plan, with no model call | the port's early return |
+| `--yes` | skip the confirmation before real API calls | `confirm` |
 
 The iteration count is deliberately *not* standardised: `--rounds` (ACE, GEPA),
-`--generations` (ADAS, DGM), `--iterations` (EvoSkill, OpenEvolve) and `--steps`
-(SkillOpt) each keep their upstream vocabulary, which is part of being a faithful
-port.
+`--generations` (ADAS, DGM), `--iterations` (EvoSkill, OpenEvolve), `--steps`
+(SkillOpt) and `--candidates` (the eleven) each keep their own vocabulary, which
+for the seven is part of being a faithful port. `--budget-rollouts` maps onto
+whichever one a port uses, so a sweep can pin every arm with one flag.
 
 `--serial` is the control every one of these ports was missing. They all
 parallelise an algorithm that was published as a serial loop, and until this flag
@@ -94,277 +118,139 @@ OpenEvolve is the exception and needed no fixing: it derives
 `rounds = iterations // workers`, so its total work was already fixed and the flag
 simply sets `--iterations`.
 
-Every example takes `--dry-run`, which prints its configuration and returns with
-**zero network access and no API key**, and has an offline test suite
-(`tests/test_<name>_example.py`) exercising its pure logic. Ports that need an
-external dataset load it through the shared
-[**`agentdescent.dataloader`**](dataloader.md) data layer — dependency-free
-(`urllib` only), cached under `~/.cache/agentdescent/`, from each benchmark's
-canonical source. Where a paper's full setup needs heavy infrastructure, the
-boundary is documented in the example's module docstring — never hidden.
+Every example takes `--dry-run`, which prints its configuration and returns
+**without a model call and without an API key**. Whether it also avoids the
+network depends on which runner it is on: the seven return before any dataset is
+touched, and say so (`Data: deferred`). The eleven build their `MethodPolicy`
+first, so a port whose domain is a real benchmark — PromptBreeder, AFlow,
+Self-Refine, Reflexion, SICA, Gödel Agent — loads and caches its split during a
+dry run, and prints that it did.
+
+Datasets go through the shared [**`agentdescent.dataloader`**](dataloader.md)
+layer — dependency-free (`urllib` only), cached under `~/.cache/agentdescent/`,
+from each benchmark's canonical source. Every port has an offline test suite
+exercising its pure logic, named on its page. Where a paper's full setup needs
+heavy infrastructure, the boundary is documented in the example's module
+docstring — never hidden.
 
 ### The MethodPolicy command line
 
-The eleven [`MethodPolicy`](policies.md) ports share one `main`, so they share
-one parser: `build_parser()` in
-[`examples/_method_runner.py`](https://github.com/Birfy/agentdescent/blob/main/examples/_method_runner.py),
-which layers the flags below onto `add_standard_args`.
+The eleven declarative ports share
+[`build_parser`](https://github.com/Birfy/agentdescent/blob/main/examples/_method_runner.py),
+so their command line is the same on all eleven: the shared flags above plus
+`--workers`, `--candidates` (a synonym for `--budget-rollouts`),
+`--no-reflective-merge`, `--staleness`, `--temperature`, `--max-tokens` and
+`--timeout`. Two ports add one switch of their own — Reflexion's
+`--per-instance` and Gödel Agent's `--gateless`, both controls for a declared
+departure.
 
 | flag | what it does here |
 |---|---|
-| `--budget-rollouts N` | mapped onto `--candidates`: the proposals the run may spend in total |
-| `--workers N` | worker count, and the batch size the merge is sized to (`candidates // workers` rounds in the synchronous modes) |
-| `--async` / `--async-ratio N` | barrier-free runtime and its lag budget. **`--async-ratio` defaults to 1 here**, not the shared 3 — see below |
-| `--eval-concurrency N` | held-out evaluations in flight at once; wall-clock only. Left off, the runner's own rule applies: **1** under `--serial`, the worker count otherwise |
-| `--eval-cache DIR` | memoise the gate to a directory two processes can share ([`FileCache`](api.md)). Off by default: a cache that outlives the run makes a rerun return the first run's numbers |
-| `--staleness` | what to do with a diff proposed against a head the merger has since moved |
-| `--reflective-merge` / `--no-reflective-merge` | override the method's own `reflective` declaration in either direction |
-| `--val-cap` | **not offered.** These methods freeze train/held-out/test in `build()`, before the parser is consulted, so there is no gate split left to cap |
+| `--async-ratio N` | the lag budget, passed to `async_evolve`. **Defaults to 1**, not the shared 3 — see below |
+| `--eval-concurrency N` | held-out evaluations in flight at once; wall-clock only. Left off, the runner's own rule applies: **1** under `--serial`, `--workers` otherwise |
+| `--eval-cache DIR` | memoise the gate to a directory two processes can share, merged onto the method's own `Policies` bundle. Off by default: a cache that outlives the run makes a rerun return the first run's numbers |
+| `--val-cap` | **not offered.** These ports freeze train/held-out/test in `build()`, before the parser is consulted, so it now fails as an unrecognised argument rather than parsing and moving nothing |
 
-`--reflective-merge` is absent from every reproduce command on the algorithm
-pages, and that is not an omission: nine of the eleven declare `reflective=True`
-and Voyager and SkillWeaver declare `False`, matching what each measured row
-recorded. The declaration is a fidelity statement, so the flag is for a control
-arm that needs to vary exactly it.
+The first three used to be declared by `add_standard_args` and never passed to
+`run_port`, so on these eleven a run that set all three was byte-identical to one
+that set none — the same defect as Gödel Agent's `--gateless`, which five
+documents described while the parser rejected it. All four are now wired or
+withdrawn, and `tests/test_method_runner_flags.py` enumerates the parser and
+fails on a flag with nowhere recorded that reads it, so the next one added here
+cannot be decorative. `run_port` also records all three in `framework`, and
+`--dry-run` prints them: a flag absent from the plan is a flag nobody checks.
 
-!!! warning "Four of these reached this runner and were dropped — and one of them cost a number"
-    `--async-ratio`, `--eval-concurrency` and `--eval-cache` were declared by
-    the shared parser and never passed to `run_port`; `--val-cap` was accepted
-    and could not be honoured at all. A run that set all four was byte-identical
-    to a run that set none. All four are now wired or withdrawn, and
-    `tests/test_method_runner_flags.py` enumerates the parser and fails on a
-    flag with nowhere recorded that reads it.
+!!! note "Why `--async-ratio` defaults to 1 here and 3 for the seven above"
+    Two entry points reach `run_port` — this command line and
+    `bench.candidate_methods` — and a lag budget on which they disagree is a
+    trap, because the same nominal configuration would then run two different
+    searches depending on which one launched it. `run_port`'s signature says 1
+    and `bench.candidate_methods` defaults to 1, so this parser says 1 too;
+    `add_standard_args`' 3 stays the default for the seven ports above, which
+    is where it was measured.
 
-    **`--async-ratio` is the expensive one.** Every async row under
-    `bench/results/` recorded `async_ratio: 2` — the value its command line
-    asked for — and ran at `run_port`'s default of **1**, because the flag never
-    arrived. Those files now record 1, with a note, because that is what
-    happened.
-
-    So the default here is **1, not the shared 3**. Adopting 3 while fixing the
-    flag would have made every documented `--async` command mean something new
-    and left fifteen measured rows unreproducible from the command line.
-    `--async-ratio 3` is one argument away, and it is a real change: the lag
-    budget bounds both how far a worker's snapshot may drift behind head *and*
-    how many cards may sit un-merged ahead of the merger.
-
-    `--eval-concurrency` defaults to unset for the same class of reason. The
-    shared default is 8, and taking it would have made `--serial` — the control
-    arm, the upstream algorithm's own one-at-a-time loop — score its gate eight
-    ways at once. That is the confound `bench/matrix_run.py` already documents
-    for the other seven ports.
-
-Reproducing one of the measured rows on the algorithm pages has this shape; each
-page's **Run it** section gives the exact command:
-
-```bash
-python -m examples.<method>.<module> --yes --seed 0 \
-    --budget-rollouts 80 --workers 8 \
-    --async --async-ratio 1 --max-seconds 3600 \
-    --staleness full --temperature 0.7 --no-thinking \
-    --provider claude --model deepseek-v4-flash
-```
-
-`--max-seconds` is the one number the results files do not record. Any value
-comfortably above the `engine_s` in the row's own cell leaves `--budget-rollouts`
-as the binding stop, which is what those runs hit.
+    It is one argument away and it is a real change, not a label: the budget
+    bounds both how far a worker's snapshot may drift behind head *and* how many
+    cards may sit un-merged ahead of the merger. The rows below were recorded at
+    `async_ratio=2`, so every **Run it** command on the algorithm pages passes
+    `--async-ratio 2` explicitly — which, now that the flag arrives, reproduces
+    them.
 
 ---
 
-## Skill self-evolution
+## Measured results — all eighteen
 
-### ACE — Agentic Context Engineering
+Every port has been run and every number below is linked to the run that
+produced it. **The two halves of this page are not comparable with each other**,
+and within each half only rows on the same domain are: a gain is bounded by the
+headroom its baseline leaves, and the ports sit on benchmarks whose baselines
+run from 0.000 to 0.641.
 
-*Paper* arXiv:2510.04618 · *repo* `ace-agent/ace` · *dataset* FiNER-139.
+### The eleven, on one runner and one budget
 
-ACE evolves a **context playbook** (accumulated lessons) with three roles that
-map exactly onto `evolve()`:
+Three seeds each, `async_pipeline`, 80 rollouts, 8 workers, `--staleness full`,
+`deepseek-v4-flash` at temperature 0.7 with thinking disabled. Test columns are
+the mean over the three seeds; `moved` counts seeds whose held-out test score
+rose at all.
 
-* **Generator** → `LLMAgent.solve` (solve a task using the playbook),
-* **Reflector** → `LLMAgent.propose` (distil one *delta bullet* from a failure),
-* **Curator** → the **aggregator** — deterministic, non-LLM merge (dedup +
-  statistical acceptance).
+| Method | Domain | test, before → after | gain | moved | accepted | calls / seed |
+|---|---|---:|---:|---:|---:|---:|
+| [PromptBreeder](algo-promptbreeder.md#measured-results-gsm8k) | GSM8K | 0.474 → **0.969** | +0.495 | 3/3 | 8/240 | 1444 |
+| [AFlow](algo-aflow.md#measured-results-gsm8k) | GSM8K | 0.510 → **0.969** | +0.458 | 3/3 | 10/240 | 2069 |
+| [Self-Refine](algo-self-refine.md#measured-results-gsm8k) | GSM8K | 0.552 → **0.943** | +0.391 | 3/3 | 5/240 | 1050 |
+| [Reflexion](algo-reflexion.md#measured-results-gsm-hard) | GSM-Hard | 0.583 → **0.599** | +0.016 | 2/3 | 3/240 | 465 |
+| [SICA](algo-sica.md#measured-results-gsm-hard) | GSM-Hard | 0.641 → **0.667** | +0.026 | 2/3 | 5/240 | 899 |
+| [Gödel Agent](algo-godel-agent.md#measured-results-gsm-hard) | GSM-Hard | 0.625 → **0.687** | +0.062 | 2/3 | 9/240 | 985 |
+| [Voyager](algo-voyager.md#measured-results-crafting-world) | crafting world | 0.000 → **0.667** | +0.667 | 2/3 | 3/240 | 1234 |
+| [SkillWeaver](algo-skillweaver.md#measured-results-settings-site) | settings site | 0.000 → **0.771** | +0.771 | 3/3 | 8/240 | 1170 |
+| [Absolute Zero](algo-absolute-zero.md#measured-results-self-play-carts) | self-play carts | 0.042 → **0.354** | +0.313 | 3/3 | 9/240 | 624 |
+| [R-Zero](algo-r-zero.md#measured-results-self-play-carts) | self-play carts | 0.062 → **0.292** | +0.230 | 3/3 | 6/240 | 937 |
+| [Agent0](algo-agent0.md#measured-results-self-play-carts) | self-play carts | 0.042 → **0.542** | +0.500 | 3/3 | 6/240 | 1626 |
 
-The custom `ACEPlaybook` strategy keeps the two ACE invariants: **incremental
-delta updates** (only ever append a new content-addressed bullet — never a
-monolithic rewrite, so "context collapse" cannot happen) and **grow-and-refine
-de-dup** (near-duplicate bullets pruned at insert). ACE's per-bullet
-helpful/harmful counters become the aggregator's per-diff **Beta-posterior
-acceptance** — a bullet commits only if it raises held-out reward.
+**Read the columns against each other, not down the gain column.** The three
+GSM8K rows converge on 0.94–0.97 from a real model baseline and separate on
+*cost*: AFlow spends twice Self-Refine's calls for 0.026 more. The three
+GSM-Hard rows move a fraction as far because their headroom is a fraction as
+wide — and the noise floor there is ±0.02 against GSM8K's ±0.09, which is why a
++0.026 on GSM-Hard is a result and a +0.05 on GSM8K would not be. The two
+environment analogues start at 0.000 because a seed agent that has discovered no
+skill solves none of their goals; the three self-play rows do not, because a
+trusted renderer generates their evaluation carts and a fresh solver already gets
+some of them — which is also why neither of those groups has a 1.000 ceiling to
+read a final score against.
 
-```bash
-python -m examples.ace.ace_context_evolution --dry-run
-python -m examples.ace.ace_context_evolution --model claude-haiku-4-5
-```
+**`accepted` is the shape of the mechanism, not a yield.** Between 3 and 10 of
+240 proposals commit across every row, because the gate scores each candidate on
+the full held-out split and admits only a strict improvement. One accepted skill
+is all Voyager's run needs.
 
-### GEPA — Reflective Prompt Evolution
+### The seven, each on its own benchmark
 
-*Paper* arXiv:2507.19457 · *repo* `gepa-ai/gepa` · *dataset* HotpotQA.
+Different budgets, different datasets, one seed each — these are single runs
+that establish the port works end to end, not a comparison.
 
-GEPA's distinctive mechanism is **per-instance Pareto candidate selection**
-(Algorithm 2): instead of greedily mutating the single best-*average* prompt, it
-samples the next parent from the per-instance Pareto frontier, weighted by how
-many instances a candidate uniquely wins — keeping complementary specialists
-alive. This is realised by a custom `ParetoAggregator` plugged into `evolve()`
-through `aggregator_factory=` (the sanctioned "swap the whole optimizer" hook).
-The optimizer sets the dev head to the sampled Pareto parent, so `evolve()`'s
-next round mutates *it*, not the greedy best. Reflective mutation (the LLM
-rewriting the instruction from execution trace + NL feedback) is the propose step.
+| Method | Domain | measured | budget |
+|---|---|---|---|
+| [ACE](algo-ace.md#measured-results-finer-139) | FiNER-139 | val 0.719 → **0.766**, test 0.786, 10 bullets curated | async N=4, 120 rollouts |
+| [GEPA](algo-gepa.md#measured-results-hotpotqa) | HotpotQA | **1.85× / 3.22×** concurrency (sync / async) against a true serial arm; test EM 0.600 → 0.850 on 20 items | 16 rollouts pinned on all three arms |
+| [EvoSkill](algo-evoskill.md#measured-results-finqa) | FinQA | val 0.527 → **0.707**, test 0.633, the frontier filled 5/5 | async N=4, 120 rollouts |
+| [SkillOpt](algo-skillopt.md#measured-results-searchqa) | SearchQA (`--hard`) | val 0.053 → **0.211**, test 0.316, 3 edits accepted of 43 | async N=4, 60 rollouts |
+| [ADAS](algo-adas.md#measured-results-gpqa-diamond) | GPQA Diamond | **no lift number** — MGSM is saturated and GPQA costs 49 s / 5,116 tokens per call, and the two constraints are opposed | — |
+| [DGM](algo-dgm.md#measured-results-vendored-bugs-objective-real) | vendored bugs, real pytest | seed agent 0.844 → best archived child **0.906** held out; its own `solve.py` 18 → 79 lines | async N=2, 16 rollouts |
+| [OpenEvolve](algo-openevolve.md#measured-results-function-minimization) | function minimization | combined score 0.9638 → **1.4995** against a 1.5 ceiling, held-out seeds | async N=4, 24 rollouts |
 
-*Documented deviation:* GEPA's Algorithm 1 admits a child by comparing means on a
-feedback minibatch of size *b*. `evolve()` rolls out **one** task per worker per
-round, so that comparison is a single Bernoulli draw — for a binary reward like
-HotpotQA EM, exactly `{-1, 0, +1}`. The admission test is therefore "did not
-regress" rather than "improved": requiring the one sampled instance to flip
-wrong→right threw away prompts that help broadly but do not fix *that* question,
-and a rejected candidate never enters the pool, never gets a score row, and so can
-never reach the frontier — which is precisely the complementary specialist the
-frontier exists to keep alive. Algorithm 2 itself (per-instance frontier,
-domination pruning, win-frequency sampling) is scored on the full `D_pareto` row
-and is unaffected.
-
-```bash
-python -m examples.gepa.gepa_prompt_evolution --dry-run
-python -m examples.gepa.gepa_prompt_evolution --model claude-haiku-4-5
-```
-
-### EvoSkill — Automated Skill Discovery
-
-*Paper* arXiv:2603.02766 · *repo* `sentient-agi/EvoSkill` · *dataset* OfficeQA.
-
-Faithful to what the **repo code** does (which differs from some paper claims):
-**batch-level failure-driven skill induction** (collect items scored `< 0.8`, a
-Skill Proposer analyses a *batch* of failure patterns → a Skill Generator writes
-one `SKILL.md`) governed by a **bounded top-K aggregate frontier** — *not* a
-per-instance Pareto frontier (`src/registry/manager.py:update_frontier` is a
-leaderboard on mean validation accuracy, while the paper's abstract says "a Pareto
-frontier of agent programs governs selection"). The unit-aware numeric scorer and the
-exact tolerance ladder (`src/loop/runner.py:79` — `[0.05, 0.01, 0.1, 0.0, 0.025]`,
-weight `1/(1+20·tol)`, pass threshold `0.8` at `:319`) are ported, as is the
-frontier bound (`src/registry/manager.py:379`, `max_size=5`). On the **sync** path this strict per-candidate frontier
-(`TopKFrontierAggregator`) runs verbatim; on the **async** path it switches to
-`SgdSkillAggregator` — SGD-style skill descent that validates every `val_every`
-steps and rolls back on no gain, amortising the held-out eval
-([why](aggregator.md#the-async-optimizer-variant-sgd-style-descent)).
-
-*Dataset note:* the full OfficeQA is HF-**gated** (`databricks/officeqa`, set
-`HF_TOKEN`); absent that the example loads the repo's **bundled 12-row sample**.
-EvoSkill's Read/Grep doc tools are approximated by a keyword line-retriever. With
-one non-tool LLM on 272 KB bulletins accuracy is low — the value is the faithful
-*loop*.
-
-```bash
-python -m examples.evoskill.evoskill_skill_discovery --dry-run
-```
-
-### SkillOpt — ReflACT
-
-*Paper* arXiv:2605.23904 · *repo* `microsoft/SkillOpt` · *dataset* SearchQA.
-
-Trains the **skill document as the external state of a frozen agent**. All four
-load-bearing invariants are reproduced faithfully from the repo:
-
-1. **Bounded string edits** on one markdown doc — ops `{append, insert_after,
-   replace, delete}`;
-2. **strict held-out accept gate** — a candidate is accepted only if it strictly
-   improves the validation hard-EM over the *current* skill (greedy, like
-   `evolve()`);
-3. **textual learning-rate budget** — an integer edit cap per step (AgentDescent's
-   `trust_region_ops` analogue);
-4. **rejected-edit buffer** — rejected edits are remembered in-epoch and fed back
-   into the reflection prompt, so the optimizer stops re-proposing them. The
-   example implements this itself: the core `settle()` pool retains discarded
-   evidence but [nothing reads it back](concepts.md#33-staleness-policies-flashevolve-full-guarded-reflective), so this
-   is the worked example of what that pool is *for*.
-
-```bash
-python -m examples.skillopt.skillopt_skill_training --dry-run
-python -m examples.skillopt.skillopt_skill_training --model claude-haiku-4-5
-```
-
----
-
-## Program evolution
-
-### OpenEvolve — function-minimization program search
-
-*Repo* `algorithmicsuperintelligence/openevolve` · *task* bundled function
-minimization.
-
-OpenEvolve evolves Python source with model mutations, MAP-Elites feature grids,
-island-local selection, and ring migration. The port maps source replacement to
-a `Strategy`, the archive to a custom `Aggregator`, and concurrency to
-`evolve()` / `async_evolve()`. Generated programs run behind an AST gate and a
-sandbox with no network and explicit resource limits -- Bubblewrap on Linux,
-Seatbelt (`sandbox-exec`) on macOS, and a refusal to run where neither exists.
-
-The [dedicated page](algo-openevolve.md) documents the pinned upstream revision,
-the intentional substitutions, and a live run in which the evolved program
-reached the evaluator's ceiling on held-out seeds.
-
-```bash
-python -m examples.openevolve.openevolve_program_evolution --dry-run
-```
-
----
-
-## Harness self-evolution
-
-### ADAS — Meta Agent Search
-
-*Paper* arXiv:2408.08435 · *repo* `ShengranHu/ADAS` · *dataset* MGSM.
-
-Evolves the **agentic system itself** — a *harness* change, so the artifact is
-**L1** (`classify()` prints the layer). A **meta-agent**, conditioned on the
-entire **archive** of prior agents + their fitness, proposes the next agent, with
-two Reflexion refinement rounds; fitness is a bootstrap-CI mean (upstream `_mgsm/utils.py` resamples 100 000
-times; this example uses 2 000 so it runs in seconds — a stated deviation, not a
-silent one); the archive is **keep-all**. The seven ADAS MGSM seeds (CoT, Self-Consistency, Reflexion,
-Debate, Step-back, Quality-Diversity, Role-Assignment) are the starting archive.
-
-*Safety substitution (documented):* ADAS `exec`s model-written Python `forward()`
-functions. To avoid arbitrary code execution, an agent here is a **composable
-control-flow program** in a small validated DSL run by a safe interpreter — the
-Meta Agent Search loop, seeds, MGSM scoring, and keep-all archive are faithful;
-only the agent *substrate* is a safe DSL. `--select dgm` swaps archive
-conditioning for the DGM parent-selection rule.
-
-```bash
-python -m examples.adas.adas_meta_agent_search --dry-run
-python -m examples.adas.adas_meta_agent_search --model claude-haiku-4-5 --generations 6
-```
-
-### DGM — Darwin Gödel Machine
-
-*Paper* arXiv:2505.22954 · *repo* `jennyzzt/dgm` · *dataset* SWE-bench Verified.
-
-The archetypal harness self-evolution: a coding agent that **edits its own
-codebase**, keeping every variant in an open-ended **archive**. Faithful to
-`DGM_outer.py`: keep-all archive, staged empirical validation (small=10 →
-medium=50 if score > 0.4 → big=140), and the exact parent-selection rule
-`p_i ∝ sigmoid(10·(score−0.5)) · 1/(1+children_i)` (favour high performers,
-discount already-explored parents). The agent is an **L1** harness.
-
-*Honesty boundary:* DGM's real objective runs each candidate patch inside the
-**SWE-bench Docker harness** (per-task containers, real test suites, arbitrary
-code execution) — out of scope for a dependency-free example. The objective here
-is a **transparent surrogate** (each real SWE instance has a latent
-required-capability set an agent must cover), so the DGM *algorithm* runs and is
-tested offline while the *scores* are simulated, not SWE-bench results. Pass a
-real `evaluate_fn` to `run_dgm` to plug in the actual harness.
-
-```bash
-python -m examples.dgm.dgm_self_improve                      # runs offline (surrogate)
-python -m examples.dgm.dgm_self_improve --generations 12 --archive keep_all
-```
+!!! warning "One run per seed, and one seed on the bottom table"
+    Nothing here is a paper-scale result. The eleven carry three seeds and report
+    the spread on their own pages; the seven carry one, and a single run does not
+    pin a number on a sampled model. The quality columns are evidence the
+    mechanism runs and moves the metric it should, not evidence about how much.
 
 ---
 
 ## Mechanism coverage
 
-Every mechanism family in the original backlog now has at least one
-implemented port. Fidelity differs by port and is recorded on each page (see
-[port fidelity](port-fidelity.md)):
+Every mechanism family in the original backlog now has at least one implemented
+port:
 
 | Mechanism | Benchmark-faithful | Microports / analogues |
 |---|---|---|
@@ -398,8 +284,9 @@ is the standard, that page is what each port was actually found to do.
 1. **Faithful to the repo, not just the paper.** Where the released code diverges
    from the paper's claims (e.g. EvoSkill's frontier is top-K aggregate, not
    per-instance Pareto), the example follows the **code** and says so.
-2. **Faithful dataset identity.** Each example uses the paper's actual benchmark,
-   loaded from its canonical source.
+2. **Declared dataset identity.** A benchmark-faithful port uses the paper's own
+   benchmark from its canonical source; a microport or analogue uses a compact
+   or substituted domain and carries the fidelity class that says which it is.
 3. **Documented boundaries.** Where the full setup needs heavy infra (AppWorld,
    SWE-bench Docker, gated data), the example states the boundary and, when
    needed, substitutes a clearly-labelled surrogate — the algorithm stays

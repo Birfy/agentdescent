@@ -66,18 +66,21 @@ offline in seconds; `--agent claude-code` swaps in the real CLI agent, and
 ### Self-evolution algorithm ports
 
 Eighteen ports of the latest self-evolution algorithms (see
-[the catalog](self-evolution-examples.md)). The seven benchmark-faithful ones
-load real benchmarks through the [`agentdescent.dataloader`](dataloader.md)
-data layer; the eleven [`MethodPolicy`](policies.md) ports run bundled
-deterministic domains and are measured together in the
+[the catalog](self-evolution-examples.md)). Twelve load a real benchmark through
+the [`agentdescent.dataloader`](dataloader.md) data layer; the other six run
+bundled deterministic domains. The eleven [`MethodPolicy`](policies.md) ports
+share a runner and are measured together in the
 [runtime matrix](matrix-overview.md) (`python -m bench.candidate_methods`).
-Every port's `--dry-run` prints its configuration, then returns before loading
-data or models: no network, no API key.
+
+Every port's `--dry-run` prints its configuration and makes **no model call**.
+The seven return before touching data too; the eleven build their policy first,
+so a dry run of one on a real benchmark loads and caches the split.
 
 ```bash
-python -m examples.ace.ace_context_evolution --dry-run     # ACE   / FiNER-139
+python -m examples.ace.ace_context_evolution --dry-run      # ACE   / FiNER-139
 python -m examples.gepa.gepa_prompt_evolution --dry-run     # GEPA  / HotpotQA
-python -m examples.dgm.dgm_self_improve                    # DGM   / SWE-bench Verified (offline surrogate)
+python -m examples.dgm.dgm_self_improve                     # DGM   / offline surrogate
+python -m examples.sica.sica_self_edit --dry-run            # SICA  / GSM-Hard
 ```
 
 ### Tests
@@ -188,7 +191,9 @@ with tempfile.TemporaryDirectory() as repo:
 
 ## 3. Configuration reference
 
-### `AggregatorConfig` ([aggregator](aggregator.md))
+### `AggregatorConfig`
+
+Tunes the shipped merge pipeline; see [the aggregator](aggregator.md).
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -207,7 +212,9 @@ with tempfile.TemporaryDirectory() as repo:
 | `cas_backoff` | 0.05 | base backoff (seconds) for those retries |
 | `fusion_tournament` | `False` | rank the union against the singles ([fusion](fusion-policies.md)); off by default |
 
-### `AsyncConfig` ([async](async.md))
+### `AsyncConfig`
+
+The reference async orchestrator's own config; see [async](async.md).
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -223,7 +230,9 @@ with tempfile.TemporaryDirectory() as repo:
 
 `AsyncStats.error` is `None` on a clean run and carries the backend failure that ended it otherwise — check it, since a run whose workers all died otherwise returns normal-looking zeros.
 
-### Staleness policy ([staleness](staleness.md))
+### Staleness policy
+
+What a lagging diff is worth; see [staleness](staleness.md).
 
 ```python
 from agentdescent import get_policy

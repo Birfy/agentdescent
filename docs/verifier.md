@@ -57,8 +57,9 @@ given a different substrate from rollouts.
 
 ## The evaluation cache
 
-Evaluation is the expensive half of a run — the gate measures 193.6s against
-90.0s for the same work at `eval_concurrency` 1 and 8, and each of those seconds
+Evaluation is the expensive half of a run —
+[measured](efficiency.md#the-other-axis-eval_concurrency), the same work takes
+3.6 s against 1.2 s at `eval_concurrency` 1 and 8, and every one of those seconds
 is a real rollout. So evaluations are memoised, keyed on **what the artifact
 renders to**, the task id, and the **environment's fingerprint**.
 

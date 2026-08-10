@@ -1,16 +1,22 @@
 # Reflexion — Verbal reinforcement / episodic memory
 
-**Fidelity class: `mechanism_microport`** — see [port fidelity](port-fidelity.md) for
-what the classes mean. This port is measured in the runtime matrix: the mechanism is
-preserved and measured under AgentDescent's runtimes; it is **not** a
-paper-benchmark reproduction.
+> **Memory self-evolution.** Turn a failed trajectory into a verbal reflection,
+> append it to a bounded episodic memory, and retry with that memory in context.
+> Runs through the shared [`MethodPolicy`](policies.md) runner. Example:
+> [`examples/reflexion/reflexion_episodic_memory.py`](https://github.com/Birfy/agentdescent/blob/main/examples/reflexion/reflexion_episodic_memory.py).
 
 | | |
 |---|---|
-| Paper | "Reflexion: Language Agents with Verbal Reinforcement Learning", Shinn et al., 2023 ([arXiv:2303.11366](https://arxiv.org/abs/2303.11366)) |
-| Upstream code (pinned) | [noahshinn/reflexion@218cf0ef](https://github.com/noahshinn/reflexion/tree/218cf0ef1df84b05ce379dd4a8e47f17766733a0) |
-| Definition | [`examples/reflexion/reflexion_episodic_memory.py`](https://github.com/Birfy/agentdescent/blob/main/examples/reflexion/reflexion_episodic_memory.py) |
-| Domain | **GSM-Hard** ([`reasoning-machines/gsm-hard`](https://huggingface.co/datasets/reasoning-machines/gsm-hard)), 64/64/64 shuffled splits |
+| **Paper** | *Reflexion: Language Agents with Verbal Reinforcement Learning* — Shinn et al., 2023 ([arXiv:2303.11366](https://arxiv.org/abs/2303.11366)) |
+| **Upstream code** | [noahshinn/reflexion@218cf0ef](https://github.com/noahshinn/reflexion/tree/218cf0ef1df84b05ce379dd4a8e47f17766733a0) |
+| **Example** | [`examples/reflexion/reflexion_episodic_memory.py`](https://github.com/Birfy/agentdescent/blob/main/examples/reflexion/reflexion_episodic_memory.py) |
+| **Domain** | **GSM-Hard** ([`reasoning-machines/gsm-hard`](https://huggingface.co/datasets/reasoning-machines/gsm-hard)), 64/64/64 shuffled splits |
+| **Layer** | L1 (`blast_radius=0.6`, set by the shared runner) |
+| **Fidelity** | `mechanism_microport` — [what the classes mean](port-fidelity.md) |
+
+This port is measured in the [runtime matrix](matrix-overview.md): the mechanism
+is preserved and measured under AgentDescent's runtimes; it is **not** a
+paper-benchmark reproduction.
 
 ## The mechanism
 
@@ -37,7 +43,8 @@ append-only and bounded to the last Ω entries (Ω=1–3 in the paper;
 ## Measured results — GSM-Hard
 
 Three seeds, `async_pipeline`, 80 rollouts each, 8 workers, `--staleness full`,
-`--reflective-merge`, `deepseek-v4-flash` at temperature 0.7. Recorded in
+reflective merge on (this method's own declaration), `deepseek-v4-flash` at
+temperature 0.7. Recorded in
 [`bench/results/reflexion-gsmhard.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/reflexion-gsmhard.json).
 
 | seed | test quality | validation | accepted | invalid | calls |
@@ -55,34 +62,26 @@ transfers to unseen questions weakly at best. Reflexion's memory is per
 shared memory asked to generalise is a question the paper does not ask.
 `--per-instance` runs the faithful variant and is expected to accept nothing.
 
-!!! danger "On GSM8K this row accepted 0 of 80, three seeds running"
-    The earlier measurement, kept in
-    [`bench/results/reflexion-gsm8k.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/reflexion-gsm8k.json),
-    read 0.797 → 0.891, 0.750 → 0.688, 0.734 → 0.656 with `accepted=0/80` and
-    `invalid=0` every time. Nothing was committed, so each pair is **two
-    evaluations of one unchanged instruction** — a noise measurement, not a
-    result.
+!!! note "Why GSM-Hard, and what the `invalid` column counts"
+    **A memory fed by failures needs a domain that produces them.** On GSM8K
+    this port accepted **0 of 80 on all three seeds**
+    ([the run](https://github.com/Birfy/agentdescent/blob/main/bench/results/reflexion-gsm8k.json)
+    is kept): held-out sat at 0.75–0.80, four rollouts in five succeeded and
+    wrote nothing, and the failures that did occur shared no cause. GSM-Hard is
+    the same 1319 questions with large numbers substituted — held-out starts at
+    0.41–0.55 and the failures concentrate on one cause, arithmetic done in the
+    model's head, which is a failure mode a transferable rule can address.
 
-    Two causes, both fixed here rather than argued away.
+    That GSM8K run is also where the study's **±0.09 noise floor** comes from:
+    nothing committed, so each pair is two evaluations of one unchanged
+    instruction, and they differ by +0.094, −0.062 and −0.078.
 
-    **The domain produced almost no failures.** Held-out sat at 0.75–0.80, so
-    four rollouts in five succeeded and wrote nothing — a 32-candidate probe
-    yielded 7 reflections. Worse, the failures that did occur shared no cause;
-    each was an idiosyncratic misreading, and a memory read against *other*
-    questions had nothing to carry. GSM-Hard is the same 1319 questions with
-    large numbers substituted, where held-out starts at 0.41–0.55 and failures
-    concentrate on one cause — arithmetic done in the model's head — which is a
-    failure mode a transferable rule can address.
-
-    **Two reflections in seven were a bare number.** The probe's memory received
-    the strings `624` and `48`. The prompt shows the failed question and ends in
-    `New plan:`, so answering it is a live continuation however firmly the
-    instructions forbid it, and `WindowedMemory` is bounded, so each such entry
-    displaced a real plan. `WindowedMemory` now takes a `validator`;
-    `is_a_plan` requires six alphabetic words, which is a **shape** floor and not
-    a quality bar — whether a plan that clears it is any good is the held-out
-    gate's question. The `invalid` column above is that check firing 10 times
-    across three seeds.
+    `invalid` counts `WindowedMemory`'s `is_a_plan` validator rejecting an
+    entry — six alphabetic words, a **shape** floor rather than a quality bar,
+    because whether a plan is any good is the held-out gate's question. It exists
+    because the reflection prompt ends in `New plan:` above a failed question, so
+    a bare number is a live continuation, and a bounded memory would let one
+    displace a real plan.
 
 !!! warning "Its baseline is not comparable with the other ports'"
     `WindowedMemory.render` emits `MEMORY_HEADER` **even when the memory is
@@ -98,62 +97,23 @@ shared memory asked to generalise is a question the paper does not ask.
     an instruction to be careful. Reflexion did not start where they started, so
     its *gain* is not theirs to compare against — only its final score is.
 
-!!! danger "Without the worked examples, the reflector answered the arithmetic"
-    `_generate_reflection_query` prepends `FEW_SHOT_EXAMPLES` under *"Here are
-    two examples:"* — two failed trajectories each followed by its `New plan:`.
-    A first version of this port matched upstream's **wording** and dropped that
-    **structure**, and the run scored 0.125 / 0.000 / 0.062.
-
-    Measured over 40 reflections with no examples:
-
-    | | |
-    |---|---|
-    | reflections generated | 40 |
-    | that mentioned the output convention | **1** |
-    | the first four, verbatim | `925`, `264`, `465`, `$32.15` |
-    | entries in the final memory | **0** |
-
-    The query ends in `New plan:` and contains a question and its answer, so with
-    nothing to imitate the likelier continuation is simply to answer it. The
-    entries were then useless, nothing cleared the acceptance gate, the memory
-    stayed empty, and every rollout saw the bare seed instruction. Adding the
-    examples took the mean from 0.062 to 0.354.
-
-    The first draft of those examples used `m03` and `m11` — real domain items,
-    which land in held-out or test depending on the seed, so every reflection
-    prompt in the run handed over two graded answers.
-    `test_the_examples_do_not_hand_over_a_held_out_answer` caught it; the items
-    are invented now.
-
 ## Run it
 
 ```bash
 python -m examples.reflexion.reflexion_episodic_memory --dry-run
 
-# the table above, one seed of the three (0, 1, 2)
+# one seed of the three above
 python -m examples.reflexion.reflexion_episodic_memory --yes --seed 0 \
-    --budget-rollouts 80 --workers 8 \
-    --async --async-ratio 1 --max-seconds 3600 \
-    --staleness full --temperature 0.7 --no-thinking \
-    --provider claude --model deepseek-v4-flash
+    --provider openai --model deepseek-v4-flash \
+    --async --async-ratio 2 --workers 8 --budget-rollouts 80 --staleness full \
+    --temperature 0.7 --max-seconds 3600
 ```
 
-**`--async-ratio 1` is what this row ran at.** The flag was declared by the
-shared parser and never passed to `run_port`, so the run took the runner's own
-default of 1 while
-[`bench/results/reflexion-gsmhard.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/reflexion-gsmhard.json)
-recorded the 2 its command line had asked for. The flag is threaded now and that
-file records 1 — see
-[the MethodPolicy command line](self-evolution-examples.md#the-methodpolicy-command-line)
-for why the default here is 1 rather than the shared 3.
+`--async-ratio 2` is explicit because the default here is 1, and 2 is what
+this row was recorded at.
 
-No `--reflective-merge`: the method's own `reflective` declaration set the merge,
-and that declaration is a fidelity statement rather than a knob. `--max-seconds`
-is the one setting the results file does not record; any value comfortably above
-the row's `engine_s` leaves `--budget-rollouts` as the binding stop.
+`--per-instance` runs the faithful variant. Flags:
+[the MethodPolicy command line](self-evolution-examples.md#the-methodpolicy-command-line).
 
-`--per-instance` is off, which is the measured arrangement: one shared memory
-across the run, the departure from upstream this port's notes declare. Pass it
-for the paper's per-instance variant.
-
-Offline tests: `tests/test_reflexion_upstream.py`.
+Offline tests: `tests/test_reflexion_upstream.py`,
+`tests/test_candidate_methods.py`.

@@ -48,7 +48,7 @@ the infrastructure rather than the algorithm.
 Evidence cards are bucketed by artifact; a bucket fires on batch size `B` or a
 `T_max` timeout. Then, in order:
 
-1. **Staleness filter** — per-diff `η` vs `α`; the [staleness policy](evolution.md#6-staleness-staleness_policy) decides `ACCEPT / REBASE / DISCARD`.
+1. **Staleness filter** — per-diff `η` vs `α`; the [staleness policy](evolution.md#7-staleness-staleness_policy) decides `ACCEPT / REBASE / DISCARD`.
 2. **Conflict resolution** — contradictory diffs (same key, different value) are projected out PCGrad-style; keep the better of the pair, iterating until no surviving pair contradicts. Key *overlap* alone is not a conflict — identical proposals are duplicates and dedupe.
 3. **Fusion** — complementary diffs are fused (model-soup style) and the union goes to the gate. With `fusion_tournament=True` it is first run against the singles on held-out and the best wins; see [below](#is-ranking-the-fusion-worth-a-sweep-per-candidate).
 4. **Audit gate** — the candidate is submitted to the `AuditScheduler`; a high-blast-radius / low-trust merge is forced through the oracle, which can **veto it outright** (`oracle-rejected`) before the acceptance test runs. *The optimizer audits itself.* This is a blocking gate on the accept path, not a post-commit spot-check.
@@ -323,12 +323,23 @@ validation pass over many gradient steps:
 3. **Keep or roll back.** If the mini-batch improved held-out, checkpoint it;
    otherwise **roll back** the head to the last validated checkpoint.
 
-This costs ~`N`× fewer held-out evals. It is a *different* acceptance rule from
-the per-candidate frontier — a deliberate async acceleration — so a faithful port
-keeps the strict per-candidate optimizer on the **sync** path and switches to the
-SGD variant only when `asynchronous=True`. [EvoSkill](algo-evoskill.md)'s
-`SgdSkillAggregator` is the worked example (`val_every=N`, checkpoint + rollback);
-its sync path keeps the strict `TopKFrontierAggregator`.
+This costs ~`N`× fewer held-out evals — and it is a **different acceptance rule**
+from the per-candidate frontier, not a scheduling change.
+
+!!! danger "Which is why no port picks it off the schedule any more"
+    [EvoSkill](algo-evoskill.md) used to install exactly this on its async path
+    and the strict `TopKFrontierAggregator` on its sync one. That made the async
+    cell of the [runtime matrix](matrix-overview.md) measure a *different
+    optimizer* that happened to run barrier-free: no frontier at all, one
+    checkpoint in its place, and admission by mini-batch rather than by
+    candidate. It is removed; the frontier now runs on every arm, and
+    `tests/test_matrix_report.py::test_the_evoskill_frontier_is_the_algorithm_on_every_arm`
+    reads the source and fails if an aggregator is keyed off the schedule again.
+
+    Amortised validation remains a legitimate thing to build — the sketch below
+    is the whole of it — but it belongs in a run that declares it as its
+    acceptance rule, never in the async arm of a comparison whose sync arm uses
+    another.
 
 ```python
 class SgdMerger:                       # apply-then-periodically-validate, roll back on no gain

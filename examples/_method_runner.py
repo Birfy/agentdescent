@@ -37,15 +37,20 @@ QUALITY_TARGET = 0.75
 
 #: The lag budget these ports run at when ``--async-ratio`` is not given.
 #:
-#: The shared parser defaults to 3 and :func:`run_port` defaults to 1, and until
-#: the flag was threaded the parser's number reached nothing -- so every async
-#: row in ``bench/results/`` was produced at **1**, whatever its config block
-#: records. Adopting 3 here would have made fixing a dead flag silently change
-#: what a documented ``--async`` command does, and made those rows
-#: irreproducible from the command line. So the runner's own value wins and the
-#: flag is how you ask for another; the choice is stated here, in the parser's
-#: help, and in `docs/self-evolution-examples.md`, because a default that
-#: changes what a run measures is not an implementation detail.
+#: A deliberate 1 rather than ``add_standard_args``' 3, because **two** entry
+#: points reach :func:`run_port` -- this command line and
+#: ``bench.candidate_methods`` -- and a lag budget they disagree on is a trap:
+#: the same nominal configuration would run two different searches depending on
+#: which one launched it. ``run_port``'s own signature says 1 and
+#: ``bench.candidate_methods`` defaults to 1, so the parser says 1 too. The 3
+#: stays where it was measured, on the seven benchmark ports.
+#:
+#: Stated here, in the parser's help, and in `docs/self-evolution-examples.md`,
+#: because a default that changes what a run measures is not an implementation
+#: detail -- the budget bounds both how far a worker's snapshot may drift behind
+#: head and how many cards may sit un-merged ahead of the merger. The rows in
+#: ``bench/results/`` were recorded at 2, so every ``Run it`` command on the
+#: algorithm pages passes ``--async-ratio 2`` outright.
 DEFAULT_ASYNC_RATIO = 1
 
 
@@ -500,7 +505,7 @@ def build_parser(
     ``tests/test_method_runner_flags.py`` enumerates this parser and requires
     every declared flag to name where it is read. A parser built inside a
     function body can only be inspected by running the function, which is how
-    four flags sat here unread through eleven ports and fifteen recorded runs.
+    four flags sat here unread across all eleven ports.
 
     ``--val-cap`` is deliberately **not** offered: these methods freeze their
     three splits in ``build()``, before the parser is ever consulted, so there

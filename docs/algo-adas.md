@@ -8,9 +8,11 @@
 | | |
 |---|---|
 | **Paper** | *Automated Design of Agentic Systems* — Hu, Lu, Clune, 2024 ([arXiv:2408.08435](https://arxiv.org/abs/2408.08435)) |
-| **Repo** | [`ShengranHu/ADAS`](https://github.com/ShengranHu/ADAS) |
-| **Dataset** | **MGSM** (Multilingual Grade-School Math) |
+| **Upstream code** | [`ShengranHu/ADAS`](https://github.com/ShengranHu/ADAS) |
+| **Example** | [`examples/adas/adas_meta_agent_search.py`](https://github.com/Birfy/agentdescent/blob/main/examples/adas/adas_meta_agent_search.py) |
+| **Domain** | **MGSM** (Multilingual Grade-School Math) — saturated on a current model, so `--dataset gpqa` (GPQA Diamond, shipped in the ADAS repo) is what has headroom |
 | **Layer** | L1 harness (`blast_radius=0.6`) |
+| **Fidelity** | `benchmark_faithful` — [what the classes mean](port-fidelity.md) |
 
 ## The algorithm
 
@@ -58,9 +60,10 @@ In [`examples/adas/adas_meta_agent_search.py`](https://github.com/Birfy/agentdes
 | **`Interpreter`** + **`seed_archive`** | (agent substrate) | the safe control-flow DSL (`cot`/`cot_sc`/`reflexion`/`debate`/`step_back`/`role_assignment`/`ensemble`) and the seven MGSM seeds |
 | **`dgm_parent_weights`** | `--select dgm` | DGM's sigmoid×novelty rule as an alternative archive-conditioning strategy |
 
-## Measured — the cost, and why there is no lift number
+## Measured results — GPQA Diamond
 
-**This row is not measurable with `deepseek-v4-flash`.** Not "not measured yet":
+**There is no lift number, and this section is why.** This row is not measurable
+with `deepseek-v4-flash` — and not "not measured yet":
 the two constraints that would make it measurable point in opposite directions,
 and the middle is empty. What follows is the evidence, because a page that leaves
 a lift row blank without saying why invites someone to spend the two hours again.

@@ -25,7 +25,7 @@ the axis the differences actually fall on, and because the answer is not always
     each port's recorded fidelity class. Eleven of them run compact domains or
     substituted environments and say so on their pages -- a mechanism
     microport or an environment, inference, or self-edit analogue is not a
-    faithful benchmark port, and the [runtime matrix](matrix-report.md)
+    faithful benchmark port, and the [runtime matrix](matrix-overview.md)
     measures them without pretending otherwise.
 
 ---
@@ -54,9 +54,10 @@ either a bug or a finding, and either way it has to be written down.
     results, with the numbers already on the page; a blank one reads as "nothing
     changed" rather than as "nobody checked".
 
-    Auditing the arms that way has already found one: **EvoSkill's async arm runs
-    a different admission rule from its own serial arm** (below). Six of the
-    seven ports use the same aggregator on all three arms; that one does not.
+    Auditing the arms that way found one: **EvoSkill's async arm ran a different
+    admission rule from its own serial arm** (below). All seven ports now use the
+    same aggregator on all three arms, which is what that column exists to
+    enforce.
 
 Until [#75](selection.md)'s selection seam is wired to a multi-head ledger, each
 port's candidate-selection rule still lives in its own example file — so for now
@@ -94,7 +95,7 @@ column of each section below says exactly where to look.
   commits from 5 to **0**. The gate becomes more correct as it gains statistical
   power, and the playbook empties — while ACE's entire claim is accumulation.
   `--grow-and-refine` restores upstream's rule; it is opt-in because turning it
-  on changes what a row measures. See [algo-ace.md](algo-ace.md#empirical-results-finer-139-with-deepseek).
+  on changes what a row measures. See [algo-ace.md](algo-ace.md#measured-results-finer-139).
 * **Selection rule lives in**: nowhere separate — ACE has no candidate archive.
 * **Details**: [algo-ace.md](algo-ace.md)
 
@@ -126,27 +127,29 @@ column of each section below says exactly where to look.
 * **Why this one matters most**: it is the clearest case of the rule. A port
   faithful to the paper here would be a *better-sounding* algorithm that the
   authors' own code does not implement.
-* **A departure that was the admission rule, now fixed and behind a flag.**
+* **A departure that was the admission rule, now removed.**
   `run_evoskill` used to pick its aggregator off the `asynchronous` flag:
   `TopKFrontierAggregator` (upstream's rule) on the serial and synchronous arms,
-  `SgdSkillAggregator` on the asynchronous one. The second applies every
-  proposed skill to the head immediately, amortises held-out validation over
-  `val_every` steps, rolls a whole batch back when it fails to improve — and has
-  **no frontier at all**, one checkpoint in its place.
+  an SGD-style `SgdSkillAggregator` on the asynchronous one. The second applied
+  every proposed skill to the head immediately, amortised held-out validation
+  over `val_every` steps, rolled a whole batch back when it failed to improve —
+  and had **no frontier at all**, one checkpoint in its place.
 
   That is three of upstream's mechanisms at once, and the frontier is not an
   implementation detail: `update_frontier` plus `select_from_frontier` *is*
   EvoSkill. Upstream evaluates each child on the full validation split before
   the admission decision, so a barrier-free schedule changes *when* those
   evaluations happen, not whether they do — there was never a reason for the
-  schedule to pick the optimizer. The frontier now runs on every path;
-  `--sgd-descent` opts into the SGD variant explicitly. Pinned by
+  schedule to pick the optimizer. The frontier now runs on every path and the
+  SGD variant is gone rather than optional. Pinned by
   `tests/test_matrix_report.py::test_the_evoskill_frontier_is_the_algorithm_on_every_arm`,
   which reads the source and fails if the aggregator is keyed off the schedule
-  again.
-* **Selection rule lives in**: `FrontierBest` — the frontier's best member as a named `SelectionPolicy`; the bounded top-K admission stays on `Frontier`
-  `SgdSkillAggregator` (async) in
-  `examples/evoskill/evoskill_skill_discovery.py` — the `topk_aggregate` mode of
+  again. The mechanism itself is
+  [written up in the aggregator page](aggregator.md#the-async-optimizer-variant-sgd-style-descent)
+  as a thing to build deliberately, never to install by schedule.
+* **Selection rule lives in**: `FrontierBest` — the frontier's best member as a
+  named `SelectionPolicy` in `examples/evoskill/evoskill_skill_discovery.py`; the
+  bounded top-K admission stays on `Frontier`, the `topk_aggregate` mode of
   [`ParetoFrontier`](selection.md).
 * **Details**: [algo-evoskill.md](algo-evoskill.md)
 
@@ -231,7 +234,7 @@ column of each section below says exactly where to look.
   the agent unable to run. Measured there, the seed scores 0.844 and the best
   archived child 0.906, and an earlier run archived children at 0.875 and 0.500
   -- the worse one kept, which is what `keep-all` is for and what the surrogate
-  cannot produce. See [algo-dgm.md](algo-dgm.md#measured-the-real-objective).
+  cannot produce. See [algo-dgm.md](algo-dgm.md#measured-results-vendored-bugs-objective-real).
 * **Selection rule lives in**: `DGMParentSelection` — `sigmoid(10·(s−0.5)) × 1/(1+children)` as a named `SelectionPolicy` over the archive
   `examples/dgm/dgm_self_improve.py` — [`Archive`](selection.md) with
   `sampling="novelty"`.
@@ -304,10 +307,10 @@ be speedups over.
 | Algorithm | Dataset | Serial (upstream) | AgentDescent N=8 | Speedup | Final held-out Δ | Semantics changed |
 |---|---|---|---|---|---|---|
 | ACE | FiNER-139 | — | — | — | — | scheduling and merge timing; budget must be pinned |
-| GEPA | HotpotQA | 609 s / 85 calls / **1.00× concurrency** | sync 239 s / 75 · async 140 s / 83 | **1.85× / 3.22×** concurrency | 0.600 → 0.600 / 0.850 (5 tasks of 20; 1 seed, not a result) | round's diffs merged into one pool candidate (`--reflective-merge`); empty seed instruction; `--staleness guarded`, measured before the stale counters existed — [full setup](algo-gepa.md#measured-hotpotqa-with-deepseek) |
+| GEPA | HotpotQA | 609 s / 85 calls / **1.00× concurrency** | sync 239 s / 75 · async 140 s / 83 | **1.85× / 3.22×** concurrency | 0.600 → 0.600 / 0.850 (5 tasks of 20; 1 seed, not a result) | round's diffs merged into one pool candidate (`--reflective-merge`); empty seed instruction; `--staleness guarded`, measured before the stale counters existed — [full setup](algo-gepa.md#measured-results-hotpotqa) |
 | EvoSkill | FinQA (OfficeQA is HF-gated) | — | async N=4: 0.527 → 0.707 val over 120 rollouts | — | — | scheduling and merge timing; budget must be pinned. `--reflective-merge` offers the frontier one fused candidate per sweep instead of one per worker (`update_frontier` and the parent draw unchanged). The async arm used to swap in `SgdSkillAggregator` — no frontier, per-batch validation — which is now removed rather than optional |
 | SkillOpt | SearchQA (`--hard` subset) | — | async N=4: 0.053 → 0.211 val over 60 rollouts | — | — | scheduling and merge timing; budget must be pinned. `--minibatch` is this port's name for the worker count, not upstream's minibatch of tasks. `--reflective-merge` scores one fused patch per step, which is *upstream's* shape (a ReflACT step emits one patch of up to `lr` edits) rather than a departure from it |
-| ADAS | GPQA Diamond (MGSM is saturated) | — | **not measurable on this model** — see [algo-adas.md](algo-adas.md#measured-the-cost-and-why-there-is-no-lift-number) | — | — | scheduling and merge timing; budget must be pinned. `--reflective-merge` is deliberately *not* passed: the archive is keep-all and is the meta-agent's whole conditioning signal, so fusing a round's designs would remove archive entries rather than change merge timing |
+| ADAS | GPQA Diamond (MGSM is saturated) | — | **not measurable on this model** — see [algo-adas.md](algo-adas.md#measured-results-gpqa-diamond) | — | — | scheduling and merge timing; budget must be pinned. `--reflective-merge` is deliberately *not* passed: the archive is keep-all and is the meta-agent's whole conditioning signal, so fusing a round's designs would remove archive entries rather than change merge timing |
 | DGM | vendored bugs w/ pytest (`--objective real`) | — | async N=2: seed 0.844, best archived child **0.906** over 16 rollouts | — | — | scheduling and merge timing; budget must be pinned. `--serial` sets `selfimprove_size=1`, which is a population of one, so this row's control is the degenerate archive rather than upstream's default |
 | OpenEvolve | function minimization | — | — | — | — | **none** — `rounds = iterations // workers` already fixes total work, so this row's speedup is the only one that was equal-budget before the flag existed |
 
@@ -334,4 +337,21 @@ speedup outright where the cells show the arms did not spend the same budget,
 which is the one check that cannot be done by reading the flags that were
 passed.
 
-The eleven MethodPolicy ports *are* measured under all three schedulers — see the [runtime matrix](matrix-report.md).
+## The eleven MethodPolicy ports
+
+Their departures are not repeated here. Each one's page carries a **Boundaries**
+section naming exactly what its compact or substituted domain gives up, and a
+`!!! danger` block for every defect found in it and fixed — which is the same
+*paper says / released code does / this port follows* audit, written where the
+port is. Start from the
+[table of all eleven](self-evolution-examples.md#the-eleven-microports-and-analogues);
+their measured results are
+[in one place](self-evolution-examples.md#measured-results-all-eighteen), and the
+scheduler comparison they exist for is the [runtime matrix](matrix-overview.md).
+
+What they share is the thing the fidelity class encodes: **a `mechanism_microport`
+preserves the algorithm on a smaller domain, and an `environment_analogue`,
+`inference_analogue` or `self_edit_analogue` substitutes something the paper does
+not have** — a crafting world for Minecraft, verbal memory for a GRPO update, one
+AST-gated function for a codebase. None of them is a paper-benchmark
+reproduction, and none may be cited as one.

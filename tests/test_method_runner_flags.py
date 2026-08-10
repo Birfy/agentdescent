@@ -12,9 +12,9 @@ the cause of a failure -- a refutation built on a no-op.
 Three more were found the same way -- `--async-ratio`, `--eval-concurrency` and
 `--eval-cache`, declared by `add_standard_args` and never passed to `run_port`
 -- plus `--val-cap`, which these ports cannot honour at all because their splits
-are frozen in `build()`. `--async-ratio` is the expensive one: every async row
-in `bench/results/` records the value its command line asked for and ran at
-`run_port`'s default of 1.
+are frozen in `build()`. `--async-ratio` is the one that cost reproduction: the
+rows in `bench/results/` were recorded at 2, and until it was threaded no
+`python -m examples.<port>` command could ask for that.
 
 So this file no longer tests one flag. `test_every_declared_flag_is_honoured`
 enumerates the parser and requires each flag to name where it is read, which
@@ -149,11 +149,12 @@ def test_val_cap_is_refused_rather_than_accepted_and_ignored():
 def test_the_async_ratio_default_is_the_runners_own_rather_than_the_parsers():
     """1, not `add_standard_args`' 3, and the choice is the point.
 
-    Until the flag was threaded, the parser's 3 reached nothing and every async
-    run took `run_port`'s 1 -- including all fifteen rows in `bench/results/`
-    whose config block records a number their command line only asked for.
-    Adopting 3 here would have made fixing a dead flag silently change what
-    `--async` does and make those rows irreproducible from the command line.
+    Two entry points reach `run_port` -- this command line and
+    `bench.candidate_methods` -- and a lag budget they disagree on means the
+    same nominal configuration runs two different searches depending on which
+    one launched it. `run_port`'s signature says 1 and `bench.candidate_methods`
+    defaults to 1, so the parser says 1; the 3 stays on the seven ports where it
+    was measured. Asking for another value is one argument.
     """
     assert mr.DEFAULT_ASYNC_RATIO == 1
     assert mr.build_parser().parse_args([]).async_ratio == 1
