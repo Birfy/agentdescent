@@ -36,7 +36,8 @@ either). The selected agent then edits its own source and is re-benchmarked.
 ## Measured results — GSM-Hard
 
 Three seeds, `async_pipeline`, 80 rollouts each, 8 workers, `--staleness full`,
-`deepseek-v4-flash` at temperature 0.7, 64/64/64 shuffled splits. Recorded in
+reflective merge on, `deepseek-v4-flash` at temperature 0.7, 64/64/64 shuffled
+splits. Recorded in
 [`bench/results/sica-self-edit.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/sica-self-edit.json).
 
 | seed | test quality | validation | accepted | invalid | calls |
@@ -46,10 +47,15 @@ Three seeds, `async_pipeline`, 80 rollouts each, 8 workers, `--staleness full`,
 | 2 | 0.594 → **0.625** | 0.641 → 0.719 | 2/80 | 1 | 876 |
 
 Mean gain **+0.026** on test and +0.063 on validation, no seed regressing.
-`reflective=False` is a *fidelity* choice here — a model-synthesised merge of
-Python source would bypass the AST gate that makes executing it safe — so
-contested edits to the single policy slot are resolved by **ranking**, and
-ranking costs evaluations.
+
+This row used to run `reflective=False`, and that was the right call while it
+held: `ReflectiveFusion` reached the ledger **without** passing `to_diff`, so a
+model-synthesised merge of two Python sources would have bypassed the AST gate
+that makes executing them safe, and contested edits to the single policy slot
+had to be resolved by **ranking** — which costs evaluations. `ReflectiveFusion`
+now takes the strategy's validator and a synthesis that fails it returns `None`,
+the existing fall-back-to-ranking signal, so the gate holds either way and the
+flag is on.
 
 See the caveat on [PromptBreeder](algo-promptbreeder.md#measured-results-gsm8k): one
 run per seed does not pin a number here either.

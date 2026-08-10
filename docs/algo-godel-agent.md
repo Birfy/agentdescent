@@ -36,7 +36,9 @@ trials dipping before improving. Steering comes from optional self-evaluation.
 ## Measured results — GSM-Hard
 
 Three seeds, `async_pipeline`, 80 rollouts each, 8 workers, `--staleness full`,
-`--reflective-merge`, **with** the framework gate (the default, and a declared
+reflective merge on (the policy default, and
+[validated](algo-sica.md#measured-results-gsm-hard) against the same AST gate the
+proposals pass), **with** the framework gate (the default, and a declared
 substitution -- see below), `deepseek-v4-flash` at temperature 0.7, 64/64/64
 shuffled splits. Recorded in
 [`bench/results/godel-agent-self-modify.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/godel-agent-self-modify.json).

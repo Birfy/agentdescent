@@ -9,11 +9,12 @@
   "workers": 8,
   "async_ratio": 2,
   "staleness": "full",
-  "reflective_merge": false,
+  "reflective_merge": true,
   "temperature": 0.7,
   "thinking": "disabled",
   "domain": "GSM-Hard (reasoning-machines/gsm-hard), 64/64/64 shuffled splits",
-  "selection": "Archive(sampling='best')"
+  "selection": "Archive(sampling='best')",
+  "reflective_merge_note": "validated: ReflectiveFusion runs the strategy validator and falls back to ranking on rejection"
  },
  "cells": [
   {

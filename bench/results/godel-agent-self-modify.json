@@ -12,7 +12,8 @@
   "reflective_merge": true,
   "temperature": 0.7,
   "thinking": "disabled",
-  "domain": "GSM-Hard (reasoning-machines/gsm-hard), 64/64/64 shuffled splits"
+  "domain": "GSM-Hard (reasoning-machines/gsm-hard), 64/64/64 shuffled splits",
+  "reflective_merge_note": "validated: ReflectiveFusion runs the strategy validator and falls back to ranking on rejection"
  },
  "cells": [
   {

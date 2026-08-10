@@ -257,13 +257,30 @@ def test_invalid_proposals_are_counted_not_replaced():
 
 
 def test_reflective_and_verify_flags_by_artifact_kind():
+    """A model-synthesised merge is safe wherever the merged text is checked
+    before it is used.
+
+    `sica` and `godel_agent` were in the second group while `ReflectiveFusion`
+    reached the ledger without passing `to_diff` -- a synthesised merge of
+    Python source would then have bypassed the AST gate that makes executing it
+    safe, so ranking was the only option. `ReflectiveFusion` now takes the
+    strategy's `validate`, and a synthesis that fails it returns `None`, which
+    is the existing fall-back-to-ranking signal. Both are reflective now.
+    `voyager` and `skillweaver` stay out: their artifacts are validated skills,
+    and they carry `self_verify` instead.
+    """
     flags = {name: ALGORITHMS[name][1](0) for name in ALGORITHMS}
     for name in ("promptbreeder", "aflow", "reflexion", "self_refine",
-                 "absolute_zero", "r_zero", "agent0"):
+                 "absolute_zero", "r_zero", "agent0", "sica", "godel_agent"):
         assert flags[name].reflective, name
-    for name in ("voyager", "skillweaver", "sica", "godel_agent"):
+    for name in ("voyager", "skillweaver"):
         assert not flags[name].reflective, name
     assert flags["voyager"].self_verify and flags["skillweaver"].self_verify
+
+    for name in ("sica", "godel_agent", "reflexion"):
+        assert getattr(flags[name].strategy, "validator", None) is not None, (
+            f"{name} is reflective, so its synthesised merges have to be "
+            "validated -- that is the whole reason the flag could be turned on")
 
 
 def test_reflective_fusion_synthesises_with_one_model_call():

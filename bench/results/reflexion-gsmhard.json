@@ -20,7 +20,8 @@
   "reflective_merge": true,
   "temperature": 0.7,
   "thinking": "disabled",
-  "memory": "WindowedMemory(window=3, validator=is_a_plan)"
+  "memory": "WindowedMemory(window=3, validator=is_a_plan)",
+  "reflective_merge_note": "validated: ReflectiveFusion runs the strategy validator and falls back to ranking on rejection"
  },
  "supersedes": "bench/results/reflexion-gsm8k.json",
  "cells": [
