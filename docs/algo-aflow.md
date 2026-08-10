@@ -36,44 +36,40 @@ modifications and whether each helped — injected into the prompt.
 - Fixed two-node topology instead of code-level graph rewrites.
 - Paper hyper-parameters α=0.4, λ=0.2 (the pinned code itself ships 0.2/0.3).
 
-## Measured results
+## Measured results — GSM8K
 
 Three seeds, `async_pipeline`, 80 rollouts each, 8 workers, `--staleness full`,
-`--reflective-merge`, `deepseek-v4-flash` at temperature 0.7 with thinking
-disabled. Recorded in
-[`bench/results/aflow-upstream-selection.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/aflow-upstream-selection.json).
+`deepseek-v4-flash` at temperature 0.7. Recorded in
+[`bench/results/aflow-gsm8k.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/aflow-gsm8k.json).
 
 | seed | test quality | validation | accepted | calls | wall |
 |---|---|---|---|---|---|
-| 0 | 0.000 → **0.812** | 0.000 → 0.938 | 3/80 | 767 | 248 s |
-| 1 | 0.000 → **0.938** | 0.000 → 0.938 | 2/80 | 728 | 227 s |
-| 2 | 0.000 → **0.938** | 0.000 → 1.000 | 3/80 | 767 | 220 s |
+| 0 | 0.609 → **0.984** | 0.609 → 0.969 | 1/80 | 2065 | 705 s |
+| 1 | 0.438 → **0.969** | 0.438 → 0.906 | 5/80 | 2071 | 600 s |
+| 2 | 0.484 → **0.953** | 0.469 → 0.969 | 4/80 | 2072 | 592 s |
 
-Three of three seeds moved, mean 0.896, against a domain whose ceiling is 1.000.
+Mean final **0.969**, mean gain **+0.458**, all three seeds moving.
 
-### Why this clears the domain when PromptBreeder does not
+64 items per split from GSM8K's own train and test splits. The baseline is
+0.438–0.609 — the model's own accuracy — not the 0.000 the previous fixture
+installed by construction; see
+[Self-Refine](algo-self-refine.md#measured-results-gsm8k) for why that fixture
+was replaced, and the caveat on
+[PromptBreeder](algo-promptbreeder.md#measured-results) on one run per seed.
 
-[PromptBreeder](algo-promptbreeder.md) reaches 0.271 on the same 48 items, the
-same model, the same budget, and its successful seeds stall just under the
-*format-only* ceiling of 0.479: it discovers what the grader wants and not that
-it may reason first. AFlow does both, and the reason is topology rather than
-tuning. Its workflow is two nodes — **Solve**, then **ReviewAndRevise** — so the
-arithmetic and the output convention have separate places to live. A single
-instruction has to hold both at once, and the prompts that nail the format are
-the ones that forbid the working.
+### Two nodes cost two calls
 
-That is the comparison the matrix exists for: same domain, same runtime, same
-budget, and the mechanism is the variable.
+~2070 calls per seed against [Self-Refine](algo-self-refine.md)'s ~1050, for
+0.969 against 0.943. AFlow's workflow is Solve then ReviewAndRevise, so every
+rollout is two model calls where Self-Refine's fused critique-and-refine is one.
 
+On the old hand-written fixture the two were 0.896 and 0.979 — the gap ran the
+other way, and it was an artifact of that domain's one-bit output convention,
+which a second reviewing node could fix and a single instruction had to hold
+alongside the arithmetic. Against a benchmark with a real floor they land within
+0.026 of each other, and what separates them is what each spends to get there.
+That reversal is the clearest thing the move to GSM8K bought.
 
-!!! note "These cross-algorithm figures demonstrate that each port runs, not which is best"
-    Every row is one run per seed, and the seed fixes the data splits and the
-    method's own sampler -- **not the model**, which is sampled at temperature
-    0.7. Re-running an identical command at an identical seed moves the number:
-    PromptBreeder's seed 0 scored 0.438 on one run and 0.875 on the next, from
-    the same script and the same code. Read the table as evidence the mechanism
-    executes end to end and produces a plausible artifact; a ranking would need
-    repeats per seed, which these runs do not have.
 !!! danger "The selection rule was uniform, and said it was not"
     The port implemented `λ·uniform + (1−λ)·softmax(α·(s−s_max))` and dropped
     one line of upstream's `select_round`:
