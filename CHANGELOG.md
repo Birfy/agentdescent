@@ -6,8 +6,32 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-08-10
+
 ### Fixed
 
+- **Four shared flags reached the MethodPolicy runner and were dropped.**
+  `examples/_method_runner.py`'s `standard_main` declared `--async-ratio`,
+  `--eval-concurrency` and `--eval-cache` through `add_standard_args` and passed
+  none of them to `run_port`, so on all eleven declarative ports a run that set
+  every one of them was byte-identical to a run that set none -- and
+  `--val-cap`, which those ports cannot honour at all because their splits are
+  frozen in `build()`, parsed and moved nothing. The same defect as Gödel
+  Agent's `--gateless`, which five documents described while the parser rejected
+  it. All three are now threaded and recorded in the run's own `framework`
+  block, `--dry-run` prints them, and `--val-cap` is withdrawn rather than
+  accepted. `--async-ratio` cost reproduction specifically: the rows in
+  `bench/results/` were recorded at 2, and until now no
+  `python -m examples.<port>` command could ask for that. It defaults to **1**
+  here, not `add_standard_args`' 3, because `run_port`'s signature and
+  `bench.candidate_methods` both say 1 and two entry points that disagree on a
+  lag budget make the same nominal configuration run two different searches.
+  `--eval-concurrency` defaults to unset for a related reason: taking the shared
+  8 would make `--serial` -- the control arm, the upstream algorithm's own
+  one-at-a-time loop -- score its gate eight ways at once.
+  `tests/test_method_runner_flags.py` now enumerates the parser and fails on any
+  flag with nowhere recorded that reads it, and every `Run it` command on the
+  eleven algorithm pages passes `--async-ratio 2` outright.
 - **A work-budget stop on the async path abandoned the evidence it had paid
   for.** `max_rollouts` counts a rollout when it completes, so when the budget
   trips, up to `n_workers - 1` rollouts are still in flight -- legitimately
@@ -2121,7 +2145,8 @@ First public release on PyPI as **`agentdescent`**.
   discrete-space `Aggregator`, staleness policies, DP/TP/PP parallelism, layered
   governance, and the provider-agnostic `agentdescent.agents` completion layer.
 
-[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/Birfy/agentdescent/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Birfy/agentdescent/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Birfy/agentdescent/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Birfy/agentdescent/compare/v0.1.0...v0.2.0
