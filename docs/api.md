@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-196 public names across 34 modules.
+197 public names across 34 modules.
 
 ---
 
@@ -1203,6 +1203,10 @@ Candidate(
 ### `MCTS(exploration: float = 1.4) -> None`
 
 UCT over the candidate tree: one evolve step is one rollout.
+
+### `MultiHeadUnsupported`
+
+A policy named a starting point the ledger cannot hold yet.
 
 ### `ParetoFrontier(mode: str = 'per_instance', k: int = 5) -> None`
 
