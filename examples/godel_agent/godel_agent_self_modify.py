@@ -102,7 +102,7 @@ def build(seed: int, *, gateless: bool = False) -> MethodPolicy:
         proposal_calls_per_candidate=1,
         engine=(Policies(acceptance=AcceptAnyCompiling()) if gateless
                 else Policies()),
-        reflective=False,
+        reflective=True,
     )
 
 

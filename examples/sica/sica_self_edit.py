@@ -12,8 +12,16 @@ quarter of the time. (The paper's cost/time composite is unimplemented upstream
 too.)
 
 An unparseable self-edit costs its candidate and produces no diff -- there is
-no substitute source. ``reflective=False``: synthesised merges of Python source
-would bypass the AST gate.
+no substitute source.
+
+``reflective=True`` **now**, and it could not be before. `ReflectiveFusion`
+writes its synthesis straight to the ledger without passing `to_diff`, so a
+model-merged pair of Python sources used to reach the artifact unchecked and fail
+at every rollout that read it. The fusion policy takes the strategy's validator
+now, and a merge that will not compile under the AST gate is refused -- falling
+back to the ranking this port used to do for *every* diff. Ranking costs
+evaluations: a paired control measured 2.7-2.8x the model calls of a merged run
+at no gain in quality.
 """
 
 from __future__ import annotations
@@ -130,7 +138,7 @@ def build(seed: int) -> MethodPolicy:
         reward=gsmhard_reward,
         proposal_calls_per_candidate=1,
         engine=Policies(selection=Archive(sampling="best", seed=seed)),
-        reflective=False,
+        reflective=True,
     )
 
 

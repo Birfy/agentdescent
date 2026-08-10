@@ -63,29 +63,64 @@ MEMORY_HEADER = (
 #: The two items are **invented**, not drawn from GSM8K -- a worked example built
 #: from a real row hands its graded answer to every proposal in the run, which is
 #: what `test_the_examples_do_not_hand_over_a_held_out_answer` checks.
-FEW_SHOT_EXAMPLES = """A baker sells 3 trays of 12 buns for 2 dollars a bun. What does he earn?
-Attempt: 3 trays is 36 buns, so 36 times 2. The answer is 62.
+#:
+#: They also carry **no arithmetic of their own**. An earlier version showed the
+#: failed working (`36 x 2`, `20 - 8 = 12`) before generalising, and the model
+#: imitated the shape rather than the conclusion: measured on GSM8K, all four
+#: reflections in a run were re-derivations of the item just failed -- "I
+#: correctly identified 2 large pizzas and 2 small, but I multiplied wrong" --
+#: which is useless in a memory read against *other* questions. Every proposal
+#: was well-formed, every one was refused by the gate, and the memory finished
+#: empty across three seeds.
+FEW_SHOT_EXAMPLES = """Attempt on a problem about a baker's trays of buns: FAILED.
 The evaluator read the last number in the reply: '62'
 It wanted: '72'
-STATUS: FAIL
-New plan: I set the problem up correctly and then did 36 x 2 in my head and got \
-it wrong. I should have written that multiplication out on its own line where I \
-could see it. Next time I will put every calculation on its own line rather than \
-carrying it mentally, and re-read each one before using its result.
+New plan: I did one of the multiplications in my head instead of writing it \
+down, and got it wrong. From now on every calculation goes on its own line \
+before I use its result, however small it looks.
 
-A shop had 20 crates, sold 8, then received 5 more. How many now?
-Attempt: 20 - 8 = 12, then 12 + 5 = 17. So the shop started with 20 crates.
+Attempt on a problem about a shop's crates: FAILED.
 The evaluator read the last number in the reply: '20'
 It wanted: '17'
-STATUS: FAIL
-New plan: My arithmetic was right and reached 17, and then I added a closing \
-sentence that mentioned an earlier number. The grader reads the **last** number \
-in the reply, so that sentence replaced my answer with the wrong one. Next time \
-I will finish with the final number and write nothing after it."""
+New plan: My arithmetic reached the right value and then I wrote a closing \
+sentence that mentioned an earlier number. The grader reads the last number in \
+the reply, so anything after the answer replaces it. From now on I finish with \
+the answer and write nothing after it."""
 
 
-def build(seed: int) -> MethodPolicy:
+def _for_instance(rendered: str, task: Task) -> str:
+    """The rendered memory, narrowed to entries written for this task.
+
+    Upstream's memory is a list per environment; here it is one artifact whose
+    entries carry a `[task-id]` tag, and this drops the rest. On a held-out task
+    that leaves nothing, which is exactly upstream's position and exactly why
+    the default does not do it.
+    """
+    kept, tag = [], f"[{task.id}]"
+    for line in rendered.splitlines():
+        if not line.startswith("- ") or tag in line:
+            kept.append(line)
+    return "\n".join(kept)
+
+
+def build(seed: int, *, per_instance: bool = False) -> MethodPolicy:
+    """``per_instance=True`` is the faithful variant.
+
+    Upstream keys memory on the task (`env_configs[i]['memory']`) and retries
+    **that** instance. Under the framework's held-out gate such a memory is
+    empty for every reported task, so the row measures nothing -- which is why
+    the default generalises it to one shared memory and says so.
+
+    The flag exists because a substitution nobody can run is a claim nobody can
+    check, the same reason Godel Agent has ``--gateless``. It is expected to
+    score its baseline and accept nothing; that outcome is the control, not a
+    failure.
+    """
+
     def solve(llm, rendered: str, task: Task) -> str:
+        if per_instance:
+            # Only this task's own entries, as upstream's per-env memory is.
+            rendered = _for_instance(rendered, task)
         return solve_gsm8k(llm, rendered, task)
 
     def propose(llm, rendered: str, task: Task, output: str,
@@ -97,14 +132,17 @@ def build(seed: int) -> MethodPolicy:
         # budget check is `observed <= expected`, so declining costs nothing.
         if reward >= 1.0:
             return None
-        return llm(
+        prefix = f"[{task.id}] " if per_instance else ""
+        raw = llm(
             (
-                "You will be given the history of a past attempt at a problem "
-                "you were unsuccessful at. Do not summarize the problem; think "
-                "about the strategy you took. Devise a concise, new plan of "
-                "action that accounts for your mistake, with reference to the "
-                "specific steps you should have taken. Write the plan, not an "
-                "answer. Here are two examples:\n\n"
+                "You will be given a past attempt at a problem you got wrong. "
+                "Write one plan that stops the same *kind* of mistake on other "
+                "problems.\n\n"
+                "This memory is read while solving questions you have not seen, "
+                "so a plan naming this problem's numbers, quantities or "
+                "characters is worth nothing when it is read. Do not restate the "
+                "arithmetic and do not solve it again -- say what you should "
+                "have done differently, as a rule. Here are two examples:\n\n"
                 f"{FEW_SHOT_EXAMPLES}\n\n"
                 f"{rendered}\n\n"
                 f"Here is the attempt:\n{feedback(task, output)}\n"
@@ -114,6 +152,10 @@ def build(seed: int) -> MethodPolicy:
             ),
             unit=task.id,
         )
+        # Tagged so `_for_instance` can hand the solver only its own entries.
+        # The tag is the whole of what per-instance costs here: the memory is
+        # still one ledger artifact, and only the *rendering* narrows.
+        return f"{prefix}{raw.strip()}" if raw and raw.strip() else raw
 
     train, held_out, test = gsm8k_splits(seed)
     return MethodPolicy(
@@ -124,7 +166,8 @@ def build(seed: int) -> MethodPolicy:
             "Reflection is requested only after a failed rollout, as update_memory and Agent.run both gate on success.",
             "The reflection prompt asks for a plan that accounts for the mistake and shows the previous plans, matching _generate_reflection_query.",
             "Memory is append-only and rendered as the last three entries, matching upstream's bounded window.",
-            "Memory is global where upstream's is per task instance: Reflexion retries the same instance and claims no transfer, so this port asks whether reflection transfers at all.",
+            "Memory is global where upstream's is per task instance: Reflexion retries the same instance and claims no transfer, so this port asks whether reflection transfers at all. --per-instance runs the faithful variant.",
+            "The reflection prompt asks for a rule that survives being read against other questions, because a shared memory needs one -- upstream asks for the specific steps that should have been taken, which is right when the next thing you do is retry that same instance.",
             "GSM8K replaces HotpotQA/ALFWorld: real questions, a real answer key, and the standard grader.",
         ),
         strategy=WindowedMemory(seed_text=STARTING_INSTRUCTION, window=3,
@@ -140,8 +183,20 @@ def build(seed: int) -> MethodPolicy:
     )
 
 
+def _per_instance_flag(parser) -> None:
+    parser.add_argument(
+        "--per-instance",
+        action="store_true",
+        help=("run the faithful variant: a reflection is read back only while "
+              "solving the task that produced it, as upstream's per-environment "
+              "memory is. Expect it to accept nothing and score its baseline -- "
+              "that is the control that makes the shared-memory default a "
+              "checkable substitution rather than an unverifiable claim"))
+
+
 def main(argv=None) -> int:
-    return standard_main(build, argv)
+    return standard_main(build, argv, extra_args=_per_instance_flag,
+                         build_kwargs=lambda a: {"per_instance": a.per_instance})
 
 
 if __name__ == "__main__":

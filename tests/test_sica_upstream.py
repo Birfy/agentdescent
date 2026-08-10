@@ -95,11 +95,16 @@ def test_the_gate_refuses_what_it_declares_it_refuses(source, reason):
 
 
 def test_an_unparseable_self_edit_costs_its_candidate_and_proposes_nothing():
-    """There is no substitute source: a broken edit is a spent candidate, which
-    is why `reflective=False` -- a synthesised merge of Python would bypass the
-    gate that makes this safe."""
+    """There is no substitute source: a broken edit is a spent candidate.
+
+    This used to assert `reflective is False`, pinning the workaround rather
+    than the property. The merge is safe now because `ReflectiveFusion` takes
+    the strategy's validator and refuses anything that will not compile -- so
+    the gate still decides, and the port gets a merge that costs 2.7-2.8x fewer
+    calls than the ranking it fell back to.
+    """
     policy = sica.build(0)
-    assert policy.reflective is False
+    assert policy.reflective is True
     state = {"policy": sica.SICA_INITIAL_SOURCE}
     assert policy.strategy.to_diff(state, "not python at all", "w", 1, "a") is None
 
@@ -147,3 +152,50 @@ def test_the_reference_solution_is_never_shown():
     task = train[0]
     assert "code" not in task.meta
     assert "def solution" not in feedback(task, "1")
+
+
+def test_a_merge_that_will_not_compile_is_refused_rather_than_committed():
+    """`ReflectiveFusion` writes its synthesis straight to the ledger without
+    passing `to_diff`, so before it took a validator a model-merged pair of
+    Python sources reached the artifact unchecked and failed at every rollout
+    that read it. That is why this port declared `reflective=False`, and why it
+    could not use a merge that costs 2.7-2.8x fewer calls than the ranking it
+    fell back to.
+
+    Returning `None` is already the "fall back to ranking" signal, so a refused
+    merge costs exactly what the old behaviour cost and nothing more.
+    """
+    from agentdescent.fusion import ReflectiveFusion
+
+    broken = ReflectiveFusion(lambda prompt: "def agent_prompt(question: pass",
+                              validate=sica._sica_source)
+    assert broken._synthesise("seed", ["a", "b"]) is None
+
+    good_source = ('def agent_prompt(question):\n'
+                   '    return "Work it step by step.\\n\\n" + question\n')
+    fine = ReflectiveFusion(lambda prompt: good_source,
+                            validate=sica._sica_source)
+    assert fine._synthesise("seed", ["a", "b"])
+
+
+def test_a_merge_that_breaks_the_ast_gate_is_refused_too():
+    """Not only syntax: the gate also refuses calls, assignments and f-strings,
+    and a merge is exactly where two valid sources can produce a third that uses
+    none of the constructs either of them did."""
+    from agentdescent.fusion import ReflectiveFusion
+
+    calls_a_method = ('def agent_prompt(question):\n'
+                      '    return "x" + question.strip()\n')
+    policy = ReflectiveFusion(lambda prompt: calls_a_method,
+                              validate=sica._sica_source)
+    assert policy._synthesise("seed", ["a", "b"]) is None
+
+
+def test_the_runner_hands_the_strategy_validator_to_the_merge():
+    import inspect
+
+    from examples import _method_runner
+
+    source = inspect.getsource(_method_runner.run_port)
+    assert 'getattr(policy.strategy, "validator", None)' in source
+    assert "validate=validate" in source
