@@ -1,0 +1,98 @@
+{
+ "experiment": "Self-Refine on GSM8K",
+ "dataset": {
+  "name": "openai/gsm8k",
+  "config": "main",
+  "train_rows": 7473,
+  "test_rows": 1319,
+  "transport": "parquet via HF_ENDPOINT=https://hf-mirror.com",
+  "split_size": 64,
+  "note": "a 64-item window per split, not the whole benchmark: train and held-out from GSM8K's train split, the reported test tasks from its test split"
+ },
+ "grader": "the integer after #### against the last number in the reply",
+ "model": "deepseek-v4-flash",
+ "provider": "claude",
+ "host": "192-core aarch64 Linux",
+ "config": {
+  "arm": "async_pipeline",
+  "budget_rollouts": 80,
+  "workers": 8,
+  "async_ratio": 2,
+  "staleness": "full",
+  "reflective_merge": true,
+  "temperature": 0.7,
+  "thinking": "disabled"
+ },
+ "cells": [
+  {
+   "seed": 0,
+   "test": [
+    0.609,
+    0.969
+   ],
+   "validation": [
+    0.531,
+    0.953
+   ],
+   "accepted": 1,
+   "invalid": 0,
+   "wall_s": 323.5,
+   "engine_s": 129.6,
+   "calls": 1072
+  },
+  {
+   "seed": 1,
+   "test": [
+    0.5,
+    0.984
+   ],
+   "validation": [
+    0.391,
+    0.922
+   ],
+   "accepted": 3,
+   "invalid": 0,
+   "wall_s": 362.7,
+   "engine_s": 126.7,
+   "calls": 1071
+  },
+  {
+   "seed": 2,
+   "test": [
+    0.547,
+    0.875
+   ],
+   "validation": [
+    0.562,
+    0.922
+   ],
+   "accepted": 1,
+   "invalid": 0,
+   "wall_s": 314.8,
+   "engine_s": 115.5,
+   "calls": 1007
+  }
+ ],
+ "summary": {
+  "test_baseline": {
+   "min": 0.5,
+   "max": 0.609
+  },
+  "test_final": {
+   "min": 0.875,
+   "median": 0.969,
+   "max": 0.984,
+   "mean": 0.943
+  },
+  "test_gain": {
+   "mean": 0.391
+  },
+  "seeds_that_moved": 3,
+  "total_seeds": 3,
+  "wall_seconds_total": 1001.0
+ },
+ "supersedes": {
+  "fixture": "the hand-written money domain",
+  "note": "48 items this repository authored, graded by a rule it chose and changed mid-study when it blocked progress. Its baseline was 0.000 by construction"
+ }
+}

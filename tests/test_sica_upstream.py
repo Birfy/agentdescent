@@ -63,18 +63,17 @@ def test_the_gate_admits_a_prompt_that_can_clear_the_domain():
     """
     teaches = (
         'def agent_prompt(question):\n'
-        '    return "Work the arithmetic out in dollars, then convert to whole '
-        'cents. End your reply with a final line containing only that integer.'
-        '\\n\\n" + question\n'
+        '    return "Work the problem step by step, writing each calculation on '
+        'its own line, then state the final number last.\\n\\n" + question\n'
     )
     functions = sica.compile_policy(teaches, {"agent_prompt": 1})
-    from examples._money_domain import money_splits
-    rendered = sica.policy_prompt(functions["agent_prompt"], money_splits(0)[0][0])
-    assert "cents" in rendered and "final line" in rendered
+    from examples._gsm8k_domain import gsm8k_splits
+    rendered = sica.policy_prompt(functions["agent_prompt"], gsm8k_splits(0)[0][0])
+    assert "step by step" in rendered and "final number" in rendered
 
     suffix = (
         'def agent_prompt(question):\n'
-        '    return "Solve:\\n" + question + "\\nAnswer in integer cents."\n'
+        '    return "Solve:\\n" + question + "\\nState the final number last."\n'
     )
     assert sica.compile_policy(suffix, {"agent_prompt": 1})
 

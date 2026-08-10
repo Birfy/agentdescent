@@ -23,7 +23,7 @@ from agentdescent.policies import AcceptDecision, Policies
 from examples._measure import extract_python
 from examples._method_policy import MethodPolicy, ValidatedSlot
 from examples._method_runner import standard_main
-from examples._money_domain import feedback, money_reward, money_splits
+from examples._gsm8k_domain import feedback, gsm8k_reward, gsm8k_splits
 from examples.sica.sica_self_edit import compile_policy, policy_prompt
 
 
@@ -80,7 +80,7 @@ def build(seed: int, *, gateless: bool = False) -> MethodPolicy:
             unit=task.id,
         )
 
-    train, held_out, test = money_splits(seed)
+    train, held_out, test = gsm8k_splits(seed)
     return MethodPolicy(
         name="godel_agent",
         fidelity=FIDELITY,
@@ -97,7 +97,7 @@ def build(seed: int, *, gateless: bool = False) -> MethodPolicy:
         test_tasks=tuple(test),
         solve=solve,
         propose=propose,
-        reward=money_reward,
+        reward=gsm8k_reward,
         proposal_calls_per_candidate=1,
         engine=(Policies(acceptance=AcceptAnyCompiling()) if gateless
                 else Policies()),

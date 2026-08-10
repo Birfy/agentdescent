@@ -50,8 +50,8 @@ from agentdescent.selection import SelectionContext, SingleHead
 from examples._measure import parse_json_object
 from examples._method_policy import FieldSlots, MethodPolicy, read_fields
 from examples._method_runner import standard_main
-from examples._money_domain import (STARTING_INSTRUCTION, money_reward,
-                                    money_splits, solve_money)
+from examples._gsm8k_domain import (STARTING_INSTRUCTION, gsm8k_reward,
+                                    gsm8k_splits, solve_gsm8k)
 from examples.promptbreeder._promptbreeder_operators import (
     MUTATION_PROMPTS, PROBLEM_DESCRIPTION, THINKING_STYLES, TWO_STEP,
     OperatorSampler, apply_step_prompt, build_prompt)
@@ -140,7 +140,7 @@ def build(seed: int) -> MethodPolicy:
 
     def solve(llm, rendered: str, task: Task) -> str:
         genome = read_fields(rendered)
-        return solve_money(llm, genome.get("task_prompt", STARTING_INSTRUCTION),
+        return solve_gsm8k(llm, genome.get("task_prompt", STARTING_INSTRUCTION),
                            task)
 
     def propose(llm, rendered: str, task: Task, output: str,
@@ -205,7 +205,7 @@ def build(seed: int) -> MethodPolicy:
                 lines.append(f"    {score:.3f}  {prompt!r}")
         return "\n".join(lines)
 
-    train, held_out, test = money_splits(seed)
+    train, held_out, test = gsm8k_splits(seed)
     return MethodPolicy(
         name="promptbreeder",
         fidelity=FIDELITY,
@@ -225,7 +225,7 @@ def build(seed: int) -> MethodPolicy:
         test_tasks=tuple(test),
         solve=solve,
         propose=propose,
-        reward=money_reward,
+        reward=gsm8k_reward,
         # Two, not one: the paper's hypermutation operators are two model calls,
         # and declaring one would make the budget check fail on a run that spent
         # exactly what the algorithm asks for.

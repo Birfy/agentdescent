@@ -46,8 +46,8 @@ from agentdescent.selection import SelectionContext, SingleHead
 from examples._measure import parse_json_object
 from examples._method_policy import FieldSlots, MethodPolicy, read_fields
 from examples._method_runner import standard_main
-from examples._money_domain import (STARTING_INSTRUCTION, feedback,
-                                    money_reward, money_splits, solve_money)
+from examples._gsm8k_domain import (STARTING_INSTRUCTION, feedback,
+                                    gsm8k_reward, gsm8k_splits, solve_gsm8k)
 
 
 FIDELITY = "mechanism_microport"
@@ -161,7 +161,7 @@ def build(seed: int) -> MethodPolicy:
 
     def solve(llm, rendered: str, task: Task) -> str:
         graph = read_fields(rendered)
-        draft = solve_money(
+        draft = solve_gsm8k(
             llm, graph.get("solve_instruction", STARTING_INSTRUCTION), task,
             subphase="solve")
         return llm(
@@ -208,7 +208,7 @@ def build(seed: int) -> MethodPolicy:
         except (KeyError, TypeError, ValueError):
             return ""
 
-    train, held_out, test = money_splits(seed)
+    train, held_out, test = gsm8k_splits(seed)
     return MethodPolicy(
         name="aflow",
         fidelity=FIDELITY,
@@ -231,7 +231,7 @@ def build(seed: int) -> MethodPolicy:
         test_tasks=tuple(test),
         solve=solve,
         propose=propose,
-        reward=money_reward,
+        reward=gsm8k_reward,
         proposal_calls_per_candidate=2,
         engine=Policies(selection=SoftMixed(seed=seed)),
         reflective=True,

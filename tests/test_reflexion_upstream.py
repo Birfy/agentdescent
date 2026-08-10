@@ -13,8 +13,8 @@ from examples.reflexion import reflexion_episodic_memory as rx
 
 
 def _task():
-    return Task(id="train:m00", prompt="A pen costs $1.40. What is the total?",
-                meta={"answer_cents": "140", "split": "train"})
+    return Task(id="train:0", prompt="A pen costs 3 dollars. Two pens cost?",
+                meta={"answer": "6", "split": "train"})
 
 
 def _policy():
@@ -141,14 +141,17 @@ def test_the_examples_are_plans_rather_than_answers():
 
 def test_the_examples_do_not_hand_over_a_held_out_answer():
     """They are worked examples, so they contain answers -- which makes it worth
-    checking that the items they use are the domain's own, and that a method
-    memorising them learns nothing a held-out item would reward."""
-    from examples._money_domain import money_splits
+    checking that they are invented rather than drawn from the benchmark. A
+    worked example built from a real row hands its graded answer to every
+    reflection prompt in the run.
 
-    for seed in (0, 1, 2):
-        _, held_out, test = money_splits(seed)
-        for task in list(held_out) + list(test):
-            answer = str(task.meta["answer_cents"])
-            shown = f"It wanted: '{answer}'"
-            assert shown not in rx.FEW_SHOT_EXAMPLES, (
-                f"seed {seed}: the examples hand over {task.id}'s answer")
+    The first draft of these used two items from the old money fixture, which
+    landed in held-out or test depending on the seed. That is why this scans the
+    whole dataset rather than the window a seed happens to see.
+    """
+    from examples._gsm8k_domain import gold_answer, load_split
+
+    for split in ("train", "test"):
+        for row in load_split(split):
+            assert row["question"].strip() not in rx.FEW_SHOT_EXAMPLES, (
+                f"a {split} question appears verbatim in the worked examples")

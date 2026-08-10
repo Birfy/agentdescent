@@ -38,8 +38,8 @@ from agentdescent.evolution import Task
 
 from examples._method_policy import MethodPolicy, WindowedMemory, read_fields
 from examples._method_runner import standard_main
-from examples._money_domain import (STARTING_INSTRUCTION, feedback,
-                                    money_reward, money_splits, solve_money)
+from examples._gsm8k_domain import (STARTING_INSTRUCTION, feedback,
+                                    gsm8k_reward, gsm8k_splits, solve_gsm8k)
 
 
 FIDELITY = "mechanism_microport"
@@ -53,44 +53,40 @@ MEMORY_HEADER = (
 )
 
 #: `reflexion_few_shot_examples.txt`, in this domain. Without them the reflector
-#: does not write a plan -- it answers the arithmetic. Measured: 40 reflections
-#: against no examples produced 40 bare numbers (`925`, `264`, `$32.15`), one of
-#: which mentioned the output convention, and the memory finished empty because
-#: nothing that useless ever cleared the acceptance gate. The prompt ends in
-#: "New plan:" and contains a question and its answer; with nothing to imitate,
-#: answering the question is the likelier continuation.
+#: does not write a plan -- it answers the arithmetic. Measured on the domain
+#: this port used to run: 40 reflections against no examples produced 40 bare
+#: numbers, one of which mentioned anything reusable, and the memory finished
+#: empty because nothing that useless cleared the acceptance gate. The prompt
+#: ends in "New plan:" and contains a question and its answer; with nothing to
+#: imitate, answering the question is the likelier continuation.
 #:
-#: The two items are **invented**, not drawn from `TASKS`. The first draft used
-#: `m03` and `m11`, which land in held-out or test depending on the seed, so
-#: every reflection prompt in the run handed over two graded answers --
-#: `test_the_examples_do_not_hand_over_a_held_out_answer` is what caught it.
-FEW_SHOT_EXAMPLES = """A ticket is $6.30 and a badge is $1.20. What is the total amount?
-Attempt: The total is $7.50.
-The evaluator read the final line of the reply: '$7.50'
-It wanted: '750'
+#: The two items are **invented**, not drawn from GSM8K -- a worked example built
+#: from a real row hands its graded answer to every proposal in the run, which is
+#: what `test_the_examples_do_not_hand_over_a_held_out_answer` checks.
+FEW_SHOT_EXAMPLES = """A baker sells 3 trays of 12 buns for 2 dollars a bun. What does he earn?
+Attempt: 3 trays is 36 buns, so 36 times 2. The answer is 62.
+The evaluator read the last number in the reply: '62'
+It wanted: '72'
 STATUS: FAIL
-New plan: I computed the sum correctly and then reported it the way a person \
-writes money, with a dollar sign and a decimal point. The evaluator did not \
-accept that string. I should have converted the dollar amount to whole cents \
-and written that integer on its own line with nothing else on it. Next time I \
-will finish the arithmetic in dollars, multiply by 100, and put only that \
-integer on the final line.
+New plan: I set the problem up correctly and then did 36 x 2 in my head and got \
+it wrong. I should have written that multiplication out on its own line where I \
+could see it. Next time I will put every calculation on its own line rather than \
+carrying it mentally, and re-read each one before using its result.
 
-Five friends split a $21.50 bill equally. What amount does each pay?
-Attempt: 2150
-The evaluator read the final line of the reply: '2150'
-It wanted: '430'
+A shop had 20 crates, sold 8, then received 5 more. How many now?
+Attempt: 20 - 8 = 12, then 12 + 5 = 17. So the shop started with 20 crates.
+The evaluator read the last number in the reply: '20'
+It wanted: '17'
 STATUS: FAIL
-New plan: I wrote the total in cents instead of each person's share -- I had \
-the output convention right and skipped an operation the question asked for. I \
-should have divided by the number of people before converting. Next time I will \
-restate which quantity is being asked for before computing, and check that every \
-operation named in the question appears in my working."""
+New plan: My arithmetic was right and reached 17, and then I added a closing \
+sentence that mentioned an earlier number. The grader reads the **last** number \
+in the reply, so that sentence replaced my answer with the wrong one. Next time \
+I will finish with the final number and write nothing after it."""
 
 
 def build(seed: int) -> MethodPolicy:
     def solve(llm, rendered: str, task: Task) -> str:
-        return solve_money(llm, rendered, task)
+        return solve_gsm8k(llm, rendered, task)
 
     def propose(llm, rendered: str, task: Task, output: str,
                 reward: float) -> Optional[str]:
@@ -119,7 +115,7 @@ def build(seed: int) -> MethodPolicy:
             unit=task.id,
         )
 
-    train, held_out, test = money_splits(seed)
+    train, held_out, test = gsm8k_splits(seed)
     return MethodPolicy(
         name="reflexion",
         fidelity=FIDELITY,
@@ -129,7 +125,7 @@ def build(seed: int) -> MethodPolicy:
             "The reflection prompt asks for a plan that accounts for the mistake and shows the previous plans, matching _generate_reflection_query.",
             "Memory is append-only and rendered as the last three entries, matching upstream's bounded window.",
             "Memory is global where upstream's is per task instance: Reflexion retries the same instance and claims no transfer, so this port asks whether reflection transfers at all.",
-            "A deterministic arithmetic evaluator replaces HotpotQA/ALFWorld.",
+            "GSM8K replaces HotpotQA/ALFWorld: real questions, a real answer key, and the standard grader.",
         ),
         strategy=WindowedMemory(seed_text=STARTING_INSTRUCTION, window=3,
                                 title=MEMORY_HEADER),
@@ -138,7 +134,7 @@ def build(seed: int) -> MethodPolicy:
         test_tasks=tuple(test),
         solve=solve,
         propose=propose,
-        reward=money_reward,
+        reward=gsm8k_reward,
         proposal_calls_per_candidate=1,
         reflective=True,
     )
