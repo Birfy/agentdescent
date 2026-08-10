@@ -93,6 +93,26 @@ _NUMBER = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
 
 _CACHE: Dict[str, List[dict]] = {}
 
+#: A committed slice of GSM8K -- 96 rows per split -- for the **offline test
+#: suite only**. This repository's suite has never needed the network and moving
+#: a domain to a real dataset is no reason to change that.
+#:
+#: It is gated on an environment variable that only `conftest.py` sets, and never
+#: used as a fallback when a fetch fails. A sample that could stand in silently
+#: is the failure this module is built to refuse: a run reporting a number it
+#: measured on 96 rows while its output says GSM8K would be wrong in a direction
+#: nobody can see, which is exactly what the truncated 944-row download was.
+SAMPLE_ENV = "AGENTDESCENT_GSM8K_SAMPLE"
+SAMPLE_ROWS = 96
+_SAMPLE_PATH = os.path.join(os.path.dirname(__file__), "_gsm8k_sample.json")
+
+
+def _from_sample(split: str) -> List[dict]:
+    import json
+
+    with open(_SAMPLE_PATH, encoding="utf-8") as handle:
+        return json.load(handle)[split]
+
 
 def gold_answer(raw: str) -> Optional[str]:
     """The integer after ``####``, normalised. None if the row is malformed."""
@@ -189,6 +209,12 @@ def load_split(split: str) -> List[dict]:
     truncated benchmark reads exactly like a benchmark. The count is asserted
     rather than trusted.
     """
+    if os.environ.get(SAMPLE_ENV) == "1":
+        # Deliberately before the cache and before any transport: a suite that
+        # asked for the sample must get the sample, not whatever a previous test
+        # left behind.
+        return _from_sample(split)
+
     if split in _CACHE:
         return _CACHE[split]
 
@@ -264,6 +290,11 @@ def gsm8k_splits(seed: int, *, train: int = SPLIT_SIZE,
     """
     work = load_split("train")
     reported = load_split("test")
+    if os.environ.get(SAMPLE_ENV) == "1":
+        # The sample is 96 rows; a 64/64 request would run off the end of it and
+        # hand back short splits, which is the shape of bug this domain exists to
+        # catch. Tests care that the plumbing works, not how many items it saw.
+        train = held_out = test = min(train, held_out, test, SAMPLE_ROWS // 3)
     work_offset = (seed * (train + held_out)) % max(1, len(work) - train - held_out)
     test_offset = (seed * test) % max(1, len(reported) - test)
     window = work[work_offset:work_offset + train + held_out]

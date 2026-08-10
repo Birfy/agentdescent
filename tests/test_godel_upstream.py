@@ -12,8 +12,8 @@ from examples.godel_agent import godel_agent_self_modify as ga
 
 
 def _task():
-    from examples._money_domain import money_splits
-    return money_splits(0)[0][0]
+    from examples._gsm8k_domain import gsm8k_splits
+    return gsm8k_splits(0)[0][0]
 
 
 def test_the_gateless_flag_exists_and_changes_the_acceptance_rule():
@@ -64,7 +64,7 @@ def test_the_proposal_is_written_by_the_artifacts_own_improvement_prompt():
         seen["prompt"] = prompt
         return "```python\n" + ga.GODEL_INITIAL_SOURCE + "```"
 
-    policy.propose(llm, source, _task(), "$1.40", 0.0)
+    policy.propose(llm, source, _task(), "the answer is 5", 0.0)
     assert seen["prompt"].startswith("SENTINEL-FROM-THE-ARTIFACT"), (
         "the meta-prompt did not come from the artifact")
 

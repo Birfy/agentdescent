@@ -32,13 +32,49 @@ import examples.godel_agent.godel_agent_self_modify as godel_module
 
 ANSWERS = {task.question: task.answer_cents for task in TASKS}
 
+
+def _gsm8k_answers():
+    """Question -> gold, for the six ports whose domain is now GSM8K.
+
+    Without this the stub answered a GSM8K prompt with the money domain's
+    fallback string, every proposal came back invalid, nothing committed, and
+    the archive never grew -- so a test named for the population aggregator
+    passed a fake_completion that had quietly stopped covering it.
+    """
+    from examples._gsm8k_domain import gold_answer, load_split
+
+    out = {}
+    for split in ("train", "test"):
+        for row in load_split(split):
+            gold = gold_answer(row["answer"])
+            if gold is not None:
+                out[row["question"].strip()] = gold
+    return out
+
+
+GSM8K_ANSWERS = _gsm8k_answers()
+
 FULL_RECIPE = [
     "sanitize:vessel", "collect:water", "collect:{ingredient}",
     "heat:water", "combine:water+{ingredient}", "serve:drink",
 ]
 
 
+#: The improved instruction's marker, the way "integer cents" was the money
+#: stub's. Without it the stub answers wrongly, so a run has headroom to find --
+#: an offline model that answers every item correctly leaves the baseline at
+#: 1.000, nothing can beat the head, nothing commits, and a test named for the
+#: population aggregator quietly stops exercising one.
+IMPROVED = "step by step"
+
+
 def _money_answer(prompt):
+    for question, answer in GSM8K_ANSWERS.items():
+        if question not in prompt:
+            continue
+        if IMPROVED in prompt.lower():
+            return f"Working it through step by step, the answer is {answer}"
+        return f"The answer is {int(answer) + 1}"
     for question, answer in ANSWERS.items():
         if question not in prompt:
             continue
@@ -60,7 +96,7 @@ def fake_completion(prompt):
     if 'with "task_prompt" and "mutation_prompt" strings' in lower:
         return json.dumps(
             {
-                "task_prompt": "Compute carefully and return integer cents only.",
+                "task_prompt": "Work the problem step by step, then state the number.",
                 "mutation_prompt": "Generalize evaluator feedback into domain rules.",
             }
         )
@@ -72,21 +108,21 @@ def fake_completion(prompt):
         # deduplicate to one entry and no tournament ever has two to sample.
         tag = abs(hash(prompt)) % 1000
         return json.dumps(
-            {"task_prompt": f"Compute carefully and return integer cents only. [{tag}]"})
+            {"task_prompt": f"Work the problem step by step, then state the number. [{tag}]"})
     if "aflow's graph optimizer" in lower:
         return json.dumps(
             {
                 "modification": "learn integer-cents formatting",
-                "solve_instruction": "Compute carefully and return integer cents only.",
-                "review_instruction": "Verify arithmetic and return integer cents only.",
+                "solve_instruction": "Work the problem step by step, then state the number.",
+                "review_instruction": "Check each step by step and restate the number.",
             }
         )
     if "reflexion's verbal reflection module" in lower:
-        return "Compute carefully and return monetary answers as integer cents only."
+        return "Work the problem step by step, then state the number."
     if "self-refine's feedback module" in lower:
-        return "The answer used dollars; the evaluator expects integer cents."
+        return "The attempt skipped the working; it should go step by step."
     if "self-refine's refine module" in lower:
-        return "Compute carefully and return monetary answers as integer cents only."
+        return "Work the problem step by step, then state the number."
     if "sica's meta-improvement tool" in lower:
         return """```python
 def agent_prompt(question):
@@ -151,14 +187,14 @@ def self_improvement_prompt(source, feedback):
             "agent0 co-evolution update",
         )
     ):
-        return "Represent monetary totals as integer cents and output only that integer."
+        return "Work the problem step by step, then state the number last."
     if "produce their union" in lower:
-        return ("Merged union: compute carefully and return monetary answers "
-                "as integer cents only, keeping every proposed rule.")
+        return ("Merged union: work the problem step by step and state the "
+                "number last, keeping every proposed rule.")
     answer = _money_answer(prompt)
     if answer is not None:
         return answer
-    return "Represent monetary totals as integer cents and output only that integer."
+    return "Work the problem step by step, then state the number last."
 
 
 def _offline_run(algorithm, mode):

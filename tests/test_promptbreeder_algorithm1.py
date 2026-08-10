@@ -72,8 +72,8 @@ def _genome():
 
 def _task():
     from agentdescent.evolution import Task
-    return Task(id="train:m00", prompt="A pen costs $1.40. What is the total?",
-                meta={"answer_cents": "140", "split": "train"})
+    return Task(id="train:0", prompt="A pen costs 3 dollars. Two pens cost?",
+                meta={"answer": "6", "split": "train"})
 
 
 @pytest.mark.parametrize("operator", OPERATORS)
@@ -88,13 +88,13 @@ def test_every_operator_either_builds_a_prompt_or_says_why_not(operator):
          for i in range(4)],
         [{"task_prompt": "elite a"}, {"task_prompt": "elite b"}])
     sampler = OperatorSampler(seed=0)
-    prompt = build_prompt(operator, _genome(), _task(), "140", 1.0, view,
+    prompt = build_prompt(operator, _genome(), _task(), "6", 1.0, view,
                           sampler.rng())
     assert prompt, f"{operator} could not build a prompt from a full population"
     # The gold answer appears only where the paper's operator is *defined* over
     # execution feedback, and only for a train item -- see
     # `test_proposals_only_ever_see_the_train_split` for why that is safe.
-    if "140" in prompt:
+    if "'6'" in prompt or "It wanted: '6'" in prompt:
         assert operator in ("first_order", "lamarckian"), (
             f"{operator} shows the item's answer without consuming feedback")
 
@@ -115,11 +115,11 @@ def test_lamarckian_needs_a_correct_working_not_just_any_output():
     """Its input is a working-out the grader *accepted*; reverse-engineering an
     instruction from a wrong answer teaches the wrong instruction."""
     view, sampler = PopulationView(), OperatorSampler(seed=0)
-    assert build_prompt("lamarckian", _genome(), _task(), "140", 0.0, view,
+    assert build_prompt("lamarckian", _genome(), _task(), "6", 0.0, view,
                         sampler.rng()) is None
     assert build_prompt("lamarckian", _genome(), _task(), "", 1.0, view,
                         sampler.rng()) is None
-    assert build_prompt("lamarckian", _genome(), _task(), "140", 1.0, view,
+    assert build_prompt("lamarckian", _genome(), _task(), "6", 1.0, view,
                         sampler.rng())
 
 
@@ -319,7 +319,7 @@ def test_hypermutation_is_two_steps_and_ends_at_the_task_prompt():
     # terminates quickly and does not assume an order.
     for _ in range(200):
         before = len(calls)
-        payload = policy.propose(llm, rendered, _task(), "140", 1.0)
+        payload = policy.propose(llm, rendered, _task(), "6", 1.0)
         drawn = [u for u, _ in calls[before:]]
         if any(u.endswith(":apply") for u in drawn):
             assert len(drawn) == 2, "the second step did not run"
