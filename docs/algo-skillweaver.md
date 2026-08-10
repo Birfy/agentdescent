@@ -1,16 +1,23 @@
 # SkillWeaver — Web agent API synthesis
 
-**Fidelity class: `environment_analogue`** — see [port fidelity](port-fidelity.md) for
-what the classes mean. This port is measured in the runtime matrix: the mechanism is
-preserved and measured under AgentDescent's runtimes; it is **not** a
-paper-benchmark reproduction.
+> **API-library self-evolution.** Propose, practise, verify and hone reusable
+> web APIs into a growing library. Runs through the shared
+> [`MethodPolicy`](policies.md) runner with `self_verify` on (the reward model).
+> Example:
+> [`examples/skillweaver/skillweaver_web_apis.py`](https://github.com/Birfy/agentdescent/blob/main/examples/skillweaver/skillweaver_web_apis.py).
 
 | | |
 |---|---|
-| Paper | "SkillWeaver: Web Agents can Self-Improve by Discovering and Honing Skills", Zheng et al., 2025 ([arXiv:2504.07079](https://arxiv.org/abs/2504.07079)) |
-| Upstream code (pinned) | [OSU-NLP-Group/SkillWeaver@f2a63d65](https://github.com/OSU-NLP-Group/SkillWeaver/tree/f2a63d65d0f6ff46ac30e817cede8797f8f25b97) |
-| Definition | [`examples/skillweaver/skillweaver_web_apis.py`](https://github.com/Birfy/agentdescent/blob/main/examples/skillweaver/skillweaver_web_apis.py) |
-| Domain | deterministic settings web service (12 form tasks, disjoint splits) |
+| **Paper** | *SkillWeaver: Web Agents can Self-Improve by Discovering and Honing Skills* — Zheng et al., 2025 ([arXiv:2504.07079](https://arxiv.org/abs/2504.07079)) |
+| **Upstream code** | [OSU-NLP-Group/SkillWeaver@f2a63d65](https://github.com/OSU-NLP-Group/SkillWeaver/tree/f2a63d65d0f6ff46ac30e817cede8797f8f25b97) |
+| **Example** | [`examples/skillweaver/skillweaver_web_apis.py`](https://github.com/Birfy/agentdescent/blob/main/examples/skillweaver/skillweaver_web_apis.py) |
+| **Domain** | deterministic settings web service — 48 form tasks, 16/16/16 splits |
+| **Layer** | L1 (`blast_radius=0.6`, set by the shared runner) |
+| **Fidelity** | `environment_analogue` — [what the classes mean](port-fidelity.md) |
+
+This port is measured in the [runtime matrix](matrix-overview.md): the mechanism
+is preserved and measured under AgentDescent's runtimes; it is **not** a
+paper-benchmark reproduction.
 
 ## The mechanism
 
@@ -34,10 +41,11 @@ execution throws**). The product is a growing library of plug-and-play APIs.
 - A deterministic settings service replaces Dockerized WebArena.
 - Key-match retrieval replaces the paper's API-doc retrieval.
 
-## Measured results
+## Measured results — settings site
 
 Three seeds, `async_pipeline`, 80 rollouts each, 8 workers, `--staleness full`,
-`self_verify` on (the reward model), `deepseek-v4-flash` at temperature 0.7.
+reflective merge **off** and `self_verify` on (both this method's own
+declaration), `deepseek-v4-flash` at temperature 0.7.
 Recorded in
 [`bench/results/skillweaver-web-apis.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/skillweaver-web-apis.json).
 
@@ -48,43 +56,15 @@ Recorded in
 | 2 | 0.000 → **0.875** | 0.000 → 1.000 | 3/80 | 1121 |
 
 Mean 0.771, all three seeds moved. Compare
-[Voyager](algo-voyager.md#measured-results)'s 1.000 / 1.000 / 0.000 on the same
-runtime and budget: this site *names the concepts* its API needs — "the page
-hydrates before accepting input and confirms with a toast" — where Voyager's
-world named neither the vessel nor its `X+Y` syntax. Even after both were made
-learnable, the site that says more is the one whose seeds agree.
+[Voyager](algo-voyager.md#measured-results-crafting-world)'s 1.000 / 1.000 / 0.000
+on the same runtime and budget: **this site names the concepts its API needs** —
+"the page hydrates before accepting input and confirms with a toast" — where
+Voyager's world names neither. The environment that says more is the one whose
+seeds agree, which is worth knowing before reading either as a fact about the
+algorithm.
 
 See the caveat on [PromptBreeder](algo-promptbreeder.md#measured-results-gsm8k): one
 run per seed does not pin a number here either.
-
-!!! danger "The site hinted the concepts and still demanded the exact tokens"
-    Its message says the page hydrates and confirms with a toast. Under string
-    equality it required `wait:hydration-complete` and `assert:saved-toast`
-    exactly, so every one of these did the right thing and was refused:
-
-    | written | refused because |
-    |---|---|
-    | `wait:hydration`, `wait:page-hydrated` | not the exact token |
-    | `assert:toast`, `assert:success-toast` | not the exact token |
-    | `fill:timezone = UTC` | spaces around the equals sign |
-
-    Steps are matched on **verb plus content** now, declared once in `_STEPS`: a
-    verb whose argument the site only gestures at is matched on the verb, and a
-    verb whose argument comes from the task — the page, the field, the value —
-    must carry it. The wrong page, the wrong field and the wrong value all still
-    fail.
-
-!!! danger "Missing, misplaced and wrong-argument were one message"
-    The site reported *"a 'fill' step never succeeded"* to an agent that had
-    written a `fill` in the wrong place, and the same words to one whose `fill`
-    carried the wrong value. Three failures, three repairs: an agent told a step
-    is missing writes another one, and an agent told a wrong value is out of
-    order reorders it. Neither ever fixes what is actually wrong — the loop that
-    held Voyager at 0.000 across three seeds.
-
-    The site now separates *absent* from *present but late* from *present with
-    an argument the page did not act on*, and still names neither the expected
-    argument nor the steps to come.
 
 !!! note "Two departures that are not just \"a deterministic service replaces WebArena\""
     **The success check is a model upstream and the environment here.**
@@ -98,5 +78,19 @@ run per seed does not pin a number here either.
     model only functions with `test_count > 0` (`is_tested`). Verification is a
     scheduled phase over the library there, and a per-proposal re-roll here.
 
-    The domain was also 12 tasks in 4/4/4 splits, which `run_port` refuses at
-    eight workers; it is 48 in 16/16/16 now.
+## Run it
+
+```bash
+python -m examples.skillweaver.skillweaver_web_apis --dry-run
+
+# one seed of the three above
+python -m examples.skillweaver.skillweaver_web_apis --yes --seed 0 \
+    --provider openai --model deepseek-v4-flash \
+    --async --workers 8 --budget-rollouts 80 --staleness full \
+    --temperature 0.7 --max-seconds 3600
+```
+
+Flags: [the MethodPolicy command line](self-evolution-examples.md#the-methodpolicy-command-line).
+
+Offline tests: `tests/test_skillweaver_upstream.py`,
+`tests/test_candidate_methods.py`.

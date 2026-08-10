@@ -77,10 +77,8 @@ nav:
     - Complete example — skill evolution: skill-evolution.md
     - Efficiency experiments: efficiency.md
     - Measured results: results.md
-    - Runtime matrix — overview: matrix-overview.md
+    - Runtime matrix: matrix-overview.md
     - Runtime matrix — report: matrix-report.md
-    - Runtime matrix — parallel speedup: matrix-parallel-speedup.md
-    - Runtime matrix — async behaviour: matrix-async.md
   - Self-evolution algorithms:
     - Overview: self-evolution-examples.md
     - Porting checklist: porting-checklist.md

@@ -1,16 +1,23 @@
 # Voyager — Embodied skill-library agent
 
-**Fidelity class: `environment_analogue`** — see [port fidelity](port-fidelity.md) for
-what the classes mean. This port is measured in the runtime matrix: the mechanism is
-preserved and measured under AgentDescent's runtimes; it is **not** a
-paper-benchmark reproduction.
+> **Skill-library self-evolution.** Grow a library of executable skills from a
+> curriculum, repairing failed programs from environment feedback. Runs through
+> the shared [`MethodPolicy`](policies.md) runner with `self_verify` on (the
+> critic). Example:
+> [`examples/voyager/voyager_skill_library.py`](https://github.com/Birfy/agentdescent/blob/main/examples/voyager/voyager_skill_library.py).
 
 | | |
 |---|---|
-| Paper | "Voyager: An Open-Ended Embodied Agent with Large Language Models", Wang et al., 2023 ([arXiv:2305.16291](https://arxiv.org/abs/2305.16291)) |
-| Upstream code (pinned) | [MineDojo/Voyager@55e45a88](https://github.com/MineDojo/Voyager/tree/55e45a880755d0c8c66ca7fb5fe7962ac8974f89) |
-| Definition | [`examples/voyager/voyager_skill_library.py`](https://github.com/Birfy/agentdescent/blob/main/examples/voyager/voyager_skill_library.py) |
-| Domain | deterministic crafting world (12 recipe goals, disjoint splits) |
+| **Paper** | *Voyager: An Open-Ended Embodied Agent with Large Language Models* — Wang et al., 2023 ([arXiv:2305.16291](https://arxiv.org/abs/2305.16291)) |
+| **Upstream code** | [MineDojo/Voyager@55e45a88](https://github.com/MineDojo/Voyager/tree/55e45a880755d0c8c66ca7fb5fe7962ac8974f89) |
+| **Example** | [`examples/voyager/voyager_skill_library.py`](https://github.com/Birfy/agentdescent/blob/main/examples/voyager/voyager_skill_library.py) |
+| **Domain** | deterministic crafting world — 48 recipe goals, 16/16/16 splits |
+| **Layer** | L1 (`blast_radius=0.6`, set by the shared runner) |
+| **Fidelity** | `environment_analogue` — [what the classes mean](port-fidelity.md) |
+
+This port is measured in the [runtime matrix](matrix-overview.md): the mechanism
+is preserved and measured under AgentDescent's runtimes; it is **not** a
+paper-benchmark reproduction.
 
 ## The mechanism
 
@@ -36,10 +43,12 @@ from a gold program.
 - Key-match retrieval replaces embedding retrieval.
 - The task pool + difficulty sampling is an analogue of the generative curriculum, which proposes novel tasks.
 
-## Measured results
+## Measured results — crafting world
 
 Three seeds, `async_pipeline`, 80 rollouts each, 8 workers, `--staleness full`,
-`self_verify` on (the critic), `deepseek-v4-flash` at temperature 0.7. Recorded
+reflective merge **off** and `self_verify` on (both this method's own
+declaration — the library overwrites a key, so a synthesised merge would not be
+the algorithm), `deepseek-v4-flash` at temperature 0.7. Recorded
 in
 [`bench/results/voyager-skill-library.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/voyager-skill-library.json).
 
@@ -57,44 +66,38 @@ that works is all the run needs.
 See the caveat on [PromptBreeder](algo-promptbreeder.md#measured-results-gsm8k): one
 run per seed does not pin a number here either.
 
-!!! danger "Three seeds scored 0.000 against a world that could not be solved"
-    The first runs reported `quality 0.000 -> 0.000`, `accepted=0/80`, and
-    **`invalid=0`** on every seed. Well-formed skills, none of them accepted.
-    Reading the trajectories rather than the summary showed the solver had
-    already discovered all three missing steps, and was failing on things the
-    world never said.
-
-    **Two arguments the world never named.** The required sequence contains
-    `combine:water+mint` and `sanitize:vessel`, matched by string equality. The
-    `X+Y` syntax appears in no primitive list, no seed skill and no feedback
-    message; neither does the word "vessel". The solver wrote
-    `combine:water_clove`, `combine:berry:water`, `combine:thyme_water` — every
-    plausible spelling but that one — and `sanitize:water`, `sanitize:berry`.
-    Steps are matched on **verb plus content** now: an argument the world does
-    not name is matched on the verb alone, and an argument that follows from the
-    goal must still contain it.
-
-    **A feedback message that was wrong, not merely terse.** With `sanitize`
-    written after the two `collect`s, the world consumed the sanitize, looked for
-    a collect among the actions *after* it, found none, and reported *"a
-    'collect' step never happened"* — to an agent that had written two. An agent
-    that believes it adds a third collect; it never reorders. The message now
-    separates a step that is **absent** from one that is **late**, while still
-    naming neither the step nor where it belongs.
-
-    Not handing over the required program and withholding what the world observed
-    are different things, and upstream conflates neither: Minecraft tells the
-    agent what it is missing. What has to be discovered here is still the
-    **sequence**, which is the skill the paper is about.
-
-!!! note "The library overwrites; it is not add-only"
-    This page used to claim "an add-only skill library ... matching upstream's
-    versioned, never-overwritten library". `SkillManager.add_new_skill` prints
-    *"Skill {name} already exists. Rewriting!"*, deletes the vector-store entry
-    and reassigns `self.skills[program_name]`. The older code is dumped to disk
-    as `{name}V2.js` and **retrieval never reads it** — `retrieve_skills` returns
+!!! note "Upstream's library overwrites; it is not add-only"
+    `SkillManager.add_new_skill` prints *"Skill {name} already exists.
+    Rewriting!"*, deletes the vector-store entry and reassigns
+    `self.skills[program_name]`. The older code is dumped to disk as
+    `{name}V2.js` and **retrieval never reads it** — `retrieve_skills` returns
     `self.skills[...]["code"]`. Versioned on disk and overwritten in memory are
-    different libraries, and only the second one is the algorithm.
+    different libraries, and only the second one is the algorithm — which is also
+    why this port declares `reflective=False`.
 
-    The domain was also 12 goals in 4/4/4 splits, which `run_port` refuses at
-    eight workers; it is 48 in 16/16/16 now.
+!!! warning "Seed 2 finds nothing, and the world is the reason to check first"
+    What has to be discovered here is the **sequence**, which is the skill the
+    paper is about — but a world that names none of its own vocabulary makes that
+    undiscoverable rather than hard. Steps are matched on **verb plus content**:
+    an argument the world never names is matched on the verb alone, and one that
+    follows from the goal must contain it. Feedback separates a step that is
+    **absent** from one that is **late**, because an agent told a step is missing
+    writes another one and never reorders. Both were needed before any seed
+    solved this world at all; one still does not.
+
+## Run it
+
+```bash
+python -m examples.voyager.voyager_skill_library --dry-run
+
+# one seed of the three above
+python -m examples.voyager.voyager_skill_library --yes --seed 0 \
+    --provider openai --model deepseek-v4-flash \
+    --async --workers 8 --budget-rollouts 80 --staleness full \
+    --temperature 0.7 --max-seconds 3600
+```
+
+Flags: [the MethodPolicy command line](self-evolution-examples.md#the-methodpolicy-command-line).
+
+Offline tests: `tests/test_voyager_upstream.py`,
+`tests/test_candidate_methods.py`.

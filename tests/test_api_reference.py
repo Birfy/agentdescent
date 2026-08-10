@@ -9,6 +9,7 @@ here instead of shipping.
     python -m tools.gen_api_docs        # the fix, when this fails
 """
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -67,6 +68,50 @@ def test_the_generator_reads_the_same_class_on_every_interpreter():
 
     got = {sig for sig, _ in _methods(_Probe)}
     assert got == {"stat(a: int) -> str", "clsm(a: int) -> str", "inst(a: int) -> str"}, got
+
+
+def _section(text: str, heading: str) -> str:
+    """One `### ` section of the page, up to the next heading of any level."""
+    start = text.index(heading)
+    rest = text[start + len(heading):]
+    end = re.search(r"\n#{2,3} ", rest)
+    return rest[: end.start()] if end else rest
+
+
+@pytest.mark.parametrize("name", ["evolve", "async_evolve", "evolve_skill"])
+def test_every_parameter_of_an_entry_point_reaches_the_page(name):
+    """A heading that reads `evolve(...)` documents no parameters at all.
+
+    67 signatures were too long for their heading and collapsed to `(...)`,
+    including every entry point this library has. The parameters were in the
+    code and the prose describing them was in the docstrings; neither reached a
+    reader of the reference.
+    """
+    import inspect
+
+    section = _section(API.read_text(encoding="utf-8"), f"### `{name}(...)`")
+    missing = [p for p in inspect.signature(getattr(agentdescent, name)).parameters
+               if f"`{p}`" not in section and f"`**{p}`" not in section]
+    assert not missing, f"{name} parameters absent from docs/api.md: {missing}"
+
+
+def test_the_keyword_only_marker_is_emitted_once_per_signature():
+    """`*` used to be re-emitted before every keyword-only parameter.
+
+    The guard read `"*" not in parts[-1:]`, which is true again as soon as one
+    keyword-only parameter has been appended, so `evolve` rendered thirty-odd
+    of them. It was invisible while every long signature collapsed to `(...)`.
+    """
+    section = _section(API.read_text(encoding="utf-8"), "### `evolve(...)`")
+    block = section.split("```python")[1].split("```")[0]
+    assert block.count("\n    *,\n") == 1, block
+
+
+def test_a_table_of_blank_prose_is_not_printed():
+    """A dataclass of counters documents none of its fields; a table of empty
+    cells repeats the signature above it and says nothing."""
+    section = _section(API.read_text(encoding="utf-8"), "### `FusionStats(...)`")
+    assert "| parameter |" not in section
 
 
 def test_no_sphinx_roles_leak_into_the_page():

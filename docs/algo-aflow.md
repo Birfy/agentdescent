@@ -1,16 +1,22 @@
 # AFlow — Agentic workflow search
 
-**Fidelity class: `mechanism_microport`** — see [port fidelity](port-fidelity.md) for
-what the classes mean. This port is measured in the runtime matrix: the mechanism is
-preserved and measured under AgentDescent's runtimes; it is **not** a
-paper-benchmark reproduction.
+> **Workflow self-evolution.** Search the space of code-expressed agentic
+> workflows, with soft mixed selection over the top-k scored ones. Runs through
+> the shared [`MethodPolicy`](policies.md) runner. Example:
+> [`examples/aflow/aflow_workflow_search.py`](https://github.com/Birfy/agentdescent/blob/main/examples/aflow/aflow_workflow_search.py).
 
 | | |
 |---|---|
-| Paper | "AFlow: Automating Agentic Workflow Generation", Zhang et al., ICLR 2025 ([arXiv:2410.10762](https://arxiv.org/abs/2410.10762)) |
-| Upstream code (pinned) | [FoundationAgents/AFlow@3f457218](https://github.com/FoundationAgents/AFlow/tree/3f457218fc716093fe53f6df8a5d5e6379d66346) |
-| Definition | [`examples/aflow/aflow_workflow_search.py`](https://github.com/Birfy/agentdescent/blob/main/examples/aflow/aflow_workflow_search.py) |
-| Domain | deterministic integer-cents arithmetic (12 tasks, disjoint splits) |
+| **Paper** | *AFlow: Automating Agentic Workflow Generation* — Zhang et al., ICLR 2025 ([arXiv:2410.10762](https://arxiv.org/abs/2410.10762)) |
+| **Upstream code** | [FoundationAgents/AFlow@3f457218](https://github.com/FoundationAgents/AFlow/tree/3f457218fc716093fe53f6df8a5d5e6379d66346) |
+| **Example** | [`examples/aflow/aflow_workflow_search.py`](https://github.com/Birfy/agentdescent/blob/main/examples/aflow/aflow_workflow_search.py) |
+| **Domain** | **GSM8K** ([`openai/gsm8k`](https://huggingface.co/datasets/openai/gsm8k), `main`), 64/64/64 splits |
+| **Layer** | L1 (`blast_radius=0.6`, set by the shared runner) |
+| **Fidelity** | `mechanism_microport` — [what the classes mean](port-fidelity.md) |
+
+This port is measured in the [runtime matrix](matrix-overview.md): the mechanism
+is preserved and measured under AgentDescent's runtimes; it is **not** a
+paper-benchmark reproduction.
 
 ## The mechanism
 
@@ -39,7 +45,8 @@ modifications and whether each helped — injected into the prompt.
 ## Measured results — GSM8K
 
 Three seeds, `async_pipeline`, 80 rollouts each, 8 workers, `--staleness full`,
-`deepseek-v4-flash` at temperature 0.7. Recorded in
+reflective merge on (this method's own declaration), `deepseek-v4-flash` at
+temperature 0.7. Recorded in
 [`bench/results/aflow-gsm8k.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/aflow-gsm8k.json).
 
 | seed | test quality | validation | accepted | calls | wall |
@@ -70,41 +77,18 @@ alongside the arithmetic. Against a benchmark with a real floor they land within
 0.026 of each other, and what separates them is what each spends to get there.
 That reversal is the clearest thing the move to GSM8K bought.
 
-!!! danger "The selection rule was uniform, and said it was not"
-    The port implemented `λ·uniform + (1−λ)·softmax(α·(s−s_max))` and dropped
-    one line of upstream's `select_round`:
+## Run it
 
-    ```python
-    scores = [item["score"] * 100 for item in sorted_items]
-    ```
+```bash
+python -m examples.aflow.aflow_workflow_search --dry-run
 
-    Upstream's α is 0.2 *against percentages*, so the effective temperature is
-    20 against accuracies in `[0, 1]` — and this port's scores are accuracies in
-    `[0, 1]` exactly as upstream's are, so the scaling is not a unit conversion.
-    It **is** the temperature. Over a pool scoring 0.50 / 0.40 / 0.25 / 0.10:
+# one seed of the three above
+python -m examples.aflow.aflow_workflow_search --yes --seed 0 \
+    --provider openai --model deepseek-v4-flash \
+    --async --workers 8 --budget-rollouts 80 --staleness full \
+    --temperature 0.7 --max-seconds 3600
+```
 
-    | | pick distribution |
-    |---|---|
-    | upstream | `[0.688, 0.158, 0.079, 0.075]` |
-    | this port, before | `[0.265, 0.257, 0.245, 0.233]` |
-    | uniform | `[0.250, 0.250, 0.250, 0.250]` |
+Flags: [the MethodPolicy command line](self-evolution-examples.md#the-methodpolicy-command-line).
 
-    Uniform to three digits. The port ran, logged "soft mixed probability", and
-    had no exploitation at all.
-
-    Three smaller departures went with it. **α and λ were the paper's 0.4 / 0.2**
-    rather than the pinned code's own `DEFAULT_ALPHA = 0.2` /
-    `DEFAULT_LAMBDA = 0.3` — where released code and paper disagree about a
-    constant, the code is what produced the published numbers. **The seed
-    workflow was force-appended to the pool**; upstream's `get_top_rounds` moves
-    round 1 to the front only when it already made the cut, and `select_round`
-    re-sorts by score immediately after, so that move changes nothing and
-    membership is the whole rule. And **experience carried neither the parent's
-    score nor whether each past modification helped**, where upstream's
-    `format_experience` reports both and `check_modification` regenerates rather
-    than accept a repeat.
-
-    An offline test had pinned the wrong behaviour:
-    `test_soft_mixed_keeps_the_seed_and_favours_scores` asserted the seed was
-    always reachable, which was true only because of the force-append. The test
-    was protecting the bug.
+Offline tests: `tests/test_aflow_upstream.py`, `tests/test_candidate_methods.py`.

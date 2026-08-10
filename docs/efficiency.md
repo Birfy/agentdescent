@@ -196,8 +196,8 @@ one environment in it.
 The async path filters staleness inline and never reaches `Aggregator`'s filter,
 which is where the synchronous ratio is counted. Its stale column read **0%** —
 not "no staleness" but "not measured", and the two are indistinguishable in a
-table. Now counted at the inline gate, it reads 83%, which is the explanation for
-the row above it.
+table. Counted at the inline gate, and with the double-counted denominator fixed,
+it reads **93%**, which is the explanation for the row above it.
 
 
 ## On a live model, on a published algorithm

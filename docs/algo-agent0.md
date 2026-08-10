@@ -1,16 +1,23 @@
 # Agent0 — Tool-integrated curriculum co-evolution
 
-**Fidelity class: `inference_analogue`** — see [port fidelity](port-fidelity.md) for
-what the classes mean. This port is measured in the runtime matrix: the mechanism is
-preserved and measured under AgentDescent's runtimes; it is **not** a
-paper-benchmark reproduction.
+> **Curriculum/executor co-evolution.** A Curriculum agent writes tasks at the
+> Executor's frontier and rewards tool use; the Executor answers them
+> stop-and-go through a sandboxed calculator. Runs through the shared
+> [`MethodPolicy`](policies.md) runner. Example:
+> [`examples/agent0/agent0_tool_curriculum.py`](https://github.com/Birfy/agentdescent/blob/main/examples/agent0/agent0_tool_curriculum.py).
 
 | | |
 |---|---|
-| Paper | "Agent0: Unleashing Self-Evolving Agents from Zero Data via Tool-Integrated Reasoning", 2025 ([arXiv:2511.16043](https://arxiv.org/abs/2511.16043)) |
-| Upstream code (pinned) | [aiming-lab/Agent0@f775b510](https://github.com/aiming-lab/Agent0/tree/f775b5101e62fe92976831adf4a21a38fcc0a767) |
-| Definition | [`examples/agent0/agent0_tool_curriculum.py`](https://github.com/Birfy/agentdescent/blob/main/examples/agent0/agent0_tool_curriculum.py) |
-| Domain | self-generated cart arithmetic with a sandboxed calculator; frozen evaluation carts |
+| **Paper** | *Agent0: Unleashing Self-Evolving Agents from Zero Data via Tool-Integrated Reasoning* — 2025 ([arXiv:2511.16043](https://arxiv.org/abs/2511.16043)) |
+| **Upstream code** | [aiming-lab/Agent0@f775b510](https://github.com/aiming-lab/Agent0/tree/f775b5101e62fe92976831adf4a21a38fcc0a767) |
+| **Example** | [`examples/agent0/agent0_tool_curriculum.py`](https://github.com/Birfy/agentdescent/blob/main/examples/agent0/agent0_tool_curriculum.py) |
+| **Domain** | self-generated cart arithmetic with a sandboxed calculator — 16 self-play slots + 16/16 frozen evaluation carts |
+| **Layer** | L1 (`blast_radius=0.6`, set by the shared runner) |
+| **Fidelity** | `inference_analogue` — [what the classes mean](port-fidelity.md) |
+
+This port is measured in the [runtime matrix](matrix-overview.md): the mechanism
+is preserved and measured under AgentDescent's runtimes; it is **not** a
+paper-benchmark reproduction.
 
 ## The mechanism
 
@@ -35,10 +42,11 @@ interpreter in stop-and-go fashion.
 - Verbal policy memory replaces ADPO post-training.
 - One calculator tool replaces the Python interpreter; no repetition penalty.
 
-## Measured results
+## Measured results — self-play carts
 
 Three seeds, `async_pipeline`, 80 rollouts each, 8 workers, `--staleness full`,
-`deepseek-v4-flash` at temperature 0.7. Recorded in
+reflective merge on (this method's own declaration), four executor samples per
+generated task, `deepseek-v4-flash` at temperature 0.7. Recorded in
 [`bench/results/agent0-tool-curriculum.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/agent0-tool-curriculum.json).
 
 | seed | test quality | validation | accepted | invalid | calls |
@@ -47,42 +55,45 @@ Three seeds, `async_pipeline`, 80 rollouts each, 8 workers, `--staleness full`,
 | 1 | 0.125 → **0.625** | 0.000 → 0.500 | 2/80 | 0 | 1584 |
 | 2 | 0.000 → **0.500** | 0.000 → 0.688 | 2/80 | 0 | 1678 |
 
-All three seeds moved; mean gain **+0.458**, the largest of the three
-inference analogues ([Absolute Zero](algo-absolute-zero.md) +0.313,
-[R-Zero](algo-r-zero.md) +0.230) — and the most expensive, at ~1600 calls per
-seed against their ~600 and ~940. Four executor samples times two tool turns is
-eight model calls per training rollout.
+All three seeds moved, by exactly **+0.500** each — the largest gain of the three
+inference analogues ([Absolute Zero](algo-absolute-zero.md#measured-results-self-play-carts)
++0.313, [R-Zero](algo-r-zero.md#measured-results-self-play-carts) +0.230) — and
+the most expensive, at ~1600 calls per seed against their ~620 and ~940. Four
+executor samples times two tool turns is eight model calls per training rollout.
 
 Read the *gain*: the carts are generated, so the baseline is not 0.000 and the
 ceiling is not 1.000. See the caveat on
 [PromptBreeder](algo-promptbreeder.md#measured-results-gsm8k) on one run per seed.
 
-!!! danger "Both curriculum reward components were missing"
-    `curriculum_reward.py`:
+!!! note "Both reward components are numbers in the prompt, not adjectives"
+    `curriculum_reward.py` is
+    `(min(p, 1−p) if question else −1) − penalty + calculate_tool_reward(...)`.
 
-    ```python
-    final_score = (min(score, 1 - score) if question else -1) - penalty \
-                  + calculate_tool_reward(predicts[i])
-    ```
+    **Uncertainty** is over the executor's *self-consistency* — `max_count /
+    len(results)`, the same computation [R-Zero](algo-r-zero.md) uses — so the
+    executor is sampled **four times** per generated task and the majority share
+    is what the curriculum sees. A single rollout's grounded reward would be 0 or
+    1, where `1 − 2|p − 0.5|` is zero at both ends and the signal does not exist.
+    Upstream writes `min(p, 1−p)`; `1 − 2|p − 0.5|` is exactly twice it, and
+    `DifficultyWeighted`'s `4p(1−p)` shares its peak and zeros with either.
 
-    **The uncertainty term was always zero.** `score` there is
-    `max_count / len(results)` from `generate_results` — the executor's
-    *self-consistency* over repeated samples, the same computation R-Zero uses.
-    This port fed the term the single rollout's **grounded reward**, which is 0
-    or 1, and `1 - 2|p - 0.5|` is zero at both. The curriculum signal did not
-    exist on any item of any run. It samples the executor four times now and
-    takes the majority share.
+    **The tool bonus** is `min(tool_call_count, 4) × 0.05`, and the update prompt
+    reports `R_tool` with the call count that produced it — a prompt that says
+    "with a tool-use bonus" and carries no value is not surfacing the component.
 
-    Upstream's term is `min(p, 1-p)`; the port's `1 - 2|p - 0.5|` is exactly
-    twice it. Same shape, and `DifficultyWeighted`'s `4p(1-p)` shares its peak
-    and zeros with either.
+## Run it
 
-    **The tool reward was never a number.** `calculate_tool_reward` is
-    `min(tool_call_count, 4) * 0.05`. The update prompt said "with a tool-use
-    bonus" and carried no value, while the notes claimed the component was
-    surfaced. It now reports `R_tool` and the call count that produced it.
+```bash
+python -m examples.agent0.agent0_tool_curriculum --dry-run
 
-!!! note "One `majority_share`, two ports"
-    R-Zero's `question_evaluate/evaluate.py` and Agent0's `generate_results` are
-    the same computation, so it lives in `_selfplay_domain` — separate copies are
-    how a fix to one leaves the other, and both had the same defect.
+# one seed of the three above
+python -m examples.agent0.agent0_tool_curriculum --yes --seed 0 \
+    --provider openai --model deepseek-v4-flash \
+    --async --workers 8 --budget-rollouts 80 --staleness full \
+    --temperature 0.7 --max-seconds 3600
+```
+
+Flags: [the MethodPolicy command line](self-evolution-examples.md#the-methodpolicy-command-line).
+
+Offline tests: `tests/test_selfplay_upstream.py`,
+`tests/test_candidate_methods.py`.

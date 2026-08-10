@@ -1,16 +1,22 @@
 # Self-Refine — Iterative feedback refinement
 
-**Fidelity class: `mechanism_microport`** — see [port fidelity](port-fidelity.md) for
-what the classes mean. This port is measured in the runtime matrix: the mechanism is
-preserved and measured under AgentDescent's runtimes; it is **not** a
-paper-benchmark reproduction.
+> **Feedback-loop self-evolution.** One model generates, critiques its own
+> answer, and refines from the critique. Runs through the shared
+> [`MethodPolicy`](policies.md) runner. Example:
+> [`examples/self_refine/self_refine_feedback_loop.py`](https://github.com/Birfy/agentdescent/blob/main/examples/self_refine/self_refine_feedback_loop.py).
 
 | | |
 |---|---|
-| Paper | "Self-Refine: Iterative Refinement with Self-Feedback", Madaan et al., 2023 ([arXiv:2303.17651](https://arxiv.org/abs/2303.17651)) |
-| Upstream code (pinned) | [madaan/self-refine@9a206d41](https://github.com/madaan/self-refine/tree/9a206d41e5d2d0c241bb441f41eeadb945afaa55) |
-| Definition | [`examples/self_refine/self_refine_feedback_loop.py`](https://github.com/Birfy/agentdescent/blob/main/examples/self_refine/self_refine_feedback_loop.py) |
-| Domain | deterministic integer-cents arithmetic (12 tasks, disjoint splits) |
+| **Paper** | *Self-Refine: Iterative Refinement with Self-Feedback* — Madaan et al., 2023 ([arXiv:2303.17651](https://arxiv.org/abs/2303.17651)) |
+| **Upstream code** | [madaan/self-refine@9a206d41](https://github.com/madaan/self-refine/tree/9a206d41e5d2d0c241bb441f41eeadb945afaa55) |
+| **Example** | [`examples/self_refine/self_refine_feedback_loop.py`](https://github.com/Birfy/agentdescent/blob/main/examples/self_refine/self_refine_feedback_loop.py) |
+| **Domain** | **GSM8K** ([`openai/gsm8k`](https://huggingface.co/datasets/openai/gsm8k), `main`), 64/64/64 splits |
+| **Layer** | L1 (`blast_radius=0.6`, set by the shared runner) |
+| **Fidelity** | `mechanism_microport` — [what the classes mean](port-fidelity.md) |
+
+This port is measured in the [runtime matrix](matrix-overview.md): the mechanism
+is preserved and measured under AgentDescent's runtimes; it is **not** a
+paper-benchmark reproduction.
 
 ## The mechanism
 
@@ -35,7 +41,8 @@ No training of any kind.
 ## Measured results — GSM8K
 
 Three seeds, `async_pipeline`, 80 rollouts each, 8 workers, `--staleness full`,
-`deepseek-v4-flash` at temperature 0.7, on a 192-core Linux host. Recorded in
+reflective merge on (this method's own declaration), `deepseek-v4-flash` at
+temperature 0.7, on a 192-core Linux host. Recorded in
 [`bench/results/self-refine-gsm8k.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/self-refine-gsm8k.json).
 
 | seed | test quality | validation | accepted | calls | wall |
@@ -61,36 +68,36 @@ the gain is real rather than small-sample luck.
 See the caveat on [PromptBreeder](algo-promptbreeder.md#measured-results-gsm8k): one
 run per seed does not pin a number here either.
 
-!!! danger "The previous numbers were measured against a fixture this repository wrote"
-    This row used to run on 48 hand-written arithmetic items, graded by a rule
-    chosen here — and **changed here**, mid-study, when it blocked progress: the
-    grader matched the whole reply, which made the output convention and the
-    reasoning mutually exclusive, so every method evolved prompts forbidding a
-    chain of thought.
+!!! danger "Why a benchmark, and not the fixture this repository used to write"
+    These rows used to run on 48 hand-written arithmetic items graded by a rule
+    chosen here — and **changed here**, mid-study, when it blocked progress. Its
+    baseline was **0.000 by construction**, because the seed instruction could not
+    satisfy an output convention no one had told it, so the old row read
+    1.000 / 0.938 / 1.000 from a floor of zero. A number produced against a target
+    its author can move is not a measurement of the method. GSM8K brings its own
+    questions, answer key and grader (the integer after `####` against the last
+    number the reply states); none of it is this repository's to adjust.
 
-    Both are legitimate things to do to a fixture and disqualifying for a
-    benchmark. A number produced against a target its author can move is not a
-    measurement of the method.
+    Loading it is where that can quietly reverse. `load_split` **asserts** the
+    published row counts — 7473 train, 1319 test — because an interrupted fetch
+    once returned 944 of 1319 test rows and raised nothing. A truncated benchmark
+    reads exactly like a benchmark. The splits come over `HF_ENDPOINT` as parquet
+    (the run host cannot reach `huggingface.co`), with `datasets-server` as the
+    fallback, and the on-disk cache is written whole and renamed.
 
-    What that fixture flattered, specifically: its baseline was **0.000 by
-    construction**, because the seed instruction could not satisfy an output
-    convention no one had told it. The old row read 1.000 / 0.938 / 1.000 from a
-    floor of zero. Here the floor is the model's own GSM8K accuracy and the same
-    method gains +0.391 above it.
+## Run it
 
-    GSM8K brings its own questions, its own answer key, and the standard grader:
-    the integer after `####` against the last number the reply states. Nothing in
-    it is this repository's to adjust.
+```bash
+python -m examples.self_refine.self_refine_feedback_loop --dry-run
 
-!!! note "Loading a real dataset is where a benchmark quietly becomes a fixture"
-    The run host cannot reach `huggingface.co`, so the splits come over
-    `HF_ENDPOINT` (a mirror) as parquet, with `datasets-server` as the fallback
-    where that is reachable.
+# one seed of the three above
+python -m examples.self_refine.self_refine_feedback_loop --yes --seed 0 \
+    --provider openai --model deepseek-v4-flash \
+    --async --workers 8 --budget-rollouts 80 --staleness full \
+    --temperature 0.7 --max-seconds 3600
+```
 
-    `load_split` asserts the published row counts — 7473 train and 1319 test —
-    rather than trusting them. That check exists because it caught the failure
-    first: an interrupted fetch of GSM8K's raw JSONL over a slow link returned
-    **944 of 1319** test rows and raised nothing at all. A truncated benchmark
-    reads exactly like a benchmark, and every number measured on one is wrong in
-    a direction nobody can see. The on-disk cache is written whole and renamed
-    for the same reason.
+Flags: [the MethodPolicy command line](self-evolution-examples.md#the-methodpolicy-command-line).
+
+Offline tests: `tests/test_self_refine_upstream.py`,
+`tests/test_candidate_methods.py`.

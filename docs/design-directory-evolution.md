@@ -449,8 +449,10 @@ skill 目录，只是活在内存里、靠 `render_skills()` 拼进 prompt。迁
 agent 可以**按需读取**它需要的那个 skill 文件，而不是把整个 skill 库塞进 prompt。
 这才是「skill 目录」相对于「prompt 拼接」的实质差别（渐进披露），也是当前实现拿不到的东西。
 
-EvoSkill 自带的两个聚合器（`TopKFrontierAggregator` / `SgdSkillAggregator`）与
-`FileTree` 正交，原样保留。
+EvoSkill 自带的聚合器与 `FileTree` 正交，原样保留。（写下这条时 EvoSkill 有两个：
+`TopKFrontierAggregator` 和按 `asynchronous` 切换的 `SgdSkillAggregator`。后者已被
+删除 —— 按调度切换聚合器等于让 async 那一格测量的是另一个算法，见
+[port fidelity](port-fidelity.md#evoskill-automated-skill-discovery)。）
 
 ### 5.3 ADAS / DGM —— 第三梯队，高价值但也是最大的安全面
 

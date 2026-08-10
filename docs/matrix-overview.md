@@ -1,45 +1,57 @@
-# The runtime matrix — results overview
+# The runtime matrix
 
-*This page aggregates the live serial/sync/async matrix across all eleven
-MethodPolicy ports. It is **pending the post-restructuring rerun** of
-`python -m bench.candidate_methods`; every table below is populated from
-`bench/results/candidate-methods-framework-final.json` by
-`bench/candidate_methods_report.py`. The previous run's report (against the
-pre-restructuring implementation) remains at
-[Runtime matrix](matrix-report.md) for provenance.*
+The runtime matrix asks one question of the eleven
+[`MethodPolicy` ports](self-evolution-examples.md#the-eleven-microports-and-analogues):
+**what does changing only the scheduler do?** Same method, same candidate and
+proposal-call budget, three runtimes:
 
-## The eleven newer ports
+- `serial` — `evolve(max_concurrency=1)`
+- `sync_parallel` — `evolve(max_concurrency=workers)`, with its round barrier
+- `async_pipeline` — `async_evolve(...)`, completion-order merge sweeps
 
-| Method | Fidelity class | Mechanism seams |
-|---|---|---|
-| [PromptBreeder](algo-promptbreeder.md) | `mechanism_microport` | selection (binary tournament), FieldSlots genome |
-| [AFlow](algo-aflow.md) | `mechanism_microport` | selection (soft mixed), per-parent experience |
-| [Reflexion](algo-reflexion.md) | `mechanism_microport` | WindowedMemory (bounded append-only) |
-| [Self-Refine](algo-self-refine.md) | `mechanism_microport` | two-call FEEDBACK→REFINE, stop signal |
-| [Voyager](algo-voyager.md) | `environment_analogue` | SkillLibrary, DifficultyWeighted, self-verify critic |
-| [SkillWeaver](algo-skillweaver.md) | `environment_analogue` | SkillLibrary, DifficultyWeighted, self-verify reward model |
-| [Absolute Zero](algo-absolute-zero.md) | `inference_analogue` | frozen self-play evaluation, learnability signal |
-| [R-Zero](algo-r-zero.md) | `inference_analogue` | AdvantageAcceptance (GRPO shape), DifficultyWeighted |
-| [Agent0](algo-agent0.md) | `inference_analogue` | DifficultyWeighted, calculator stop-and-go |
-| [SICA](algo-sica.md) | `self_edit_analogue` | AST gate, Archive selection |
-| [Gödel Agent](algo-godel-agent.md) | `self_edit_analogue` | AST gate, optional gateless acceptance |
+Nothing else varies, which is what makes the timing columns attributable to the
+scheduler rather than to the algorithm.
 
-## Quality across the matrix
+```bash
+python -m bench.candidate_methods --provider openai --model glm-5.2 \
+  --workers 2 --candidates 2 --repeats 1 --seed 0 \
+  --modes serial sync_parallel async_pipeline --yes
+python -m bench.candidate_methods_report --input bench/results/<run>.json
+```
 
-*TBD after rerun: per-method strict test reward before → after, per mode, with
-per-mode target-reach rates and invalid-candidate counts. Baselines are
-expected to be near zero by construction (the hidden output convention); with
-fallback substitution removed, any gain is learned, not injected.*
+The report writes [`docs/matrix-report.md`](matrix-report.md) — that page is
+generated, so edit the generator rather than the page.
 
-| Method | Serial quality | Sync quality | Async quality | Invalid candidates |
-|---|---:|---:|---:|---:|
-| *TBD* | | | | |
+!!! warning "The current report predates the restructuring"
+    [Runtime matrix — report](matrix-report.md) was produced against source
+    fingerprint `381b663…`, before the ports moved to their declarative
+    `MethodPolicy` form and before the hand-written arithmetic fixture was
+    replaced by GSM8K, GSM-Hard and the widened generated domains. **Its timing
+    columns still describe a real experiment** — 1.36× end-to-end and 1.89×
+    inside the engine window, paired over n=33, with 11/11 methods showing a
+    median sync-over-serial win — and are retained for provenance. **Its quality
+    columns do not**: they were measured on the fixture whose baseline was 0.000
+    by construction, which is why every cell reads `0.000 -> …`. Current quality
+    numbers are the three-seed async rows on each port's own page, summarised in
+    [measured results — all eighteen](self-evolution-examples.md#measured-results-all-eighteen).
 
-## Merging behaviour
+## What the rerun has to report
 
-*TBD after rerun: fusion calls, union merges, conflict drops per mode — the
-matrix now runs worker-sized merge batches, with reflective merge on
-text-valued artifacts.*
+The comparison is equal-*candidate*, not equal-*work*, so three columns have to
+sit beside any headline:
 
-See also: [parallel speedup](matrix-parallel-speedup.md) ·
-[async behaviour](matrix-async.md)
+* **Cost.** The barrier-free loop performs more rollouts and more merge sweeps
+  for the same candidate budget. `observed_rollouts` and `observed_fusion_calls`
+  are recorded per run for this reason.
+* **Target-reach rates.** The time-to-quality ratio drops any pair where either
+  side missed the target, so the reach rates are the denominator a reader needs
+  before quoting a TTQ figure; the summary JSON carries
+  `per_mode_target_reach`.
+* **Merge behaviour.** Batches are sized to the worker count, so concurrent
+  proposals now actually meet in one merge — union on library and memory
+  artifacts, reflective merge on contested text. Whether merged unions change
+  the speedup picture is an open measurement.
+
+Self-verify methods ([Voyager](algo-voyager.md), [SkillWeaver](algo-skillweaver.md))
+pay one extra rollout per candidate in every mode, so the comparison stays
+equal-budget across them.

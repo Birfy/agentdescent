@@ -9,9 +9,11 @@
 | | |
 |---|---|
 | **Paper** | *Darwin Gödel Machine* — Zhang, Hu, Lu, Lange, Clune, 2025 ([arXiv:2505.22954](https://arxiv.org/abs/2505.22954)) |
-| **Repo** | [`jennyzzt/dgm`](https://github.com/jennyzzt/dgm) |
-| **Dataset** | **SWE-bench Verified** (real instance ids) |
+| **Upstream code** | [`jennyzzt/dgm`](https://github.com/jennyzzt/dgm) |
+| **Example** | [`examples/dgm/dgm_self_improve.py`](https://github.com/Birfy/agentdescent/blob/main/examples/dgm/dgm_self_improve.py) |
+| **Domain** | **SWE-bench Verified** instance ids against a transparent surrogate (default), or 64 vendored bugs with real pytest runs (`--objective real`, which the rows below used) |
 | **Layer** | L1 harness (`blast_radius=0.6`) |
+| **Fidelity** | `benchmark_faithful` — [what the classes mean](port-fidelity.md) |
 
 ## The algorithm
 
@@ -58,7 +60,7 @@ In [`examples/dgm/dgm_self_improve.py`](https://github.com/Birfy/agentdescent/bl
 | **`dgm_parent_weights` / `choose_selfimproves`** | (selection) | the exact DGM rule `p_i ∝ sigmoid(10·(score−0.5)) · 1/(1+children_i)` |
 | `propose` + `make_surrogate_evaluator` | `propose=` / objective | add the most-needed capability; the transparent surrogate objective (swap in a real Docker harness via `evaluate_fn`) |
 
-## Measured — the real objective
+## Measured results — vendored bugs (`--objective real`)
 
 `--objective real` evolves the agent's own Python source and scores it by running
 pytest. 64 vendored bugs in `examples/dgm/tasks/` (32 train / 32 held-out),
@@ -71,18 +73,10 @@ pytest. 64 vendored bugs in `examples/dgm/tasks/` (32 train / 32 held-out),
 | archive | 3 agents: 0.906, 0.906, 0.844 |
 | the agent's own `solve.py` | 18 lines → **79 lines** |
 
-!!! warning "Two of the 64 fixtures were a coin flip when this was measured"
-    `dedupe-order` and `set-difference-order` both encode "used a `set`, lost the
-    order", and both asserted it on **strings**. Python randomises string hashing
-    per process, so the buggy implementation came out in the right order on about
-    one hash seed in fifteen for the first and one in five for the second — the
-    task then had nothing failing, and the agent was handed a free solve for
-    reasons that had nothing to do with the agent. CI drew such a seed and caught
-    it. Both now assert on integers, which hash to themselves, and
-    `test_a_bug_about_ordering_fails_on_every_hash_seed` pins the seven
-    `set`/`dict`-touching fixtures against a repeat. The numbers above were
-    recorded before that fix and so carry up to ±1 task of seed luck in each
-    32-task split.
+These numbers predate a fixture fix (two ordering bugs asserted on strings, whose
+hashing Python randomises per process) and so carry up to **±1 task of seed luck**
+in each 32-task split;
+`test_a_bug_about_ordering_fails_on_every_hash_seed` pins it against a repeat.
 
 **What it wrote for itself.** The seed agent sends `lib.py` and the pytest output
 to a model and writes the reply straight back. Its own diagnosis produced three
@@ -120,23 +114,6 @@ failed; it is the agent giving itself an input the seed never had.
     Under the real objective there are: an earlier run archived children at
     **0.875 and 0.500**, the worse one kept, which is the behaviour `keep-all`
     exists for and which the surrogate cannot produce.
-
-!!! danger "Two numbers on this page were wrong before they were right"
-    An earlier version of this run reported **0.000 → 0.844**. The final figure
-    was correct and the baseline was invented: the archive seeded itself inside
-    `step()`, which only runs once a card reaches the merger, so a run whose
-    self-modifications all failed never measured its own seed and printed
-    `DGMContext.seed_score`'s 0.0 default. A wrong denominator under a right
-    numerator reads as a large success. Seeding now happens when the archive is
-    built, and a test pins it with an actor that proposes nothing at all.
-
-    Before that, a self-edit that added a **retry loop** scored 0.875 → 0.500 and
-    looked like a regression. It was not: the harness pre-fetched a single model
-    reply and served it to every call, so the second and third attempts received
-    the first answer again. "One model call per task" was a property of the
-    harness, and the first improvement the agent ever proposed was the one thing
-    that made impossible. The bridge is now a real request/reply channel with a
-    call budget.
 
 ## Run it
 

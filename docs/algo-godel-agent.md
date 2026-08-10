@@ -1,16 +1,23 @@
 # Gödel Agent — Recursive runtime self-modification
 
-**Fidelity class: `self_edit_analogue`** — see [port fidelity](port-fidelity.md) for
-what the classes mean. This port is measured in the runtime matrix: the mechanism is
-preserved and measured under AgentDescent's runtimes; it is **not** a
-paper-benchmark reproduction.
+> **Self-edit.** The artifact owns both its solve prompt and the
+> self-improvement prompt that rewrites it, so the search rewrites its own
+> search. Runs through the shared [`MethodPolicy`](policies.md) runner, behind an
+> AST gate. Example:
+> [`examples/godel_agent/godel_agent_self_modify.py`](https://github.com/Birfy/agentdescent/blob/main/examples/godel_agent/godel_agent_self_modify.py).
 
 | | |
 |---|---|
-| Paper | "Gödel Agent: A Self-Referential Agent Framework for Recursive Self-Improvement", Yin et al., 2024 ([arXiv:2410.04444](https://arxiv.org/abs/2410.04444)) |
-| Upstream code (pinned) | [Arvid-pku/Godel_Agent@bbb50879](https://github.com/Arvid-pku/Godel_Agent/tree/bbb508796be31c7140cdfc7106efd830a1324242) |
-| Definition | [`examples/godel_agent/godel_agent_self_modify.py`](https://github.com/Birfy/agentdescent/blob/main/examples/godel_agent/godel_agent_self_modify.py) |
-| Domain | **GSM-Hard** ([`reasoning-machines/gsm-hard`](https://huggingface.co/datasets/reasoning-machines/gsm-hard)); two AST-gated policy functions |
+| **Paper** | *Gödel Agent: A Self-Referential Agent Framework for Recursive Self-Improvement* — Yin et al., 2024 ([arXiv:2410.04444](https://arxiv.org/abs/2410.04444)) |
+| **Upstream code** | [Arvid-pku/Godel_Agent@bbb50879](https://github.com/Arvid-pku/Godel_Agent/tree/bbb508796be31c7140cdfc7106efd830a1324242) |
+| **Example** | [`examples/godel_agent/godel_agent_self_modify.py`](https://github.com/Birfy/agentdescent/blob/main/examples/godel_agent/godel_agent_self_modify.py) |
+| **Domain** | **GSM-Hard** ([`reasoning-machines/gsm-hard`](https://huggingface.co/datasets/reasoning-machines/gsm-hard)), 64/64/64 shuffled splits; two AST-gated policy functions |
+| **Layer** | L1 (`blast_radius=0.6`, set by the shared runner) |
+| **Fidelity** | `self_edit_analogue` — [what the classes mean](port-fidelity.md) |
+
+This port is measured in the [runtime matrix](matrix-overview.md): the mechanism
+is preserved and measured under AgentDescent's runtimes; it is **not** a
+paper-benchmark reproduction.
 
 ## The mechanism
 
@@ -62,25 +69,22 @@ merged. The same split fix described on
 [SICA](algo-sica.md#measured-results-gsm-hard) applies to this row: these numbers
 are from the shuffled-split run.
 
-!!! danger "`--gateless` was documented in five places and the parser rejected it"
-    This module's docstring, `examples/godel_agent/README.md`,
-    this page, [acceptance-policies.md](acceptance-policies.md) and
-    [matrix-overview.md](matrix-overview.md) all described the flag and what it
-    does. The command line answered `unrecognized arguments: --gateless`.
+## Run it
 
-    `AcceptAnyCompiling` was written and `build(gateless=True)` took the keyword;
-    nothing could reach it, because `standard_main` had no seam for a
-    method-specific switch and called `build(args.seed)`.
+```bash
+python -m examples.godel_agent.godel_agent_self_modify --dry-run
 
-    That matters more here than a dead flag usually would. **Upstream has no
-    acceptance gate at all** -- a monkey-patched edit is kept unless it crashes,
-    and the paper reports 92% of trials dipping before improving. This study
-    measures methods *under* the framework gate, so the gate stays and is
-    labelled a substitution rather than a preserved mechanism. `--gateless` is
-    the control that makes that label checkable, and it is the one thing that
-    could not be run.
+# one seed of the three above
+python -m examples.godel_agent.godel_agent_self_modify --yes --seed 0 \
+    --provider openai --model deepseek-v4-flash \
+    --async --workers 8 --budget-rollouts 80 --staleness full \
+    --temperature 0.7 --max-seconds 3600
 
-    `standard_main` now takes `extra_args` and `build_kwargs`, and the banner and
-    the recorded configuration name the acceptance rule in force -- a switch that
-    changes what a run accepts belongs in the run's own record, not only in the
-    flag that set it.
+# the control: upstream's own gatelessness, any compiling edit kept
+python -m examples.godel_agent.godel_agent_self_modify --gateless --dry-run
+```
+
+Flags: [the MethodPolicy command line](self-evolution-examples.md#the-methodpolicy-command-line).
+
+Offline tests: `tests/test_godel_upstream.py`,
+`tests/test_candidate_methods.py`.

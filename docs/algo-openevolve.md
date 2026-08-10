@@ -1,14 +1,21 @@
-# OpenEvolve - program evolution
+# OpenEvolve — Program evolution
 
-This example ports OpenEvolve's function-minimization program search onto the
-AgentDescent evolution engines. Python source is the evolving artifact, model
-calls propose mutations, a sandboxed evaluator supplies reward, and a custom
-aggregator maintains the quality-diversity archive.
+> **Program self-evolution.** Python source is the genome: model calls mutate it,
+> a sandboxed evaluator supplies reward, and a MAP-Elites island archive keeps
+> the population. Runs through [`evolve()`](evolution.md) / `async_evolve()` with
+> a custom `Strategy` + `aggregator_factory` at **L1** governance. Example:
+> [`examples/openevolve/openevolve_program_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/openevolve/openevolve_program_evolution.py).
 
-The runnable port is
-[`examples/openevolve/openevolve_program_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/openevolve/openevolve_program_evolution.py).
-It supports synchronous data parallelism through `evolve()` and barrier-free
-execution through `async_evolve()`.
+| | |
+|---|---|
+| **Paper** | no paper — the port follows the released code (the technique is AlphaEvolve-shaped) |
+| **Upstream code** | [algorithmicsuperintelligence/openevolve@411fb59c](https://github.com/algorithmicsuperintelligence/openevolve/tree/411fb59c886c18704caaffb611e17cf9e7d824d2), `examples/function_minimization` + the database implementation |
+| **Example** | [`examples/openevolve/openevolve_program_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/openevolve/openevolve_program_evolution.py) |
+| **Domain** | the bundled function-minimization task, 8 evaluator seeds (6 train / 2 held out) + 6 disjoint test seeds |
+| **Layer** | L1 program (`blast_radius=0.6`, AST-gated and sandbox-isolated) |
+| **Fidelity** | `benchmark_faithful` — [what the classes mean](port-fidelity.md) |
+
+Port author: `cyanneko`.
 
 ## Algorithm mapping
 
@@ -82,34 +89,9 @@ process under the real profile and asserts that a write outside the scratch
 directory fails, a write inside it succeeds, and `socket.create_connection`
 cannot reach the network.
 
-## Running the port
+## Measured results — function minimization
 
-Preview without an API key, network access, or sandbox process:
-
-```bash
-python -m examples.openevolve.openevolve_program_evolution --dry-run
-```
-
-Run six mutations with GLM-5.2 through an OpenAI-compatible endpoint:
-
-```bash
-python -m examples.openevolve.openevolve_program_evolution \
-  --provider glm --model glm-5.2 --iterations 6 --workers 3 --yes
-```
-
-Add `--async` for the barrier-free engine, or `--serial` for the upstream serial
-algorithm. `OPENAI_API_KEY` and `OPENAI_BASE_URL` must be set for the `glm`
-provider.
-
-!!! note "`--serial` and the benchmark's `serial` mode are two different baselines"
-    `--serial` is the [shared port flag](self-evolution-examples.md#the-shared-command-line):
-    **one worker**, so there is nothing to merge and the loop is the published
-    one. `bench/openevolve_agentdescent.py` also has a mode called `serial`, and it
-    means something narrower — `evolve(max_concurrency=1)` with the full worker
-    count, i.e. the same algorithm run without thread concurrency. That mode
-    isolates threading; the flag isolates merging.
-
-## Live benchmark method
+### The method
 
 | Setting | Value |
 |---|---|
@@ -124,12 +106,6 @@ provider.
 | Isolation | Seatbelt (`sandbox-exec`), macOS |
 | Replay | none; a single live engine run |
 
-Exact reproduction command:
-
-```bash
-python -m examples.openevolve.openevolve_program_evolution --yes --seed 0 --tasks 8 --budget-rollouts 24 --workers 4 --islands 3 --migration-interval 4 --async --async-ratio 3 --staleness full --max-seconds 1800 --max-tokens 32000 --model deepseek-v4-flash
-```
-
 The recorded output is
 [`bench/results/openevolve-quality-run.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/openevolve-quality-run.json).
 The three-mode timing harness is still
@@ -137,7 +113,7 @@ The three-mode timing harness is still
 this page reports quality, and the cross-algorithm speedup numbers live in
 [efficiency.md](efficiency.md).
 
-## Results — quality, on `deepseek-v4-flash`
+### The result
 
 24 rollouts, 3 islands, `--staleness full`, 4 workers, 24 mutation calls,
 76,294 tokens, 0 failures, 50.8 seconds of wall clock. Every figure below is
@@ -167,32 +143,51 @@ The archive machinery is all live: 25 programs evaluated, 22 valid, island cell
 counts `[3, 2, 2]`, and **3 ring migrations**. `--staleness full` considered 24
 stale cards and discarded none.
 
-!!! danger "Two settings made this look like a search that found nothing"
-    Before these were fixed the same configuration reported
-    `reward 0.7639 -> 0.7639` twice, with no warning anywhere.
+!!! danger "Two settings decide whether this port searches at all"
+    Both produce an **empty** model reply, which the round records as a candidate
+    that did not improve — indistinguishable from a search that found nothing.
+    `make_propose` counts empty replies and warns, naming both as the causes.
 
-    **`--thinking disabled` was gated on the GLM path.** It is the default, but
-    the condition also required `is_openai_compatible(args)` and a GLM model, so
-    against an Anthropic-shaped endpoint it silently did nothing. Measured on
-    `deepseek-v4-flash`: with reasoning on, a mutation call spends **96% of its
-    output on thinking** -- 75k characters of it against a 3.2k program -- takes
-    a median 234 s, and hit the 32000-token ceiling in 3 of 6 samples. With it
-    off: 512–990 output tokens, 7 s, and 0 of 6 unparseable.
+    **Reasoning off.** Measured on `deepseek-v4-flash`: with it on, a mutation
+    call spends **96% of its output on thinking** — 75k characters against a 3.2k
+    program — takes a median 234 s, and hits the 32000-token ceiling in 3 of 6
+    samples. Off: 512–990 output tokens, 7 s, 0 of 6 unparseable.
 
-    **`--max-tokens` defaulted to 2048.** Upstream's `config.yaml` says 16000 and
-    upstream mutates with SEARCH/REPLACE diffs; this port rewrites the whole
-    genome, which needs *more* than upstream, not less. Six samples: 2048 gave no
-    parseable program at all, 16000 failed 5 of 6, 32000 failed 2 of 6.
+    **`--max-tokens` at least 32000.** Upstream's `config.yaml` says 16000 and
+    mutates with SEARCH/REPLACE diffs; this port rewrites the whole genome, so it
+    needs *more* than upstream, not less. Six samples: 2048 gave no parseable
+    program at all, 16000 failed 5 of 6, 32000 failed 2 of 6.
 
-    Both failures are the same shape. The budget runs out before any visible
-    content is emitted, the reply arrives **empty**, and the round records a
-    candidate that simply did not improve -- which is exactly what a search that
-    found nothing also looks like. `make_propose` now counts empty replies and
-    warns, naming both `--thinking` and `--max-tokens` as the causes.
+## Run it
 
-!!! note "This run is why the row is no longer Linux-only"
-    Candidate isolation was Bubblewrap-only, so the matrix skipped this row on
-    any non-Linux host (`needs="bwrap"`). The Seatbelt backend described under
-    [Fidelity and boundaries](#fidelity-and-boundaries) was added to run it here,
-    and the `needs` marker is gone.
+Preview without an API key, network access, or sandbox process:
+
+```bash
+python -m examples.openevolve.openevolve_program_evolution --dry-run
+
+# six mutations through an OpenAI-compatible endpoint
+python -m examples.openevolve.openevolve_program_evolution \
+    --provider glm --model glm-5.2 --iterations 6 --workers 3 --yes
+
+# the run measured above
+python -m examples.openevolve.openevolve_program_evolution --yes --seed 0 \
+    --tasks 8 --budget-rollouts 24 --workers 4 \
+    --islands 3 --migration-interval 4 \
+    --async --async-ratio 3 --staleness full \
+    --max-seconds 1800 --max-tokens 32000 --model deepseek-v4-flash
+```
+
+Add `--async` for the barrier-free engine, or `--serial` for the upstream serial
+algorithm. `OPENAI_API_KEY` and `OPENAI_BASE_URL` must be set for the `glm`
+provider.
+
+!!! note "`--serial` and the benchmark's `serial` mode are two different baselines"
+    `--serial` is the [shared port flag](self-evolution-examples.md#the-shared-command-line):
+    **one worker**, so there is nothing to merge and the loop is the published
+    one. `bench/openevolve_agentdescent.py` also has a mode called `serial`, and it
+    means something narrower — `evolve(max_concurrency=1)` with the full worker
+    count, i.e. the same algorithm run without thread concurrency. That mode
+    isolates threading; the flag isolates merging.
+
+Offline tests: `tests/test_openevolve_example.py`.
 

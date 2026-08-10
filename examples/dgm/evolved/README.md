@@ -1,7 +1,7 @@
 # What the agent wrote for itself
 
 The best archived child from the run recorded in
-[`docs/algo-dgm.md`](../../../docs/algo-dgm.md#measured-the-real-objective) --
+[`docs/algo-dgm.md`](../../../docs/algo-dgm.md#measured-results-vendored-bugs-objective-real) --
 seed 0.844, this agent 0.906 on 32 held-out bugs.
 
 Not hand-written and not edited afterwards: `solve.py` is what
