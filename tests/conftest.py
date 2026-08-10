@@ -15,3 +15,4 @@ truncated 944-row download was.
 import os
 
 os.environ.setdefault("AGENTDESCENT_GSM8K_SAMPLE", "1")
+os.environ.setdefault("AGENTDESCENT_GSMHARD_SAMPLE", "1")

@@ -47,7 +47,7 @@ below), `deepseek-v4-flash` at temperature 0.7. Recorded in
 | 2 | 0.000 → **1.000** | 0.000 → 1.000 | 3/80 | 1079 |
 
 Mean 0.646, all three seeds moving. See the caveat on
-[PromptBreeder](algo-promptbreeder.md#measured-results): one run per seed does
+[PromptBreeder](algo-promptbreeder.md#measured-results-gsm8k): one run per seed does
 not pin a number here either.
 
 !!! danger "`--gateless` was documented in five places and the parser rejected it"

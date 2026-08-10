@@ -29,7 +29,8 @@ from agentdescent.selection import Archive
 from examples._measure import extract_python
 from examples._method_policy import MethodPolicy, ValidatedSlot
 from examples._method_runner import standard_main
-from examples._gsm8k_domain import feedback, gsm8k_reward, gsm8k_splits
+from examples._gsmhard_domain import (feedback, gsmhard_reward,
+                                      gsmhard_splits)
 
 
 FIDELITY = "self_edit_analogue"
@@ -109,7 +110,7 @@ def build(seed: int) -> MethodPolicy:
             unit=task.id,
         )
 
-    train, held_out, test = gsm8k_splits(seed)
+    train, held_out, test = gsmhard_splits(seed)
     return MethodPolicy(
         name="sica",
         fidelity=FIDELITY,
@@ -126,7 +127,7 @@ def build(seed: int) -> MethodPolicy:
         test_tasks=tuple(test),
         solve=solve,
         propose=propose,
-        reward=gsm8k_reward,
+        reward=gsmhard_reward,
         proposal_calls_per_candidate=1,
         engine=Policies(selection=Archive(sampling="best", seed=seed)),
         reflective=False,

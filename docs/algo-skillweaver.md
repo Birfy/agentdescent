@@ -54,7 +54,7 @@ hydrates before accepting input and confirms with a toast" — where Voyager's
 world named neither the vessel nor its `X+Y` syntax. Even after both were made
 learnable, the site that says more is the one whose seeds agree.
 
-See the caveat on [PromptBreeder](algo-promptbreeder.md#measured-results): one
+See the caveat on [PromptBreeder](algo-promptbreeder.md#measured-results-gsm8k): one
 run per seed does not pin a number here either.
 
 !!! danger "The site hinted the concepts and still demanded the exact tokens"

@@ -58,7 +58,7 @@ sixteen a single item moved the score by 0.0625; sixty-four buys 0.016, and the
 gain came out at +0.391 against +0.375 on the smaller window, which is what says
 the gain is real rather than small-sample luck.
 
-See the caveat on [PromptBreeder](algo-promptbreeder.md#measured-results): one
+See the caveat on [PromptBreeder](algo-promptbreeder.md#measured-results-gsm8k): one
 run per seed does not pin a number here either.
 
 !!! danger "The previous numbers were measured against a fixture this repository wrote"

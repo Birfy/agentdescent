@@ -54,7 +54,7 @@ Two seeds clear the world outright and one finds nothing. `accepted` is 2, 1 and
 proposal is re-rolled by the critic before it reaches the gate, and one skill
 that works is all the run needs.
 
-See the caveat on [PromptBreeder](algo-promptbreeder.md#measured-results): one
+See the caveat on [PromptBreeder](algo-promptbreeder.md#measured-results-gsm8k): one
 run per seed does not pin a number here either.
 
 !!! danger "Three seeds scored 0.000 against a world that could not be solved"
