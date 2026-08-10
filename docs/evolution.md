@@ -98,29 +98,102 @@ nothing else in the call changes.
 
 ## Every knob is a module
 
-| `evolve(...)` parameter | Module | What it plugs in | Default |
+`evolve()` takes three kinds of configuration, and it is worth knowing which one
+you are reaching for. **Every default below is the behaviour you get by passing
+nothing**, so adding a knob never silently changes an existing run. The
+[API reference](api.md) has the exact signature and every parameter's own prose;
+this is the map.
+
+### 1. The plug-in seams — you pass an object
+
+These are the five things that make `evolve()` a framework rather than a script.
+Each is a protocol: pass one of the shipped implementations, or your own.
+
+| parameter | you pass | what it decides | default | page |
+|---|---|---|---|---|
+| `agent=` **or** `run=` + `propose=` | an actor, or two callables | how a task is solved, and what a failure proposes | — **required** | [agents](agents.md) |
+| `reward=` | `(task, output) -> [0, 1]` | what counts as success | — **required** | [rewards](rewards.md) |
+| `strategy=` | a `Strategy` | **what the artifact is** and how a proposal becomes a `Diff` | `AppendRules()` | [strategies](strategies.md) |
+| `parallel=` | a `ParallelStrategy` | how a round's tasks are split across workers (DP / TP) | `DataParallel()` | [parallelism](parallelism.md) |
+| `aggregator_factory=` | `(ledger, verifier, audit, config, staleness) -> AggregatorProtocol` | **the whole optimizer** — for a mechanism that needs state the pipeline does not keep | the reference `Aggregator` | [aggregator](aggregator.md) |
+
+```python
+from agentdescent import evolve, LLMAgent, SingleSlot, DataParallel, openai_compatible
+
+evolve(tasks, reward,
+       agent=LLMAgent(openai_compatible(model="deepseek-v4-flash")),
+       strategy=SingleSlot(initial_value="You are a helpful assistant."),
+       parallel=DataParallel())
+```
+
+### 2. The decision plane — `policies=Policies(...)`
+
+Every *decision* the engine makes is a replaceable object, and they all travel in
+one argument. Two guarantees make the bundle safe to use: **nothing is silently
+ignored** — each engine declares what it honours and `Policies.require_supported`
+raises on anything else — and **`None` means today's behaviour**, so `Policies()`
+and passing nothing are the same run.
+
+| field | the decision | shipped implementations | page |
 |---|---|---|---|
-| `policies=` | [`policies`](policies.md) | every replaceable decision in one bundle — selection, sampling, conflict, fusion, acceptance, promotion, staleness, machinery | `Policies()` (today's behaviour) |
-| `agent=` / `run=`+`propose=` | [`agentdescent.agents`](agents.md) + `LLMAgent` | the actor: solve a task, propose a change | — (required) |
-| `strategy=` | [`Strategy`](strategies.md) (`SingleSlot` / `AppendRules` / `KeyedRules` / [`FileTree`](directory-evolution.md) / yours) | the **evolution rule** — what the artifact is and how a proposal becomes a diff | `AppendRules()` |
-| `parallel=` | [`agentdescent.parallel`](parallelism.md) | the **parallelism method** — DP / TP / PP | `DataParallel()` |
-| `task_sampler=` | [`agentdescent.sampling`](sampling.md) | **which task** a worker rolls out next | `RoundRobin()` |
-| `blast_radius=` | [governance](governance.md) | which layer (L2 skill vs L1 harness/verifier) | `0.2` (L2) |
-| `agg_config=` | `AggregatorConfig` | merge & acceptance **tuning** | sensible defaults |
-| `aggregator_factory=` | `AggregatorProtocol` | **swap the whole optimizer** (custom merge/acceptance) | reference `Aggregator` |
-| `staleness_policy=` | [staleness](staleness.md) (`get_policy(...)`) | how stale diffs are handled | `guarded` |
-| `refresh_interval=` | driver | rounds a worker keeps its snapshot — what *creates* staleness on the synchronous path | `1` (no staleness) |
-| `rounds=`, `n_workers=` | driver | loop size, parallel worker count | `15`, `4` |
-| `max_concurrency=` | driver | run a round's workers **concurrently** (thread pool); aggregator = barrier (synchronous DP) | `1` (sequential) |
-| `round_timeout=` | driver | cap how long a round waits for its workers — abandons stragglers | `None` (wait forever) |
-| `asynchronous=`, `async_ratio=` | [`async_evolve`](#the-barrier-free-runtime-async_evolve) | **barrier-free** async: workers never wait for the merge; lag budget | `False`, `3` |
-| `self_verify=` | [`async_evolve`](#the-barrier-free-runtime-async_evolve) | async only: a worker re-runs its trajectory with the diff applied for a local before/after signal; faithful ports that score the candidate on held-out only pass `False` | `True` |
-| `on_round=` | driver | **progress callback** — fires per round / merger sweep | `None` |
-| `target_reward=`, `patience=` | driver | **early stopping** — stop at a reward, or after N rounds without improvement | `None`, `None` |
-| `max_worker_errors=` | driver | how much total failure to tolerate — only while *no* worker has ever succeeded | `3` |
-| `oracle_budget=`, `cheap_eval_tasks=` | [verifier](verifier.md) | audit budget for L1 merges, and how many held-out tasks the *ranking* passes score | `200`, all |
-| `repo_path=` | [ledger](ledger.md) | where the git-backed store lives — pass the same path again to **resume** | scratch, removed on return |
-| `reward` | [rewards](rewards.md) | `(task, output) -> [0, 1]` — ready-made scorers for the common cases | — (required) |
+| `task_sampler` | which task the next rollout spends | `RoundRobin` (default), `DifficultyWeighted` | [sampling](sampling.md) |
+| `selection` | which candidate the next batch starts from | `SingleHead`, `Beam`, `ParetoFrontier`, `Archive`, `MCTS` | [selection](selection.md) |
+| `proposal` | how rollout evidence becomes proposals | protocol only — write your own | [proposal](proposal-policies.md) |
+| `conflict` | what happens to contradicting diffs | `DefaultConflict`, `KeepContradictions`, `AdvantageConflict` | [conflict](conflict-policies.md) |
+| `fusion` | whether and how survivors merge | `DefaultFusion`, `ReflectiveFusion` | [fusion](fusion-policies.md) |
+| `acceptance` | whether the merged candidate commits | `DefaultAcceptance`, `AdvantageAcceptance`, `StableDistanceAcceptance` | [acceptance](acceptance-policies.md) |
+| `promotion` | when `dev` reaches `stable` | `DefaultPromotion` | [promotion](promotion-policies.md) |
+| `staleness` | what a lagging diff is worth | `get_policy("full"/"guarded"/"reflective")` | [staleness](staleness.md) |
+
+The remaining fields are machinery rather than algorithm — `verifier`, `ledger`,
+`eval_cache`, `executor`, `evaluator`, `sandbox_provider`, `sandbox_spec`,
+`aggregator_factory` — see [the verifier](verifier.md), [the ledger](ledger.md)
+and [execution](execution.md).
+
+```python
+from agentdescent import Policies, Beam, DifficultyWeighted, AdvantageAcceptance
+from agentdescent.fusion import reflective_merge
+
+evolve(tasks, reward, agent=agent, policies=Policies(
+    selection=Beam(4),
+    task_sampler=DifficultyWeighted(),
+    acceptance=AdvantageAcceptance(inner=my_gate),
+    **reflective_merge(completion),        # sets conflict= and fusion= together
+))
+```
+
+`task_sampler=` and `staleness_policy=` also exist as direct `evolve()` arguments
+— the same objects, kept because they predate the bundle. Pick one place and stay
+there. Which seam a given mechanism belongs in is
+[a decision with a rule](policies.md#which-seam-is-my-mechanism).
+
+### 3. The plain settings — numbers and flags
+
+| what you are setting | parameters | defaults |
+|---|---|---|
+| **Loop size** | `rounds`, `n_workers` | `15`, `4` |
+| **Budget** — the units a comparison must hold fixed | `max_rollouts`, `max_calls`, `max_seconds` | all `None` (unbounded) |
+| **Stopping early** | `target_reward`, `patience`, `solved_threshold` | `None`, `None`, `0.999` |
+| **Concurrency** | `max_concurrency` (rollouts), `eval_concurrency` (the gate) | `1`, `8` |
+| **Barrier-free mode** | `asynchronous`, `async_ratio`, `self_verify` | `False`, `3`, `True` |
+| **Staleness on the sync path** | `refresh_interval` | `1` — and at `1` there is no staleness to handle |
+| **Straggler handling** | `round_timeout`, `max_worker_errors` | `None` (wait forever), `3` |
+| **Governance** | `blast_radius`, `oracle_budget` | `0.2` (L2), `200` |
+| **The data split** | `held_out_frac`, `shuffle`, `seed` | `0.4`, `False`, `0` |
+| **Evaluation cost** | `cheap_eval_tasks`, `fusion_tournament` | `None` → 8 tasks; `None` → off |
+| **Merge tuning** | `agg_config=AggregatorConfig(...)` | see [the field table](usage.md#aggregatorconfig) |
+| **The artifact** | `artifact_id`, `initial_state` | `'artifact'`, `strategy.initial()` |
+| **Persistence** | `repo_path` — pass the same path again to **resume** | a scratch repo, removed on return |
+| **Observability** | `on_round`, `verbose`, `usage` | `None`, `False`, `None` |
+
+!!! warning "Three of these change what a run *measures*, not just what it costs"
+    `solved_threshold` — leave it at `0.999` for a binary scorer and **lower it
+    for a graded one**, or every rollout asks the reflector to fix an answer that
+    already scored 0.95. `cheap_eval_tasks` bounds ranking resolution: at the
+    default of 8 binary-scored tasks, two candidates closer than 0.125 are ordered
+    by whichever the sample happens to favour. `max_rollouts` is checked at the
+    round barrier, so a synchronous run overshoots by up to one round — report
+    `result.rollouts`, never the budget you asked for.
 
 The building blocks in detail:
 
@@ -277,7 +350,7 @@ Details + the DP/TP/PP semantics: [Customizable parallelism](parallelism.md).
 
 ---
 
-## Task selection — `task_sampler=`
+## 4. Task selection — `task_sampler=`
 
 *What:* which task a worker rolls out next, from the shard
 [`parallel=`](parallelism.md) gave it. *Module:*
@@ -306,7 +379,7 @@ accuracy claim** are all on [the sampling page](sampling.md).
 
 ---
 
-## 4. Governance — `blast_radius=`
+## 5. Governance — `blast_radius=`
 
 *What:* which governance layer the artifact lives in — the aggregator treats
 high-impact artifacts more conservatively, automatically.
@@ -327,7 +400,7 @@ See [governance in concepts](concepts.md#6-governance-blast-radius-decides-paral
 
 ---
 
-## 5. The aggregator — `agg_config=` (tune) / `aggregator_factory=` (replace)
+## 6. The aggregator — `agg_config=` (tune) / `aggregator_factory=` (replace)
 
 *What:* the optimizer that decides what to merge (staleness filter → conflict
 resolution → fusion → statistical acceptance → transactional commit). `agg_config`
@@ -355,7 +428,7 @@ aggregator: **[the aggregator page](aggregator.md)**.
 
 ---
 
-## 6. Staleness — `staleness_policy=`
+## 7. Staleness — `staleness_policy=`
 
 *What:* what to do with a diff proposed against an out-of-date artifact version.
 *Module:* the Full / Guarded / Reflective policies.
