@@ -8,9 +8,11 @@
 | | |
 |---|---|
 | **Paper** | *SkillOpt: Executive Strategy for Self-Evolving Agent Skills* — Yang et al., 2025 ([arXiv:2605.23904](https://arxiv.org/abs/2605.23904)) |
-| **Repo** | [`microsoft/SkillOpt`](https://github.com/microsoft/SkillOpt) (PyPI `skillopt`) |
-| **Dataset** | **SearchQA** (single-turn text QA), EM / F1 |
+| **Upstream code** | [`microsoft/SkillOpt`](https://github.com/microsoft/SkillOpt) (PyPI `skillopt`) |
+| **Example** | [`examples/skillopt/skillopt_skill_training.py`](https://github.com/Birfy/agentdescent/blob/main/examples/skillopt/skillopt_skill_training.py) |
+| **Domain** | **SearchQA** (single-turn text QA), EM / F1 |
 | **Layer** | L2 skill (`blast_radius=0.2`) |
+| **Fidelity** | `benchmark_faithful` — [what the classes mean](port-fidelity.md) |
 
 ## The algorithm (ReflACT)
 
@@ -55,7 +57,7 @@ In [`examples/skillopt/skillopt_skill_training.py`](https://github.com/Birfy/age
 | **`LRScheduler`** | (edit budget) | the integer "learning-rate" cap on edits per step (`constant`/`linear`/`cosine`) |
 | `make_propose(...)` | `propose=` | the analyst — one failed rollout → a budget-capped edit patch |
 
-## Measured — SearchQA with DeepSeek
+## Measured results — SearchQA
 
 Barrier-free (`--async`), 4 workers, **60 rollouts pinned**, `--reflective-merge`,
 `--staleness full`, `deepseek-v4-flash`, one seed. `--hard --hard-passes 2` over
@@ -102,7 +104,7 @@ optimizer generalises. That pays once — the first "stop adding qualifiers" edi
 fixes several questions at once — and the restatements after it add nothing,
 which is why sweeps 2–4 and 6–8 commit nothing at all.
 
-The same shape appears in [EvoSkill](algo-evoskill.md#empirical-results-claude-code-as-the-base-agent-on-finqa),
+The same shape appears in [EvoSkill](algo-evoskill.md#measured-results-finqa),
 where a tolerance-based numeric scorer produces skills about rounding. Two ports,
 two datasets, two scorers, and in both the induced skill targets the metric's
 surface. It is worth knowing before reading a lift as evidence about capability.

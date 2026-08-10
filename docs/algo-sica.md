@@ -1,16 +1,22 @@
 # SICA — Self-improving coding agent (real source edits)
 
-**Fidelity class: `self_edit_analogue`** — see [port fidelity](port-fidelity.md) for
-what the classes mean. This port is measured in the runtime matrix: the mechanism is
-preserved and measured under AgentDescent's runtimes; it is **not** a
-paper-benchmark reproduction.
+> **Self-edit.** An archive of agent iterations; the best performer edits its own
+> Python source and is re-benchmarked. Runs through the shared
+> [`MethodPolicy`](policies.md) runner, behind an AST gate. Example:
+> [`examples/sica/sica_self_edit.py`](https://github.com/Birfy/agentdescent/blob/main/examples/sica/sica_self_edit.py).
 
 | | |
 |---|---|
-| Paper | "A Self-Improving Coding Agent", Robeyns et al., 2025 ([arXiv:2504.15228](https://arxiv.org/abs/2504.15228)) |
-| Upstream code (pinned) | [MaximeRobeyns/self_improving_coding_agent@ed8275dc](https://github.com/MaximeRobeyns/self_improving_coding_agent/tree/ed8275dca4d3c5dbf77229964351fe9b424797dc) |
-| Definition | [`examples/sica/sica_self_edit.py`](https://github.com/Birfy/agentdescent/blob/main/examples/sica/sica_self_edit.py) |
-| Domain | **GSM-Hard** ([`reasoning-machines/gsm-hard`](https://huggingface.co/datasets/reasoning-machines/gsm-hard)); one AST-gated policy function |
+| **Paper** | *A Self-Improving Coding Agent* — Robeyns et al., 2025 ([arXiv:2504.15228](https://arxiv.org/abs/2504.15228)) |
+| **Upstream code** | [MaximeRobeyns/self_improving_coding_agent@ed8275dc](https://github.com/MaximeRobeyns/self_improving_coding_agent/tree/ed8275dca4d3c5dbf77229964351fe9b424797dc) |
+| **Example** | [`examples/sica/sica_self_edit.py`](https://github.com/Birfy/agentdescent/blob/main/examples/sica/sica_self_edit.py) |
+| **Domain** | **GSM-Hard** ([`reasoning-machines/gsm-hard`](https://huggingface.co/datasets/reasoning-machines/gsm-hard)), 64/64/64 shuffled splits; one AST-gated policy function |
+| **Layer** | L1 (`blast_radius=0.6`, set by the shared runner) |
+| **Fidelity** | `self_edit_analogue` — [what the classes mean](port-fidelity.md) |
+
+This port is measured in the [runtime matrix](matrix-overview.md): the mechanism
+is preserved and measured under AgentDescent's runtimes; it is **not** a
+paper-benchmark reproduction.
 
 ## The mechanism
 
@@ -26,7 +32,7 @@ either). The selected agent then edits its own source and is re-benchmarked.
 |---|---|
 | Real self-edits | proposals are complete Python sources through an AST gate (function surface, arity, node whitelist, no builtins) |
 | Utility gate | the framework's held-out acceptance gate |
-| Archive base selection | `Archive('performance')`, driven by the population aggregator; the run finalises on the archive's best scorer |
+| Archive base selection | `Archive('best')` — a deterministic argmax over the archive, as upstream's `idxmax()` is — driven by the population aggregator; the run finalises on the archive's best scorer |
 
 ## Boundaries
 
@@ -36,8 +42,8 @@ either). The selected agent then edits its own source and is re-benchmarked.
 ## Measured results — GSM-Hard
 
 Three seeds, `async_pipeline`, 80 rollouts each, 8 workers, `--staleness full`,
-reflective merge on, `deepseek-v4-flash` at temperature 0.7, 64/64/64 shuffled
-splits. Recorded in
+reflective merge on (this method's own declaration), `deepseek-v4-flash` at
+temperature 0.7, 64/64/64 shuffled splits. Recorded in
 [`bench/results/sica-self-edit.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/sica-self-edit.json).
 
 | seed | test quality | validation | accepted | invalid | calls |
@@ -60,48 +66,40 @@ flag is on.
 See the caveat on [PromptBreeder](algo-promptbreeder.md#measured-results-gsm8k): one
 run per seed does not pin a number here either.
 
-!!! danger "This row read as overfitting, and was mostly the split"
-    On the first GSM-Hard run validation rose **+0.094 on all three seeds** —
-    four standard deviations against the 0.021 sd of re-scoring the same split —
-    and test did not move at all. The obvious reading is a gate that accepts what
-    only works on the set it judges.
+!!! note "Why the splits are shuffled, and why selection is `best`"
+    **The splits are one deterministic shuffle**, not positional. GSM-Hard is
+    derived from GSM8K in order and its tail is harder: taking train and held-out
+    from the head and test from the tail put an **0.18 gap** between them on every
+    seed before any candidate was proposed, so a method was tuned on one
+    distribution and reported on another. `gsmhard_splits` draws all three from
+    one shuffle; the residual gaps are −0.156 / +0.016 / +0.062, mixed sign.
 
-    It was not. The splits were **positional**: train and held-out from the head
-    of the file, test from the tail. GSM-Hard is derived from GSM8K in order and
-    its tail is harder, so the seed instruction scored 0.73 on held-out and 0.55
-    on test — an 0.18 gap, the same sign on every seed, present before any
-    candidate was proposed. A method was being tuned on one distribution and
-    reported on another.
+    **`Archive('best')`, not `'performance'`.** `get_best_agent_iteration` takes
+    `idxmax()` of the mean benchmark score and `runner.py` runs that agent's code
+    — there is no sampling in it. A softmax over scores in `[0, 1]` leaves only
+    `exp(1)/exp(0) = 2.7` between the best and worst entry, which over a
+    four-candidate archive scoring 0.2 / 0.9 / 0.5 / 0.9 starts from the *worst*
+    agent 8 times in 40. Ties go to the earlier entry, as `idxmax` does.
 
-    `gsmhard_splits` now draws all three from one deterministic shuffle. The
-    gaps are −0.156 / +0.016 / +0.062 — mixed sign, mean ≈ 0 — and the table
-    above is that run. The earlier hypothesis, that the gate was accepting noise,
-    was tested first and **refuted**: re-scoring one split five times moved it by
-    0.02, not the 0.09 that would have been needed.
+    **The editable surface is checked before a run, not after.**
+    `test_the_gate_admits_a_prompt_that_can_clear_the_domain` compiles a policy
+    that solves the domain and asserts the AST gate lets it through, so a 0.000
+    here would be the algorithm's result and not the harness's —
+    [Voyager](algo-voyager.md#measured-results-crafting-world) is what that
+    failure looks like when nobody checks.
 
-!!! danger "The next base was sampled where upstream takes the maximum"
-    `get_best_agent_iteration` takes `idxmax()` of the mean benchmark score, and
-    `runner.py` then runs `archive.agent_{best_iter}.agent_code`. There is no
-    sampling in it.
+## Run it
 
-    This port used `Archive(sampling="performance")` — a softmax over score,
-    which at temperature 1 over scores in `[0, 1]` leaves only
-    `exp(1)/exp(0) = 2.7` between the best and the worst entry. Measured over a
-    four-candidate archive scoring 0.2 / 0.9 / 0.5 / 0.9, that mode starts from
-    the **worst** agent 8 times in 40.
+```bash
+python -m examples.sica.sica_self_edit --dry-run
 
-    This page had the rule right in prose — "selects by best mean score" — and
-    named a mode that does something else. `Archive` gains a `best` mode, in the
-    shared selection seam rather than inside this example, because a
-    deterministic argmax over the archive is a published rule and belongs beside
-    `performance`, `novelty` and the `uniform` ablation. Ties go to the earlier
-    entry, as `idxmax` does, so a later candidate has to beat the incumbent
-    rather than merely equal it.
+# one seed of the three above
+python -m examples.sica.sica_self_edit --yes --seed 0 \
+    --provider openai --model deepseek-v4-flash \
+    --async --workers 8 --budget-rollouts 80 --staleness full \
+    --temperature 0.7 --max-seconds 3600
+```
 
-!!! note "The gate was checked before the run, not after"
-    A self-edit analogue whose editable surface cannot express a solution is
-    [Voyager](algo-voyager.md#measured-results)'s failure in another shape: three
-    seeds of 0.000 with no invalid proposals, against a target the world does not
-    accept. `test_the_gate_admits_a_prompt_that_can_clear_the_domain` compiles a
-    policy that teaches integer cents and working-out and asserts the gate lets
-    it through, so a zero here would be the algorithm's and not the harness's.
+Flags: [the MethodPolicy command line](self-evolution-examples.md#the-methodpolicy-command-line).
+
+Offline tests: `tests/test_sica_upstream.py`, `tests/test_candidate_methods.py`.

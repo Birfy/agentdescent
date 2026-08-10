@@ -68,7 +68,7 @@ raise it to explore more.
 !!! warning "That is a targeting measurement, not an accuracy claim"
     Landing more rollouts on failing tasks does **not** automatically produce a
     better artifact. On real
-    [ACE / FiNER-139 runs](algo-ace.md#empirical-results-finer-139-with-deepseek)
+    [ACE / FiNER-139 runs](algo-ace.md#measured-results-finer-139)
     the difficulty-weighted sampler reached a lesson sooner (round 0 versus round
     2) but did not score better — and two runs of the *same* round-robin
     configuration differed by 4.8 points, so at that sample size neither sampler

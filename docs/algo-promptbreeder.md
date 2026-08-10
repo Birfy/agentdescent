@@ -1,16 +1,23 @@
 # PromptBreeder — Prompt self-evolution (genetic)
 
-**Fidelity class: `mechanism_microport`** — see [port fidelity](port-fidelity.md) for
-what the classes mean. This port is measured in the runtime matrix: the mechanism is
-preserved and measured under AgentDescent's runtimes; it is **not** a
-paper-benchmark reproduction.
+> **Prompt self-evolution.** Evolve a population of task-prompt + mutation-prompt
+> units with a binary tournament. Runs through the shared
+> [`MethodPolicy`](policies.md) runner, with the tournament as the
+> `aggregator_factory`. Example:
+> [`examples/promptbreeder/promptbreeder_genetic_prompts.py`](https://github.com/Birfy/agentdescent/blob/main/examples/promptbreeder/promptbreeder_genetic_prompts.py).
 
 | | |
 |---|---|
-| Paper | "Promptbreeder: Self-Referential Self-Improvement Via Prompt Evolution", Fernando et al., 2023 ([arXiv:2309.16797](https://arxiv.org/abs/2309.16797)) |
-| Upstream code (pinned) | paper only — no official released code |
-| Definition | [`examples/promptbreeder/promptbreeder_genetic_prompts.py`](https://github.com/Birfy/agentdescent/blob/main/examples/promptbreeder/promptbreeder_genetic_prompts.py) |
-| Domain | deterministic integer-cents arithmetic (48 tasks, disjoint 16/16/16 splits) |
+| **Paper** | *Promptbreeder: Self-Referential Self-Improvement Via Prompt Evolution* — Fernando et al., 2023 ([arXiv:2309.16797](https://arxiv.org/abs/2309.16797)) |
+| **Upstream code** | paper only — no official released code |
+| **Example** | [`examples/promptbreeder/promptbreeder_genetic_prompts.py`](https://github.com/Birfy/agentdescent/blob/main/examples/promptbreeder/promptbreeder_genetic_prompts.py) |
+| **Domain** | **GSM8K** ([`openai/gsm8k`](https://huggingface.co/datasets/openai/gsm8k), `main`), 64/64/64 splits |
+| **Layer** | L1 (`blast_radius=0.6`, set by the shared runner) |
+| **Fidelity** | `mechanism_microport` — [what the classes mean](port-fidelity.md) |
+
+This port is measured in the [runtime matrix](matrix-overview.md): the mechanism
+is preserved and measured under AgentDescent's runtimes; it is **not** a
+paper-benchmark reproduction.
 
 ## The mechanism
 
@@ -34,40 +41,21 @@ measured on a 100-item training batch; the paper runs a population of 50 for
 | Fitness on a random training batch | `PopulationContext.fitness(state, batch)` — a resampled batch of the **train** split |
 | N-unit initialisation from description x mutation-prompt x thinking-style | `seed_population`, billed to an `init:` phase rather than to the proposal budget |
 
-!!! warning "Three of these were missing, and each changed the search rather than the bookkeeping"
-    The port ran, returned a number, and was wrong in ways nothing asserted --
-    an archive that only grows still returns a best unit, a tournament ranked on
-    held-out still picks a winner, and three operators in rotation still mutate.
-
-    | | was | is |
-    |---|---|---|
-    | replacement | archive grew forever, no unit ever died | `\|P\| = N`, the loser's slot is reused |
-    | fitness | the held-out split — the acceptance gate's own signal, which makes the tournament a second gate rather than a fitness measure | a random batch of the train split, resampled per tournament |
-    | operators | 3 of 9, in fixed rotation | 9 of 9, uniformly sampled |
-
-    Rotation is the subtle one: it *guarantees* each operator's share where
-    sampling does not, so a run's operator mix was an assumption rather than an
-    observation.
-
-    Algorithm 1's tournament cannot be a `SelectionPolicy`, which is why it moved:
-    a selection policy receives candidates carrying cached scores and returns one,
-    while the paper's tournament has to **evaluate** both sampled units and
-    **replace** the loser.
-
 ## Boundaries
 
 - Population 8 and fitness batch 4, against the paper's 50 and 100.
 - The unit carries no few-shot context, so context shuffling is expressed as
   prompt crossover over the population rather than over exemplars.
-- The domain was 12 items in 4/4/4 splits. `run_port` refuses a run whose train
-  split is smaller than the worker count, so that capped this port — and the ten
-  others sharing the domain — at four workers, with the acceptance gate resting
-  on four items. It is now 48 items in 16/16/16.
+- Algorithm 1's tournament cannot be a `SelectionPolicy` and so lives in the
+  `aggregator_factory` seam instead: a selection policy receives candidates
+  carrying cached scores and returns one, where the paper's tournament has to
+  **evaluate** both sampled units and **replace** the loser.
 
 ## Measured results — GSM8K
 
 Three seeds, `async_pipeline`, 80 rollouts each, 8 workers, `--staleness full`,
-`--reflective-merge`, `deepseek-v4-flash` at temperature 0.7. Recorded in
+reflective merge on (this method's own declaration),
+`deepseek-v4-flash` at temperature 0.7. Recorded in
 [`bench/results/promptbreeder-gsm8k.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/promptbreeder-gsm8k.json).
 
 | seed | test quality | validation | accepted | calls | wall |
@@ -104,4 +92,21 @@ was replaced.
     verdict under another. [SICA](algo-sica.md#measured-results-gsm-hard) reports
     gains against the tighter figure because that is the one its own
     configuration produces.
+
+## Run it
+
+```bash
+python -m examples.promptbreeder.promptbreeder_genetic_prompts --dry-run
+
+# one seed of the three above
+python -m examples.promptbreeder.promptbreeder_genetic_prompts --yes --seed 0 \
+    --provider openai --model deepseek-v4-flash \
+    --async --workers 8 --budget-rollouts 80 --staleness full \
+    --temperature 0.7 --max-seconds 3600
+```
+
+Flags: [the MethodPolicy command line](self-evolution-examples.md#the-methodpolicy-command-line).
+
+Offline tests: `tests/test_promptbreeder_algorithm1.py`,
+`tests/test_candidate_methods.py`.
 

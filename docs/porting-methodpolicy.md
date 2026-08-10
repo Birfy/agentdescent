@@ -27,6 +27,12 @@ Use this for mechanism microports and analogues — declarative
 - [ ] Add offline tests to `tests/test_candidate_methods.py` (the matrix test
   runs every method in every scheduler without an API key) and register the
   builder in `bench.candidate_methods`.
-- [ ] Add `docs/algo-<name>.md`: mechanism, seam wiring table, boundaries, and
-  the matrix-results placeholder.
+- [ ] Add `docs/algo-<name>.md` in the shape every other port page has: lead
+  blockquote, the Paper / Upstream code / Example / Domain / Layer / Fidelity
+  table, **The mechanism**, **Where each piece lives**, **Boundaries**,
+  **Measured results — `<domain>`**, **Run it**, and the offline-tests line.
+- [ ] Add its row to
+  [the eleven](self-evolution-examples.md#the-eleven-microports-and-analogues)
+  and, once measured, to
+  [all eighteen](self-evolution-examples.md#measured-results-all-eighteen).
 - [ ] Record the port author and the upstream trace, exactly as Path A does.

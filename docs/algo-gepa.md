@@ -8,9 +8,11 @@
 | | |
 |---|---|
 | **Paper** | *GEPA: Reflective Prompt Evolution Can Outperform RL* — Agrawal et al., 2025 ([arXiv:2507.19457](https://arxiv.org/abs/2507.19457)) |
-| **Repo** | [`gepa-ai/gepa`](https://github.com/gepa-ai/gepa) (also `dspy.GEPA`) |
-| **Dataset** | **HotpotQA** (multi-hop QA, distractor), exact match |
+| **Upstream code** | [`gepa-ai/gepa`](https://github.com/gepa-ai/gepa) (also `dspy.GEPA`) |
+| **Example** | [`examples/gepa/gepa_prompt_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/gepa/gepa_prompt_evolution.py) |
+| **Domain** | **HotpotQA** (multi-hop QA, distractor), exact match |
 | **Layer** | L2 prompt (`blast_radius=0.2`) |
+| **Fidelity** | `benchmark_faithful` — [what the classes mean](port-fidelity.md) |
 
 ## The algorithm
 
@@ -62,7 +64,7 @@ In [`examples/gepa/gepa_prompt_evolution.py`](https://github.com/Birfy/agentdesc
 | **`pareto_frontier` / `pareto_select`** | (pure, unit-tested) | Algorithm 2: per-instance best → union of winners → dominance pruning → frequency-weighted sampling |
 | `gepa_agent()` | `agent=` | Generator + reflective-mutation actor (rewrites the instruction from trace + NL feedback) |
 
-## Measured — HotpotQA with DeepSeek
+## Measured results — HotpotQA
 
 The only row in the [parallelisation matrix](port-fidelity.md#the-parallelisation-matrix)
 measured on **all three arms**, so the only one with a speedup that has a

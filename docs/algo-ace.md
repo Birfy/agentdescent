@@ -7,9 +7,11 @@
 | | |
 |---|---|
 | **Paper** | *Agentic Context Engineering* — Zhang et al., 2025 ([arXiv:2510.04618](https://arxiv.org/abs/2510.04618)) |
-| **Repo** | [`ace-agent/ace`](https://github.com/ace-agent/ace) |
-| **Dataset** | **FiNER-139** (financial XBRL tagging) — `nlpaueb/finer-139` |
+| **Upstream code** | [`ace-agent/ace`](https://github.com/ace-agent/ace) |
+| **Example** | [`examples/ace/ace_context_evolution.py`](https://github.com/Birfy/agentdescent/blob/main/examples/ace/ace_context_evolution.py) |
+| **Domain** | **FiNER-139** (financial XBRL tagging) — `nlpaueb/finer-139` |
 | **Layer** | L2 skill (`blast_radius=0.2`) |
+| **Fidelity** | `benchmark_faithful` — [what the classes mean](port-fidelity.md) |
 
 ## The algorithm
 
@@ -64,7 +66,7 @@ The example provides these plug-ins to `evolve()` (in
 | default `Aggregator` | (the Curator) | dedup + Beta-posterior acceptance — a bullet commits only if it raises held-out reward; **no custom aggregator needed** |
 | `ace_agent()` | `agent=` | Generator (`solve`) + Reflector (`propose`) over a completion |
 
-## Empirical results — FiNER-139 with DeepSeek
+## Measured results — FiNER-139
 
 Barrier-free (`--async`), 4 workers, 120 rollouts pinned, `deepseek-v4-flash`,
 `--pool 3200 --top-k 139` — 364 single-entity sentences over the full concept
@@ -125,7 +127,7 @@ merger thread, not the workers.
     baseline. Measured there, 32 rollouts produced `+0/-0` on nearly every round
     and val never moved. `--pool 3200` puts the baseline at 0.667. The same
     saturation effect is visible in
-    [EvoSkill](algo-evoskill.md#empirical-results-claude-code-as-the-base-agent-on-finqa),
+    [EvoSkill](algo-evoskill.md#measured-results-finqa),
     and it is why [`DifficultyWeighted` task sampling](sampling.md) exists.
 
 ### What the playbook actually contains
@@ -152,6 +154,15 @@ and `business combinations` as section names in one run. Grow-and-refine's
 near-duplicate check is scoped *within* a section, so a singular/plural split
 walks past it.
 
+## Where the mechanism lives (decision-plane note)
+
+ACE is the port that needed no optimizer surgery: its distinctive mechanism --
+incremental delta updates curated into a playbook -- is entirely an **artifact
+shape**, so it lives at the [strategy layer](strategies.md) (`ACEPlaybook`),
+and the shipped merge pipeline runs unchanged underneath. Of the three
+insertion layers in [choosing policies](policies.md), ACE uses the first alone;
+there is deliberately no custom aggregator and no local policy class here.
+
 ## Run it
 
 ```bash
@@ -170,12 +181,3 @@ python -m examples.ace.ace_context_evolution --pool 3200 --top-k 139 \
 has to be asked for rather than inherited.
 
 Offline tests: `tests/test_ace_example.py`.
-
-## Where the mechanism lives (decision-plane note)
-
-ACE is the port that needed no optimizer surgery: its distinctive mechanism --
-incremental delta updates curated into a playbook -- is entirely an **artifact
-shape**, so it lives at the [strategy layer](strategies.md) (`ACEPlaybook`),
-and the shipped merge pipeline runs unchanged underneath. Of the three
-insertion layers in [choosing policies](policies.md), ACE uses the first alone;
-there is deliberately no custom aggregator and no local policy class here.

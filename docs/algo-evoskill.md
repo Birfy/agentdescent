@@ -8,9 +8,11 @@
 | | |
 |---|---|
 | **Paper** | *EvoSkill: Automated Skill Discovery for Coding Agents* — Alzubi et al., 2026 ([arXiv:2603.02766](https://arxiv.org/abs/2603.02766)) |
-| **Repo** | [`sentient-agi/EvoSkill`](https://github.com/sentient-agi/EvoSkill) |
-| **Dataset** | **OfficeQA** (U.S. Treasury Bulletins), deterministic numeric scorer |
+| **Upstream code** | [`sentient-agi/EvoSkill`](https://github.com/sentient-agi/EvoSkill) |
+| **Example** | [`examples/evoskill/evoskill_skill_discovery.py`](https://github.com/Birfy/agentdescent/blob/main/examples/evoskill/evoskill_skill_discovery.py) |
+| **Domain** | **OfficeQA** (U.S. Treasury Bulletins), deterministic numeric scorer — **FinQA** without HF access, which is what the measured rows below ran on |
 | **Layer** | L2 skill (`blast_radius=0.2`) |
+| **Fidelity** | `benchmark_faithful` — [what the classes mean](port-fidelity.md) |
 
 ## The algorithm (faithful to the code, not just the paper)
 
@@ -47,14 +49,12 @@ Traced from the repo (`src/loop/runner.py`, `src/registry/manager.py`,
   a batch of `batch_size` failures (shared across the concurrent workers) and then
   induces **one** `SKILL.md` from their shared pattern (two LLM calls) — matching
   the repo's per-iteration induction, not one skill per trajectory.
-* `aggregator_factory` — **two optimizers, picked by path**:
-    * **sync** (`asynchronous=False`) → `TopKFrontierAggregator`: the strict
-      bounded top-K frontier faithful to `registry/manager.py` — scores **every**
-      candidate on held-out, commits the best frontier member as the dev head.
-    * **async** (`asynchronous=True`) → `SgdSkillAggregator`: SGD-style skill
-      descent — apply each skill update, validate on held-out only every
-      `val_every` steps, **roll back** the mini-batch on no gain. Amortises the
-      held-out eval ~`val_every`× (the [async optimizer variant](aggregator.md#the-async-optimizer-variant-sgd-style-descent)).
+* `aggregator_factory` → `TopKFrontierAggregator` on **every** path: the strict
+  bounded top-K frontier faithful to `registry/manager.py` — scores **every**
+  candidate on held-out, commits the best frontier member as the dev head. It
+  used to be swapped for an SGD-style amortised-validation optimizer whenever
+  `asynchronous=True`, which made the async arm measure a different algorithm;
+  [that is why it no longer is](aggregator.md#the-async-optimizer-variant-sgd-style-descent).
 * `self_verify=False` — the repo scores the *child* on the validation set and
   never re-runs the sampled task, so the async worker skips its per-trajectory
   re-run rollout.
@@ -68,8 +68,7 @@ In [`examples/evoskill/evoskill_skill_discovery.py`](https://github.com/Birfy/ag
 |---|---|---|
 | `FrontierBest` | selection ([seam](selection.md)) | best-of-frontier parent rule as a named policy |
 | **`SkillLibraryTree`** | `strategy=` | a proposed `SKILL.md` (`name :: body`) becomes a `Diff` on the skill library — a [`FileTree`](directory-evolution.md), so the library is a real directory of `SKILL.md` files |
-| **`TopKFrontierAggregator`** + **`Frontier`** | `aggregator_factory=` (**sync**) | the bounded top-K aggregate frontier; scores every candidate on held-out, commits the best member as the dev head |
-| **`SgdSkillAggregator`** | `aggregator_factory=` (**async**) | SGD-style skill descent: apply updates, validate every `val_every` steps, checkpoint + roll back on no held-out gain |
+| **`TopKFrontierAggregator`** + **`Frontier`** | `aggregator_factory=` | the bounded top-K aggregate frontier, on every arm; scores every candidate on held-out, commits the best member as the dev head |
 | `make_propose(...)` | `propose=` | **batch-level** failure-driven Skill Proposer + Generator — one `SKILL.md` per `batch_size` failures (shared across workers) |
 | `self_verify=False` | async runtime | skip the per-trajectory re-run — the repo scores the child on val only |
 | **`openhands_backend` / `tool_loop_backend`** (`agentdescent.backends`) | the base agent | real OpenHands tool agent, a grep/read ReAct loop, or the default keyword retriever — selected by `--backend` |
@@ -106,7 +105,7 @@ backend = openhands_backend(model="openai/deepseek-v4-pro",
 answer = backend.answer(question, document_text, skills=rendered_skills)
 ```
 
-## Empirical results — Claude Code as the base agent, on FinQA
+## Measured results — FinQA
 
 Barrier-free (`--async`), 4 workers, **120 rollouts pinned**, `--reflective-merge`,
 one seed. The base agent is the **Claude Code CLI** (`--backend claude-code`),
@@ -116,7 +115,7 @@ files with its own tools, which is the shape upstream runs. The model behind the
 CLI is `deepseek-v4-flash` through an Anthropic-compatible endpoint
 (`CLAUDE_CODE_SIMPLE=1` forces API-key auth so the CLI uses it).
 
-Dataset is **FinQA**, not OfficeQA — see [Dataset caveat](#dataset-caveat).
+Dataset is **FinQA**, not OfficeQA — see [Datasets](#datasets-dataset-officeqafinqa).
 60 items → 30 train / 15 val / 15 test.
 
 **Three runs, changing only what happens to a diff proposed against a head the
@@ -180,21 +179,18 @@ is what displaced the seed. They used to be reported as a single number, which
 said "the Proposer produced nothing" about a run that produced six candidates and
 admitted every one of them — opposite diagnoses from the same figure.
 
-## Dataset caveat
-
-The full OfficeQA is HF-**gated** (`databricks/officeqa`, set `HF_TOKEN`); absent
-that the example falls back to **FinQA**, which is what the results above were
-measured on. The earlier fallback was the repo's bundled 12-row sample, and it
-split into 5 train / 3 val / 2 test — too small to measure anything, so every run
-reported 0.000 and read as a broken algorithm rather than a missing dataset.
-
 ## Datasets — `--dataset officeqa|finqa`
 
 OfficeQA is **HF-gated** (`databricks/officeqa`: an accepted licence plus
 `HF_TOKEN`). Without that access the example uses **FinQA**
 (`dreamerdeo/finqa`, ungated) — the same shape, a financial document plus a
 numeric answer to locate and compute, at 60 items with ~4 KB documents that a
-model without tools can read directly.
+model without tools can read directly. FinQA is what the rows above were
+measured on.
+
+The earlier fallback was the repo's bundled 12-row sample, which split into
+5 train / 3 val / 2 test — too small to measure anything, so every run reported
+0.000 and read as a broken algorithm rather than a missing dataset.
 
 ```bash
 python -m examples.evoskill.evoskill_skill_discovery --dataset finqa \

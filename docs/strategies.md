@@ -178,6 +178,7 @@ Each is a real `Strategy` you can read and reuse:
 | `SkillDocStrategy` | [SkillOpt](algo-skillopt.md) | one markdown doc under bounded edit operations |
 | `AgentDesignStrategy` | [ADAS](algo-adas.md) | one agentic-system design |
 | `HarnessStrategy` | [DGM](algo-dgm.md) | a coding agent's capability set |
+| `OpenEvolveStrategy` | [OpenEvolve](algo-openevolve.md) | one Python program each proposal replaces, behind an AST gate |
 
 ## Examples-level strategies
 
