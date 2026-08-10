@@ -1,0 +1,95 @@
+{
+ "experiment": "AFlow soft-mixed workflow search on GSM8K",
+ "dataset": {
+  "name": "openai/gsm8k",
+  "config": "main",
+  "split_size": 64,
+  "transport": "parquet via HF_ENDPOINT",
+  "grader": "the integer after #### against the last number in the reply"
+ },
+ "reference": "FoundationAgents/AFlow@3f457218",
+ "model": "deepseek-v4-flash",
+ "provider": "claude",
+ "config": {
+  "arm": "async_pipeline",
+  "budget_rollouts": 80,
+  "workers": 8,
+  "async_ratio": 2,
+  "staleness": "full",
+  "reflective_merge": true,
+  "alpha": 0.2,
+  "lambda": 0.3,
+  "top_k": 4,
+  "score_scale": 100,
+  "temperature": 0.7,
+  "thinking": "disabled"
+ },
+ "cells": [
+  {
+   "seed": 0,
+   "test": [
+    0.609,
+    0.984
+   ],
+   "validation": [
+    0.609,
+    0.969
+   ],
+   "accepted": 1,
+   "invalid": 0,
+   "wall_s": 705.4,
+   "engine_s": 293.2,
+   "calls": 2065
+  },
+  {
+   "seed": 1,
+   "test": [
+    0.438,
+    0.969
+   ],
+   "validation": [
+    0.438,
+    0.906
+   ],
+   "accepted": 5,
+   "invalid": 0,
+   "wall_s": 599.6,
+   "engine_s": 280.9,
+   "calls": 2071
+  },
+  {
+   "seed": 2,
+   "test": [
+    0.484,
+    0.953
+   ],
+   "validation": [
+    0.469,
+    0.969
+   ],
+   "accepted": 4,
+   "invalid": 2,
+   "wall_s": 591.6,
+   "engine_s": 267.1,
+   "calls": 2072
+  }
+ ],
+ "summary": {
+  "test_baseline": {
+   "min": 0.438,
+   "max": 0.609
+  },
+  "test_final": {
+   "min": 0.953,
+   "median": 0.969,
+   "max": 0.984,
+   "mean": 0.969
+  },
+  "test_gain": {
+   "mean": 0.458
+  },
+  "seeds_that_moved": 3,
+  "total_seeds": 3,
+  "calls_per_seed_mean": 2069
+ }
+}
