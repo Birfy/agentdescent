@@ -175,6 +175,12 @@ def _from_datasets_server(split: str) -> List[dict]:
     return hf_rows(DATASET, split, config=CONFIG, limit=EXPECTED_ROWS[split])
 
 
+def _cache_file(split: str) -> str:
+    from agentdescent.dataloader import cache_path
+
+    return cache_path("gsm8k", f"{split}.jsonl")
+
+
 def load_split(split: str) -> List[dict]:
     """The whole split, checked against its published size.
 
@@ -185,6 +191,18 @@ def load_split(split: str) -> List[dict]:
     """
     if split in _CACHE:
         return _CACHE[split]
+
+    import json
+
+    path = _cache_file(split)
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as handle:
+            rows = [json.loads(line) for line in handle if line.strip()]
+        if len(rows) == EXPECTED_ROWS[split]:
+            _CACHE[split] = rows
+            return rows
+        os.remove(path)          # a short cache file is a truncated download
+
     errors = []
     for loader in (_from_parquet, _from_datasets_server):
         try:
@@ -197,6 +215,14 @@ def load_split(split: str) -> List[dict]:
                 f"{loader.__name__}: got {len(rows)} rows, expected "
                 f"{EXPECTED_ROWS[split]} -- a truncated split, not a short one")
             continue
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        # Written whole then renamed: a cache file half-written by an interrupted
+        # process is exactly the truncated split this function exists to refuse.
+        tmp = path + ".partial"
+        with open(tmp, "w", encoding="utf-8") as handle:
+            for row in rows:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+        os.replace(tmp, path)
         _CACHE[split] = rows
         return rows
     raise RuntimeError(f"could not load GSM8K {split}: " + "; ".join(errors))

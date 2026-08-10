@@ -498,7 +498,11 @@ def standard_main(build: Callable[..., MethodPolicy],
                  if policy.engine.acceptance is not None else ""))
         for note in policy.notes:
             print(f"  - {note}")
-        print("[dry-run] no dataset or model API was accessed.")
+        # `build` has already run, and a method whose domain is a real dataset
+        # fetches it there. Claiming otherwise was true of the hand-written
+        # fixtures and stopped being true the moment a port moved to GSM8K.
+        print("[dry-run] no model API was accessed; the dataset is loaded and "
+              "cached by `build`.")
         return 0
 
     if not confirm(args):

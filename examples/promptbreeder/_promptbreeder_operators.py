@@ -44,7 +44,7 @@ from typing import Callable, Dict, List, Optional
 
 from agentdescent.evolution import Task
 
-from examples._money_domain import feedback
+from examples._gsm8k_domain import feedback
 
 
 #: The paper seeds each unit by mutating the problem description with a
@@ -77,9 +77,9 @@ THINKING_STYLES = (
 )
 
 PROBLEM_DESCRIPTION = (
-    "Answer arithmetic word problems about amounts of money. A strict automatic "
-    "grader reads the reply and accepts exactly one form of answer; the form is "
-    "not stated in the problems and has to be inferred from feedback."
+    "Solve grade-school math word problems. An automatic grader reads the reply "
+    "and takes the last number in it as the answer, so the working before that "
+    "number is free and anything written after it is not."
 )
 
 HYPER_MUTATION_PROMPT = (
