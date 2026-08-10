@@ -28,9 +28,9 @@ ledger commit that rewrites the head.**
 | `ParetoAggregator` | GEPA's pool with per-instance score rows and Algorithm-2 frontier sampling | `examples/gepa/` |
 | `DGMArchiveAggregator` | DGM's keep-all archive with `sigmoid(perf) × 1/(1+children)` parent selection | `examples/dgm/` |
 | `MetaSearchAggregator` | ADAS's keep-all archive over agent designs (head rule: shipped `Beam(1)`) | `examples/adas/` |
-| `TopKFrontierAggregator` | EvoSkill's bounded top-K frontier (parent rule: `FrontierBest`) | `examples/evoskill/` |
-| `SgdSkillAggregator` | EvoSkill's async variant: apply-then-amortised-validate with rollback | `examples/evoskill/` |
+| `TopKFrontierAggregator` | EvoSkill's bounded top-K frontier (parent rule: `FrontierBest`), on every arm | `examples/evoskill/` |
 | `StrictGateAggregator` | SkillOpt's strict gate (acceptance rule: `StrictImprovement`) + rejected-edit buffer + LR schedule | `examples/skillopt/` |
+| `PromptBreederPopulation` | PromptBreeder's binary tournament: two units re-scored on a train batch, the loser's slot reused | `examples/promptbreeder/` |
 
 ## The one trap
 

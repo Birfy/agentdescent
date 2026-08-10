@@ -90,9 +90,11 @@ For Claude, `pip install anthropic` and use `claude(model="claude-haiku-4-5")`
 instead — same call everywhere else. Full walkthrough:
 [quickstart](quickstart-skill.md).
 
-!!! tip "Inspect a faithful port with `--dry-run`"
-    Every algorithm port (all eighteen) prints its configuration with no dataset
-    download, model call, or API key. Other examples may still load or download data:
+!!! tip "Inspect a port with `--dry-run`"
+    All eighteen print their configuration and return **with no model call and
+    no API key**. The seven benchmark-faithful ones return before touching data
+    as well; the eleven `MethodPolicy` ports build their policy first, so one on
+    a real benchmark downloads and caches its split during a dry run and says so.
 
     ```bash
     python -m examples.ace.ace_context_evolution --dry-run
