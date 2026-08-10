@@ -12,9 +12,10 @@ the cause of a failure -- a refutation built on a no-op.
 Three more were found the same way -- `--async-ratio`, `--eval-concurrency` and
 `--eval-cache`, declared by `add_standard_args` and never passed to `run_port`
 -- plus `--val-cap`, which these ports cannot honour at all because their splits
-are frozen in `build()`. `--async-ratio` is the one that cost reproduction: the
-rows in `bench/results/` were recorded at 2, and until it was threaded no
-`python -m examples.<port>` command could ask for that.
+are frozen in `build()`. `--async-ratio` is the one that cost a number: fifteen
+rows in `bench/results/` recorded 2 and ran at `run_port`'s default of 1, and
+nothing in the run's own output contradicted the number the author had asked
+for -- see `tests/test_results_provenance.py`.
 
 So this file no longer tests one flag. `test_every_declared_flag_is_honoured`
 enumerates the parser and requires each flag to name where it is read, which

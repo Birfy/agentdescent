@@ -77,15 +77,17 @@ python -m examples.godel_agent.godel_agent_self_modify --dry-run
 # one seed of the three above
 python -m examples.godel_agent.godel_agent_self_modify --yes --seed 0 \
     --provider openai --model deepseek-v4-flash \
-    --async --async-ratio 2 --workers 8 --budget-rollouts 80 --staleness full \
+    --async --async-ratio 1 --workers 8 --budget-rollouts 80 --staleness full \
     --temperature 0.7 --max-seconds 3600
 
 # the control: upstream's own gatelessness, any compiling edit kept
 python -m examples.godel_agent.godel_agent_self_modify --gateless --dry-run
 ```
 
-`--async-ratio 2` is explicit because the default here is 1, and 2 is what
-this row was recorded at.
+`--async-ratio 1` is what this row ran at: the flag was dropped before it
+reached the runtime, so the run took the runner's default whatever the
+command line said. It is passed explicitly here because the value matters and
+a default can move.
 
 Flags: [the MethodPolicy command line](self-evolution-examples.md#the-methodpolicy-command-line).
 

@@ -167,14 +167,39 @@ cannot be decorative. `run_port` also records all three in `framework`, and
     searches depending on which one launched it. `run_port`'s signature says 1
     and `bench.candidate_methods` defaults to 1, so this parser says 1 too;
     `add_standard_args`' 3 stays the default for the seven ports above, which
-    is where it was measured.
+    is where it was measured. It is one argument away and it is a real change,
+    not a label: the budget bounds both how far a worker's snapshot may drift
+    behind head *and* how many cards may sit un-merged ahead of the merger.
 
-    It is one argument away and it is a real change, not a label: the budget
-    bounds both how far a worker's snapshot may drift behind head *and* how many
-    cards may sit un-merged ahead of the merger. The rows below were recorded at
-    `async_ratio=2`, so every **Run it** command on the algorithm pages passes
-    `--async-ratio 2` explicitly — which, now that the flag arrives, reproduces
-    them.
+!!! warning "Fifteen recorded rows said `async_ratio: 2` and ran at 1"
+    They were attributed to `bench.candidate_methods`, which passes the flag
+    through. They did not come from there. **`bench.candidate_methods` has no
+    `--staleness` and never passes `staleness=` to `run_port`**, so every run
+    through it is `guarded` — and all fifteen blocks record `full`.
+
+    What they did come from is the line `standard_main` prints, and that is
+    checkable rather than argued. It formats qualities at `.3f`, seconds at
+    `.1f` and calls as an int, and across all 45 cells in those files not one
+    value carries more precision than that; its fields are `test`/`validation`
+    pairs, `accepted`, `invalid`, `wall_s`, `engine_s`, `calls`, which is the
+    cell schema exactly. `bench.candidate_methods` JSON-dumps
+    `MethodRunResult.compact()` unrounded — in the one file it produced, 198 of
+    198 wall/engine values are full floats. That command line dropped
+    `--async-ratio`, so the runs took the runner's default of 1.
+
+    Those files now record 1, with a note. The **Run it** commands pass
+    `--async-ratio 1` explicitly for the same reason a config block should never
+    have been typed from memory: the value matters and a default can move.
+
+    The underlying defect was not the flag. It was that a run printed what it
+    *reached* and nothing about how it was *set up*, so the config block beside
+    those numbers had to be remembered. A live run now prints its resolved
+    configuration as one JSON line, in these key names, to be copied:
+
+    ```
+    config: {"arm": "async_pipeline", "seed": 0, "budget_rollouts": 80, "workers": 8,
+             "async_ratio": 1, "staleness": "full", "reflective_merge": true, ...}
+    ```
 
 ---
 

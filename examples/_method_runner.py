@@ -14,6 +14,7 @@ evaluation -- rather than each candidate paying its own ranking evaluation.
 from __future__ import annotations
 
 import argparse
+import json
 import random
 import threading
 import time
@@ -27,7 +28,8 @@ from agentdescent.staleness import get_policy
 from agentdescent.evolution import EvolutionResult, Task, evolve
 from agentdescent.fusion import reflective_merge
 
-from ._common import add_standard_args, completion_for, confirm
+from ._common import (add_standard_args, completion_for, confirm,
+                      is_openai_compatible)
 from ._measure import MODES, PhasedLLM, Recorder, compact_events, usage_dict
 from ._method_policy import MethodPolicy, PopulationContext
 from ._population import population_factory
@@ -48,9 +50,10 @@ QUALITY_TARGET = 0.75
 #: Stated here, in the parser's help, and in `docs/self-evolution-examples.md`,
 #: because a default that changes what a run measures is not an implementation
 #: detail -- the budget bounds both how far a worker's snapshot may drift behind
-#: head and how many cards may sit un-merged ahead of the merger. The rows in
-#: ``bench/results/`` were recorded at 2, so every ``Run it`` command on the
-#: algorithm pages passes ``--async-ratio 2`` outright.
+#: head and how many cards may sit un-merged ahead of the merger. Fifteen rows in
+#: ``bench/results/`` recorded 2 and ran at this default, because the flag was
+#: dropped before it reached the runtime; :func:`run_config` is why that can no
+#: longer happen unnoticed.
 DEFAULT_ASYNC_RATIO = 1
 
 
@@ -454,6 +457,12 @@ def run_port(
             "async_ratio": async_ratio if mode == "async_pipeline" else None,
             "eval_concurrency": gate_concurrency,
             "eval_cache": bool(eval_cache),
+            # The one field a run could not state about itself, and the one that
+            # made fifteen recorded config blocks impossible to attribute: a
+            # block saying `staleness: full` could not have come from
+            # `bench.candidate_methods`, which never passes it, and the run's own
+            # record did not say either way.
+            "staleness": staleness,
             "acceptance": (type(policy.engine.acceptance).__name__
                            if policy.engine.acceptance is not None else "default"),
             "self_verify": policy.self_verify,
@@ -473,6 +482,61 @@ def run_port(
         budget=budget,
         notes=policy.notes,
     )
+
+
+#: What a run has to state about itself for its numbers to be reproducible.
+#: The key names are the ones ``bench/results/*.json`` config blocks already use,
+#: so a block is copied out of a run rather than remembered about it.
+CONFIG_FIELDS = (
+    "arm", "seed", "budget_rollouts", "workers", "async_ratio", "staleness",
+    "reflective_merge", "self_verify", "eval_concurrency", "eval_cache",
+    "temperature", "thinking", "provider", "model",
+)
+
+
+def run_config(args, policy: MethodPolicy, mode: str, *,
+               reflective: Optional[bool] = None) -> Dict[str, object]:
+    """The resolved configuration of the run about to happen, as a dict.
+
+    Every ``bench/results/*.json`` config block was typed by hand beside the
+    numbers, and the numbers themselves were transcribed from the line
+    :func:`standard_main` prints -- which states what a run *reached* and nothing
+    about how it was set up. Fifteen of those blocks then recorded
+    ``async_ratio: 2`` for runs that took the runner's default of 1, because
+    ``--async-ratio`` was dropped before it reached the runtime and nothing in
+    the run's own output contradicted the number the author had asked for.
+
+    So the run states its own configuration, in the key names those blocks use,
+    and it is printed next to the results line. A block that disagrees with the
+    run is now a block somebody retyped instead of copying.
+
+    ``async_ratio`` is ``None`` outside ``async_pipeline`` for the reason
+    ``framework`` gives: a lag budget means nothing with a round barrier in the
+    way, and a number printed anyway is one a reader would compare across arms.
+    """
+    on = policy.reflective if reflective is None else bool(reflective)
+    return {
+        "arm": mode,
+        "seed": args.seed,
+        "budget_rollouts": args.candidates,
+        "workers": args.workers,
+        "async_ratio": args.async_ratio if mode == "async_pipeline" else None,
+        "staleness": args.staleness,
+        "reflective_merge": on,
+        "self_verify": policy.self_verify,
+        "eval_concurrency": ((1 if mode == "serial" else args.workers)
+                             if args.eval_concurrency is None
+                             else args.eval_concurrency),
+        "eval_cache": bool(args.eval_cache),
+        "temperature": args.temperature,
+        # `--no-thinking` only reaches an Anthropic-shaped endpoint;
+        # `completion_for` drops it on the OpenAI-compatible path rather than
+        # guessing a per-vendor equivalent, so the run must not claim otherwise.
+        "thinking": ("disabled" if getattr(args, "no_thinking", False)
+                     and not is_openai_compatible(args) else "default"),
+        "provider": args.provider,
+        "model": args.model,
+    }
 
 
 def _reflective_override(args, policy: MethodPolicy) -> Optional[bool]:
@@ -641,6 +705,14 @@ def standard_main(build: Callable[..., MethodPolicy],
           f"invalid={outcome.invalid_candidates} "
           f"wall={outcome.wall_seconds:.1f}s engine={outcome.engine_wall_seconds:.1f}s "
           f"calls={outcome.model_usage['calls']} budget={outcome.budget['matched']}")
+    # The line above is what every `bench/results/*.json` cell was transcribed
+    # from -- `.3f` qualities, `.1f` seconds, integer calls, which is why not one
+    # of 45 cells carries more precision than that. It says what the run reached
+    # and nothing about how it was set up, so the config block beside those cells
+    # was typed from memory and fifteen of them recorded a lag budget the run
+    # never had. This one is copyable.
+    print("config: " + json.dumps(run_config(args, policy, mode,
+                                             reflective=override)))
     if policy.report is not None:
         detail = policy.report()
         if detail:

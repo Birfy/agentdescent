@@ -6,6 +6,39 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-08-10
+
+### Fixed
+
+- **A run reported what it reached and nothing about how it was set up, so
+  fifteen recorded rows attributed themselves to the wrong lag budget.** Every
+  `bench/results/*.json` written from a MethodPolicy port pairs a `cells` list
+  with a hand-typed `config` block; the cells were transcribed from the line
+  `standard_main` prints, which states results only. Fifteen blocks recorded
+  `async_ratio: 2` for runs that took `run_port`'s default of 1 -- 0.4.1 fixed
+  the dropped flag but left the attribution, which named
+  `bench.candidate_methods` as the source. It was not: that harness has no
+  `--staleness` and never passes `staleness=` to `run_port`, so every run
+  through it is `guarded`, and all fifteen blocks record `full`. The transcribed
+  line is what produced them, and that is checkable rather than argued -- it
+  formats qualities at `.3f`, seconds at `.1f` and calls as an int, and across
+  all 45 cells not one value carries more precision, while the one file
+  `bench.candidate_methods` did write has 198 of 198 wall/engine values at full
+  float precision. Those files now record 1, with a note.
+- **`run_port` now records `staleness` in `framework`.** It was the one setting
+  a run could not state about itself, and the one that made those blocks
+  impossible to attribute either way.
+
+### Added
+
+- **`examples._method_runner.run_config` and the `config:` line.** A live run
+  prints its resolved configuration as one JSON object, in the key names those
+  results blocks already use, so a block is copied out of a run instead of
+  remembered about it. `tests/test_results_provenance.py` keeps the forensic
+  invariant executable: a future results file whose cells carry more precision
+  than that print line came from somewhere else, and its config block cannot be
+  read as describing a command-line run.
+
 ## [0.4.1] — 2026-08-10
 
 ### Fixed
@@ -2145,7 +2178,8 @@ First public release on PyPI as **`agentdescent`**.
   discrete-space `Aggregator`, staleness policies, DP/TP/PP parallelism, layered
   governance, and the provider-agnostic `agentdescent.agents` completion layer.
 
-[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/Birfy/agentdescent/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/Birfy/agentdescent/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Birfy/agentdescent/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Birfy/agentdescent/compare/v0.2.0...v0.3.0
