@@ -32,77 +32,65 @@ No training of any kind.
 
 - Fundamental analogue: upstream refines the *answer* to one instance; this port refines the *instruction artifact*.
 
-## Measured results
+## Measured results — GSM8K
 
 Three seeds, `async_pipeline`, 80 rollouts each, 8 workers, `--staleness full`,
-`--reflective-merge`, `deepseek-v4-flash` at temperature 0.7. Recorded in
-[`bench/results/self-refine-fused-call.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/self-refine-fused-call.json).
+`deepseek-v4-flash` at temperature 0.7, on a 192-core Linux host. Recorded in
+[`bench/results/self-refine-gsm8k.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/self-refine-gsm8k.json).
 
-| seed | test quality | validation | accepted | calls |
-|---|---|---|---|---|
-| 0 | 0.000 → **1.000** | 0.000 → 1.000 | 2/80 | 395 |
-| 1 | 0.000 → **0.938** | 0.000 → 1.000 | 3/80 | 400 |
-| 2 | 0.000 → **1.000** | 0.000 → 1.000 | 2/80 | 416 |
+| seed | test quality | validation | accepted | calls | wall |
+|---|---|---|---|---|---|
+| 0 | 0.609 → **0.969** | 0.531 → 0.953 | 1/80 | 1072 | 324 s |
+| 1 | 0.500 → **0.984** | 0.391 → 0.922 | 3/80 | 1071 | 363 s |
+| 2 | 0.547 → **0.875** | 0.562 → 0.922 | 1/80 | 1007 | 315 s |
 
-Mean 0.979 against a ceiling of 1.000, and validation reaches 1.000 on all three
-seeds. This row clears the domain.
+Mean final **0.943**, mean gain **+0.391**, all three seeds moving. 17 minutes
+for the set.
 
-### Against the other mechanisms
+**Read the baseline.** It is 0.500–0.609, not 0.000, and that is the point of
+the move described below: `deepseek-v4-flash` already answers half of GSM8K, so
+what a method has to work with is the headroom above a real floor rather than
+the whole interval.
 
-Same 48 items, same model, same 80-rollout budget:
+64 items per split, drawn from GSM8K's own train and test splits — a *window* on
+the benchmark, not the whole 8792 rows, which at this budget would be hours. At
+sixteen a single item moved the score by 0.0625; sixty-four buys 0.016, and the
+gain came out at +0.391 against +0.375 on the smaller window, which is what says
+the gain is real rather than small-sample luck.
 
-| | mean test | calls per seed |
-|---|---:|---:|
-| **Self-Refine** | **0.979** | ~400 |
-| [AFlow](algo-aflow.md) | 0.896 | ~750 |
-| [Reflexion](algo-reflexion.md) | 0.354 | ~460 |
-| [PromptBreeder](algo-promptbreeder.md) | 0.271 | ~630 |
+See the caveat on [PromptBreeder](algo-promptbreeder.md#measured-results): one
+run per seed does not pin a number here either.
 
-The best row is also the cheapest, and the two facts have the same cause. Every
-Self-Refine candidate costs **one** model call — the fused critique-and-refine
-that the fidelity fix below restored — where AFlow spends two calls per *rollout*
-on its two workflow nodes. Fixing the fidelity halved the cost and did not trade
-anything for it.
+!!! danger "The previous numbers were measured against a fixture this repository wrote"
+    This row used to run on 48 hand-written arithmetic items, graded by a rule
+    chosen here — and **changed here**, mid-study, when it blocked progress: the
+    grader matched the whole reply, which made the output convention and the
+    reasoning mutually exclusive, so every method evolved prompts forbidding a
+    chain of thought.
 
+    Both are legitimate things to do to a fixture and disqualifying for a
+    benchmark. A number produced against a target its author can move is not a
+    measurement of the method.
 
-!!! note "These cross-algorithm figures demonstrate that each port runs, not which is best"
-    Every row is one run per seed, and the seed fixes the data splits and the
-    method's own sampler -- **not the model**, which is sampled at temperature
-    0.7. Re-running an identical command at an identical seed moves the number:
-    PromptBreeder's seed 0 scored 0.438 on one run and 0.875 on the next, from
-    the same script and the same code. Read the table as evidence the mechanism
-    executes end to end and produces a plausible artifact; a ranking would need
-    repeats per seed, which these runs do not have.
-!!! danger "FEEDBACK and REFINE are one call in the task whose domain this is"
-    `GSMFeedback.__call__` makes a **single** request and splits the completion
-    on a marker: `entire_output.split("def solution():")`, prose before is the
-    critique, code after is the improved solution. `iterative_gsm` then checks
-    the **critique half** for the stop signal.
+    What that fixture flattered, specifically: its baseline was **0.000 by
+    construction**, because the seed instruction could not satisfy an output
+    convention no one had told it. The old row read 1.000 / 0.938 / 1.000 from a
+    floor of zero. Here the floor is the model's own GSM8K accuracy and the same
+    method gains +0.391 above it.
 
-    Six of the repository's seven tasks *do* have a separate `task_iterate.py`
-    REFINE module. `gsm` does not — and `gsm` is the arithmetic-word-problem task
-    this port's domain matches, and the one the port takes its stop signal from.
-    The port had it both ways: two calls, citing gsm.
+    GSM8K brings its own questions, its own answer key, and the standard grader:
+    the integer after `####` against the last number the reply states. Nothing in
+    it is this repository's to adjust.
 
-    An offline test was pinning the old shape.
-    `test_dry_run_counts_two_call_proposals` asserted
-    `reserved proposal calls=24`, a number that is only reachable when
-    `self_refine` declares two calls per candidate.
+!!! note "Loading a real dataset is where a benchmark quietly becomes a fixture"
+    The run host cannot reach `huggingface.co`, so the splits come over
+    `HF_ENDPOINT` (a mirror) as parquet, with `datasets-server` as the fallback
+    where that is reachable.
 
-    The critique prompt now carries worked examples of the fused shape, as
-    `data/prompt/gsm/feedback.txt` carries four. Without them the model does not
-    emit the marker and the refinement half comes back empty — the same failure
-    [Reflexion](algo-reflexion.md) had, where a reflector with nothing to imitate
-    answered the arithmetic instead of planning.
-
-!!! note "The stop signal is stronger here than upstream's"
-    `iterative_gsm` breaks on `"it is correct" in feedback.lower()`, and that
-    phrase appears **nowhere** in `data/prompt/gsm/`. Nothing teaches the model to
-    emit it, so upstream's check never fires and its loop runs the full
-    `max_attempts`.
-
-    This port instructs the critique to say it when the attempt is already right,
-    which makes the check real. That is the paper's stopping criterion working
-    rather than upstream's vestigial check reproduced, and the notes say which —
-    a run that stops early is spending less than a run that does not, and the
-    reason belongs next to the number.
+    `load_split` asserts the published row counts — 7473 train and 1319 test —
+    rather than trusting them. That check exists because it caught the failure
+    first: an interrupted fetch of GSM8K's raw JSONL over a slow link returned
+    **944 of 1319** test rows and raised nothing at all. A truncated benchmark
+    reads exactly like a benchmark, and every number measured on one is wrong in
+    a direction nobody can see. The on-disk cache is written whole and renamed
+    for the same reason.
