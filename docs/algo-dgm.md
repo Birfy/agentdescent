@@ -54,10 +54,10 @@ In [`examples/dgm/dgm_self_improve.py`](https://github.com/Birfy/agentdescent/bl
 
 | Plug-in | `evolve()` slot | What it does |
 |---|---|---|
-| `DGMParentSelection` | selection ([seam](selection.md)) | `sigmoid(10·(s−0.5)) × 1/(1+children)` parent sampling; default of `DGMArchiveAggregator` |
+| shipped `Archive(sampling="sigmoid_novelty")` | selection ([seam](selection.md)) | `sigmoid(10·(s−0.5)) × 1/(1+children)` parent sampling; default of `DGMArchiveAggregator`, with the aggregator's own rng |
 | **`HarnessStrategy`** | `strategy=` | a proposed capability becomes a `Diff` on the harness capability set |
 | **`DGMArchiveAggregator`** | `aggregator_factory=` | keep-all archive + staged eval (10→50→140) + sigmoid×novelty parent selection; sets the sampled parent as the dev head |
-| **`dgm_parent_weights` / `choose_selfimproves`** | (selection) | the exact DGM rule `p_i ∝ sigmoid(10·(score−0.5)) · 1/(1+children_i)` |
+| **`dgm_parent_weights` / `choose_selfimproves`** | (selection) | the exact DGM rule `p_i ∝ sigmoid(10·(score−0.5)) · 1/(1+children_i)`. The formula is now [`agentdescent.selection.sigmoid_novelty_weights`](selection.md); `examples/adas` carried a byte-identical copy until it was shared |
 | `propose` + `make_surrogate_evaluator` | `propose=` / objective | add the most-needed capability; the transparent surrogate objective (swap in a real Docker harness via `evaluate_fn`) |
 
 ## Measured results — vendored bugs (`--objective real`)

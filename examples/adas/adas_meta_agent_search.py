@@ -60,6 +60,7 @@ from agentdescent.evolvable import Diff, EvidenceCard
 from agentdescent.evolution import EvolvingArtifact, Task, evolve, rule_id
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
+from agentdescent.selection import sigmoid_novelty_weights
 from agentdescent.staleness import get_policy
 from examples._common import (add_standard_args, completion_for, confirm,
                               is_openai_compatible, worker_count,
@@ -322,18 +323,18 @@ def bootstrap_ci(correct: List[float], n_resamples: int = 2000, seed: int = 0
     return mean, lo, hi
 
 
-def dgm_parent_weights(scores: List[float], children: List[int]) -> List[float]:
-    """Darwin Godel Machine parent-selection weights (DGM_outer.py `score_child_prop`).
-
-    ``p_i proportional to sigmoid(10*(score-0.5)) * 1/(1+children_i)``: favour
-    high performers, discount already-explored parents (open-ended novelty)."""
-    raw = []
-    for s, c in zip(scores, children):
-        sig = 1.0 / (1.0 + math.exp(-10.0 * (s - 0.5)))
-        nov = 1.0 / (1.0 + c)
-        raw.append(sig * nov)
-    total = sum(raw) or 1.0
-    return [r / total for r in raw]
+#: Darwin Godel Machine weights (``DGM_outer.py:score_child_prop``):
+#: ``p_i proportional to sigmoid(10*(score-0.5)) * 1/(1+children_i)`` -- favour
+#: high performers, discount already-explored parents. Now shipped as
+#: :func:`agentdescent.selection.sigmoid_novelty_weights`, because this file and
+#: `examples/dgm` each carried a byte-identical copy.
+#:
+#: ADAS uses the weights for a different *draw*: `examples/dgm` samples one
+#: parent, ADAS samples up to five archive entries without replacement to
+#: condition the meta-agent. Sharing the formula and not the draw is the whole
+#: distinction, and it is why this stays a function here rather than becoming
+#: `Archive('sigmoid_novelty')`.
+dgm_parent_weights = sigmoid_novelty_weights
 
 
 # ===========================================================================

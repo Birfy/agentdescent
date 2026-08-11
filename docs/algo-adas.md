@@ -58,7 +58,7 @@ In [`examples/adas/adas_meta_agent_search.py`](https://github.com/Birfy/agentdes
 | **`MetaSearchAggregator`** | `aggregator_factory=` | ADAS's keep-all archive with bootstrap-CI fitness |
 | `make_propose(...)` | `propose=` | the meta-agent, conditioned on the whole archive (+ two Reflexion rounds) |
 | **`Interpreter`** + **`seed_archive`** | (agent substrate) | the safe control-flow DSL (`cot`/`cot_sc`/`reflexion`/`debate`/`step_back`/`role_assignment`/`ensemble`) and the seven MGSM seeds |
-| **`dgm_parent_weights`** | `--select dgm` | DGM's sigmoid×novelty rule as an alternative archive-conditioning strategy |
+| **`dgm_parent_weights`** | `--select dgm` | DGM's sigmoid×novelty rule as an alternative archive-conditioning strategy. Shared with `examples/dgm` as [`sigmoid_novelty_weights`](selection.md) — same formula, different draw: ADAS samples five entries without replacement to condition the meta-agent, DGM samples one parent |
 
 ## Measured results — GPQA Diamond
 
