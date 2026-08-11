@@ -69,6 +69,10 @@ class PopulationAggregator(Aggregator):
         self._archive: List[Dict[str, object]] = []
         self._seen: Set[str] = set()
         self._archive_lock = threading.Lock()
+        #: Selections made, i.e. the ``round`` handed to the policy. Not under
+        #: the archive lock: `step()` is the merger's, one thread, while the
+        #: lock guards the archive against the workers that `ingest`.
+        self._selections = 0
 
     # -- the archive ---------------------------------------------------------
 
@@ -182,8 +186,23 @@ class PopulationAggregator(Aggregator):
         # point no matter how many workers are under it. This is the seam that
         # widens when the ledger can hold several -- the policy is already
         # written to answer for ``n``.
+        #
+        # ``round`` is *which selection this is*, not the engine's round, and it
+        # is counted here because only this method knows: `step()` also runs on
+        # sweeps that never reach a choice (fewer than two candidates), and
+        # counting those would have a beam skip slots it never expanded.
+        #
+        # It used to be left at its default of 0, and that single omission is
+        # what made width inert. A policy asked for one starting point can only
+        # rotate on something that changes between calls; the archive and the
+        # `selected` counts are two such things, and `MCTS` and `Archive` read
+        # them -- but `Beam` and `ParetoFrontier` rank a pool and have no
+        # per-candidate state to read, so with a constant round they returned
+        # the same entry forever. `Beam(4)` was `Beam(1)`, and `ParetoFrontier`
+        # sat on whichever front member was admitted first, usually the seed.
         ctx = SelectionContext(head=head_candidate, candidates=tuple(candidates),
-                               n_workers=1)
+                               round=self._selections, n_workers=1)
+        self._selections += 1
         chosen = list(self.selection.select(ctx, 1))
         if not chosen:
             return reports

@@ -6,6 +6,45 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A declared `Beam(k)` was `Beam(1)`, and `ParetoFrontier` never left the
+  candidate it was handed first.** `PopulationAggregator` asks for one starting
+  point per merge — the ledger holds one live head — and built its
+  `SelectionContext` without `round=`, leaving it at 0 for every call. `MCTS` and
+  `Archive` rotate on state they read per candidate (`selected`), so they
+  coped; `Beam` and `ParetoFrontier` rank a pool and have nothing per-candidate
+  to read, so they returned the same entry forever. Measured over eight
+  selections against a growing archive:
+
+  ```
+  before                                  after
+  Beam(4)               [3,3,3,3,...]     [3,2,1,0,3,2,1,0]
+  Pareto(per_instance)  [0,0,0,0,...]     [0,3,0,3,0,3,0,3]
+  Archive(novelty)      [2,2,2,1,2,2,2,2] [2,2,1,1,3,3,1,0]
+  ```
+
+  `ParetoFrontier` was the worse of the two: the front is built in archive
+  order, so `front[0]` is the earliest admitted non-dominated candidate —
+  usually the seed — and a run could watch far higher scorers arrive and keep
+  expanding the seed, the exact opposite of what keeping a specialist is for.
+
+  The layer now counts its selections and passes one, and `Beam` /
+  `ParetoFrontier` offset their round-robin by it, so the walk is continuous
+  across calls rather than restarted at the best member. `Archive`'s seeded rng
+  was also rebuilding an identical `Random` every call for the same reason.
+
+  **No published number moves**, and it is pinned rather than asserted: at
+  `round == 0` the new expression is the old one (`(0 + i) % len == i % len`)
+  and a test compares the concrete answers. Every configuration this repository
+  runs is unaffected for a separate reason each — SICA's `Archive('best')` never
+  draws, DGM and GEPA pass their own rng so `ctx.round` is unread, AFlow and
+  PromptBreeder hold their own stateful rng, and ADAS and EvoSkill use `Beam(1)`
+  whose single slot cannot rotate. The one configuration that changes is
+  `Archive(sampling='novelty'|'performance'|'uniform', seed=N)` under the
+  population layer, which nothing here uses and which was drawing the same
+  random number every step.
+
 ### Added
 
 - **`ParetoFrontier(mode="win_frequency")` — GEPA's Algorithm 2, shipped.**

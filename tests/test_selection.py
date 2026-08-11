@@ -30,9 +30,10 @@ def _c(version, score=None, per_task=None, selected=0, parent=None):
                      per_task=per_task or {}, selected=selected, parent=parent)
 
 
-def _ctx(*candidates, head=None, n=4):
+def _ctx(*candidates, head=None, n=4, round=0):
     head = head or candidates[0]
-    return SelectionContext(head=head, candidates=candidates, n_workers=n)
+    return SelectionContext(head=head, candidates=candidates, round=round,
+                            n_workers=n)
 
 
 # -- the default is the status quo ------------------------------------------
@@ -324,3 +325,93 @@ def test_mcts_spreads_a_batch_across_distinct_arms():
                _c(3, 0.7, selected=5), n=3)
     chosen = MCTS().select(ctx, 3)
     assert len({c.version for c in chosen}) == 3
+
+
+# -- the walk over the pool, and the promise that round 0 did not move -------
+
+
+def test_round_zero_answers_exactly_what_it_answered_before():
+    """The guard on the whole change: at ``round == 0`` nothing moved.
+
+    `Beam` and `ParetoFrontier` walk their pool offset by `ctx.round` now,
+    where they used to restart at the best member on every call. The two are
+    the same expression when the offset is zero -- ``(0 + i) % len == i % len``
+    -- and this pins that rather than trusting the algebra, because every
+    number this repository has published was produced with the round the
+    population layer used to pass, which was zero.
+    """
+    pool = (_c(1, 0.4, {"t0": 0.9, "t1": 0.1}), _c(2, 0.8, {"t0": 0.8, "t1": 0.8}),
+            _c(3, 0.6, {"t0": 0.2, "t1": 0.9}), _c(4, 0.5, {"t0": 0.5, "t1": 0.5}))
+    ctx = _ctx(*pool, round=0)
+    # Beam: ranked best-first, taken from the top.
+    assert [c.version for c in Beam(4).select(ctx, 1)] == [2]
+    assert [c.version for c in Beam(4).select(ctx, 4)] == [2, 3, 4, 1]
+    assert [c.version for c in Beam(1).select(ctx, 4)] == [2, 2, 2, 2]
+    # ParetoFrontier: the front in archive order, taken from the front.
+    front = [c.version for c in pareto_front(pool, tasks=["t0", "t1"])]
+    assert [c.version for c in ParetoFrontier("per_instance").select(ctx, 1)] == front[:1]
+    assert [c.version for c in ParetoFrontier("per_instance").select(ctx, 3)] == \
+           [front[i % len(front)] for i in range(3)]
+
+
+def test_beam_of_one_is_single_head_at_every_round():
+    """A width-one beam has one slot, so rotating it cannot go anywhere.
+
+    ADAS and EvoSkill both use `Beam(1)` inside their own aggregators; if the
+    offset reached them their published numbers would move.
+    """
+    pool = (_c(1, 0.9), _c(2, 0.5), _c(3, 0.7))
+    for r in range(6):
+        ctx = _ctx(*pool, round=r)
+        assert list(Beam(1).select(ctx, 4)) == list(SingleHead().select(ctx, 4))
+
+
+def test_a_beam_expands_every_slot_when_asked_one_at_a_time():
+    """The defect, as the population layer actually meets it.
+
+    The layer asks for one starting point per merge, because the ledger holds
+    one live head. Asked that way with a constant round, `Beam(4)` answered
+    with the best candidate every time -- identical to `Beam(1)`, so the width
+    was inert and nothing said so.
+    """
+    pool = (_c(1, 0.4), _c(2, 0.8), _c(3, 0.6), _c(4, 0.5))
+    picks = [Beam(4).select(_ctx(*pool, round=r), 1)[0].version for r in range(8)]
+    assert set(picks) == {1, 2, 3, 4}, f"the beam never left its best slot: {picks}"
+    assert picks[:4] == picks[4:], "the walk should be a cycle over the beam"
+
+
+def test_the_frontier_is_walked_not_pinned_to_its_oldest_member():
+    """`ParetoFrontier` sat on `front[0]` forever, which is worse than best-first.
+
+    The front is built in archive order, so `front[0]` is the earliest admitted
+    non-dominated candidate -- usually the seed. A run could watch candidates
+    scoring far higher arrive and keep expanding the seed, which is the exact
+    opposite of what keeping a specialist is for.
+    """
+    pool = (_c(1, 0.30, {"t0": 0.95, "t1": 0.05}),      # the seed: a specialist
+            _c(2, 0.50, {"t0": 0.50, "t1": 0.50}),
+            _c(3, 0.80, {"t0": 0.75, "t1": 0.85}))
+    front = {c.version for c in pareto_front(pool, tasks=["t0", "t1"])}
+    picks = {ParetoFrontier("per_instance").select(_ctx(*pool, round=r), 1)[0].version
+             for r in range(8)}
+    assert picks == front, f"expanded {picks}, front is {front}"
+
+
+def test_the_population_layer_hands_the_policy_a_moving_round():
+    """The root cause: the layer never set `round`, so it was 0 for every call.
+
+    Counted per *selection* rather than per `step()`: a sweep with fewer than
+    two candidates makes no choice, and counting it would have the beam skip a
+    slot it never expanded.
+    """
+    seen = []
+
+    class Recording(Beam):
+        def select(self, ctx, n):
+            seen.append(ctx.round)
+            return super().select(ctx, n)
+
+    result = _run(policies=Policies(selection=Recording(3)))
+    assert result.error is None
+    assert seen, "the layer never asked"
+    assert seen == list(range(len(seen))), f"rounds were not consecutive: {seen}"

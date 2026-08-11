@@ -171,6 +171,18 @@ class Beam(SingleHead):
     has not been measured, and ranking it as the worst is how a freshly created
     branch is never explored -- the classic way a beam collapses to a single line
     of descent.
+
+    The walk over the beam is **continuous across calls**, offset by
+    ``ctx.round``, not restarted at the best member each time. That is what makes
+    ``k`` mean anything where a caller asks for one starting point at a time: the
+    engine's ledger holds one live head, so the population layer asks for one per
+    merge, and a beam that answered "the best" every time was `Beam(1)` under
+    another name. Rotating expands each of the ``k`` in turn instead -- serial
+    where textbook beam search is parallel, and the same frontier.
+
+    At ``ctx.round == 0`` this is exactly the old per-call round-robin, which is
+    what makes the change checkable: `tests/test_selection.py` pins that every
+    policy's answer at round 0 is the answer it gave before.
     """
 
     def __init__(self, k: int = 1) -> None:
@@ -188,7 +200,7 @@ class Beam(SingleHead):
                         key=lambda c: (c.score is None, c.score or 0.0),
                         reverse=True)
         beam = ranked[:self.k] or [ctx.head]
-        return [beam[i % len(beam)] for i in range(n)]
+        return [beam[(ctx.round + i) % len(beam)] for i in range(n)]
 
 
 def pareto_win_frequency(
@@ -370,7 +382,7 @@ class ParetoFrontier(SingleHead):
                 "scores and none were provided; use mode='topk_aggregate' if "
                 "aggregate ranking is what you want")
         front = pareto_front(ctx.candidates, tasks=tasks) or [ctx.head]
-        return [front[i % len(front)] for i in range(n)]
+        return [front[(ctx.round + i) % len(front)] for i in range(n)]
 
 
 class Archive(SingleHead):
