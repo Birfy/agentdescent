@@ -79,37 +79,63 @@ would be running *EvoSkill's* rule and reporting it under GEPA's name.
 **`Archive` is deterministic given its seed.** An archive that samples differently
 on a re-run makes a seeded comparison meaningless.
 
+## How a policy takes effect: serialised heads
+
+Declaring a policy installs the [population layer](api.md#the-population-layer),
+and that is the whole mechanism:
+
+```python
+evolve(tasks, reward, agent=agent,
+       policies=Policies(selection=Beam(4)))    # installs PopulationAggregator
+```
+
+`PopulationAggregator` subclasses the shipped aggregator — staleness, conflict,
+fusion, acceptance and promotion all run unchanged — and wraps three things
+around it. It archives every distinct committed head with its held-out score. It
+asks the policy which archived candidate the next batch should mutate. It
+commits that candidate back to `dev`, so the next round's workers start from it.
+`finalize` commits the archive's best scorer, so a run ends on its best
+candidate rather than on whatever it was exploring when the budget ran out.
+
+The heads are **serialised, not concurrent** — one at a time on one branch — so
+the search is real but a wide beam does not run wide in wall-clock. Both drivers
+get it from the same place: `Policies(selection=…)` reaches
+`_build_engine`, and the layer is installed there.
+
+`Policies(selection=…)` and `aggregator_factory=` are refused together. They
+configure the same seat, and choosing one silently would leave a caller who
+passed both with no way to read which one ran.
+
 ## What is deliberately not here yet
 
 Multiple **live** heads. The ledger holds one `dev` branch, staleness is defined
-as `η = max(head − base)`, and promotion compares `dev` against `stable` — all
-three assume "head" names one thing. So a policy that returns a starting point
-other than the head raises `MultiHeadUnsupported` — a `NotImplementedError`,
-which is what this raised before it had a name, *and* a `ContractError`, which
-is how it gets out of the barrier-free loop's merger thread instead of being
-absorbed there as a provider failure and retried:
+as `η = max(head − base)`, and promotion compares `dev` against `stable`. The
+population layer sidesteps that by taking turns rather than by making `head`
+plural; making the ledger hold concurrent branches is separate work.
+
+The refusal that remains is narrower and is about the *menu*: a policy chooses
+among `SelectionContext.candidates`, and one that returns something else raises
+`MultiHeadUnsupported`.
 
 ```
-Beam.select() asked to start from a candidate other than the current head, and
-the ledger holds one live branch: `dev`, with staleness defined as
-eta = max(head - base). Multi-head support is a separate change; until then a
-selection policy may only return the head it was given.
+Beam.select() returned a candidate that is not in the archive it was given (4
+entries). A selection policy chooses among the candidates in
+SelectionContext.candidates; it cannot invent one, because a state that was
+never a committed head has never been scored by the gate.
 ```
 
-It raises rather than being collapsed to the head, because a caller who passes a
-beam and watches a run finish has every reason to believe the beam ran — the same
-rule [`Policies.require_supported`](api.md) enforces for the bundle as a whole.
+The type carries two bases on purpose. `NotImplementedError` is what callers
+already catch. `ContractError` is how it gets out of the barrier-free loop's
+merger thread instead of being absorbed there as a provider failure and retried
+until the sweep budget runs out.
 
-Every policy above is therefore usable *today* in the shape a run actually
-starts in: an archive of one, a beam over one candidate. That is what makes the
-seam checkable now instead of after the ledger changes. Making the ledger hold
-concurrent branches, and redefining `η` when `head` is plural, is separate work.
-
-**Both drivers ask.** [`evolve()`](api.md) asks once per round, before the batch
-goes out; [`async_evolve()`](async.md) asks once per merger sweep, which is that
-loop's round — `history` is indexed by it. They were not always the same: the
-barrier-free loop listed `selection` as wired and then never consulted it, so
-the identical bundle raised on one path and finished with a reward on the other.
+!!! note "`Beam(1)` is no longer the same run as `SingleHead`"
+    It is still the same *answer* on the pool `SingleHead` sees — one candidate,
+    and `tests/test_selection.py` pins that. But `Beam(1)` over an archive
+    restarts from the best scorer, which differs from "continue from the head"
+    the moment the head is not the best. That is beam search with width one, and
+    it is what the policy always meant; before the population layer it had
+    nowhere to show.
 
 ## Examples-level policies, and how they actually run
 
@@ -120,11 +146,17 @@ The MethodPolicy ports add two paper rules as ~15-line policies:
 | `BinaryTournament` | sample two candidates, breed the winner (unscored wins, Beam's optimism) | [PromptBreeder](algo-promptbreeder.md) |
 | `SoftMixed` | `λ·uniform + (1−λ)·softmax(α·(s−s_max))` over top-k, seed always included | [AFlow](algo-aflow.md) |
 
-On a single-head ledger these (and `Archive`, `Beam`, …) get their population
-through the [population aggregator](aggregator-factory.md): committed heads
-enter an archive, the policy picks the next parent from it, and the pick is a
-ledger commit. Declare `Policies(selection=…)` as usual — the method runner
-routes it there automatically.
+These run on the same population layer as the shipped policies, and declaring
+one is all it takes — the method runner no longer routes anything, because the
+engine does it.
+
+A port only reaches for `aggregator_factory=` when its rule is not expressible
+as a `SelectionPolicy` at all. PromptBreeder's is the case: Algorithm 1's
+tournament *evaluates* both sampled units and *replaces* the loser, and a policy
+is handed candidates with cached scores and returns one. So
+[`PromptBreederPopulation`](algo-promptbreeder.md) subclasses
+`PopulationAggregator` and keeps `BinaryTournament` beside it as the declared,
+equivalent policy — the two cannot disagree about who wins.
 
 ## Legacy-port policies
 

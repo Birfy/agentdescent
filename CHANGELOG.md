@@ -6,7 +6,50 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **`Policies(selection=…)` now takes effect, from either driver.** The
+  population layer that made a `SelectionPolicy` mean something on a one-branch
+  ledger lived in `examples/_population.py` and was installed by the MethodPolicy
+  runner, so one bundle field had three readings: `evolve()` refused it,
+  `async_evolve()` dropped it, and the port runner honoured it through
+  `aggregator_factory=`. It is `agentdescent.population` now, and `_build_engine`
+  installs it for any declared policy, so both drivers run the same search. The
+  runner keeps the factory route only for a port whose rule is not expressible as
+  a `SelectionPolicy` at all — PromptBreeder's tournament evaluates and replaces,
+  where a policy is handed cached scores and returns one of them.
+- **`Beam(1)` is no longer the same *run* as `SingleHead`.** It is still the same
+  answer on the pool `SingleHead` sees, and the tests pin that; but over an
+  archive it restarts from the best scorer, which differs from "continue from the
+  head" the moment the two differ. That is what beam search of width one means —
+  before the population layer it had nowhere to show. No recorded measurement
+  moves: every result in the repository was produced with no policy declared, or
+  through the runner that already installed this layer.
+- **A declared `selection` policy alongside `aggregator_factory=` is refused.**
+  Both fill the aggregator seat, and resolving it silently would leave a caller
+  who passed both with nothing to read that says which one ran.
+
 ### Fixed
+
+- **A parent switch kept keys the chosen parent did not have.** The switch was
+  written as `head.apply(Diff(ops=target_state))`, and `apply` only *sets* keys —
+  so on a grow-only key space (`AppendRules`) every key the head had survived the
+  switch, and "start from candidate C" quietly meant "start from C plus the
+  incumbent". Exploration silently became hill climbing. It was unreachable in
+  the ports, where every declared policy rides a fixed-key artifact, and moving
+  the layer into the engine makes the pairing reachable by any caller. The switch
+  now carries explicit `None` deletions for the keys the target does not have —
+  the sentinel `apply` already understood and `diff` already emits.
+
+### Removed
+
+- **`_check_selection`.** It asked the policy once per round against a context
+  holding one candidate and refused any answer but the head, which was the honest
+  thing to do while nothing could honour a different answer. `PopulationAggregator`
+  now can, for every policy and on both drivers, so the check had one live branch
+  left. The refusal it existed for moved to `PopulationAggregator._offered`,
+  where the menu is the real archive rather than a pool of one, and still raises
+  `MultiHeadUnsupported`.
 
 - **`async_evolve` listed `selection` among the policies it honours and never
   asked it.** `selection` is in `_ASYNC_WIRED_POLICIES`, so

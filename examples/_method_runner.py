@@ -32,7 +32,6 @@ from ._common import (add_standard_args, completion_for, confirm,
                       is_openai_compatible)
 from ._measure import MODES, PhasedLLM, Recorder, compact_events, usage_dict
 from ._method_policy import MethodPolicy, PopulationContext
-from ._population import population_factory
 
 
 QUALITY_TARGET = 0.75
@@ -167,13 +166,6 @@ def _batch(tasks, size: int, seed: int):
         list(tasks), size)
 
 
-def _default_population(ctx: PopulationContext):
-    """The shared archive: keep every committed head, ask `selection` who is next."""
-    return population_factory(
-        ctx.selection, ctx.artifact_id, conflict=ctx.conflict,
-        fusion=ctx.fusion, acceptance=ctx.acceptance)
-
-
 def _evaluate(policy: MethodPolicy, llm: PhasedLLM, rendered: str,
               tasks: Sequence[Task]) -> float:
     if not tasks:
@@ -285,14 +277,19 @@ def run_port(
             **reflective_merge(lambda prompt: merge_llm(prompt, unit="merge"),
                                validate=validate))
     aggregator_factory = None
-    if engine.selection is not None:
-        # The engine's own selection seam is single-head degenerate, so a
-        # declared selection policy runs through the sanctioned optimizer exit
-        # instead: PopulationAggregator keeps the archive and commits parent
-        # switches (the GEPA/DGM pattern, generalised). The factory path
-        # bypasses the bundle's decision fields, so they travel through the
-        # factory and are stripped from the bundle -- carried in both places,
-        # one copy would be silently ignored.
+    if engine.selection is not None and policy.population is not None:
+        # A *custom* population layer still needs the optimizer exit: it is a
+        # `PopulationAggregator` subclass with the method's own algorithm in it
+        # (PromptBreeder's tournament evaluates and replaces, which a
+        # `SelectionPolicy` cannot do). The plain case no longer comes through
+        # here -- `Policies(selection=...)` installs the shared layer in the
+        # engine itself, so the runner stopped carrying a rule the engine now
+        # owns.
+        #
+        # The factory path bypasses the bundle's decision fields, so they travel
+        # through the factory and are stripped from the bundle: carried in both
+        # places, one copy would be silently ignored -- and a declared policy
+        # alongside a factory is now refused outright.
         pop_ctx = PopulationContext(
             selection=engine.selection,
             artifact_id=f"candidate-{policy.name}",
@@ -310,7 +307,7 @@ def run_port(
                 _batch(policy.train_tasks, batch, seed)),
             train_size=len(policy.train_tasks),
             seed=seed)
-        aggregator_factory = (policy.population or _default_population)(pop_ctx)
+        aggregator_factory = policy.population(pop_ctx)
         engine = replace(engine, selection=None, conflict=None, fusion=None,
                          acceptance=None)
     if eval_cache:

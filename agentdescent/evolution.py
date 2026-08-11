@@ -798,50 +798,32 @@ def _fusion_trials(aggregator) -> List[FusionTrial]:
     return list(getattr(getattr(aggregator, "fusion_policy", None), "trials", ()))
 
 
-def _check_selection(policy, artifact_id, artifact, base_v, round_index,
-                     n_workers, history) -> None:
-    """Ask the selection policy where the next batch starts, and check we can go.
+def _wants_population(policy) -> bool:
+    """Does this selection policy need a candidate pool to mean anything?
 
-    The engine has one live head. `SingleHead` -- the default -- returns it for
-    every worker, so this is a no-op on the default path and the whole point is
-    that it stays one: the seam exists before the ledger can express what a
-    non-default policy would ask for.
+    Exactly one does not: `SingleHead`, which answers "the head" whatever it is
+    shown and is what the engine does with no policy at all. Everything else --
+    including `Beam(1)`, which reaches that answer by ranking a pool rather than
+    by definition -- is asking to *choose*, and choosing needs something to
+    choose from. So a declared policy is what asks for the population layer, and
+    the untouched path stays untouched.
 
-    A policy that names a *different* starting point is refused, loudly, rather
-    than collapsed to the head. Silently ignoring it is the failure mode
-    `Policies.require_supported` was written against: a caller who passes a beam
-    and watches a run finish has every reason to believe the beam ran. Refusing
-    also means every policy in `agentdescent.selection` is usable today in its
-    degenerate, single-candidate shape -- ``Beam(1)``, an archive of one -- and
-    only genuinely multi-head requests fail.
+    ``type(...) is`` rather than ``isinstance``: every shipped policy subclasses
+    `SingleHead` to inherit the degenerate case, so `isinstance` would report
+    that `Archive` wants nothing.
 
-    **Both drivers call this**, once per round and once per merger sweep
-    respectively. `async_evolve` listed `selection` as wired and then never
-    consulted it, so the two paths disagreed on the same bundle: `evolve` raised,
-    the barrier-free loop finished and reported a reward. That is the failure
-    this function exists to prevent, arriving through the driver that did not
-    call it -- so the shared check has to be shared, not merely available.
+    This replaced `_check_selection`, which asked the policy once per round
+    against a context holding one candidate and refused any answer but the head.
+    That was the honest thing to do while nothing could honour a different
+    answer. Now `PopulationAggregator` can, for every policy and on both
+    drivers, so the check had exactly one live branch left -- the no-op -- and
+    the refusal it existed for moved to
+    :meth:`~agentdescent.population.PopulationAggregator._offered`, where the
+    menu is the real archive instead of a pool of one.
     """
-    from .selection import Candidate, MultiHeadUnsupported, SelectionContext
+    from .selection import SingleHead
 
-    head = Candidate(
-        artifact_id=artifact_id, version=base_v,
-        state=dict(getattr(artifact, "state", {}) or {}),
-        # The last measured held-out reward, which is what any of these policies
-        # would rank on. `None` before the first round has been scored -- and the
-        # policies treat that as "unmeasured", not as zero.
-        score=history[-1].held_out_reward if history else None,
-        selected=round_index)
-    ctx = SelectionContext(head=head, candidates=(head,), round=round_index,
-                           n_workers=n_workers)
-    chosen = list(policy.select(ctx, n_workers))
-    if any(c.version != base_v or c.artifact_id != artifact_id for c in chosen):
-        raise MultiHeadUnsupported(
-            f"{type(policy).__name__}.select() asked to start from a candidate "
-            f"other than the current head, and the ledger holds one live branch: "
-            "`dev`, with staleness defined as eta = max(head - base). Multi-head "
-            "support is a separate change; until then a selection policy may only "
-            "return the head it was given.")
+    return policy is not None and type(policy) is not SingleHead
 
 
 def _cost_fields(meter: Meter) -> Dict[str, Any]:
@@ -1591,6 +1573,7 @@ def _check_callable(fn: Callable, n_args: int, sig_hint: str) -> None:
 def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state,
                   blast_radius, artifact_id, held_out_frac, repo_path, agg_config,
                   staleness_policy, aggregator_factory, oracle_budget,
+                  selection: Optional[Any] = None,
                   eval_concurrency: int = 8,
                   cheap_eval_tasks: Optional[int] = None,
                   fusion_tournament: Optional[bool] = None,
@@ -1789,6 +1772,21 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
 
     pol = policies_bundle or Policies()
 
+    # Checked before the warning below, which would otherwise fire first and name
+    # the wrong problem: a caller who passed a beam, a factory and a conflict
+    # policy would read "your conflict policy is unused" on the way to an
+    # exception about the beam.
+    if _wants_population(selection) and aggregator_factory is not None:
+        # Both configure the same seat. Choosing one silently would mean a caller
+        # who passed a beam and a factory got whichever the engine happened to
+        # prefer, with nothing to read that says which.
+        raise ValueError(
+            f"Policies(selection={type(selection).__name__}(...)) needs the "
+            "population aggregator, and aggregator_factory= replaces the "
+            "aggregator outright -- they configure the same seat. Pass one: the "
+            "factory if it does its own candidate selection, the policy if it "
+            "should run on the shipped merge pipeline.")
+
     # A custom factory builds its own optimizer, so the merge-side policies never
     # reach anything -- `policies=Policies(**reflective_merge(...))` alongside
     # `aggregator_factory=` looks configured and changes nothing. Silence there is
@@ -1810,6 +1808,16 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
         return Aggregator(ledger, verifier, audit, config, staleness_policy=policy,
                           meter=meter, conflict=pol.conflict, fusion=pol.fusion,
                           acceptance=pol.acceptance, promotion=pol.promotion)
+
+    # A declared selection policy is what asks for a population layer -- the rule
+    # the port runner already used, moved here so it is the engine's rule rather
+    # than one runner's. `SingleHead` is the default and asks for nothing, so the
+    # untouched path stays byte-for-byte the untouched path.
+    if _wants_population(selection):
+        from .population import population_factory
+        aggregator_factory = population_factory(
+            selection, artifact_id, meter=meter, conflict=pol.conflict,
+            fusion=pol.fusion, acceptance=pol.acceptance, promotion=pol.promotion)
 
     # `None` defers to whatever the config already says, so `agg_config=` keeps
     # working and the two cannot silently disagree; an explicit True or False
@@ -2274,7 +2282,9 @@ def evolve(
     aggregator_factory = _pol.aggregator_factory
     sampler = task_sampler or RoundRobin()
     # Where the next batch starts. `SingleHead` is the current head for every
-    # worker, i.e. exactly what this loop has always done.
+    # worker, i.e. exactly what this loop has always done; anything else installs
+    # the population layer in `_build_engine` and is asked by *it*, once per
+    # merge, against the archive of committed heads.
     selection = _pol.selection or SingleHead()
     # The group-relative reward every rollout carries. Off nobody's path: the
     # value lands on the evidence card and no default policy reads it.
@@ -2298,6 +2308,7 @@ def evolve(
         initial_state=initial_state, blast_radius=blast_radius, artifact_id=artifact_id,
         held_out_frac=held_out_frac, repo_path=repo_path, agg_config=agg_config,
         staleness_policy=staleness_policy, aggregator_factory=aggregator_factory,
+        selection=selection,
         oracle_budget=oracle_budget, eval_concurrency=eval_concurrency,
         cheap_eval_tasks=cheap_eval_tasks, fusion_tournament=fusion_tournament,
             shuffle=shuffle, seed=seed,
@@ -2385,8 +2396,6 @@ def evolve(
         artifact = snap.get(artifact_id)
         base_v = snap.version.get(artifact_id, 0)
         assert_mutable(artifact)
-        _check_selection(selection, artifact_id, artifact, base_v, r, n_workers,
-                         history)
         ok_units, failed_units = [0], [0]      # this round's tally
 
         def _snapshot_for(worker: int):

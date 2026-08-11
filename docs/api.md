@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-197 public names across 34 modules.
+199 public names across 35 modules.
 
 ---
 
@@ -1236,6 +1236,56 @@ Every worker starts from the current head. Today's behaviour, exactly.
 ### `pareto_front(candidates: Sequence[Candidate], *, tasks: Sequence[str]) -> List[Candidate]`
 
 Candidates no other candidate beats on every task and betters on one.
+
+---
+
+## The population layer
+
+What makes a selection policy take effect on a one-branch ledger. &nbsp;·&nbsp; `agentdescent.population` &nbsp;·&nbsp; [guide](selection.md)
+
+### `PopulationAggregator(...)`
+
+The shipped merge pipeline plus an archive and a selection policy.
+
+```python
+PopulationAggregator(
+    ledger,
+    verifier,
+    audit,
+    config,
+    staleness_policy = None,
+    *,
+    selection: SelectionPolicy,
+    artifact_id: str,
+    meter = None,
+    conflict = None,
+    fusion = None,
+    acceptance = None,
+    promotion = None
+)
+```
+
+| method | what it does |
+|---|---|
+| `finalize() -> None` | Leave the best-scoring candidate on the head, then promote. |
+| `step() -> List[MergeReport]` | Fire every artifact bucket that is ready and return per-artifact reports. |
+
+### `population_factory(...)`
+
+The `aggregator_factory=` adapter for one run.
+
+```python
+population_factory(
+    selection: SelectionPolicy,
+    artifact_id: str,
+    *,
+    meter = None,
+    conflict = None,
+    fusion = None,
+    acceptance = None,
+    promotion = None
+)
+```
 
 ---
 

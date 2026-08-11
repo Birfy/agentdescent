@@ -1,16 +1,16 @@
 """The candidate-selection seam, and the promise that adding it changed nothing.
 
-The whole value of this module on day one is the *absence* of a behaviour change:
+The whole value of the default path is the *absence* of a behaviour change:
 `SingleHead` has to be byte-for-byte what the engine already did, or every
 measurement in the repository moved under a refactor. So the first test compares
-a full run against a recorded one, and the rest pin the properties that make the
-other policies trustworthy without a ground truth of their own -- chiefly that
-`Beam(1)` computes `SingleHead`'s answer by a different route.
+a run with no policy against one that names the default, and the unit tests pin
+the properties that make the other policies trustworthy without a ground truth
+of their own -- chiefly that `Beam(1)` reaches `SingleHead`'s answer on the pool
+`SingleHead` sees.
 
-The second thing pinned here is the *refusal*. The ledger holds one live branch,
-so a policy that names a different starting point cannot be honoured yet; it
-raises rather than being collapsed to the head, because a caller who passes a
-beam and watches a run finish has every reason to believe the beam ran.
+The second thing pinned here is the *refusal*. A policy chooses among the
+candidates it is given; one that returns something else is refused rather than
+committed, because a state no rollout produced has never been through the gate.
 """
 
 import pytest
@@ -74,29 +74,41 @@ def test_the_default_run_is_unchanged():
            [h.held_out_reward for h in explicit.history]
 
 
-def test_beam_of_one_is_the_single_head_path():
+def test_beam_of_one_agrees_with_single_head_on_single_head_s_pool():
     """`Beam` has no independent ground truth, so this is what makes it
-    trustworthy: on the shape the engine can run today it must agree exactly."""
-    plain = _run()
-    beamed = _run(policies=Policies(selection=Beam(1)))
-    assert beamed.rendered == plain.rendered
-    assert beamed.final_reward == plain.final_reward
+    trustworthy: shown the pool `SingleHead` is shown, it must answer the same.
+
+    A *run* no longer agrees, and should not: with a population layer `Beam(1)`
+    restarts from the archive's best scorer, which is a different search from
+    "continue from the head" as soon as the two differ. The equivalence was
+    always about the degenerate pool, and this is that claim without the run
+    around it.
+    """
+    only = _c(1, score=0.5)
+    ctx = _ctx(only, n=4)
+    assert list(Beam(1).select(ctx, 4)) == list(SingleHead().select(ctx, 4))
 
 
 @pytest.mark.parametrize("policy", [
     SingleHead(), Beam(1), Beam(4), ParetoFrontier(mode="topk_aggregate"),
     Archive(sampling="uniform"), Archive(sampling="novelty"), MCTS(),
 ])
-def test_every_policy_runs_on_the_single_candidate_path(policy):
+def test_every_policy_drives_a_whole_run(policy):
     """A policy that cannot cope with an archive of one is not usable at all --
-    that is the shape every run starts in."""
+    that is the shape every run starts in -- and one that breaks once the
+    archive grows is not usable either. This runs long enough for both."""
     result = _run(policies=Policies(selection=policy))
     assert result.error is None
     assert result.final_reward > 0.0
 
 
 class _Wanderer:
-    """Names a starting point that is not the head. Neither driver can honour it."""
+    """Returns a candidate that was never on the menu.
+
+    The state matters and the version does not: the population layer commits the
+    chosen candidate's *state* as the next head, so a state the archive has
+    never held is a state no gate has ever scored.
+    """
 
     def __init__(self):
         self.calls = 0
@@ -104,13 +116,16 @@ class _Wanderer:
     def select(self, ctx, n):
         self.calls += 1
         return [Candidate(artifact_id=ctx.head.artifact_id,
-                          version=ctx.head.version + 7)] * n
+                          version=ctx.head.version + 7,
+                          state={"invented": "never a committed head"})] * n
 
 
-def test_a_multi_head_answer_is_refused_rather_than_collapsed():
+def test_a_candidate_the_archive_never_offered_is_refused():
+    policy = _Wanderer()
     with pytest.raises(NotImplementedError) as excinfo:
-        _run(policies=Policies(selection=_Wanderer()))
-    assert "one live branch" in str(excinfo.value)
+        _run(policies=Policies(selection=policy))
+    assert "not in the archive" in str(excinfo.value)
+    assert policy.calls >= 1
 
 
 # -- both drivers, one answer ------------------------------------------------
@@ -121,12 +136,13 @@ def test_the_barrier_free_loop_asks_the_selection_policy():
 
     The bundle's own check let it through, so the field was accepted and
     dropped -- a caller who passed a beam and read a final reward had every
-    reason to believe the beam ran. Counting the calls is the only way to see
-    it: with one live candidate every shipped policy answers "the head", so the
-    run's numbers are identical whether the policy was asked or not.
+    reason to believe the beam ran. Counting the calls is still the test: a
+    policy that keeps answering "the head" leaves a run's numbers untouched, so
+    the call count is what separates asked from dropped.
     """
-    class Counting(SingleHead):
+    class Counting(Beam):
         def __init__(self):
+            super().__init__(1)
             self.calls = 0
 
         def select(self, ctx, n):
@@ -139,7 +155,7 @@ def test_the_barrier_free_loop_asks_the_selection_policy():
     assert policy.calls >= 1, "async_evolve finished without asking where to start"
 
 
-def test_a_multi_head_answer_is_refused_on_the_async_path_too():
+def test_a_candidate_the_archive_never_offered_is_refused_on_the_async_path_too():
     """The refusal is the shared one, and it reaches the caller's thread.
 
     Both halves matter. Raising at all is parity with `evolve`; raising
@@ -149,7 +165,7 @@ def test_a_multi_head_answer_is_refused_on_the_async_path_too():
     policy = _Wanderer()
     with pytest.raises(MultiHeadUnsupported) as excinfo:
         _run_async(policies=Policies(selection=policy))
-    assert "one live branch" in str(excinfo.value)
+    assert "not in the archive" in str(excinfo.value)
     assert policy.calls >= 1
 
 
@@ -161,6 +177,44 @@ def test_the_refusal_stays_catchable_as_what_it_used_to_be():
     """
     assert issubclass(MultiHeadUnsupported, NotImplementedError)
     assert issubclass(MultiHeadUnsupported, ContractError)
+
+
+def test_a_declared_policy_and_a_custom_factory_are_refused_together():
+    """Both configure the aggregator seat; picking one silently is the trap."""
+    with pytest.raises(ValueError) as excinfo:
+        _run(policies=Policies(selection=Beam(2)),
+             aggregator_factory=lambda *a, **k: None)
+    assert "same seat" in str(excinfo.value)
+
+
+def test_a_parent_switch_removes_the_keys_the_parent_does_not_have():
+    """The switch is a replacement, not a union.
+
+    It used to be written as ``head.apply(Diff(ops=target_state))``, and `apply`
+    only *sets* keys -- so on a grow-only key space every key the head had
+    survived a switch to a candidate that did not have it. "Start from the seed"
+    silently meant "start from the seed plus everything since", which is not
+    exploration, it is hill climbing with extra steps. Invisible in the ports
+    because every declared policy there rides a fixed-key artifact.
+
+    Observed through ``RoundInfo.n_items``, which is the number of keys the head
+    holds at the end of a round. A policy that always names the empty seed must
+    drive it back to zero; under a union it can only ever climb.
+    """
+    class AlwaysSeed(Beam):
+        """Pick the oldest candidate -- the seed, whose state is empty."""
+
+        def select(self, ctx, n):
+            return [min(ctx.candidates, key=lambda c: c.version)] * n
+
+    result = _run(policies=Policies(selection=AlwaysSeed(1)))
+    sizes = [h.n_items for h in result.history]
+    assert sum(h.committed for h in result.history) > 0, (
+        "nothing committed, so there was never a populated head to switch away "
+        "from and this test would pass on any implementation")
+    assert sizes[-1] == 0, (
+        f"the head never returned to the empty seed (sizes={sizes}), so the "
+        "parent switch kept keys the chosen parent does not have")
 
 
 # -- the policies themselves -------------------------------------------------
