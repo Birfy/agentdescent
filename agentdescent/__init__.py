@@ -78,6 +78,7 @@ from .aggregator import (
     MergeReport,
     EvidenceBuffer,
 )
+from .population import PopulationAggregator, population_factory
 from .staleness import (
     StaleAction,
     StalenessPolicy,
@@ -250,6 +251,8 @@ __all__ = [
     "MergeReport",
     "MergeOutcome",
     "AggregatorContractError",
+    "PopulationAggregator",
+    "population_factory",
     "diffs_conflict",
     "diffs_contradict",
     "fuse_diffs",

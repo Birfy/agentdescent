@@ -42,8 +42,8 @@ from .policies import Policies
 from .evolution import (
     _publish_stable, _safe_log,
     Agent, EvolutionResult, Propose, Reward, RoundInfo, Run, Strategy, Task,
-    _ASYNC_WIRED_POLICIES, _check_selection, _cost_fields, _fusion_trials,
-    _resolve_policies, SOLVED, _build_engine, _checked_proposal, _checked_reward,
+    _ASYNC_WIRED_POLICIES, _cost_fields, _fusion_trials, _resolve_policies,
+    SOLVED, _build_engine, _checked_proposal, _checked_reward,
 )
 from .aggregator import AggregatorConfig, check_reports
 from .evolvable import ContractError, EvidenceCard, vv_staleness
@@ -252,12 +252,15 @@ def async_evolve(
                              aggregator_factory=aggregator_factory)
     task_sampler, staleness_policy = _pol.task_sampler, _pol.staleness
     aggregator_factory = _pol.aggregator_factory
+    # Passed through rather than consulted here: `_build_engine` turns a declared
+    # policy into the population layer, and the aggregator asks it once per merge.
     selection = _pol.selection or SingleHead()
     eng = _build_engine(
         tasks, reward, agent=agent, run=run, propose=propose, strategy=strategy,
         initial_state=initial_state, blast_radius=blast_radius, artifact_id=artifact_id,
         held_out_frac=held_out_frac, repo_path=repo_path, agg_config=agg_config,
         staleness_policy=staleness_policy, aggregator_factory=aggregator_factory,
+        selection=selection,
         oracle_budget=oracle_budget, eval_concurrency=eval_concurrency,
         cheap_eval_tasks=cheap_eval_tasks, fusion_tournament=fusion_tournament,
         shuffle=shuffle, seed=seed,
@@ -536,15 +539,6 @@ def async_evolve(
             return
         snap = eng.ledger.snapshot(Ledger.DEV)
         head_vv, head_art = snap.version, snap.get(eng.artifact_id)
-        # Where the next work starts, asked once per sweep. A sweep is this
-        # loop's round -- `history` is indexed by it and `RoundInfo.round` is the
-        # sweep index -- so this is the same question the barrier loop asks per
-        # round, put at the same place in the cycle. A sweep with no cards
-        # returned above and is deliberately not counted as one (see the stall
-        # note below), so it does not ask either.
-        _check_selection(selection, eng.artifact_id, head_art,
-                         head_vv.get(eng.artifact_id, 0), len(history),
-                         n_workers, history)
 
         def _discarded() -> None:
             """Record a card this gate is dropping, denominator included.
