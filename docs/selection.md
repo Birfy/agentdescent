@@ -61,7 +61,7 @@ evolve(tasks, reward, agent=agent,
 | policy | corresponds to | note |
 |---|---|---|
 | `SingleHead()` | today's engine | the default; every worker starts from the head |
-| `Beam(k)` | classic beam search | `Beam(1)` computes `SingleHead`'s answer by another route, and the tests assert they agree |
+| `Beam(k)` | classic beam search | the walk over the `k` best is continuous across calls, so asking one at a time expands each in turn; `Beam(1)` computes `SingleHead`'s answer by another route, and the tests assert they agree |
 | `ParetoFrontier(mode=...)` | GEPA / EvoSkill | `win_frequency` is GEPA's Algorithm 2 exactly; `per_instance` is plain Pareto walked round-robin; `topk_aggregate` is EvoSkill's — three published rules, one argument |
 | `Archive(sampling=...)` | DGM / ADAS / SICA | `sigmoid_novelty` is DGM's `choose_selfimproves`; `performance`, `novelty` (softmax ÷ `1 + selected`), `best` (SICA's `idxmax`), `uniform` as the ablation |
 | `MCTS(exploration=...)` | tree search | UCT over the candidate tree; one evolve step is one rollout, value is held-out reward, backup runs up `Candidate.parent` |
@@ -82,6 +82,18 @@ every candidate nothing dominates, including ones that are best at nothing, and
 walks them round-robin. Algorithm 2 admits only the per-instance winners and
 draws in proportion to how many instances each still wins. `win_frequency` is
 what the old name meant.
+
+**The walk over a pool is continuous, not restarted.** `Beam` and
+`ParetoFrontier` offset their round-robin by `SelectionContext.round`. It
+matters because the population layer asks for **one** starting point per merge —
+the ledger holds one live head — and a policy that answered "the best" every
+time made `k` inert: `Beam(4)` was `Beam(1)`, and `ParetoFrontier` sat on
+whichever front member was admitted first, usually the seed, while candidates
+scoring far higher arrived and were never expanded. Rotating expands each slot
+in turn: serial where textbook beam search is parallel, same frontier. At
+`round == 0` it is exactly the old per-call round-robin, which is what makes the
+change checkable — the tests pin that every policy's round-0 answer is the
+answer it gave before.
 
 **`Archive` is deterministic given its seed.** An archive that samples differently
 on a re-run makes a seeded comparison meaningless. Pass `rng=` instead when the
