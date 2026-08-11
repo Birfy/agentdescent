@@ -58,10 +58,10 @@ In [`examples/gepa/gepa_prompt_evolution.py`](https://github.com/Birfy/agentdesc
 
 | Plug-in | `evolve()` slot | What it does |
 |---|---|---|
-| `ParetoWinFrequency` | selection ([seam](selection.md)) | Algorithm-2 frontier sampling as a named policy; `ParetoAggregator` delegates to it |
+| shipped `ParetoFrontier(mode="win_frequency")` | selection ([seam](selection.md)) | Algorithm-2 frontier sampling; `ParetoAggregator` passes its own rng so the stream is unchanged |
 | **`InstructionSlot`** | `strategy=` | a single evolvable instruction module; each proposal replaces it (content-addressed) |
 | **`ParetoAggregator`** / `pareto_aggregator_factory` | `aggregator_factory=` | GEPA's per-instance Pareto candidate selection; commits the sampled Pareto parent as the dev head |
-| **`pareto_frontier` / `pareto_select`** | (pure, unit-tested) | Algorithm 2: per-instance best → union of winners → dominance pruning → frequency-weighted sampling |
+| **`pareto_frontier` / `pareto_select`** | (pure, unit-tested) | Algorithm 2: per-instance best → union of winners → dominance pruning → frequency-weighted sampling. `pareto_frontier` is now [`agentdescent.selection.pareto_win_frequency`](selection.md) under this name |
 | `gepa_agent()` | `agent=` | Generator + reflective-mutation actor (rewrites the instruction from trace + NL feedback) |
 
 ## Measured results — HotpotQA

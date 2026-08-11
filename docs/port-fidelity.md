@@ -109,9 +109,15 @@ column of each section below says exactly where to look.
   `--workers` is the minibatch size. The Pareto set is the held-out split.
 * **Departures**: one module rather than many. Recorded because "GEPA on
   HotpotQA" without it would imply the multi-module search ran.
-* **Selection rule lives in**: `ParetoWinFrequency` — GEPA's Algorithm-2 sampling as a named `SelectionPolicy` ([selection](selection.md)); `ParetoAggregator` delegates to it
-  `examples/gepa/gepa_prompt_evolution.py` — per-instance domination, the
-  `per_instance` mode of [`ParetoFrontier`](selection.md).
+* **Selection rule lives in**: the engine —
+  [`ParetoFrontier(mode="win_frequency")`](selection.md), Algorithm 2 exactly:
+  per-instance winners → dominance pruning → a draw weighted by unique wins.
+  `ParetoAggregator` passes its own rng so the stream is unchanged.
+  This entry used to say `per_instance`, and that was wrong twice over: the port
+  did not use the shipped policy at all (it kept `ParetoWinFrequency` locally),
+  and `per_instance` is plain Pareto walked round-robin — it keeps candidates
+  that are best at nothing and it does not weight the draw. Two different rules
+  under one name is exactly what a fidelity record exists to stop.
 * **Details**: [algo-gepa.md](algo-gepa.md)
 
 ## EvoSkill — Automated Skill Discovery
@@ -235,9 +241,13 @@ column of each section below says exactly where to look.
   archived child 0.906, and an earlier run archived children at 0.875 and 0.500
   -- the worse one kept, which is what `keep-all` is for and what the surrogate
   cannot produce. See [algo-dgm.md](algo-dgm.md#measured-results-vendored-bugs-objective-real).
-* **Selection rule lives in**: `DGMParentSelection` — `sigmoid(10·(s−0.5)) × 1/(1+children)` as a named `SelectionPolicy` over the archive
-  `examples/dgm/dgm_self_improve.py` — [`Archive`](selection.md) with
-  `sampling="novelty"`.
+* **Selection rule lives in**: the engine —
+  [`Archive(sampling="sigmoid_novelty")`](selection.md), i.e.
+  `sigmoid(10·(s−0.5)) × 1/(1+children)`, with the aggregator's own rng.
+  This entry used to say `sampling="novelty"`, and that was wrong: `novelty` is
+  a temperature-1 softmax, and a sigmoid at gain 10 is nearly a step at 0.5 —
+  they disagree most exactly where an archive spends its time, which is why the
+  port kept a local class rather than using the shipped one.
 * **Details**: [algo-dgm.md](algo-dgm.md)
 
 ## OpenEvolve — Program Evolution (AlphaEvolve)

@@ -62,8 +62,8 @@ evolve(tasks, reward, agent=agent,
 |---|---|---|
 | `SingleHead()` | today's engine | the default; every worker starts from the head |
 | `Beam(k)` | classic beam search | `Beam(1)` computes `SingleHead`'s answer by another route, and the tests assert they agree |
-| `ParetoFrontier(mode=...)` | GEPA / EvoSkill | `per_instance` and `topk_aggregate` — the fidelity difference as a parameter |
-| `Archive(sampling=...)` | DGM / ADAS | `performance`, `novelty` (performance ÷ `1 + selected`), `uniform` as the ablation |
+| `ParetoFrontier(mode=...)` | GEPA / EvoSkill | `win_frequency` is GEPA's Algorithm 2 exactly; `per_instance` is plain Pareto walked round-robin; `topk_aggregate` is EvoSkill's — three published rules, one argument |
+| `Archive(sampling=...)` | DGM / ADAS / SICA | `sigmoid_novelty` is DGM's `choose_selfimproves`; `performance`, `novelty` (softmax ÷ `1 + selected`), `best` (SICA's `idxmax`), `uniform` as the ablation |
 | `MCTS(exploration=...)` | tree search | UCT over the candidate tree; one evolve step is one rollout, value is held-out reward, backup runs up `Candidate.parent` |
 
 Three details that are decisions rather than defaults:
@@ -72,12 +72,21 @@ Three details that are decisions rather than defaults:
 *unmeasured*. Ranking it as the worst is how a beam collapses onto a single line
 of descent and stops being a beam, and how an archive stops exploring.
 
-**`per_instance` Pareto refuses to fall back.** Given candidates with no
-`per_task` scores it raises rather than quietly ranking on the aggregate — which
-would be running *EvoSkill's* rule and reporting it under GEPA's name.
+**Per-instance Pareto refuses to fall back.** Given candidates with no
+`per_task` scores, `win_frequency` and `per_instance` raise rather than quietly
+ranking on the aggregate — which would be running *EvoSkill's* rule and
+reporting it under GEPA's name.
+
+**`per_instance` is not GEPA, and used to claim it was.** Plain Pareto keeps
+every candidate nothing dominates, including ones that are best at nothing, and
+walks them round-robin. Algorithm 2 admits only the per-instance winners and
+draws in proportion to how many instances each still wins. `win_frequency` is
+what the old name meant.
 
 **`Archive` is deterministic given its seed.** An archive that samples differently
-on a re-run makes a seeded comparison meaningless.
+on a re-run makes a seeded comparison meaningless. Pass `rng=` instead when the
+caller owns the stream: a port migrating off a hand-written rule has to keep
+drawing from *its* rng in *its* order, or every number it published moves.
 
 ## How a policy takes effect: serialised heads
 
@@ -160,14 +169,30 @@ equivalent policy — the two cannot disagree about who wins.
 
 ## Legacy-port policies
 
-The mechanism-heavy ports express their parent rules as policy classes at this
-seam (local where the upstream rule differs from a shipped policy — the
-difference is always documented on the class):
+The mechanism-heavy ports express their parent rules at this seam. Two of them
+used to keep a *local* class because the shipped policy could not express the
+published rule; both said so on the class, in the same words — "close enough to
+look right and wrong enough to change a measured run". Those two rules are now
+shipped modes, so the difference a result carries is an argument rather than a
+file a reader has to find:
 
-| Policy | Rule | Port |
+| Port | Rule | Now |
 |---|---|---|
-| `DGMParentSelection` | `sigmoid(10·(s−0.5)) × 1/(1+children)` sampling | [DGM](algo-dgm.md) |
-| `ParetoWinFrequency` | per-instance Pareto frontier, sampled by unique wins | [GEPA](algo-gepa.md) |
-| `FrontierBest` | best member of the bounded top-K frontier | [EvoSkill](algo-evoskill.md) |
-| shipped `Beam(1)` | best of the keep-all archive (exact match, no subclass) | [ADAS](algo-adas.md) |
-| `EpsilonGreedy` | exploit best with probability ε, else uniform | [OpenEvolve](algo-openevolve.md) |
+| [GEPA](algo-gepa.md) | per-instance frontier, sampled by unique wins | `ParetoFrontier(mode="win_frequency")` |
+| [DGM](algo-dgm.md) | `sigmoid(10·(s−0.5)) × 1/(1+children)` sampling | `Archive(sampling="sigmoid_novelty")` |
+| [ADAS](algo-adas.md) | best of the keep-all archive | shipped `Beam(1)` (always was) |
+| [EvoSkill](algo-evoskill.md) | best member of the bounded top-K frontier | `FrontierBest`, local |
+| [OpenEvolve](algo-openevolve.md) | exploit best with probability ε, else uniform | `EpsilonGreedy`, local |
+
+Migrating a rule must not move a number, and "must not" is checked rather than
+intended: `tests/test_port_selection_equivalence.py` steps the shipped mode and
+the rule it replaced through **one shared rng in lockstep**, 200 consecutive
+draws, rather than comparing their distributions. A policy that drew the right
+parent from the wrong stream offset would pass a distribution test and change
+every seeded run.
+
+ADAS is the reason `sigmoid_novelty_weights` is a function and not only a
+sampling mode: ADAS uses the same weights for a different *draw* — up to five
+archive entries without replacement, to condition the meta-agent, rather than
+one parent. Shared formula, unshared draw. It had a byte-identical copy of the
+formula until this landed.

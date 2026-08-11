@@ -1176,9 +1176,18 @@ Chooses the next task id for a worker, and learns from the outcome.
 
 Which candidate the next batch of workers starts from. &nbsp;·&nbsp; `agentdescent.selection` &nbsp;·&nbsp; [guide](selection.md)
 
-### `Archive(sampling: str = 'novelty', temperature: float = 1.0, seed: int = 0) -> None`
+### `Archive(...)`
 
 DGM's and ADAS's archive sampling: performance, tempered by novelty.
+
+```python
+Archive(
+    sampling: str = 'novelty',
+    temperature: float = 1.0,
+    seed: int = 0,
+    rng: Optional['random.Random'] = None
+) -> None
+```
 
 ### `Beam(k: int = 1) -> None`
 
@@ -1208,9 +1217,18 @@ UCT over the candidate tree: one evolve step is one rollout.
 
 A policy named a starting point the ledger cannot hold yet.
 
-### `ParetoFrontier(mode: str = 'per_instance', k: int = 5) -> None`
+### `ParetoFrontier(...)`
 
-GEPA's and EvoSkill's selection rules, as one class and one argument.
+Three published frontier rules, as one class and one argument.
+
+```python
+ParetoFrontier(
+    mode: str = 'per_instance',
+    k: int = 5,
+    seed: int = 0,
+    rng: Optional['random.Random'] = None
+) -> None
+```
 
 ### `SelectionContext(...)`
 

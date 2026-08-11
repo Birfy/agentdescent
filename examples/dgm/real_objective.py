@@ -44,6 +44,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple
 
 from agentdescent.filetree import parse_tree
+from agentdescent.selection import Archive
 from agentdescent.treestrategy import FileTree as _FileTree
 
 TASKS_DIR = pathlib.Path(__file__).resolve().parent / "tasks"
@@ -479,7 +480,7 @@ class SourceArchiveAggregator:
 
     * keep-all append (stepping stones stay, and under a real objective they can
       genuinely be worse -- which is the point);
-    * `DGMParentSelection`, i.e. `sigmoid(10*(s-0.5)) / (1+children)`, at the
+    * `Archive('sigmoid_novelty')`, i.e. `sigmoid(10*(s-0.5)) / (1+children)`, at the
       standard selection seam;
     * `staged_evaluate`'s small -> medium ladder with `test_more_threshold=0.4`.
     """
@@ -488,13 +489,13 @@ class SourceArchiveAggregator:
                  selection=None) -> None:
         import threading
 
-        from examples.dgm.dgm_self_improve import DGMParentSelection
 
         self.ledger = ledger
         self.verifier = verifier
         self.ctx = ctx
         self.aid = artifact_id
-        self.selection = selection or DGMParentSelection(ctx.rng)
+        self.selection = selection or Archive(
+            sampling="sigmoid_novelty", rng=ctx.rng)
         self.cards: List = []
         self._lock = threading.Lock()
         self.head_index = 0

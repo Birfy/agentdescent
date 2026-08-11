@@ -6,6 +6,46 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`ParetoFrontier(mode="win_frequency")` — GEPA's Algorithm 2, shipped.**
+  Per-instance winners → dominance pruning → a draw weighted by how many
+  instances each survivor still wins, as
+  `agentdescent.selection.pareto_win_frequency`. GEPA kept its own copy for a
+  stated reason ("the shipped policy walks the frontier round-robin, GEPA
+  samples it weighted by unique wins — close enough to look right and wrong
+  enough to change a measured run"), and the reason was correct. The port now
+  uses the shipped mode.
+- **`Archive(sampling="sigmoid_novelty")` — DGM's `choose_selfimproves`,
+  shipped**, as `agentdescent.selection.sigmoid_novelty_weights`. Same story:
+  `novelty` is a temperature-1 softmax, DGM's is `sigmoid(10·(s−0.5))`, and a
+  sigmoid at gain 10 is nearly a step where the softmax is nearly flat — they
+  disagree most exactly where an archive spends its time. `examples/dgm` and
+  `examples/adas` each carried a byte-identical copy of the formula; there is
+  one now. ADAS keeps a function rather than the policy because it uses the same
+  weights for a different draw: five entries without replacement to condition
+  the meta-agent, against DGM's one parent.
+- **`rng=` on `ParetoFrontier` and `Archive`.** A port migrating off a
+  hand-written rule has to keep drawing from *its* rng in *its* order; a policy
+  that re-seeded per call would agree on the distribution and disagree with
+  every number the port has published. `seed=` still builds a fresh stream.
+- **`tests/test_port_selection_equivalence.py`.** What makes "we did not change
+  the upstream selection rule" a claim a test can check rather than a sentence a
+  reader has to trust: the shipped mode and the rule it replaced are stepped
+  through **one shared rng in lockstep**, 200 consecutive draws, and the
+  frontier is compared against GEPA's own implementation rather than a
+  transcription of it.
+
+### Fixed
+
+- **`ParetoFrontier(mode="per_instance")` claimed to be GEPA and is not.** It is
+  plain Pareto walked round-robin: it keeps candidates that are best at nothing,
+  and it does not weight the draw. `docs/port-fidelity.md` recorded GEPA as
+  using it, which was wrong twice over — the port did not use the shipped policy
+  at all. The mode keeps its behaviour and loses the claim; `win_frequency` is
+  what the name meant. The same entry recorded DGM as `sampling="novelty"`,
+  which was the softmax it specifically did not use.
+
 ### Changed
 
 - **`Policies(selection=…)` now takes effect, from either driver.** The

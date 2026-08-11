@@ -56,7 +56,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from typing import (
-    Dict, List, Mapping, Optional, Protocol, Sequence, runtime_checkable,
+    Dict, List, Mapping, Optional, Protocol, Sequence, Set, Tuple,
+    runtime_checkable,
 )
 
 from .evolvable import ContractError
@@ -72,6 +73,8 @@ __all__ = [
     "SelectionPolicy",
     "SingleHead",
     "pareto_front",
+    "pareto_win_frequency",
+    "sigmoid_novelty_weights",
 ]
 
 
@@ -188,6 +191,72 @@ class Beam(SingleHead):
         return [beam[i % len(beam)] for i in range(n)]
 
 
+def pareto_win_frequency(
+        scores: Sequence[Sequence[float]]) -> Tuple[Set[int], Dict[int, int]]:
+    """GEPA Algorithm 2, steps 1-4: the frontier and how often each member wins.
+
+    ``scores[c][i]`` is candidate ``c``'s score on Pareto instance ``i``.
+
+    1. per-instance best; 2. union of the candidates that tie it; 3. drop any
+    candidate strictly dominated by another survivor; 4. count, for each
+    survivor, how many instances it still ties the best on.
+
+    This is **not** :func:`pareto_front`, and the difference is the point.
+    `pareto_front` keeps everything nothing else dominates; this keeps only what
+    ties the best on at least one instance, then prunes. A candidate that is
+    merely un-dominated -- never the best anywhere -- is on the first and not on
+    the second. Two published rules, two functions, so a run can say which it
+    used.
+    """
+    if not scores or not scores[0]:
+        return set(), {}
+    n_cand, n_inst = len(scores), len(scores[0])
+    # 1 + 2: candidates that tie the best score on at least one instance.
+    best = [max(scores[c][i] for c in range(n_cand)) for i in range(n_inst)]
+    pstar = [{c for c in range(n_cand) if scores[c][i] == best[i]}
+             for i in range(n_inst)]
+    kept: Set[int] = set().union(*pstar) if pstar else set()
+    # 3: iteratively remove any candidate strictly dominated by another in the
+    # surviving set -- not by any candidate, which would prune against rows that
+    # are themselves already out.
+    changed = True
+    while changed:
+        changed = False
+        for b in list(kept):
+            if any(a != b
+                   and all(x >= y for x, y in zip(scores[a], scores[b]))
+                   and any(x > y for x, y in zip(scores[a], scores[b]))
+                   for a in kept):
+                kept.discard(b)
+                changed = True
+                break
+    # 4: frequency over the pruned per-instance frontier.
+    freq: Dict[int, int] = {c: 0 for c in kept}
+    for winners in pstar:
+        for c in (winners & kept):
+            freq[c] += 1
+    return kept, freq
+
+
+def sigmoid_novelty_weights(scores: Sequence[float],
+                            children: Sequence[int]) -> List[float]:
+    """DGM's ``score_child_prop``: ``sigmoid(10*(s-0.5)) * 1/(1+children)``.
+
+    Favour high performers, discount parents already explored. Normalised, and
+    an all-zero raw vector divides by 1 rather than by 0 -- the degenerate case
+    an archive of untouched zero-scorers actually reaches.
+
+    Here rather than in a port because it was in *two*: `examples/dgm` and
+    `examples/adas` each carried a byte-identical copy, one selecting a parent
+    and one choosing what to show the meta-agent. Two copies of a published
+    formula is how the two quietly stop being the same formula.
+    """
+    raw = [(1.0 / (1.0 + math.exp(-10.0 * (s - 0.5)))) * (1.0 / (1.0 + c))
+           for s, c in zip(scores, children)]
+    total = sum(raw) or 1.0
+    return [r / total for r in raw]
+
+
 def pareto_front(candidates: Sequence[Candidate], *,
                  tasks: Sequence[str]) -> List[Candidate]:
     """Candidates no other candidate beats on every task and betters on one.
@@ -210,37 +279,87 @@ def pareto_front(candidates: Sequence[Candidate], *,
 
 
 class ParetoFrontier(SingleHead):
-    """GEPA's and EvoSkill's selection rules, as one class and one argument.
+    """Three published frontier rules, as one class and one argument.
 
-    They are genuinely different rules and the repository has documented the
-    difference in prose for a while:
-
+    ``win_frequency``
+        **GEPA's Algorithm 2**, exactly: the per-instance winners, pruned of
+        anything a survivor dominates, sampled in proportion to how many
+        instances each survivor still wins. One draw per call, repeated for
+        every worker, because Algorithm 2 selects *a* parent per iteration.
+        Needs ``Candidate.per_task`` and an rng.
     ``per_instance``
-        GEPA. A candidate survives when no other dominates it across the
-        held-out instances, so a candidate that is best on a single hard task
-        stays in. Needs ``Candidate.per_task``.
+        Plain Pareto: a candidate survives when nothing else dominates it, and
+        the survivors are walked round-robin. Close to GEPA and not GEPA -- it
+        keeps candidates that are best at nothing, and it does not weight the
+        draw. This is the mode the class shipped with under GEPA's name; the
+        name was wrong and `win_frequency` is what that name meant.
     ``topk_aggregate``
         EvoSkill's released code. Rank by the aggregate score and keep the top
-        ``k``. Cheaper, and it discards the specialist the first mode keeps.
+        ``k``. Cheaper, and it discards the specialist the other two keep.
 
-    Making this an argument is the point: a fidelity difference that lives in two
-    hand-written implementations drifts, and a reader cannot tell which one a run
-    used.
+    Making this an argument is the point: a fidelity difference that lives in
+    hand-written per-port implementations drifts, and a reader of a result
+    cannot tell which rule produced it.
     """
 
-    MODES = ("per_instance", "topk_aggregate")
+    MODES = ("win_frequency", "per_instance", "topk_aggregate")
 
-    def __init__(self, mode: str = "per_instance", k: int = 5) -> None:
+    def __init__(self, mode: str = "per_instance", k: int = 5,
+                 seed: int = 0, rng: Optional["random.Random"] = None) -> None:
         if mode not in self.MODES:
             raise ValueError(f"mode must be one of {self.MODES}, not {mode!r}")
         self.mode = mode
         self.k = k
+        self.seed = seed
+        #: Passed in when the caller owns the stream. A port migrating off a
+        #: hand-written rule has to keep drawing from *its* rng in *its* order,
+        #: or a seeded run picks different parents and every measured number it
+        #: published moves. A fresh `Random(seed)` otherwise.
+        self.rng = rng
+
+    def _draw(self, ctx: SelectionContext):
+        import random
+
+        if self.rng is not None:
+            return self.rng
+        return random.Random(self.seed * 1_000_003 + ctx.round)
+
+    def _win_frequency(self, ctx: SelectionContext, n: int) -> Sequence[Candidate]:
+        """Algorithm 2 step 5: one draw, weighted by win frequency.
+
+        One `rng.choices(..., k=1)` for the whole batch, not `k=n`: Algorithm 2
+        selects a parent per iteration and every worker mutates it. Drawing per
+        worker would consume the stream differently and pick different parents
+        on a seeded re-run of an already-published number.
+        """
+        candidates = list(ctx.candidates)
+        tasks = sorted({t for c in candidates for t in c.per_task})
+        if not tasks:
+            raise ValueError(
+                "ParetoFrontier(mode='win_frequency') is GEPA Algorithm 2 and "
+                "needs Candidate.per_task scores; none were provided. Use "
+                "mode='topk_aggregate' if aggregate ranking is what you want.")
+        rows = [[c.per_task.get(t, 0.0) for t in tasks] for c in candidates]
+        kept, freq = pareto_win_frequency(rows)
+        pool = [c for c in sorted(kept) if freq[c] > 0]
+        if not pool:
+            # Degenerate -- every row identical, so nothing uniquely wins.
+            # Best aggregate, which is where upstream lands too, and no draw:
+            # spending a random number here would desynchronise the stream
+            # against a run that had one more candidate.
+            best = max(range(len(rows)), key=lambda c: sum(rows[c]))
+            return [candidates[best]] * n
+        chosen = self._draw(ctx).choices(pool, weights=[freq[c] for c in pool],
+                                         k=1)[0]
+        return [candidates[chosen]] * n
 
     def select(self, ctx: SelectionContext, n: int) -> Sequence[Candidate]:
         if len(ctx.candidates) <= 1:
             return super().select(ctx, n)
         if self.mode == "topk_aggregate":
             return Beam(self.k).select(ctx, n)
+        if self.mode == "win_frequency":
+            return self._win_frequency(ctx, n)
         tasks = sorted({t for c in ctx.candidates for t in c.per_task})
         if not tasks:
             # Refused rather than silently degraded to aggregate ranking: that
@@ -273,14 +392,24 @@ class Archive(SingleHead):
     configured as "performance" picks the worst entry roughly a quarter of the
     time where SICA would never pick it.
 
+    ``'sigmoid_novelty'`` is **DGM's** ``choose_selfimproves`` exactly:
+    :func:`sigmoid_novelty_weights`, i.e. ``sigmoid(10*(s-0.5)) / (1+selected)``.
+    The shape is `'novelty'`'s and the numbers are not -- a sigmoid at gain 10
+    is nearly a step at 0.5, where a temperature-1 softmax is nearly flat, so
+    the two disagree most exactly where an archive spends its time. It is a
+    separate mode rather than a tuning of `'novelty'` for that reason.
+
     Deterministic given ``seed``: an archive that samples differently on a
-    re-run makes a seeded comparison meaningless.
+    re-run makes a seeded comparison meaningless. Pass ``rng`` instead when the
+    caller owns the stream -- a port migrating off a hand-written rule has to
+    keep drawing from *its* rng in *its* order, or every measured number it
+    published moves.
     """
 
-    MODES = ("performance", "novelty", "uniform", "best")
+    MODES = ("performance", "novelty", "sigmoid_novelty", "uniform", "best")
 
     def __init__(self, sampling: str = "novelty", temperature: float = 1.0,
-                 seed: int = 0) -> None:
+                 seed: int = 0, rng: Optional["random.Random"] = None) -> None:
         if sampling not in self.MODES:
             raise ValueError(f"sampling must be one of {self.MODES}, not {sampling!r}")
         if temperature <= 0:
@@ -288,6 +417,7 @@ class Archive(SingleHead):
         self.sampling = sampling
         self.temperature = temperature
         self.seed = seed
+        self.rng = rng
 
     def _weight(self, c: Candidate) -> float:
         if self.sampling == "uniform":
@@ -309,11 +439,19 @@ class Archive(SingleHead):
             best = max(ctx.candidates,
                        key=lambda c: (0.0 if c.score is None else c.score))
             return [best] * n
+        pool = list(ctx.candidates)
+        if self.sampling == "sigmoid_novelty":
+            # An unscored candidate is a zero here, not the mean: DGM's archive
+            # holds evaluated agents, and inventing 0.5 for one would place it
+            # exactly on the sigmoid's steepest point.
+            weights = sigmoid_novelty_weights(
+                [0.0 if c.score is None else c.score for c in pool],
+                [c.selected for c in pool])
+        else:
+            weights = [self._weight(c) for c in pool]
         # An int, not a tuple: tuple seeding is deprecated from 3.9 and would
         # eventually start raising in the middle of a long run.
-        rng = random.Random(self.seed * 1_000_003 + ctx.round)
-        pool = list(ctx.candidates)
-        weights = [self._weight(c) for c in pool]
+        rng = self.rng or random.Random(self.seed * 1_000_003 + ctx.round)
         return rng.choices(pool, weights=weights, k=n)
 
 

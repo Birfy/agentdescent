@@ -55,6 +55,7 @@ from agentdescent.evolvable import Diff, EvidenceCard
 from agentdescent.evolution import EvolvingArtifact, LLMAgent, Task, evolve, rule_id
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
+from agentdescent.selection import ParetoFrontier, pareto_win_frequency
 from examples._common import (add_standard_args, completion_for, confirm,
                               score_tasks, worker_count,
                               budget_kwargs, capped_val, report_engine)
@@ -122,81 +123,31 @@ def gepa_agent(complete) -> LLMAgent:
 # ===========================================================================
 
 
-def _dominates(a: Sequence[float], b: Sequence[float]) -> bool:
-    """Row a Pareto-dominates row b: >= on every instance, > on at least one."""
-    ge = all(x >= y for x, y in zip(a, b))
-    gt = any(x > y for x, y in zip(a, b))
-    return ge and gt
-
-
-def pareto_frontier(scores: List[List[float]]) -> Tuple[Set[int], Dict[int, int]]:
-    """Return (kept candidates, win-frequency) per GEPA Algorithm 2, steps 1-4.
-
-    ``scores[c][i]`` = candidate c's score on Pareto instance i. Steps:
-    1. per-instance best; 2. union of instance-winners; 3. drop strictly
-    dominated candidates; 4. frequency = #instances each survivor still wins."""
-    if not scores or not scores[0]:
-        return set(), {}
-    n_cand, n_inst = len(scores), len(scores[0])
-    # 1 + 2: candidates that tie the best score on at least one instance.
-    best = [max(scores[c][i] for c in range(n_cand)) for i in range(n_inst)]
-    pstar = [set(c for c in range(n_cand) if scores[c][i] == best[i])
-             for i in range(n_inst)]
-    C: Set[int] = set().union(*pstar) if pstar else set()
-    # 3: iteratively remove any candidate strictly dominated by another in C.
-    kept = set(C)
-    changed = True
-    while changed:
-        changed = False
-        for b in list(kept):
-            if any(a != b and _dominates(scores[a], scores[b]) for a in kept):
-                kept.discard(b)
-                changed = True
-                break
-    # 4: frequency over the pruned per-instance frontier.
-    freq: Dict[int, int] = {c: 0 for c in kept}
-    for s in pstar:
-        for c in (s & kept):
-            freq[c] += 1
-    return kept, freq
+#: Algorithm 2 steps 1-4, now shipped as
+#: :func:`agentdescent.selection.pareto_win_frequency`. Kept under this name
+#: because it is what the paper's step numbering calls it and what this port's
+#: tests reach for; the implementation moved so that a *run* can name the rule
+#: it used (``ParetoFrontier(mode='win_frequency')``) instead of a reader
+#: having to find this file.
+pareto_frontier = pareto_win_frequency
 
 
 def pareto_select(scores: List[List[float]], rng: random.Random) -> int:
-    """Sample a parent index ~ its Pareto win-frequency (Algorithm 2, step 5)."""
-    kept, freq = pareto_frontier(scores)
+    """Sample a parent index ~ its Pareto win-frequency (Algorithm 2, step 5).
+
+    The index form, for the tests and for anyone reading the algorithm rather
+    than driving the engine. The engine drives
+    :class:`~agentdescent.selection.ParetoFrontier` with ``mode='win_frequency'``,
+    which is this function over `Candidate` rows and draws from the same rng in
+    the same order -- `tests/test_port_selection_equivalence.py` steps the two
+    in lockstep rather than comparing their distributions.
+    """
+    kept, freq = pareto_win_frequency(scores)
     cands = [c for c in sorted(kept) if freq[c] > 0]
     if not cands:  # degenerate: fall back to best average
         return max(range(len(scores)), key=lambda c: sum(scores[c]))
     weights = [freq[c] for c in cands]
     return rng.choices(cands, weights=weights, k=1)[0]
-
-
-class ParetoWinFrequency:
-    """GEPA's Algorithm-2 sampling at the standard selection seam.
-
-    A :class:`~agentdescent.selection.SelectionPolicy` whose candidates carry
-    their per-instance rows in ``Candidate.per_task``; ``select`` rebuilds the
-    aligned score matrix and defers to :func:`pareto_select`, so the rng call
-    order -- and therefore every seeded run -- is identical to the inline rule
-    it replaces.
-
-    Local rather than the shipped ``ParetoFrontier`` on purpose: the shipped
-    policy walks the frontier round-robin, GEPA samples it weighted by how many
-    instances a candidate *uniquely* wins. Same frontier, different draw --
-    close enough to look right and wrong enough to change a measured run.
-    """
-
-    def __init__(self, rng: random.Random) -> None:
-        self.rng = rng
-
-    def select(self, ctx, n: int):
-        candidates = list(ctx.candidates)
-        if len(candidates) <= 1:
-            return [ctx.head] * n
-        tasks = sorted({t for c in candidates for t in c.per_task})
-        scores = [[c.per_task.get(t, 0.0) for t in tasks] for c in candidates]
-        k = pareto_select(scores, self.rng)
-        return [candidates[k]] * n
 
 
 # ===========================================================================
@@ -225,7 +176,7 @@ class ParetoAggregator(AggregatorProtocol):
     def __init__(self, ledger: Ledger, verifier, audit, config, policy,
                  artifact_id: str = "gepa_prompt", seed: int = 0,
                  eval_concurrency: int = 8, merge_round=None,
-                 selection: Optional["ParetoWinFrequency"] = None):
+                 selection: Optional["ParetoFrontier"] = None):
         self.ledger = ledger
         self.eval_concurrency = eval_concurrency
         #: Optional :class:`~agentdescent.policies.FusionPolicy`. When set, the
@@ -247,7 +198,12 @@ class ParetoAggregator(AggregatorProtocol):
         self.verifier = verifier
         self.artifact_id = artifact_id
         self.rng = random.Random(seed)
-        self.selection = selection or ParetoWinFrequency(self.rng)
+        # Algorithm 2 at the shipped seam. `rng=` rather than `seed=` because
+        # this aggregator owns the stream and spends it elsewhere too: a
+        # policy that re-seeded per call would agree on the distribution and
+        # disagree with every number this port has published.
+        self.selection = selection or ParetoFrontier(
+            mode="win_frequency", rng=self.rng)
         self._cards: List[EvidenceCard] = []
         self._lock = threading.Lock()   # ingest: workers; step: one thread
         # pool: list of (state_dict, per_instance_scores, avg). Parallel lists so

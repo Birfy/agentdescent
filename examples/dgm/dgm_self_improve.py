@@ -67,6 +67,7 @@ from agentdescent.evolvable import Diff, EvidenceCard
 from agentdescent.evolution import EvolvingArtifact, Task, evolve
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
+from agentdescent.selection import Archive, sigmoid_novelty_weights
 from agentdescent.staleness import get_policy
 from examples._common import (add_standard_args, completion_for, confirm,
                               worker_count,
@@ -92,15 +93,11 @@ CAPABILITY_POOL = [
 # ===========================================================================
 
 
-def dgm_parent_weights(scores: List[float], children: List[int]) -> List[float]:
-    """``p_i proportional to sigmoid(10*(score-0.5)) * 1/(1+children_i)``."""
-    raw = []
-    for s, c in zip(scores, children):
-        sig = 1.0 / (1.0 + math.exp(-10.0 * (s - 0.5)))
-        nov = 1.0 / (1.0 + c)
-        raw.append(sig * nov)
-    total = sum(raw) or 1.0
-    return [r / total for r in raw]
+#: ``p_i proportional to sigmoid(10*(score-0.5)) * 1/(1+children_i)``, now
+#: shipped as :func:`agentdescent.selection.sigmoid_novelty_weights`. It was
+#: written out here *and* byte-identically in `examples/adas`, which is how two
+#: copies of a published formula quietly stop being the same formula.
+dgm_parent_weights = sigmoid_novelty_weights
 
 
 def choose_selfimproves(archive: List["Agent"], k: int,
@@ -110,34 +107,6 @@ def choose_selfimproves(archive: List["Agent"], k: int,
     children = [a.children for a in archive]
     weights = dgm_parent_weights(scores, children)
     return rng.choices(range(len(archive)), weights=weights, k=k)
-
-
-class DGMParentSelection:
-    """`choose_selfimproves` at the standard selection seam.
-
-    A :class:`~agentdescent.selection.SelectionPolicy` over `Candidate` records:
-    ``score`` carries the staged-eval score and ``selected`` carries DGM's
-    children-explored count, so `dgm_parent_weights` reads them unchanged and
-    the single ``rng.choices`` call keeps the exact random-consumption order of
-    the inline rule it replaces -- a seeded run picks identical parents.
-
-    Local rather than shipped on purpose: `Archive('novelty')` divides by
-    ``1+selected`` but scores with a temperature softmax, not DGM's
-    ``sigmoid(10*(s-0.5))`` -- close enough to look right and wrong enough to
-    change a measured run.
-    """
-
-    def __init__(self, rng: random.Random) -> None:
-        self.rng = rng
-
-    def select(self, ctx, n: int):
-        candidates = list(ctx.candidates)
-        if len(candidates) <= 1:
-            return [ctx.head] * n
-        weights = dgm_parent_weights(
-            [c.score or 0.0 for c in candidates],
-            [c.selected for c in candidates])
-        return self.rng.choices(candidates, weights=weights, k=n)
 
 
 # ===========================================================================
@@ -319,11 +288,16 @@ class DGMArchiveAggregator(AggregatorProtocol):
 
     def __init__(self, ledger: Ledger, verifier, ctx: DGMContext,
                  artifact_id: str = "coding_agent",
-                 selection: Optional[DGMParentSelection] = None):
+                 selection: Optional[Archive] = None):
         self.ledger = ledger
         self.verifier = verifier
         self.ctx = ctx
-        self.selection = selection or DGMParentSelection(ctx.rng)
+        # `choose_selfimproves` at the shipped seam. `rng=` rather than
+        # `seed=` because this aggregator owns the stream: a policy that
+        # re-seeded per call would sample the same distribution and pick
+        # different parents than every number this port has published.
+        self.selection = selection or Archive(
+            sampling="sigmoid_novelty", rng=ctx.rng)
         self.aid = artifact_id
         self.cards: List[EvidenceCard] = []
         self._lock = threading.Lock()   # ingest: workers; step: one thread
