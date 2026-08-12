@@ -108,6 +108,7 @@ def workload(config: Config, seed: int) -> EvolutionResult:
         max_concurrency=config.n_workers,
         eval_concurrency=config.eval_concurrency,
         asynchronous=config.asynchronous, async_ratio=config.async_ratio,
+        resync_on_commit=config.resync_on_commit,
         staleness_policy=get_policy(config.staleness),
         held_out_frac=0.4, seed=seed, max_seconds=60.0)
 

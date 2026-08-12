@@ -69,7 +69,7 @@ def async_evolve(
     artifact_id: str = "artifact",
     n_workers: int = 4,
     async_ratio: int = 3,
-    resync_on_commit: bool = False,
+    resync_on_commit: bool = True,
     max_seconds: float = 20.0,
     max_iters: Optional[int] = None,
     max_calls: Optional[int] = None,
@@ -137,6 +137,9 @@ def async_evolve(
         start, before any commit has moved head.
     resync_on_commit:
         Refresh every worker as soon as a sweep commits, whatever the ratio.
+        On by default: a worker that starts a rollout against a version a
+        finished sweep has already replaced is doing work the merger will
+        discard, and no workload wants that.
 
         This does **not** remove staleness where a real workload gets it. A
         worker snapshots, then spends the rollout in ``run``, then pushes; a
@@ -144,9 +147,12 @@ def async_evolve(
         what the top of the loop does. What it removes is the other source:
         *starting* a rollout against a snapshot a finished sweep has already
         superseded. The two coincide only when rollouts are short relative to
-        sweep cadence -- as they are in this repo's synthetic tests, where
-        turning this on does collapse η to 0 -- which is why it is opt-in
-        rather than the default.
+        sweep cadence -- as they are in this repo's synthetic tests and bench
+        workloads, where a rollout is a dictionary lookup and turning this on
+        does collapse η to 0. Those are the cases that need ``False``: anything
+        measuring what the lag budget alone does has to switch this off, or the
+        budget is no longer the only resync trigger and the measurement is of
+        something else.
 
         Turn it on when the artifact's *content* is what workers reason from,
         so an out-of-date copy makes the work void rather than merely stale.
@@ -817,9 +823,10 @@ def async_evolve(
         # This does not make cards fresh: the snapshot is taken before `run` and
         # the card is pushed after it, so a commit during a long rollout still
         # arrives stale, which is where staleness comes from on any workload
-        # whose rollouts outlast a sweep. It is opt-in because on *short*
-        # rollouts the two windows collapse into one and η goes to 0, and this
-        # module exists to let η be non-zero.
+        # whose rollouts outlast a sweep -- the module's premise survives. It
+        # stays switchable because on *short* rollouts the two windows collapse
+        # into one and η goes to 0, so anything measuring the lag budget in
+        # isolation has to turn it off.
         if resync_on_commit and committed:
             commit_epoch[0] += 1
         if stall.should_force_refresh():

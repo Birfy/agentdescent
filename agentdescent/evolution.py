@@ -2080,7 +2080,7 @@ def evolve(
     eval_concurrency: int = 8,
     asynchronous: bool = False,
     async_ratio: int = 3,
-    resync_on_commit: bool = False,
+    resync_on_commit: bool = True,
     pipelined_gate: bool = False,
     gate_workers: int = 2,
     max_seconds: Optional[float] = None,
