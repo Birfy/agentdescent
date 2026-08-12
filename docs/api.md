@@ -47,6 +47,8 @@ EvolutionResult(
     merge_seconds: float = 0.0,
     merge_gate_seconds: float = 0.0,
     worker_starved_seconds: float = 0.0,
+    evals_skipped: int = 0,
+    bounded_scans_cut: int = 0,
     stale_considered: int = 0,
     stale_discarded: int = 0,
     redispatched: int = 0,
@@ -99,6 +101,7 @@ EvolvingArtifact(
 | `evidence_eval(evidence: EvidenceCard) -> float` | Score this artifact on the trajectories an evidence card carries. |
 | `full_eval(task_set: Sequence[Task]) -> Dict[str, float]` | Score on a task set. No longer part of the `Evolvable` protocol -- the engine reaches ground truth through the verifier's `eval_fn` -- and kept because it is a convenient thing for a caller to have. |
 | `score(tasks: Sequence[Task]) -> float` | Mean reward over `tasks`, evaluated concurrently. |
+| `score_bounded(tasks: Sequence[Task], floor: float) -> float` | Mean reward, abandoned once it **provably** cannot exceed `floor`. |
 
 ### `FusionStats(...)`
 
@@ -842,7 +845,8 @@ AggregatorConfig(
     accept_samples: int = 4000,
     cas_attempts: int = 3,
     cas_backoff: float = 0.05,
-    fusion_tournament: bool = False
+    fusion_tournament: bool = False,
+    bounded_gate: bool = False
 ) -> None
 ```
 
@@ -974,7 +978,7 @@ ThreeLayerVerifier(
 | method | what it does |
 |---|---|
 | `cheap_eval(artifact: Evolvable) -> float` | The signal used everywhere a budget-free score is needed. |
-| `eval_counts(artifact: Evolvable) -> Tuple[float, float]` | Return (successes, failures) on the full held-out set. |
+| `eval_counts(artifact: Evolvable, floor: Optional[float] = None) -> Tuple[float, float]` | Return (successes, failures) on the full held-out set. |
 | `learned_eval(artifact: Evolvable) -> Tuple[float, float]` | Noisy proxy that also returns an uncertainty estimate. |
 | `oracle_eval(artifact: Evolvable) -> float` | Ground truth on the full held-out set. Consumes audit budget. |
 | `rule_eval(artifact: Evolvable) -> float` | Cheap, deterministic-ish check on a tiny subset. |

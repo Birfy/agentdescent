@@ -64,6 +64,8 @@ class MeterSnapshot:
     merge_seconds: float = 0.0
     merge_gate_seconds: float = 0.0
     worker_starved_seconds: float = 0.0
+    evals_skipped: int = 0
+    bounded_scans_cut: int = 0
     calls: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
@@ -90,6 +92,7 @@ class MeterSnapshot:
 _COUNTERS = frozenset({
     "rollouts", "rollout_seconds", "eval_seconds", "merge_seconds",
     "merge_gate_seconds", "worker_starved_seconds",
+    "evals_skipped", "bounded_scans_cut",
     "cache_hits", "cache_misses", "cache_inflight_joins",
     "stale_considered", "stale_discarded",
     "redispatched", "duplicates_dropped", "cas_conflicts",
@@ -150,6 +153,17 @@ class Meter:
     #: construction -- there the round barrier idles every worker for exactly
     #: `merge_seconds`, and a counter would only restate it.
     worker_starved_seconds: float = 0.0
+
+    #: What the bounded scan did not buy. `evals_skipped` counts held-out
+    #: evaluations -- real model calls -- that `score_bounded` proved could not
+    #: change a decision and never made; `bounded_scans_cut` counts the scans
+    #: that ended early, so the two together give the average saving per cut.
+    #:
+    #: Zero is the honest reading "nothing was skippable here", not "the feature
+    #: is off": a workload whose candidates are all close to the base never
+    #: reaches a provable verdict early, and pays a chunked scan for nothing.
+    evals_skipped: int = 0
+    bounded_scans_cut: int = 0
 
     #: Model spend. Reuses `agents.Usage` rather than duplicating its fields, so
     #: `evolve(usage=...)` and `claude(usage=...)` can share one object and the
@@ -263,6 +277,8 @@ class Meter:
                 merge_seconds=self.merge_seconds,
                 merge_gate_seconds=self.merge_gate_seconds,
                 worker_starved_seconds=self.worker_starved_seconds,
+                evals_skipped=self.evals_skipped,
+                bounded_scans_cut=self.bounded_scans_cut,
                 calls=u.calls,
                 prompt_tokens=u.prompt_tokens,
                 completion_tokens=u.completion_tokens,

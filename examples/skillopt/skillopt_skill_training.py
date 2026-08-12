@@ -414,7 +414,12 @@ class StrictGateAggregator(AggregatorProtocol):
         for diff in diffs:                                 # pick the best strict improver
             from agentdescent.policies import MergeContext
             candidate = head.apply(diff)
-            em = candidate.score(self.verifier.held_out)
+            # `current_em` is the bar: this gate takes strict improvers only, so
+            # a candidate that provably cannot reach it is rejected whatever the
+            # unscored tail says. `score_bounded` stops there instead of buying
+            # the rest -- and a candidate that *does* clear the bar is never cut,
+            # so `em` is exact on every path that commits or is recorded.
+            em = candidate.score_bounded(self.verifier.held_out, self.current_em)
             decision = self.acceptance.accept(MergeContext(
                 artifact=head, candidate=candidate, cards=list(cards),
                 base_counts=(self.current_em * n, (1 - self.current_em) * n),

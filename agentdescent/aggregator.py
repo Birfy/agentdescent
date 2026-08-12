@@ -135,6 +135,40 @@ class AggregatorConfig:
     #: thing, which :class:`~agentdescent.fusion.ReflectiveFusion` does.
     fusion_tournament: bool = False
 
+    #: Stop a candidate's held-out scan once the tasks left cannot lift it past
+    #: the base's rate (FlashEvolve §3.3's rejecting half, with the guess taken
+    #: out -- see :meth:`~agentdescent.evolution.EvolvingArtifact.score_bounded`).
+    #:
+    #: **Off by default, and the reason is a claim this field used to make and
+    #: could not keep.** The bound is sound for the *comparison* -- no assignment
+    #: of the unscored tail reaches the bar, so accept/reject is decided exactly
+    #: as a full scan would decide it. It is not sound for the *magnitude*, and
+    #: this engine consumes the magnitude: a rejected candidate's delta goes into
+    #: the per-artifact Beta posterior (`prior.observe_delta`, `_decide`), which
+    #: sets the acceptance threshold every later merge is judged against. A bound
+    #: understates that delta, so the posterior drifts and the run diverges.
+    #:
+    #: The basis is the code path, not a measurement. `test_a_large_lag_budget
+    #: _does_not_livelock` did fail while this defaulted to on -- but it fails
+    #: 3/3 with the feature reverted too, so it is load-dependent and says
+    #: nothing either way. The reason to keep this off is that `_decide` demonstrably
+    #: reads `cand_counts` for something other than the comparison, and a bound
+    #: is only sound for the comparison.
+    #:
+    #: The equivalence test in `tests/test_bounded_gate.py` passes, and that is a
+    #: statement about its domain rather than a general one: it rarely rejects
+    #: through the posterior path. A workload that does would diverge.
+    #:
+    #: So it is opt-in, for a caller who wants the saving and does not depend on
+    #: the posterior tracking rejected candidates faithfully. Turning it on
+    #: changes a run; it does not make one wrong.
+    #:
+    #: The saving is entirely workload-shaped and can be zero: a candidate that
+    #: ends up close to the base is never provably losing early, so its scan runs
+    #: to the end and pays for the chunking. `evals_skipped` and
+    #: `bounded_scans_cut` say which happened.
+    bounded_gate: bool = False
+
 
 class MergeOutcome(str, Enum):
     """The vocabulary of :attr:`MergeReport.category`.
@@ -933,7 +967,27 @@ class Aggregator:
         is one full held-out sweep of the backend.
         """
         c.base_counts = self.verifier.eval_counts(c.artifact)
-        c.cand_counts = self.verifier.eval_counts(c.candidate)
+        # The base's rate is the bar the candidate has to clear, and measuring it
+        # first means the bar is known *before* the expensive call. So the
+        # candidate's scan can stop the moment its remaining tasks cannot lift it
+        # over -- see `EvolvingArtifact.score_bounded`. Nothing downstream
+        # changes: every gate below asks whether the candidate beat the base, and
+        # a scan that stopped returns a bound which answers that identically.
+        #
+        # Deliberately not applied to the base itself. There is no bar for it to
+        # clear, its rate is what the *next* merge's bar is built from, and it is
+        # a cache hit anyway.
+        floor = None
+        if self.config.bounded_gate:
+            base_rate = MergeContext.rate(c.base_counts)
+            # A perfect base cannot be beaten, and `>= 1.0` would make every
+            # candidate stop after one chunk with a bound of exactly 1.0 -- a tie,
+            # which the gate reads as "no improvement". Correct, and it would hide
+            # a genuinely perfect candidate from the audit trail, so leave the
+            # full scan in the one case where the saving is largest and the
+            # information loss is total.
+            floor = base_rate if base_rate < 1.0 else None
+        c.cand_counts = self.verifier.eval_counts(c.candidate, floor)
         c.base_cheap = self.verifier.cheap_eval(c.artifact)
         c.cand_cheap = self.verifier.cheap_eval(c.candidate)
         return c

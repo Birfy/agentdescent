@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import atexit
 import hashlib
+import math
 import os
 import re
 import shutil
@@ -392,6 +393,105 @@ class EvolvingArtifact:
             return sum(self._rt.eval_one(self, t) for t in tasks) / len(tasks)
         scores = self._rt.evaluator().map(lambda t: self._rt.eval_one(self, t), tasks)
         return sum(scores) / len(scores)
+
+    def score_bounded(self, tasks: Sequence[Task], floor: float) -> float:
+        """Mean reward, abandoned once it **provably** cannot exceed ``floor``.
+
+        This is FlashEvolve's speculative stage completion (§3.3) with the
+        speculation taken out of the rejecting half. The paper scores an
+        ``alpha_spec`` prefix, compares the partial score against the pool, and
+        *guesses*; a wrong guess costs a rollback, which is why the paper keeps
+        the whole mechanism optional and out of its main results.
+
+        A guess is unnecessary for rejection. Rewards are contractually in
+        ``[0, 1]`` (:func:`_checked_reward` enforces it), so after ``k`` of ``n``
+        tasks the best the full set could still reach is
+        ``(sum_so_far + (n - k)) / n``. Once *that* is at or below ``floor``, no
+        assignment of the remaining tasks can beat ``floor`` -- so the remaining
+        ``n - k`` evaluations cannot change any decision that only asks "is this
+        better than ``floor``", and buying them is buying a number nobody reads.
+
+        The return value is that upper bound when the scan stops early, and the
+        true mean when it does not. Either way ``score_bounded(t, f) > f`` gives
+        exactly the answer ``score(t) > f`` would have, which is the property
+        that makes this a **cost** optimisation with no effect on any outcome --
+        no rollback path, no speculative version, nothing downstream to mark
+        stale -- *provided nothing downstream reads the magnitude*. That proviso
+        is load-bearing and it is why `AggregatorConfig.bounded_gate` is off by
+        default: the shipped gate feeds a rejected candidate's delta into a Beta
+        posterior that sets later thresholds, and a bound understates it.
+
+        It is not free of trade-offs, and the trade-off is not accuracy:
+
+        * The returned number is a bound, not a measurement, whenever it stops
+          early. A caller that *records* it (a history row, a Pareto axis, a
+          reported score) must not use this -- and the two ports that need a
+          per-task vector cannot use it at all, since a truncated scan has no
+          value for the tasks it skipped.
+        * Concurrency is traded for the option to stop: the scan runs a chunk at
+          a time rather than fanning out over the whole set at once. ``prefix``
+          is that chunk as a fraction of the set, and it is the paper's
+          ``alpha_spec``. The paper measures 0.25 as the useful setting and 0.5
+          as starving its own validate stage; the reason is visible here too --
+          a chunk is a synchronisation point, so a large one gives up the early
+          exit while a tiny one gives up the fan-out.
+
+        ``floor`` is the number to beat, usually the base artifact's mean on the
+        same tasks. Pass ``-inf`` to disable the early exit and get :meth:`score`
+        with extra steps.
+        """
+        if not tasks or self._rt is None:
+            return 0.0
+        tasks = list(tasks)
+        n = len(tasks)
+        width = max(1, self._rt.eval_concurrency)
+        total, done = 0.0, 0
+        while done < n:
+            # The earliest index at which a cut can even become possible, given
+            # what has been scored: a cut needs (total + n - k)/n <= floor, and
+            # the tail contributes at most 1.0 each, so k >= n(1 - floor) + total.
+            #
+            # Checking before that point cannot fire, and checking after it wastes
+            # the evaluations in between -- which is exactly what a *fixed* prefix
+            # does. FlashEvolve's alpha_spec is a constant because its prefix
+            # feeds a speculative *accept*, where an early signal is the product.
+            # For a provable *reject* the optimum is not a constant: it is
+            # 1 - floor, and floor is known before the scan starts. Measured on
+            # a 24-task set at eval_concurrency 8, against a candidate scoring 0,
+            # at base rates 0.3 / 0.5 / 0.7 / 0.9:
+            #
+            #     fixed 25%      0%   33%   67%   67%
+            #     adaptive      29%   50%   67%   67%
+            #
+            # The 0.3 row goes from structurally impossible to working, which is
+            # the point. The two right-hand columns do not move, and the reason
+            # is the `max(width, ...)` below: a chunk narrower than the pool
+            # would give up the fan-out, so the saving is capped at 1 - width/n
+            # (67% here) however high the bar is. Raising `eval_concurrency`
+            # buys wall-clock and lowers this ceiling -- the two knobs pull
+            # against each other, and neither is free.
+            if floor <= 0.0 or not math.isfinite(floor):
+                take = n - done          # no cut can ever fire; one full-width pass
+            else:
+                need = int(math.ceil(n * (1.0 - floor) + total))
+                take = min(n - done, max(width, need - done))
+            batch = tasks[done:done + take]
+            if len(batch) == 1 or width == 1:
+                total += sum(self._rt.eval_one(self, t) for t in batch)
+            else:
+                total += sum(self._rt.evaluator().map(
+                    lambda t: self._rt.eval_one(self, t), batch))
+            done += len(batch)
+            if done == n:
+                return total / n
+            # The best the untouched tail could still contribute is 1.0 each.
+            ceiling = (total + (n - done)) / n
+            if ceiling <= floor:
+                if self._rt.meter is not None:
+                    self._rt.meter.add("evals_skipped", n - done)
+                    self._rt.meter.add("bounded_scans_cut")
+                return ceiling
+        return total / n           # unreachable; kept so every path returns
 
     def evidence_eval(self, evidence: EvidenceCard) -> float:
         """Score this artifact on the trajectories an evidence card carries.
@@ -839,6 +939,8 @@ def _cost_fields(meter: Meter) -> Dict[str, Any]:
         "rollouts": m.rollouts,
         "rollout_seconds": m.rollout_seconds,
         "eval_seconds": m.eval_seconds,
+        "evals_skipped": m.evals_skipped,
+        "bounded_scans_cut": m.bounded_scans_cut,
         "merge_seconds": m.merge_seconds,
         "merge_gate_seconds": m.merge_gate_seconds,
         "worker_starved_seconds": m.worker_starved_seconds,
@@ -1155,6 +1257,17 @@ class EvolutionResult:
     #: than hiding behind them. Always 0 on the synchronous path, where the
     #: barrier idles every worker for exactly ``merge_seconds``.
     worker_starved_seconds: float = 0.0
+    #: Held-out evaluations the bounded gate proved could not change a decision
+    #: and never made, and the number of scans that ended early. Real model calls
+    #: not spent -- see
+    #: :meth:`~agentdescent.evolution.EvolvingArtifact.score_bounded`.
+    #:
+    #: Zero means "nothing here was skippable", not "the feature is off": a
+    #: workload whose candidates land close to the base never reaches a provable
+    #: verdict early. Read against ``cache_misses``, which counts the evaluations
+    #: that *were* performed, for the fraction saved.
+    evals_skipped: int = 0
+    bounded_scans_cut: int = 0
     #: Staleness, with its denominator: ``discarded / considered``. Without the
     #: denominator a stale count cannot be read at all.
     stale_considered: int = 0
@@ -1353,6 +1466,8 @@ class EvolutionResult:
             "rollouts": self.rollouts,
             "rollout_seconds": self.rollout_seconds,
             "eval_seconds": self.eval_seconds,
+            "evals_skipped": self.evals_skipped,
+            "bounded_scans_cut": self.bounded_scans_cut,
             "merge_seconds": self.merge_seconds,
             "merge_gate_seconds": self.merge_gate_seconds,
             "worker_starved_seconds": self.worker_starved_seconds,
@@ -1481,6 +1596,8 @@ class EvolutionResult:
             rollouts=d.get("rollouts", 0),
             rollout_seconds=d.get("rollout_seconds", 0.0),
             eval_seconds=d.get("eval_seconds", 0.0),
+            evals_skipped=d.get("evals_skipped", 0),
+            bounded_scans_cut=d.get("bounded_scans_cut", 0),
             merge_seconds=d.get("merge_seconds", 0.0),
             merge_gate_seconds=d.get("merge_gate_seconds", 0.0),
             worker_starved_seconds=d.get("worker_starved_seconds", 0.0),
