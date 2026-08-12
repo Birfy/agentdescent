@@ -214,6 +214,7 @@ evolve(
     eval_concurrency: int = 8,
     asynchronous: bool = False,
     async_ratio: int = 3,
+    resync_on_commit: bool = False,
     pipelined_gate: bool = False,
     gate_workers: int = 2,
     max_seconds: Optional[float] = None,
@@ -262,6 +263,7 @@ evolve(
 | `eval_concurrency` | `int` | `8` | How many held-out tasks to score at once. Every gate goes through this -- each round's measurement and, far more often, the aggregator's per-candidate comparisons -- so it is the merge half of the run's parallelism, independent of `n_workers`. `1` restores the old sequential behaviour. |
 | `asynchronous` | `bool` | `False` | Delegate to `async_evolve` -- no round barrier, with `async_ratio` as the staleness lag budget. |
 | `async_ratio` | `int` | `3` | As `asynchronous`. |
+| `resync_on_commit` | `bool` | `False` | Asynchronous path only. Refresh every worker's snapshot as soon as a sweep commits, so no one *starts* a rollout against a superseded artifact. See `async_evolve`, which documents what it does and does not fix -- a commit landing mid-rollout still produces a stale card. |
 | `pipelined_gate` | `bool` | `False` | Under `asynchronous=True`, run a merge's **measurement** phase on its own threads instead of on the merger, so the merger goes back to draining while the gate runs. Off by default; documented in full on `async_evolve`, which implements it. Warns and does nothing on the synchronous path, where the round barrier idles every worker for the whole merge regardless. |
 | `gate_workers` | `int` | `2` | As `pipelined_gate`. |
 | `max_seconds` | `Optional[float]` | `None` | Wall-clock budget. `None` (default) means unbounded; the async path uses `20.0` when unset. |
@@ -1540,6 +1542,7 @@ async_evolve(
     artifact_id: str = 'artifact',
     n_workers: int = 4,
     async_ratio: int = 3,
+    resync_on_commit: bool = False,
     max_seconds: float = 20.0,
     max_iters: Optional[int] = None,
     max_calls: Optional[int] = None,
@@ -1586,6 +1589,7 @@ async_evolve(
 | `artifact_id` | `str` | `'artifact'` | As `tasks`. |
 | `n_workers` | `int` | `4` | Producer threads (`>= 1`). The train tasks are sharded round-robin across them; a worker with an empty shard is not started. |
 | `async_ratio` | `int` | `3` | The lag budget, in two senses: a worker refreshes its snapshot once head drifts more than this far ahead, **and** it stops producing while more than this many cards sit un-merged. The second bound matters at cold start, before any commit has moved head. |
+| `resync_on_commit` | `bool` | `False` | Refresh every worker as soon as a sweep commits, whatever the ratio. This does **not** remove staleness where a real workload gets it. A worker snapshots, then spends the rollout in `run`, then pushes; a commit landing anywhere in that window makes the card stale no matter what the top of the loop does. What it removes is the other source: *starting* a rollout against a snapshot a finished sweep has already superseded. The two coincide only when rollouts are short relative to sweep cadence -- as they are in this repo's synthetic tests, where turning this on does collapse η to 0 -- which is why it is opt-in rather than the default. Turn it on when the artifact's *content* is what workers reason from, so an out-of-date copy makes the work void rather than merely stale. Evolving a skill library from empty is the case that motivated it: the lag budget fires at `head_v - base_v > async_ratio`, so with the default 3 the first three commits leave every worker still proposing against no library at all, re-deriving what head already has for the merger to discard. |
 | `max_seconds` | `float` | `20.0` | Wall-clock budget for the **production phase only**. Two things still happen after it, so budget for them: a bounded shutdown (`shutdown_grace`, since an in-flight rollout cannot be cancelled) and **one held-out scoring pass** to compute `final_reward`. That pass is memoised per (artifact, task), so it is free when the final head was already scored by a sweep and costs a full held-out sweep of the backend when it was not -- which is exactly the case when the budget was too short for any sweep to finish. |
 | `max_iters` | `Optional[int]` | `None` | Stop after this many worker rollouts in total (a budget, not a barrier). |
 | `max_calls` | `Optional[int]` | `None` | Stop after this many actor invocations (`run` + `propose`) in total. The second half of an equal-budget comparison: two configurations matched on rollouts still differ in model spend whenever one of them asks for more proposals per rollout, and the cheaper unit is the one a reader assumes was held fixed. Both bounds are checked as each rollout lands, so a run overshoots only by what was already in flight. |
