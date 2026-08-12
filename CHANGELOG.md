@@ -31,18 +31,25 @@ All notable changes to AgentDescent are documented here. The format follows
   arriving meanwhile accumulate in the buffer, so batches get larger rather than
   more numerous.
 
-  Measured at `n_workers=8`, `async_ratio=3`, with held-out scoring costing 5x a
-  rollout — the regime FlashEvolve profiles:
+  **It does what it says, and on the stub workload that buys nothing.** Both
+  halves are measured, at `n_workers=8`, `async_ratio=3`, held-out scoring at 5x
+  a rollout. The mechanism works -- merger occupancy over four runs each falls
+  from 40-67% to **24-41%**, with fewer and larger merges, which is what
+  one-candidate-per-artifact predicts. Throughput does not follow: over seven
+  runs each in a 6s window, rollouts min/median/max read 1008/**1202**/1320
+  inline against 862/**1162**/1480 pipelined -- a **0.97x** median with fully
+  overlapping distributions, and 1.02x where the gate costs what a rollout does.
 
-  ```
-                         rollouts  merges  merger busy  starved
-  inline gate                 648      10          53%    4.40x
-  pipelined_gate=True         921      17          34%    2.83x
-  ```
+  The counters say why: freeing the merger only helps if the merger is the
+  binding constraint, and here it is not. Workers gate on
+  `len(intake) > async_ratio`, the merger polls every 5ms, and eight workers
+  producing a card every 20ms refill the queue past 3 between sweeps whatever
+  the merger is doing.
 
-  +42% rollouts and +70% merges for the same wall-clock. Where the gate costs
-  only as much as a rollout the same comparison reads 776 -> 818 (+5%): the win
-  is proportional to how much the gate dominates.
+  An earlier draft of this entry read **+42% rollouts and +70% merges**. That
+  was one run per arm, and the spread inside a single configuration is wider
+  than the effect -- inline alone ranges 1008-1320 at n=7. The two runs happened
+  to land at opposite ends of it, in the direction that flattered the change.
 
   **Off by default**, because it is a third pool and the ceiling a provider sees
   becomes `n_workers + gate_workers * eval_concurrency`. Warns and does nothing

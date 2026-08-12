@@ -170,18 +170,51 @@ and measured on — there is no candidate-level staleness to have a policy about
 Cards arriving meanwhile accumulate in the aggregator's buffer, so batches get
 larger rather than more numerous.
 
-Measured at `n_workers=8`, `async_ratio=3`, held-out scoring costing 5× a
-rollout — the regime FlashEvolve profiles:
+**It does what it says, and on this workload that buys nothing.** Both halves
+are measured, at `n_workers=8`, `async_ratio=3`, held-out scoring costing 5× a
+rollout — the regime FlashEvolve profiles.
 
-| | rollouts | merges | merger busy | starved |
-|---|---:|---:|---:|---:|
-| inline gate | 648 | 10 | 53% | 4.40× |
-| `pipelined_gate=True` | **921** | **17** | 34% | **2.83×** |
+The mechanism works. Merger occupancy over four runs each:
 
-**+42% rollouts and +70% merges for the same wall-clock**, with a third fewer
-workers blocked. When the gate is only as expensive as a rollout the same
-comparison reads 776 → 818 (+5%): the win is proportional to how much the gate
-dominates, which is the honest shape for it to have.
+| | merger busy | merges |
+|---|---|---|
+| inline gate | 40–67% | 9, 11, 31, 38 |
+| `pipelined_gate=True` | **24–41%** | 5, 10, 23, 31 |
+
+The merger is freed by about half, and it holds fewer, larger merges — which is
+what one-candidate-per-artifact predicts, since the cards arriving during a
+measurement batch instead of triggering their own merge.
+
+Throughput does not follow. Seven runs each, 6-second window, rollouts as
+min / median / max:
+
+| | gate 5× rollout | gate = rollout |
+|---|---|---|
+| inline gate | 1008 / **1202** / 1320 | 1291 / **1377** / 1500 |
+| `pipelined_gate=True` | 862 / **1162** / 1480 | 1234 / **1406** / 1446 |
+| median ratio | **0.97×** | **1.02×** |
+
+The distributions overlap completely. **There is no measured speedup here**, and
+starvation does not move either (2.76–3.98× against 2.09–4.43×).
+
+The reason is visible in the same counters: freeing the merger only helps if the
+merger is the binding constraint, and here it is not. Workers gate on
+`len(intake) > async_ratio`, the merger polls every 5 ms, and eight workers
+producing a card every 20 ms refill the queue past 3 between sweeps whatever the
+merger is doing. The bottleneck is the lag budget against the poll interval, not
+the gate.
+
+!!! danger "An earlier version of this table read +42% rollouts and +70% merges"
+    That was **one run per arm**, and the spread inside a single configuration
+    is wider than the effect: inline alone ranges 1008–1320 at n=7, and ranged
+    570–852 at n=3 with a 4-second window. The first pair of runs happened to
+    land at opposite ends of it.
+
+    The number was wrong in the direction that flatters the change, which is the
+    direction to be most suspicious of. It is corrected here rather than
+    deleted, because "the mechanism works and the workload does not care" is a
+    result, and a reader deciding whether to turn this on needs it more than
+    they needed the headline.
 
 !!! warning "The first version of this made the run *slower*, and the counters said why"
     Skipping the merger's poll sleep whenever a measurement was *in flight*

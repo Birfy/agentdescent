@@ -236,8 +236,8 @@ def test_starvation_is_exactly_zero_when_the_gate_cannot_fire():
     threshold, so it is **exact and load-independent**. A wall-clock comparison
     would read differently on a busy machine, and a counter's floor should not.
 
-    The corresponding *measurement* -- 12-17% starved with slow rollouts and a
-    cheap gate, against 36-41% the other way round -- lives in
+    The corresponding *measurement* (n=3) -- 12-17% starved with slow rollouts
+    and a cheap gate, against 36-41% the other way round -- lives in
     `examples/efficiency.py --only stages`, which is where the numbers in
     `docs/efficiency.md` come from.
     """
@@ -255,6 +255,8 @@ def test_narrowing_the_gates_own_pool_still_starves_workers():
     while the ordering against a wider pool can and did.
 
     Measured across three trials: 36-41% at the default width, 52-75% at 1.
+    Quoted as observed ranges, not as an effect size -- three runs of one
+    configuration of this engine can span 1.5x (see docs/efficiency.md).
     """
     r = _async(run=_slow_gate_run, async_ratio=1, max_seconds=1.5,
                eval_concurrency=1)
