@@ -33,7 +33,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import (Callable, Deque, Dict, List, Optional, Protocol, Tuple,
-                    runtime_checkable)
+                    Union, runtime_checkable)
 
 from .evolvable import (
     ContractError, Diff, EvidenceCard, Evolvable, VersionVector, vv_staleness,
@@ -135,6 +135,40 @@ class AggregatorConfig:
     #: thing, which :class:`~agentdescent.fusion.ReflectiveFusion` does.
     fusion_tournament: bool = False
 
+    #: Stop a candidate's held-out scan once the tasks left cannot lift it past
+    #: the base's rate (FlashEvolve §3.3's rejecting half, with the guess taken
+    #: out -- see :meth:`~agentdescent.evolution.EvolvingArtifact.score_bounded`).
+    #:
+    #: **Off by default, and the reason is a claim this field used to make and
+    #: could not keep.** The bound is sound for the *comparison* -- no assignment
+    #: of the unscored tail reaches the bar, so accept/reject is decided exactly
+    #: as a full scan would decide it. It is not sound for the *magnitude*, and
+    #: this engine consumes the magnitude: a rejected candidate's delta goes into
+    #: the per-artifact Beta posterior (`prior.observe_delta`, `_decide`), which
+    #: sets the acceptance threshold every later merge is judged against. A bound
+    #: understates that delta, so the posterior drifts and the run diverges.
+    #:
+    #: The basis is the code path, not a measurement. `test_a_large_lag_budget
+    #: _does_not_livelock` did fail while this defaulted to on -- but it fails
+    #: 3/3 with the feature reverted too, so it is load-dependent and says
+    #: nothing either way. The reason to keep this off is that `_decide` demonstrably
+    #: reads `cand_counts` for something other than the comparison, and a bound
+    #: is only sound for the comparison.
+    #:
+    #: The equivalence test in `tests/test_bounded_gate.py` passes, and that is a
+    #: statement about its domain rather than a general one: it rarely rejects
+    #: through the posterior path. A workload that does would diverge.
+    #:
+    #: So it is opt-in, for a caller who wants the saving and does not depend on
+    #: the posterior tracking rejected candidates faithfully. Turning it on
+    #: changes a run; it does not make one wrong.
+    #:
+    #: The saving is entirely workload-shaped and can be zero: a candidate that
+    #: ends up close to the base is never provably losing early, so its scan runs
+    #: to the end and pays for the chunking. `evals_skipped` and
+    #: `bounded_scans_cut` say which happened.
+    bounded_gate: bool = False
+
 
 class MergeOutcome(str, Enum):
     """The vocabulary of :attr:`MergeReport.category`.
@@ -230,6 +264,61 @@ class MergeReport:
     #: Stable bucket for the same outcome, safe to count across rounds. ``reason``
     #: interpolates values ("P(delta>0)=0.42 <= 0.75"), so it makes a useless key.
     category: str = ""
+
+
+@dataclass
+class _Candidate:
+    """One merge, between choosing what to commit and deciding whether to.
+
+    A merge is three phases with very different properties, and they used to be
+    one method:
+
+    * **prepare** -- drain, staleness, conflicts, fusion. Touches aggregator
+      state (the buffer, the meter) and is cheap;
+    * **measure** -- the four verifier calls. Touches *no* aggregator state, and
+      is where 94% of the merger's gate time goes (`docs/efficiency.md`);
+    * **decide** -- acceptance, audit, CAS commit, posterior update. Touches
+      aggregator state and must stay on one thread.
+
+    This is the value that crosses those boundaries. It exists so the middle
+    phase can be **moved off the merger thread** without the other two following
+    it: everything `measure` needs is here, and everything it produces is here,
+    so nothing it does can be observed by another merge in flight.
+
+    Held deliberately as data rather than as a closure over `_process`'s locals:
+    a closure would capture `self` and make "touches no aggregator state"
+    unverifiable by reading it.
+    """
+
+    artifact_id: str
+    artifact: Evolvable
+    candidate: Evolvable
+    diff: Diff
+    #: What the acceptance policy is shown: the cards that survived *conflict
+    #: resolution*, which is the evidence for the diff being put forward.
+    cards: List[EvidenceCard]
+    #: What a lost CAS re-files: everything that survived *staleness*, including
+    #: the cards conflict resolution dropped. The two are deliberately different
+    #: -- a conflicted diff lost on merit and re-filing it buys the same loss
+    #: again, while a CAS-conflicted batch was never judged against the new head.
+    survivor_cards: List[EvidenceCard]
+    head: Dict[str, int]
+    fused: bool
+    considered: int
+    survived: int
+    discarded: int
+    conflicts: int
+
+    #: Filled by `Aggregator._measure`. `None` until then, which is what makes a
+    #: candidate that skipped the phase fail loudly rather than commit on zeros.
+    base_counts: Optional[Tuple[float, float]] = None
+    cand_counts: Optional[Tuple[float, float]] = None
+    base_cheap: Optional[float] = None
+    cand_cheap: Optional[float] = None
+
+    @property
+    def measured(self) -> bool:
+        return self.base_counts is not None and self.cand_counts is not None
 
 
 
@@ -410,6 +499,11 @@ class Aggregator:
         self._seen: "set" = set()
         # dev version last copied onto stable, so an unchanged head is not re-promoted.
         self._promoted_at: Dict[str, int] = {}
+        # Artifacts with a candidate out being measured. Empty for the whole of
+        # `step()`, which measures inline; a pipelined caller passes
+        # `skip_in_flight=True` and this is what bounds it to one candidate per
+        # artifact at a time.
+        self._in_flight: "set" = set()
 
     # -- staleness (section 4.2) ---------------------------------------------
 
@@ -483,17 +577,86 @@ class Aggregator:
         self.buffer.add(card)
 
     def step(self) -> List[MergeReport]:
-        """Fire every artifact bucket that is ready and return per-artifact reports."""
+        """Fire every artifact bucket that is ready and return per-artifact reports.
+
+        The published contract, unchanged: it measures on the calling thread and
+        hands back finished reports. :meth:`begin_step` / :meth:`finish_step` are
+        the same three phases with the expensive one left to the caller.
+
+        Written through the public :meth:`measure` rather than the private
+        ``_measure`` so that **both callers take one path**. A subclass or a
+        wrapper that overrides the phase would otherwise change the pipelined
+        run and silently not the inline one -- two behaviours from one override
+        is the kind of difference nobody finds until the two disagree.
+        """
+        return self.finish_step(self.measure(self.begin_step()))
+
+    def begin_step(self, *, skip_in_flight: bool = False) -> List[Union["_Candidate", MergeReport]]:
+        """Phases 1 and 2: tick, drain what is ready, choose candidates.
+
+        Returns a mix -- a :class:`MergeReport` for merges that ended without
+        anything to score, and a candidate for the rest. The caller measures the
+        candidates (however and wherever it likes) and hands the whole list back
+        to :meth:`finish_step`.
+
+        ``skip_in_flight`` is what makes a pipelined caller safe. An artifact
+        whose candidate is still being measured is passed over rather than given
+        a second one, so **at most one candidate per artifact is ever in
+        flight** -- which is what keeps every candidate committed against the
+        head it was prepared and measured on, and is why this pipeline needs no
+        staleness rule of its own. The cards keep arriving into the buffer
+        meanwhile; batching them is what the buffer is for.
+        """
         self.buffer.tick()
-        reports: List[MergeReport] = []
+        out: List[Union[_Candidate, MergeReport]] = []
         for aid in self.buffer.ready(self.config):
-            report = self._process(aid)
+            if skip_in_flight and aid in self._in_flight:
+                continue
+            prepared = self._prepare(aid)
+            if isinstance(prepared, _Candidate):
+                self._in_flight.add(aid)
+            out.append(prepared)
+        return out
+
+    def measure(self, items: List[Union["_Candidate", MergeReport]]) -> List[Union["_Candidate", MergeReport]]:
+        """Phase 2 for a batch from :meth:`begin_step`. **Off-thread safe.**
+
+        The only phase a caller may move off the merger: it writes into the
+        candidates it was handed and nowhere else. Everything it reads -- the
+        verifier, the evaluation cache -- is already locked and single-flight,
+        because the gate has always scored several tasks at once.
+        """
+        for item in items:
+            if isinstance(item, _Candidate):
+                self._measure(item)
+        return items
+
+    def finish_step(self, items: List[Union["_Candidate", MergeReport]]) -> List[MergeReport]:
+        """Phase 3: decide the measured candidates, then age and promote.
+
+        Must run on one thread -- it commits, updates the posteriors, and moves
+        the promotion policy. :meth:`_measure` is the only phase that may be
+        moved off it.
+        """
+        reports: List[MergeReport] = []
+        for item in items:
+            if isinstance(item, MergeReport):
+                reports.append(item)
+                continue
+            try:
+                reports.append(self._decide(item))
+            finally:
+                # Released whatever happened: a candidate whose decision raised
+                # would otherwise block its artifact for the rest of the run,
+                # and a merger that quietly stops merging one artifact is the
+                # hardest kind of failure to see.
+                self._in_flight.discard(item.artifact_id)
+        for report in reports:
             # Told after the fact, from the category the merge actually reported
             # -- not from a second reading of the same decision. A trust region
             # that adapted to its own guess about what happened would be tuning
             # itself against a number nothing else in the run agrees with.
             self._observe_trust_region(report.category)
-            reports.append(report)
         self._age_and_promote(reports)
         return reports
 
@@ -719,6 +882,28 @@ class Aggregator:
         return set(tracked) | self._seen if tracked is not None else set(self._seen)
 
     def _process(self, artifact_id: str) -> MergeReport:
+        """One merge, all three phases, on this thread.
+
+        Kept as the single entry point because `step()` is a published contract
+        that returns its reports synchronously, and every custom aggregator and
+        both drivers depend on that. The phases below are separable; this is
+        what it looks like when nothing separates them.
+        """
+        prepared = self._prepare(artifact_id)
+        if isinstance(prepared, MergeReport):      # nothing to measure
+            return prepared
+        self._measure(prepared)
+        return self._decide(prepared)
+
+    def _prepare(self, artifact_id: str) -> "Union[_Candidate, MergeReport]":
+        """Drain, filter, and choose what to put forward -- no measurement.
+
+        Returns a finished :class:`MergeReport` for the merges that end here: an
+        artifact that is not in the ledger, and a batch with no survivors. Those
+        are not failures of the phase, they are merges with nothing to measure,
+        and giving them a report rather than a candidate is what lets the caller
+        skip the expensive phase entirely.
+        """
         self._seen.add(artifact_id)
         cards = self.buffer.drain(artifact_id)
         snap = self.ledger.snapshot(Ledger.DEV)
@@ -757,24 +942,84 @@ class Aggregator:
         kept_cards, conflicts = self._resolve_conflicts(artifact, survivors)
         kept_diffs = [c.diff for c in kept_cards]
         best_diff, best_state, fused = self._tournament(artifact, kept_diffs)
+        return _Candidate(
+            artifact_id=artifact_id, artifact=artifact, candidate=best_state,
+            diff=best_diff, cards=kept_cards, survivor_cards=survivors,
+            head=head, fused=fused,
+            considered=n_considered, survived=len(survivors),
+            discarded=len(discarded), conflicts=conflicts)
 
+    def _measure(self, c: "_Candidate") -> "_Candidate":
+        """Score the base and the candidate. **Touches no aggregator state.**
+
+        That property is the whole point of the method and it is load-bearing:
+        it is what makes this phase safe to run off the merger thread, and off
+        several at once. It reads the verifier (whose caches are locked and
+        single-flight) and writes only into ``c``.
+
+        94% of the merger's gate time is spent here -- measured, see
+        `docs/efficiency.md` -- while the two phases either side of it are
+        bookkeeping. Anything that keeps a merger waiting is waiting on this.
+
+        Three of the four calls are usually cache hits: the base was scored by
+        the previous merge, and `cheap_eval` sub-samples a set `eval_counts` has
+        just scored in full. The real cost is ``eval_counts(candidate)``, which
+        is one full held-out sweep of the backend.
+        """
+        c.base_counts = self.verifier.eval_counts(c.artifact)
+        # The base's rate is the bar the candidate has to clear, and measuring it
+        # first means the bar is known *before* the expensive call. So the
+        # candidate's scan can stop the moment its remaining tasks cannot lift it
+        # over -- see `EvolvingArtifact.score_bounded`. Nothing downstream
+        # changes: every gate below asks whether the candidate beat the base, and
+        # a scan that stopped returns a bound which answers that identically.
+        #
+        # Deliberately not applied to the base itself. There is no bar for it to
+        # clear, its rate is what the *next* merge's bar is built from, and it is
+        # a cache hit anyway.
+        floor = None
+        if self.config.bounded_gate:
+            base_rate = MergeContext.rate(c.base_counts)
+            # A perfect base cannot be beaten, and `>= 1.0` would make every
+            # candidate stop after one chunk with a bound of exactly 1.0 -- a tie,
+            # which the gate reads as "no improvement". Correct, and it would hide
+            # a genuinely perfect candidate from the audit trail, so leave the
+            # full scan in the one case where the saving is largest and the
+            # information loss is total.
+            floor = base_rate if base_rate < 1.0 else None
+        c.cand_counts = self.verifier.eval_counts(c.candidate, floor)
+        c.base_cheap = self.verifier.cheap_eval(c.artifact)
+        c.cand_cheap = self.verifier.cheap_eval(c.candidate)
+        return c
+
+    def _decide(self, c: "_Candidate") -> MergeReport:
+        """Accept or reject, audit, and commit. Single-threaded by contract.
+
+        Everything here writes aggregator state -- the posterior, the audit
+        scheduler's trust table, the ledger -- so unlike :meth:`_measure` this
+        must not run concurrently with itself.
+        """
+        if not c.measured:
+            # A candidate that reached the decision without being scored would
+            # take `base_counts` as zeros and read as a tie, which the Beta test
+            # resolves by rejecting -- a silent no-op merge. Say so instead.
+            raise AggregatorContractError(
+                f"_decide() got an unmeasured candidate for {c.artifact_id!r}; "
+                "_measure() has to run between _prepare() and _decide()")
         # -- Beta-posterior acceptance (section 4.4) -------------------------
         # Compare candidate vs base as two Beta posteriors over their held-out
         # success rate, with the running per-artifact posterior as a shared
         # prior (so evidence-starved tail artifacts get a wider, more
         # conservative test).  Accept iff P(candidate_rate > base_rate) clears
         # the annealed threshold -- not a point estimate crossing a line.
-        prior = self._posteriors[artifact_id]
-        base_s, base_f = self.verifier.eval_counts(artifact)
-        cand_s, cand_f = self.verifier.eval_counts(best_state)
-        base_score = self.verifier.cheap_eval(artifact)
-        cand_score = self.verifier.cheap_eval(best_state)
+        prior = self._posteriors[c.artifact_id]
+        base_score, cand_score = c.base_cheap, c.cand_cheap
         decision = self.acceptance_policy.accept(MergeContext(
-            artifact=artifact, candidate=best_state, cards=kept_cards,
-            base_counts=(base_s, base_f), cand_counts=(cand_s, cand_f),
-            diff=best_diff, base_cheap=base_score, cand_cheap=cand_score,
-            prior=prior, trust_radius=artifact.blast_radius,
-            stable_distance=self._stable_distance(artifact_id, best_state)))
+            artifact=c.artifact, candidate=c.candidate, cards=c.cards,
+            base_counts=c.base_counts, cand_counts=c.cand_counts,
+            diff=c.diff, base_cheap=base_score, cand_cheap=cand_score,
+            prior=prior, trust_radius=c.artifact.blast_radius,
+            stable_distance=self._stable_distance(c.artifact_id, c.candidate)))
         p_improve = decision.p_improve
 
         # The full held-out rates. The regression guard below must use *these*
@@ -784,32 +1029,31 @@ class Aggregator:
         # two doc pages promised sub-sampling "never affects commit safety". It was
         # the promise that was wrong, not the intent; the guard is meant to stop a
         # measured regression, and ground truth is what measures one.
-        base_full = MergeContext.rate((base_s, base_f))
-        cand_full = MergeContext.rate((cand_s, cand_f))
+        base_full = MergeContext.rate(c.base_counts)
+        cand_full = MergeContext.rate(c.cand_counts)
 
-        rejected = self._audit(artifact, artifact_id, best_state, best_diff,
+        def report(diff, version, reason, category) -> MergeReport:
+            return MergeReport(c.artifact_id, diff, c.fused, c.considered,
+                               c.survived, c.discarded, c.conflicts, p_improve,
+                               version, reason, category)
+
+        rejected = self._audit(c.artifact, c.artifact_id, c.candidate, c.diff,
                                base_full, cand_full, base_score, cand_score, prior)
         if rejected:
-            return MergeReport(artifact_id, None, fused, n_considered, len(survivors),
-                               len(discarded), conflicts, p_improve, None,
-                               "oracle rejected", MergeOutcome.ORACLE_REJECTED)
+            return report(None, None, "oracle rejected", MergeOutcome.ORACLE_REJECTED)
 
         if not decision.accept:
             prior.observe_delta(decision.observed_delta)
-            return MergeReport(artifact_id, None, fused, n_considered, len(survivors),
-                               len(discarded), conflicts, p_improve, None,
-                               decision.detail, MergeOutcome(decision.category))
+            return report(None, None, decision.detail,
+                          MergeOutcome(decision.category))
 
         # -- commit (section 4.1): CAS on dev --------------------------------
-        new_version = self._commit_with_retry(artifact_id, best_state, best_diff, head)
+        new_version = self._commit_with_retry(c.artifact_id, c.candidate, c.diff,
+                                              c.head)
         if new_version is None:
-            self.buffer.settle(survivors)
-            return MergeReport(artifact_id, None, fused, n_considered, len(survivors),
-                               len(discarded), conflicts, p_improve, None,
-                               "CAS conflict", MergeOutcome.CAS_CONFLICT)
+            self.buffer.settle(c.survivor_cards)
+            return report(None, None, "CAS conflict", MergeOutcome.CAS_CONFLICT)
 
         prior.update(True, weight=2.0)  # a committed improvement is strong evidence.
 
-        return MergeReport(artifact_id, best_diff, fused, n_considered, len(survivors),
-                           len(discarded), conflicts, p_improve, new_version,
-                           "committed", MergeOutcome.COMMITTED)
+        return report(c.diff, new_version, "committed", MergeOutcome.COMMITTED)

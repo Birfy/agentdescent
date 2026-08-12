@@ -8,6 +8,149 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- **The pipelined-gate seam disabled the async path's livelock guard, in
+  exactly the situation the guard exists for.** `pipelined_gate` needs the
+  merger to skip poll sweeps whose candidate is still out being measured, and
+  the skip it shipped was `if not reports: return`. On the **inline** path "no
+  reports" also describes a sweep whose every card was discarded at the
+  staleness gate -- and the return skipped `stall.note_sweep`, the counter
+  behind `stall_patience`. Under `async_ratio >> alpha` that counter is the
+  *only* thing that ends the cycle: head stops moving, so the lag budget never
+  forces a worker refresh, and the forced-resync epoch is all that is left.
+  The same return also broke `history`'s documented "one entry per merger
+  sweep that had cards" and left the published head un-bumped on those sweeps.
+
+  Caught by CI, on all three Python versions, in
+  `test_a_large_lag_budget_does_not_livelock` -- the test named for the
+  failure. It was first misread here as a pre-existing flake, on the strength
+  of a stash test that removed only *uncommitted* work while the offending
+  committed change stayed in place; `main` is green under the same load. The
+  test is genuinely load-sensitive (a 3-second budget, four spinning workers
+  against one merger), which made the local signal noisy -- never absent.
+
+  The fix is the missing half of the condition: `if not reports and not
+  batch`. A pure collect poll is skipped; a sweep that had cards and reported
+  nothing is the livelock's signature and must be counted.
+
+### Added
+
+- **Evaluation can now be its own stage: `async_evolve(pipelined_gate=True)`.**
+  Two modules claim to implement FlashEvolve's stage orchestration and both
+  implement two stages — workers and a merger — with *Evaluate* folded into the
+  merger. The counters above say what that costs: the merger runs ~90% busy,
+  94% of it in the gate, and 4.5 of 8 workers sit blocked at the backpressure
+  gate at any moment.
+
+  A merge is three phases, and only the middle one is expensive: prepare (drain,
+  staleness, fusion), **measure** (the four verifier calls), decide (accept,
+  audit, CAS commit). `Aggregator` now exposes them as `begin_step` / `measure` /
+  `finish_step`, with `step()` defined in terms of the three — so the published
+  contract is unchanged and every custom aggregator keeps working. `measure()`
+  writes only into the candidate it was handed, which is what lets the async
+  driver run it on its own threads.
+
+  **No commit semantics change.** `begin_step(skip_in_flight=True)` bounds the
+  pipeline to **one candidate per artifact**, so every candidate is still
+  committed against the head it was prepared and measured on — there is no
+  candidate-level staleness to have a policy about, which is the difference
+  between this and a change that quietly loosens what a commit means. Cards
+  arriving meanwhile accumulate in the buffer, so batches get larger rather than
+  more numerous.
+
+  **It does what it says, and on the stub workload that buys nothing.** Both
+  halves are measured, at `n_workers=8`, `async_ratio=3`, held-out scoring at 5x
+  a rollout. The mechanism works -- merger occupancy over four runs each falls
+  from 40-67% to **24-41%**, with fewer and larger merges, which is what
+  one-candidate-per-artifact predicts. Throughput does not follow: over seven
+  runs each in a 6s window, rollouts min/median/max read 1008/**1202**/1320
+  inline against 862/**1162**/1480 pipelined -- a **0.97x** median with fully
+  overlapping distributions, and 1.02x where the gate costs what a rollout does.
+
+  The counters say why: freeing the merger only helps if the merger is the
+  binding constraint, and here it is not. Workers gate on
+  `len(intake) > async_ratio`, the merger polls every 5ms, and eight workers
+  producing a card every 20ms refill the queue past 3 between sweeps whatever
+  the merger is doing.
+
+  An earlier draft of this entry read **+42% rollouts and +70% merges**. That
+  was one run per arm, and the spread inside a single configuration is wider
+  than the effect -- inline alone ranges 1008-1320 at n=7. The two runs happened
+  to land at opposite ends of it, in the direction that flattered the change.
+
+  **Off by default**, because it is a third pool and the ceiling a provider sees
+  becomes `n_workers + gate_workers * eval_concurrency`. Warns and does nothing
+  on the synchronous path, where the round barrier idles every worker for the
+  whole merge whatever the gate runs on.
+
+  **It reaches no port yet, and says so.** Every algorithm in `examples/`
+  supplies its own `aggregator_factory` implementing `AggregatorProtocol` from
+  scratch, so none has the three phases and `pipelined_gate=True` warns and runs
+  inline -- which includes all eleven runtime-matrix rows. Porting one means
+  expressing it in phases and leaving `step()` inherited.
+
+  Having the three methods is **not** sufficient, and that was a real bug in the
+  first version of the check: `PopulationAggregator` derives from `Aggregator`,
+  inherits all three, and overrides `step()` to admit the pre-merge head into
+  its archive and consult its selection policy. A `hasattr` test passes there,
+  and driving the phases directly would have skipped every line of the override
+  -- running a different algorithm while reporting the requested one. The check
+  now also requires `step()` to be the base implementation.
+
+  On a live model (**GLM-5.2**, GEPA/HotpotQA, 16 rollouts, 4 workers) the
+  profile is sharper than the stub's: `merge_gate_seconds == merge_seconds`
+  **exactly** -- the merger spends all of its busy time in the gate -- with
+  `worker_starved_seconds=54.6`. `eval_seconds` read 1894s against a 740s
+  process wall-clock, which is the whole reason it cannot answer this question.
+
+  The first version of it made runs *slower* — 462 rollouts inline against 389
+  pipelined — by skipping the merger's poll sleep whenever a measurement was in
+  flight rather than *finished*. That is a busy-wait, and a busy-wait holds the
+  GIL against the workers it was meant to free, while `merge_seconds` reported a
+  confident 92% occupancy because spinning is occupancy. Both the fix and the
+  counter that caught it are in this release.
+
+- **The merger's own profile, so "is the gate the bottleneck" stops being a
+  guess.** `docs/efficiency.md` could say whether a run got faster and not why,
+  and the counter a reader would reach for cannot answer it: `eval_seconds` sums
+  across the evaluation pool, so eight threads scoring for a second each reads
+  `8.0` whether the gate cost eight seconds or one. Three wall-clock counters on
+  the one thread that merges now do — `merge_seconds` (merger occupancy),
+  `merge_gate_seconds` (the part of it blocked on evaluation, a **subset**), and
+  `worker_starved_seconds` (async only: workers held at the backpressure gate
+  with a finished card and nowhere to put it), plus `EvolutionResult.gate_share()`
+  and `.merger_occupancy()`.
+
+  `merge_seconds` was not new. It has been declared in `MeterSnapshot`, in
+  `Meter`, and in `Meter.snapshot()` since the first version of `metrics.py` and
+  **written by nothing**, so every run ever published reported `0.0` — which is
+  indistinguishable from "merging was free", and is the opposite of what the
+  first measurement says.
+
+  Measured (`python -m examples.efficiency --only stages`, `n_workers=8`):
+
+  ```
+  workload                             wall  merger busy  of it, gate  starved/s
+  sync, uniform 20ms                   0.5s          59%         100%          —
+  async, uniform 20ms                  4.1s          94%          82%       4.5x
+  async, uniform 20ms, eval_conc=1     4.3s          99%          95%       6.9x
+  sync, heavy tail                     1.9s          43%         100%          —
+  async, heavy tail                    4.3s          90%          94%       5.6x
+  ```
+
+  The third row is the controlled one: same workload, same rollouts, same
+  evaluations, only the gate's own pool narrows — and starvation rises from 4.5
+  to 6.9 of eight workers. On the synchronous path `of it, gate` reads 100%,
+  because everything the driver does after the barrier *is* evaluation.
+
+  The counters also record a trap they were nearly written into. Starvation
+  alone does not implicate the gate: with this domain's microsecond rollout the
+  workers lap the merger between sweeps whatever the gate costs (at
+  `async_ratio=8`, four workers starved for ~4s of a 1s window with nothing
+  slowed down). `gate_share()` is what separates a busy merger from a blocking
+  one, which is why the pair ships rather than either half.
+
+### Fixed
+
 - **The A/B harness could not tell "the rule did not help" from "the rule never
   ran".** `bench/ab_run.py` exists so that the three borrowed RL decision rules
   are validated before they are documented, and its own docstring promises to

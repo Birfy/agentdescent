@@ -581,6 +581,8 @@ def main(argv=None) -> None:
                     rounds=args.rounds, n_workers=args.workers,
                     max_concurrency=1 if args.asynchronous else args.workers,
                     asynchronous=args.asynchronous, async_ratio=args.async_ratio,
+                    pipelined_gate=args.asynchronous and args.pipelined_gate,
+                    gate_workers=args.gate_workers,
                     max_seconds=args.max_seconds if args.asynchronous else None,
                     held_out_frac=val_frac,
                     aggregator_factory=factory, verbose=True,

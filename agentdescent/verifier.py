@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from .evolvable import Evolvable, stable_hash
 
@@ -152,13 +152,33 @@ class ThreeLayerVerifier:
         learned, _ = self.learned_eval(artifact)
         return 0.5 * rule + 0.5 * learned
 
-    def eval_counts(self, artifact: Evolvable) -> Tuple[float, float]:
+    def eval_counts(self, artifact: Evolvable,
+                    floor: Optional[float] = None) -> Tuple[float, float]:
         """Return (successes, failures) on the full held-out set.
 
         Feeds the aggregator's Beta-posterior acceptance test with an honest
-        sample size (design doc, section 4.4)."""
-        acc = self.eval_fn(artifact, self.held_out)
+        sample size (design doc, section 4.4).
+
+        ``floor`` is the rate this artifact has to beat, and it turns the scan
+        into :meth:`~agentdescent.evolution.EvolvingArtifact.score_bounded`:
+        evaluation stops as soon as the remaining tasks *cannot* lift the mean
+        past it, because from there on every additional model call buys a number
+        that no longer changes the answer. The counts that come back are then a
+        bound rather than a measurement, which is exactly as sound for a test
+        asking "is the candidate better" and **not** sound for anything that
+        records the rate. See :meth:`score_bounded` for that distinction.
+
+        Only used where a caller has a baseline to hand -- the aggregator has
+        one, having just measured the base. ``None`` keeps the full scan, so an
+        `Evolvable` that cannot do a bounded one (the protocol does not require
+        it) is unaffected.
+        """
         n = float(len(self.held_out))
+        bounded = getattr(artifact, "score_bounded", None)
+        if floor is None or not callable(bounded):
+            acc = self.eval_fn(artifact, self.held_out)
+        else:
+            acc = bounded(self.held_out, floor)
         return acc * n, (1.0 - acc) * n
 
     def oracle_eval(self, artifact: Evolvable) -> float:
