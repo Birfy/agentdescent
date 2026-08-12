@@ -8,6 +8,40 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- **The A/B harness could not tell "the rule did not help" from "the rule never
+  ran".** `bench/ab_run.py` exists so that the three borrowed RL decision rules
+  are validated before they are documented, and its own docstring promises to
+  report "whether the mechanism fired at all". It reported `fusion.contested` —
+  a *fusion* counter, non-zero whether or not an advantage was ever recorded —
+  for **every** rule, so three of the four were audited by a counter belonging
+  to the fourth. Each rule now carries its own: cards that arrived with an
+  advantage, decisions that had a measured distance from `stable`, and whether
+  the adaptive trust region ever left its initial value.
+- **`--rule advantage` at the harness's own default would have measured almost
+  nothing, and said nothing about it.** A group is one base version and one task
+  cluster; `GroupAdvantage` returns `None` until the group *reaches*
+  `min_group=4`, so the first three rollouts of every round can never carry a
+  value. At `--workers 4` that is one rollout in four — measured at 25% with
+  rewards that have spread, and 0% at `--workers 2`, where both arms are the
+  control. The sweep now states this ceiling before it spends anything, refuses
+  outright below `min_group`, and names the lever (`--workers`). `docs/concepts.md`
+  attributed the missing signal to task clusters, which is the visible half and
+  not the half that bites: the HotpotQA workload the harness runs carries no
+  clusters at all.
+
+### Added
+
+- **`bench/ab_run.py --no-thinking`.** `completion_for` has honoured the flag for
+  a while and this sweep had no way to pass it, so every A/B ran with reasoning
+  tokens on. Measured on GLM-5.2 behind an Anthropic-shaped endpoint: 14.9 s and
+  379 output tokens against 6.2 s and 44 with it disabled. That is a change to
+  the model's output and not only its latency, so it has to be identical across
+  arms — it is applied to both by construction, and recorded in the result JSON
+  next to the model id, because a reader cannot otherwise tell which of the two
+  models the arms were comparing.
+
+### Fixed
+
 - **A declared `Beam(k)` was `Beam(1)`, and `ParetoFrontier` never left the
   candidate it was handed first.** `PopulationAggregator` asks for one starting
   point per merge — the ledger holds one live head — and built its

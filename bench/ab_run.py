@@ -34,7 +34,7 @@ import json
 import statistics
 import sys
 import threading
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from agentdescent import Usage
 from agentdescent.advantage import (
@@ -52,35 +52,116 @@ from .baselines_run import _finer, _fmt, _hotpotqa
 RULES = ("advantage", "trust-region", "stable-distance",
          "reflective-fusion")
 
+#: `evolve()` builds its own `GroupAdvantage()` and does not expose `min_group`,
+#: so on the `--rule advantage` arm this is a property of the engine rather than
+#: a knob of this script -- and the only lever a caller has is `--workers`.
+_MIN_GROUP = 4
 
-def _arm(rule: str, on: bool, completion=None) -> Dict[str, Any]:
-    """The `evolve()` keyword arguments for one arm of one A/B.
+
+class _Fired:
+    """How often the rule under test had anything to act on.
+
+    The reason this exists rather than a comment: the "did it fire" check used to
+    read `fusion.contested` for **every** rule. That is the right counter for
+    `--rule reflective-fusion` and unrelated to the other three -- fusion
+    tournaments happen whether or not an advantage was ever recorded -- so an
+    `--rule advantage` sweep in which no group ever filled reported a healthy
+    non-zero count and its quality column read as a clean null result. A paid run
+    that cannot tell "the rule did not help" from "the rule never ran" is worse
+    than no run.
+    """
+
+    def __init__(self) -> None:
+        self.considered = 0      # decisions the rule was asked about
+        self.fired = 0           # decisions where it had a signal to apply
+
+
+class _CountingAdvantage(AdvantageAcceptance):
+    """`AdvantageAcceptance`, counting the cards that carried an advantage."""
+
+    def __init__(self, inner, probe: _Fired, strength: float = 1.0) -> None:
+        super().__init__(inner, strength)
+        self.probe = probe
+
+    def accept(self, ctx):
+        self.probe.considered += 1
+        if any(getattr(c, "advantage", None) is not None for c in ctx.cards):
+            self.probe.fired += 1
+        return super().accept(ctx)
+
+
+class _CountingStableDistance(StableDistanceAcceptance):
+    """`StableDistanceAcceptance`, counting decisions with a measured distance.
+
+    Zero distance is the ordinary state early in a run -- dev *is* stable until
+    something is promoted -- so a penalty that never had a distance to penalise
+    has not been tested by the run that reported it.
+    """
+
+    def __init__(self, inner, probe: _Fired, strength: float = 0.1) -> None:
+        super().__init__(inner, strength)
+        self.probe = probe
+
+    def accept(self, ctx):
+        self.probe.considered += 1
+        if (getattr(ctx, "stable_distance", 0.0) or 0.0) > 0.0:
+            self.probe.fired += 1
+        return super().accept(ctx)
+
+
+def _arm(rule: str, on: bool, completion=None) -> Tuple[Dict[str, Any], Any]:
+    """The `evolve()` keyword arguments for one arm, and the thing that watched it.
 
     The control is *not* "a bundle with nothing in it" -- it is the default
     policies, constructed the same way the engine constructs them. Otherwise the
     comparison could be measuring the wiring rather than the rule.
+
+    The second return value is whatever can answer "did this rule fire": a
+    `_Fired` probe, the `AdaptiveTrustRegion` itself (it already records every
+    value it has taken), or `None` for the control and for the fusion rule,
+    whose own counters already say.
     """
     if not on:
-        return {}
+        return {}, None
     if rule == "advantage":
         # `DefaultAcceptance` is wrapped, not replaced: the Beta test and the
         # regression guard have a documented history of bugs behind them.
         base = DefaultAcceptance(0.5, 64, 4000)
+        probe = _Fired()
         return {"policies": Policies(
-            acceptance=AdvantageAcceptance(base),
-            conflict=None)}          # conflict needs the verifier; wired below
+            acceptance=_CountingAdvantage(base, probe),
+            conflict=None)}, probe   # conflict needs the verifier; wired below
     if rule == "trust-region":
+        region = AdaptiveTrustRegion()
         return {"agg_config": AggregatorConfig(
-            trust_region_policy=AdaptiveTrustRegion())}
+            trust_region_policy=region)}, region
     if rule == "stable-distance":
         base = DefaultAcceptance(0.5, 64, 4000)
-        return {"policies": Policies(acceptance=StableDistanceAcceptance(base))}
+        probe = _Fired()
+        return {"policies": Policies(
+            acceptance=_CountingStableDistance(base, probe))}, probe
     if rule == "reflective-fusion":
         # The pair, not the fusion policy alone: conflict resolution runs first
         # and would hand it a single diff. `reflective_merge` is what makes the
         # unpaired mistake unavailable.
-        return {"policies": Policies(**reflective_merge(completion))}
+        return {"policies": Policies(**reflective_merge(completion))}, None
     raise ValueError(f"unknown rule {rule!r}; known: {', '.join(RULES)}")
+
+
+def _fired_counts(rule: str, watcher, fusion) -> Tuple[int, int]:
+    """``(fired, considered)`` for this rule, from whatever can answer."""
+    if rule == "reflective-fusion":
+        return fusion.contested, fusion.contested
+    if rule == "trust-region":
+        if watcher is None:
+            return 0, 0
+        # A region that only ever held its initial value is a constant wearing
+        # an adaptive class's name, and its arm is a control against a control.
+        moves = len({(r.ops, r.chars) for r in watcher.history})
+        return moves - 1, len(watcher.history)
+    if watcher is None:
+        return 0, 0
+    return watcher.fired, watcher.considered
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -99,6 +180,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-self-verify", dest="self_verify", action="store_false",
                    help="skip the second rollout per proposal. Identical on both "
                         "arms, so the A/B stays valid, and it halves the bill")
+    p.add_argument("--no-thinking", dest="no_thinking", action="store_true",
+                   help="ask an Anthropic-shaped endpoint for no reasoning "
+                        "tokens. Applied to *both* arms or they are not "
+                        "comparable, and recorded in the JSON next to the model "
+                        "id because it changes the model's output, not only its "
+                        "latency (measured on GLM-5.2: 14.9s/379 output tokens "
+                        "-> 6.2s/44).")
     p.add_argument("--eval-concurrency", type=int, default=8)
     p.add_argument("--run-concurrency", type=int, default=1,
                    help="how many of the (arm, seed) runs to execute at once. "
@@ -120,6 +208,28 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"Seeds    : {seeds}")
     print(f"Runs     : {2 * len(seeds)} evolve() calls (off and on, per seed)")
     print(f"self_verify: {args.self_verify}")
+    print(f"thinking : {'disabled' if args.no_thinking else 'on'}")
+    if args.rule == "advantage":
+        # Stated before the money, not diagnosed after it. A group is one base
+        # version and one task cluster; the base version moves on every commit,
+        # so a group is at most one round of workers. `GroupAdvantage` returns
+        # `None` until the group reaches `min_group`, so the first
+        # `min_group - 1` rollouts of every round can never carry a value no
+        # matter what the workload does.
+        carriers = max(0, args.workers - _MIN_GROUP + 1)
+        print(f"Signal   : at most {carriers}/{args.workers} rollouts per round "
+              f"can carry an advantage (min_group={_MIN_GROUP})")
+        if carriers == 0:
+            print(f"\n--workers {args.workers} is below min_group={_MIN_GROUP}: "
+                  "no rollout can ever carry an advantage, so both arms would be "
+                  f"the control. Use --workers {_MIN_GROUP} or more.",
+                  file=sys.stderr)
+            return 2
+        if carriers / args.workers < 0.5:
+            print(f"warning: fewer than half the rollouts per round can carry the "
+                  f"signal at --workers {args.workers}. --workers 8 gives "
+                  f"{max(0, 8 - _MIN_GROUP + 1)}/8, --workers 16 gives "
+                  f"{max(0, 16 - _MIN_GROUP + 1)}/16.", file=sys.stderr)
     if args.plan:
         return 0
     if len(seeds) < 3:
@@ -162,7 +272,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         usage = Usage()
         workload, completion = _build(seed, usage)
         kwargs = dict(workload.evolve_kwargs)
-        kwargs.update(_arm(args.rule, on, completion))
+        arm_kwargs, watcher = _arm(args.rule, on, completion)
+        kwargs.update(arm_kwargs)
         kwargs.setdefault("rounds", 10_000)
         from agentdescent.evolution import evolve
 
@@ -201,6 +312,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             # Whether the mechanism fired at all. `contested` is the first thing
             # to read for --rule reflective-fusion: zero means no fused candidate
             # ever competed, and the quality column is then about nothing.
+            "fired": _fired_counts(args.rule, watcher, fusion)[0],
+            "fired_of": _fired_counts(args.rule, watcher, fusion)[1],
             "contested": fusion.contested,
             "fused_wins": fusion.fused_wins,
             "synthesized_wins": fusion.synthesized_wins,
@@ -230,8 +343,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 4
 
     print()
-    print("| arm | seeds | test (min/med/max) | commits | vetoes | contested | synth wins |")
-    print("|---|---|---|---|---|---|---|")
+    print("| arm | seeds | test (min/med/max) | commits | vetoes | fired | contested | synth wins |")
+    print("|---|---|---|---|---|---|---|---|")
     for arm in ("off", "on"):
         group = [r for r in rows if r["arm"] == arm]
         if not group:
@@ -242,17 +355,31 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"| {arm} | {len(tests)}/{len(group)} | {interval} | "
               f"{sum(r['committed'] for r in group)} | "
               f"{sum(r['oracle_rejected'] for r in group)} | "
+              f"{sum(r['fired'] for r in group)}/{sum(r['fired_of'] for r in group)} | "
               f"{sum(r['contested'] for r in group)} | "
               f"{sum(r['synthesized_wins'] for r in group)} |")
 
     print()
-    contested_on = sum(r["contested"] for r in rows if r["arm"] == "on")
-    if contested_on == 0:
+    fired_on = sum(r["fired"] for r in rows if r["arm"] == "on")
+    considered_on = sum(r["fired_of"] for r in rows if r["arm"] == "on")
+    if fired_on == 0:
         # Before any quality claim: a mechanism that never ran is a control
         # against a control, and its table looks exactly like a null result.
-        print(f"`{args.rule}` never fired: 0 contested tournaments on the `on` "
-              "arm. The quality column below is not about this rule -- fix the "
-              "workload or the wiring before reading it.")
+        # This used to read `contested`, which counts *fusion* tournaments and
+        # is non-zero whether or not the rule under test ever had a signal -- so
+        # the one check standing between a paid run and a false negative was
+        # answering about a different mechanism for three of the four rules.
+        print(f"`{args.rule}` never fired: 0 of {considered_on} decisions on the "
+              "`on` arm had anything for it to apply. The quality column above "
+              "is not about this rule -- fix the workload or the wiring before "
+              "reading it.")
+        if args.rule == "advantage":
+            print(f"  For this rule that is usually the group size: a group is "
+                  f"one base version and one task cluster, and only the "
+                  f"{max(0, args.workers - _MIN_GROUP + 1)} of every "
+                  f"{args.workers} rollouts that arrive after the group reaches "
+                  f"min_group={_MIN_GROUP} can carry a value at all. Raise "
+                  "--workers.")
     else:
         off = sorted(r["test"] for r in rows if r["arm"] == "off"
                      and r["test"] is not None)
@@ -280,7 +407,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             json.dump({"rule": args.rule, "dataset": args.dataset,
                        "budget_rollouts": args.budget_rollouts,
                        "workers": args.workers, "model": args.model,
-                       "self_verify": args.self_verify, "rows": rows}, fh, indent=2)
+                       "self_verify": args.self_verify,
+                       "no_thinking": args.no_thinking, "rows": rows}, fh, indent=2)
     return 0
 
 

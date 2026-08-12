@@ -103,9 +103,32 @@ one base version and one task cluster, and the base version moves on every
 commit — so a group is at most *one round of workers*, split across however many
 clusters they landed in. With four workers over four clusters the largest
 possible group is one, and the default `min_group=4` records nothing at all.
-That is not a bug to tune away: it says where this signal can exist — wide
-rounds, few clusters, or a head that has stopped moving — and an A/B has to be
-run somewhere it does. `tests/test_advantage.py` pins it.
+
+Clusters are the visible half. The half that bites the A/B is arithmetic, and it
+applies even when every task is in one cluster — which is the case for the
+HotpotQA workload `bench/ab_run.py` actually runs, since those tasks carry no
+`cluster` at all. `GroupAdvantage` returns `None` until the group *reaches*
+`min_group`, so the first `min_group - 1` rollouts of every round can never
+carry a value however the rewards fall. At the harness's own default of four
+workers that is three in four:
+
+| `--workers` | rollouts per round that can carry an advantage | measured |
+|---|---|---|
+| 2 | 0 of 2 — the arm is the control | 0% |
+| 4 | 1 of 4 | 25% |
+| 8 | 5 of 8 | 62% |
+| 16 | 13 of 16 | 81% |
+
+The measured column is with rewards that have real spread. With flat rewards
+inside a round it is 0% at every width — that is GRPO's zero-advantage filter
+working, not a defect.
+
+Neither limit is a bug to tune away: together they say where this signal can
+exist — wide rounds, few clusters, a head that has stopped moving, and rewards
+that disagree with each other. An A/B has to be run somewhere it does, so
+`bench/ab_run.py` refuses `--rule advantage` below `min_group` and prints the
+ceiling before it spends anything. `tests/test_advantage.py` and
+`tests/test_ab_run.py` pin it.
 
 Two design choices that are load-bearing:
 
