@@ -726,13 +726,24 @@ def async_evolve(
                 _discarded()                             # DISCARD -> drop the card
         with eng.meter.timed("merge_gate_seconds"):
             reports = check_reports(_gated_step(), eng.aggregator)
-        if not reports:
-            # A pipelined sweep whose candidate is still being measured has
-            # nothing to report yet. Returning here keeps the merger draining --
-            # which is the entire point of the pipeline -- and, as importantly,
-            # keeps `history` free of empty rounds: `RoundInfo` is the record of
-            # a merge, and one per poll would drown the real ones and make
-            # `patience` count polls instead of merges.
+        if not reports and not batch:
+            # A pipelined poll whose candidate is still being measured has
+            # nothing to report yet. Returning keeps the merger draining --
+            # which is the point of the pipeline -- and keeps `history` free of
+            # rounds no merge produced.
+            #
+            # `not batch` is load-bearing, and it was missing: a sweep that HAD
+            # cards and reported nothing is not idle, it is the run's evidence
+            # being rejected -- every card discarded at the staleness gate above,
+            # or buffered below the batch trigger. Returning here skipped
+            # `stall.note_sweep`, and that counter is the ONLY livelock guard:
+            # with `async_ratio >> alpha`, head stops moving, so the lag budget
+            # never forces a refresh, and `stall_patience` forcing one is what
+            # breaks the cycle. Skipping the count disabled the guard in exactly
+            # the situation it exists for -- CI caught it on all three Python
+            # versions in `test_a_large_lag_budget_does_not_livelock`, the test
+            # named for it, while faster local machines passed on the commits
+            # that softened the race.
             return
         committed = sum(1 for x in reports if x.committed_version is not None)
         after = eng.ledger.snapshot(Ledger.DEV)
@@ -753,10 +764,10 @@ def async_evolve(
             reports=reports, history=history, early=early, on_round=on_round)
         # A stalled pipeline: cards keep arriving and none of them commits. Under
         # Guarded with async_ratio > alpha that is a livelock, not slow progress.
-        # Counted per *merge*, not per sweep: a sweep with no cards produced no
-        # merge and returned above, and a pipelined sweep that only collected a
-        # finished measurement did produce one -- it is a merge that started
-        # several sweeps ago, which is the whole point.
+        # Counted per sweep **that had cards or reports** -- a poll with neither
+        # returned above. A sweep whose whole batch was discarded at the
+        # staleness gate MUST land here with committed=0: those discards are the
+        # livelock's signature, and this counter is the only thing that breaks it.
         stall.note_sweep(committed)
         if stall.should_force_refresh():
             epoch[0] += 1                      # every worker resyncs on its next loop
