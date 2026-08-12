@@ -548,11 +548,14 @@ class Aggregator:
         The published contract, unchanged: it measures on the calling thread and
         hands back finished reports. :meth:`begin_step` / :meth:`finish_step` are
         the same three phases with the expensive one left to the caller.
+
+        Written through the public :meth:`measure` rather than the private
+        ``_measure`` so that **both callers take one path**. A subclass or a
+        wrapper that overrides the phase would otherwise change the pipelined
+        run and silently not the inline one -- two behaviours from one override
+        is the kind of difference nobody finds until the two disagree.
         """
-        return self.finish_step([
-            self._measure(item) if isinstance(item, _Candidate) else item
-            for item in self.begin_step()
-        ])
+        return self.finish_step(self.measure(self.begin_step()))
 
     def begin_step(self, *, skip_in_flight: bool = False) -> List[Union["_Candidate", MergeReport]]:
         """Phases 1 and 2: tick, drain what is ready, choose candidates.

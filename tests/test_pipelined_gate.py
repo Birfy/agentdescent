@@ -272,20 +272,70 @@ def test_an_aggregator_without_the_seam_warns_and_falls_back():
     assert r.final_reward == pytest.approx(1.0)
 
 
-def test_pipelining_frees_the_workers_when_the_gate_dominates():
-    """The point of the change, measured rather than asserted from the design.
+def test_the_measurement_runs_off_the_merger_thread():
+    """The point of the change, asserted as the mechanism rather than as a time.
 
-    Held-out scoring costs 5x a rollout, which is the regime FlashEvolve
-    profiles (evaluate at 56-92% of a synchronous step). Measured over one run
-    each: 648 -> 921 rollouts and 4.40 -> 2.83 starved workers. Asserted as an
-    ordering, because the absolute numbers depend on the machine.
+    "The pipelined run did more rollouts" is what this buys, and it is a
+    *measurement*: it depends on the machine, and an ordering between two timed
+    runs flakes on a loaded one (it did, in the full suite, while passing alone).
+    The numbers live in `examples/efficiency.py --only stages` and
+    `docs/efficiency.md`; what the suite can guarantee is the thing that makes
+    them possible -- that `measure()` does not run where merging runs.
     """
-    held = {f"t{i}" for i in range(12, 20)}
-    run = _make_run(rollout_s=0.02, gate_s=0.10, held_ids=held)
-    common = dict(run=run, n_workers=8, async_ratio=3, max_seconds=4.0,
-                  eval_concurrency=8, held_out_frac=0.4)
-    inline = _run_async(**common)
-    piped = _run_async(pipelined_gate=True, **common)
-    assert piped.rollouts > inline.rollouts
-    assert (piped.worker_starved_seconds / piped.wallclock
-            < inline.worker_starved_seconds / inline.wallclock)
+    seen = {"inline": set(), "piped": set()}
+
+    def factory(which):
+        def build(ledger, verifier, audit, config, policy):
+            agg = Aggregator(ledger, verifier, audit, config,
+                             staleness_policy=policy)
+            inner = agg.measure
+
+            def measure(items):
+                seen[which].add(threading.current_thread().name)
+                return inner(items)
+
+            agg.measure = measure
+            return agg
+
+        return build
+
+    _run_async(aggregator_factory=factory("inline"), max_seconds=1.5)
+    _run_async(aggregator_factory=factory("piped"), pipelined_gate=True,
+               max_seconds=1.5)
+
+    assert seen["inline"] and seen["piped"], "no merge measured anything"
+    # Inline: the merger measures, so it happens on whatever thread called
+    # `step()`. Pipelined: only on the gate pool, whose threads are named.
+    assert not any(n.startswith("agentdescent-gate") for n in seen["inline"])
+    assert all(n.startswith("agentdescent-gate") for n in seen["piped"]), seen["piped"]
+
+
+def test_an_aggregator_that_overrides_step_is_not_pipelined():
+    """Having the three phases is not enough -- `step()` has to still *be* them.
+
+    `PopulationAggregator` subclasses `Aggregator`, so it inherits all three,
+    and overrides `step()` to admit the pre-merge head into its archive and
+    consult its selection policy. Driving the phases directly there would skip
+    every line of that override and run a different algorithm while reporting
+    the requested one. Caught on a real run: the check was `hasattr` alone.
+    """
+    from agentdescent.population import PopulationAggregator
+    from agentdescent.selection import SingleHead
+
+    assert PopulationAggregator.step is not Aggregator.step, (
+        "this test is only meaningful while PopulationAggregator overrides step()")
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        # Called directly: `_run_async` silences RuntimeWarning, which is the
+        # thing under test here.
+        r = async_evolve(_tasks(), _reward, run=_make_run(), propose=_propose,
+                         strategy=AppendRules(), n_workers=2, max_seconds=1.0,
+                         self_verify=False, held_out_frac=0.4, seed=0,
+                         pipelined_gate=True,
+                         aggregator_factory=lambda l, v, a, c, p: PopulationAggregator(
+                             l, v, a, c, staleness_policy=p, selection=SingleHead(),
+                             artifact_id="artifact"))
+    assert any("overrides step()" in str(w.message) for w in caught), \
+        [str(w.message) for w in caught]
+    assert r.final_reward == pytest.approx(1.0)

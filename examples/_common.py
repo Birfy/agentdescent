@@ -90,6 +90,16 @@ def add_standard_args(
         help="async wall-clock budget",
     )
     parser.add_argument(
+        "--pipelined-gate",
+        action="store_true",
+        help=("--async only: run a merge's measurement phase on its own threads "
+              "instead of on the merger, so the merger keeps draining while the "
+              "gate runs (see async_evolve(pipelined_gate=))"),
+    )
+    parser.add_argument(
+        "--gate-workers", type=int, default=2,
+        help="threads for --pipelined-gate (default 2)")
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="show the plan without loading data or accessing the network",
@@ -264,6 +274,16 @@ def report_engine(result) -> None:
           f"stale_considered={result.stale_considered}  "
           f"stale_discarded={result.stale_discarded}  "
           f"redispatched={result.redispatched}", flush=True)
+    # The stage profile, on the same one-line format and for the same reason the
+    # line above exists: without it "the async arm got faster" cannot be told
+    # apart from "the gate stopped running". `merge_gate_seconds` is a subset of
+    # `merge_seconds`, and `worker_starved_seconds` is summed across workers --
+    # see `EvolutionResult.gate_share()` / `.merger_occupancy()`.
+    print(f"stage profile: wallclock={result.wallclock:.1f}  "
+          f"merge_seconds={result.merge_seconds:.1f}  "
+          f"merge_gate_seconds={result.merge_gate_seconds:.1f}  "
+          f"worker_starved_seconds={result.worker_starved_seconds:.1f}  "
+          f"eval_seconds={result.eval_seconds:.1f}", flush=True)
 
 
 def eval_cache_kwargs(args: argparse.Namespace) -> dict:

@@ -111,6 +111,8 @@ HONOURED = {
     "workers": "run_port(workers=)",
     "candidates": "run_port(candidate_budget=)",
     "staleness": "run_port(staleness=)",
+    "pipelined_gate": "run_port(pipelined_gate=) -- async_pipeline mode only",
+    "gate_workers": "run_port(gate_workers=)",
     "temperature": "completion_for",
     "max_tokens": "completion_for",
     "timeout": "completion_for",

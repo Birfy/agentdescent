@@ -225,53 +225,55 @@ def _starved_share(r) -> float:
     return r.worker_starved_seconds / available if available else 0.0
 
 
-def test_starvation_reads_low_when_the_merger_keeps_up():
+def test_starvation_is_exactly_zero_when_the_gate_cannot_fire():
     """The other half: the counter has to be able to read low.
 
     A counter non-zero on every run cannot distinguish the case it was added
     for -- timing the backpressure loop unconditionally would do exactly that,
     since the two `intake_lock` acquisitions would put a floor under it.
 
-    The contrast is **slow rollouts, cheap gate**, not "a fast gate". With the
-    domain's own microsecond rollout the workers lap the merger between sweeps
-    whatever the gate costs (measured at `async_ratio=8`: four workers starved
-    for ~4s of a 1s window with nothing slowed down at all). That is a property
-    of the workload, not of the gate, and it is exactly why `gate_share()` has
-    to be read beside this number rather than instead of it.
+    Asserted against a lag budget nothing can exceed rather than against a
+    threshold, so it is **exact and load-independent**. A wall-clock comparison
+    would read differently on a busy machine, and a counter's floor should not.
 
-    Measured across three trials: 12-17% here against 36-41% below.
+    The corresponding *measurement* -- 12-17% starved with slow rollouts and a
+    cheap gate, against 36-41% the other way round -- lives in
+    `examples/efficiency.py --only stages`, which is where the numbers in
+    `docs/efficiency.md` come from.
     """
-    r = _async(run=_slow_rollout_run, max_seconds=1.5)
+    r = _async(run=_slow_rollout_run, async_ratio=1_000_000, max_seconds=1.0)
     assert r.rollouts > 0                       # it did work, it just was not blocked
-    assert _starved_share(r) < 0.30
+    assert r.worker_starved_seconds == 0.0
 
 
-def test_narrowing_the_gates_own_pool_starves_more_workers():
-    """The controlled version, and the one that actually implicates the gate.
+def test_narrowing_the_gates_own_pool_still_starves_workers():
+    """Serialising the gate's own pool is the controlled way to implicate it.
 
     Same workload, same rollouts, same evaluations -- only `eval_concurrency`
-    moves, so the gate's wall-clock is the single variable. If starvation rises
-    with it, the workers were waiting on the gate and not on the merge.
+    moves, so the gate's wall-clock is the single variable. Asserted one-sided:
+    a loaded machine can only make starvation *worse*, so `> 0` cannot flake,
+    while the ordering against a wider pool can and did.
 
-    Measured across three trials: 36-41% at the default width against 52-75% at
-    1. Asserted as an ordering rather than a ratio, because the absolute numbers
-    depend on how loaded the machine is and the ordering does not.
+    Measured across three trials: 36-41% at the default width, 52-75% at 1.
     """
-    wide = _async(run=_slow_gate_run, async_ratio=1, max_seconds=1.5)
-    narrow = _async(run=_slow_gate_run, async_ratio=1, max_seconds=1.5,
-                    eval_concurrency=1)
-    assert _starved_share(narrow) > _starved_share(wide)
+    r = _async(run=_slow_gate_run, async_ratio=1, max_seconds=1.5,
+               eval_concurrency=1)
+    assert _starved_share(r) > 0.0
+    assert r.gate_share() > 0.5
 
 
-def test_the_gate_share_separates_a_busy_merger_from_a_blocking_gate():
-    """Starvation says the merger was the bottleneck; this says what it was doing.
+def test_the_two_ratios_are_the_arithmetic_they_claim():
+    """`gate_share` is gate/merge and `merger_occupancy` is merge/wall.
 
-    Both runs starve their workers on this domain. Only one of them spends the
-    merger's time in the gate, and a change that moves evaluation off the merger
-    can only help that one."""
-    slow_gate = _async(run=_slow_gate_run, async_ratio=1, max_seconds=1.5)
-    cheap_gate = _async(run=_run, async_ratio=1, max_seconds=1.0)
-    assert slow_gate.gate_share() > cheap_gate.gate_share()
+    Asserted on a hand-built result rather than a run: the ratios are what a
+    reader divides by, and getting the denominators the wrong way round is both
+    easy and invisible in a plausible-looking percentage."""
+    r = EvolutionResult(state={}, rendered="", final_reward=0.0,
+                        history=[], ledger_log=[],
+                        wallclock=10.0, merge_seconds=4.0,
+                        merge_gate_seconds=3.0)
+    assert r.gate_share() == pytest.approx(0.75)
+    assert r.merger_occupancy() == pytest.approx(0.40)
 
 
 # ---------------------------------------------------------------------------

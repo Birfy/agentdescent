@@ -46,7 +46,7 @@ from .evolution import (
     _ASYNC_WIRED_POLICIES, _cost_fields, _fusion_trials, _resolve_policies,
     SOLVED, _build_engine, _checked_proposal, _checked_reward,
 )
-from .aggregator import AggregatorConfig, check_reports
+from .aggregator import Aggregator, AggregatorConfig, check_reports
 from .evolvable import ContractError, EvidenceCard, vv_staleness
 from .ledger import Ledger, LedgerFailure
 from .sampling import RoundRobin, TaskSampler
@@ -396,14 +396,29 @@ def async_evolve(
     # simply accumulate in the aggregator's buffer, which is what a buffer is
     # for. A custom aggregator that predates the seam has no `begin_step`; it
     # keeps the inline path rather than being refused.
-    _seam = all(callable(getattr(eng.aggregator, m, None))
-                for m in ("begin_step", "measure", "finish_step"))
-    _pipelined = pipelined_gate and _seam
-    if pipelined_gate and not _seam:
+    #
+    # Having the three methods is **not** enough, and the difference is not
+    # academic: `PopulationAggregator` subclasses `Aggregator` -- so it inherits
+    # all three -- and overrides `step()` to admit the pre-merge head into its
+    # archive and consult its selection policy. Driving the phases directly there
+    # would skip every line of that override and run a different algorithm while
+    # reporting the requested one. So the test is that `step()` is still the base
+    # implementation, which is the only case where the three phases are provably
+    # what `step()` does.
+    _has_phases = all(callable(getattr(eng.aggregator, m, None))
+                      for m in ("begin_step", "measure", "finish_step"))
+    _own_step = getattr(type(eng.aggregator), "step", None) is Aggregator.step
+    _pipelined = pipelined_gate and _has_phases and _own_step
+    if pipelined_gate and not _pipelined:
+        why = ("it overrides step(), so the three phases are not what its step() "
+               "does and running them directly would skip the override"
+               if _has_phases else
+               "it has no begin_step/measure/finish_step")
         warnings.warn(
-            f"async_evolve(pipelined_gate=True) needs an aggregator with "
-            f"begin_step/measure/finish_step; {type(eng.aggregator).__name__} has "
-            "none, so the gate stays on the merger thread as before.",
+            f"async_evolve(pipelined_gate=True) cannot pipeline "
+            f"{type(eng.aggregator).__name__}: {why}. The gate stays on the "
+            "merger thread as before. To pipeline a custom aggregator, express "
+            "it as begin_step/measure/finish_step and leave step() inherited.",
             RuntimeWarning, stacklevel=2)
     gate_pool = (ThreadPoolExecutor(max(1, gate_workers),
                                     thread_name_prefix="agentdescent-gate")

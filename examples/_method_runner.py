@@ -200,6 +200,8 @@ def run_port(
     max_seconds: float = 300.0,
     shutdown_grace: float = 120.0,
     staleness: str = "guarded",
+    pipelined_gate: bool = False,
+    gate_workers: int = 2,
     reflective: Optional[bool] = None,
     eval_concurrency: Optional[int] = None,
     eval_cache: str = "",
@@ -359,6 +361,13 @@ def run_port(
             max_iters=candidate_budget,
             max_seconds=max_seconds,
             shutdown_grace=shutdown_grace,
+            # `async_pipeline` is the only mode with a merger to take work off.
+            # Whether it *can* is the aggregator's business: a port supplying its
+            # own `aggregator_factory` has no begin_step/measure/finish_step, and
+            # `async_evolve` warns and stays inline rather than silently running
+            # a different merge -- which is every port here today.
+            pipelined_gate=pipelined_gate,
+            gate_workers=gate_workers,
             **common,
         )
     else:
@@ -693,6 +702,7 @@ def standard_main(build: Callable[..., MethodPolicy],
         candidate_budget=args.candidates, max_seconds=args.max_seconds,
         staleness=args.staleness, reflective=_reflective_override(args, policy),
         async_ratio=args.async_ratio, eval_concurrency=args.eval_concurrency,
+        pipelined_gate=args.pipelined_gate, gate_workers=args.gate_workers,
         eval_cache=args.eval_cache,
     )
     print(f"{policy.name}/{mode}: quality {outcome.baseline_quality:.3f} -> "

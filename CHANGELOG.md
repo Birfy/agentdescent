@@ -49,6 +49,26 @@ All notable changes to AgentDescent are documented here. The format follows
   on the synchronous path, where the round barrier idles every worker for the
   whole merge whatever the gate runs on.
 
+  **It reaches no port yet, and says so.** Every algorithm in `examples/`
+  supplies its own `aggregator_factory` implementing `AggregatorProtocol` from
+  scratch, so none has the three phases and `pipelined_gate=True` warns and runs
+  inline -- which includes all eleven runtime-matrix rows. Porting one means
+  expressing it in phases and leaving `step()` inherited.
+
+  Having the three methods is **not** sufficient, and that was a real bug in the
+  first version of the check: `PopulationAggregator` derives from `Aggregator`,
+  inherits all three, and overrides `step()` to admit the pre-merge head into
+  its archive and consult its selection policy. A `hasattr` test passes there,
+  and driving the phases directly would have skipped every line of the override
+  -- running a different algorithm while reporting the requested one. The check
+  now also requires `step()` to be the base implementation.
+
+  On a live model (**GLM-5.2**, GEPA/HotpotQA, 16 rollouts, 4 workers) the
+  profile is sharper than the stub's: `merge_gate_seconds == merge_seconds`
+  **exactly** -- the merger spends all of its busy time in the gate -- with
+  `worker_starved_seconds=54.6`. `eval_seconds` read 1894s against a 740s
+  process wall-clock, which is the whole reason it cannot answer this question.
+
   The first version of it made runs *slower* — 462 rollouts inline against 389
   pipelined — by skipping the merger's poll sleep whenever a measurement was in
   flight rather than *finished*. That is a busy-wait, and a busy-wait holds the

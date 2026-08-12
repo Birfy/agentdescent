@@ -195,6 +195,58 @@ dominates, which is the honest shape for it to have.
     measurements, each fanning out over `eval_concurrency` tasks — so the
     ceiling your provider sees is `n_workers + gate_workers × eval_concurrency`.
 
+!!! danger "It does not apply to any of the ports yet"
+    Every algorithm in `examples/` supplies its own `aggregator_factory` —
+    `ParetoAggregator`, `MetaSearchAggregator`, `DGMArchiveAggregator`, and so
+    on — and each implements `AggregatorProtocol` from scratch rather than
+    deriving from `Aggregator`. None of them has the three phases, so
+    `pipelined_gate=True` warns and runs inline. **Today the flag reaches runs
+    on the shipped `Aggregator` and nothing else**, which includes none of the
+    eleven [runtime matrix](matrix-report.md) rows.
+
+    Porting one means expressing it as `begin_step` / `measure` / `finish_step`
+    and leaving `step()` inherited — one port at a time, and each is its own
+    question about where that algorithm's expensive measurement actually sits.
+
+    Having the three methods is not sufficient either, and the difference is not
+    academic: `PopulationAggregator` **does** derive from `Aggregator`, inherits
+    all three, and overrides `step()` to admit the pre-merge head into its
+    archive and consult its selection policy. Driving the phases directly there
+    would skip every line of that override and run a different algorithm while
+    reporting the requested one. So the check is that `step()` is still the base
+    implementation — the only case where the three phases are provably what
+    `step()` does.
+
+### On a live model — where the merger's time really goes
+
+Everything above is stub latency. The same profile against **GLM-5.2** on an
+Anthropic-shaped endpoint, GEPA/HotpotQA, 48 rows (24 train / 12 D_pareto / 12
+test), `--budget-rollouts 16 --workers 4 --async --async-ratio 3`:
+
+```
+rollouts=19  stopped=max_iters  test EM=0.833  (seed 0.333 -> best D_pareto 0.500)
+merge_seconds=560.1  merge_gate_seconds=560.1  worker_starved_seconds=54.6
+eval_seconds=1894.1   118 calls, 3542.6s in the model
+```
+
+**`merge_gate_seconds == merge_seconds`, exactly.** On a real model the merger
+spends *all* of its busy time in the gate — the stub's 82–94% was an
+underestimate, because on a stub the cheap phases are a measurable fraction and
+on a real backend they round to nothing.
+
+The whole process took 740 s, and that includes the dataset fetch and the final
+test-split evaluation, which sit outside the engine's own clock — so merger
+occupancy here is **at least 76%** and the true figure is higher.
+
+Note what `eval_seconds` alone would have said: **1894 s**, against that 740 s.
+Summed across the pool it exceeds the run it describes, which is exactly why it
+can neither be compared to the clock nor used to say whether anyone was blocked.
+`worker_starved_seconds=54.6` is the number that says the gate cost rollouts.
+
+The paired `pipelined_gate=True` arm is **not** reported here, because GEPA
+supplies `ParetoAggregator` and the run correctly refused to pipeline it (see
+the box above). Producing that number needs the port expressed in phases first.
+
 
 ## The configuration matrix — `bench/`
 
