@@ -34,7 +34,8 @@ from __future__ import annotations
 import threading
 import time
 import warnings
-from typing import Callable, Dict, List, Optional
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .advantage import GroupAdvantage
 from .agents import Usage
@@ -75,6 +76,8 @@ def async_evolve(
     patience: Optional[int] = None,
     max_worker_errors: int = 3,
     eval_concurrency: int = 8,
+    pipelined_gate: bool = False,
+    gate_workers: int = 2,
     held_out_frac: float = 0.4,
     repo_path: Optional[str] = None,
     agg_config=None,
@@ -152,6 +155,37 @@ def async_evolve(
     eval_concurrency:
         How many held-out tasks the merger scores at once. ``1`` restores the old
         sequential behaviour.
+    pipelined_gate:
+        Run a merge's **measurement** phase on its own threads instead of on the
+        merger. Off by default.
+
+        The merger is one thread and it does three things per merge: drain and
+        filter (cheap), score the base and the candidate (expensive), then
+        accept, audit and commit (cheap). Measured on the stub workload, the
+        middle phase is **94% of the merger's gate time** and the merger is
+        ~90% busy, which leaves 4.5 of 8 workers blocked at the backpressure
+        gate at any moment (``docs/efficiency.md``). This lets the merger go
+        back to draining while the measurement runs, so the workers keep
+        producing.
+
+        **It changes no commit semantics.** At most one candidate per artifact
+        is measured at a time, so every candidate is still committed against the
+        head it was prepared and measured on -- there is no candidate-level
+        staleness to have a policy about. Cards arriving meanwhile accumulate in
+        the aggregator's buffer, which is what the buffer is for, so batches get
+        larger rather than more numerous.
+
+        Requires an aggregator with ``begin_step`` / ``measure`` / ``finish_step``
+        (the shipped one has them). A custom one that predates the seam warns and
+        keeps the inline path.
+    gate_workers:
+        Threads for the measurement phase when ``pipelined_gate`` is on. Bounded
+        in practice by one candidate per artifact, so the default of 2 is enough
+        for a single-artifact run with one measurement finishing as the next
+        starts. This is a **third** pool -- ``n_workers`` rollouts,
+        ``gate_workers`` measurements, each of which fans out over
+        ``eval_concurrency`` tasks -- so the ceiling your provider sees is
+        ``n_workers + gate_workers * eval_concurrency``.
     max_worker_errors:
         Consecutive failed rollouts before a worker that has *never* succeeded
         gives up. Workers that have succeeded at least once never retire; they
@@ -349,6 +383,69 @@ def async_evolve(
     run_deadline = [float("inf")]
     worker_threads: List[threading.Thread] = []
 
+    # -- the evaluation stage -------------------------------------------------
+    #
+    # `pipelined_gate` moves phase 2 of a merge (the four verifier calls, 94% of
+    # the merger's gate time -- see `docs/efficiency.md`) onto its own threads.
+    # Phase 1 (drain, staleness, fusion) and phase 3 (accept, audit, commit)
+    # stay on the merger, which is still the only writer.
+    #
+    # `begin_step(skip_in_flight=True)` bounds it to one candidate per artifact,
+    # so a candidate is always committed against the head it was measured on and
+    # this needs no staleness rule of its own -- the cards that arrive meanwhile
+    # simply accumulate in the aggregator's buffer, which is what a buffer is
+    # for. A custom aggregator that predates the seam has no `begin_step`; it
+    # keeps the inline path rather than being refused.
+    _seam = all(callable(getattr(eng.aggregator, m, None))
+                for m in ("begin_step", "measure", "finish_step"))
+    _pipelined = pipelined_gate and _seam
+    if pipelined_gate and not _seam:
+        warnings.warn(
+            f"async_evolve(pipelined_gate=True) needs an aggregator with "
+            f"begin_step/measure/finish_step; {type(eng.aggregator).__name__} has "
+            "none, so the gate stays on the merger thread as before.",
+            RuntimeWarning, stacklevel=2)
+    gate_pool = (ThreadPoolExecutor(max(1, gate_workers),
+                                    thread_name_prefix="agentdescent-gate")
+                 if _pipelined else None)
+    #: (future, items) for every batch out being measured.
+    gate_inflight: List[Tuple[Any, List[Any]]] = []
+
+    def _collect_gate(block: bool = False) -> List[Any]:
+        """Finish every measured batch, and leave the rest in flight.
+
+        `block=True` is the shutdown path: a candidate whose measurement has
+        already been paid for must still get its decision, or the run throws
+        away a full held-out sweep of real model calls it has already spent.
+        """
+        reports: List[Any] = []
+        still: List[Tuple[Any, List[Any]]] = []
+        for fut, items in gate_inflight:
+            if not (block or fut.done()):
+                still.append((fut, items))
+                continue
+            # Re-raised here on purpose: a measurement that failed is a backend
+            # failure, and the merger's own error handling is what knows how to
+            # tolerate one. Swallowing it would leave the artifact in flight
+            # forever, and a merger that quietly stops merging looks idle.
+            fut.result()
+            reports.extend(eng.aggregator.finish_step(items))
+        gate_inflight[:] = still
+        return reports
+
+    def _gated_step() -> List[Any]:
+        """`aggregator.step()`, with phase 2 off this thread when asked."""
+        if not _pipelined:
+            return eng.aggregator.step()
+        reports = _collect_gate()
+        items = eng.aggregator.begin_step(skip_in_flight=True)
+        if any(not hasattr(i, "committed_version") for i in items):
+            gate_inflight.append(
+                (gate_pool.submit(eng.aggregator.measure, items), items))
+        elif items:                       # nothing to score: decide them now
+            reports.extend(eng.aggregator.finish_step(items))
+        return reports
+
     def _worker(wid: int, shard: List[Task]) -> None:
         snap = eng.ledger.snapshot(Ledger.DEV)
         base_v = snap.version.get(eng.artifact_id, 0)
@@ -366,12 +463,25 @@ def async_evolve(
             # ``async_ratio`` candidates ahead of the merger (prevents the
             # cold-start flood where workers race while the merger is busy on the
             # first slow held-out eval).
+            #
+            # Timed, because this is where a slow gate becomes a slow *run*. The
+            # merger's own occupancy says how busy it was; only this says whether
+            # that cost anybody a rollout. `t_gate` stays None until the first
+            # sleep so a worker that never waits records nothing at all -- an
+            # unconditional timer would report the two `intake_lock` acquisitions
+            # as starvation and put a floor under a counter whose whole value is
+            # being zero when there is no problem.
+            t_gate: Optional[float] = None
             while not stop.is_set():
                 with intake_lock:
                     pending = len(intake)
                 if pending <= async_ratio:
                     break
+                if t_gate is None:
+                    t_gate = time.time()
                 time.sleep(0.05)
+            if t_gate is not None:
+                eng.meter.add("worker_starved_seconds", time.time() - t_gate)
             head_v = _published_head()
             # Refresh on the lag budget, or when the merger has asked everyone to
             # sync. `concepts.md` documents that backpressure guard as what keeps a
@@ -534,11 +644,33 @@ def async_evolve(
     def _drain_and_merge() -> None:
         with intake_lock:
             batch, intake[:] = intake[:], []
-        if not batch:
+        # A sweep with no cards still has work when a measurement has *finished*:
+        # its decision is the merger's, and nothing else will collect it. Without
+        # this the pipeline would only ever finish a merge on the sweep that
+        # happened to bring the next card in.
+        #
+        # `fut.done()`, not "anything in flight". Skipping the sleep while a
+        # measurement is merely *running* turns the merger into a busy-wait, and
+        # a busy-wait holds the GIL against the workers it was meant to free.
+        # Measured that way first: 462 rollouts inline against 389 pipelined --
+        # the change made the run slower, and the counters read as a fully
+        # occupied merger because spinning is occupancy.
+        if not batch and not any(f.done() for f, _ in gate_inflight):
             time.sleep(0.005)
             return
-        snap = eng.ledger.snapshot(Ledger.DEV)
-        head_vv, head_art = snap.version, snap.get(eng.artifact_id)
+        # Timed from here, not from the top: a sweep that found nothing spent its
+        # time in that poll sleep, and counting it would make merger occupancy a
+        # measure of how idle the merger was.
+        with eng.meter.timed("merge_seconds"):
+            _merge_batch(batch)
+
+    def _merge_batch(batch: List[EvidenceCard]) -> None:
+        # Only when there is something to rebase *against*. A ledger read is a
+        # `git checkout` behind a process-wide lock that every worker queues on,
+        # and the collect-only sweeps above would otherwise take one every 5ms.
+        if batch:
+            snap = eng.ledger.snapshot(Ledger.DEV)
+            head_vv, head_art = snap.version, snap.get(eng.artifact_id)
 
         def _discarded() -> None:
             """Record a card this gate is dropping, denominator included.
@@ -566,13 +698,27 @@ def async_evolve(
                 eng.aggregator.ingest(card if eta == 0 else card.rebased_onto(head_vv))
             elif action is StaleAction.REBASE:
                 cand = head_art.apply(card.diff)         # cheap re-verify on current head
-                if head_art.evidence_eval(card) <= cand.evidence_eval(card):
+                # Gate work, and easy to forget it is: `evidence_eval` runs the
+                # agent on the card's trajectories, so the "cheap" re-verify is
+                # two rollout-priced measurements per rebased card.
+                with eng.meter.timed("merge_gate_seconds"):
+                    better = head_art.evidence_eval(card) <= cand.evidence_eval(card)
+                if better:
                     eng.aggregator.ingest(card.rebased_onto(head_vv))
                 else:
                     _discarded()
             else:
                 _discarded()                             # DISCARD -> drop the card
-        reports = check_reports(eng.aggregator.step(), eng.aggregator)
+        with eng.meter.timed("merge_gate_seconds"):
+            reports = check_reports(_gated_step(), eng.aggregator)
+        if not reports:
+            # A pipelined sweep whose candidate is still being measured has
+            # nothing to report yet. Returning here keeps the merger draining --
+            # which is the entire point of the pipeline -- and, as importantly,
+            # keeps `history` free of empty rounds: `RoundInfo` is the record of
+            # a merge, and one per poll would drown the real ones and make
+            # `patience` count polls instead of merges.
+            return
         committed = sum(1 for x in reports if x.committed_version is not None)
         after = eng.ledger.snapshot(Ledger.DEV)
         dev = after.get(eng.artifact_id)
@@ -583,7 +729,8 @@ def async_evolve(
         # both corrupt `history` and make `target_reward` fire spuriously. This
         # is not a redundant eval -- `_Runtime.eval_one` memoises on
         # (artifact signature, task id), so re-scoring an unchanged head is free.
-        r = dev.score(eng.held_out)
+        with eng.meter.timed("merge_gate_seconds"):
+            r = dev.score(eng.held_out)
         # Same three steps as the barrier loop; the round index is a merger sweep
         # here and a barrier there, which is the only part that differs.
         _info, early_stop = eng.record_round(
@@ -591,8 +738,10 @@ def async_evolve(
             reports=reports, history=history, early=early, on_round=on_round)
         # A stalled pipeline: cards keep arriving and none of them commits. Under
         # Guarded with async_ratio > alpha that is a livelock, not slow progress.
-        # A sweep with no cards in it is neither, so it is not counted -- and this
-        # function has already returned in that case.
+        # Counted per *merge*, not per sweep: a sweep with no cards produced no
+        # merge and returned above, and a pipelined sweep that only collected a
+        # finished measurement did produce one -- it is a merge that started
+        # several sweeps ago, which is the whole point.
         stall.note_sweep(committed)
         if stall.should_force_refresh():
             epoch[0] += 1                      # every worker resyncs on its next loop
@@ -603,6 +752,46 @@ def async_evolve(
         if early_stop is not None:
             stop_reason[0] = early_stop
             stop.set()
+
+    def _finish_pipeline() -> None:
+        """Decide every candidate still out being measured, then let it go.
+
+        On the merger thread, like every other decision. Failures are reported
+        the way the rest of the merger reports them rather than raised: this runs
+        after the budget has expired, and a run that produced results must not
+        lose them to a measurement that failed on the way out.
+        """
+        if not gate_inflight:
+            return
+        try:
+            reports = _collect_gate(block=True)
+        except Exception as e:  # noqa: BLE001 - the run is over; keep what landed
+            with counter_lock:
+                if errors[0] is None:
+                    errors[0] = f"{type(e).__name__}: {str(e)[:200]}"
+            return
+        if not reports:
+            return
+        try:
+            after = eng.ledger.snapshot(Ledger.DEV)
+            dev = after.get(eng.artifact_id)
+            if dev is None:
+                return
+            _publish_head(after.version.get(eng.artifact_id, 0))
+            last_good[0] = dev
+            # Recorded, not just committed. A merge that lands here is a merge
+            # like any other, and leaving it out of `history` would put a commit
+            # in the ledger that no round accounts for -- visible only as a
+            # `final_reward` that no entry in the history explains. The score is
+            # memoised per (artifact, task), so this costs nothing when the
+            # candidate was the one just measured.
+            eng.record_round(index=len(history), reward=dev.score(eng.held_out),
+                             n_items=len(dev.state), reports=reports,
+                             history=history, early=early, on_round=on_round)
+        except Exception as e:  # noqa: BLE001 - the commits are already in the ledger
+            with counter_lock:
+                if errors[0] is None:
+                    errors[0] = f"{type(e).__name__}: {str(e)[:200]}"
 
     def _merger() -> None:
         # The merger is the only writer; if it dies the workers would keep filling a
@@ -639,6 +828,13 @@ def async_evolve(
                                and time.time() < run_deadline[0]):
                             _drain_and_merge()
                     _drain_and_merge()       # final drain after stop
+                    # A measurement already paid for is a full held-out sweep of
+                    # real model calls; abandoning it at the buzzer throws away
+                    # the most expensive thing the run bought, and the artifact
+                    # would stay in flight with its decision never made. Blocking
+                    # here is bounded by the measurement itself, which was
+                    # already running before the budget expired.
+                    _finish_pipeline()
                     return
                 _drain_and_merge()
                 consecutive = 0
@@ -790,5 +986,11 @@ def async_evolve(
                              stragglers=stragglers[0],
                              fusion_trials=_fusion_trials(eng.aggregator),
                              **_cost_fields(eng.meter))
+    if gate_pool is not None:
+        # `wait=False`: the merger has already blocked on every measurement it
+        # meant to keep (`_finish_pipeline`), so anything still running here is
+        # work the run has decided to abandon. Waiting for it would put an
+        # unbounded backend call after the budget the caller fixed.
+        gate_pool.shutdown(wait=False)
     eng.cleanup()          # do not hold a scratch git repo for the whole process
     return result

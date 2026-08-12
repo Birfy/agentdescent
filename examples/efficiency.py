@@ -182,19 +182,30 @@ def _stub_workload(latency, n_tasks=20):
     return tasks, run
 
 
-def _timed_evolve(tasks, run, *, concurrency, rounds=6, workers=8, eval_conc=8):
+def _evolve_result(tasks, run, *, concurrency, rounds=6, workers=8, eval_conc=8):
+    """Run the stub workload and hand back the whole result, not just a duration.
+
+    `_timed_evolve` threw everything but the wall-clock away, which was fine
+    while wall-clock was the only question. The stage profile below needs the
+    cost counters off the same run."""
     import warnings as _w
 
     from agentdescent import AppendRules, evolve
 
-    start = time.time()
     with _w.catch_warnings():
         _w.simplefilter("ignore")
-        evolve(tasks, lambda t, o: 1.0 if o == t.meta["gold"] else 0.0,
-               run=run, propose=lambda r, t, o, s: t.id, strategy=AppendRules(),
-               rounds=rounds, n_workers=workers, max_concurrency=concurrency,
-               eval_concurrency=eval_conc, held_out_frac=0.4, self_verify=False,
-               seed=0)
+        return evolve(tasks, lambda t, o: 1.0 if o == t.meta["gold"] else 0.0,
+                      run=run, propose=lambda r, t, o, s: t.id,
+                      strategy=AppendRules(),
+                      rounds=rounds, n_workers=workers, max_concurrency=concurrency,
+                      eval_concurrency=eval_conc, held_out_frac=0.4,
+                      self_verify=False, seed=0)
+
+
+def _timed_evolve(tasks, run, *, concurrency, rounds=6, workers=8, eval_conc=8):
+    start = time.time()
+    _evolve_result(tasks, run, concurrency=concurrency, rounds=rounds,
+                   workers=workers, eval_conc=eval_conc)
     return time.time() - start
 
 
@@ -250,7 +261,86 @@ def experiment_gate(rounds: int = 4) -> None:
     print("set -- raise it if yours is large and your provider allows it.\n")
 
 
-# -- Experiment 5: the GIL question, measured ---------------------------------
+# -- Experiment 5: where the merger's time goes -------------------------------
+
+
+def _async_result(tasks, run, *, workers=8, eval_conc=8, seconds=6.0, ratio=1):
+    import warnings as _w
+
+    from agentdescent import AppendRules
+    from agentdescent.async_evolve import async_evolve
+
+    with _w.catch_warnings():
+        _w.simplefilter("ignore")
+        return async_evolve(tasks, lambda t, o: 1.0 if o == t.meta["gold"] else 0.0,
+                            run=run, propose=lambda r, t, o, s: t.id,
+                            strategy=AppendRules(), n_workers=workers,
+                            eval_concurrency=eval_conc, async_ratio=ratio,
+                            max_seconds=seconds, held_out_frac=0.4,
+                            self_verify=False, seed=0)
+
+
+def experiment_stage_profile(rounds: int = 4) -> None:
+    """Is the gate on the critical path, or is it hiding behind the rollouts?
+
+    Every other experiment on this page measures **whether the run got faster**.
+    This one measures **who was waiting for whom**, which is the question you
+    have to answer before deciding that evaluation deserves a stage of its own
+    (issue #151). Three numbers, and none of them is `eval_seconds` -- that one
+    sums across the evaluation pool, so it reads 8.0 for eight threads scoring a
+    second each whether the run spent eight seconds in the gate or one:
+
+    * **merger busy** -- `merge_seconds / wallclock`. One thread, so this is a
+      real occupancy and cannot exceed 1;
+    * **of it, gate** -- `merge_gate_seconds / merge_seconds`. Near 1 means the
+      merger is an evaluation stage wearing a merger's name;
+    * **starved** -- `worker_starved_seconds`, summed across workers, per second
+      of wall-clock. Only the barrier-free path can report it; the synchronous
+      barrier idles every worker for exactly `merge_seconds` by construction.
+
+    **The two must be read together.** A merger at 95% occupancy that starved
+    nobody has hidden itself perfectly behind the rollouts, and moving its work
+    elsewhere buys nothing. A merger at 95% whose workers idle on it is the
+    serial-stage bottleneck FlashEvolve's Figure 2(c) is about.
+    """
+    print("=== Experiment 5: where the merger's time goes ===")
+    print("n_workers=8, eval_concurrency=8, held_out_frac=0.4\n")
+    print(f"{'workload':>34} {'wall':>7} {'merger busy':>12} "
+          f"{'of it, gate':>12} {'starved/s':>10}")
+
+    def row(label: str, r, starved: bool = True) -> None:
+        s = (f"{r.worker_starved_seconds / r.wallclock:>9.1f}x"
+             if starved and r.wallclock else f"{'—':>10}")
+        print(f"{label:>34} {r.wallclock:>6.1f}s {r.merger_occupancy():>11.0%} "
+              f"{r.gate_share():>11.0%} {s}")
+
+    # A rollout that costs what a rollout costs, and a gate that costs the same
+    # per task -- the ordinary case, where nothing is deliberately skewed.
+    tasks, run = _stub_workload(constant_latency(0.02), n_tasks=20)
+    row("sync, uniform 20ms", _evolve_result(tasks, run, concurrency=8,
+                                             rounds=rounds), starved=False)
+    row("async, uniform 20ms", _async_result(tasks, run, seconds=4.0))
+
+    # The same run with the gate's own pool serialised. Nothing about the
+    # workload changed, so any movement is the gate and only the gate.
+    row("async, uniform 20ms, eval_conc=1",
+        _async_result(tasks, run, eval_conc=1, seconds=4.0))
+
+    # A reasoning model's shape: the tail is what a barrier cannot hide.
+    tasks, run = _stub_workload(
+        heavy_tailed_latency(0.02, 12.0, 0.15, seed=5), n_tasks=20)
+    row("sync, heavy tail", _evolve_result(tasks, run, concurrency=8,
+                                           rounds=rounds), starved=False)
+    row("async, heavy tail", _async_result(tasks, run, seconds=4.0))
+
+    print("\nRead the last two columns together: a busy merger that starves")
+    print("nobody has hidden itself behind the rollouts. `starved/s` above ~1x")
+    print("means, on average, at least one of the eight workers was blocked at")
+    print("all times -- and the `of it, gate` column says whether the gate is")
+    print("what they were blocked on.\n")
+
+
+# -- Experiment 6: the GIL question, measured ---------------------------------
 
 
 def _time_pool(work, n: int, threads: int) -> float:
@@ -320,7 +410,8 @@ def main() -> None:
     parser.add_argument("--model", default=os.environ.get("AGENTDESCENT_MODEL", ""),
                         help="model id for experiment 3; omitted skips the I/O row")
     parser.add_argument("--only",
-                        choices=("parallel", "async", "distribution", "gate", "gil"),
+                        choices=("parallel", "async", "distribution", "gate",
+                                 "stages", "gil"),
                         help="run one experiment instead of all of them")
     args = parser.parse_args()
 
@@ -333,6 +424,8 @@ def main() -> None:
         experiment_distribution()
     if args.only in (None, "gate"):
         experiment_gate()
+    if args.only in (None, "stages"):
+        experiment_stage_profile()
     if args.only == "gil":
         experiment_gil(args.model)
 

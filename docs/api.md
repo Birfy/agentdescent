@@ -44,6 +44,9 @@ EvolutionResult(
     rollouts: int = 0,
     rollout_seconds: float = 0.0,
     eval_seconds: float = 0.0,
+    merge_seconds: float = 0.0,
+    merge_gate_seconds: float = 0.0,
+    worker_starved_seconds: float = 0.0,
     stale_considered: int = 0,
     stale_discarded: int = 0,
     redispatched: int = 0,
@@ -66,7 +69,9 @@ EvolutionResult(
 | `cost_to_quality(target: float) -> Optional[int]` | Rollouts spent up to the first round that reached `target`. |
 | `duplicate_rate() -> float` | Cache hits as a fraction of lookups -- work that did *not* have to be redone. In one process this is memoisation working; across processes it is the figure that says how much a shared cache would be worth. |
 | `fusion_stats() -> 'FusionStats'` | How often merging beat the best single diff -- and how badly it lost. |
+| `gate_share() -> float` | How much of the merger's busy time went to evaluation, in `[0, 1]`. |
 | `load(path: str) -> 'EvolutionResult'` | Read back a result written by `save`. |
+| `merger_occupancy() -> float` | Merger busy time over wall-clock. Above ~0.8 it is the critical path. |
 | `outcomes() -> Dict[str, int]` | Merge outcomes for the whole run, by category -- *why* it went as it did. |
 | `save(path: str) -> None` | Write the evolved artifact and its run summary to a JSON file. |
 | `stale_rate() -> float` | Discarded evidence as a fraction of evidence considered; 0.0 if none. |
@@ -206,6 +211,8 @@ evolve(
     eval_concurrency: int = 8,
     asynchronous: bool = False,
     async_ratio: int = 3,
+    pipelined_gate: bool = False,
+    gate_workers: int = 2,
     max_seconds: Optional[float] = None,
     max_rollouts: Optional[int] = None,
     max_calls: Optional[int] = None,
@@ -252,6 +259,8 @@ evolve(
 | `eval_concurrency` | `int` | `8` | How many held-out tasks to score at once. Every gate goes through this -- each round's measurement and, far more often, the aggregator's per-candidate comparisons -- so it is the merge half of the run's parallelism, independent of `n_workers`. `1` restores the old sequential behaviour. |
 | `asynchronous` | `bool` | `False` | Delegate to `async_evolve` -- no round barrier, with `async_ratio` as the staleness lag budget. |
 | `async_ratio` | `int` | `3` | As `asynchronous`. |
+| `pipelined_gate` | `bool` | `False` | Under `asynchronous=True`, run a merge's **measurement** phase on its own threads instead of on the merger, so the merger goes back to draining while the gate runs. Off by default; documented in full on `async_evolve`, which implements it. Warns and does nothing on the synchronous path, where the round barrier idles every worker for the whole merge regardless. |
+| `gate_workers` | `int` | `2` | As `pipelined_gate`. |
 | `max_seconds` | `Optional[float]` | `None` | Wall-clock budget. `None` (default) means unbounded; the async path uses `20.0` when unset. |
 | `max_rollouts` | `Optional[int]` | `None` | The budget in the two units a comparison has to hold fixed: rollouts completed, and actor invocations (`run` + `propose`). `rounds` is not one of them -- configurations differ in how much model a round buys, so a budget fixed in rounds hands the wider configuration more model and then reports the extra model as a win for parallelism. Either bound stops the run with `stop_reason` `"max_rollouts"` / `"max_calls"`. **Checked at the round barrier, so a run overshoots by up to one round.** A round is dispatched or it is not; stopping halfway would leave a half-merged round, and the states a comparison compares are the ones a merge produced. So a budget is a *bound on where to stop*, never the number to compare on: read the spend the run actually reported (`result.rollouts`, `result.usage.calls`), which is what `baselines` does -- it refuses to call two arms equal-budget when their measured spends differ. The async path has no barrier and enforces both per rollout, so it overshoots by at most the rollouts already in flight. |
 | `max_calls` | `Optional[int]` | `None` | As `max_rollouts`. |
@@ -810,7 +819,10 @@ Aggregator(
 
 | method | what it does |
 |---|---|
+| `begin_step(*, skip_in_flight: bool = False) -> List[Union['_Candidate', MergeReport]]` | Phases 1 and 2: tick, drain what is ready, choose candidates. |
 | `finalize() -> None` | Publish the current dev head to stable at the end of a clean run. |
+| `finish_step(items: List[Union['_Candidate', MergeReport]]) -> List[MergeReport]` | Phase 3: decide the measured candidates, then age and promote. |
+| `measure(items: List[Union['_Candidate', MergeReport]]) -> List[Union['_Candidate', MergeReport]]` | Phase 2 for a batch from `begin_step`. **Off-thread safe.** |
 | `step() -> List[MergeReport]` | Fire every artifact bucket that is ready and return per-artifact reports. |
 
 ### `AggregatorConfig(...)`
@@ -1531,6 +1543,8 @@ async_evolve(
     patience: Optional[int] = None,
     max_worker_errors: int = 3,
     eval_concurrency: int = 8,
+    pipelined_gate: bool = False,
+    gate_workers: int = 2,
     held_out_frac: float = 0.4,
     repo_path: Optional[str] = None,
     agg_config = None,
@@ -1575,6 +1589,8 @@ async_evolve(
 | `patience` | `Optional[int]` | `None` | Stop after this many consecutive merge sweeps that fail to beat the best held-out reward seen so far. The async analogue of the synchronous knob: there are no round barriers here, so a *sweep* (one drain-and-merge by the merger) is the unit. `None` disables it. |
 | `max_worker_errors` | `int` | `3` | Consecutive failed rollouts before a worker that has *never* succeeded gives up. Workers that have succeeded at least once never retire; they back off and keep trying until the run's own budget ends it. |
 | `eval_concurrency` | `int` | `8` | How many held-out tasks the merger scores at once. `1` restores the old sequential behaviour. |
+| `pipelined_gate` | `bool` | `False` | Run a merge's **measurement** phase on its own threads instead of on the merger. Off by default. The merger is one thread and it does three things per merge: drain and filter (cheap), score the base and the candidate (expensive), then accept, audit and commit (cheap). Measured on the stub workload, the middle phase is **94% of the merger's gate time** and the merger is ~90% busy, which leaves 4.5 of 8 workers blocked at the backpressure gate at any moment (`docs/efficiency.md`). This lets the merger go back to draining while the measurement runs, so the workers keep producing. **It changes no commit semantics.** At most one candidate per artifact is measured at a time, so every candidate is still committed against the head it was prepared and measured on -- there is no candidate-level staleness to have a policy about. Cards arriving meanwhile accumulate in the aggregator's buffer, which is what the buffer is for, so batches get larger rather than more numerous. Requires an aggregator with `begin_step` / `measure` / `finish_step` (the shipped one has them). A custom one that predates the seam warns and keeps the inline path. |
+| `gate_workers` | `int` | `2` | Threads for the measurement phase when `pipelined_gate` is on. Bounded in practice by one candidate per artifact, so the default of 2 is enough for a single-artifact run with one measurement finishing as the next starts. This is a **third** pool -- `n_workers` rollouts, `gate_workers` measurements, each of which fans out over `eval_concurrency` tasks -- so the ceiling your provider sees is `n_workers + gate_workers * eval_concurrency`. |
 | `held_out_frac` | `float` | `0.4` | As `tasks`. |
 | `repo_path` | `Optional[str]` | `None` | As `tasks`. |
 | `agg_config` |  | `None` | As `tasks`. |

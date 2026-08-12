@@ -95,6 +95,106 @@ raise it if yours is large and your provider allows the concurrency.
     that, the barrier is meeting a heavy tail, which is what `asynchronous=True`
     addresses.
 
+### Who was waiting for whom — the stage profile
+
+The table above measures whether the run got *faster*. It cannot say **why**,
+and the obvious candidate — `eval_seconds` — cannot either: it sums across the
+evaluation pool, so eight threads scoring for a second each reads `8.0` whether
+the run spent eight seconds in the gate or one.
+
+Three counters answer it, and they are wall-clock on the one thread that merges:
+
+| counter | what it is |
+|---|---|
+| `merge_seconds` | the merger's **busy** time. One thread, so `merge_seconds / wallclock` is a real occupancy and cannot exceed 1 |
+| `merge_gate_seconds` | the part of it blocked on evaluation. A **subset** — `gate_share()` — never a second total to add |
+| `worker_starved_seconds` | summed across workers: time held at the backpressure gate with a finished card and nowhere to put it. Async only |
+
+```bash
+python -m examples.efficiency --only stages
+```
+
+| workload | wall | merger busy | of it, gate | starved/s |
+|---|---:|---:|---:|---:|
+| sync, uniform 20 ms | 0.5 s | 59% | **100%** | — |
+| async, uniform 20 ms | 4.1 s | 94% | 82% | **4.5×** |
+| async, uniform 20 ms, `eval_concurrency=1` | 4.3 s | 99% | 95% | **6.9×** |
+| sync, heavy tail | 1.9 s | 43% | **100%** | — |
+| async, heavy tail | 4.3 s | 90% | 94% | **5.6×** |
+
+`starved/s` is `worker_starved_seconds / wallclock` at `n_workers=8`, so `4.5×`
+means four and a half of the eight workers were blocked at any given moment.
+
+**The gate is on the critical path, and the third row is what proves it.** Same
+workload, same rollouts, same evaluations — only the gate's own pool narrows,
+and starvation rises from 4.5 to 6.9 of eight workers. Nothing else moved, so
+nothing else can be responsible.
+
+On the synchronous path the `of it, gate` column reads **100%**: everything the
+driver does after the barrier *is* evaluation. That is not news, but it was not
+measurable before — `merge_seconds` had been declared in `metrics.py` since the
+first version and written by nobody, so every run ever published reported `0.0`,
+which reads as "merging was free".
+
+!!! note "Read the last two columns together"
+    A merger at 95% occupancy that starved nobody has hidden itself perfectly
+    behind the rollouts, and moving its work elsewhere buys nothing. A merger at
+    95% whose workers idle on it is the serial-stage bottleneck — FlashEvolve's
+    Figure 2(c), which profiles the evaluate stage at 56–92% of a synchronous
+    step.
+
+    The counters also show a trap: with this domain's *microsecond* rollout the
+    workers lap the merger between sweeps whatever the gate costs (measured at
+    `async_ratio=8`: four workers starved for ~4 s of a 1 s window with nothing
+    slowed down at all). Starvation alone does not implicate the gate.
+    `gate_share()` is what does.
+
+### Taking the gate off the merger — `pipelined_gate`
+
+A merge is three phases, and only the middle one is expensive:
+
+| phase | cost | touches aggregator state |
+|---|---|---|
+| **prepare** — drain, staleness, conflicts, fusion | cheap | yes |
+| **measure** — score base and candidate | **94% of gate time** | **no** |
+| **decide** — accept, audit, CAS commit | cheap | yes |
+
+That middle column is why the split is possible: `Aggregator.measure()` writes
+only into the candidate it was handed, so it can run anywhere.
+`async_evolve(pipelined_gate=True)` runs it on its own threads and lets the
+merger go back to draining.
+
+**It changes no commit semantics.** At most one candidate per artifact is in
+flight, so every candidate is still committed against the head it was prepared
+and measured on — there is no candidate-level staleness to have a policy about.
+Cards arriving meanwhile accumulate in the aggregator's buffer, so batches get
+larger rather than more numerous.
+
+Measured at `n_workers=8`, `async_ratio=3`, held-out scoring costing 5× a
+rollout — the regime FlashEvolve profiles:
+
+| | rollouts | merges | merger busy | starved |
+|---|---:|---:|---:|---:|
+| inline gate | 648 | 10 | 53% | 4.40× |
+| `pipelined_gate=True` | **921** | **17** | 34% | **2.83×** |
+
+**+42% rollouts and +70% merges for the same wall-clock**, with a third fewer
+workers blocked. When the gate is only as expensive as a rollout the same
+comparison reads 776 → 818 (+5%): the win is proportional to how much the gate
+dominates, which is the honest shape for it to have.
+
+!!! warning "The first version of this made the run *slower*, and the counters said why"
+    Skipping the merger's poll sleep whenever a measurement was *in flight*
+    turned the merger into a busy-wait — and a busy-wait holds the GIL against
+    the very workers it was meant to free. Measured: 462 rollouts inline against
+    **389** pipelined, while `merger busy` read a confident 92%, because
+    spinning is occupancy. The condition is `fut.done()`, not "anything
+    pending".
+
+    Off by default. It is a third pool — `n_workers` rollouts, `gate_workers`
+    measurements, each fanning out over `eval_concurrency` tasks — so the
+    ceiling your provider sees is `n_workers + gate_workers × eval_concurrency`.
+
 
 ## The configuration matrix — `bench/`
 
