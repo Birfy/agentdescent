@@ -278,6 +278,15 @@ def async_evolve(
         bounded by any argument (a 3s run with a fast reward produced 221).
         ``RoundInfo.round`` is the sweep index. Compare ``final_reward`` across the
         sync and async paths, not ``len(history)``.
+
+        That "per sweep that had cards" rule is load-bearing, not descriptive: a
+        sweep whose whole batch was discarded as stale **must** still be
+        recorded, because the same bookkeeping feeds ``stall_patience`` -- the
+        run's only livelock guard once head stops moving. Under
+        ``pipelined_gate`` one more kind of entry appears: the sweep that
+        *collects* a finished measurement records the merge it completes, so a
+        single merge can contribute two entries (the sweep that ingested its
+        cards, then the one that landed its decision).
     """
     _pol = _resolve_policies(policies, "async_evolve()",
                              supported=_ASYNC_WIRED_POLICIES,

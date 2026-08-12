@@ -6,6 +6,32 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **The pipelined-gate seam disabled the async path's livelock guard, in
+  exactly the situation the guard exists for.** `pipelined_gate` needs the
+  merger to skip poll sweeps whose candidate is still out being measured, and
+  the skip it shipped was `if not reports: return`. On the **inline** path "no
+  reports" also describes a sweep whose every card was discarded at the
+  staleness gate -- and the return skipped `stall.note_sweep`, the counter
+  behind `stall_patience`. Under `async_ratio >> alpha` that counter is the
+  *only* thing that ends the cycle: head stops moving, so the lag budget never
+  forces a worker refresh, and the forced-resync epoch is all that is left.
+  The same return also broke `history`'s documented "one entry per merger
+  sweep that had cards" and left the published head un-bumped on those sweeps.
+
+  Caught by CI, on all three Python versions, in
+  `test_a_large_lag_budget_does_not_livelock` -- the test named for the
+  failure. It was first misread here as a pre-existing flake, on the strength
+  of a stash test that removed only *uncommitted* work while the offending
+  committed change stayed in place; `main` is green under the same load. The
+  test is genuinely load-sensitive (a 3-second budget, four spinning workers
+  against one merger), which made the local signal noisy -- never absent.
+
+  The fix is the missing half of the condition: `if not reports and not
+  batch`. A pure collect poll is skipped; a sweep that had cards and reported
+  nothing is the livelock's signature and must be counted.
+
 ### Added
 
 - **Evaluation can now be its own stage: `async_evolve(pipelined_gate=True)`.**
