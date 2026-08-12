@@ -2080,6 +2080,7 @@ def evolve(
     eval_concurrency: int = 8,
     asynchronous: bool = False,
     async_ratio: int = 3,
+    resync_on_commit: bool = True,
     pipelined_gate: bool = False,
     gate_workers: int = 2,
     max_seconds: Optional[float] = None,
@@ -2251,6 +2252,12 @@ def evolve(
         :func:`~agentdescent.async_evolve.async_evolve`, which implements it.
         Warns and does nothing on the synchronous path, where the round barrier
         idles every worker for the whole merge regardless.
+    resync_on_commit:
+        Asynchronous path only. Refresh every worker's snapshot as soon as a
+        sweep commits, so no one *starts* a rollout against a superseded
+        artifact. See :func:`~agentdescent.async_evolve.async_evolve`, which
+        documents what it does and does not fix -- a commit landing mid-rollout
+        still produces a stale card.
     asynchronous, async_ratio:
         Delegate to :func:`~agentdescent.async_evolve.async_evolve` -- no round
         barrier, with ``async_ratio`` as the staleness lag budget.
@@ -2429,6 +2436,7 @@ def evolve(
             tasks, reward, agent=agent, run=run, propose=propose, strategy=strategy,
             initial_state=initial_state, blast_radius=blast_radius, artifact_id=artifact_id,
             n_workers=n_workers, async_ratio=async_ratio,
+            resync_on_commit=resync_on_commit,
             max_seconds=20.0 if max_seconds is None else max_seconds,
             max_iters=(max_rollouts if max_rollouts is not None
                        else rounds * max(1, n_workers)),

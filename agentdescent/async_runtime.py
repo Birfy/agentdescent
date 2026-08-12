@@ -46,6 +46,11 @@ from .staleness import StalenessPolicy
 class AsyncConfig:
     n_workers: int = 6
     async_ratio: int = 3          # ROLL Flash global lag budget (max head drift)
+    #: Resync every worker the moment a sweep commits. Mirrors the engine's
+    #: default. Switch off to study the lag budget in isolation: this domain's
+    #: rollout is a dictionary lookup, so with it on a worker is never more than
+    #: one lookup behind head and eta never leaves 0.
+    resync_on_commit: bool = True
     noise: float = 0.15
     target_accuracy: float = 0.98
     max_seconds: float = 20.0     # wall-clock safety bound
@@ -184,6 +189,7 @@ class AsyncAgentDescent:
             artifact_id=self.skill_id,
             n_workers=self.cfg.n_workers,
             async_ratio=self.cfg.async_ratio,
+            resync_on_commit=self.cfg.resync_on_commit,
             max_seconds=self.cfg.max_seconds,
             target_reward=self.cfg.target_accuracy,
             held_out_frac=cluster_split_frac(self._train_tasks, self._held_tasks),

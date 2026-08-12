@@ -64,6 +64,12 @@ class Config:
     #: value tuned for one workload is not a value at all for another -- which is
     #: why it is a dimension of the matrix rather than a constant in it.
     async_ratio: int = 3
+    #: Off across this matrix, unlike the engine default. Every async row here
+    #: exists to measure what the lag budget alone does, and a rollout in this
+    #: workload is a dictionary lookup -- with commit-resync on, a worker is
+    #: never more than one lookup behind head, eta never leaves 0 and the
+    #: `async_ratio` column stops varying anything.
+    resync_on_commit: bool = False
     staleness: str = "guarded"
 
     def as_row(self) -> Dict[str, Any]:

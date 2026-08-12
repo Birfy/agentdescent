@@ -297,9 +297,18 @@ configuration. Quality is scored on a split `evolve()`'s gate never saw.
 | sync-1 | 3 | 2/3 | 1.22 / 1.26 / 1.29 | 21 / 22 / 22 | 0.793 / 0.862 / 0.897 | 0% |
 | sync-4 | 3 | 3/3 | 0.46 / 0.52 / 0.71 | 24 / 24 / 40 | 0.862 / 1.000 / 1.000 | 0% |
 | sync-8 | 3 | 3/3 | 0.25 / 0.25 / 0.41 | 24 / 24 / 40 | 0.931 / 1.000 / 1.000 | 0% |
-| async-4 (lag 3, the default) | 3 | **0/3** | — | — | 0.310 / 0.345 / 0.379 | **93%** |
+| async-4 (lag 3, no commit-resync) | 3 | **0/3** | — | — | 0.310 / 0.345 / 0.379 | **93%** |
 | async-4 (lag 1) | 3 | 3/3 | 0.56 / 0.74 / 0.93 | 31 / 35 / 123 | 0.897 / 0.931 / 1.000 | 25% |
 | async-4 (lag 0) | 3 | 3/3 | 0.59 / 0.66 / 0.75 | 25 / 28 / 46 | 0.828 / 0.897 / 0.931 | 0% |
+
+!!! note "Every async row here runs with `resync_on_commit=False`, which is no longer the default"
+    The engine now resyncs a worker the moment a sweep commits, so nobody starts
+    a rollout against a version that has already been replaced. This matrix
+    pins it off, because a rollout in this workload is a dictionary lookup: with
+    it on, a worker is never more than one lookup behind head, `eta` never
+    leaves 0 and the `async_ratio` column stops varying anything. These rows are
+    what the lag budget does in isolation, which is what they were measuring all
+    along -- they are no longer a picture of the default configuration.
 
 !!! warning "The `stale%` column was understated, and this is the corrected run"
     It read **86%** and **10%** for the two async rows. The async path ran its own

@@ -14,10 +14,12 @@ from agentdescent.domains.router import make_task_universe
 from agentdescent.staleness import get_policy
 
 
-def _run(policy_name, async_ratio=4, seconds=15.0, noise=0.12, seed=1):
+def _run(policy_name, async_ratio=4, seconds=15.0, noise=0.12, seed=1,
+         resync_on_commit=True):
     universe = make_task_universe(seed=7)
     cfg = AsyncConfig(n_workers=6, async_ratio=async_ratio, noise=noise,
-                      target_accuracy=0.95, max_seconds=seconds, seed=seed)
+                      target_accuracy=0.95, max_seconds=seconds, seed=seed,
+                      resync_on_commit=resync_on_commit)
     with tempfile.TemporaryDirectory() as repo:
         sys = AsyncAgentDescent(repo, universe, config=cfg,
                              staleness_policy=get_policy(policy_name))
@@ -48,8 +50,13 @@ def test_guarded_discards_more_than_reflective():
     laptop and fails on a loaded CI runner (it did: 0.83 on Python 3.9). The
     relational invariants hold regardless of machine speed.
     """
-    g = _run("guarded", async_ratio=4, seconds=12.0, seed=3)
-    r = _run("reflective", async_ratio=4, seconds=12.0, seed=3)
+    # `resync_on_commit=False`: this compares what two staleness *policies* do
+    # with stale work, so the lag budget has to be the only resync trigger. With
+    # the default on, a commit resyncs every worker and -- rollouts here being
+    # dictionary lookups -- nothing is ever stale for either policy to act on,
+    # so both counters read 0 and the comparison has no content.
+    g = _run("guarded", async_ratio=4, seconds=12.0, seed=3, resync_on_commit=False)
+    r = _run("reflective", async_ratio=4, seconds=12.0, seed=3, resync_on_commit=False)
 
     assert g.discarded_stale > r.discarded_stale   # the claim under test
     # ...and as a *rate*, which is what "wastes less work" actually means.

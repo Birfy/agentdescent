@@ -69,6 +69,7 @@ def async_evolve(
     artifact_id: str = "artifact",
     n_workers: int = 4,
     async_ratio: int = 3,
+    resync_on_commit: bool = True,
     max_seconds: float = 20.0,
     max_iters: Optional[int] = None,
     max_calls: Optional[int] = None,
@@ -134,6 +135,32 @@ def async_evolve(
         drifts more than this far ahead, **and** it stops producing while more
         than this many cards sit un-merged. The second bound matters at cold
         start, before any commit has moved head.
+    resync_on_commit:
+        Refresh every worker as soon as a sweep commits, whatever the ratio.
+        On by default: a worker that starts a rollout against a version a
+        finished sweep has already replaced is doing work the merger will
+        discard, and no workload wants that.
+
+        This does **not** remove staleness where a real workload gets it. A
+        worker snapshots, then spends the rollout in ``run``, then pushes; a
+        commit landing anywhere in that window makes the card stale no matter
+        what the top of the loop does. What it removes is the other source:
+        *starting* a rollout against a snapshot a finished sweep has already
+        superseded. The two coincide only when rollouts are short relative to
+        sweep cadence -- as they are in this repo's synthetic tests and bench
+        workloads, where a rollout is a dictionary lookup and turning this on
+        does collapse η to 0. Those are the cases that need ``False``: anything
+        measuring what the lag budget alone does has to switch this off, or the
+        budget is no longer the only resync trigger and the measurement is of
+        something else.
+
+        Turn it on when the artifact's *content* is what workers reason from,
+        so an out-of-date copy makes the work void rather than merely stale.
+        Evolving a skill library from empty is the case that motivated it: the
+        lag budget fires at ``head_v - base_v > async_ratio``, so with the
+        default 3 the first three commits leave every worker still proposing
+        against no library at all, re-deriving what head already has for the
+        merger to discard.
     max_seconds:
         Wall-clock budget for the **production phase only**. Two things still
         happen after it, so budget for them: a bounded shutdown
@@ -374,6 +401,10 @@ def async_evolve(
     # Backpressure: bumped when the pipeline stalls (evidence keeps arriving and
     # nothing commits), which forces every worker to resync regardless of the ratio.
     epoch = [0]
+    #: Bumped on every commit when ``resync_on_commit``. Separate from `epoch`
+    #: because that one feeds `forced_refreshes`, which the docs define as quiet
+    #: on a healthy run -- and a commit is the pipeline working, not a fault.
+    commit_epoch = [0]
     forced_refreshes = [0]
     stragglers = [0]
     estimator = duration_estimator
@@ -478,6 +509,7 @@ def async_evolve(
         by_shard_id = {t.id: t for t in shard}
         i = 0
         local_epoch = epoch[0]
+        local_commit = commit_epoch[0]
         consecutive = 0            # consecutive backend failures for this worker
         warned = False
         while not stop.is_set():
@@ -515,11 +547,13 @@ def async_evolve(
             # never triggers a refresh either. It existed only in the reference
             # runtime, which is not the one a real workload reaches.
             forced = epoch[0] != local_epoch
-            if head_v - base_v > async_ratio or forced:
+            committed_since = commit_epoch[0] != local_commit
+            if head_v - base_v > async_ratio or forced or committed_since:
                 snap = eng.ledger.snapshot(Ledger.DEV)
                 base_v = snap.version.get(eng.artifact_id, 0)
                 artifact = snap.get(eng.artifact_id)
                 local_epoch = epoch[0]
+                local_commit = commit_epoch[0]
                 # Only the *forced* half is counted. Refreshing on one's own lag
                 # budget is what an async worker does all run long -- counting it
                 # made `forced_refreshes` non-zero on every healthy run, while the
@@ -778,6 +812,23 @@ def async_evolve(
         # staleness gate MUST land here with committed=0: those discards are the
         # livelock's signature, and this counter is the only thing that breaks it.
         stall.note_sweep(committed)
+        # A commit changes what the artifact *is*, so a worker about to start a
+        # rollout on the pre-merge snapshot is working from a version that no
+        # longer exists. The lag budget does not catch that on its own -- it
+        # fires at ``head_v - base_v > async_ratio``, so with the default 3 the
+        # first three commits leave the whole fleet on its start-of-run
+        # snapshot, which on a run that starts from an empty artifact means
+        # every worker keeps re-deriving what head already has.
+        #
+        # This does not make cards fresh: the snapshot is taken before `run` and
+        # the card is pushed after it, so a commit during a long rollout still
+        # arrives stale, which is where staleness comes from on any workload
+        # whose rollouts outlast a sweep -- the module's premise survives. It
+        # stays switchable because on *short* rollouts the two windows collapse
+        # into one and η goes to 0, so anything measuring the lag budget in
+        # isolation has to turn it off.
+        if resync_on_commit and committed:
+            commit_epoch[0] += 1
         if stall.should_force_refresh():
             epoch[0] += 1                      # every worker resyncs on its next loop
             stall.force()
