@@ -14,7 +14,9 @@ evaluation -- rather than each candidate paying its own ranking evaluation.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
+import os
 import random
 import threading
 import time
@@ -167,12 +169,37 @@ def _batch(tasks, size: int, seed: int):
 
 
 def _evaluate(policy: MethodPolicy, llm: PhasedLLM, rendered: str,
-              tasks: Sequence[Task]) -> float:
+              tasks: Sequence[Task], concurrency: int = 1) -> float:
+    """Score ``rendered`` on every task; ``concurrency`` bounds calls in flight.
+
+    The default stays 1 -- the serial arm is the control, and turning its
+    baseline concurrent silently is the mistake ``eval_concurrency``'s
+    docstring already names. Parallel modes pass their worker count: on a
+    thinking model a 32-task baseline is 30-90 minutes serial, and it is pure
+    wall-clock -- each call is independent and order does not matter to a mean.
+    """
     if not tasks:
         return 0.0
-    return sum(
-        policy.reward(task, policy.solve(llm, rendered, task)) for task in tasks
-    ) / len(tasks)
+
+    def one(task: Task) -> float:
+        # One stalled backend call must cost one task's score, not the run:
+        # a baseline evaluation died whole to a single request that outlived
+        # timeout x retries. Scored 0 -- the same in-band verdict a crashed
+        # candidate gets -- and said out loud, because a silent 0 in a mean
+        # reads as a wrong answer rather than a missing measurement.
+        try:
+            return policy.reward(task, policy.solve(llm, rendered, task))
+        except Exception as e:  # noqa: BLE001 - a backend failure
+            print(f"[eval] task {task.id} failed, scored 0: "
+                  f"{type(e).__name__}: {str(e)[:120]}", flush=True)
+            return 0.0
+
+    if concurrency <= 1 or len(tasks) == 1:
+        return sum(one(task) for task in tasks) / len(tasks)
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=min(concurrency, len(tasks))) as pool:
+        return sum(pool.map(one, tasks)) / len(tasks)
 
 
 def _fusion_summary(result: EvolutionResult) -> Dict[str, object]:
@@ -244,8 +271,18 @@ def run_port(
 
     initial = policy.strategy.render(policy.strategy.initial())
     started = time.monotonic()
-    baseline_quality = _evaluate(policy, eval_llm, initial, policy.test_tasks)
-    baseline_validation = _evaluate(policy, eval_llm, initial, policy.held_out_tasks)
+    # Same rule as the gate's eval_concurrency, applied conservatively: an
+    # explicit value is honoured, a missing one changes nothing -- the
+    # offline example tests depend on serial call order, and "a missing value
+    # never turns concurrency on" is already this runner's stated contract.
+    _eval_conc = eval_concurrency if eval_concurrency is not None else 1
+    baseline_quality = _evaluate(policy, eval_llm, initial, policy.test_tasks,
+                                 concurrency=_eval_conc)
+    baseline_validation = _evaluate(policy, eval_llm, initial,
+                                    policy.held_out_tasks,
+                                    concurrency=_eval_conc)
+    print(f"[baseline] quality(test)={baseline_quality:.3f} "
+          f"validation(held-out)={baseline_validation:.3f}", flush=True)
     engine_started = time.monotonic()
     actor_usage = Usage()
     limiter = ProposalLimiter(
@@ -352,6 +389,13 @@ def run_port(
         # current head and leaves the acceptance gate as the verification, which
         # it already is.
         "staleness_policy": get_policy(staleness),
+        # A run that reports nothing until its summary cannot be told from a
+        # stalled one; one line per merger sweep is the smallest fix.
+        "on_round": lambda info: print(
+            f"[sweep {info.round}] held_out={info.held_out_reward:.3f} "
+            f"committed={info.committed} rejected={info.rejected} "
+            f"reasons={info.reasons} elapsed={info.elapsed_s:.0f}s "
+            f"rollouts={info.rollouts}", flush=True),
     }
     if mode == "async_pipeline":
         result = async_evolve(
@@ -381,7 +425,11 @@ def run_port(
     engine_wall = time.monotonic() - engine_started
     if result.error:
         raise RuntimeError(result.error)
-    final_quality = _evaluate(policy, eval_llm, result.rendered, policy.test_tasks)
+    final_quality = _evaluate(policy, eval_llm, result.rendered,
+                              policy.test_tasks, concurrency=_eval_conc)
+    # The evolved artifact is the run's product; a summary that reports its
+    # score and discards its content answers "how much" and hides "what".
+    print("[final artifact]\n" + result.rendered, flush=True)
     wall_seconds = time.monotonic() - started
 
     engine_ttq = result.time_to_quality(QUALITY_TARGET)
@@ -724,4 +772,17 @@ def standard_main(build: Callable[..., MethodPolicy],
         detail = policy.report()
         if detail:
             print(detail)
+    # Everything the run knew, kept: scores, per-phase usage, and every
+    # recorded event (proposal texts included). The printed summary is a
+    # transcription surface; this is the record.
+    # Opt-in via AGENTDESCENT_RESULT_DIR: a run that writes files into the
+    # caller's cwd by default litters every test invocation.
+    result_dir = os.environ.get("AGENTDESCENT_RESULT_DIR")
+    if result_dir and dataclasses.is_dataclass(outcome):
+        out_path = os.path.join(
+            result_dir, f"result_{policy.name}_{mode}_seed{args.seed}.json")
+        with open(out_path, "w") as fh:
+            json.dump(dataclasses.asdict(outcome), fh, ensure_ascii=False,
+                      indent=1, default=str)
+        print(f"[result saved] {out_path}", flush=True)
     return 0
