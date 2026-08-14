@@ -32,6 +32,10 @@ class CallEvent:
     started_s: float
     ended_s: float
     success: bool
+    #: Response text, retained only when AGENTDESCENT_RECORD_TEXT=1 and only
+    #: for proposal/fusion phases -- the calls whose content is the search's
+    #: own moves. Empty otherwise; the recorder's no-retention default stands.
+    response: str = ""
 
     @property
     def duration_s(self) -> float:
@@ -54,14 +58,20 @@ class Recorder:
     def call(self, prompt: str, *, phase: str, unit: str) -> str:
         started = self.elapsed()
         success = False
+        response = ""
         try:
             response = self.completion(prompt).strip()
             success = True
             return response
         finally:
             ended = self.elapsed()
+            import os as _os
+            keep = (_os.environ.get("AGENTDESCENT_RECORD_TEXT") == "1"
+                    and phase.split(":")[0] in ("proposal", "fusion"))
             with self._lock:
-                self.events.append(CallEvent(phase, unit, started, ended, success))
+                self.events.append(CallEvent(
+                    phase, unit, started, ended, success,
+                    response[:4000] if keep else ""))
 
     def phase_summary(self) -> Dict[str, Dict[str, float]]:
         grouped: Dict[str, List[CallEvent]] = {}
@@ -158,6 +168,7 @@ def compact_events(events: Sequence[CallEvent]) -> List[Dict[str, Any]]:
             "ended_s": event.ended_s,
             "duration_s": event.duration_s,
             "success": event.success,
+            **({"response": event.response} if event.response else {}),
         }
         for event in sorted(events, key=lambda row: row.started_s)
     ]

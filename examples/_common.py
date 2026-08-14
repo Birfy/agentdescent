@@ -422,4 +422,10 @@ def completion_for(args: argparse.Namespace, *, usage: Optional[Usage] = None,
         return openai_compatible(model=args.model, usage=usage, **kwargs)
     if getattr(args, "no_thinking", False):
         kwargs.setdefault("thinking", {"type": "disabled"})
+    # --timeout reaches this path too: claude()'s 120s default assumes Claude
+    # latencies, and a thinking model behind an Anthropic-shaped endpoint
+    # (GLM-5.2 on GSM-Hard) legitimately exceeds it -- a baseline eval died at
+    # 120s x 3 retries before any evolution happened.
+    if getattr(args, "timeout", None):
+        kwargs.setdefault("timeout", float(args.timeout))
     return claude(model=args.model, usage=usage, **kwargs)
