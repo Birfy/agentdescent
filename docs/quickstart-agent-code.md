@@ -1,28 +1,34 @@
 # Quickstart — evolve an agent's code
 
-A complete, measured case: one `evolve()` call that improves a **running
-program** — an agent whose `agent.py` is executed per task — on GSM-Hard,
-against a hosted thinking model (`deepseek-v4-flash` behind an
-Anthropic-shaped endpoint). Everything below is one real run: its
-configuration, the diff the engine committed, and both numbers it produced —
-including the one that did not move, and why.
+A complete, measured case: one `evolve()` call that takes a **deliberately
+minimal running agent** — a bare model call and a one-line instruction file —
+and evolves it on GSM-Hard against a hosted thinking model
+(`deepseek-v4-flash` behind an Anthropic-shaped endpoint). One run, 83
+minutes: **test 0.692 → 0.757** on a 107-problem split the engine never saw.
+
+The case makes one point above the others: the winning configuration was not
+a cleverer architecture. It was a *lower starting point and a larger budget*,
+with the engine free to decide what the agent should become.
 
 ## What evolves
 
 The artifact is a two-file tree, executed for real on every rollout:
 
-- `agent.py` — the agent. It asks the model to *write a Python program* that
-  solves the problem, `exec`s that program, and falls back to plain prompting
-  on any error. This file is the product of an earlier evolution run; here it
-  is the **starting point**.
-- `skills/strategy.md` — the instruction the agent prepends to every prompt.
+- `agent.py` — initially ~40 lines: read `skills/`, send one prompt, print
+  the reply. No tools, no retries, no output parsing.
+- `skills/strategy.md` — initially the single line `Solve the problem.`
 
-Both are editable (`FileTree` strategy, at most 2 files per diff). A rollout
+Both are editable (`FileTree`, at most 2 files per diff). A rollout
 materialises the candidate into a workspace and runs
 `python3 agent.py "<question>"` through `code_runner` — process isolation,
-trimmed environment, hard timeout. The reward is exact-match on the last
-number of stdout, normalised the way GSM-Hard's targets need
+trimmed environment, hard timeout. Reward is exact-match on the last number
+of stdout, normalised the way GSM-Hard's float targets require
 (`-9867630.0` ≡ `-9867630`).
+
+Data: 320 GSM-Hard problems (the offline sample shipped in
+`examples/_gsmhard_sample.json`), split 106 train / 107 held-out / 107 test
+by a seeded shuffle. The engine trains and gates on the first two; test is
+measured once before and once after.
 
 ## The call
 
@@ -34,7 +40,7 @@ result = evolve(
     blast_radius=0.6,                     # agent code is a harness: L1, oracle-gated
     n_workers=6, asynchronous=True, async_ratio=3,
     eval_concurrency=16,
-    rounds=12, max_rollouts=72, patience=5, target_reward=0.95,
+    rounds=30, max_rollouts=180, patience=8, target_reward=0.95,
     self_verify=False, cheap_eval_tasks=6,
     agg_config=AggregatorConfig(bounded_gate=True, base_delta=0.8,
                                 anneal_half_life=256, batch_trigger=4),
@@ -44,135 +50,120 @@ result = evolve(
 )
 ```
 
-Four of these knobs are the lessons of this case, not defaults:
+Knobs that are the lessons of this series, not defaults:
 
+- **`max_rollouts=180`** — budget is what lets the engine climb in steps.
+  Runs of 60–72 rollouts on the same task plateaued after one commit; this
+  run committed three times, each on top of the last.
 - **`base_delta=0.8, anneal_half_life=256`** — a relaxed, flat acceptance
-  threshold. The improvements available here are small (a formatting bug
-  costs 1–2 of 107 held-out tasks); under the default schedule the Beta
-  posterior needs ~4–5 tasks of lift and correct fixes die at the gate.
-- **`max_proposals=4` / `batch_trigger=4`** — reflective merge synthesises at
-  most four competing proposals per model call; beyond that the merge prompt
-  degrades into summarisation.
-- **No `selection=`** — single head, deliberately. With an
-  archive (`Archive("sigmoid_novelty")`), commits land on *divergent
-  lineages* that never recombine, and the final winner-take-all pick dropped
-  a correct formatting fix in the run before this one. Single-head stacks
-  every accepted fix on one lineage.
-- **The reflector and fusion completions run with
-  `thinking={"type": "disabled"}`.** On the edit-protocol prompt this model's
-  reasoning runs away — measured: 32,768 output tokens of thinking and zero
-  visible text. Thinking-off returns a valid `<EDITS>` block in ~12s. The
-  *agent's own* solve calls keep thinking on; the split is per-completion.
+  threshold. Real fixes on this workload are worth 1–4 held-out tasks each;
+  under the default schedule the Beta posterior wants more lift than that
+  and correct small fixes die at the gate.
+- **`max_proposals=4` / `batch_trigger=4`** — reflective merge synthesises a
+  few competing proposals per model call rather than summarising many.
+- **No `selection=`** — single head. With an archive
+  (`Archive("sigmoid_novelty")`) commits land on divergent lineages that
+  never recombine; single-head stacks every accepted fix on one lineage.
+- **Reflector and fusion completions run `thinking={"type": "disabled"}`.**
+  On the edit-protocol prompt this model's reasoning runs away (measured:
+  32,768 output tokens, zero visible text). Thinking-off returns a valid
+  `<EDITS>` block in ~12s. The agent's own solve calls keep thinking on.
 
-The reflector's template asks for a **diagnosis before the edit**: classify
-the failure as (a) output formatting, (b) arithmetic, or (c) comprehension,
-then make the smallest edit that fixes that class. It also states the grader's
-actual comparison rule (`4561195.20` does **not** match `4561195.2`), because
-a reflector that has to guess the grader proposes fixes for the wrong layer.
+The reflector template asks for a **diagnosis before the edit** — classify
+the failure as output formatting / arithmetic / comprehension, then make the
+smallest generalising fix — and it states the grader's comparison rule
+outright, because a reflector that has to guess the grader fixes the wrong
+layer.
 
 ## What one run did
 
-Data: 320 GSM-Hard problems, split 106 train / 107 held-out / 107 test
-(seeded shuffle; the engine never sees test). Wall clock **83 minutes**:
-72 rollouts, 441 reflector/fusion calls, 0 call failures.
+83 minutes wall clock: 185 rollouts, 988 reflector/fusion calls, 1 transient
+call failure. Eight merger sweeps; every accepted commit was a
+`ReflectiveFusion` synthesis of 7–9 concurrent proposals, taken through the
+statistical gate and the L1 oracle re-check:
 
-| sweep | held-out | committed | rejected |
-|---|---|---|---|
-| 0 | 0.785 | 0 | 0 |
-| 1 | **0.804** | **1** | 0 |
-| 2 | 0.804 | 0 | 1 (oracle) |
-| 3 | 0.804 | 0 | 0 |
-
-The ledger records what the one commit was:
+| sweep | held-out | event |
+|---|---|---|
+| 0 | 0.766 | — |
+| 1 | 0.766 | 1 oracle-rejected |
+| 2 | **0.794** | **commit** — synth of 7 proposals |
+| 3 | 0.794 | 1 oracle-rejected |
+| 4 | **0.804** | **commit** — synth of 8 proposals |
+| 5 | 0.804 | 1 oracle-rejected |
+| 6 | **0.822** | **commit** — synth of 9 proposals |
+| 7 | 0.822 | budget exhausted |
 
 ```
-merge synth(w0:ecb0561e + w1:24a27b37 + w1:f15d32cf + w2:253ef29e + w2:7e3d6ef3 + w3:791b4fee) -> dgm-agent
+merge synth(w0:6a7fd1d6 + w1:6c55d989 + w2:8d9c6a01 + w3:0c549fbd + …) -> dgm-agent   (sweep 2)
+merge synth(w0:d2944aa8 + w1:88cac018 + w1:d78106da + w2:41380c5e + …) -> dgm-agent   (sweep 4)
+merge synth(w0:61ca8769 + w1:53943c35 + w2:3c1c1e47 + w2:ef0695da + …) -> dgm-agent   (sweep 6)
 ```
 
-— six workers independently diagnosed output-formatting failures, conflict
-resolution handed the contradicting rewrites to `ReflectiveFusion`, and one
-synthesised candidate carried them through the gate and the L1 oracle
-re-check. One later candidate was oracle-rejected; the run then stopped on
-budget.
+## What it evolved into
 
-## The committed diff
+The one-line `skills/strategy.md` grew into a **comprehension rulebook** —
+the engine's own diagnosis of where this model actually loses points on
+GSM-Hard. Excerpts, verbatim:
 
-The synthesis added two functions to `agent.py` and wired them into the
-exec path — nothing else changed:
+> For phrases like … 'three times more than X', interpret it as 'three times
+> as many as X' (i.e., 3 × X), not 'X + 3×X'.
 
-```python
-def finalize_output(out):
-    """Find final Answer line and ensure it contains a numeric literal, not a fraction expression."""
-    m = re.findall(r"Answer:\s*(.*)", out)
-    if not m:
-        return ""
-    raw = m[-1].strip().split()[0]
-    # If it's a fraction like a/b, evaluate it as a float
-    if "/" in raw and not re.match(r"^[-]?\d+$", raw):
-        try:
-            num, den = raw.split("/")
-            val = float(num) / float(den)
-            return "Answer: " + repr(val)
-        except Exception:
-            return ""
-    return "Answer: " + raw
+> The new value after applying a percentage rate that repeats every T units
+> of time is computed by compounding: new_value = base_value *
+> (1 + (percentage/100))^(number_of_periods).
 
+> Do not multiply a price by a count unless the phrase explicitly says
+> 'each' or 'per item'.
 
-def extract_answer(out):
-    """Extract the last number from any output, removing extra 'Answer:' prefixes."""
-    m = re.findall(r"Answer:\s*(-?[\d,.]+)", out)
-    if m:
-        return "Answer: " + m[-1].replace(",", "")
-    # fallback: last numeric token
-    nums = re.findall(r"-?[\d,]+\.?[\d]*", out)
-    if nums:
-        return "Answer: " + nums[-1].replace(",", "")
-    return ""
-```
+> When a problem asks 'How many will not be used' … compute the remainder as
+> initial_total - (used_per_recipient * number_of_recipients). This
+> remainder **may be negative** … and that negative value is the correct
+> answer.
 
-This is exactly the fix the reflector's diagnoses called for: the agent's
-generated programs sometimes print a raw fraction (`1422094/3`) or a doubled
-`Answer: Answer:` prefix, and the grader — which reads the last number —
-scores those zero even though the computed value is right.
+> Output the number as a plain decimal with full precision (do not round, do
+> not add trailing zeros, do not add commas…).
 
-## What it was worth — both numbers
+…plus a restate-then-verify protocol (state the interpretation before
+computing, re-read the question after). `agent.py` gained a retry loop
+around the model call and — a caveat worth naming — one narrow hard-coded
+rate-problem heuristic that slipped through the relaxed gate because its
+held-out footprint happened to be positive. A looser gate admits more real
+fixes *and* the occasional stowaway; the test number below includes both.
+
+## What it was worth
 
 | | held-out (gates on it) | test (never seen) |
 |---|---|---|
-| before | 0.785 | 0.701 |
-| after | **0.804** (+2 tasks) | 0.701 (±0) |
+| before | 0.766 | 0.692 |
+| after | **0.822** (+6 tasks) | **0.757** (+7 tasks, +6.5pp) |
 
-Held-out improved; test did not. That is not the fix failing to generalise —
-it is **footprint**. The fraction-output pathology this diff repairs occurs in
-this dataset a handful of times, and those occurrences happen to sit in the
-held-out split; test's two formatting losses are a *different* sub-bug
-(trailing zeros from `%.2f`-style printing, `6532906.40` vs `6532906.4`) that
-was proposed in the same run but fell past the budget. A fix whose true value
-is 1–2 tasks per 107 shows up only in the split that contains its cases; the
-measurement floor of a 107-task split is about ±2 tasks of backend
-nondeterminism even at `temperature=0`.
+For calibration on this same split: evolving *only* a prompt-policy function
+(the Gödel-agent port) reached 0.720, and a hand-designed
+write-a-program-and-exec agent also reached 0.720. The evolved rulebook
+beats both — and a per-item audit puts the honest ceiling near **0.879**,
+because 13 of the 107 test items are corrupted upstream (the question's
+substituted numbers disagree with the numbers the gold-computing reference
+code used, so no faithful solver can match the gold).
 
-Two honest conclusions to carry out of this case:
+Two conclusions to carry out of this case:
 
-1. **The machinery works end-to-end at this scale**: diagnose → targeted
-   edit → conflict resolution → reflective synthesis → statistical gate →
-   L1 oracle → one lineage. Every accepted change is a real repair with a
-   named cause, and every rejection has a reason you can read in the ledger.
-2. **Effect size has to clear measurement granularity before test moves.**
-   Small correct fixes accumulate across rounds; judging them one run at a
-   time on a 107-task split under-counts them. Widen the split, average
-   seeds, or let the run continue — the trailing-zero fix was already in the
-   proposal stream when the budget ended.
+1. **Give evolution room instead of architecture.** Every designed variant —
+   prescribed tool contracts, dual-path solvers with arbitration — measured
+   at or below what the engine reached on its own from a bare agent. The
+   headroom was in *comprehension rules*, and the engine found that without
+   being told.
+2. **Budget converts to staircase commits.** Three synthesis commits, each
+   over the last, each clearing the gate and the L1 oracle — the shape that
+   short runs on this workload never reached.
 
 ## Reproducing
 
-The pieces are all public surface: `evolve()` with `FileTree` +
-`code_runner` + `tree_reflector` (custom template), `reflective_merge`,
-`ReflectiveStaleness`, and the offline GSM-Hard sample at
-`examples/_gsmhard_sample.json` (`AGENTDESCENT_GSMHARD_SAMPLE=1`). Two
-environment notes that cost this series real hours: construct the Anthropic
-client with `max_retries=0` (the SDK's internal retries multiply with
-`with_retries` into ~45-minute stalls on a slow endpoint), and give thinking
-models a generous `max_tokens` — at the runner default of 1024 a thinking
-model returns **empty text** for every reflection and the run silently
-proposes nothing.
+All public surface: `evolve()` with `FileTree` + `code_runner` +
+`tree_reflector` (custom diagnose-first template), `reflective_merge`,
+`ReflectiveStaleness`, and the offline GSM-Hard sample
+(`AGENTDESCENT_GSMHARD_SAMPLE=1`). Two environment notes that cost this
+series real hours: construct the Anthropic client with `max_retries=0` (the
+SDK's internal retries multiply with `with_retries` into ~45-minute stalls
+on a slow endpoint), and give thinking models a generous `max_tokens` — at
+1024 a thinking model returns **empty text** for every reflection and the
+run silently proposes nothing.
