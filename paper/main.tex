@@ -44,7 +44,7 @@
 \maketitle
 
 \begin{abstract}
-Self-improving agent systems --- agents that evolve their own skills, prompts, and harnesses --- are today overwhelmingly \emph{serial}: one candidate is proposed, evaluated, and accepted or rejected per iteration, bounding improvement throughput at $O(1/T_{\mathrm{iter}})$. We present \textbf{AgentDescent}, a framework that transplants the deep-learning \emph{training stack} onto agent self-evolution. The ``parameters'' are a library of evolvable artifacts (skills, prompts, harness modules, verifiers); the ``gradients'' are \emph{diffs carrying evidence cards}; the ``optimizer step'' is a \emph{merge decision} over a git-backed, version-vectored ledger. $N$ workers propose diffs in parallel and a barrier-free asynchronous aggregator merges them, targeting $O(N/T_{\mathrm{iter}})$ improvement throughput. The one place the analogy must break defines the system: \emph{gradients add, diffs do not} --- so aggregation is not averaging but conflict resolution, statistical acceptance under a per-artifact Beta posterior, and transactional commit. Staleness from asynchrony is handled by a per-diff lag measure $\eta$ with rebase-and-re-verify policies, and a layered governance model (frozen safety layer, oracle-gated harness layer, freely merging skill layer) keeps the self-referential loop from polluting itself. We demonstrate generality by porting \emph{eighteen} published self-evolution algorithms --- seven benchmark-faithful (ACE, GEPA, EvoSkill, SkillOpt, ADAS, DGM, OpenEvolve) and eleven declared microports and analogues --- all running unchanged under serial, synchronous, and barrier-free asynchronous scheduling. Empirically, thread-level rollout parallelism reaches $5.8\times$ on real API calls, dispatch scales near-linearly to 8 workers, and on a live model (GEPA/HotpotQA) removing the round barrier lifts effective concurrency from $1.85\times$ to $3.22\times$ over a true serial control at a pinned rollout budget. An equal-budget comparison of merge-of-$N$ against best-of-$N$ forking is reported honestly: at small budgets the two are not yet statistically separated, and we analyze why. Code, all eighteen ports, and every measured number's reproduction command are open source.
+Self-improving agent systems --- agents that evolve their own skills, prompts, and harnesses --- are today overwhelmingly \emph{serial}: one candidate is proposed, evaluated, and accepted or rejected per iteration, bounding improvement throughput at $O(1/T_{\mathrm{iter}})$. We present \textbf{AgentDescent}, a framework that transplants the deep-learning \emph{training stack} onto agent self-evolution. The ``parameters'' are a library of evolvable artifacts (skills, prompts, harness modules, verifiers); the ``gradients'' are \emph{diffs carrying evidence cards}; the ``optimizer step'' is a \emph{merge decision} over a git-backed, version-vectored ledger. $N$ workers propose diffs in parallel and a barrier-free asynchronous aggregator merges them, targeting $O(N/T_{\mathrm{iter}})$ improvement throughput. The one place the analogy must break defines the system: \emph{gradients add, diffs do not} --- so aggregation is not averaging but conflict resolution, statistical acceptance under a per-artifact Beta posterior, and transactional commit. Three execution concepts carry the design: \emph{parallelism} (synchronous data-parallel rounds, whose barrier waits on the slowest rollout), \emph{asynchrony} (a barrier-free runtime in which staleness becomes a first-class, per-diff lag $\eta$ governed by a version-lag budget and by Full / Guarded / Reflective policies), and \emph{reflective merge} (when concurrent proposals contradict on a single key, a model writes their union and the acceptance gate --- not the model --- decides). A layered governance model (frozen safety layer, oracle-gated harness layer, freely merging skill layer) keeps the self-referential loop from polluting itself. We demonstrate generality by porting \emph{eighteen} published self-evolution algorithms --- seven benchmark-faithful (ACE, GEPA, EvoSkill, SkillOpt, ADAS, DGM, OpenEvolve) and eleven declared microports and analogues --- all running unchanged under serial, synchronous, and barrier-free asynchronous scheduling. On a live model (GEPA/HotpotQA), removing the round barrier lifts effective concurrency from $1.85\times$ to $3.22\times$ over a true serial control at a pinned rollout budget; an equal-budget comparison of merge-of-$N$ against best-of-$N$ forking is reported honestly as not yet separated, and we analyze why. Code, all eighteen ports, and every measured number's reproduction command are open source.
 \end{abstract}
 
 \section{Introduction}
@@ -103,55 +103,58 @@ training code (not self-modifiable) & L0 frozen governance layer \\
 \centering
 \begin{tikzpicture}[
   font=\small,
-  node distance=6mm and 9mm,
-  box/.style={draw, rounded corners=2pt, align=center, minimum height=8mm, inner sep=4pt},
-  worker/.style={box, fill=adblue!12, draw=adblue!70!black},
-  agg/.style={box, fill=adorange!15, draw=adorange!70!black},
+  box/.style={draw, rounded corners=2pt, align=center, minimum height=9mm, inner sep=4pt},
+  worker/.style={box, fill=adblue!12, draw=adblue!70!black, minimum width=26mm},
+  agg/.style={box, fill=adorange!15, draw=adorange!70!black, minimum width=33mm, minimum height=7mm, inner sep=3pt},
   ledger/.style={box, fill=adgreen!12, draw=adgreen!60!black},
   gov/.style={box, fill=adred!8, draw=adred!60!black},
   arr/.style={-{Stealth[length=2.4mm]}, thick, adgray},
 ]
-% workers
-\node[worker] (w1) {Worker 1\\rollout + propose};
-\node[worker, below=of w1] (w2) {Worker 2\\rollout + propose};
-\node[below=1mm of w2] (wd) {$\vdots$};
-\node[worker, below=4mm of wd] (wn) {Worker $N$\\rollout + propose};
+% column 1: workers
+\node[worker] (w1) at (0, 1.9)  {Worker 1\\rollout + propose};
+\node[worker] (w2) at (0, 0.45) {Worker 2\\rollout + propose};
+\node          at (0,-0.5) {$\vdots$};
+\node[worker] (wn) at (0,-1.9)  {Worker $N$\\rollout + propose};
 
-% evidence buffer
-\node[box, right=of w2, fill=adgray!10, minimum height=26mm] (buf) {Evidence\\Buffer\\(thread-safe)};
+% column 2: evidence buffer
+\node[box, fill=adgray!10, minimum height=24mm] (buf) at (3.6, 0) {Evidence\\Buffer};
 
-% aggregator pipeline
-\node[agg, right=of buf, yshift=18mm] (stale) {staleness filter\\$\eta$ vs.\ $\alpha$};
-\node[agg, below=3.5mm of stale] (conf) {conflict resolution\\(PCGrad-style)};
-\node[agg, below=3.5mm of conf] (fuse) {fusion\\(model soup)};
-\node[agg, below=3.5mm of fuse] (gate) {audit gate +\\Beta acceptance};
-\node[agg, below=3.5mm of gate] (commit) {transactional\\commit (CAS)};
+% column 3: aggregator pipeline (top to bottom)
+\node[agg] (stale)  at (8.2, 2.0)  {1.\ staleness filter ($\eta$ vs.\ $\alpha$)};
+\node[agg] (conf)   at (8.2, 1.0)  {2.\ conflict resolution};
+\node[agg] (fuse)   at (8.2, 0.0)  {3.\ fusion / reflective merge};
+\node[agg] (gate)   at (8.2,-1.0)  {4.\ audit gate + Beta accept};
+\node[agg] (commit) at (8.2,-2.0)  {5.\ commit (CAS)};
 \begin{scope}[on background layer]
-\node[draw=adorange!70!black, rounded corners=3pt, fit=(stale)(conf)(fuse)(gate)(commit), inner sep=3.5pt, fill=adorange!4] (aggbox) {};
+\node[draw=adorange!70!black, rounded corners=3pt, fit=(stale)(commit), inner sep=4pt, fill=adorange!4] (aggbox) {};
 \end{scope}
 \node[above=1mm of aggbox, adorange!50!black, font=\small\bfseries] {Aggregator (the optimizer)};
 
-% ledger
-\node[ledger, right=10mm of aggbox, minimum height=20mm] (led) {git-backed \code{Ledger}\\version vectors\\\code{dev} $\rightarrow$ \code{stable}};
+% column 4: ledger
+\node[ledger, minimum height=22mm] (led) at (12.6, 0) {git-backed\\\code{Ledger}\\\code{dev} $\to$ \code{stable}};
 
-% governance
-\node[gov, below=7mm of led, align=left] (govn) {\textbf{Governance}\\L2 skills: free merge\\L1 harness: oracle-gated\\L0 safety: frozen};
+% governance below the aggregator
+\node[gov, align=left] (govn) at (8.2, -3.6) {\textbf{Governance:} L2 free merge $\cdot$ L1 oracle-gated $\cdot$ L0 frozen};
 
-% arrows
+% forward flow, left to right
 \draw[arr] (w1.east) -- (buf.west |- w1.east);
-\draw[arr] (w2.east) -- (buf.west);
+\draw[arr] (w2.east) -- (buf.west |- w2.east);
 \draw[arr] (wn.east) -- (buf.west |- wn.east);
-\draw[arr] (buf.east) -- (aggbox.west |- buf.east) node[midway, above, font=\scriptsize] {diffs +};
-\node[font=\scriptsize, adgray] at ($(buf.east)!0.5!(aggbox.west |- buf.east)+(0,-2.5mm)$) {evidence};
+\draw[arr] (buf.east) -- (aggbox.west) node[midway, above=1pt, font=\scriptsize] {diffs + evidence};
 \draw[arr] (stale) -- (conf);
 \draw[arr] (conf) -- (fuse);
 \draw[arr] (fuse) -- (gate);
 \draw[arr] (gate) -- (commit);
-\draw[arr] (aggbox.east |- led.west) -- (led.west) node[midway, above, font=\scriptsize] {commit};
-\draw[arr, adgreen!60!black] (led.north) to[out=140, in=40, looseness=0.6] node[above, font=\scriptsize, pos=0.78] {snapshots (lag budget \code{async\_ratio})} (w1.north);
-\draw[arr, adred!60!black, dashed] (govn.west) to[out=180, in=-70] (gate.south);
+\draw[arr] (aggbox.east) -- (led.west) node[midway, above, font=\scriptsize] {commit};
+
+% governance: straight vertical arrow up into the aggregator
+\draw[arr, adred!60!black, dashed] (govn.north) -- (aggbox.south);
+
+% feedback loop: orthogonal route along the bottom, no crossings
+\draw[arr, adgreen!60!black]
+  (led.south) -- (12.6,-5.0) -- node[above, font=\scriptsize] {snapshot refresh (bounded by the lag budget \code{async\_ratio})} (0,-5.0) -- (wn.south);
 \end{tikzpicture}
-\caption{AgentDescent architecture. $N$ workers roll out tasks against ledger snapshots and emit diffs with evidence cards into a thread-safe buffer; a dedicated aggregator thread runs the five-stage merge pipeline and commits to the git-backed ledger. In the barrier-free runtime the two sides never wait for each other; a version-lag budget bounds how stale a worker's snapshot may become. Governance (right, dashed) injects oracle audits for high-blast-radius merges and freezes the safety layer.}
+\caption{AgentDescent architecture. Evidence flows left to right: $N$ workers roll out tasks against ledger snapshots and emit diffs with evidence cards into a thread-safe buffer; a dedicated aggregator thread runs the five-stage merge pipeline and commits winners to the git-backed ledger. The green return path is the only feedback edge: workers refresh their snapshot from the ledger, and the lag budget \code{async\_ratio} bounds how far behind head a snapshot may drift. In the synchronous runtime a round barrier sits between the two sides; in the barrier-free runtime they never wait for each other. Governance (dashed) forces high-blast-radius merges through an oracle and freezes the safety layer.}
 \label{fig:architecture}
 \end{figure}
 
@@ -183,20 +186,41 @@ Evidence cards are bucketed by artifact. When a bucket triggers (batch size $B$,
 \label{sec:fusion-objection}
 The sharpest objection to merge-based evolution is that two individually good local edits may be jointly worse. Two properties bound the damage. First, \emph{the acceptance gate, not the tournament, is the safeguard}: the gate scores the fused candidate on the full held-out set and refuses a measured regression, so a harmful fusion never commits. Second, the fused union is a \emph{superset} of every individual diff, so committing it loses no proposal --- it merely carries some that looked negative this round, and the next round proposes from there. The only case the tournament decides that the gate does not is a fusion that beats the base artifact but loses to one of its singles; that case is recoverable, which is why the tournament is off by default (it costs one held-out sweep per candidate, unconditionally, against a conditional and recoverable gain). It remains available (\code{fusion\_tournament=True}) because it is the only instrument that can \emph{measure} the objection: it reports a win rate, mean gain, the losing tail, and --- critically --- a \code{contested} counter for tournaments where a fused candidate was actually built and ranked. We deliberately publish no headline win rate: the quantity is a property of the artifact's key space and of proposal overlap, not of the mechanism, and would not transfer across datasets (\cref{sec:merge-vs-fork} reports it in situ for one workload).
 
-\section{Runtimes, Staleness, and Parallelism Paradigms}
+\section{Parallelism, Asynchrony, and Reflective Merge}
 \label{sec:parallelism}
 
-\subsection{Two runtimes}
-The \textbf{synchronous data-parallel} runtime is a round barrier: all workers step, one aggregator step, next round. It is deterministic and serves as the baseline. The \textbf{asynchronous stage-orchestration} runtime removes the barrier entirely: worker threads keep producing evidence while a dedicated aggregator thread keeps merging, connected by a thread-safe evidence buffer, so the rollout/propose and aggregate/commit stages overlap instead of stalling --- the partial-rollout, no-barrier discipline of asynchronous RL \citep{fu2025areal,roll2025flash} ported to self-evolution.
+This section develops the framework's three central execution concepts in order of increasing subtlety: what parallelism buys and where its ceiling is; what removing the barrier costs and how that cost is governed; and what to do when concurrent proposals \emph{contradict} rather than compose.
 
-\subsection{Staleness policies and the lag budget}
-Asynchrony's price is staleness, and the active policy is the only thing that changes between async regimes. Given each diff's $(\eta, \alpha)$ the policy answers \textsc{accept}/\textsc{rebase}/\textsc{discard}: \textbf{Full} uses stale diffs directly ($\eta$ ignored; maximum throughput, minimum safety); \textbf{Guarded} is version-gated bounded staleness (accept $\eta{=}0$, rebase $\eta \le \alpha$, discard beyond), in the spirit of AReaL \citep{fu2025areal}; \textbf{Reflective} always rebases and re-verifies, discarding only if the delta no longer holds --- recovering proposals the Guarded policy would waste. Orthogonally, \code{async\_ratio} is a global lag budget in artifact \emph{versions} (the ROLL-Flash-style budget \citep{roll2025flash}): a worker refreshes its snapshot only once head has drifted more than \code{async\_ratio} versions past it, and a backpressure signal forces a global resync if evidence keeps arriving while nothing commits. \Cref{sec:exp-staleness} measures both knobs.
+\subsection{Parallelism: the round barrier and its ceiling}
+\label{sec:concept-parallel}
+The baseline runtime is \textbf{synchronous data parallelism}: every worker holds the same ledger snapshot, rolls out a shard of tasks, and proposes diffs; a round barrier waits for \emph{all} workers; then one aggregator step merges the round's diffs; then the next round begins. It is deterministic and easy to reason about, and because agent rollouts are I/O-bound (the worker spends its time waiting on a model), plain threads already deliver real overlap --- measured, eight threads speed up real API rollouts $5.8\times$ while pure-CPU work gains nothing ($1.1\times$).
 
-\subsection{DP, TP, PP over an artifact library}
-Three pluggable decompositions mirror the parallelism taxonomy of large-scale training. \textbf{Data parallel} (default): same snapshot, task-sharded, diffs merged. \textbf{Tensor parallel} \citep{shoeybi2019megatron}: one \emph{hot} artifact is split into disjoint sections, each owned by a worker, so edits are conflict-free by construction and the merge is concatenation plus a consistency review. \textbf{Pipeline parallel} \citep{huang2019gpipe}: artifacts form a dependency chain, and a downstream failure back-propagates blame to the earliest failing upstream stage --- the same machinery used for counterfactual-replay attribution.
+The barrier, however, imposes a structural ceiling that no worker count can lift. A round lasts as long as its \emph{slowest} rollout --- wall-clock per round is $\mathbb{E}[\max \text{ of } N]$ rather than $\mathbb{E}[\text{latency}]$ --- and modern reasoning models have exactly the heavy-tailed latency that maximizes this gap: a short answer and a 2{,}000-token deliberation are the same call. Between rounds, a second serial region appears: the aggregator's held-out evaluations run while every worker idles. Both costs are inherent to the \emph{schedule}, not the workload, which motivates removing the barrier.
 
-\subsection{The three long tails}
-AgentDescent treats ``the long tail'' as three separate problems. \textbf{$L_{\mathrm{traj}}$} (system): heavy-tailed rollout durations are met with an online duration estimator, longest-processing-time dispatch \citep{graham1969lpt}, and straggler detection; the barrier-free runtime is what actually prevents one slow rollout from stalling the rest (turn-level checkpoint-and-resume is \emph{not} implemented --- the resume queue records stragglers but nothing resumes them, since resumability would require a rollout contract the opaque \code{run} callable does not offer). \textbf{$L_{\mathrm{task}}$} (data): Zipfian artifact triggering is met with UCB \citep{auer2002ucb} over (cluster $\times$ artifact) so starved tail artifacts receive an exploration bonus, plus a difficulty filter that down-weights all-pass/all-fail groups (the zero-advantage argument familiar from RLVR). \textbf{$L_{\mathrm{value}}$} (signal): most diffs are marginal, so the audit scheduler spends the scarce oracle budget proportionally to $\mathrm{blast\ radius} \times \mathrm{uncertainty} / \mathrm{trust}$.
+\subsection{Asynchrony: barrier-free evolution, staleness, and the lag budget}
+\label{sec:concept-async}
+The \textbf{barrier-free runtime} deletes the round structure entirely. Worker threads continuously roll out and propose; a dedicated aggregator thread continuously drains the evidence buffer and merges; nobody waits for anybody (\cref{fig:architecture}). This is the partial-rollout, no-barrier discipline of asynchronous RL systems \citep{fu2025areal,roll2025flash} ported to self-evolution: the rollout/propose stage and the merge/commit stage \emph{overlap} instead of alternating, so a slow rollout delays only its own diff.
+
+Asynchrony's price is \textbf{staleness}: a worker may propose against a snapshot the ledger has already moved past. AgentDescent makes staleness a first-class, per-diff quantity --- $\eta = \max(\text{head} - \text{base})$ over the artifacts the diff touches, computable because the ledger is version-vectored --- and bounds it with two independent mechanisms. First, the \textbf{lag budget} \code{async\_ratio} caps drift at the source: a worker refreshes its snapshot once head is more than \code{async\_ratio} versions past it, and a backpressure signal forces a global resync if evidence keeps arriving while nothing commits. Small budget $\to$ near-synchronous behavior; large budget $\to$ high throughput and many stale diffs. Second, a \textbf{staleness policy} decides what to do with the stale diffs that arrive anyway, answering \textsc{accept}/\textsc{rebase}/\textsc{discard} from each diff's $(\eta,\alpha)$:
+
+\begin{itemize}
+  \item \textbf{Full} --- use stale diffs directly, $\eta$ ignored: maximum throughput, minimum safety. Sound only where diffs compose regardless of base version.
+  \item \textbf{Guarded} --- version-gated bounded staleness in the spirit of AReaL \citep{fu2025areal}: accept $\eta{=}0$, rebase $\eta \le \alpha$, discard beyond. Safe, but it \emph{pays for safety in discarded work} --- at a large lag budget on our reference domain it throws away $\sim$85\% of its rollouts (\cref{fig:staleness}).
+  \item \textbf{Reflective} --- always rebase onto the current head and \emph{re-verify}: cheaply re-check whether the diff's claimed improvement still holds there, and discard only if it does not. The insight is that a stale diff is not a wrong diff --- it is an unproven one --- so the policy converts would-be-discards back into candidates, recovering most of Guarded's waste for the price of a cheap re-check.
+\end{itemize}
+
+One footgun deserves a paragraph because it generalizes: the lag budget is denominated in artifact \emph{versions}, so its right value depends entirely on how much wall-clock a version represents. The default (3) is tuned for seconds-long model rollouts; on a domain where a rollout costs microseconds, a worker drifts past any budget almost instantly --- measured, \code{async\_ratio}=3 there discards 93\% of its evidence and never reaches the quality bar, while 1 comes within a point of the synchronous path. A run that discards more than half its evidence now warns at runtime.
+
+\subsection{Reflective merge: when a dictionary update cannot merge}
+\label{sec:concept-reflective}
+The fusion stage's default mechanism is a keyed union: a strategy maps each proposal into diff operations on keys (playbook bullets, rule slots, file paths), and \emph{distinct} keys fuse for free --- two workers editing different files, or appending different bullets, combine by construction. This is the model-soup analogy \citep{wortsman2022modelsoups}, and it silently assumes the artifact's key space is fine-grained enough for concurrent proposals to land on different keys.
+
+Many important artifacts violate that assumption. A prompt held in a \emph{single} instruction slot --- GEPA's artifact shape \citep{agrawal2025gepa}, and arguably the common case for prompt evolution --- makes every pair of concurrent proposals a write--write conflict on one key. The keyed machinery then has only bad options: a dictionary update (\code{ops.update()}) keeps the last rewrite and silently drops the rest, and conflict resolution keeps the better of the pair --- which quietly reduces merge-of-$N$ to per-round \emph{best-of-$N$ selection}. That is a real mechanism, but it is not merging, and a framework that reports it as merging would be measuring the wrong thing (the \code{contested} counter exists precisely so such runs cannot be misread).
+
+\textbf{Reflective merge} (\code{reflective\_merge}) is the escape hatch: when surviving proposals contradict on a key, a model is asked to \emph{write their union} --- one candidate text that preserves the intent of each proposal --- and that written union goes to the acceptance gate like any other candidate. The gate still has the last word (a union that regresses held-out score does not commit), so the model's synthesis is a proposal generator, not a decision maker. The same idea appears at two places in the pipeline under one name: as the fusion mechanism just described, and inside the \emph{Reflective staleness policy} above, where ``rebase and re-verify'' is the temporal version of the same move --- carry the proposal's intent onto a changed base and let measurement decide. Reflective merge is also a \emph{cost} lever: fusing a round's $N$ surviving diffs into one candidate means one held-out admission sweep instead of $N$, which is measurable as fewer model calls at equal budget (\cref{sec:exp-live}).
+
+\subsection{Beyond data parallelism}
+Two further decompositions mirror the training-stack taxonomy, included for completeness: \textbf{tensor parallel} \citep{shoeybi2019megatron} splits one hot artifact into disjoint sections so concurrent edits are conflict-free by construction, and \textbf{pipeline parallel} \citep{huang2019gpipe} treats a dependency chain of artifacts as stages, back-propagating blame for a downstream failure to the earliest failing upstream stage. Orthogonally, heavy-tailed rollout \emph{durations} are met with duration-estimated LPT dispatch \citep{graham1969lpt} and straggler detection, and heavy-tailed task \emph{value} with UCB task selection \citep{auer2002ucb} and an oracle-audit budget spent by $\mathrm{blast\ radius} \times \mathrm{uncertainty}/\mathrm{trust}$.
 
 \section{Governance by Blast Radius}
 \label{sec:governance}
@@ -211,14 +235,10 @@ A framework claiming generality should be measured by what it can express. Eight
 \section{Experiments}
 \label{sec:experiments}
 
-All numbers below are produced by scripts shipped in the repository and named beside each result; absolute times depend on the host and endpoint, so we report ratios and provide the exact reproduction command for every row. Unless stated otherwise, live-model runs use \code{deepseek-v4-flash} or \code{GLM-5.2} through an OpenAI-compatible endpoint.
+We report one \emph{typical} result per claim rather than the full measurement tables, which live in the repository documentation together with the exact reproduction command for every number. All results are produced by scripts shipped in the repository; absolute times depend on host and endpoint, so ratios are the reproducible quantity. Live-model runs use \code{deepseek-v4-flash} or \code{GLM-5.2} through an OpenAI-compatible endpoint.
 
-\subsection{Is thread-level rollout parallelism real?}
-\label{sec:exp-gil}
-Agent rollouts are I/O-bound (the worker waits on a model), so Python threads should overlap them despite the GIL --- but this is measured, not assumed. Eight threads over one pool, two workloads: a real \code{glm-5.2} API round trip falls from 48.6\,s sequential to 8.3\,s ($\mathbf{5.8\times}$; 5.8--6.5$\times$ across three runs, sub-linear because a reasoning model's heavy-tailed latency means eight threads finish when the slowest finishes), while pure-Python CPU arithmetic gains nothing ($1.1\times$). The corollary matters more than the headline: the speedup tracks how much of a rollout is \emph{waiting}, so CPU-heavy agents belong behind a process pool while the framework's workers stay on the I/O.
-
-\subsection{Dispatch scales near-linearly; the barrier does not}
-\label{sec:exp-scaling}
+\subsection{Parallelism: near-linear dispatch, a real barrier ceiling}
+\label{sec:exp-parallel}
 
 \begin{figure}[t]
 \centering
@@ -239,7 +259,7 @@ Agent rollouts are I/O-bound (the worker waits on a model), so Python threads sh
 \addlegendentry{async dispatch (measured)}
 \end{axis}
 \end{tikzpicture}
-\caption{Rollout-dispatch throughput of the barrier-free runtime vs.\ worker count (fixed wall-clock window; \code{examples/efficiency.py}, Experiment~1). Speedup is near-linear to 8 workers --- the rollout stage holds no global lock. Across repeated runs the 8-worker figure landed between $7.8\times$ and $9.2\times$; the honest reading is ``linear to within measurement noise at this scale.''}
+\caption{Rollout-dispatch throughput of the barrier-free runtime vs.\ worker count (fixed wall-clock window; \code{examples/efficiency.py}). Near-linear to 8 workers --- the rollout stage holds no global lock. Across repeated runs the 8-worker figure landed between $7.8\times$ and $9.2\times$; the honest reading is ``linear to within measurement noise at this scale.''}
 \label{fig:scaling}
 \end{minipage}\hfill
 \begin{minipage}[t]{0.48\textwidth}
@@ -258,30 +278,26 @@ Agent rollouts are I/O-bound (the worker waits on a model), so Python threads sh
 \addplot[fill=adblue!60, draw=adblue!80!black] coordinates {(serial,1.00) (sync $N{=}4$,1.85) (async $N{=}4$,3.22)};
 \end{axis}
 \end{tikzpicture}
-\caption{Effective concurrency (model-seconds $\div$ wall-clock) on a faithful GEPA port, HotpotQA, \code{deepseek-v4-flash}, 16 rollouts pinned on every arm. The serial control is the published loop exactly (one worker, serial gate: overlap $1.00\times$). The round barrier is the whole difference between the parallel arms: the same four workers reach $1.85\times$ with it and $3.22\times$ without it. Wall-clock: 609\,s / 239\,s / 140\,s.}
+\caption{Effective concurrency (model-seconds $\div$ wall-clock) on a faithful GEPA port, HotpotQA, 16 rollouts pinned on every arm. The serial control is the published loop exactly (one worker, serial gate: overlap $1.00\times$). The round barrier is the whole difference between the parallel arms: the same four workers reach $1.85\times$ with it and $3.22\times$ without it. Wall-clock: 609\,s / 239\,s / 140\,s.}
 \label{fig:concurrency}
 \end{minipage}
 \end{figure}
 
-Two complementary measurements separate what parallelism buys from what the barrier costs. First, \emph{dispatch}: running the barrier-free runtime for a fixed wall-clock window and counting rollouts gives near-linear scaling through 8 workers (\cref{fig:scaling}); the rollout stage holds no global lock, so this is the $O(N/T_{\mathrm{iter}})$ regime the design targets. Second, \emph{end-to-end}: a whole \evolve{} run at default settings reaches only $1.8\times$ with 8 workers under uniform rollout latency, and $1.7\times$ under a heavy-tailed (reasoning-model-like) latency --- because the round barrier waits for the slowest worker and, past that, the ceiling is whatever in a round is \emph{not} a rollout, which at default settings is the acceptance gate. The two gaps have two independent knobs: the gate has its own concurrency pool (\code{eval\_concurrency} $1 \to 8$ takes the gate from 3.6\,s to 1.2\,s, saturating at the held-out size), and the barrier can be removed --- on a heavy-tailed dispatch microbenchmark the asynchronous pipeline runs at $\sim$100\% utilization against the barrier's 36--40\%, a $2.65\times$ wall-clock speedup (robust range 2.57--2.93$\times$), tracking $\mathbb{E}[\max \text{ of } N]/\mathbb{E}[\text{latency}]$.
+Two measurements bracket what parallelism buys. \emph{Dispatch} (\cref{fig:scaling}): running the barrier-free runtime for a fixed wall-clock window and counting rollouts gives near-linear scaling through 8 workers --- the $O(N/T_{\mathrm{iter}})$ regime the design targets. \emph{End-to-end}: a whole synchronous \evolve{} run at 8 workers reaches only $1.8\times$ under uniform rollout latency and $1.7\times$ under a heavy-tailed, reasoning-model-like latency --- the barrier ceiling predicted in \cref{sec:concept-parallel}, since a round waits for its slowest rollout and the inter-round gap is serial gate evaluation. On the same heavy-tailed workload, removing the barrier yields $2.65\times$ over the synchronous discipline: the barrier idles workers at 36--40\% utilization waiting for the tail, while the barrier-free pipeline stays at $\sim$100\%.
 
-\subsection{On a live model, against a true serial control}
+\subsection{The flagship: a live model against a true serial control}
 \label{sec:exp-live}
-Stub latencies can flatter a scheduler, so the same question is put to a faithful port of a published serial algorithm on its own benchmark: GEPA on HotpotQA \citep{agrawal2025gepa,yang2018hotpotqa}, 16 rollouts pinned on every arm, and a control that is the upstream loop \emph{exactly} --- one worker \emph{and} a serial gate (a control that still evaluates concurrently is already partly parallel; this one overlaps at precisely $1.00\times$). \Cref{fig:concurrency} shows the result: the synchronous arm reaches $1.85\times$ effective concurrency --- consistent with the heavy-tail stub prediction of 1.7--1.8$\times$ --- and removing the barrier takes the same four workers to $3.22\times$. Wall-clock falls faster than concurrency rises (609\,s $\to$ 239\,s $\to$ 140\,s) because model-seconds per rollout also fall (37.9 $\to$ 27.7 $\to$ 23.8): reflective merging collapses each round's diffs into one gate sweep, and the async arm discards stale proposals before they reach the gate. That saving is real but is not parallelism, so it is reported beside the concurrency figure, not inside it. Two caveats: the async arm overran the pinned budget (19 rollouts vs.\ 16) because a barrier-free path has no round boundary at which to stop, and at \code{async\_ratio}=3 this workload discarded every stale proposal the filter saw --- buying wall-clock and spending proposals.
+Stub latencies can flatter a scheduler, so the same question is put to a faithful port of a published serial algorithm on its own benchmark: GEPA on HotpotQA \citep{agrawal2025gepa,yang2018hotpotqa}, 16 rollouts pinned on every arm, and a control that is the upstream loop \emph{exactly} --- one worker \emph{and} a serial gate, overlapping at precisely $1.00\times$ (a control that still evaluates concurrently is already partly parallel). \Cref{fig:concurrency} shows the result: the synchronous arm reaches $1.85\times$ effective concurrency --- consistent with the heavy-tail stub prediction --- and removing the barrier takes the same four workers to $3.22\times$, with wall-clock falling $609 \to 239 \to 140$\,s. Reflective merge also shows up here as the cost lever of \cref{sec:concept-reflective}: in a width-8 variant of the same setup, fusing each round's surviving diffs into one candidate cut model calls by 28\% relative to the serial arm (70 vs.\ 97), because $N$ admission sweeps collapse into one. One caveat travels with the async arm: with no round boundary at which to stop, it overran the pinned budget (19 rollouts vs.\ 16), and at the default lag budget it discarded every stale proposal it saw --- buying wall-clock and spending proposals.
 
-A second live-model experiment isolates merging as a \emph{cost} lever at width 8 (GEPA's own Pareto optimizer untouched, empty seed instruction, 16 rollouts pinned, one seed, wall-clock net of endpoint failures): serial 1424\,s / 97 calls, sync $N{=}8$ 1022\,s / \textbf{70} calls, async $N{=}8$ \textbf{742\,s} / 95 calls. The merge lever works exactly where admissions are the cost --- sync fuses six single-candidate admissions into two merged ones ($-28\%$ calls) --- while async gives most of that saving back (its merger sweeps on its own cadence, so batches shrink) but wins wall-clock ($1.92\times$). Raw \code{curl} probes put the endpoint's own ceiling at $7\times$--$10\times$, so the measured ladder ($1.31\times$/$1.80\times$/$2.89\times$ effective concurrency) is the engine's structure, not the provider's.
-
-\subsection{Staleness policies and the lag budget}
+\subsection{Asynchrony's cost structure: the staleness policies}
 \label{sec:exp-staleness}
 
 \begin{figure}[t]
 \centering
-\begin{minipage}[t]{0.48\textwidth}
-\centering
 \begin{tikzpicture}
 \begin{axis}[
-  width=\textwidth, height=5.4cm,
-  ybar stacked, bar width=14pt,
+  width=0.6\textwidth, height=5.6cm,
+  ybar stacked, bar width=16pt,
   xlabel={staleness policy (\code{async\_ratio}=4)},
   ylabel={rollouts ($\times 10^3$)},
   symbolic x coords={Full, Reflective, Guarded},
@@ -295,86 +311,14 @@ A second live-model experiment isolates merging as a \emph{cost} lever at width 
 \addlegendentry{discarded as stale}
 \end{axis}
 \end{tikzpicture}
-\caption{The three staleness policies at a large lag budget (\code{examples/run\_async}). All three converge to reward 1.000 on the reference domain; what differs is the cost. Guarded discards $\sim$85\% of its rollouts as stale ($\sim$5.1\,s wall vs.\ $\sim$3.2\,s); Reflective recovers most would-be-stale proposals by rebasing and re-verifying. Ratios are the result --- absolute counts scale with the host.}
+\caption{The three staleness policies at a deliberately large lag budget (\code{examples/run\_async}). All three converge to the same final reward on the reference domain; what differs is the cost. Guarded discards $\sim$85\% of its rollouts as stale ($\sim$5.1\,s wall-clock vs.\ $\sim$3.2\,s); Reflective recovers almost all of that would-be waste by rebasing and re-verifying instead of discarding. Ratios are the result --- absolute counts scale with the host.}
 \label{fig:staleness}
-\end{minipage}\hfill
-\begin{minipage}[t]{0.48\textwidth}
-\centering
-\begin{tikzpicture}
-\begin{axis}[
-  width=\textwidth, height=5.4cm,
-  xlabel={\code{async\_ratio} (lag budget, versions)},
-  ylabel={held-out test quality},
-  xtick={0,1,3}, ymin=0, ymax=1.1, xmin=-0.4, xmax=3.4,
-  legend style={font=\scriptsize, at={(0.5,-0.32)}, anchor=north, legend columns=2, draw=none, fill=none},
-  grid=major, grid style={adgray!20},
-  tick label style={font=\scriptsize}, label style={font=\scriptsize},
-]
-\addplot[adblue, thick, mark=*, mark size=1.8pt, error bars/.cd, y dir=both, y explicit]
-  coordinates {(0,0.897) += (0,0.034) -= (0,0.069)
-               (1,0.931) += (0,0.069) -= (0,0.034)
-               (3,0.345) += (0,0.034) -= (0,0.035)};
-\addlegendentry{median test quality (3 seeds)}
-\addplot[adred!70!black, densely dashed, thick, mark=square*, mark size=1.6pt]
-  coordinates {(0,0.00) (1,0.25) (3,0.93)};
-\addlegendentry{stale-discard fraction}
-\end{axis}
-\end{tikzpicture}
-\caption{The lag budget is a budget in artifact \emph{versions}, so its right value depends on rollout cost. On the microsecond-rollout reference domain (async $N{=}4$, 3 seeds, commit-resync pinned off), \code{async\_ratio}=3 discards 93\% of evidence and never reaches the quality bar; 1 comes within a point of synchronous; 0 is the steadiest row. The default (3) is tuned for seconds-long model rollouts, and a run that discards more than half its evidence now warns at runtime.}
-\label{fig:lagbudget}
-\end{minipage}
 \end{figure}
 
-\Cref{fig:staleness} compares the three policies at a deliberately large lag budget: all converge, and the cost structure is the message --- Guarded pays for safety in discarded work, Full pays nothing on a domain whose diffs happen to compose, and Reflective buys most of Guarded's safety at a fraction of its waste by rebasing instead of discarding. \Cref{fig:lagbudget} sweeps the lag budget itself on the deterministic reference domain and exposes a genuine footgun that the framework now warns about at runtime: \code{async\_ratio} is denominated in artifact versions, so on a domain where a rollout costs microseconds a worker drifts past any budget almost instantly --- at lag 3 the run discards 93\% of its evidence and never reaches the quality bar, while at lag 1 it comes within a point of the synchronous path. The default stays tuned for the workload the framework is for (seconds-long model rollouts), not the one that is cheap to measure. The same sweep also shows that \emph{parallelism buys time, not rollouts}: from 1 to 8 synchronous workers, time-to-quality falls $1.26 \to 0.52 \to 0.25$ (normalized) while cost-to-quality \emph{rises} slightly ($22 \to 24$ rollouts), and reach-rate improves from 2/3 to 3/3 seeds. These coordination-cost numbers involve no model call and are evidence the harness works, not an answer to the parallelism question --- that answer is \cref{sec:exp-live}.
+\Cref{fig:staleness} makes the trade-off of \cref{sec:concept-async} concrete: at a large lag budget all three policies converge to the same quality, and the entire difference is \emph{what each one pays}. Guarded pays for safety in discarded work ($\sim$85\% of rollouts thrown away); Full pays nothing on a domain whose diffs happen to compose; Reflective buys most of Guarded's safety at a fraction of its waste, because rebase-and-re-verify converts would-be discards back into candidates. The lag-budget footgun of \cref{sec:concept-async} was measured the same way: at \code{async\_ratio}=3 on a microsecond-rollout domain, 93\% of evidence is discarded and the quality bar is never reached, while a budget of 1 comes within a point of the synchronous path.
 
-\subsection{Do the ports still learn? The runtime-matrix quality results}
+\subsection{Generality: the ports still learn under the aggressive schedule}
 \label{sec:exp-ports}
-
-\begin{table}[t]
-\centering
-\footnotesize
-\setlength{\tabcolsep}{4pt}
-\caption{The eleven microports and analogues on one runner and one budget: 3 seeds each, barrier-free async pipeline, 80 rollouts, 8 workers, Full staleness, \code{deepseek-v4-flash}. ``moved'' counts seeds whose held-out test score rose; ``accepted'' is committed proposals out of 240 across the three seeds. Rows are comparable only within a domain: a gain is bounded by the headroom its baseline leaves (GSM-Hard's noise floor is $\pm 0.02$ vs.\ GSM8K's $\pm 0.09$).}
-\label{tab:eleven}
-\begin{tabular}{@{}llrrccr@{}}
-\toprule
-\textbf{Method} & \textbf{Domain} & \textbf{test, before $\to$ after} & \textbf{gain} & \textbf{moved} & \textbf{accepted} & \textbf{calls/seed} \\
-\midrule
-PromptBreeder \citep{fernando2023promptbreeder} & GSM8K & $0.474 \to \mathbf{0.969}$ & $+0.495$ & 3/3 & 8/240 & 1444 \\
-AFlow \citep{zhang2024aflow} & GSM8K & $0.510 \to \mathbf{0.969}$ & $+0.458$ & 3/3 & 10/240 & 2069 \\
-Self-Refine \citep{madaan2023selfrefine} & GSM8K & $0.552 \to \mathbf{0.943}$ & $+0.391$ & 3/3 & 5/240 & 1050 \\
-Reflexion \citep{shinn2023reflexion} & GSM-Hard & $0.583 \to \mathbf{0.599}$ & $+0.016$ & 2/3 & 3/240 & 465 \\
-SICA \citep{robeyns2025sica} & GSM-Hard & $0.641 \to \mathbf{0.667}$ & $+0.026$ & 2/3 & 5/240 & 899 \\
-G\"odel Agent \citep{yin2024godel} & GSM-Hard & $0.625 \to \mathbf{0.687}$ & $+0.062$ & 2/3 & 9/240 & 985 \\
-Voyager \citep{wang2023voyager} & crafting world & $0.000 \to \mathbf{0.667}$ & $+0.667$ & 2/3 & 3/240 & 1234 \\
-SkillWeaver \citep{zheng2025skillweaver} & settings site & $0.000 \to \mathbf{0.771}$ & $+0.771$ & 3/3 & 8/240 & 1170 \\
-Absolute Zero \citep{zhao2025absolutezero} & self-play carts & $0.042 \to \mathbf{0.354}$ & $+0.313$ & 3/3 & 9/240 & 624 \\
-R-Zero \citep{huang2025rzero} & self-play carts & $0.062 \to \mathbf{0.292}$ & $+0.230$ & 3/3 & 6/240 & 937 \\
-Agent0 \citep{xue2025agent0} & self-play carts & $0.042 \to \mathbf{0.542}$ & $+0.500$ & 3/3 & 6/240 & 1626 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\begin{table}[t]
-\centering
-\footnotesize
-\setlength{\tabcolsep}{4pt}
-\caption{The seven benchmark-faithful ports, each on its own benchmark. Single runs (one seed) that establish each port works end to end --- not a cross-method comparison, and not paper-scale results.}
-\label{tab:seven}
-\begin{tabular}{@{}lp{3.1cm}p{2.6cm}p{5.6cm}@{}}
-\toprule
-\textbf{Method} & \textbf{Domain} & \textbf{Budget} & \textbf{Measured} \\
-\midrule
-ACE \citep{zhang2025ace} & FiNER-139 \citep{loukas2022finer} & async $N{=}4$, 120 rollouts & val $0.719 \to \mathbf{0.766}$, test $0.786$; 10 bullets curated \\
-GEPA \citep{agrawal2025gepa} & HotpotQA \citep{yang2018hotpotqa} & 16 rollouts, all arms pinned & $1.85\times / 3.22\times$ concurrency (sync/async) vs.\ true serial; test EM $0.600 \to 0.850$ on 20 items \\
-EvoSkill & FinQA \citep{chen2021finqa} & async $N{=}4$, 120 rollouts & val $0.527 \to \mathbf{0.707}$, test $0.633$; frontier filled 5/5 \\
-SkillOpt & SearchQA \citep{dunn2017searchqa} (hard subset) & async $N{=}4$, 60 rollouts & val $0.053 \to \mathbf{0.211}$, test $0.316$; 3 of 43 edits accepted \\
-ADAS \citep{hu2024adas} & MGSM \citep{shi2022mgsm}, GPQA \citep{rein2023gpqa} & --- & no lift number: MGSM saturated; GPQA at 49\,s / 5{,}116 tokens per call \\
-DGM \citep{zhang2025dgm} & vendored bugs, real \code{pytest} (SWE-bench-style \citep{jimenez2023swebench}) & async $N{=}2$, 16 rollouts & seed agent $0.844 \to$ best archived child $\mathbf{0.906}$ held out; its \code{solve.py} grew $18 \to 79$ lines \\
-OpenEvolve \citep{openevolve2025} & function minimization & async $N{=}4$, 24 rollouts & combined score $0.9638 \to \mathbf{1.4995}$ vs.\ a 1.5 ceiling, held-out seeds \\
-\bottomrule
-\end{tabular}
-\end{table}
 
 \begin{figure}[t]
 \centering
@@ -401,22 +345,20 @@ OpenEvolve \citep{openevolve2025} & function minimization & async $N{=}4$, 24 ro
 \addlegendentry{after evolution (mean of 3 seeds)}
 \end{axis}
 \end{tikzpicture}
-\caption{Held-out test score before and after evolution for the eleven microports and analogues (\cref{tab:eleven}): 3 seeds each under the barrier-free async pipeline, 80 rollouts, 8 workers. Between 3 and 10 of 240 proposals commit per row --- the acceptance gate admits only strict held-out improvements, so low acceptance is the shape of the mechanism, not a low yield.}
+\caption{Held-out test score before and after evolution for the eleven microports and analogues, each run under the \emph{most aggressive} configuration --- barrier-free async pipeline, 8 workers, Full staleness, 80 rollouts, 3 seeds. All eleven improve. Between 3 and 10 of 240 proposals commit per method --- the acceptance gate admits only strict held-out improvements, so sparse acceptance is the shape of the mechanism, not a low yield. Bars are comparable only within a domain: a gain is bounded by the headroom its baseline leaves.}
 \label{fig:eleven}
 \end{figure}
 
-Speed is worthless if the ports stop learning under the parallel schedulers, so every port is also measured for quality. \Cref{tab:eleven} and \cref{fig:eleven} report the eleven declarative ports under the \emph{most aggressive} configuration --- barrier-free, 8 workers, Full staleness --- at three seeds each: all eleven improve their held-out test metric, with gains bounded by each benchmark's headroom exactly as they should be (the GSM8K rows converge on 0.94--0.97 and separate on \emph{cost}: AFlow spends twice Self-Refine's calls for 0.026 more). Acceptance is sparse by design --- 3--10 committed proposals out of 240 --- because the gate admits only strict held-out improvements. \Cref{tab:seven} reports the seven benchmark-faithful ports on their own benchmarks. An earlier fixed-fingerprint run of the full runtime matrix (11 methods $\times$ 3 schedulers, paired over $n{=}33$) measured a median $1.36\times$ end-to-end and $1.89\times$ engine-window speedup of synchronous-parallel over serial, with 11/11 methods showing a median win.
+Speed is worthless if the ports stop learning under the parallel schedulers, so quality is measured under the most aggressive one. \Cref{fig:eleven} shows the eleven declarative ports: all improve their held-out test metric, with gains bounded by each benchmark's headroom exactly as they should be (the three GSM8K ports converge on 0.94--0.97 and separate on \emph{cost}, not quality). The seven benchmark-faithful ports each run end to end on their own benchmark; three typical rows stand for the set: ACE lifts FiNER-139 validation $0.719 \to 0.766$ while curating a ten-bullet playbook, DGM's best archived child fixes held-out vendored bugs at $0.906$ against its seed agent's $0.844$ (its own solver growing from 18 to 79 lines), and OpenEvolve drives a function-minimization score from $0.964$ to $1.4995$ against a 1.5 ceiling. These single-seed runs establish that each port works, not paper-scale comparisons. Finally, the one-call entry point (\code{evolve\_skill}) on 40 real HotpotQA rows lifts held-out exact match from $0.167$ to $0.583$, committing one proposal and rejecting three --- the accepted one being the instruction \emph{``Respond with only the requested answer, omitting any extra explanation or restatement.''}
 
-Beyond the ports, the highest-level one-call path (\code{evolve\_skill}) on 40 real HotpotQA rows lifts held-out exact match from $0.167$ to $0.583$ in four rounds (338 calls, one committed proposal, three rejected below threshold), learning the instruction \emph{``Respond with only the requested answer, omitting any extra explanation or restatement''}; a bring-your-own-agent run on word problems scored in undocumented integer-cents convention goes $0.250 \to 1.000$ in one round by writing the convention down --- generalizing rather than memorizing.
-
-\subsection{Merge-of-$N$ against best-of-$N$ fork at equal budget}
+\subsection{Merge-of-$N$ against best-of-$N$ fork: an honest null}
 \label{sec:merge-vs-fork}
-Every number above is a throughput number, and throughput cannot distinguish \emph{merging} from \emph{sampling-and-selecting}: $N$ independent forks saturate $N$ workers just as well. The distinguishing quantity is held-out quality at an \emph{equal rollout budget}, merge-of-$N$ against best-of-$N$ fork, with the fork reported both as the dev-selected arm (what fork-and-select actually delivers) and the test-oracle arm (an unshippable upper bound). On HotpotQA through \code{GLM-5.2} (80 rows split 40/20/20, 9 rollouts pinned, $N{=}3$, 3 seeds, reflective merge so contradicting proposals survive to be fused), the result is a \textbf{null}: merge-of-3 has the highest median test EM ($0.800$ vs.\ $0.700$ for both serial and fork) \emph{and} the widest spread ($0.600$--$0.850$), and the intervals overlap --- the framework's own separation test refuses to call it a win, which is what it is for. Two secondary observations are still informative: the call confound runs in merge's favor (73 calls vs.\ serial's 93 and fork's 132, because a merge arm shares what its workers learned while forks each start from nothing), and fork pays a real price for choosing on dev (oracle median $0.750$ vs.\ selected $0.700$). The binding caveat is mechanistic: at this budget the fused union was built \emph{twice in the whole experiment} --- most merges saw a single surviving diff --- so this is not evidence that merging does not help; it is an experiment in which merging barely fired. A related subtlety generalizes: an artifact whose strategy keeps all state in one key (GEPA's single instruction slot) makes every pair of proposals contradict by construction, reducing merge-of-$N$ to per-round best-of-$N$ selection unless a reflective model-written merge is installed; the \code{contested} counter exists so such runs cannot be misread as merge wins. Larger budgets on multi-key artifacts are the open measurement.
+Every number above is a throughput number, and throughput cannot distinguish \emph{merging} from \emph{sampling-and-selecting}: $N$ independent forks saturate $N$ workers just as well. The distinguishing quantity is held-out quality at an \emph{equal rollout budget}. On HotpotQA (three seeds, $N{=}3$, 9 rollouts pinned, reflective merge installed so contradicting proposals survive to be fused), merge-of-3 posts the highest median test score \emph{and} the widest spread, the intervals overlap, and the framework's own separation test refuses to call it a win --- which is what that test is for. The diagnosis matters more than the verdict: at this budget the fused union was built \emph{twice in the whole experiment}, because most merges saw only a single surviving diff --- so this is not evidence that merging does not help; it is an experiment in which merging barely fired. It also confirms the single-key subtlety of \cref{sec:concept-reflective} from the other side: without reflective merge, this workload's merge arm would have been best-of-$N$ selection wearing merging's name. Larger budgets on multi-key artifacts are the open measurement, and the baseline harness (serial / fork-with-oracle-and-selected / merge, budget-pinned, seeded) ships with the framework.
 
 \section{Scope, Limitations, and Honest Reporting}
 \label{sec:limits}
 
-AgentDescent is a research reference implementation, not a production system, and several limits are stated rather than hidden. (i) The throughput premise is a \emph{testable engineering hypothesis}, not community consensus; the equal-budget quality question (\cref{sec:merge-vs-fork}) is currently a null at small budgets. (ii) Turn-level checkpoint-and-resume of stragglers is not implemented, and neither is a stratified tail-canary held-out split; the paper's tables mark both. (iii) Most quality rows carry three seeds and the seven faithful ports carry one --- evidence the mechanism runs and moves the metric it should, not paper-scale claims. (iv) Difficulty knobs calibrated on one model do not transfer: re-measured under a model swap at fixed configuration, the two ports whose difficulty was a knob (ACE's top-$k$, SkillOpt's hard-subset selector) lost their lift entirely --- the mechanism ran correctly and there was nothing left to learn --- while the ports whose difficulty is a property of the benchmark reproduced. (v) Several earlier headline numbers in the project's own history were found to be irreproducible (no generating script) or measured with flattering definitions (setup time in the denominator, double-counted staleness denominators, one-run-per-arm comparisons), and were re-measured and corrected in place; every number in this paper is generated by a named script. We consider this correction trail part of the contribution: a framework for self-improving systems should hold its own evaluation to at least the standard its acceptance gate holds diffs to.
+AgentDescent is a research reference implementation, not a production system, and several limits are stated rather than hidden. (i) The throughput premise is a \emph{testable engineering hypothesis}, not community consensus; the equal-budget quality question (\cref{sec:merge-vs-fork}) is currently a null at small budgets. (ii) Turn-level checkpoint-and-resume of stragglers is not implemented, and neither is a stratified tail-canary held-out split. (iii) Most quality rows carry three seeds and the seven faithful ports carry one --- evidence the mechanism runs and moves the metric it should, not paper-scale claims. (iv) Difficulty knobs calibrated on one model do not transfer: re-measured under a model swap at fixed configuration, the two ports whose difficulty was a knob (ACE's top-$k$, SkillOpt's hard-subset selector) lost their lift entirely --- the mechanism ran correctly and there was nothing left to learn --- while the ports whose difficulty is a property of the benchmark reproduced. (v) Several earlier headline numbers in the project's own history were found to be irreproducible (no generating script) or measured with flattering definitions (setup time in the denominator, double-counted staleness denominators, one-run-per-arm comparisons), and were re-measured and corrected in place; every number in this paper is generated by a named script. We consider this correction trail part of the contribution: a framework for self-improving systems should hold its own evaluation to at least the standard its acceptance gate holds diffs to.
 
 \section{Conclusion}
 \label{sec:conclusion}
@@ -428,7 +370,7 @@ The algorithm ports were contributed by \code{chendanyang} (the seven benchmark-
 
 \section*{Reproducibility}
 \sloppy
-All code is at \url{https://github.com/Birfy/agentdescent} (MIT license; \code{pip install agentdescent}; the core engine has zero required dependencies). Every measured number in this paper names its generating script: \code{examples/efficiency.py} (\cref{sec:exp-gil,sec:exp-scaling}), \code{bench/matrix\_run.py} and \code{examples/gepa/gepa\_prompt\_evolution.py} (\cref{sec:exp-live}), \code{examples/run\_async.py} and \code{bench/run.py} (\cref{sec:exp-staleness}), \code{bench/candidate\_methods.py} (\cref{sec:exp-ports}), and \code{bench/baselines\_run.py} (\cref{sec:merge-vs-fork}). Every port supports \code{-{}-dry-run} (no API key, no model call) and carries an offline test suite; datasets are fetched from canonical sources by a dependency-free data layer. Absolute timings depend on host and endpoint; the repository documentation states, for each table, whether ratios or absolute values are the reproducible quantity.
+All code is at \url{https://github.com/Birfy/agentdescent} (MIT license; \code{pip install agentdescent}; the core engine has zero required dependencies). Every measured number in this paper names its generating script: \code{examples/efficiency.py} (\cref{sec:concept-parallel,sec:exp-parallel}), \code{bench/matrix\_run.py} and \code{examples/gepa/gepa\_prompt\_evolution.py} (\cref{sec:exp-live}), \code{examples/run\_async.py} and \code{bench/run.py} (\cref{sec:exp-staleness}), \code{bench/candidate\_methods.py} (\cref{sec:exp-ports}), and \code{bench/baselines\_run.py} (\cref{sec:merge-vs-fork}). Every port supports \code{-{}-dry-run} (no API key, no model call) and carries an offline test suite; datasets are fetched from canonical sources by a dependency-free data layer. Absolute timings depend on host and endpoint; the repository documentation states, for each table, whether ratios or absolute values are the reproducible quantity.
 
 \bibliographystyle{plainnat}
 \bibliography{references}

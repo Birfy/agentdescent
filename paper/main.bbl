@@ -1,4 +1,4 @@
-\begin{thebibliography}{38}
+\begin{thebibliography}{32}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
 \expandafter\ifx\csname urlstyle\endcsname\relax
@@ -19,25 +19,10 @@ Peter Auer, Nicol{\`o} Cesa-Bianchi, and Paul Fischer.
 \newblock Finite-time analysis of the multiarmed bandit problem.
 \newblock \emph{Machine Learning}, 47\penalty0 (2):\penalty0 235--256, 2002.
 
-\bibitem[Chen et~al.(2021)Chen, Chen, Smiley, Shah, Borova, Langdon, Moussa,
-  Beane, Huang, Routledge, et~al.]{chen2021finqa}
-Zhiyu Chen, Wenhu Chen, Charese Smiley, Sameena Shah, Iana Borova, Dylan
-  Langdon, Reema Moussa, Matt Beane, Ting-Hao Huang, Bryan Routledge, et~al.
-\newblock {FinQA}: A dataset of numerical reasoning over financial data.
-\newblock In \emph{Proceedings of EMNLP}, 2021.
-
 \bibitem[{CoEvoSkills authors}(2026)]{coevoskills2026}
 {CoEvoSkills authors}.
 \newblock Self-evolving agent skills via co-evolutionary verification.
 \newblock \emph{arXiv preprint arXiv:2604.01687}, 2026.
-
-\bibitem[Dunn et~al.(2017)Dunn, Sagun, Higgins, Guney, Cirik, and
-  Cho]{dunn2017searchqa}
-Matthew Dunn, Levent Sagun, Mike Higgins, V~Ugur Guney, Volkan Cirik, and
-  Kyunghyun Cho.
-\newblock {SearchQA}: A new {Q\&A} dataset augmented with context from a search
-  engine.
-\newblock \emph{arXiv preprint arXiv:1704.05179}, 2017.
 
 \bibitem[Fernando et~al.(2023)Fernando, Banarse, Michalewski, Osindero, and
   Rockt{\"a}schel]{fernando2023promptbreeder}
@@ -81,13 +66,6 @@ Yanping Huang, Youlong Cheng, Ankur Bapna, Orhan Firat, Dehao Chen, Mia Chen,
   parallelism.
 \newblock \emph{Advances in Neural Information Processing Systems}, 32, 2019.
 
-\bibitem[Jimenez et~al.(2023)Jimenez, Yang, Wettig, Yao, Pei, Press, and
-  Narasimhan]{jimenez2023swebench}
-Carlos~E Jimenez, John Yang, Alexander Wettig, Shunyu Yao, Kexin Pei, Ofir
-  Press, and Karthik Narasimhan.
-\newblock {SWE-bench}: Can language models resolve real-world {GitHub} issues?
-\newblock \emph{arXiv preprint arXiv:2310.06770}, 2023.
-
 \bibitem[Kingma and Ba(2014)]{kingma2014adam}
 Diederik~P Kingma and Jimmy Ba.
 \newblock Adam: A method for stochastic optimization.
@@ -100,13 +78,6 @@ Mu~Li, David~G Andersen, Jun~Woo Park, Alexander~J Smola, Amr Ahmed, Vanja
 \newblock Scaling distributed machine learning with the parameter server.
 \newblock In \emph{11th USENIX Symposium on Operating Systems Design and
   Implementation (OSDI 14)}, pages 583--598, 2014.
-
-\bibitem[Loukas et~al.(2022)Loukas, Fergadiotis, Chalkidis, Spyropoulou,
-  Malakasiotis, Androutsopoulos, and Paliouras]{loukas2022finer}
-Lefteris Loukas, Manos Fergadiotis, Ilias Chalkidis, Eirini Spyropoulou,
-  Prodromos Malakasiotis, Ion Androutsopoulos, and Georgios Paliouras.
-\newblock {FiNER}: Financial numeric entity recognition for {XBRL} tagging.
-\newblock In \emph{Proceedings of ACL}, 2022.
 
 \bibitem[Madaan et~al.(2023)Madaan, Tandon, Gupta, Hallinan, Gao, Wiegreffe,
   Alon, Dziri, Prabhumoye, Yang, et~al.]{madaan2023selfrefine}
@@ -136,13 +107,6 @@ Alexander Novikov, Ng{\^a}n V{\~u}, Marvin Eisenberger, Emilien Dupont, Po-Sen
   discovery.
 \newblock \emph{arXiv preprint arXiv:2506.13131}, 2025.
 
-\bibitem[Rein et~al.(2023)Rein, Hou, Stickland, Petty, Pang, Dirani, Michael,
-  and Bowman]{rein2023gpqa}
-David Rein, Betty~Li Hou, Asa~Cooper Stickland, Jackson Petty, Richard~Yuanzhe
-  Pang, Julien Dirani, Julian Michael, and Samuel~R Bowman.
-\newblock {GPQA}: A graduate-level google-proof {Q\&A} benchmark.
-\newblock \emph{arXiv preprint arXiv:2311.12022}, 2023.
-
 \bibitem[Robeyns et~al.(2025)Robeyns, Szummer, and Aitchison]{robeyns2025sica}
 Maxime Robeyns, Martin Szummer, and Laurence Aitchison.
 \newblock A self-improving coding agent.
@@ -164,13 +128,6 @@ J{\"u}rgen Schmidhuber.
 Asankhaya Sharma.
 \newblock {OpenEvolve}: an open-source evolutionary coding agent.
 \newblock \url{https://github.com/codelion/openevolve}, 2025.
-
-\bibitem[Shi et~al.(2022)Shi, Suzgun, Freitag, Wang, Srivats, Vosoughi, Chung,
-  Tay, Ruder, Zhou, et~al.]{shi2022mgsm}
-Freda Shi, Mirac Suzgun, Markus Freitag, Xuezhi Wang, Suraj Srivats, Soroush
-  Vosoughi, Hyung~Won Chung, Yi~Tay, Sebastian Ruder, Denny Zhou, et~al.
-\newblock Language models are multilingual chain-of-thought reasoners.
-\newblock \emph{arXiv preprint arXiv:2210.03057}, 2022.
 
 \bibitem[Shinn et~al.(2023)Shinn, Cassano, Gopinath, Narasimhan, and
   Yao]{shinn2023reflexion}
