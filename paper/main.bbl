@@ -1,4 +1,4 @@
-\begin{thebibliography}{32}
+\begin{thebibliography}{30}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
 \expandafter\ifx\csname urlstyle\endcsname\relax
@@ -13,11 +13,6 @@ Lakshya~A Agrawal, Shangyin Tan, Dilara Soylu, Noah Ziems, Rishi Khare, Krista
 \newblock {GEPA}: Reflective prompt evolution can outperform reinforcement
   learning.
 \newblock \emph{arXiv preprint arXiv:2507.19457}, 2025.
-
-\bibitem[Auer et~al.(2002)Auer, Cesa-Bianchi, and Fischer]{auer2002ucb}
-Peter Auer, Nicol{\`o} Cesa-Bianchi, and Paul Fischer.
-\newblock Finite-time analysis of the multiarmed bandit problem.
-\newblock \emph{Machine Learning}, 47\penalty0 (2):\penalty0 235--256, 2002.
 
 \bibitem[{CoEvoSkills authors}(2026)]{coevoskills2026}
 {CoEvoSkills authors}.
@@ -39,12 +34,6 @@ Wei Fu, Jiaxuan Gao, Xujie Shen, Chen Zhu, Zhiyu Mei, Chuyi He, Shusheng Xu,
 \newblock {AReaL}: A large-scale asynchronous reinforcement learning system for
   language reasoning.
 \newblock \emph{arXiv preprint arXiv:2505.24298}, 2025.
-
-\bibitem[Graham(1969)]{graham1969lpt}
-Ronald~L Graham.
-\newblock Bounds on multiprocessing timing anomalies.
-\newblock \emph{SIAM Journal on Applied Mathematics}, 17\penalty0 (2):\penalty0
-  416--429, 1969.
 
 \bibitem[Hu et~al.(2024)Hu, Lu, and Clune]{hu2024adas}
 Shengran Hu, Cong Lu, and Jeff Clune.
