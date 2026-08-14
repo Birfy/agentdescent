@@ -284,7 +284,11 @@ def claude(model: str = "claude-opus-4-8", max_tokens: int = 4096,
         nonlocal _client
         if _client is None:
             from anthropic import Anthropic  # lazy, optional dependency
-            _client = Anthropic()
+            # max_retries=0: retrying is this function's job (`with_retries`
+            # below). Leaving the SDK's default 2 in place multiplies the two
+            # layers -- attempts x (1 + max_retries) x timeout -- and one
+            # logical call against a stalled endpoint blocked ~45 minutes.
+            _client = Anthropic(max_retries=0)
         t0 = time.time()
         try:
             msg = _client.messages.create(
