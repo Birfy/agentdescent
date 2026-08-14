@@ -36,6 +36,7 @@ nav:
     - Install and first run: install.md
     - Quickstart — dataset to skill: quickstart-skill.md
     - Quickstart — evolve a directory: quickstart-directory.md
+    - Quickstart — evolve an agent's code: quickstart-agent-code.md
   - Core concepts:
     - Concepts: concepts.md
     - Architecture: architecture.md
