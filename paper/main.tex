@@ -28,6 +28,7 @@
 
 \newcommand{\evolve}{\texttt{evolve()}}
 \newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\plugtitle}[1]{\textbf{\footnotesize #1}}
 
 \title{\textbf{AgentDescent: Gradient Descent Where the Parameters Are Agents} \\[4pt]
 \large A Parallel, Asynchronous, Merge-Based Framework for Self-Evolving Agent Artifacts}
@@ -62,7 +63,7 @@ The analogy is productive precisely because of where it breaks. \emph{Gradients 
 \begin{enumerate}
   \item \textbf{A systems design} that maps the deep-learning training stack --- parameter server, asynchronous SGD, staleness bounds, adaptive per-parameter tests, gradient surgery, weight averaging, EMA --- onto parallel agent self-evolution, with an explicit account of where the analogy holds and where it must break (\cref{sec:design}).
   \item \textbf{A discrete-space aggregator} implementing merge as optimization: staleness policies (Full / Guarded / Reflective) over a per-diff lag measure $\eta$, PCGrad-style conflict projection, model-soup-style fusion with an optional fusion tournament, Beta-posterior acceptance with annealed confidence, and dual-branch (dev/stable) promotion (\cref{sec:aggregator}).
-  \item \textbf{Two execution runtimes and three parallelism paradigms}: a synchronous data-parallel round loop and a barrier-free asynchronous stage-orchestration runtime with a version-lag budget (\code{async\_ratio}) and backpressure; plus data-, tensor-, and pipeline-parallel decompositions of the artifact library (\cref{sec:parallelism}).
+  \item \textbf{Two execution runtimes and three parallelism paradigms}: a synchronous data-parallel round loop and a barrier-free asynchronous stage-orchestration runtime with a version-lag budget (\code{async\_ratio}) and backpressure; plus data-, tensor-, and pipeline-parallel decompositions of the artifact library --- with every component (agent, strategy, aggregator, staleness policy, runtime, executor) behind a swappable seam (\cref{sec:parallelism,sec:pluggable}).
   \item \textbf{Generality, demonstrated}: eighteen published self-evolution algorithms ported onto one engine --- seven reproducing their paper's own benchmark, eleven as declared mechanism microports and analogues --- each runnable, offline-tested, and measured under all three schedulers (\cref{sec:ports}).
   \item \textbf{An honest empirical study} (\cref{sec:experiments}): near-linear dispatch scaling to 8 workers; $5.8\times$ thread-level speedup on real API rollouts; $1.85\times \to 3.22\times$ effective concurrency from removing the round barrier on a live model at a pinned budget; a staleness-policy and lag-budget characterization; and an equal-budget merge-vs-fork comparison that we report as \emph{not yet separated}, together with the diagnosis of why separation is hard at small budgets.
 \end{enumerate}
@@ -109,6 +110,8 @@ training code (not self-modifiable) & L0 frozen governance layer \\
   ledger/.style={box, fill=adgreen!12, draw=adgreen!60!black},
   gov/.style={box, fill=adred!8, draw=adred!60!black},
   arr/.style={-{Stealth[length=2.4mm]}, thick, adgray},
+  plug/.style={draw=adgray, dashed, rounded corners=2pt, align=center, font=\scriptsize, inner sep=3pt, fill=white},
+  plugarr/.style={dashed, adgray, -{Circle[open, length=1.6mm]}},
 ]
 % column 1: workers
 \node[worker] (w1) at (0, 1.9)  {Worker 1\\rollout + propose};
@@ -133,9 +136,6 @@ training code (not self-modifiable) & L0 frozen governance layer \\
 % column 4: ledger
 \node[ledger, minimum height=22mm] (led) at (12.6, 0) {git-backed\\\code{Ledger}\\\code{dev} $\to$ \code{stable}};
 
-% governance below the aggregator
-\node[gov, align=left] (govn) at (8.2, -3.6) {\textbf{Governance:} L2 free merge $\cdot$ L1 oracle-gated $\cdot$ L0 frozen};
-
 % forward flow, left to right
 \draw[arr] (w1.east) -- (buf.west |- w1.east);
 \draw[arr] (w2.east) -- (buf.west |- w2.east);
@@ -147,14 +147,25 @@ training code (not self-modifiable) & L0 frozen governance layer \\
 \draw[arr] (gate) -- (commit);
 \draw[arr] (aggbox.east) -- (led.west) node[midway, above, font=\scriptsize] {commit};
 
-% governance: straight vertical arrow up into the aggregator
-\draw[arr, adred!60!black, dashed] (govn.north) -- (aggbox.south);
+% ---- pluggable-seam shelf: every dashed socket is one keyword argument ----
+\node[plug] (pagent) at (0,-3.9) {\plugtitle{agent \, (\code{agent=})}\\Claude $\cdot$ OpenAI-compat.\\Claude Code $\cdot$ any callable\\\code{run}/\code{reward}/\code{propose}};
+\node[plug] (prun)   at (3.9,-3.9) {\plugtitle{runtime + placement}\\sync $\leftrightarrow$ \code{async}\\DP $\cdot$ TP $\cdot$ PP\\threads / processes};
+\node[plug] (popt)   at (8.5,-3.9) {\plugtitle{optimizer \, (\code{aggregator\_factory=})}\\default $\cdot$ Pareto $\cdot$ archive $\cdot$ MAP-Elites\\staleness: Full $\cdot$ Guarded $\cdot$ Reflective};
+\node[plug] (pstrat) at (12.9,-3.9) {\plugtitle{artifact \, (\code{strategy=})}\\\code{AppendRules}/\code{KeyedRules}\\ACE playbook $\cdot$ directory\\(file-path keys) $\cdot$ yours};
+\draw[plugarr] (pagent.north) -- (wn.south);
+\draw[plugarr] (prun.north) -- (prun.north |- buf.south) -- (buf.south);
+\draw[plugarr] (popt.north) -- (popt.north |- aggbox.south) -- (aggbox.south);
+\draw[plugarr] (pstrat.north) -- (pstrat.north |- led.south) -- (led.south);
 
-% feedback loop: orthogonal route along the bottom, no crossings
+% the one deliberately non-pluggable layer
+\node[gov] (govn) at (8.5,-5.7) {\textbf{Governance (L0 frozen):} oracle $\cdot$ audit budget $\cdot$ merge permissions --- deliberately \emph{not} a seam};
+\draw[arr, adred!60!black, dashed] (govn.north) -- (popt.south);
+
+% feedback loop: orthogonal route along the outside, no crossings
 \draw[arr, adgreen!60!black]
-  (led.south) -- (12.6,-5.0) -- node[above, font=\scriptsize] {snapshot refresh (bounded by the lag budget \code{async\_ratio})} (0,-5.0) -- (wn.south);
+  (led.east) -- (15.2,0) -- (15.2,-6.7) -- node[above, font=\scriptsize] {snapshot refresh (bounded by the lag budget \code{async\_ratio})} (-2.3,-6.7) -- (-2.3,0.45) -- (w2.west);
 \end{tikzpicture}
-\caption{AgentDescent architecture. Evidence flows left to right: $N$ workers roll out tasks against ledger snapshots and emit diffs with evidence cards into a thread-safe buffer; a dedicated aggregator thread runs the five-stage merge pipeline and commits winners to the git-backed ledger. The green return path is the only feedback edge: workers refresh their snapshot from the ledger, and the lag budget \code{async\_ratio} bounds how far behind head a snapshot may drift. In the synchronous runtime a round barrier sits between the two sides; in the barrier-free runtime they never wait for each other. Governance (dashed) forces high-blast-radius merges through an oracle and freezes the safety layer.}
+\caption{AgentDescent architecture. \textbf{Solid, top:} the fixed data path --- $N$ workers roll out tasks against ledger snapshots and emit diffs with evidence cards into a thread-safe buffer; a dedicated aggregator thread runs the five-stage merge pipeline and commits winners to the git-backed ledger; the green return edge is the only feedback path, bounded by the lag budget. \textbf{Dashed, bottom:} every component on the path is a \emph{pluggable seam}, swapped by one keyword argument of \evolve{} --- the model behind a worker, the whole optimizer, the staleness policy, the runtime and placement, and the artifact's diff encoding. The eighteen ports of \cref{sec:ports} are exactly such plug-ins. The one deliberate exception is the red governance layer: L0 (oracle, audit budget, merge permissions) is frozen and read-only to the loop, because a self-referential system must not be able to swap out its own judge.}
 \label{fig:architecture}
 \end{figure}
 
@@ -166,6 +177,10 @@ The \code{Ledger} is the parameter server: a git-backed store with per-artifact 
 
 \subsection{The one required disanalogy}
 Because diffs do not add, every downstream design choice follows from replacing summation with a decision procedure. Averaging two contradictory edits is not meaningful; ranking and projecting them is. This is why the aggregator (next section) is best understood not as a reducer but as a discrete-space optimizer whose ``step'' is a merge decision, and why acceptance is statistical --- a per-artifact posterior over whether the candidate improves held-out reward --- rather than a learning rate.
+
+\subsection{Everything behind the seam is pluggable}
+\label{sec:pluggable}
+The architecture of \cref{fig:architecture} is deliberately a set of \emph{seams}, each swapped by one keyword argument of the single entry point \evolve{}. The \textbf{agent layer} is provider-agnostic --- any \code{prompt$\to$text} callable is a completion, so Claude, OpenAI-compatible endpoints, a tool-using CLI agent, or three plain Python functions (\code{run}/\code{reward}/\code{propose}) plug in interchangeably. The \textbf{strategy} (\code{strategy=}) defines what evolves and how proposals become keyed diff operations: append-only rule lists, keyed rule slots, ACE-style playbooks, or whole directories whose state keys are file paths --- the optimizer never changes, only the diff encoding does. The \textbf{aggregator itself} is replaceable (\code{aggregator\_factory=}): GEPA's Pareto optimizer, ADAS/DGM-style archives, and OpenEvolve's MAP-Elites islands all slot in at this seam, with their parent-selection and gate rules extracted as named policy classes at two further seams (selection, acceptance). The \textbf{staleness policy}, the \textbf{runtime} (\code{asynchronous=True}), the \textbf{parallelism strategy} (DP/TP/PP or a custom one), the \textbf{executor} (in-process threads or supervised worker processes), and the \textbf{sandbox isolation level} are likewise independent arguments. The eighteen ports of \cref{sec:ports} are the load test of this claim: none of them forks the engine --- each is precisely a bundle of plug-ins at these seams. The single deliberate exception is governance (\cref{sec:governance}): the L0 layer is frozen and exposes no seam, because a self-modifying system must not be able to swap out its own judge.
 
 \section{The Aggregator as a Discrete-Space Optimizer}
 \label{sec:aggregator}
