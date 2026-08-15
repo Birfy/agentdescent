@@ -488,6 +488,13 @@ def build_parser() -> argparse.ArgumentParser:
                         "Without it, a one-key artifact (GEPA's InstructionSlot) "
                         "cannot fuse at all and the merge arm is really per-round "
                         "best-of-N selection -- `fusion.contested` is 0 and says so")
+    p.add_argument("--fusion-tournament", action="store_true",
+                   help="rank each fused union against the individual candidates "
+                        "on held-out data before the gate. Costs one extra sweep "
+                        "per candidate, which is why it is off by default -- but "
+                        "it is the only setting under which `fusion.contested` "
+                        "and `win_rate` are populated, so a merge-vs-fork run "
+                        "that wants to say whether fusion *fired* needs it")
     p.add_argument("--allow-thin-headroom", action="store_true",
                    help="run even when the seed artifact already scores above "
                         f"{MAX_SEED_TEST_SCORE}. The refusal still prints and the "
@@ -609,6 +616,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return best_of_n_fork(workload, args.width, budget=budget, seed=seed,
                                   concurrency=args.fork_concurrency)
         if name == "merge":
+            if args.fusion_tournament:
+                # Only the merge arm can hold a tournament, and only a
+                # tournament populates `contested`/`win_rate`. Installed here
+                # rather than on the shared workload so the other two arms keep
+                # the gate they would have had without this flag.
+                workload = replace(workload, evolve_kwargs={
+                    **workload.evolve_kwargs, "fusion_tournament": True})
             if args.reflective_merge:
                 # Only the merge arm. serial has one proposal per step and fork
                 # never merges, so installing it there would change nothing and
@@ -678,6 +692,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(to_markdown(comparison))
     print()
     print(f"total model spend: {usage.summary()}")
+
+    # `contested` before `win_rate`, always: a merge arm whose fusions never
+    # fired is not evidence about merging, and the two are indistinguishable in
+    # a quality table. Printed for every merge arm, so a run that answered
+    # nothing says so on its own.
+    for arm in results:
+        if arm.fusion is not None:
+            print(f"fusion  {arm.arm} seed={arm.seed}: {arm.fusion.summary()}")
+        elif arm.arm.startswith("merge"):
+            print(f"fusion  {arm.arm} seed={arm.seed}: no tournament held "
+                  "(pass --fusion-tournament to populate contested/win_rate)")
 
     if "merge" in arms and "fork" in arms:
         merge_name, fork_name = f"merge-of-{args.width}", f"fork-of-{args.width}"
