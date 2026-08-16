@@ -1,4 +1,4 @@
-\begin{thebibliography}{43}
+\begin{thebibliography}{44}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
 \expandafter\ifx\csname urlstyle\endcsname\relax
@@ -224,6 +224,16 @@ Mohammad Shoeybi, Mostofa Patwary, Raul Puri, Patrick LeGresley, Jared Casper,
 \newblock {Megatron-LM}: Training multi-billion parameter language models using
   model parallelism.
 \newblock \emph{arXiv preprint arXiv:1909.08053}, 2019.
+
+\bibitem[Suzgun et~al.(2023)Suzgun, Scales, Sch{\"a}rli, Gehrmann, Tay, Chung,
+  Chowdhery, Le, Chi, Zhou, and Wei]{suzgun2023bbh}
+Mirac Suzgun, Nathan Scales, Nathanael Sch{\"a}rli, Sebastian Gehrmann, Yi~Tay,
+  Hyung~Won Chung, Aakanksha Chowdhery, Quoc~V Le, Ed~H Chi, Denny Zhou, and
+  Jason Wei.
+\newblock Challenging {BIG-Bench} tasks and whether chain-of-thought can solve
+  them.
+\newblock In \emph{Findings of the Association for Computational Linguistics:
+  ACL 2023}, 2023.
 
 \bibitem[Wang et~al.(2023)Wang, Xie, Jiang, Mandlekar, Xiao, Zhu, Fan, and
   Anandkumar]{wang2023voyager}
