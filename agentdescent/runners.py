@@ -59,8 +59,16 @@ LAYOUTS: Dict[str, str] = {
     "claude_skill": ".claude/skills/{name}",   # project-scoped Claude Code skill
     "claude_agent": ".claude/agents",          # project-scoped subagent definitions
     "skill_library": ".claude/skills",         # a directory OF skills, one dir each
+    "dsh_skill": ".dsh/skills/{name}",         # project-scoped DeepSeek Harness skill
+    "dsh_skill_library": ".dsh/skills",        # a directory OF dsh skills, one dir each
     "root": "",                                # the tree *is* the working directory
 }
+# The dsh rows are the harness's rank-100 `project-dsh` root, and a rollout
+# workspace holds no `.git`, so the harness resolves its project root to the
+# workspace itself and scans exactly this path. Staging a dsh run under a
+# `.claude` layout instead is not an error anything reports -- the agent simply
+# never sees the skill, every candidate scores the same, and the run looks like
+# a method that does not work.
 
 #: Prefix of the output a runner produces when the frozen test suite fails. The
 #: rollout is not an error -- "the candidate broke the build" is exactly the
