@@ -119,64 +119,59 @@ training code (not self-modifiable) & L0 frozen governance layer \\
   font=\small,
   box/.style={draw, rounded corners=2pt, align=center, minimum height=9mm, inner sep=4pt},
   worker/.style={box, fill=adblue!12, draw=adblue!70!black, minimum width=26mm},
-  agg/.style={box, fill=adorange!15, draw=adorange!70!black, minimum width=33mm, minimum height=7mm, inner sep=3pt},
-  ledger/.style={box, fill=adgreen!12, draw=adgreen!60!black},
-  gov/.style={box, fill=adred!8, draw=adred!60!black},
+  agg/.style={box, fill=adorange!15, draw=adorange!70!black, minimum width=34mm, minimum height=7mm, inner sep=3pt},
+  ledger/.style={box, fill=adgreen!12, draw=adgreen!60!black, minimum width=24mm},
+  gov/.style={box, fill=adred!8, draw=adred!60!black, align=center},
+  seam/.style={draw=adgray, dashed, rounded corners=2pt, align=center, font=\scriptsize, inner sep=3pt, fill=white},
   arr/.style={-{Stealth[length=2.4mm]}, thick, adgray},
-  plug/.style={draw=adgray, dashed, rounded corners=2pt, align=center, font=\scriptsize, inner sep=3pt, fill=white},
-  plugarr/.style={dashed, adgray, -{Circle[open, length=1.6mm]}},
+  elab/.style={font=\scriptsize, align=center, fill=white, inner sep=1pt},
 ]
-% column 1: workers
+% ---- row 1: the fixed data path ----
 \node[worker] (w1) at (0, 1.9)  {Worker 1\\rollout + propose};
 \node[worker] (w2) at (0, 0.45) {Worker 2\\rollout + propose};
-\node          at (0,-0.5) {$\vdots$};
+\node          at (0,-0.6) {$\vdots$};
 \node[worker] (wn) at (0,-1.9)  {Worker $N$\\rollout + propose};
-
-% column 2: evidence buffer
-\node[box, fill=adgray!10, minimum height=24mm] (buf) at (3.6, 0) {Evidence\\Buffer};
-
-% column 3: aggregator pipeline (top to bottom)
-\node[agg] (stale)  at (8.2, 2.0)  {1.\ staleness filter ($\eta$ vs.\ $\eta_{\max}$)};
-\node[agg] (conf)   at (8.2, 1.0)  {2.\ conflict resolution};
-\node[agg] (fuse)   at (8.2, 0.0)  {3.\ fusion / reflective merge};
-\node[agg] (gate)   at (8.2,-1.0)  {4.\ audit gate + Beta accept};
-\node[agg] (commit) at (8.2,-2.0)  {5.\ commit (CAS)};
+\node[box, fill=adgray!10, minimum height=24mm, minimum width=16mm] (buf) at (3.7, 0) {Evidence\\Buffer};
+\node[agg] (stale)  at (8.6, 2.0)  {1.\ staleness filter ($\eta$ vs.\ $\eta_{\max}$)};
+\node[agg] (conf)   at (8.6, 1.0)  {2.\ conflict resolution};
+\node[agg] (fuse)   at (8.6, 0.0)  {3.\ fusion / reflective merge};
+\node[agg] (gate)   at (8.6,-1.0)  {4.\ audit gate + Beta accept};
+\node[agg] (commit) at (8.6,-2.0)  {5.\ commit (CAS)};
 \begin{scope}[on background layer]
 \node[draw=adorange!70!black, rounded corners=3pt, fit=(stale)(commit), inner sep=4pt, fill=adorange!4] (aggbox) {};
 \end{scope}
 \node[above=1mm of aggbox, adorange!50!black, font=\small\bfseries] {Aggregator (the optimizer)};
+\node[ledger, minimum height=22mm] (led) at (13.2, 0) {git-backed\\\code{Ledger}\\\code{dev} $\to$ \code{stable}};
 
-% column 4: ledger
-\node[ledger, minimum height=22mm] (led) at (12.6, 0) {git-backed\\\code{Ledger}\\\code{dev} $\to$ \code{stable}};
-
-% forward flow, left to right
 \draw[arr] (w1.east) -- (buf.west |- w1.east);
 \draw[arr] (w2.east) -- (buf.west |- w2.east);
 \draw[arr] (wn.east) -- (buf.west |- wn.east);
-\draw[arr] (buf.east) -- (aggbox.west) node[midway, above=1pt, font=\scriptsize] {diffs + evidence};
-\draw[arr] (stale) -- (conf);
-\draw[arr] (conf) -- (fuse);
-\draw[arr] (fuse) -- (gate);
-\draw[arr] (gate) -- (commit);
-\draw[arr] (aggbox.east) -- (led.west) node[midway, above, font=\scriptsize] {commit};
+\draw[arr] (buf.east) -- (aggbox.west);
+\node[elab] at ($(buf.east)!0.5!(aggbox.west)$) {diffs +\\evidence};
+\draw[arr] (aggbox.east) -- (led.west);
+\node[elab] at ($(aggbox.east)!0.5!(led.west)$) {commit};
+\draw[arr] (stale) -- (conf);  \draw[arr] (conf) -- (fuse);
+\draw[arr] (fuse) -- (gate);   \draw[arr] (gate) -- (commit);
 
-% ---- pluggable-seam shelf: every dashed socket is one keyword argument ----
-\node[plug] (pagent) at (0,-3.9) {\plugtitle{agent \, (\code{agent=})}\\Claude $\cdot$ OpenAI-compat.\\Claude Code $\cdot$ any callable\\\code{run}/\code{reward}/\code{propose}};
-\node[plug] (prun)   at (3.9,-3.9) {\plugtitle{runtime + placement}\\sync $\leftrightarrow$ \code{async}\\DP $\cdot$ TP $\cdot$ PP\\threads / processes};
-\node[plug] (popt)   at (8.5,-3.9) {\plugtitle{optimizer \, (\code{aggregator\_factory=})}\\default $\cdot$ Pareto $\cdot$ archive $\cdot$ MAP-Elites\\staleness: Full $\cdot$ Guarded $\cdot$ Reflective};
-\node[plug] (pstrat) at (12.9,-3.9) {\plugtitle{artifact \, (\code{strategy=})}\\\code{AppendRules}/\code{KeyedRules}\\ACE playbook $\cdot$ directory\\(file-path keys) $\cdot$ yours};
-\draw[plugarr] (pagent.north) -- (wn.south);
-\draw[plugarr] (prun.north) -- (prun.north |- buf.south) -- (buf.south);
-\draw[plugarr] (popt.north) -- (popt.north |- aggbox.south) -- (aggbox.south);
-\draw[plugarr] (pstrat.north) -- (pstrat.north |- led.south) -- (led.south);
+% ---- row 2: the seams, one per component ----
+\node[seam] (sagent) at (0,-3.5)   {\textbf{agent} (\code{agent=})\\any \code{prompt$\to$text}};
+\node[seam] (srun)   at (3.7,-3.5) {\textbf{runtime} (\code{asynchronous=})\\DP $\cdot$ TP $\cdot$ PP};
+\node[seam] (sopt)   at (8.6,-3.5) {\textbf{optimizer} (\code{aggregator\_factory=})\\+ staleness policy};
+\node[seam] (sart)   at (13.2,-3.5){\textbf{artifact} (\code{strategy=})\\diff encoding};
+\draw[dashed, adgray] (sagent.north) -- (0,-2.35);
+\draw[dashed, adgray] (srun.north)   -- (3.7,-1.2);
+\draw[dashed, adgray] (sopt.north)   -- (8.6,-2.5);
+\draw[dashed, adgray] (sart.north)   -- (13.2,-1.1);
 
-% the one deliberately non-pluggable layer
-\node[gov] (govn) at (8.5,-5.7) {\textbf{Governance (L0 frozen):} oracle $\cdot$ audit budget $\cdot$ merge permissions --- deliberately \emph{not} a seam};
-\draw[arr, adred!60!black, dashed] (govn.north) -- (popt.south);
+% ---- row 3: the one layer that is not a seam, wired to the gate it governs ----
+\node[gov] (govn) at (6.3,-5.3) {\textbf{Governance (L0 frozen)}\\oracle $\cdot$ audit budget $\cdot$ merge permissions};
+\draw[arr, adred!60!black, dashed] (govn.north) -- (6.3,-1.0) -- (gate.west);
 
-% feedback loop: orthogonal route along the outside, no crossings
+% ---- row 4: the single feedback edge, in its own lane ----
 \draw[arr, adgreen!60!black]
-  (led.east) -- (15.2,0) -- (15.2,-6.7) -- node[above, font=\scriptsize] {snapshot refresh (bounded by the lag budget \code{async\_ratio})} (-2.3,-6.7) -- (-2.3,0.45) -- (w2.west);
+  (led.north) -- (13.2,3.6) --
+  node[above, font=\scriptsize, pos=0.55] {snapshot refresh, bounded by the lag budget \code{async\_ratio}}
+  (0,3.6) -- (w1.north);
 \end{tikzpicture}
 \caption{AgentDescent architecture. \textbf{Solid, top:} the fixed data path --- $N$ workers roll out tasks against ledger snapshots and emit diffs with evidence cards into a thread-safe buffer; a dedicated aggregator thread runs the five-stage merge pipeline and commits winners to the git-backed ledger; the green return edge is the only feedback path, bounded by the lag budget. \textbf{Dashed, bottom:} the pluggable seams of \cref{sec:pluggable}, each selected by one keyword argument of \evolve{}. \textbf{Red:} the frozen L0 governance layer, deliberately not a seam.}
 \label{fig:architecture}
