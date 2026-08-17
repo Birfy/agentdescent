@@ -42,6 +42,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # The plugin's last test spawns the real Python engine and drives a whole
+      # run through the bridge. It is the only test that can catch the two
+      # halves drifting apart, and it skips itself when the package is not
+      # importable -- so CI installs it rather than letting that test quietly
+      # pass by doing nothing.
+      - run: pip install -e ..
       - run: npm ci --ignore-scripts
       - run: npm run typecheck
       - run: npm test

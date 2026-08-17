@@ -15,7 +15,9 @@
   "exports": {
     ".": "./lib/index.js",
     "./evolution": "./lib/evolution.js",
-    "./artifacts/skill": "./lib/artifacts/skill.js"
+    "./artifacts/skill": "./lib/artifacts/skill.js",
+    "./bridge": "./lib/bridge.js",
+    "./engine": "./lib/engine.js"
   },
   "files": [
     "lib",
