@@ -39,7 +39,7 @@
 \newcommand{\plugtitle}[1]{\textbf{\footnotesize #1}}
 \newcommand{\Dval}{D_{\mathrm{val}}}
 
-\title{AgentDescent: Asynchronous Parallel Self-Evolution of Agent Artifacts via Reflective Merge}
+\title{AgentDescent: Asynchronous Parallel Self-Evolution of LLM Agents by Merging Conflicting Edits}
 
 % Running head and the line under the title bar; the full title is too long to
 % sit in a page header.
@@ -61,7 +61,7 @@
 \begin{abstract}
 A self-evolving agent loop pays for two things: rollouts, and the held-out validation that decides which proposed edit to keep. On live models the second dominates the critical path, and it is the one parallelism alone cannot reduce --- $N$ concurrent proposals mean $N$ acceptance tests. Merging removes that multiplier by validating a round's proposals once, but only where they can be fused, and they cannot when the artifact is held in a single key: every concurrent pair then conflicts, and merge-of-$N$ degenerates into best-of-$N$ selection at best-of-$N$ validation cost.
 
-\textbf{Reflective merge} closes that gap. A model writes the union of the contradicting proposals, and the union faces the same acceptance test as any candidate --- the model proposes, the gate decides. We isolate the mechanism on an artifact where nothing else can fuse: over four seeds at a pinned rollout budget, the keyed union produces a fused candidate in $0$ of $48$ merges and reflective merge in $42$, spending $47\%$ fewer model calls (paired 95\% CI $[-634,-311]$, same direction on every seed). Quality is not the claim; at four seeds on a 30-task split we report the interval and do not assert equivalence. We also give a closed-form upper bound on how often merging can fire at all, which retrodicts two null results of our own. The framework these run on, \textbf{AgentDescent}, executes eighteen published self-evolution algorithms as plug-ins under serial, synchronous, and barrier-free schedulers without modification, reaching $6.8\times$ less wall-clock than a faithful serial control. Code, workloads, and per-result reproduction commands are open source.
+The fix is to merge the conflicting edits instead of discarding all but one: a model is asked to write their union --- one edit preserving what each proposal contributed --- and that union faces the same acceptance test as any candidate, so the model proposes and the gate decides. We call this \emph{reflective merge}. We isolate the mechanism on an artifact where nothing else can fuse: over four seeds at a pinned rollout budget, the keyed union produces a fused candidate in $0$ of $48$ merges and reflective merge in $42$, spending $47\%$ fewer model calls (paired 95\% CI $[-634,-311]$, same direction on every seed). Quality is not the claim; at four seeds on a 30-task split we report the interval and do not assert equivalence. We also give a closed-form upper bound on how often merging can fire at all, which retrodicts two null results of our own. The framework these run on, \textbf{AgentDescent}, executes eighteen published self-evolution algorithms as plug-ins under serial, synchronous, and barrier-free schedulers without modification, reaching $6.8\times$ less wall-clock than a faithful serial control. Code, workloads, and per-result reproduction commands are open source.
 \end{abstract}
 
 \keywords{Self-evolving agents \and Diff merging \and Validation cost \and Parallel and asynchronous execution \and LLM agents}
