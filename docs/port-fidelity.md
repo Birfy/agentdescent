@@ -1,6 +1,6 @@
 # Port fidelity — what each port follows, and where it departs
 
-Eighteen published self-evolution algorithms run on this engine — seven as benchmark-faithful ports, eleven as declared microports and analogues. Every one of them
+Nineteen published self-evolution algorithms run on this engine — eight as benchmark-faithful ports, eleven as declared microports and analogues. Every one of them
 was published as a **serial** loop, and every one of them here runs in parallel
 with a merge step the original does not have. That is only an interesting claim
 if the algorithm is otherwise untouched — a "parallelised GEPA" that quietly
@@ -20,7 +20,7 @@ the axis the differences actually fall on, and because the answer is not always
     contradicts reproduces something nobody ran.
 
 !!! note "Fidelity is a per-port property, not a tier"
-    All eighteen ports sit side by side in
+    All nineteen ports sit side by side in
     [Self-evolution algorithms](self-evolution-examples.md); what differs is
     each port's recorded fidelity class. Eleven of them run compact domains or
     substituted environments and say so on their pages -- a mechanism
@@ -55,7 +55,7 @@ either a bug or a finding, and either way it has to be written down.
     changed" rather than as "nobody checked".
 
     Auditing the arms that way found one: **EvoSkill's async arm ran a different
-    admission rule from its own serial arm** (below). All seven ports now use the
+    admission rule from its own serial arm** (below). All eight ports now use the
     same aggregator on all three arms, which is what that column exists to
     enforce.
 
@@ -272,11 +272,53 @@ column of each section below says exactly where to look.
   `examples/openevolve/openevolve_program_evolution.py`.
 * **Details**: [algo-openevolve.md](algo-openevolve.md)
 
+## ERA — Empirical-software search (Flat UCB tree search)
+
+* **Reference**: commit `b836730b5c000526af95116b1d0e2c60c8cf0a10`,
+  `implementation/futs.py` plus `implementation/playground_s3e1.py`.
+* **Paper and released code** agree on the algorithm; the paper describes the
+  tree search the released `futs.py` implements, and this port follows the code
+  line for line — the PUCT formula, `c_puct = 1.0`, the rank normalisation with
+  its single-node 0.5 case, the uniform `1/N` prior, and visits backpropagated up
+  the parent chain. Upstream's own `futs_test.py` fixtures are reproduced as
+  tests here rather than paraphrased.
+* **This port follows**: also the task — Playground S3E1, the 80/20 head/tail
+  split, the `train_and_predict(train_path, test_path)` contract, RMSE, and the
+  mutation prompt with its ban on `xgboost`/`lightgbm`. **A failed program is
+  still a node**, scoring `-inf`, because dropping it would change the rank
+  denominator and the prior on every later iteration.
+* **Departures**: upstream ships **no sandbox** — `implementation/sandbox.py` is
+  an abstract class whose `run` raises "Must provide a sandbox for executing
+  untrusted code" — so the sandbox is entirely this port's. Because the
+  benchmark needs pandas/numpy/scikit-learn, the AST gate cannot be the boundary
+  and the Bubblewrap profile binds the root read-only rather than a handful of
+  directories; that is weaker than the OpenEvolve port's and
+  [algo-era.md](algo-era.md) says so in a `!!! danger` block. Upstream also
+  reports one RMSE over the same tail it optimised against; this port withholds
+  `--test-shards` of that tail from the search.
+* **The one thing parallelism touched, and why it is not a semantics change**:
+  upstream backpropagates a visit *after* `execute_fn` returns; this port
+  reserves it at *selection*. With one proposal in flight nothing can observe
+  the tree between those two points, so the visit counts every selection sees
+  are identical.
+  `tests/test_era_example.py::test_serial_tree_reproduces_upstream_futs` drives
+  this port's tree and a transcription of `futs.search` with the same mock
+  generator and executor and asserts the same node is expanded at every step.
+  Without the reservation, `argmax(puct)` is deterministic and every worker in a
+  batch would be handed the same parent — so N workers would buy N samples of
+  one node rather than N expansions.
+* **Selection rule lives in**: the engine —
+  [`FlatPuct(c_puct=1.0)`](selection.md), the whole of `futs.compute_rank_scores`
+  + `futs.compute_pucts` + the `argmax`. The tree bookkeeping (parent chain,
+  backpropagation) stays on the aggregator's archive, the same division
+  OpenEvolve uses for `EpsilonGreedy` and its islands.
+* **Details**: [algo-era.md](algo-era.md)
+
 ---
 
 ## The parallelisation matrix
 
-What the seven ports can jointly show that no single one can: **parallel merging
+What the eight ports can jointly show that no single one can: **parallel merging
 is not tied to this repository's own domains — it is a layer that goes around an
 existing self-evolution algorithm.** That is the answer to "why would I use this
 instead of just using GEPA", and the answer is that it is not a choice between
@@ -288,7 +330,7 @@ column. Without it the speedups already in [results](results.md) had nothing to
 be speedups over.
 
 !!! danger "`--serial` alone does not make the two arms comparable"
-    Six of the seven ports pass a **fixed `rounds`** and let `n_workers` multiply
+    Six of the eight ports pass a **fixed `rounds`** and let `n_workers` multiply
     it, so an `N=8` arm performs **eight times the rollouts** of the `--serial`
     arm. Measured on the engine directly, `rounds=24`:
 
@@ -323,11 +365,12 @@ be speedups over.
 | ADAS | GPQA Diamond (MGSM is saturated) | — | **not measurable on this model** — see [algo-adas.md](algo-adas.md#measured-results-gpqa-diamond) | — | — | scheduling and merge timing; budget must be pinned. `--reflective-merge` is deliberately *not* passed: the archive is keep-all and is the meta-agent's whole conditioning signal, so fusing a round's designs would remove archive entries rather than change merge timing |
 | DGM | vendored bugs w/ pytest (`--objective real`) | — | async N=2: seed 0.844, best archived child **0.906** over 16 rollouts | — | — | scheduling and merge timing; budget must be pinned. `--serial` sets `selfimprove_size=1`, which is a population of one, so this row's control is the degenerate archive rather than upstream's default |
 | OpenEvolve | function minimization | — | — | — | — | **none** — `rounds = iterations // workers` already fixes total work, so this row's speedup is the only one that was equal-budget before the flag existed |
+| ERA | Kaggle Playground S3E1 | — | — | — | — | rollout scheduling and merge timing only; `rounds = iterations // workers` fixes total work as OpenEvolve's does. The visit backpropagated after execution upstream is *reserved at selection* here — identical at one worker, and the reason N workers do not all expand the same node |
 
 **The quality column is allowed to go down, and a table of all-green is probably
 wrong.** Asynchrony has to cost something somewhere: stale diffs get discarded, a
 rebased delta may no longer hold, and archive-style algorithms select against the
-newest head. If not one of the seven shows it, the likeliest explanation is that
+newest head. If not one of the eight shows it, the likeliest explanation is that
 the measurement is too coarse or the serial arm was not really serial — not that
 the cost is zero.
 
@@ -356,7 +399,7 @@ section naming exactly what its compact or substituted domain gives up, and a
 port is. Start from the
 [table of all eleven](self-evolution-examples.md#the-eleven-microports-and-analogues);
 their measured results are
-[in one place](self-evolution-examples.md#measured-results-all-eighteen), and the
+[in one place](self-evolution-examples.md#measured-results-all-nineteen), and the
 scheduler comparison they exist for is the [runtime matrix](matrix-overview.md).
 
 What they share is the thing the fidelity class encodes: **a `mechanism_microport`

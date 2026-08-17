@@ -1,17 +1,17 @@
-# Self-evolution algorithms — eighteen ports
+# Self-evolution algorithms — nineteen ports
 
 AgentDescent is a *general* engine for parallel, merge-based evolution. To show
-it is faithful to the field — not a toy — eighteen published **skill**,
+it is faithful to the field — not a toy — nineteen published **skill**,
 **program** and **harness** self-evolution algorithms run on it, each as one
-runnable example with a dedicated page. Seven reproduce their paper's own
+runnable example with a dedicated page. Eight reproduce their paper's own
 benchmark; eleven preserve the mechanism on a compact domain and say so. What
 each one follows and where it departs is recorded per port in
 [port fidelity](port-fidelity.md).
 
-**All eighteen run through the AgentDescent evolution engines.** No example
+**All nineteen run through the AgentDescent evolution engines.** No example
 bypasses the engine, and they reach it two ways:
 
-* the **seven benchmark-faithful ports** are each a custom `strategy=` and/or a
+* the **eight benchmark-faithful ports** are each a custom `strategy=` and/or a
   custom `aggregator_factory=`, with their parent/gate rules extracted as named
   policy classes at the standard seams ([selection](selection.md),
   [acceptance](acceptance-policies.md));
@@ -21,7 +21,7 @@ bypasses the engine, and they reach it two ways:
   [strategies](strategies.md), and the [runtime matrix](matrix-overview.md)
   measures them under all three schedulers.
 
-**All eighteen are parallel — and can run async.** In synchronous mode their workers
+**All nineteen are parallel — and can run async.** In synchronous mode their workers
 run **concurrently** (overlapping LLM rollouts) with the aggregator merge as the
 barrier (*synchronous data-parallelism*). Add **`--async`** and the same example
 runs **barrier-free** through
@@ -35,7 +35,7 @@ python -m examples.ace.ace_context_evolution --model claude-haiku-4-5           
 python -m examples.ace.ace_context_evolution --model claude-haiku-4-5 --async   # barrier-free
 ```
 
-### The seven benchmark-faithful ports
+### The eight benchmark-faithful ports
 
 | Algorithm | Port author | Kind | Domain (faithful) | `evolve()` plug-ins | Page |
 |---|---|---|---|---|---|
@@ -46,6 +46,7 @@ python -m examples.ace.ace_context_evolution --model claude-haiku-4-5 --async   
 | **ADAS** (Meta Agent Search) | chendanyang | harness (L1) | MGSM, GPQA Diamond | `strategy` + `aggregator_factory=` keep-all archive | [→](algo-adas.md) |
 | **DGM** (Darwin Gödel Machine) | chendanyang | harness (L1) | SWE-bench Verified ids; vendored bugs w/ pytest | `strategy` + `aggregator_factory=` archive + selection | [→](algo-dgm.md) |
 | **OpenEvolve** (Program Evolution) | cyanneko | program (L1) | Function minimization | `strategy` + `aggregator_factory=` MAP-Elites islands | [→](algo-openevolve.md) |
+| **ERA** (Empirical Research Assistance) | chendanyang | program (L1) | Kaggle Playground S3E1 (RMSE) | `strategy` + `aggregator_factory=` FUTS tree, `selection.FlatPuct` | [→](algo-era.md) |
 
 ### The eleven microports and analogues
 
@@ -91,9 +92,9 @@ honoured locally is how a port grows a `--yes` it never reads.
 | `--yes` | skip the confirmation before real API calls | `confirm` |
 
 The iteration count is deliberately *not* standardised: `--rounds` (ACE, GEPA),
-`--generations` (ADAS, DGM), `--iterations` (EvoSkill, OpenEvolve), `--steps`
+`--generations` (ADAS, DGM), `--iterations` (EvoSkill, OpenEvolve, ERA), `--steps`
 (SkillOpt) and `--candidates` (the eleven) each keep their own vocabulary, which
-for the seven is part of being a faithful port. `--budget-rollouts` maps onto
+for the eight is part of being a faithful port. `--budget-rollouts` maps onto
 whichever one a port uses, so a sweep can pin every arm with one flag.
 
 `--serial` is the control every one of these ports was missing. They all
@@ -105,7 +106,7 @@ them had no baseline in the repository at all. It is refused together with
 stale against a moved head, and staleness in the control arm is the one thing a
 control must not have.
 
-**`--serial` on its own is still not a comparison.** Six of these seven ports pass
+**`--serial` on its own is still not a comparison.** Six of these eight ports pass
 a fixed iteration count and let the worker count multiply it, so an `N=8` run does
 eight times the rollouts of the serial one — measured on the engine at
 `rounds=24`: 192 rollouts against 24. A wall-clock read across that gap is eight
@@ -120,7 +121,7 @@ simply sets `--iterations`.
 
 Every example takes `--dry-run`, which prints its configuration and returns
 **without a model call and without an API key**. Whether it also avoids the
-network depends on which runner it is on: the seven return before any dataset is
+network depends on which runner it is on: the eight return before any dataset is
 touched, and say so (`Data: deferred`). The eleven build their `MethodPolicy`
 first, so a port whose domain is a real benchmark — PromptBreeder, AFlow,
 Self-Refine, Reflexion, SICA, Gödel Agent — loads and caches its split during a
@@ -160,13 +161,13 @@ fails on a flag with nowhere recorded that reads it, so the next one added here
 cannot be decorative. `run_port` also records all three in `framework`, and
 `--dry-run` prints them: a flag absent from the plan is a flag nobody checks.
 
-!!! note "Why `--async-ratio` defaults to 1 here and 3 for the seven above"
+!!! note "Why `--async-ratio` defaults to 1 here and 3 for the eight above"
     Two entry points reach `run_port` — this command line and
     `bench.candidate_methods` — and a lag budget on which they disagree is a
     trap, because the same nominal configuration would then run two different
     searches depending on which one launched it. `run_port`'s signature says 1
     and `bench.candidate_methods` defaults to 1, so this parser says 1 too;
-    `add_standard_args`' 3 stays the default for the seven ports above, which
+    `add_standard_args`' 3 stays the default for the eight ports above, which
     is where it was measured. It is one argument away and it is a real change,
     not a label: the budget bounds both how far a worker's snapshot may drift
     behind head *and* how many cards may sit un-merged ahead of the merger.
@@ -203,7 +204,7 @@ cannot be decorative. `run_port` also records all three in `framework`, and
 
 ---
 
-## Measured results — all eighteen
+## Measured results — all nineteen
 
 Every port has been run and every number below is linked to the run that
 produced it. **The two halves of this page are not comparable with each other**,
@@ -249,7 +250,7 @@ read a final score against.
 the full held-out split and admits only a strict improvement. One accepted skill
 is all Voyager's run needs.
 
-### The seven, each on its own benchmark
+### The eight, each on its own benchmark
 
 Different budgets, different datasets, one seed each — these are single runs
 that establish the port works end to end, not a comparison.
@@ -263,10 +264,11 @@ that establish the port works end to end, not a comparison.
 | [ADAS](algo-adas.md#measured-results-gpqa-diamond) | GPQA Diamond | **no lift number** — MGSM is saturated and GPQA costs 49 s / 5,116 tokens per call, and the two constraints are opposed | — |
 | [DGM](algo-dgm.md#measured-results-vendored-bugs-objective-real) | vendored bugs, real pytest | seed agent 0.844 → best archived child **0.906** held out; its own `solve.py` 18 → 79 lines | async N=2, 16 rollouts |
 | [OpenEvolve](algo-openevolve.md#measured-results-function-minimization) | function minimization | combined score 0.9638 → **1.4995** against a 1.5 ceiling, held-out seeds | async N=4, 24 rollouts |
+| [ERA](algo-era.md#measured-results-playground-s3e1) | Kaggle Playground S3E1 | test RMSE 0.7297 → **0.5913** (−19.0%) on 2,476 unseen rows; 7-node tree, all valid | async N=3, 6 expansions |
 
 !!! warning "One run per seed, and one seed on the bottom table"
     Nothing here is a paper-scale result. The eleven carry three seeds and report
-    the spread on their own pages; the seven carry one, and a single run does not
+    the spread on their own pages; the eight carry one, and a single run does not
     pin a number on a sampled model. The quality columns are evidence the
     mechanism runs and moves the metric it should, not evidence about how much.
 

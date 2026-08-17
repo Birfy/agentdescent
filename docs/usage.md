@@ -65,7 +65,7 @@ offline in seconds; `--agent claude-code` swaps in the real CLI agent, and
 
 ### Self-evolution algorithm ports
 
-Eighteen ports of the latest self-evolution algorithms (see
+Nineteen ports of the latest self-evolution algorithms (see
 [the catalog](self-evolution-examples.md)). Twelve load a real benchmark through
 the [`agentdescent.dataloader`](dataloader.md) data layer; the other six run
 bundled deterministic domains. The eleven [`MethodPolicy`](policies.md) ports
@@ -73,7 +73,7 @@ share a runner and are measured together in the
 [runtime matrix](matrix-overview.md) (`python -m bench.candidate_methods`).
 
 Every port's `--dry-run` prints its configuration and makes **no model call**.
-The seven return before touching data too; the eleven build their policy first,
+The eight return before touching data too; the eleven build their policy first,
 so a dry run of one on a real benchmark loads and caches the split.
 
 ```bash

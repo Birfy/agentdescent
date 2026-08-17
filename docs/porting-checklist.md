@@ -15,6 +15,6 @@ microports/analogues follow the [MethodPolicy checklist](porting-methodpolicy.md
 - [ ] Make `--dry-run` return before data/model setup: zero network and zero API key.
 - [ ] Add `tests/test_<name>_example.py`; all tests must run offline.
 - [ ] Add `docs/algo-<name>.md` in the shape every other port page has: lead blockquote, the Paper / Upstream code / Example / Domain / Layer / Fidelity table, the algorithm, how it plugs into `evolve()`, the plug-ins it implements, **Measured results — `<domain>`** (or why none exists), **Run it**, and the offline-tests line.
-- [ ] Add its rows to [the seven](self-evolution-examples.md#the-seven-benchmark-faithful-ports), to [all eighteen](self-evolution-examples.md#measured-results-all-eighteen), and to the README's fidelity table.
+- [ ] Add its rows to [the eight](self-evolution-examples.md#the-eight-benchmark-faithful-ports), to [all nineteen](self-evolution-examples.md#measured-results-all-nineteen), and to the README's fidelity table.
 - [ ] State heavy-infrastructure boundaries such as Docker or gated data instead of hiding them.
 - [ ] Record the port author/maintainer so later fidelity decisions have an owner.

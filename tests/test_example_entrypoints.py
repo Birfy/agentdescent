@@ -1,4 +1,4 @@
-"""The command-line contract shared by the seven faithful algorithm ports."""
+"""The command-line contract shared by the eight faithful algorithm ports."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ import pytest
 from examples.ace import ace_context_evolution as ace
 from examples.adas import adas_meta_agent_search as adas
 from examples.dgm import dgm_self_improve as dgm
+from examples.era import era_empirical_software as era
 from examples.evoskill import evoskill_skill_discovery as evoskill
 from examples.gepa import gepa_prompt_evolution as gepa
 from examples.openevolve import openevolve_program_evolution as openevolve
@@ -26,7 +27,7 @@ from examples._common import add_standard_args
 class Port(NamedTuple):
     """One port's entry in the contract.
 
-    ``provider`` and ``async_ratio`` carry defaults because six of the seven
+    ``provider`` and ``async_ratio`` carry defaults because six of the eight
     ports take the shared ones; a port that names them is declaring a deliberate
     deviation, which is the only way one gets past this file.
     """
@@ -38,6 +39,13 @@ class Port(NamedTuple):
     loader: str
     provider: str = "claude"
     async_ratio: int = 3
+    #: True when the port's own iteration flag already *is* the total rollout
+    #: budget (`rounds = iterations // workers`), so `--budget-rollouts` maps
+    #: onto it instead of adding a second budget beside it. Declared per row
+    #: rather than tested by module identity: the property is what earns the
+    #: exemption, and a second port with it should not have to be named in an
+    #: `is` chain three hundred lines away.
+    budget_is_iterations: bool = False
 
 
 PORTS = (
@@ -50,7 +58,14 @@ PORTS = (
     # OpenEvolve is measured against an OpenAI-compatible GLM endpoint, and its
     # sandboxed candidate evaluation makes a lag budget of 3 versions too loose.
     Port(openevolve, "iterations", "glm-5.2", 300.0, "build_tasks",
-         provider="openai", async_ratio=1),
+         provider="openai", async_ratio=1, budget_is_iterations=True),
+    # ERA deviates for the same two reasons OpenEvolve does -- an
+    # OpenAI-compatible endpoint, and sandboxed candidate execution that makes a
+    # three-version lag budget too loose -- and for one of its own: a rollout
+    # trains a model, so the async wall-clock budget is upstream's 60s timeout
+    # times a tree's worth of expansions rather than a handful of API calls.
+    Port(era, "iterations", "glm-5.2", 1800.0, "build_tasks",
+         provider="openai", async_ratio=1, budget_is_iterations=True),
 )
 
 PORT_IDS = tuple(port.module.__name__.rsplit(".", 1)[-1] for port in PORTS)
@@ -94,7 +109,7 @@ def test_a_budget_is_only_passed_when_one_was_asked_for():
 def test_every_port_can_hold_its_rollout_budget_fixed(port):
     """Without this, no speedup row in `docs/port-fidelity.md` means anything.
 
-    Six of the seven ports pass a fixed `rounds` and let `n_workers` multiply it,
+    Six of the eight ports pass a fixed `rounds` and let `n_workers` multiply it,
     so an `N=8` arm runs *eight times* the rollouts of the `--serial` arm.
     Comparing their wall-clocks reports eight times the model spend as parallel
     efficiency; comparing their final quality credits the extra spend to
@@ -102,14 +117,16 @@ def test_every_port_can_hold_its_rollout_budget_fixed(port):
     and **no port passed it** -- the same failure as `cheap_eval_tasks`, where the
     knob shipped and the default nobody sets stayed the only default there is.
 
-    OpenEvolve is the exception: `rounds = iterations // workers` already fixes
-    total work, so it maps the shared flag onto `iterations` instead of adding a
-    second budget beside it.
+    OpenEvolve and ERA are the exceptions: `rounds = iterations // workers`
+    already fixes total work, so they map the shared flag onto `iterations`
+    instead of adding a second budget beside it. That is `budget_is_iterations`
+    on the row, not a module identity check here.
     """
     source = pathlib.Path(inspect.getfile(port.module)).read_text(encoding="utf-8")
-    if port.module is openevolve:
+    if port.budget_is_iterations:
         assert "args.iterations = args.budget_rollouts" in source, (
-            "OpenEvolve's own iteration budget is the rollout budget; map it")
+            f"{PORT_IDS[PORTS.index(port)]} declares its iteration budget is the "
+            "rollout budget; map the shared flag onto it")
         return
     assert "budget_kwargs(args)" in source, (
         f"{PORT_IDS[PORTS.index(port)]} cannot hold its budget fixed, so its "

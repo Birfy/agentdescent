@@ -230,7 +230,7 @@ def capped_val(trainval, val_frac: float, val_cap: Optional[int]):
 def budget_kwargs(args: argparse.Namespace) -> dict:
     """``max_rollouts=`` for ``evolve()``, or nothing when no budget was asked for.
 
-    **A speedup measured without this is not a speedup.** Six of the seven ports
+    **A speedup measured without this is not a speedup.** Six of the eight ports
     pass a fixed ``rounds`` and let ``n_workers`` multiply it, so an ``N=8`` arm
     performs *eight times* the rollouts of the ``--serial`` arm. Comparing their
     wall-clocks then reports eight times the model spend as parallel efficiency,

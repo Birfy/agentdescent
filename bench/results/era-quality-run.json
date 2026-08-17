@@ -1,0 +1,269 @@
+{
+  "experiment": "ERA on AgentDescent",
+  "status": "completed",
+  "completed_at": "2026-08-17T04:43:28+00:00",
+  "upstream_commit": "b836730b5c000526af95116b1d0e2c60c8cf0a10",
+  "config": {
+    "provider": "claude",
+    "model": "glm-5.2",
+    "seed": 0,
+    "asynchronous": true,
+    "async_ratio": 1,
+    "max_seconds": 1800.0,
+    "pipelined_gate": false,
+    "gate_workers": 2,
+    "dry_run": false,
+    "serial": false,
+    "budget_rollouts": null,
+    "val_cap": null,
+    "eval_concurrency": 8,
+    "reflective_merge": false,
+    "eval_cache": "",
+    "no_thinking": false,
+    "staleness": "full",
+    "iterations": 6,
+    "workers": 3,
+    "shards": 8,
+    "test_shards": 4,
+    "train_rows": 0,
+    "held_out_frac": 0.5,
+    "c_puct": 1.0,
+    "candidate_timeout": 60.0,
+    "max_code_length": 20000,
+    "max_tokens": 16000,
+    "temperature": 0.7,
+    "thinking": "disabled",
+    "api_timeout": 180.0,
+    "shutdown_grace": 120.0,
+    "quality_target": null
+  },
+  "observation": {
+    "mode": "async",
+    "wall_seconds": 427.285743792,
+    "baseline": {
+      "index": 0,
+      "parent_index": null,
+      "program_id": "2f7ff24305f1f1d5",
+      "iteration": 0,
+      "change_summary": "LinearRegression baseline",
+      "score": -0.739151923513527,
+      "rmse": 0.739151923513527,
+      "num_visits": 6,
+      "valid": true,
+      "error": "",
+      "code_chars": 362
+    },
+    "best": {
+      "index": 4,
+      "parent_index": 0,
+      "program_id": "6d01036d7b18bb10",
+      "iteration": 4,
+      "change_summary": "",
+      "score": -0.5824486596335964,
+      "rmse": 0.5824486596335964,
+      "num_visits": 1,
+      "valid": true,
+      "error": "",
+      "code_chars": 2001
+    },
+    "data": {
+      "train_rows": 29709,
+      "scoring_shards": 12,
+      "rows_per_shard": 619
+    },
+    "framework": {
+      "baseline_reward": 0.574992895376125,
+      "final_reward": 0.6319988930147864,
+      "quality_gain": 0.05700599763866143,
+      "stop_reason": "max_iters",
+      "error": null,
+      "outcomes": {
+        "committed": 2,
+        "tree-updated": 1
+      },
+      "rollouts": 8,
+      "rollout_seconds": 36.33967566490173,
+      "eval_seconds": 195.53437399864197,
+      "stale_considered": 6,
+      "stale_discarded": 0,
+      "stale_rate": 0.0,
+      "retired_workers": 0,
+      "history": [
+        {
+          "round": 0,
+          "held_out_reward": 0.6263191709785179,
+          "elapsed_s": 73.94654202461243,
+          "rollouts": 5,
+          "committed": 1,
+          "rejected": 0,
+          "reasons": {
+            "committed": 1
+          }
+        },
+        {
+          "round": 1,
+          "held_out_reward": 0.6319988930147864,
+          "elapsed_s": 415.891077041626,
+          "rollouts": 8,
+          "committed": 1,
+          "rejected": 0,
+          "reasons": {
+            "committed": 1
+          }
+        },
+        {
+          "round": 2,
+          "held_out_reward": 0.6319988930147864,
+          "elapsed_s": 421.8670470714569,
+          "rollouts": 8,
+          "committed": 0,
+          "rejected": 1,
+          "reasons": {
+            "tree-updated": 1
+          }
+        }
+      ]
+    },
+    "actor_usage": {
+      "calls": 24,
+      "failures": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "model_seconds": 332.922943
+    },
+    "tree": {
+      "nodes": 7,
+      "valid_nodes": 7,
+      "max_depth": 2,
+      "root_visits": 6,
+      "c_puct": 1.0,
+      "tree": [
+        {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "2f7ff24305f1f1d5",
+          "iteration": 0,
+          "change_summary": "LinearRegression baseline",
+          "score": -0.739151923513527,
+          "rmse": 0.739151923513527,
+          "num_visits": 6,
+          "valid": true,
+          "error": "",
+          "code_chars": 362
+        },
+        {
+          "index": 1,
+          "parent_index": 0,
+          "program_id": "f75c86cc08c4ca20",
+          "iteration": 2,
+          "change_summary": "",
+          "score": -0.5967259708553063,
+          "rmse": 0.5967259708553063,
+          "num_visits": 2,
+          "valid": true,
+          "error": "",
+          "code_chars": 1558
+        },
+        {
+          "index": 2,
+          "parent_index": 0,
+          "program_id": "2422fc9757af88b9",
+          "iteration": 1,
+          "change_summary": "",
+          "score": -0.5955452489864659,
+          "rmse": 0.5955452489864659,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 1862
+        },
+        {
+          "index": 3,
+          "parent_index": 0,
+          "program_id": "f5e3266bc4aca2e0",
+          "iteration": 3,
+          "change_summary": "",
+          "score": -0.5967636056404862,
+          "rmse": 0.5967636056404862,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 2203
+        },
+        {
+          "index": 4,
+          "parent_index": 0,
+          "program_id": "6d01036d7b18bb10",
+          "iteration": 4,
+          "change_summary": "",
+          "score": -0.5824486596335964,
+          "rmse": 0.5824486596335964,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 2001
+        },
+        {
+          "index": 5,
+          "parent_index": 0,
+          "program_id": "82c5556b7b5da51b",
+          "iteration": 5,
+          "change_summary": "",
+          "score": -0.589877562458755,
+          "rmse": 0.589877562458755,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 1888
+        },
+        {
+          "index": 6,
+          "parent_index": 1,
+          "program_id": "9987329bc966406d",
+          "iteration": 6,
+          "change_summary": "",
+          "score": -0.5836250738290196,
+          "rmse": 0.5836250738290196,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 1735
+        }
+      ]
+    },
+    "test": {
+      "baseline": {
+        "rmse": 0.7296847983999691,
+        "score": -0.7296847983999691,
+        "rows_scored": 2476,
+        "shards": 4,
+        "seconds": 3.9649745419999998,
+        "limits_unavailable": [
+          "RLIMIT_AS"
+        ],
+        "error": ""
+      },
+      "best": {
+        "rmse": 0.5913325611315611,
+        "score": -0.5913325611315611,
+        "rows_scored": 2476,
+        "shards": 4,
+        "seconds": 154.008945541,
+        "limits_unavailable": [
+          "RLIMIT_AS"
+        ],
+        "error": ""
+      },
+      "rmse_gain": 0.13835223726840806
+    }
+  },
+  "model_usage": {
+    "calls": 6,
+    "failures": 0,
+    "prompt_tokens": 5786,
+    "completion_tokens": 3176,
+    "total_tokens": 8962,
+    "model_seconds": 99.026656
+  }
+}

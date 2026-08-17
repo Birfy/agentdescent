@@ -39,8 +39,8 @@ improvement throughput, where serial self-improvement is bounded at 1 diff / T_i
   are forced through an oracle; safety/permissions (L0) are frozen.
 - **Provider-agnostic.** Any `prompt -> text` is a completion — Claude,
   OpenAI-compatible endpoints (GLM / DeepSeek), or a tool-using agent (OpenHands).
-- **Eighteen algorithm ports.** Runnable, offline-tested examples — seven
-  benchmark-faithful (ACE, GEPA, EvoSkill, SkillOpt, ADAS, DGM, OpenEvolve)
+- **Nineteen algorithm ports.** Runnable, offline-tested examples — eight
+  benchmark-faithful (ACE, GEPA, EvoSkill, SkillOpt, ADAS, DGM, OpenEvolve, ERA)
   and eleven declared microports/analogues measured in the runtime matrix.
 
 ## Install
@@ -149,7 +149,7 @@ Full docs live in [`docs/`](https://github.com/Birfy/agentdescent/tree/main/docs
 | [Duration-aware scheduling](https://github.com/Birfy/agentdescent/blob/main/docs/duration-scheduling.md) | Estimate rollout cost from task size; LPT dispatch + straggler checkpointing |
 | [Efficiency experiments](https://github.com/Birfy/agentdescent/blob/main/docs/efficiency.md) | Measured parallel scaling and async tail-hiding |
 | [Example: skill evolution](https://github.com/Birfy/agentdescent/blob/main/docs/skill-evolution.md) | One complete run — real dataset, real LLM, every module |
-| [Self-evolution algorithms](https://github.com/Birfy/agentdescent/blob/main/docs/self-evolution-examples.md) | Eighteen algorithm ports, their fidelity classes, and every measured result in one table |
+| [Self-evolution algorithms](https://github.com/Birfy/agentdescent/blob/main/docs/self-evolution-examples.md) | Nineteen algorithm ports, their fidelity classes, and every measured result in one table |
 | [Runtime matrix](https://github.com/Birfy/agentdescent/blob/main/docs/matrix-overview.md) | The 11-method serial/sync/async scheduler comparison, with explicit fidelity boundaries |
 
 ```bash
@@ -240,15 +240,15 @@ Guide: [evolving a directory](https://github.com/Birfy/agentdescent/blob/main/do
 
 ## Ports of the latest self-evolution algorithms
 
-To show the engine is faithful to the field, eighteen published self-evolution
+To show the engine is faithful to the field, nineteen published self-evolution
 algorithms run on it — one runnable example each, every one with a `--dry-run`
-mode and an offline test suite. **Seven** reproduce their paper's own benchmark;
+mode and an offline test suite. **Eight** reproduce their paper's own benchmark;
 **eleven** preserve the mechanism on a compact domain and carry a fidelity class
 that says exactly which kind of port they are.
 
 | | Algorithms |
 |---|---|
-| **Benchmark-faithful** | ACE (FiNER-139), GEPA (HotpotQA), EvoSkill (OfficeQA / FinQA), SkillOpt (SearchQA), ADAS (MGSM, GPQA), DGM (SWE-bench Verified ids, vendored bugs), OpenEvolve (function minimization) |
+| **Benchmark-faithful** | ACE (FiNER-139), GEPA (HotpotQA), EvoSkill (OfficeQA / FinQA), SkillOpt (SearchQA), ADAS (MGSM, GPQA), DGM (SWE-bench Verified ids, vendored bugs), OpenEvolve (function minimization), ERA (Kaggle Playground S3E1) |
 | **Mechanism microports** | PromptBreeder, AFlow, Self-Refine (GSM8K), Reflexion (GSM-Hard) |
 | **Self-edit analogues** | SICA, Gödel Agent (GSM-Hard) |
 | **Environment analogues** | Voyager (crafting world), SkillWeaver (settings site) |
@@ -258,6 +258,7 @@ that says exactly which kind of port they are.
 python -m examples.ace.ace_context_evolution --dry-run     # skill/context self-evolution (ACE)
 python -m examples.dgm.dgm_self_improve                    # harness self-evolution (DGM), offline
 python -m examples.openevolve.openevolve_program_evolution --dry-run  # program evolution (OpenEvolve)
+python -m examples.era.era_empirical_software --dry-run     # empirical-software tree search (ERA)
 ```
 
 Fidelity is to the **released code**, not just the paper (e.g. EvoSkill's frontier
@@ -267,7 +268,7 @@ boundary is documented, never hidden. Analogues are labelled as analogues and mu
 not be cited as paper-benchmark reproductions.
 
 Every port's measured result, with the run file behind it:
-[all eighteen](https://github.com/Birfy/agentdescent/blob/main/docs/self-evolution-examples.md#measured-results-all-eighteen).
+[all nineteen](https://github.com/Birfy/agentdescent/blob/main/docs/self-evolution-examples.md#measured-results-all-nineteen).
 Full guide:
 [docs/self-evolution-examples.md](https://github.com/Birfy/agentdescent/blob/main/docs/self-evolution-examples.md)
 · per-port departures: [docs/port-fidelity.md](https://github.com/Birfy/agentdescent/blob/main/docs/port-fidelity.md).
