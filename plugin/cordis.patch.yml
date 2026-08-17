@@ -1,0 +1,5 @@
+# The layer this bundle contributes. A profile listing `dsh-plugin-agentdescent`
+# applies it after `@deepseek-ai/dsh-base`, so these rows see the base tree.
+- insert:
+    - id: evolution
+      name: dsh-plugin-agentdescent/evolution

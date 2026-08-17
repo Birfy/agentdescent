@@ -27,3 +27,25 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[dev]"
       - run: pytest -q
+
+  # The TypeScript bundle under plugin/. It ships to npm rather than PyPI and
+  # has its own toolchain, so it gets its own job -- a Python-only change should
+  # not pay for a Node install, and a plugin-only change should not wait on the
+  # three-version Python matrix.
+  plugin:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      - run: npm test
+      # The published artifact is the built one: a consumer installs `lib/`,
+      # never `src/`. Building here is what keeps "it typechecks" from being
+      # mistaken for "it ships".
+      - run: npm run build

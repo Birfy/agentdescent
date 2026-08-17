@@ -1,0 +1,43 @@
+{
+  "name": "dsh-plugin-agentdescent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A training loop for DeepSeek Harness: evolve the skills, prompts and presets the harness itself loads",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Birfy/agentdescent.git",
+    "directory": "plugin"
+  },
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": "./lib/index.js",
+    "./evolution": "./lib/evolution.js"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "prepare": "npm run build"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@types/node": "^22.20.1",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

@@ -11,3 +11,7 @@ venv/
 .DS_Store
 *.log
 site/
+
+# plugin/ is the TypeScript bundle (npm), built at publish time
+node_modules/
+plugin/lib/
