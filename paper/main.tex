@@ -165,7 +165,11 @@ training code (not self-modifiable) & L0 frozen governance layer \\
 
 % ---- row 3: the one layer that is not a seam, wired to the gate it governs ----
 \node[gov] (govn) at (6.3,-5.3) {\textbf{Governance (L0 frozen)}\\oracle $\cdot$ audit budget $\cdot$ merge permissions};
-\draw[arr, adred!60!black, dashed] (govn.north) -- (6.3,-1.0) -- (gate.west);
+% routed relative to the aggregator's own west edge, so it clears the box
+% whatever width the stage labels give it
+\path (aggbox.west) ++(-0.45,0) coordinate (glane);
+\draw[arr, adred!60!black, dashed]
+  (govn.north) -- (glane |- govn.north) -- (glane |- gate.west) -- (gate.west);
 
 % ---- row 4: the single feedback edge, in its own lane ----
 \draw[arr, adgreen!60!black]
