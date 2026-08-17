@@ -1,6 +1,11 @@
-\documentclass[11pt]{article}
+\documentclass{article}
 
-\usepackage[margin=1in]{geometry}
+% NeurIPS-derived single-column preprint style (arxiv.sty ships alongside this
+% file, as arXiv requires). It loads geometry and fancyhdr itself, so neither is
+% requested here; newtx is loaded after it so the Times it selects is the
+% modern one with matching math rather than the base ptm.
+\usepackage{arxiv}
+
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
 \usepackage{newtxtext,newtxmath}
@@ -33,8 +38,14 @@
 \newcommand{\plugtitle}[1]{\textbf{\footnotesize #1}}
 \newcommand{\Dval}{D_{\mathrm{val}}}
 
-\title{\textbf{AgentDescent: Gradient Descent Where the Parameters Are Agents} \\[4pt]
-\large A Parallel, Asynchronous, Merge-Based Framework for Self-Evolving Agent Artifacts}
+\title{AgentDescent: Gradient Descent Where the Parameters Are Agents\\[2pt]
+\large A Parallel, Asynchronous, Merge-Based Framework\\ \large for Self-Evolving Agent Artifacts}
+
+% Running head and the line under the title bar; the full title is too long to
+% sit in a page header.
+\renewcommand{\shorttitle}{AgentDescent}
+\renewcommand{\headeright}{Preprint}
+\renewcommand{\undertitle}{Preprint}
 
 \author{
   Danyang Chen\\
@@ -52,6 +63,8 @@ Self-improving agent systems evolve their own skills, prompts, and harnesses, bu
 
 Measured on live models, synchronous parallelism gives a median $1.36\times$ end-to-end speedup across eleven algorithms (11 of 11, $p{=}0.001$), and barrier removal reaches $6.28\times$ effective concurrency where the gate is expensive. Merging supplies a third source of speedup that selection cannot: a round's $k$ concurrent proposals are validated once rather than $k$ times, and validation is where a live-model loop spends its critical path. We derive merging's precondition in closed form --- the engine proposes only from failed rollouts, so a near-saturated artifact starves the merge step however finely its keys are cut --- and on the workload that condition prescribes, merging matches both a serial lineage and best-of-$N$ selection in held-out quality at six seeds while spending $11$--$32\%$ fewer model calls and $1.28$--$1.53\times$ less wall-clock, at the lowest seed-to-seed variance of the three arms. Code, workloads, and per-result reproduction commands are open source.
 \end{abstract}
+
+\keywords{Self-evolving agents \and Parallel and asynchronous execution \and Diff merging \and LLM agents \and Distributed optimization}
 
 \section{Introduction}
 \label{sec:intro}
