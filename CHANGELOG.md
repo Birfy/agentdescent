@@ -8,6 +8,29 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- **A staleness test asserted a property of the machine, not of the policy.**
+  `test_offline_examples.py::test_full_discards_nothing_and_guarded_discards_the_most`
+  required `guarded.discarded_stale > 0` from `_async_stats` — an 8-second,
+  wall-clock-bounded run of six real worker threads against one merger. Whether
+  any diff's `eta` exceeds alpha there depends on whether the merger drains
+  slower than the workers fill; on an idle host it keeps up, every card arrives
+  at `eta == 0`, and Guarded correctly discards nothing.
+
+  It failed on `main` in CI on Python 3.12, and on the same commit in a later run
+  on 3.11 instead, passing the other two both times. The victim version rotating
+  between runs is the signature of a load-sensitive assertion rather than of a
+  regression — and unlike the `pipelined_gate` livelock below, which CI caught on
+  *all three* versions, there is no committed change to bisect to.
+
+  The assertion is now the part that is deterministic: Full discards nothing by
+  definition, and Guarded can never discard *less* than Full — an inversion is a
+  real bug and still fails. The strict claim keeps its home in two tests that can
+  hold it on seeded, bounded runs:
+  `test_staleness.py::test_a_refresh_interval_makes_every_staleness_action_reachable`
+  (every branch including DISCARD is reachable) and
+  `test_the_staleness_sweep_actually_varies_with_alpha` (a tight alpha discards
+  strictly more than a generous one).
+
 - **The pipelined-gate seam disabled the async path's livelock guard, in
   exactly the situation the guard exists for.** `pipelined_gate` needs the
   merger to skip poll sweeps whose candidate is still out being measured, and
