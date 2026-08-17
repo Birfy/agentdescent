@@ -1,7 +1,7 @@
 """The parallelisation matrix: every port, serial / parallel / async, equal budget.
 
 One row per algorithm, three arms per row, `--budget-rollouts` pinned to the
-same value on all of them. That pin is the whole point. Six of the seven ports
+same value on all of them. That pin is the whole point. Six of the eight ports
 pass a fixed
 iteration count and let `n_workers` multiply it, so an unbudgeted `N=8` arm runs
 eight times the rollouts of the `--serial` arm -- measured on the engine at
@@ -173,7 +173,7 @@ SCHEDULING_ONLY = "rollout scheduling and merge timing only"
 #: `ROWS` without one.
 #:
 #: The `serial` arm's entry describes the control itself: it is the upstream loop
-#: for six of the seven, and where it is *not* -- DGM -- saying so is the point,
+#: for six of the eight, and where it is *not* -- DGM -- saying so is the point,
 #: because a speedup is measured against whatever is written here.
 SEMANTICS = {
     "ace": {

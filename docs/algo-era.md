@@ -1,0 +1,279 @@
+# ERA — Empirical-software search (Flat UCB tree search)
+
+> **Program search, tree-shaped.** A Python solution to a scientific-computing
+> task is the artifact: a model rewrites a selected node, a sandboxed evaluator
+> supplies RMSE, and a **flat PUCT tree** — every node selectable, exploitation
+> by rank rather than by score — decides what to expand next. Runs through
+> [`evolve()`](evolution.md) / `async_evolve()` with a custom `Strategy` +
+> `aggregator_factory` at **L1** governance. Example:
+> [`examples/era/era_empirical_software.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/era_empirical_software.py).
+
+| | |
+|---|---|
+| **Paper** | *An AI system to help scientists write expert-level empirical software*, [arXiv:2509.06503](https://arxiv.org/abs/2509.06503) (Nature, 2026) |
+| **Upstream code** | [google-research/era@b836730](https://github.com/google-research/era/tree/b836730b5c000526af95116b1d0e2c60c8cf0a10), `implementation/futs.py` + `implementation/playground_s3e1.py` |
+| **Example** | [`examples/era/era_empirical_software.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/era_empirical_software.py) |
+| **Domain** | Kaggle Playground Series S3E1 (synthetic California housing), RMSE — upstream's own bundled task |
+| **Layer** | L1 program (`blast_radius=0.6`, AST-gated and sandbox-isolated) |
+| **Fidelity** | `benchmark_faithful` — [what the classes mean](port-fidelity.md) |
+
+Port author: `chendanyang`.
+
+## The algorithm
+
+FUTS is 155 lines upstream and the whole of it is one loop:
+
+1. **Rank.** Sort every node by score; `rank_score = rank / (N − 1)`, so the
+   worst node is 0 and the best is 1. A lone node is 0.5.
+2. **Score.** `puct = rank_score + c_puct · (1/N) · √(Σvisits) / (1 + visits)`.
+3. **Select.** `argmax(puct)` over **all** nodes — there is no descent from the
+   root, which is what "flat" names.
+4. **Expand.** The model rewrites the selected node's program; the sandbox runs
+   it; the resulting score makes a new node whose parent is the selected one.
+5. **Backpropagate.** The new node and every ancestor take one visit.
+
+Two choices in there are doing the work, and both differ from ordinary UCT:
+
+**Exploitation is a rank, not a value.** Scores enter the formula only through
+their order, so the exploration constant means the same thing whether the metric
+is RMSE, log-likelihood or accuracy — and one bad candidate scoring `-inf`
+cannot swamp the term the way a raw value would.
+
+**The prior is uniform.** AlphaZero's `P(s, a)` needs a policy network to say
+which sibling is promising. There is none here, so `P = 1/N` and the exploration
+term reduces to a visit-starvation bonus.
+
+## Algorithm mapping
+
+| ERA mechanism | AgentDescent representation |
+|---|---|
+| `futs.search`'s select step | [`selection.FlatPuct`](selection.md), a shipped `SelectionPolicy` |
+| `futs.Node` list | `EraTree`, the aggregator's shared archive |
+| `futs.Solution` (a program string) | `Task` rollouts over a source-code artifact |
+| `PlaygroundGenerator.__call__` | `propose(rendered, task, output, reward)` |
+| Full program replacement | `EraStrategy.to_diff()` |
+| `PlaygroundExecutor.__call__` | `run()` plus `reward_program()` |
+| `Sandbox.run` (upstream: `NotImplementedError`) | `_era_support.sandbox_command` — Bubblewrap / Seatbelt |
+| `num_iterations` | `evolve(rounds=iterations // workers)`, `--budget-rollouts` |
+| Concurrent expansions | `evolve(max_concurrency=...)` |
+| Completion-order commits | `async_evolve(async_ratio=...)` |
+| Best node so far | AgentDescent `Ledger` dev head |
+
+The artifact is generated executable code, so the port declares
+`blast_radius=0.6` and is classified as an L1 change. The RMSE evaluator remains
+the acceptance authority, as it is upstream.
+
+## How it plugs into `evolve()`
+
+```python
+result = evolve(
+    build_tasks(shards),               # one task per held-out shard
+    reward_program,                    # 1 / (1 + RMSE), from the runner payload
+    run=make_run(...),                 # train in the sandbox, predict one shard
+    propose=make_propose(tree, ...),   # FUTS select -> mutation prompt -> program
+    strategy=EraStrategy(),            # the program is the artifact
+    aggregator_factory=factory,        # EraTreeAggregator: execute, append, commit
+    blast_radius=0.6,
+    rounds=iterations // workers,      # total expansions fixed as workers vary
+)
+```
+
+Four plug-ins, and one thing deliberately *not* reused:
+
+* **`strategy=EraStrategy`** — a single-slot program artifact. Not `SingleSlot`,
+  because `to_diff` has to carry the parent's tree index alongside the code:
+  where a node attaches is part of the algorithm, not metadata.
+* **`aggregator_factory=`** — `EraTreeAggregator` owns the tree. It re-executes
+  every surviving card against the held-out shards, appends the node, and commits
+  the best-scoring program to the `dev` head.
+* **`selection.FlatPuct`** — the shipped policy, called by the tree under its own
+  lock so the visit reservation and the pick are one atomic step.
+* **`reward_program`** is custom rather than one of
+  [`agentdescent.rewards`](rewards.md): those score a *text answer* against a
+  gold string, and this scores a vector of predictions against a vector of
+  truths. Reaching for `numeric_close` here would have meant scoring the
+  candidate's printed output rather than its predictions.
+
+## Fidelity and boundaries
+
+Preserved mechanics:
+
+1. The PUCT formula, `c_puct = 1.0`, the rank normalisation including the
+   single-node 0.5 case, the uniform prior, and visits backpropagated up the
+   parent chain. Pinned by
+   `tests/test_era_example.py::test_rank_scores_match_the_upstream_unit_test`
+   and `::test_puct_matches_the_upstream_unit_test`, which are upstream's own
+   `futs_test.py` fixtures.
+2. **A node is appended for every expansion, including a failed one.** Upstream
+   returns `float('-inf')` from `PlaygroundExecutor` when the sandbox fails and
+   appends the node anyway; dropping it would change the rank denominator and
+   the prior on every later iteration.
+3. The task: Playground S3E1, the 80/20 head/tail split of `train.csv`, the
+   `MedHouseVal` target dropped from what the candidate reads,
+   `train_and_predict(train_path, test_path)`, RMSE scored on the host, and the
+   mutation prompt — including the ban on `xgboost`/`lightgbm` and the three
+   speed constraints.
+4. `score = -RMSE`, because FUTS maximises. The engine's `[0, 1]` reward is
+   `1 / (1 + RMSE)`, which is strictly decreasing in RMSE and therefore induces
+   *exactly* the ranking `-RMSE` does — the tree and the acceptance gate cannot
+   disagree about which of two programs is better.
+
+Intentional differences:
+
+1. **Upstream ships no sandbox.** `implementation/sandbox.py` is an abstract
+   class whose `run` raises `NotImplementedError("Must provide a sandbox for
+   executing untrusted code.")`. This port supplies one and refuses to run
+   without it. See the boundary note below — it is the most important thing on
+   this page.
+2. Upstream reports one RMSE over its whole 20% tail, which is also the split it
+   optimised against. Here the tail is cut into equal contiguous shards; the
+   first `--shards` are what the search can score and the last `--test-shards`
+   are never shown to it, so the reported number is on unseen rows.
+3. A shard is one AgentDescent task, so `run()` trains the current program and
+   predicts one shard. Upstream has a single train-and-predict per candidate;
+   this makes the same candidate measurable per-task, which is what the engine's
+   held-out gate and `eval_concurrency` need.
+4. Upstream is serial. With N workers a visit is reserved at **selection** time
+   rather than after execution — see below.
+5. Candidate threads are pinned to one (`OMP_NUM_THREADS=1` and friends), because
+   `RLIMIT_CPU` counts CPU seconds across threads: an OpenBLAS that helpfully
+   starts eight would burn a 60-second budget in eight wall-clock seconds and the
+   candidate would be killed for being fast. Upstream sets no thread policy and
+   has no CPU limit to protect.
+
+### The visit reservation, and why it is not a semantics change
+
+Upstream backpropagates the new node's visit *after* `execute_fn` returns. This
+port increments the selected node and its ancestors at *selection*, and gives
+the inserted node `num_visits = 1` without re-walking the chain.
+
+With one proposal in flight, nothing can observe the tree between those two
+points, so every selection sees identical visit counts — the two are the same
+algorithm. `tests/test_era_example.py::test_serial_tree_reproduces_upstream_futs`
+pins that: it drives this port's tree and a line-by-line transcription of
+`futs.search` with the same mock generator and executor, and asserts the same
+node is expanded at every step, with the same final visit vector.
+
+With N in flight it is the standard parallel-MCTS virtual loss, and it is the
+minimum needed for N workers to mean anything: without it, `argmax(puct)` is
+deterministic and every worker in a batch would be handed the same parent.
+
+!!! danger "The AST gate is not the boundary here, and must not be read as one"
+    The OpenEvolve port's gate allows six standard-library modules, so the gate
+    and the sandbox are two real layers. This benchmark *requires*
+    `pandas`, `numpy` and `scikit-learn` — a stack that can read files and spawn
+    processes — so admitting it admits most of what a gate would otherwise stop.
+
+    What the gate still buys is that the ordinary accidents (a candidate that
+    shells out, calls `open`, or reaches for a dunder) fail in-process with a
+    readable message. What actually confines a candidate is the sandbox:
+    **Bubblewrap** (`bwrap`) on Linux, **Seatbelt** (`sandbox-exec`) on macOS,
+    both denying network access and confining writes to a scratch directory,
+    with CPU / address-space / file-size / fd / process limits from `setrlimit`
+    inside the runner. A host with neither backend raises rather than running
+    model-written code unconfined.
+
+    Unlike the OpenEvolve port, the Bubblewrap profile here binds the root
+    **read-only** rather than a handful of directories: the candidate's imports
+    live wherever the interpreter was installed, and enumerating those would be
+    a guess that fails differently on every host. Reads are therefore open on
+    both platforms; writes and the network are not. That is a weaker boundary
+    than OpenEvolve's and it is stated rather than glossed.
+
+    It is checked against the kernel rather than by reading the profile back:
+    `test_the_sandbox_blocks_the_writes_and_network_it_claims_to_block` runs a
+    probe under the real profile and asserts a write outside the scratch
+    directory fails, a write inside it succeeds, and `socket.create_connection`
+    cannot reach the network.
+
+## Measured results — Playground S3E1
+
+### The method
+
+| Setting | Value |
+|---|---|
+| Model | `glm-5.2`, Anthropic-shaped API |
+| Sampling | temperature 0.7, **thinking disabled**, `--max-tokens 16000` |
+| Mode | `async_evolve(n_workers=3, async_ratio=1)`, `--staleness full` |
+| Budget | 6 expansions, hard-capped; `--max-seconds 1800` |
+| Search | `c_puct = 1.0`, `--candidate-timeout 60` (upstream's `Sandbox(timeout_seconds=60)`) |
+| Data | upstream's full 80% split — 29,709 training rows |
+| Scoring shards | 8 of the 20% tail (4 rollout, 4 held-out gate), 619 rows each |
+| Independent test | 4 further shards, 2,476 rows, never scored during the search |
+| Isolation | Seatbelt (`sandbox-exec`), macOS |
+| Replay | none; a single live engine run |
+
+The recorded output is
+[`bench/results/era-quality-run.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-quality-run.json).
+
+### The result
+
+6 expansions, 6 mutation calls, 0 failures, 8,962 tokens, 99.0 s of model time,
+427.3 s of wall clock. Every figure below is scored on the **test** shards,
+which the search never saw:
+
+| | baseline | best found | |
+|---|---:|---:|---:|
+| test RMSE | 0.72968 | **0.59133** | −19.0% |
+| held-out gate RMSE | 0.73915 | **0.58245** | the split the tree ranked on |
+| framework reward `1/(1+RMSE)` | 0.5750 | **0.6320** | |
+
+The baseline is upstream's own `LinearRegression` seed. The winner is a
+`GradientBoostingRegressor` with early stopping over ten engineered features —
+income × age / rooms / occupancy interactions, a longitude × latitude location
+term, a distance-to-origin term, a high-income flag — and predictions clipped to
+the target's known `[0, 5]` bounds. It is written to
+`era-agentdescent-result-best.py` beside the JSON.
+
+The tree machinery is live: 7 nodes, all 7 valid, root visited 6 times, max
+depth 2, and `--staleness full` considered 6 cards and discarded none.
+
+!!! note "Two things this run measured that the score does not show"
+    **The gate is 95% of the wall clock, and workers are what starve.**
+    `merge_gate_seconds` was 406.1 s of a 421.9 s run, and
+    `worker_starved_seconds` 128.8 s. Every surviving card is re-executed across
+    four held-out shards, and each of those is a full training run on 29,709
+    rows inside the sandbox — on the merger thread. The parallelisable part is
+    the model call (99 s across all six), so on this port **more `--workers` buys
+    almost nothing**; `--eval-concurrency` and `--pipelined-gate` are the levers,
+    and a speedup row here would be measuring the sandbox, not the scheduler.
+
+    **Asynchrony makes the tree root-heavy.** Five of six expansions attached to
+    the root, because sweep 1 dispatched four proposals before any sibling had
+    been inserted — with one node in the tree, `argmax(puct)` can only return the
+    root. The offline canned-model run showed the same effect more sharply
+    (depth 1 async against depth 2 sync at the same budget). It cost nothing
+    here, since the best node happened to be a root child, but it is a real
+    semantic effect of the barrier-free schedule, and it is why tree depth
+    belongs beside the score rather than in a footnote.
+
+!!! warning "One run, one seed, and no serial control"
+    This is a single live run. No `--serial` arm was measured, so **no speedup or
+    parallel-efficiency claim is made here** and the ERA row in
+    [port-fidelity.md](port-fidelity.md#the-parallelisation-matrix) is empty
+    rather than filled from one arm.
+
+## Run it
+
+Preview without an API key, network access, or sandbox process:
+
+```bash
+python -m examples.era.era_empirical_software --dry-run
+```
+
+```bash
+python -m examples.era.era_empirical_software --provider claude --model glm-5.2 \
+    --yes --iterations 6 --workers 3 --async --async-ratio 1 --staleness full \
+    --shards 8 --test-shards 4 --candidate-timeout 60 --max-tokens 16000
+```
+
+Add `--serial` for the upstream serial algorithm (one worker, nothing to merge),
+or drop `--async` for the synchronous barrier. `--train-rows N` caps the
+training file for a quicker look — it is a difficulty knob, so a capped run is
+not comparable to an uncapped one.
+
+`--provider claude` selects an Anthropic-shaped endpoint (`ANTHROPIC_BASE_URL`
++ `ANTHROPIC_API_KEY`); `--provider openai`, the default, uses
+`OPENAI_BASE_URL` + `OPENAI_API_KEY`.
+
+Offline tests: `tests/test_era_example.py`.

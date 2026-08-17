@@ -5,7 +5,7 @@
 > deliberately separate from the evolution engine — *which* benchmark you evolve
 > against has nothing to do with the framework — and every
 > dataset-backed [self-evolution example](self-evolution-examples.md) loads its data
-> through it (the seven benchmark-faithful ports; the eleven MethodPolicy ports
+> through it (the eight benchmark-faithful ports; the eleven MethodPolicy ports
 > run bundled deterministic domains instead).
 
 The examples each need a public benchmark (FiNER, HotpotQA, SearchQA, MGSM,

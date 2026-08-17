@@ -156,7 +156,7 @@ def test_the_async_ratio_default_is_the_runners_own_rather_than_the_parsers():
     `bench.candidate_methods` -- and a lag budget they disagree on means the
     same nominal configuration runs two different searches depending on which
     one launched it. `run_port`'s signature says 1 and `bench.candidate_methods`
-    defaults to 1, so the parser says 1; the 3 stays on the seven ports where it
+    defaults to 1, so the parser says 1; the 3 stays on the eight ports where it
     was measured. Asking for another value is one argument.
     """
     assert mr.DEFAULT_ASYNC_RATIO == 1
@@ -167,7 +167,7 @@ def test_the_async_ratio_default_is_the_runners_own_rather_than_the_parsers():
 def test_eval_concurrency_defaults_to_none_so_serial_keeps_its_control():
     """`--serial` is the control arm, and the published loop scores one task at
     a time. A plain default of 8 would make the control partly parallel, which
-    is the confound `bench/matrix_run.py` documents for the other seven ports."""
+    is the confound `bench/matrix_run.py` documents for the other eight ports."""
     assert mr.build_parser().parse_args([]).eval_concurrency is None
     assert mr.build_parser().parse_args(["--eval-concurrency", "6"]).eval_concurrency == 6
 

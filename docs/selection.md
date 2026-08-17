@@ -52,7 +52,8 @@ competing with one.
 
 ```python
 from agentdescent import Policies, evolve
-from agentdescent.selection import Archive, Beam, MCTS, ParetoFrontier, SingleHead
+from agentdescent.selection import (
+    Archive, Beam, FlatPuct, MCTS, ParetoFrontier, SingleHead)
 
 evolve(tasks, reward, agent=agent,
        policies=Policies(selection=Beam(4)))
@@ -65,6 +66,7 @@ evolve(tasks, reward, agent=agent,
 | `ParetoFrontier(mode=...)` | GEPA / EvoSkill | `win_frequency` is GEPA's Algorithm 2 exactly; `per_instance` is plain Pareto walked round-robin; `topk_aggregate` is EvoSkill's — three published rules, one argument |
 | `Archive(sampling=...)` | DGM / ADAS / SICA | `sigmoid_novelty` is DGM's `choose_selfimproves`; `performance`, `novelty` (softmax ÷ `1 + selected`), `best` (SICA's `idxmax`), `uniform` as the ablation |
 | `MCTS(exploration=...)` | tree search | UCT over the candidate tree; one evolve step is one rollout, value is held-out reward, backup runs up `Candidate.parent` |
+| `FlatPuct(c_puct=...)` | [ERA](algo-era.md) | `futs.py`'s Flat UCB tree search: every node selectable, exploitation by **normalised rank** rather than raw score, uniform `1/N` prior. `Candidate.selected` must be the *subtree* visit count. Asking for `n > 1` reserves a visit per pick, which is upstream exactly at `n == 1` |
 
 Three details that are decisions rather than defaults:
 

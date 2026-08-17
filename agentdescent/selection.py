@@ -66,6 +66,7 @@ __all__ = [
     "Archive",
     "Beam",
     "Candidate",
+    "FlatPuct",
     "MCTS",
     "MultiHeadUnsupported",
     "ParetoFrontier",
@@ -465,6 +466,90 @@ class Archive(SingleHead):
         # eventually start raising in the middle of a long run.
         rng = self.rng or random.Random(self.seed * 1_000_003 + ctx.round)
         return rng.choices(pool, weights=weights, k=n)
+
+
+class FlatPuct(SingleHead):
+    """ERA's Flat UCB tree search -- the PUCT rule from `google-research/era`.
+
+    Two things separate it from :class:`MCTS` below, and both matter.
+
+    **Flat.** Every node in the tree is a selection candidate, always. There is
+    no descent from the root through children, so a good node found at depth 1
+    competes with one at depth 9 on equal terms; "flat" names that, not a depth
+    limit.
+
+    **Ranked, not scored.** The exploitation term is the candidate's *rank*
+    among all nodes, normalised to ``[0, 1]``, rather than its held-out score.
+    The formula is therefore invariant to the metric's units -- which is what
+    lets one search run against RMSE, log-likelihood, or accuracy without
+    retuning ``c_puct``. Upstream ``implementation/futs.py``::
+
+        rank_score = rank / (len(nodes) - 1)     # 0.5 when there is one node
+        puct = rank_score + c_puct * (1/N) * sqrt(total_visits) / (1 + visits)
+
+    ``visits`` is :attr:`Candidate.selected`, and it must be the **subtree**
+    count: upstream backpropagates every expansion up the ``parent`` chain, so a
+    caller that increments only the node it handed out is running a different
+    rule with the same name. The prior is uniform (``1/N``) because a program is
+    not a game move -- there is no policy network to ask which sibling is
+    promising, so AlphaZero's ``P(s, a)`` degenerates to the uniform one.
+
+    A FUTS tree never holds an unscored node -- a node exists only after
+    ``execute_fn`` has returned -- so ``score=None`` is ranked as ``-inf`` here
+    rather than getting this module's usual unscored-first treatment. Ties keep
+    the order in which ``ctx.candidates`` presents them, and the winner is the
+    first maximal PUCT, both matching upstream's stable ``sorted`` and ``max``.
+
+    Upstream is **serial**: one node is expanded per iteration, so ``n > 1`` has
+    no published behaviour. Each pick here reserves a visit on itself and its
+    ancestors before the next pick is computed, which is what the serial loop
+    would have seen had those expansions already been dispatched -- and is
+    upstream exactly at ``n == 1``.
+    """
+
+    def __init__(self, c_puct: float = 1.0) -> None:
+        self.c_puct = c_puct
+
+    @staticmethod
+    def _rank_scores(rows: Sequence[Candidate]) -> List[float]:
+        if len(rows) == 1:
+            return [0.5]
+        scores = [-math.inf if c.score is None else c.score for c in rows]
+        order = sorted(range(len(rows)), key=lambda i: scores[i])
+        ranks = [0.0] * len(rows)
+        for rank, index in enumerate(order):
+            ranks[index] = rank / (len(rows) - 1)
+        return ranks
+
+    def select(self, ctx: SelectionContext, n: int) -> Sequence[Candidate]:
+        rows = list(ctx.candidates)
+        if len(rows) <= 1:
+            return super().select(ctx, n)
+        ranks = self._rank_scores(rows)
+        visits = [c.selected for c in rows]
+        by_version = {c.version: i for i, c in enumerate(rows)}
+        prior = 1.0 / len(rows)
+        picked: List[Candidate] = []
+        for _ in range(n):
+            total = sum(visits)
+            best, best_puct = 0, -math.inf
+            for i, row in enumerate(rows):
+                puct = ranks[i] + self.c_puct * prior * math.sqrt(total) / (
+                    1 + visits[i])
+                if puct > best_puct:
+                    best, best_puct = i, puct
+            picked.append(rows[best])
+            # Reserve the visit upstream would have backpropagated once this
+            # expansion finished -- self, then every ancestor, guarded against a
+            # parent chain that loops or points outside the pool.
+            seen: Set[int] = set()
+            node: Optional[int] = best
+            while node is not None and node not in seen:
+                seen.add(node)
+                visits[node] += 1
+                parent = rows[node].parent
+                node = by_version.get(parent) if parent is not None else None
+        return picked
 
 
 class MCTS(SingleHead):

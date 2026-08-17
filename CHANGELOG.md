@@ -8,6 +8,29 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- **A staleness test asserted a property of the machine, not of the policy.**
+  `test_offline_examples.py::test_full_discards_nothing_and_guarded_discards_the_most`
+  required `guarded.discarded_stale > 0` from `_async_stats` — an 8-second,
+  wall-clock-bounded run of six real worker threads against one merger. Whether
+  any diff's `eta` exceeds alpha there depends on whether the merger drains
+  slower than the workers fill; on an idle host it keeps up, every card arrives
+  at `eta == 0`, and Guarded correctly discards nothing.
+
+  It failed on `main` in CI on Python 3.12, and on the same commit in a later run
+  on 3.11 instead, passing the other two both times. The victim version rotating
+  between runs is the signature of a load-sensitive assertion rather than of a
+  regression — and unlike the `pipelined_gate` livelock below, which CI caught on
+  *all three* versions, there is no committed change to bisect to.
+
+  The assertion is now the part that is deterministic: Full discards nothing by
+  definition, and Guarded can never discard *less* than Full — an inversion is a
+  real bug and still fails. The strict claim keeps its home in two tests that can
+  hold it on seeded, bounded runs:
+  `test_staleness.py::test_a_refresh_interval_makes_every_staleness_action_reachable`
+  (every branch including DISCARD is reachable) and
+  `test_the_staleness_sweep_actually_varies_with_alpha` (a tight alpha discards
+  strictly more than a generous one).
+
 - **The pipelined-gate seam disabled the async path's livelock guard, in
   exactly the situation the guard exists for.** `pipelined_gate` needs the
   merger to skip poll sweeps whose candidate is still out being measured, and
@@ -33,6 +56,54 @@ All notable changes to AgentDescent are documented here. The format follows
   nothing is the livelock's signature and must be counted.
 
 ### Added
+
+- **An eighth benchmark-faithful port: ERA, Google Research's empirical-software
+  search.** `examples/era/` runs upstream's own bundled task — Kaggle Playground
+  S3E1, `train_and_predict(train_path, test_path)`, RMSE — under upstream's own
+  search, Flat UCB tree search. FUTS is small enough to port line for line and
+  the port does: the PUCT formula, `c_puct = 1.0`, the rank normalisation with
+  its single-node 0.5 case, the uniform `1/N` prior, visits backpropagated up the
+  parent chain, and **a node appended for every expansion including a failed
+  one** — upstream scores those `-inf` and keeps them, and dropping them would
+  shrink the rank denominator and raise the prior on every later iteration.
+  Upstream's own `futs_test.py` fixtures are reproduced as tests rather than
+  paraphrased.
+
+  The selection rule went to the engine as
+  `selection.FlatPuct`, beside `ParetoFrontier`, `Archive` and `MCTS`. It is not
+  `MCTS` with different constants: the tree is *flat* (every node competes, no
+  descent from the root) and the exploitation term is a **normalised rank**
+  rather than a value, which is what makes one exploration constant work across
+  RMSE, log-likelihood and accuracy without retuning.
+
+  **Parallelising it moved exactly one thing, and it is not a semantics change.**
+  Upstream backpropagates a visit after `execute_fn` returns; this reserves it at
+  *selection*. With one proposal in flight nothing can observe the tree between
+  those two points, so every selection sees identical visit counts —
+  `test_serial_tree_reproduces_upstream_futs` drives this port's tree and a
+  line-by-line transcription of `futs.search` with the same mock generator and
+  executor and asserts the same node is expanded at every step, with the same
+  final visit vector. Without the reservation `argmax(puct)` is deterministic and
+  a batch of N workers would all be handed the same parent.
+
+  **Upstream ships no sandbox** — `implementation/sandbox.py` is an abstract class
+  whose `run` raises "Must provide a sandbox for executing untrusted code" — so
+  the sandbox is entirely this port's, and the page says plainly that it is
+  weaker than the OpenEvolve port's: the benchmark requires pandas/numpy/
+  scikit-learn, so the AST gate cannot be the boundary and the Bubblewrap profile
+  binds the root read-only rather than a handful of directories. What it does
+  enforce is checked against the kernel, not by reading the profile back.
+
+  Measured, `glm-5.2`, `async_evolve(n_workers=3)`, 6 expansions: test RMSE
+  **0.7297 → 0.5913** (−19.0%) on 2,476 rows the search never scored, from
+  upstream's `LinearRegression` seed to a gradient-boosting model with ten
+  engineered features and early stopping. Two things the score does not show and
+  the page records anyway: the held-out gate is **95% of the wall clock** (four
+  full trainings per card, on the merger thread), so more `--workers` buys almost
+  nothing here; and the barrier-free schedule makes the tree **root-heavy**, five
+  of six expansions attaching to the root because sweep 1 dispatched proposals
+  before any sibling had been inserted. One run, one seed, and no `--serial`
+  control, so no speedup is claimed. See `docs/algo-era.md`.
 
 - **Evaluation can now be its own stage: `async_evolve(pipelined_gate=True)`.**
   Two modules claim to implement FlashEvolve's stage orchestration and both

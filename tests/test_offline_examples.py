@@ -116,12 +116,38 @@ def _async_stats(policy_name, ratio=4, seconds=8.0):
                                  staleness_policy=get_policy(policy_name)).run()
 
 
-def test_full_discards_nothing_and_guarded_discards_the_most():
+def test_full_discards_nothing_and_guarded_never_discards_less():
     """Accuracy saturates on this domain, so the policies are only separable by
-    what they spend -- which is why the experiment now reports cost."""
+    what they spend -- which is why the experiment now reports cost.
+
+    This used to assert `guarded.discarded_stale > 0`, and that assertion could
+    not hold here. `_async_stats` is an **8-second, wall-clock-bounded run of six
+    real worker threads against one merger**, and whether any diff's `eta`
+    exceeds alpha depends on whether the merger drains slower than the workers
+    fill -- which is a property of the machine, not of the policy. On a fast or
+    idle host the merger keeps up, every card arrives at `eta == 0`, and Guarded
+    correctly discards nothing. Observed failing on `main` in CI on Python 3.12
+    (`proposals=26, sweeps=4, discarded_stale=0`) and, in a later run of the same
+    commit, on 3.11 instead -- the version rotating between runs is the signature
+    of a load-sensitive assertion rather than of a regression.
+
+    What survives here is the part that *is* deterministic: Full discards nothing
+    by definition, and Guarded can never discard less than Full. An inversion of
+    those is a real bug and still fails.
+
+    The strict claim -- that Guarded reaches DISCARD at all -- belongs to a test
+    that can hold it, and two already do, both on seeded and bounded runs rather
+    than on the clock:
+    `test_staleness.py::test_a_refresh_interval_makes_every_staleness_action_reachable`
+    asserts every branch including DISCARD is reachable, and
+    `test_the_staleness_sweep_actually_varies_with_alpha` above asserts a tight
+    alpha discards strictly more than a generous one.
+    """
     full, guarded = _async_stats("full"), _async_stats("guarded")
     assert full.discarded_stale == 0, "Full accepts stale diffs by definition"
-    assert guarded.discarded_stale > 0, "Guarded must reject something past alpha"
+    assert guarded.discarded_stale >= full.discarded_stale, (
+        f"Guarded discarded {guarded.discarded_stale} where Full discarded "
+        f"{full.discarded_stale} -- the gated policy cannot be the lenient one")
 
 
 def test_the_async_runtime_actually_pipelines():

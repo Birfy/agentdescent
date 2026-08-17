@@ -92,6 +92,7 @@ nav:
     - ADAS — meta agent search: algo-adas.md
     - DGM — Darwin Gödel Machine: algo-dgm.md
     - OpenEvolve — program evolution: algo-openevolve.md
+    - ERA — empirical-software search: algo-era.md
     - PromptBreeder — genetic prompts: algo-promptbreeder.md
     - AFlow — workflow search: algo-aflow.md
     - Reflexion — episodic memory: algo-reflexion.md
