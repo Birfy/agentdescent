@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-199 public names across 35 modules.
+201 public names across 35 modules.
 
 ---
 
@@ -1766,6 +1766,39 @@ document_agent(
     doc_filename: str = 'document.txt',
     inline_chars: int = 200000,
     skills_dir: str = '.claude/skills'
+) -> AgentBackend
+```
+
+### `dsh(...)`
+
+**DeepSeek Harness** (`dsh`) as a workspace-bindable `Completion`.
+
+```python
+dsh(
+    model: str = 'deepseek-v4-flash',
+    *,
+    provider: str = 'deepseek-official',
+    workspace: Optional[str] = None,
+    cordis: Optional[str] = None,
+    max_tokens: Optional[int] = None,
+    session_root: Optional[str] = None,
+    timeout: float = 600.0,
+    reuse: Optional[bool] = None,
+    usage: Optional[Usage] = None
+) -> '_DshAgent'
+```
+
+### `dsh_backend(...)`
+
+`document_agent(dsh(...))` -- the document task on DeepSeek Harness.
+
+```python
+dsh_backend(
+    model: str = 'deepseek-v4-flash',
+    *,
+    provider: str = 'deepseek-official',
+    doc_filename: str = 'document.txt',
+    **kwargs
 ) -> AgentBackend
 ```
 

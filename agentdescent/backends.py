@@ -12,16 +12,22 @@ This module adds that abstraction:
 
     AgentBackend.answer(question, document, skills="") -> str
 
-with two implementations:
+with three implementations:
 
 * :func:`openhands_backend` -- runs a **real OpenHands agent** (OpenHands SDK
   v1.x) with ``terminal`` + ``file_editor`` tools over the document, driven by any
   LiteLLM-supported model. Point it at DeepSeek with ``model="openai/deepseek-v4-pro"``
   and ``base_url="https://api.deepseek.com"``. Requires ``pip install openhands-ai``
   (Python >= 3.12). No Docker needed (local runtime).
+* :func:`dsh_backend` -- runs a **real DeepSeek Harness agent** over the document.
+  Requires ``pip install deepseek-harness-sdk``.
 * :func:`tool_loop_backend` -- a dependency-free ``grep``/``read`` ReAct loop over
   the document using any :data:`~agentdescent.agents.Completion`. A lighter local
   stand-in that mirrors what OpenHands does; runs anywhere.
+
+:func:`openhands` and :func:`dsh` are the underlying agents, usable on their own
+wherever a :data:`~agentdescent.agents.Completion` is asked for -- the document
+shape above is one domain built on them, not their only use.
 
 Both return a plain answer string, so they slot in wherever a base agent is
 needed (see ``examples/evoskill/evoskill_skill_discovery.py --backend openhands``).
@@ -29,14 +35,18 @@ needed (see ``examples/evoskill/evoskill_skill_discovery.py --backend openhands`
 
 from __future__ import annotations
 
+import atexit
 import os
 import re
 import shutil
 import tempfile
+import threading
+import time
 import warnings
+import weakref
 from typing import Callable, Mapping, Optional, Protocol, runtime_checkable
 
-from .agents import Completion, WorkspaceAgent
+from .agents import AgentError, Completion, Usage, WorkspaceAgent
 
 #: Prefix of the per-question scratch directory a workspace agent is given.
 _DOC_WS_PREFIX = "agentdescent-doc-"
@@ -257,6 +267,202 @@ def openhands_backend(model: str = "openai/deepseek-v4-pro", *,
     return document_agent(openhands(model, base_url=base_url, api_key_env=api_key_env,
                                     temperature=temperature,
                                     max_iterations=max_iterations),
+                          doc_filename=doc_filename)
+
+
+# ---------------------------------------------------------------------------
+# DeepSeek Harness -- a real agent harness, driven as a subprocess
+# ---------------------------------------------------------------------------
+#
+# The third sibling of `openhands()` and `claude_code()`, and the one this
+# package has the most to say about: dsh makes every layer of the agent a
+# swappable plugin, which is the first time the *parameters* of an agent -- its
+# skills, prompt sections, tool set, subagent presets -- have been addressable
+# rather than buried in a fixed stack. Evolving them is what this package does.
+#
+# This is M0 of `docs/design-dsh-plugin.md`: dsh as a rollout runtime, from
+# Python, with no plugin installed. The plugin (dsh hosting *us*) is M1 and
+# lands under `agentdescent/dsh/`; it reuses this adapter for the out-of-harness
+# executor, which is why the adapter comes first and stands alone.
+
+_DSH_MISSING = (
+    "dsh() needs `pip install deepseek-harness-sdk` (it installs the matching "
+    "runtime binary). Import failed: {err}")
+
+#: Agents holding a reused runtime subprocess, closed once at interpreter exit.
+#: A `WeakSet` rather than `atexit.register(self.close)` per instance: the latter
+#: pins every agent it is given for the life of the process, and `in_workspace()`
+#: mints one per rollout.
+_LIVE_DSH = weakref.WeakSet()  # type: ignore[var-annotated]
+
+
+def _close_live_dsh() -> None:
+    for agent in list(_LIVE_DSH):
+        agent.close()
+
+
+atexit.register(_close_live_dsh)
+
+
+class _DshAgent:
+    """DeepSeek Harness as a workspace-bindable :data:`Completion`."""
+
+    def __init__(self, model, provider, cordis, max_tokens, session_root,
+                 timeout, reuse, usage, workspace=None) -> None:
+        self._cfg = (model, provider, cordis, max_tokens, session_root, timeout,
+                     reuse, usage)
+        self.model, self.provider, self.usage = model, provider, usage
+        self.workspace = workspace
+        # Bound to a workspace -> the caller stages a directory per rollout and
+        # the runtime is bound to *that* cwd (the SDK resolves cwd once, at
+        # construction, and hands it to `initialize()`), so the process cannot
+        # outlive the rollout. Unbound -> every call shares one cwd, so one
+        # runtime serves the whole run and each call still gets its own session.
+        self._persistent = reuse if reuse is not None else workspace is None
+        self._harness = None
+        self._lock = threading.Lock()
+
+    def in_workspace(self, path: str) -> "_DshAgent":
+        return _DshAgent(*self._cfg, workspace=path)
+
+    def _start(self):
+        with self._lock:
+            if self._harness is not None:
+                return self._harness
+            try:
+                from deepseek_harness import DeepSeekHarness  # optional dependency
+            except Exception as e:  # noqa: BLE001 - surface the optional dependency
+                raise AgentError(
+                    _DSH_MISSING.format(err=f"{type(e).__name__}: {e}")) from e
+            model, provider, cordis, max_tokens, session_root, timeout, _, _ = self._cfg
+            options = {"model": model, "provider": provider, "cwd": self.workspace,
+                       "cordis": cordis, "max_tokens": max_tokens,
+                       "session_root": session_root,
+                       "request_timeout_seconds": timeout}
+            # Credentials and endpoint are never arguments here: the runtime
+            # inherits DEEPSEEK_API_KEY / DEEPSEEK_BASE_URL from the environment,
+            # the same rule `openai_compatible` follows.
+            self._harness = DeepSeekHarness(
+                **{k: v for k, v in options.items() if v is not None})
+            if self._persistent:
+                _LIVE_DSH.add(self)
+            return self._harness
+
+    def close(self) -> None:
+        """Reap the runtime subprocess. Idempotent."""
+        with self._lock:
+            harness, self._harness = self._harness, None
+        _LIVE_DSH.discard(self)
+        if harness is not None:
+            try:
+                harness.close()
+            except Exception:  # noqa: BLE001 - teardown is best-effort
+                pass
+
+    def __enter__(self) -> "_DshAgent":
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        self.close()
+
+    def __call__(self, prompt: str) -> str:
+        harness = self._start()
+        t0, failed = time.time(), True
+        try:
+            try:
+                result = harness.run(prompt)
+            except Exception as e:  # noqa: BLE001 - one wire error, one exception type
+                raise AgentError(
+                    f"dsh({self.model}) failed: {type(e).__name__}: {e}") from e
+            reason = getattr(result, "finish_reason", None)
+            if reason == "error":
+                # The turn broke. `final_response` still holds whatever text was
+                # committed before it did, and returning that would hand the
+                # engine a *partial* answer to score as if it were an answer --
+                # the same defect class as the `content: null` case in
+                # `openai_compatible`, where a provider-side failure arrived
+                # looking like a result. A rollout that failed must fail.
+                raise AgentError(
+                    f"dsh({self.model}) ended the turn with finish_reason='error' "
+                    f"(session {getattr(result, 'session_id', '?')})")
+            failed = False
+            # `max-tokens` is deliberately *not* an error: a truncated answer is
+            # a real rollout that deserves its low score, and raising would drop
+            # the sample instead -- which biases the measurement toward the
+            # candidates that happen to be terse.
+            #
+            # Empty text is normalised to "" for the reason `openai_compatible`
+            # documents: `Completion` is prompt -> str, and returning None
+            # surfaces four frames away as an AttributeError the engine then
+            # retries as a backend transient.
+            return (getattr(result, "final_response", "") or "").strip()
+        finally:
+            if self.usage is not None:
+                self.usage.record(seconds=time.time() - t0, failed=failed)
+            if not self._persistent:
+                self.close()
+
+
+def dsh(model: str = "deepseek-v4-flash", *, provider: str = "deepseek-official",
+        workspace: Optional[str] = None, cordis: Optional[str] = None,
+        max_tokens: Optional[int] = None, session_root: Optional[str] = None,
+        timeout: float = 600.0, reuse: Optional[bool] = None,
+        usage: Optional[Usage] = None) -> "_DshAgent":
+    """**DeepSeek Harness** (``dsh``) as a workspace-bindable :data:`Completion`.
+
+    Same contract as every other agent here -- prompt in, text out -- so it drops
+    into ``LLMAgent`` / ``evolve`` / ``evolve_skill_dir`` beside
+    :func:`~agentdescent.agents.claude_code` and :func:`openhands`, and
+    ``.in_workspace(path)`` lets a runner stage a candidate directory for it to
+    read with real tools::
+
+        evolve_skill_dir("./skills/sql", tasks, agent=dsh())
+        evolve(tasks, reward, agent=LLMAgent(dsh(model="deepseek-v4-pro")))
+
+    Needs ``pip install deepseek-harness-sdk``, which pulls the matching runtime
+    binary; the import is lazy, so the rest of the framework runs without it.
+    Credentials are **not** arguments: the runtime inherits ``DEEPSEEK_API_KEY``
+    and ``DEEPSEEK_BASE_URL`` from the environment.
+
+    **Every call gets a fresh session.** That is the property the whole thing
+    rests on -- ``DeepSeekHarness.run()`` with no ``session_id`` mints
+    ``session-<uuid4>`` -- because a rollout that inherited the previous task's
+    context would score the transcript rather than the artifact, and the
+    contamination would look like learning.
+
+    **One runtime, many sessions.** The SDK's client holds a write lock and a
+    per-session notification filter, so concurrent calls from *N* worker threads
+    share one runtime subprocess. An instance bound by ``in_workspace()`` is the
+    exception and starts one per call: the SDK resolves ``cwd`` once at
+    construction, so a workspace-bound runtime cannot be reused for a different
+    workspace, and leaving it alive would leak a process per rollout. Pass
+    ``reuse=`` to override either default.
+
+    ``timeout`` bounds one request and matches
+    :func:`~agentdescent.agents.cli_agent`'s 600s rather than the 120s used for
+    plain API calls -- an agentic turn legitimately takes minutes. It is not
+    optional in spirit: a hung agent stalls the round it belongs to.
+
+    ``cordis`` points at a Cordis composition of your own (keep the
+    ``@deepseek-ai/dsh-sdk-jsonrpc-server`` row); ``session_root`` is where the
+    session log lands, which is the artifact M2 of the plugin design harvests
+    tasks from. Note that ``Usage`` records calls and wall-clock only: unlike
+    :func:`~agentdescent.agents.claude`, the SDK's ``RunResult`` exposes no token
+    counts.
+    """
+    return _DshAgent(model, provider, cordis, max_tokens, session_root, timeout,
+                     reuse, usage, workspace=workspace)
+
+
+def dsh_backend(model: str = "deepseek-v4-flash", *,
+                provider: str = "deepseek-official",
+                doc_filename: str = "document.txt", **kwargs) -> AgentBackend:
+    """``document_agent(dsh(...))`` -- the document task on DeepSeek Harness.
+
+    The dsh counterpart of :func:`openhands_backend`, and the reason
+    :func:`document_agent` takes any agent: the document lands in a scratch
+    workspace and dsh greps it with its own tools."""
+    return document_agent(dsh(model, provider=provider, **kwargs),
                           doc_filename=doc_filename)
 
 
