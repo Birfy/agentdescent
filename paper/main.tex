@@ -67,6 +67,7 @@ The mapping is productive precisely because of where it breaks. \emph{Gradients 
   \item \textbf{A system design and a discrete-space aggregator} mapping the distributed-training stack onto parallel self-evolution --- per-diff bounded staleness, conflict projection, fusion, Beta-posterior acceptance, dual-branch promotion --- with a formal account of where the analogy holds and where it must break (\cref{sec:design,sec:aggregator}).
   \item \textbf{An efficiency analysis identifying three sources of speedup} (\cref{sec:efficiency}): rollout overlap, barrier removal, and --- specific to merge-based evolution --- reduced validation cost, in which merging collapses $k$ acceptance tests into one and \emph{reflective merge} extends the reduction to artifacts whose concurrent proposals conflict. The three do not compose unconditionally, and we characterize the regimes in which each pays.
   \item \textbf{An extensibility mechanism} under which published algorithms are ported as plug-ins rather than forks (\cref{sec:pluggable,sec:ports}): a diff-encoding \code{strategy} plus an optional \code{aggregator\_factory}, or a declarative policy bundle. Eighteen ports run under all three schedulers without modification.
+  \item \textbf{A precondition for merging, in closed form} (\cref{eq:fusionrate}): because the engine proposes only from failed rollouts, the fraction of rounds with two diffs to fuse is $1-(1-f)^N-Nf(1-f)^{N-1}$ in the incumbent's failure rate $f$ and the worker count $N$. It retrodicts two of our null results, prescribes the workload that avoids them, and bounds fusion width from below where the trust region and the round count bound it from above.
   \item \textbf{A live-model evaluation} (\cref{sec:experiments}) reported symmetrically: an eleven-algorithm scheduler study in which synchronous parallelism wins for all eleven methods (median $1.36\times$ end-to-end) while barrier removal shows no aggregate further gain ($0.99\times$), against a three-seed case study in which it reaches a median $6.28\times$ on a gate-heavy workload --- with the regime distinction analyzed; direct observation of the validation-cost reduction as falling model-seconds per rollout at a pinned budget; quality results under the most aggressive schedule; and an equal-budget merge-versus-selection comparison reported, with analysis, as not yet statistically separated.
 \end{enumerate}
 
@@ -277,7 +278,7 @@ Fidelity is declared per port --- \emph{benchmark-faithful}, \emph{mechanism mic
 \section{Evaluation}
 \label{sec:experiments}
 
-\paragraph{Setup.} All results are obtained from live models on real datasets: \code{deepseek-v4-flash} and \code{GLM-5.2} (reasoning models) via an OpenAI-compatible endpoint, on each algorithm's own benchmark. Every number is produced by a named script in the repository with its exact reproduction command; absolute times depend on host and endpoint, so ratios are the reproducible quantity. We address four questions: \textbf{RQ1} --- how much effective concurrency do the three mechanisms of \cref{sec:efficiency} deliver against a faithful serial control? \textbf{RQ2} --- does the speedup generalize across algorithms? \textbf{RQ3} --- is learning behavior preserved under the most aggressive schedule? \textbf{RQ4} --- does merging outperform best-of-$N$ selection at equal budget?
+\paragraph{Setup.} All results are obtained from live models on real datasets: \code{deepseek-v4-flash} and \code{GLM-5.2} (reasoning models) via an OpenAI-compatible endpoint, on each algorithm's own benchmark. Every number is produced by a named script in the repository with its exact reproduction command; absolute times depend on host and endpoint, so ratios are the reproducible quantity. We address four questions: \textbf{RQ1} --- how much effective concurrency do the three mechanisms of \cref{sec:efficiency} deliver against a faithful serial control? \textbf{RQ2} --- does the speedup generalize across algorithms? \textbf{RQ3} --- is learning behavior preserved under the most aggressive schedule, and how optimistic is the gate that decides it? \textbf{RQ4} --- does merging accelerate without a quality penalty relative to best-of-$N$ selection at equal budget?
 
 \subsection{RQ1: Effective concurrency against a faithful serial control}
 \label{sec:exp-live}
@@ -382,7 +383,7 @@ To test whether the RQ1 result generalizes beyond GEPA, the same scheduler compa
 
 Throughput is meaningful only if learning is preserved, so quality is measured under the most aggressive configuration (barrier-free, 8 workers, \textsc{Full} staleness). \Cref{fig:eleven} reports the eleven declarative ports at three seeds each. Read precisely: ten of eleven improve their three-seed mean test score beyond their domain's noise floor; Reflexion's $+0.016$ on GSM-Hard \citep{cobbe2021gsm8k,gao2023pal} sits within that domain's $\pm 0.02$ floor and should be read as no change; and four methods (Reflexion, SICA, G\"odel Agent, Voyager) improve on two of three seeds rather than all three. Gains are bounded by each benchmark's headroom --- the three GSM8K ports converge to 0.94--0.97 and differ in cost rather than quality. What this establishes is that the aggressive schedule does not stop the ports from learning; a paired serial-schedule quality arm at equal rollout budget, which would establish that asynchrony costs no quality \emph{relative to serial}, has not been run and we do not claim it. Among the benchmark-faithful ports, three representative single-seed results establish end-to-end operation (not effect sizes): ACE improves FiNER-139 \citep{loukas2022finer} validation $0.719 \to 0.766$ over 120 rollouts while curating a ten-bullet playbook; DGM's best archived child repairs held-out vendored bugs at $0.906$ versus its seed agent's $0.844$ under a frozen \code{pytest} oracle (a compact SWE-bench-style setting \citep{jimenez2023swebench}); SkillOpt improves a hard SearchQA \citep{dunn2017searchqa} subset $0.053 \to 0.211$ with 3 of 43 proposed edits accepted. One port produced no quality number at all: ADAS's benchmarks were either saturated (MGSM) or cost-prohibitive per call (GPQA), and we state this rather than average over it. The highest-level interface (\code{evolve\_skill}) on 40 HotpotQA rows raises held-out exact match from $0.167$ to $0.583$ over 338 model calls, committing one proposal.
 
-\subsection{RQ3b: How optimistic is the gate? The val--test gap}
+\subsection{RQ3, continued: how optimistic is the gate? The val--test gap}
 \label{sec:exp-valtest}
 The acceptance test reuses one fixed $\Dval$ across every decision, so an accepted diff is a selected extreme statistic on that split and its measured gain should be optimistically biased (\cref{sec:aggregator}). The size of that bias is measurable from the runs already reported: each of the 33 runs behind \cref{fig:eleven} records both its $\Dval$ trajectory and its disjoint test score, so the per-run difference (test gain $-$ val gain) estimates the optimism directly. Mean val gain is $+0.395$ and mean test gain $+0.357$, a mean gap of $\mathbf{-0.038}$ (median $-0.031$, s.d.\ $0.075$); test gain falls short of val gain in 20 of 33 runs and exceeds it in 7, with 6 exact ties --- a two-sided sign test on the 27 non-tied runs gives $p = 0.019$. The bias is thus real and directionally as predicted, but small relative to the gains themselves (roughly a tenth of the mean gain), and it does not threaten the sign of any result in \cref{fig:eleven}, whose scores are reported on test throughout. The runs where it is largest are those with the coarsest reward signal (SkillWeaver, $-0.125$ to $-0.250$ on an eight-task test split), which is the expected place for a selected statistic to overfit.
 
@@ -413,6 +414,57 @@ merge-of-8 & 0.033 / 0.217 / 0.400          & 0.194 & ---   & \textbf{685}  & \t
 \end{tabular}
 \end{table}
 
+
+\begin{figure}[t]
+\centering
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  width=\textwidth, height=5.2cm,
+  xlabel={$N{=}8$, 32 rollouts (4 rounds), 6 seeds},
+  ylabel={held-out test score},
+  symbolic x coords={serial, fork, merge},
+  xtick=data, ymin=0, ymax=0.46,
+  grid=major, grid style={adgray!20},
+  tick label style={font=\scriptsize}, label style={font=\scriptsize},
+]
+\addplot[only marks, mark=*, mark size=1.7pt, adblue, opacity=0.75] coordinates {
+  (serial,0.167) (serial,0.333) (serial,0.267) (serial,0.333) (serial,0.133) (serial,0.267)
+  (fork,0.067) (fork,0.100) (fork,0.167) (fork,0.300) (fork,0.267) (fork,0.233)
+  (merge,0.033) (merge,0.400) (merge,0.267) (merge,0.200) (merge,0.033) (merge,0.233)};
+\addplot[only marks, mark=-, mark size=7pt, very thick, adred!80!black] coordinates {
+  (serial,0.267) (fork,0.200) (merge,0.217)};
+\end{axis}
+\end{tikzpicture}
+\caption{Fusion width 8. Per-seed test scores with medians marked. The three arms overlap; the merge arm has the \emph{widest} spread (s.d.\ $0.130$ against $0.076$ and $0.085$).}
+\label{fig:rq4w8}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  width=\textwidth, height=5.2cm,
+  xlabel={$N{=}4$, 96 rollouts (24 rounds), 3 seeds},
+  ylabel={held-out test score},
+  symbolic x coords={serial, fork, merge},
+  xtick=data, ymin=0, ymax=0.46,
+  grid=major, grid style={adgray!20},
+  tick label style={font=\scriptsize}, label style={font=\scriptsize},
+]
+\addplot[only marks, mark=*, mark size=1.7pt, adgreen!55!black, opacity=0.8] coordinates {
+  (serial,0.100) (serial,0.367) (serial,0.133)
+  (fork,0.333) (fork,0.133) (fork,0.400)
+  (merge,0.267) (merge,0.267) (merge,0.200)};
+\addplot[only marks, mark=-, mark size=7pt, very thick, adred!80!black] coordinates {
+  (serial,0.133) (fork,0.333) (merge,0.267)};
+\end{axis}
+\end{tikzpicture}
+\caption{Fusion width 4, matched to the trust region, at a $3\times$ budget. The arms still overlap, but the merge arm is now the \emph{tightest} (s.d.\ $0.031$ against $0.119$ and $0.113$) --- three seeds, so an observation rather than a result.}
+\label{fig:rq4w4}
+\end{minipage}
+\end{figure}
+
 \textbf{The claim merging has to meet is non-inferiority, not superiority.} The framework's premise is throughput --- accepted improvement per unit wall-clock --- so merging succeeds if it reaches the same quality faster and cheaper, and fails only if quality degrades. Read that way, the six seeds say: quality is indistinguishable (merge better on 2 seeds, worse on 3, tied on 1 against fork, mean paired difference $+0.006$; $p{=}1.00$), while merge is the cheapest arm in both currencies --- $11\%$ fewer model calls and $1.28\times$ less wall-clock than serial, $32\%$ fewer calls and $1.53\times$ less wall-clock than fork.
 
 \textbf{A caution about the quality column, in both directions.} On seeds 0--2 alone the merge arm posted a median of $0.267$ against fork's $0.100$, which would have read as merging's first favourable equal-budget result; seeds 3--5 reversed it ($0.200$ against $0.267$). We report the pooled six because we would otherwise have published the favourable half. The same caution bounds the non-inferiority claim in the other direction: six seeds on a 30-task split detect only large effects, so ``no measurable quality penalty'' is what the data supports, not ``no quality penalty''.
@@ -440,7 +492,7 @@ The algorithm ports were contributed by \code{chendanyang} (the seven benchmark-
 
 \section*{Reproducibility}
 \sloppy
-All code is available at \url{https://github.com/Birfy/agentdescent} (MIT license; \code{pip install agentdescent}; the core engine has no required dependencies). Generating scripts, per result: thread overlap --- \code{examples/efficiency.py -{}-only gil}; RQ1 and the live merger profile of \cref{sec:lever-val} --- \code{bench/matrix\_run.py -{}-rows gepa}; RQ2 --- \code{bench/candidate\_methods.py}, measured on the pre-restructuring implementation (summarized report retained, raw per-run JSON not; rerun pending); RQ3 --- each port's own command line over \code{examples/\_method\_runner.py}, the entry point that accepts the \code{-{}-staleness full} configuration used, with the resolved configuration printed as one JSON line per run; the \code{evolve\_skill} case --- \code{examples/skill\_evolution.py}; RQ4 --- \code{bench/baselines\_run.py}. Every port supports \code{-{}-dry-run} (no API key or model call) and carries an offline test suite; datasets are retrieved from canonical sources by a dependency-free data layer.
+All code is available at \url{https://github.com/Birfy/agentdescent} (MIT license; \code{pip install agentdescent}; the core engine has no required dependencies). Generating scripts, per result: thread overlap --- \code{examples/efficiency.py -{}-only gil}; RQ1 and the live merger profile of \cref{sec:lever-val} --- \code{bench/matrix\_run.py -{}-rows gepa}; RQ2 --- \code{bench/candidate\_methods.py}, measured on the pre-restructuring implementation (summarized report retained, raw per-run JSON not; rerun pending); RQ3 --- each port's own command line over \code{examples/\_method\_runner.py}, the entry point that accepts the \code{-{}-staleness full} configuration used, with the resolved configuration printed as one JSON line per run; the \code{evolve\_skill} case --- \code{examples/skill\_evolution.py}; RQ4 --- \code{bench/baselines\_run.py -{}-dataset bbh-keyed -{}-fusion-tournament}, whose workload (BBH crossed with \code{KeyedRules}), width and budget sweeps, and fusion counters were added for this paper and ship with it. Every port supports \code{-{}-dry-run} (no API key or model call) and carries an offline test suite; datasets are retrieved from canonical sources by a dependency-free data layer.
 
 \bibliographystyle{plainnat}
 \bibliography{references}
