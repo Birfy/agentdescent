@@ -402,6 +402,17 @@ PATTERNS = {
     "stale_considered": r"stale_considered=([\d,]+)",
     "stale_discarded": r"stale_discarded=([\d,]+)",
     "redispatched": r"redispatched=([\d,]+)",
+    # The stage profile from the same `report_engine` line. Without these a
+    # width sweep can say the arm stopped scaling but not *where* it stopped:
+    # `merge_seconds / wallclock` is merger occupancy and `merge_gate_seconds`
+    # is the part of it that is gate evaluation, which is the term a saturation
+    # model needs. `worker_starved_seconds` is the confirmation from the other
+    # side -- a busy merger with no starved workers has hidden itself.
+    "wallclock": r"stage profile: wallclock=([\d.]+)",
+    "merge_seconds": r"merge_seconds=([\d.]+)",
+    "merge_gate_seconds": r"merge_gate_seconds=([\d.]+)",
+    "worker_starved_seconds": r"worker_starved_seconds=([\d.]+)",
+    "eval_seconds": r"eval_seconds=([\d.]+)",
 }
 
 
