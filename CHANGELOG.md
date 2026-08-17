@@ -66,18 +66,41 @@ All notable changes to AgentDescent are documented here. The format follows
   prompt bundle and a plugin package are all file trees, so path-keyed state
   already gives them fuse-vs-conflict semantics).
 
-  Two decisions carry the document. Rollouts run **inside** the harness process
-  by default — a candidate artifact is registered against one child's `agent.ctx`
-  so N workers share one process without polluting each other, and what gets
-  measured is the real harness with its real tools, sandbox and approval policy
-  rather than a stripped-down replica. And the engine stays in Python behind a
-  bidirectional NDJSON-RPC bridge whose payloads are `workspec.Ref`s, not
-  closures — the same reason `workspec` exists at all.
+  The target is a user's own harness improving as they use it, not a benchmark
+  run, and that choice is what the document is actually about. It means there
+  are **no labels**: the reward has to come from the harness itself. The answer
+  is that a logged past turn *is* a reference trajectory — dsh guarantees
+  model-visible means logged, and replays — so scoring becomes a pairwise
+  comparison against what actually happened, which is the one thing an LLM judge
+  is reliable at, rather than absolute scoring, which is the thing it is worst
+  at. Efficiency rides on top as a multiplier behind a hard success gate, never
+  as a weighted sum, so "two fewer steps" can never buy off "got it wrong".
+
+  It also means held-out sets of a few dozen turns, where the Beta posterior
+  will refuse most proposals. The document takes that as correct behaviour and
+  makes it the one red line: supplement with synthetic tasks (the `r_zero` /
+  `absolute_zero` / `agent0` ports already ship), never lower the threshold.
+
+  Rollouts run **inside** the harness process by default — a candidate is
+  registered against one child's `agent.ctx`, so N workers share one process
+  without polluting each other and what gets measured is the real harness with
+  its real tools, sandbox and approval policy. The engine stays in Python behind
+  a bidirectional NDJSON-RPC bridge carrying `workspec.Ref`s, not closures — the
+  same reason `workspec` exists at all. Transcripts are read on the TypeScript
+  side through `session-query` rather than parsed from disk in Python: the
+  on-disk log is zstd-framed with packed chunk runs behind a whitelisting codec,
+  and reimplementing that would be a compatibility surface that breaks on every
+  dsh release.
 
   Governance is the part with two doors: the L0 frozen set is checked in
   `governance.FROZEN_IDS` *and* again as a monotonic `ctx.tools.guard()` denial
   on the harness side, because single-sided trust does not hold in a system that
   rewrites itself.
+
+  The TypeScript bundle lives in this repo under `plugin/`. `packages.find`
+  already keeps it out of the wheel, but it costs a second publish workflow:
+  `dsh plugin add github:Birfy/agentdescent` cannot install a subdirectory, so
+  npm or a tarball is the only distribution path.
 
 - **An eighth benchmark-faithful port: ERA, Google Research's empirical-software
   search.** `examples/era/` runs upstream's own bundled task — Kaggle Playground
