@@ -3,7 +3,13 @@
 > 目标：让 **DeepSeek Harness（`dsh`）** 装上 AgentDescent 之后，它自己会变好 ——
 > 用户平时怎么用它，它就在那条真实轨迹上训练自己的 skill、prompt、preset 乃至插件代码。
 >
-> **状态：设计中**，尚未实现。本文写*为什么*这样切、边界划在哪、以及每一步的验收标准。
+> **状态：M0 已落地，M1 起未实现。** 本文写*为什么*这样切、边界划在哪、以及每一步的验收标准。
+>
+> 已落地的：[`agentdescent.backends.dsh()`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/backends.py)（把 dsh 当 agent 驱动）、
+> [`agentdescent.dsh.locate`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/dsh/locate.py)（按 dsh 自己的 rank 顺序解析 skill 根）、
+> [`rewards.command()`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/rewards.py)（§8.1 的 B 档最低一级）、
+> `LAYOUTS['dsh_skill']`，以及 runner
+> [`examples/dsh/evolve_dsh_skill.py`](https://github.com/Birfy/agentdescent/blob/main/examples/dsh/evolve_dsh_skill.py)。
 >
 > 对照阅读：[演化一个目录](directory-evolution.md)（本设计复用的底座）、
 > [治理 L0/L1/L2](governance.md)、[Where rollouts run](execution.md)、
@@ -593,7 +599,7 @@ monorepo 的四个具体后果，每一条都要落到文件：
 
 | | 内容 | 验收 | 估时 |
 |---|---|---|---|
-| **M0** | **离线自我演化。** 纯 Python 零 TS：读用户真实 profile 的 skill 目录，任务和判据由用户给（A 档数据集，或 B 档一条命令），rollout 走 `deepseek-harness-sdk` 子进程，产物 `EvolutionResult.write_to()` 落回去 | 在**真实 profile** 上跑完，给出 before/after 两个数，产物能被 dsh 正常加载 | 3 天 |
+| **M0** ✅ | **离线自我演化。** 纯 Python 零 TS：读用户真实 profile 的 skill 目录，任务和判据由用户给（A 档数据集，或 B 档一条命令），rollout 走 `deepseek-harness-sdk` 子进程，产物 `EvolutionResult.write_to()` 落回去 | 在**真实 profile** 上跑完，给出 before/after 两个数，产物能被 dsh 正常加载 | 3 天 |
 | **M1** | 插件最小可用：`plugin/` 骨架 + sidecar + `ctx.evolution` seam + skill 适配器 + 进程内 rollout + `/evolve` + `evolve_start` 工具。只有 L2 | `dsh plugin add ./plugin` 之后 `/evolve skill:x` 跑完，新 skill 在**同一个会话里**生效 | 1 周 |
 | **M2** | 奖励闭环：ScorerRegistry + A/B 档（`gold` / `command` / `judge`）+ C 档兜底（`replay-pairwise` + `efficiency`）+ transcript TaskSource（TS 侧 `session-query`） | 三档各跑通一个真实例子；**兜底档接受不了时能说清是因为 N 太小**，而不是静悄悄没结果 | 1–1.5 周 |
 | **M3** | 常驻形态：`ctx.jobs` + 空闲触发 + 异步运行时（`asynchronous=True, async_ratio=3`）+ Web UI 节点 + 预算上限 | 正常用 harness 的同时后台演化，任何用户输入立刻让路，花了多少 token 看得见 | 1 周 |
