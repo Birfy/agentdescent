@@ -12,6 +12,7 @@
 \usepackage{microtype}
 \usepackage{graphicx}
 \usepackage{booktabs}
+\usepackage{array}
 \usepackage{multirow}
 \usepackage{amsmath}
 \usepackage{xcolor}
@@ -323,6 +324,77 @@ Fidelity is declared per port --- \emph{benchmark-faithful}, \emph{mechanism mic
 \label{sec:experiments}
 
 \paragraph{Setup.} All results are obtained from live models on real datasets: \code{deepseek-v4-flash} and \code{GLM-5.2} (reasoning models) via an OpenAI-compatible endpoint, on each algorithm's own benchmark. Every number is produced by a named script in the repository with its exact reproduction command; absolute times depend on host and endpoint, so ratios are the reproducible quantity. We address four questions: \textbf{RQ1} --- how much effective concurrency do the three mechanisms of \cref{sec:efficiency} deliver against a faithful serial control? \textbf{RQ2} --- does the speedup generalize across algorithms? \textbf{RQ3} --- is learning behavior preserved under the most aggressive schedule, and how optimistic is the gate that decides it? \textbf{RQ4} --- does merging accelerate without a quality penalty relative to best-of-$N$ selection at equal budget?
+
+\Cref{tab:config} states every configuration in full, including the two runs that produced null results and are reported as such. Three conventions hold throughout and are worth stating once, because each of them costs us something. The rollout budget is \emph{pinned on every arm} of every comparison, so a wide arm cannot buy its speedup with extra work --- the failure mode that makes an unbudgeted $N{=}8$ arm look eight times better. The serial control runs its gate at \code{eval\_concurrency}${=}1$, reproducing the published loop rather than a partly-parallel version of it; this makes the control slower and every speedup beside it larger, which is why the value is recorded rather than assumed. And the held-out \emph{test} split is disjoint from the gate's $\Dval$ in every experiment, so no quality figure below was ever seen by an acceptance decision.
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\caption{Every configuration behind \cref{sec:experiments}. Budget is pinned in rollouts on all arms of a comparison unless noted. Flags not listed take each script's defaults, which every run prints in its header and records in its result JSON; \cref{sec:repro} names the script per experiment. Model names are the endpoint's identifiers.}
+\label{tab:config}
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{1.95cm}>{\raggedright\arraybackslash}p{1.95cm}>{\raggedright\arraybackslash}p{2.6cm}>{\raggedright\arraybackslash}p{1.7cm}>{\raggedright\arraybackslash}p{2.05cm}>{\raggedright\arraybackslash}p{3.8cm}@{}}
+\toprule
+\textbf{Experiment} & \textbf{Model} & \textbf{Workload} & \textbf{Arms, width} & \textbf{Budget, seeds} & \textbf{Gate, staleness, notes} \\
+\midrule
+Thread overlap (\cref{sec:exp-parallel})
+& \code{GLM-5.2}
+& 8 concurrent API calls of matched request length
+& 8 threads vs.~1
+& 3 repeats
+& Pure-Python CPU work run through the same harness as the GIL control \\
+\addlinespace
+RQ1 (\cref{sec:exp-live})
+& \code{GLM-5.2}
+& HotpotQA via the GEPA port; \code{-{}-fetch 80}, \code{-{}-val-cap 8}
+& serial / sync / async, $N{=}4$
+& 16 rollouts per arm; seeds 0--2
+& Gate at \code{eval\_concurrency}${=}16$ on the parallel arms, ${=}1$ on the serial control; \code{-{}-async-ratio 3}; \code{-{}-rounds 9999} so the budget binds, not the port's own iteration default; reasoning tokens disabled \\
+\addlinespace
+RQ2 (\cref{sec:exp-matrix})
+& \code{GLM-5.2}
+& each port's own benchmark, 11 ports
+& serial / sync / async, $N{=}2$
+& equal candidate budget; 3 paired seeds per cell (99 runs)
+& \textsc{Guarded} staleness throughout --- this entry point exposes no staleness flag; measured on the implementation preceding the ports' declarative restructuring \\
+\addlinespace
+RQ3 (\cref{sec:exp-ports})
+& \code{deepseek-}\allowbreak\code{v4-flash}
+& each port's own benchmark, 11 ports
+& barrier-free only, $N{=}8$
+& 80 rollouts per seed; seeds 0--2
+& \textsc{Full} staleness, the most permissive policy --- stale diffs admitted unconditionally; 465--2{,}069 model calls per seed \\
+\addlinespace
+RQ4, null 1 (\cref{sec:merge-vs-fork})
+& \code{GLM-5.2}
+& HotpotQA; artifact is a single instruction slot
+& serial / fork / merge, $N{=}3$
+& 9 rollouts per seed; seeds 0--2
+& Reflective merge on. 1{,}298 calls, 11.3\,h model time. Reported as a null: the fused union was built twice in the whole experiment \\
+\addlinespace
+RQ4, null 2 (\cref{sec:merge-vs-fork})
+& \code{GLM-5.2}
+& FiNER-139 via the ACE playbook, keyed per bullet; \code{-{}-pool 2000}, \code{-{}-val-cap 32}
+& serial / fork / merge, $N{=}4$
+& 24 rollouts; seed 0
+& Reflective merge and fusion tournament on. Reported as a null, and \cref{eq:fusionrate} explains it: the seed artifact already scored $0.938$ on the gate's split, so $f \approx 0.06$ \\
+\addlinespace
+RQ4, width 8 (\cref{sec:merge-vs-fork})
+& \code{GLM-5.2}
+& \code{bbh-keyed}: BBH crossed with \code{KeyedRules}; 60 train / 30 val / 30 test
+& serial / fork / merge, $N{=}8$
+& 32 rollouts per arm (4 rounds); seeds 0--5
+& Reflective merge, fusion tournament, and self-verification on. 16{,}124 calls, 28.3\,h model time \\
+\addlinespace
+RQ4, width 4 (\cref{sec:merge-vs-fork})
+& \code{GLM-5.2}
+& as above, same splits
+& serial / fork / merge, $N{=}4$
+& 96 rollouts per arm (24 rounds); seeds 0--5
+& As above. The width matched to the trust region, at a $3\times$ budget so the round count rises rather than falls \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \subsection{RQ1: Effective concurrency against a faithful serial control}
 \label{sec:exp-live}
@@ -650,6 +722,7 @@ The distributed-training stack admits a coherent counterpart in agent self-evolu
 OpenEvolve and the eleven microports and analogues were contributed by \code{cyanneko}.
 
 \section*{Reproducibility}
+\label{sec:repro}
 \sloppy
 All code is available at \url{https://github.com/Birfy/agentdescent} (MIT license; \code{pip install agentdescent}; the core engine has no required dependencies). Generating scripts, per result: thread overlap --- \code{examples/efficiency.py -{}-only gil}; RQ1 and the live merger profile of \cref{sec:lever-val} --- \code{bench/matrix\_run.py -{}-rows gepa}; RQ2 --- \code{bench/candidate\_methods.py}, measured on the pre-restructuring implementation (summarized report retained, raw per-run JSON not; rerun pending); RQ3 --- each port's own command line over \code{examples/\_method\_runner.py}, the entry point that accepts the \code{-{}-staleness full} configuration used, with the resolved configuration printed as one JSON line per run; the \code{evolve\_skill} case --- \code{examples/skill\_evolution.py}; RQ4 --- \code{bench/baselines\_run.py -{}-dataset bbh-keyed -{}-fusion-tournament}, whose workload (BBH crossed with \code{KeyedRules}), width and budget sweeps, and fusion counters were added for this paper and ship with it. Every port supports \code{-{}-dry-run} (no API key or model call) and carries an offline test suite; datasets are retrieved from canonical sources by a dependency-free data layer.
 
