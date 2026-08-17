@@ -57,6 +57,28 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- **A design record for shipping AgentDescent as a DeepSeek Harness plugin.**
+  `docs/design-dsh-plugin.md`. dsh makes every layer of the agent a swappable
+  Cordis plugin, which is the first time an agent's *parameters* have been
+  addressable — skills, prompt sections, tool sets, presets, and plugin source
+  are all just registrations with disposers. The design maps each of them onto
+  an `Evolvable` and reuses `filetree.py` wholesale (a dsh skill directory, a
+  prompt bundle and a plugin package are all file trees, so path-keyed state
+  already gives them fuse-vs-conflict semantics).
+
+  Two decisions carry the document. Rollouts run **inside** the harness process
+  by default — a candidate artifact is registered against one child's `agent.ctx`
+  so N workers share one process without polluting each other, and what gets
+  measured is the real harness with its real tools, sandbox and approval policy
+  rather than a stripped-down replica. And the engine stays in Python behind a
+  bidirectional NDJSON-RPC bridge whose payloads are `workspec.Ref`s, not
+  closures — the same reason `workspec` exists at all.
+
+  Governance is the part with two doors: the L0 frozen set is checked in
+  `governance.FROZEN_IDS` *and* again as a monotonic `ctx.tools.guard()` denial
+  on the harness side, because single-sided trust does not hold in a system that
+  rewrites itself.
+
 - **An eighth benchmark-faithful port: ERA, Google Research's empirical-software
   search.** `examples/era/` runs upstream's own bundled task — Kaggle Playground
   S3E1, `train_and_predict(train_path, test_path)`, RMSE — under upstream's own

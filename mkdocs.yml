@@ -106,6 +106,7 @@ nav:
     - Gödel Agent — self-modification: algo-godel-agent.md
   - Design records:
     - Evolving a directory: design-directory-evolution.md
+    - A DeepSeek Harness plugin: design-dsh-plugin.md
 
 markdown_extensions:
   - admonition
