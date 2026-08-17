@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-201 public names across 35 modules.
+202 public names across 35 modules.
 
 ---
 
@@ -1842,6 +1842,21 @@ A dependency-free `grep`/`read` ReAct loop over the document.
 ## Ready-made scorers
 
 The reward functions everyone writes, with the details right. &nbsp;·&nbsp; `agentdescent.rewards` &nbsp;·&nbsp; [guide](rewards.md)
+
+### `command(...)`
+
+1.0 when a command of yours **exits 0** on the output.
+
+```python
+command(
+    run: Union[str, Sequence[str]],
+    *,
+    timeout: float = 30.0,
+    cwd: Optional[str] = None,
+    env: Optional[Mapping[str, str]] = None,
+    ok: Sequence[int] = (0,)
+) -> Callable
+```
 
 ### `contains(gold_key: str = 'gold', *, normalise: bool = True) -> Callable`
 

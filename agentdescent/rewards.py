@@ -17,10 +17,14 @@ Bring your own for anything else; these are a convenience, not a contract.
 
 from __future__ import annotations
 
+import os
 import re
-from typing import Callable, Optional
+import shlex
+import subprocess
+import tempfile
+from typing import Callable, Mapping, Optional, Sequence, Union
 
-__all__ = ["exact_match", "contains", "last_number", "numeric_close"]
+__all__ = ["exact_match", "contains", "last_number", "numeric_close", "command"]
 
 _NUMBER = re.compile(r"-?\d[\d,]*\.?\d*")
 
@@ -106,6 +110,69 @@ def last_number(gold_key: str = "gold", *, tolerance: float = 0.0) -> Callable:
 def numeric_close(gold_key: str = "gold", *, tolerance: float = 0.01) -> Callable:
     """:func:`last_number` with a relative tolerance -- for rounded answers."""
     return last_number(gold_key, tolerance=tolerance)
+
+
+def command(run: Union[str, Sequence[str]], *, timeout: float = 30.0,
+            cwd: Optional[str] = None, env: Optional[Mapping[str, str]] = None,
+            ok: Sequence[int] = (0,)) -> Callable:
+    """1.0 when a command of yours **exits 0** on the output.
+
+    The scorers above need a gold answer. This one needs a *judgement*, which is
+    what people actually have: "the SQL has to run against my database", "it has
+    to compile", "it has to pass these tests". None of those is an expected
+    string, all of them are a command that already exists::
+
+        evolve(tasks, command("psql --quiet -f {output}"), agent=agent)
+        evolve(tasks, command(["ruff", "check", "{output}"]), agent=agent)
+
+    ``{output}`` in any argument is replaced with the path to a file holding
+    that rollout's output; the same text also arrives on **stdin**, so a filter
+    that reads stdin needs no placeholder at all.
+
+    A string is split with :func:`shlex.split` and run **without a shell**, so
+    ``|``, ``>`` and ``&&`` are not operators -- they arrive as literal
+    arguments. Ask for a shell explicitly when you want one::
+
+        command(["bash", "-lc", "psql -f {output} | grep -q OK"])
+
+    **A timeout scores 0.0 rather than raising.** A check that hangs on this
+    output *is* a failing check, and raising would drop the sample instead of
+    scoring it -- which biases the run toward whichever candidates happen not to
+    hang the checker.
+
+    **A missing executable raises.** That is a configuration mistake, not a
+    verdict on the candidate, and scoring it 0.0 would make every rollout fail
+    identically -- indistinguishable from a model that cannot do the task at all.
+    The same reasoning as :func:`last_number` raising on an unparseable gold.
+
+    ``ok`` widens the set of exit codes that count as success, for the tools that
+    signal "clean" with something other than 0.
+    """
+    template = shlex.split(run) if isinstance(run, str) else [str(a) for a in run]
+    if not template:
+        raise ValueError("command() needs a command to run; got an empty one.")
+    accepted = tuple(ok)
+
+    def reward(task, output) -> float:
+        text = output or ""
+        with tempfile.TemporaryDirectory(prefix="agentdescent-check-") as scratch:
+            path = os.path.join(scratch, "output.txt")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            argv = [arg.replace("{output}", path) for arg in template]
+            try:
+                proc = subprocess.run(argv, cwd=cwd, env=dict(env) if env else None,
+                                      input=text, capture_output=True, text=True,
+                                      timeout=timeout)
+            except FileNotFoundError as exc:
+                raise FileNotFoundError(
+                    f"command() cannot run {template[0]!r}: {exc.strerror}. Every "
+                    f"rollout would score 0.0, which is indistinguishable from a "
+                    f"model that cannot do the task -- so this raises instead.") from exc
+            except subprocess.TimeoutExpired:
+                return 0.0
+        return 1.0 if proc.returncode in accepted else 0.0
+    return reward
 
 
 def _last_number_in(text: str) -> Optional[float]:

@@ -1,7 +1,7 @@
 # Rewards — the scorers everyone writes
 
 *Module:* [`agentdescent.rewards`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/rewards.py)
-· *API:* [`exact_match`, `contains`, `last_number`, `numeric_close`](api.md#ready-made-scorers)
+· *API:* [`exact_match`, `contains`, `last_number`, `numeric_close`, `command`](api.md#ready-made-scorers)
 
 A reward is `(task, output) -> float` in `[0, 1]`, and writing one is easy —
 which is why almost everyone writes the same three and gets the same details
@@ -23,9 +23,62 @@ Each is a factory: call it to get the scorer.
 | `contains()` | gold appears anywhere in output | models that answer in a sentence |
 | `last_number()` | the **last** number in the output matches gold | arithmetic word problems |
 | `numeric_close(tolerance=0.01)` | `last_number` within a relative tolerance | rounded or derived figures |
+| `command("mycheck {output}")` | your command **exits 0** | objectives with no gold answer |
 
-All of them read the expected answer from `task.meta["gold"]` — the same place
-the [reflector](evolution.md) looks. `gold_key=` points elsewhere.
+The first four read the expected answer from `task.meta["gold"]` — the same
+place the [reflector](evolution.md) looks. `gold_key=` points elsewhere.
+`command()` reads nothing: see below.
+
+## `command()` — when you have an objective, not an answer
+
+The four scorers above need a gold answer. Plenty of real objectives do not have
+one, and are still perfectly judgeable:
+
+> "The SQL has to run against my database." · "It has to compile." · "It has to
+> pass these tests." · "It must not touch `migrations/`."
+
+Every one of those is a command that already exists on your machine:
+
+```python
+from agentdescent.rewards import command
+
+evolve(tasks, command("psql --quiet -f {output}"), agent=agent)
+evolve(tasks, command(["ruff", "check", "{output}"]), agent=agent)
+```
+
+`{output}` in any argument becomes the path to a file holding that rollout's
+output; the same text also arrives on **stdin**, so a filter that reads stdin
+needs no placeholder.
+
+A string is split with `shlex.split` and run **without a shell** — `|`, `>` and
+`&&` arrive as literal arguments rather than acting as operators. Ask for a
+shell when you want one:
+
+```python
+command(["bash", "-lc", "psql -f {output} | grep -q OK"])
+```
+
+Two behaviours are deliberate, and both are about not lying to the optimiser:
+
+- **A timeout scores 0.0**, it does not raise. A check that hangs on this output
+  *is* a failing check, and raising would drop the sample instead of scoring it
+   — which biases the run toward whichever candidates happen not to hang it.
+- **A missing executable raises.** That is a configuration mistake, not a verdict
+  on the candidate. Scoring it 0.0 would make every rollout fail identically,
+  which looks exactly like a model that cannot do the task at all — and sends you
+  hunting for the wrong bug. Same reasoning as `last_number` raising on a gold it
+  cannot parse.
+
+`command()` is binary by construction, so it is a **gate**, not a grade. To say
+"correct, and cheaper is better", multiply it by an efficiency term rather than
+averaging the two — a weighted sum lets "fewer steps" buy off "wrong":
+
+```python
+def reward(task, output):
+    if not gate(task, output):
+        return 0.0                                  # the gate is hard
+    return 0.5 + 0.5 * (1.0 - normalised_cost(output))
+```
 
 ## `normalise` is on for a reason
 
