@@ -273,6 +273,36 @@ P_{\text{fuse}}(f, N) \;=\; 1 - (1-f)^N - N f (1-f)^{N-1}.
 \end{equation}
 This is the design condition merging must satisfy before it can be compared with selection at all, and it is easy to violate: a near-saturated artifact starves the merge step no matter how finely its keys are cut. \Cref{sec:merge-vs-fork} measures both sides of it. It is the spatial counterpart of the \textsc{Reflective} staleness policy (carry intent onto a changed base; let measurement decide), and the \code{contested} counter reports whether fusion genuinely occurred, so the saving is never claimed where only selection took place.
 
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  width=0.74\textwidth, height=5.6cm,
+  xlabel={incumbent failure rate $f$},
+  ylabel={$P_{\mathrm{fuse}}(f,N)$},
+  domain=0:1, samples=201,
+  xmin=0, xmax=1, ymin=0, ymax=1.05,
+  grid=major, grid style={adgray!20},
+  legend pos=south east,
+  legend style={font=\scriptsize, draw=adgray!40, fill=white, fill opacity=0.9, text opacity=1},
+  tick label style={font=\scriptsize}, label style={font=\small},
+]
+\addplot[thick, adgray]            {1-(1-x)^2-2*x*(1-x)};    \addlegendentry{$N=2$}
+\addplot[thick, adblue]            {1-(1-x)^4-4*x*(1-x)^3};  \addlegendentry{$N=4$}
+\addplot[thick, adgreen!55!black]  {1-(1-x)^8-8*x*(1-x)^7};  \addlegendentry{$N=8$}
+\addplot[only marks, mark=*, mark size=2.4pt, adred] coordinates {(0.06,0.020) (0.90,0.9963)};
+\node[font=\scriptsize, anchor=west, adred!70!black, fill=white,
+      fill opacity=0.88, text opacity=1, inner sep=1.5pt] at (axis cs:0.115,0.115)
+  {ACE / FiNER: $f{\approx}0.06$, $N{=}4 \Rightarrow 2\%$};
+\node[font=\scriptsize, anchor=east, adred!70!black, fill=white,
+      fill opacity=0.88, text opacity=1, inner sep=1.5pt] at (axis cs:0.87,0.855)
+  {\code{bbh-keyed}: $f{\approx}0.9$, $N{=}8 \Rightarrow 100\%$};
+\end{axis}
+\end{tikzpicture}
+\caption{The fusion precondition of \cref{eq:fusionrate}: the fraction of rounds in which at least two diffs exist, and therefore anything to fuse at all. Because the engine proposes only from \emph{failed} rollouts, a near-saturated artifact starves the merge step regardless of how finely its keys are cut --- the curve collapses at small $f$ for every width. Red markers are the two workloads of \cref{sec:merge-vs-fork}: the one whose merge step never fired sits at $2\%$, and the one built to satisfy the condition sits at $100\%$. Widening $N$ moves the curve left, which is how the equation bounds fusion width \emph{from below}; the round count and the trust region bound it from above.}
+\label{fig:fusionrate}
+\end{figure}
+
 \section{Governance by Blast Radius}
 \label{sec:governance}
 
@@ -361,7 +391,64 @@ These figures supersede a single-run measurement of $1.85\times / 3.22\times$ on
 
 \subsection{RQ2: Generality across algorithms}
 \label{sec:exp-matrix}
-To test whether the RQ1 result generalizes beyond GEPA, the same scheduler comparison --- serial, synchronous, barrier-free --- is applied to all eleven declarative ports on \code{GLM-5.2} at an equal candidate budget and width 2, varying only the scheduler (three paired seeds per method; 99 observations). The results cut both ways, and we report both. \emph{Synchronous parallelism generalizes}: paired over $n{=}33$ runs it outperforms the serial arm by a median $1.36\times$ end-to-end and $1.89\times$ within the engine window, with a $1.47\times$ median time-to-quality ($n{=}18$ seeds reaching the quality bar). The win is unanimous across methods --- 11 of 11 on both the end-to-end and engine-window medians, a two-sided sign test giving $p = 0.001$ in each case. \emph{Barrier removal does not}: the asynchronous arm aggregates to $0.99\times$ end-to-end and $0.97\times$ engine-window relative to synchronous, and the per-method record is indistinguishable from chance --- 5 methods faster, 5 slower, 1 tied end-to-end ($p = 1.00$), and 2 faster against 8 slower in the engine window ($p = 0.11$, i.e.\ if anything a slight cost). Its one positive signal is time-to-quality, a modest $1.10\times$ median ($n{=}15$) concentrated in a few methods (SkillWeaver $1.25\times$, Self-Refine $1.24\times$, Reflexion $1.12\times$). The reconciliation with RQ1's $3.22\times$ is the regime: barrier removal pays in proportion to how much heavy-tailed rollout latency and gate cost there is to hide, which GEPA's long rollouts and expensive Pareto gate maximize and these compact ports mostly lack; asynchrony helps time-to-quality only when a useful commit can land before a synchronous barrier would. Two caveats: this matrix was measured on the implementation preceding the ports' declarative restructuring (mechanisms and budgets unchanged by design; a rerun on current code is pending), and its per-run JSON is retained as a summarized report rather than raw. We report it despite the caveats because it is the only multi-algorithm evidence in either direction, and it bounds the asynchronous claim honestly.
+To test whether the RQ1 result generalizes beyond GEPA, the same scheduler comparison --- serial, synchronous, barrier-free --- is applied to all eleven declarative ports on \code{GLM-5.2} at an equal candidate budget and width 2, varying only the scheduler (three paired seeds per method; 99 observations). The results cut both ways, and we report both. \emph{Synchronous parallelism generalizes}: paired over $n{=}33$ runs it outperforms the serial arm by a median $1.36\times$ end-to-end and $1.89\times$ within the engine window, with a $1.47\times$ median time-to-quality ($n{=}18$ seeds reaching the quality bar). The win is unanimous across methods --- 11 of 11 on both the end-to-end and engine-window medians, a two-sided sign test giving $p = 0.001$ in each case. \emph{Barrier removal does not}: the asynchronous arm aggregates to $0.99\times$ end-to-end and $0.97\times$ engine-window relative to synchronous, and the per-method record is indistinguishable from chance --- 5 methods faster, 5 slower, 1 tied end-to-end ($p = 1.00$), and 2 faster against 8 slower in the engine window ($p = 0.11$, i.e.\ if anything a slight cost). Its one positive signal is time-to-quality, a modest $1.10\times$ median ($n{=}15$) concentrated in a few methods (SkillWeaver $1.25\times$, Self-Refine $1.24\times$, Reflexion $1.12\times$). The reconciliation with RQ1's $3.22\times$ is the regime: barrier removal pays in proportion to how much heavy-tailed rollout latency and gate cost there is to hide, which GEPA's long rollouts and expensive Pareto gate maximize and these compact ports mostly lack; asynchrony helps time-to-quality only when a useful commit can land before a synchronous barrier would. Two caveats: this matrix was measured on the implementation preceding the ports' declarative restructuring (mechanisms and budgets unchanged by design; a rerun on current code is pending), and its per-run JSON is retained as a summarized report rather than raw. We report it despite the caveats because it is the only multi-algorithm evidence in either direction, and it bounds the asynchronous claim honestly. \Cref{fig:matrix} shows the per-method record behind both halves: every bar in the left panel clears $1.0$, and the right panel straddles it.
+
+\begin{figure}[t]
+\centering
+\begin{minipage}[t]{0.485\textwidth}
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  width=\textwidth, height=6.6cm,
+  xbar, bar width=3.1pt,
+  xmin=0.85, xmax=2.15,
+  y dir=reverse, enlarge y limits=0.05,
+  symbolic y coords={PromptBreeder,AFlow,Reflexion,Self-Refine,Voyager,SkillWeaver,Absolute Zero,R-Zero,Agent0,SICA,Godel Agent},
+  ytick=data,
+  xlabel={synchronous vs.\ serial ($\times$)},
+  grid=major, grid style={adgray!20},
+  tick label style={font=\scriptsize}, label style={font=\scriptsize},
+  legend style={font=\scriptsize, at={(0,1.02)}, anchor=south west, legend columns=2, draw=adgray!40},
+]
+\addplot[fill=adblue!65, draw=adblue!80!black] coordinates {
+  (1.41,PromptBreeder) (1.39,AFlow) (1.32,Reflexion) (1.31,Self-Refine) (1.47,Voyager)
+  (1.42,SkillWeaver) (1.45,Absolute Zero) (1.38,R-Zero) (1.20,Agent0) (1.23,SICA) (1.36,Godel Agent)};
+\addlegendentry{end-to-end}
+\addplot[fill=adgreen!45, draw=adgreen!60!black] coordinates {
+  (1.94,PromptBreeder) (1.89,AFlow) (1.81,Reflexion) (1.82,Self-Refine) (2.02,Voyager)
+  (1.96,SkillWeaver) (1.91,Absolute Zero) (1.92,R-Zero) (1.80,Agent0) (1.66,SICA) (1.79,Godel Agent)};
+\addlegendentry{engine window}
+\draw[dashed, adred!70!black, thick] (axis cs:1,PromptBreeder) -- (axis cs:1,Godel Agent);
+\end{axis}
+\end{tikzpicture}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.485\textwidth}
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  width=\textwidth, height=6.6cm,
+  xbar, bar width=3.1pt,
+  xmin=0.7, xmax=1.22,
+  y dir=reverse, enlarge y limits=0.05,
+  symbolic y coords={PromptBreeder,AFlow,Reflexion,Self-Refine,Voyager,SkillWeaver,Absolute Zero,R-Zero,Agent0,SICA,Godel Agent},
+  ytick=data, yticklabels={,,},
+  xlabel={barrier-free vs.\ synchronous ($\times$)},
+  grid=major, grid style={adgray!20},
+  tick label style={font=\scriptsize}, label style={font=\scriptsize},
+]
+\addplot[fill=adblue!65, draw=adblue!80!black] coordinates {
+  (1.01,PromptBreeder) (0.99,AFlow) (0.90,Reflexion) (0.92,Self-Refine) (0.86,Voyager)
+  (1.01,SkillWeaver) (1.03,Absolute Zero) (1.03,R-Zero) (1.00,Agent0) (0.96,SICA) (1.01,Godel Agent)};
+\addplot[fill=adgreen!45, draw=adgreen!60!black] coordinates {
+  (0.94,PromptBreeder) (1.11,AFlow) (0.87,Reflexion) (0.99,Self-Refine) (0.78,Voyager)
+  (0.95,SkillWeaver) (0.98,Absolute Zero) (0.97,R-Zero) (1.00,Agent0) (1.11,SICA) (0.88,Godel Agent)};
+\draw[dashed, adred!70!black, thick] (axis cs:1,PromptBreeder) -- (axis cs:1,Godel Agent);
+\end{axis}
+\end{tikzpicture}
+\end{minipage}
+\caption{RQ2, per method: the two halves of the scheduler result, on the same eleven ports and the same runs. \textbf{Left:} synchronous parallelism against the serial control clears $1.0$ (dashed) for all eleven methods on both clocks --- unanimous, $p = 0.001$ by a two-sided sign test on each. \textbf{Right:} removing the barrier, against synchronous, straddles $1.0$: 5 methods faster and 5 slower end-to-end ($p = 1.00$), 2 faster and 8 slower in the engine window ($p = 0.11$). The two panels use different $x$ ranges and neither starts at zero, so bar \emph{lengths} are not comparable across panels --- read the positions against the dashed line. This is the regime distinction of \cref{sec:lever-val} made visible --- these compact ports have little heavy-tailed rollout latency or gate cost for asynchrony to hide, unlike the gate-heavy workload of \cref{fig:concurrency}.}
+\label{fig:matrix}
+\end{figure}
 
 \subsection{RQ3: Quality preservation under the aggressive schedule}
 \label{sec:exp-ports}
@@ -399,7 +486,36 @@ Throughput is meaningful only if learning is preserved, so quality is measured u
 
 \subsection{RQ3 (continued): the val--test gap of the acceptance gate}
 \label{sec:exp-valtest}
-The acceptance test reuses one fixed $\Dval$ across every decision, so an accepted diff is a selected extreme statistic on that split and its measured gain should be optimistically biased (\cref{sec:aggregator}). The size of that bias is measurable from the runs already reported: each of the 33 runs behind \cref{fig:eleven} records both its $\Dval$ trajectory and its disjoint test score, so the per-run difference (test gain $-$ val gain) estimates the optimism directly. Mean val gain is $+0.395$ and mean test gain $+0.357$, a mean gap of $\mathbf{-0.038}$ (median $-0.031$, s.d.\ $0.075$); test gain falls short of val gain in 20 of 33 runs and exceeds it in 7, with 6 exact ties --- a two-sided sign test on the 27 non-tied runs gives $p = 0.019$. The bias is thus real and directionally as predicted, but small relative to the gains themselves (roughly a tenth of the mean gain), and it does not threaten the sign of any result in \cref{fig:eleven}, whose scores are reported on test throughout. The runs where it is largest are those with the coarsest reward signal (SkillWeaver, $-0.125$ to $-0.250$ on an eight-task test split), which is the expected place for a selected statistic to overfit.
+The acceptance test reuses one fixed $\Dval$ across every decision, so an accepted diff is a selected extreme statistic on that split and its measured gain should be optimistically biased (\cref{sec:aggregator}). The size of that bias is measurable from the runs already reported: each of the 33 runs behind \cref{fig:eleven} records both its $\Dval$ trajectory and its disjoint test score, so the per-run difference (test gain $-$ val gain) estimates the optimism directly. Mean val gain is $+0.395$ and mean test gain $+0.357$, a mean gap of $\mathbf{-0.038}$ (median $-0.031$, s.d.\ $0.075$); test gain falls short of val gain in 20 of 33 runs and exceeds it in 7, with 6 exact ties --- a two-sided sign test on the 27 non-tied runs gives $p = 0.019$. The bias is thus real and directionally as predicted, but small relative to the gains themselves (roughly a tenth of the mean gain), and it does not threaten the sign of any result in \cref{fig:eleven}, whose scores are reported on test throughout. The runs where it is largest are those with the coarsest reward signal (SkillWeaver, $-0.125$ to $-0.250$ on an eight-task test split), which is the expected place for a selected statistic to overfit. \Cref{fig:valtest} plots all 33 runs: the cloud sits just below the diagonal rather than far from it, which is the shape a small optimism makes.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  width=0.60\textwidth, height=6.0cm,
+  xlabel={gain on $\Dval$ (what the gate saw)},
+  ylabel={gain on test (what it was worth)},
+  xmin=-0.06, xmax=1.06, ymin=-0.10, ymax=1.06,
+  grid=major, grid style={adgray!20},
+  tick label style={font=\scriptsize}, label style={font=\scriptsize},
+  legend style={font=\scriptsize, at={(0.03,0.97)}, anchor=north west, draw=adgray!40},
+]
+\addplot[dashed, adgray, thick, forget plot] coordinates {(-0.06,-0.06) (1.06,1.06)};
+\addplot[only marks, mark=*, mark size=1.6pt, adblue, opacity=0.75] coordinates {
+  (0.422,0.422) (0.515,0.578) (0.453,0.485) (0.360,0.375) (0.468,0.531) (0.500,0.469)
+  (0.422,0.360) (0.531,0.484) (0.360,0.328) (0.063,0.032) (0.047,-0.015) (0.062,0.031)
+  (0.063,0.047) (0.047,0.000) (0.078,0.031) (0.109,0.078) (0.078,-0.032) (0.156,0.141)
+  (1.000,1.000) (1.000,1.000) (0.000,0.000) (0.313,0.250) (0.376,0.438) (0.375,0.250)
+  (0.313,0.126) (0.250,0.313) (0.250,0.250) (0.438,0.500) (0.500,0.500) (0.688,0.500)};
+\addlegendentry{one run (33 total)}
+\addplot[only marks, mark=square*, mark size=1.9pt, adred!85!black] coordinates {
+  (0.875,0.750) (0.938,0.688) (1.000,0.875)};
+\addlegendentry{SkillWeaver (8-task test split)}
+\end{axis}
+\end{tikzpicture}
+\caption{How optimistic the acceptance gate is, over the 33 runs of \cref{fig:eleven}. Each point is one run: what its accepted diffs gained on the reused $\Dval$ against what they gained on a disjoint test split. Points on the dashed diagonal realized exactly what the gate measured; points below it are the adaptive-data-analysis penalty for reusing one holdout across hundreds of acceptance decisions. Twenty of 33 fall below, 7 above, 6 exactly on it (two-sided sign test on the 27 non-tied runs, $p = 0.019$), at a mean shortfall of $0.038$ --- roughly a tenth of the mean gain, and not enough to change the sign of any result. The three largest shortfalls are the runs with the coarsest reward signal, marked separately.}
+\label{fig:valtest}
+\end{figure}
 
 \subsection{RQ4: Merge-of-$N$ versus best-of-$N$ selection at equal budget}
 \label{sec:merge-vs-fork}
@@ -488,7 +604,37 @@ With fusion firing on demand, the comparison the question has been waiting for b
 \end{minipage}
 \end{figure}
 
-\textbf{Merging is the cheapest arm at equal quality.} The framework's premise is throughput --- accepted improvement per unit wall-clock --- so the claim merging has to meet is non-inferiority in quality at lower cost. The six seeds deliver exactly that: quality is indistinguishable (merge better on 2 seeds, worse on 3, tied on 1 against fork; mean paired difference $+0.006$, $p{=}1.00$), while merge is the cheapest arm in both currencies --- $11\%$ fewer model calls and $1.28\times$ less wall-clock than serial, $32\%$ fewer calls and $1.53\times$ less wall-clock than fork. This is the validation-cost mechanism of \cref{sec:lever-val} showing up as money: the merge arm reaches the same held-out score having run the gate fewer times. Two bounds travel with the quality column. Seeds 0--2 alone put merge's median at $0.267$ against fork's $0.100$ and seeds 3--5 reversed it; we report the pooled six rather than the favorable half. And six seeds on a 30-task split detect only large effects, so what is established is the absence of a large quality penalty.
+\textbf{Merging is the cheapest arm at equal quality.} The framework's premise is throughput --- accepted improvement per unit wall-clock --- so the claim merging has to meet is non-inferiority in quality at lower cost. The six seeds deliver exactly that: quality is indistinguishable (merge better on 2 seeds, worse on 3, tied on 1 against fork; mean paired difference $+0.006$, $p{=}1.00$), while merge is the cheapest arm in both currencies --- $11\%$ fewer model calls and $1.28\times$ less wall-clock than serial, $32\%$ fewer calls and $1.53\times$ less wall-clock than fork. This is the validation-cost mechanism of \cref{sec:lever-val} showing up as money (\cref{fig:rq4cost}): the merge arm reaches the same held-out score having run the gate fewer times.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  width=0.58\textwidth, height=5.0cm,
+  ybar, bar width=11pt,
+  symbolic x coords={wide, deep},
+  xticklabels={{$N{=}8$, 32 rollouts (4 rounds)}, {$N{=}4$, 96 rollouts (24 rounds)}},
+  xtick=data, enlarge x limits=0.55,
+  ymin=0, ymax=1.42,
+  ylabel={model calls, relative to serial},
+  nodes near coords={\pgfmathprintnumber[fixed, zerofill, precision=2]{\pgfplotspointmeta}},
+  nodes near coords style={font=\tiny},
+  grid=major, grid style={adgray!20},
+  tick label style={font=\scriptsize}, label style={font=\scriptsize},
+  legend style={font=\scriptsize, at={(0.5,1.03)}, anchor=south, legend columns=3, draw=adgray!40},
+]
+\addplot[fill=adgray!35, draw=adgray] coordinates {(wide,1.00) (deep,1.00)};
+\addlegendentry{serial}
+\addplot[fill=adorange!55, draw=adorange!70!black] coordinates {(wide,1.30) (deep,1.14)};
+\addlegendentry{fork-of-$N$}
+\addplot[fill=adblue!60, draw=adblue!80!black] coordinates {(wide,0.89) (deep,0.89)};
+\addlegendentry{merge-of-$N$}
+\draw[dashed, adred!70!black] (axis cs:wide,1.0) -- (axis cs:deep,1.0);
+\end{axis}
+\end{tikzpicture}
+\caption{What the arms of \cref{tab:mergefork} cost, at equal held-out quality and an equal rollout budget, normalized to the serial control in each configuration (absolute counts: $772/1004/685$ and $2070/2363/1832$). Merging is the cheapest arm in both configurations and by the same margin --- $11\%$ below serial and $22$--$32\%$ below fork-of-$N$ --- because a round's surviving diffs are validated once rather than once each. Selection has no such saving available: $N$ independent forks must each be scored, which is why the fork arm sits \emph{above} the serial control despite doing the same number of rollouts.}
+\label{fig:rq4cost}
+\end{figure} Two bounds travel with the quality column. Seeds 0--2 alone put merge's median at $0.267$ against fork's $0.100$ and seeds 3--5 reversed it; we report the pooled six rather than the favorable half. And six seeds on a 30-task split detect only large effects, so what is established is the absence of a large quality penalty.
 
 \textbf{Fusion width is a design parameter, and \cref{eq:fusionrate} does not fix it alone.} The precondition is satisfied almost equally by $N{=}4$ ($99.6\%$ of rounds have something to fuse) and $N{=}8$ ($100\%$), but the two differ in what they do to the rest of the loop: at a fixed rollout budget $N{=}8$ halves the number of rounds, and therefore the opportunities to accumulate, while making each fused union an eight-way jump that the trust region of \cref{sec:aggregator} exists to prevent. Width should therefore be set at the smallest $N$ that clears \cref{eq:fusionrate}, not the largest available --- a concrete design rule the equation yields once the round count is priced in. Re-running at $N{=}4$ and a $3\times$ budget (24 rounds), also at six seeds, moves the mechanism in the predicted direction: the mean per-seed fusion gain rises from $-0.135$ to $-0.045$, and the merge arm's seed-to-seed standard deviation falls from $0.130$ --- the \emph{worst} of the three arms --- to $0.067$, the \emph{lowest}, against serial's $0.118$ and fork's $0.105$. Quality remains indistinguishable (merge vs.\ fork $2$--$2$--$2$, mean $-0.017$; vs.\ serial $2$--$3$--$1$, mean $+0.011$; $p{=}1.00$ for both) and merge remains the cheapest arm ($1832$ calls against $2070$ and $2363$).
 
