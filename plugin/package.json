@@ -14,7 +14,8 @@
   "types": "./lib/index.d.ts",
   "exports": {
     ".": "./lib/index.js",
-    "./evolution": "./lib/evolution.js"
+    "./evolution": "./lib/evolution.js",
+    "./artifacts/skill": "./lib/artifacts/skill.js"
   },
   "files": [
     "lib",
@@ -32,10 +33,12 @@
     "prepare": "npm run build"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.0"
+    "@deepseek-ai/cordis": "^4.0.0",
+    "@deepseek-ai/dsh-skill": "^0.0.1-rc.1"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-skill": "^0.0.1-rc.1",
     "@types/node": "^22.20.1",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
