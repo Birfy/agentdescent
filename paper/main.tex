@@ -219,7 +219,7 @@ with independent uniform priors and the probability estimated by Monte Carlo, ma
 
 One risk of this discipline deserves explicit statement: the gate reuses a single fixed $\Dval$ across many acceptance decisions (hundreds of proposals per run in \cref{sec:exp-ports}), so accepted diffs are selected extreme statistics on $\Dval$ and their measured gains are optimistically biased --- the standard adaptive-data-analysis concern. Two mitigations are in place and one is not: all quality results in \cref{sec:experiments} are reported on a disjoint \emph{test} split the gate never sees; the trust region and annealed $\delta_v$ limit how much any single decision can exploit $\Dval$; but no reusable-holdout or $\Dval$-rotation mechanism is implemented. We therefore measure the resulting bias directly (\cref{sec:exp-ports}): across 33 runs the gain the gate observed on $\Dval$ exceeds the gain realized on test by $0.038$ on average, a small but statistically detectable optimism that a reader should subtract from any $\Dval$-reported figure.
 
-A natural objection to merge-based evolution is that two individually beneficial edits may be jointly harmful. Two properties bound the risk: the acceptance test \cref{eq:accept} scores the \emph{fused} candidate on the full held-out split, so a harmful fusion cannot commit; and the union is a superset of every constituent diff, so committing it discards no proposal. An optional \emph{fusion tournament} additionally ranks the union against its constituents; it is disabled by default (it costs one additional held-out sweep per candidate against a recoverable gain) but serves as the measurement instrument for the objection, reporting win rate, the losing tail, and a \code{contested} counter that records whether a fused candidate was in fact constructed and ranked --- so a run in which fusion never occurred cannot be reported as a merge win. We deliberately publish no headline win rate: the quantity is a property of the artifact's key granularity and of proposal overlap, not of the mechanism (\cref{sec:merge-vs-fork} reports it in situ for one workload).
+A natural objection to merge-based evolution is that two individually beneficial edits may be jointly harmful. Two properties bound the risk: the acceptance test \cref{eq:accept} scores the \emph{fused} candidate on the full held-out split, so a harmful fusion cannot commit; and the union is a superset of the diffs that survive conflict resolution --- which drops the weaker member of each contradicting pair first, so it is not a superset of every proposal. An optional \emph{fusion tournament} additionally ranks the union against its constituents; it is disabled by default (it costs one additional held-out sweep per candidate against a recoverable gain) but serves as the measurement instrument for the objection, reporting win rate, the losing tail, and a \code{contested} counter that records whether a fused candidate was in fact constructed and ranked --- so a run in which fusion never occurred cannot be reported as a merge win. \Cref{sec:merge-vs-fork} reports the win rate in situ for one workload; we attach no headline to it, because it is a property of that artifact's key granularity and proposal overlap rather than of the mechanism.
 
 \section{Efficiency Analysis: Three Sources of Speedup}
 \label{sec:efficiency}
@@ -351,7 +351,7 @@ RQ1 (\cref{sec:exp-live})
 & HotpotQA via the GEPA port; \code{-{}-fetch 80}, \code{-{}-val-cap 8}
 & serial / sync / async, $N{=}4$
 & 16 rollouts per arm; seeds 0--2
-& Gate at \code{eval\_concurrency}${=}16$ on the parallel arms, ${=}1$ on the serial control; \code{-{}-async-ratio 3}; \code{-{}-rounds 9999} so the budget binds, not the port's own iteration default; reasoning tokens disabled \\
+& Gate at \code{eval\_concurrency}${=}16$ on the parallel arms, ${=}1$ on the serial control; \code{-{}-async-ratio 3}; \code{-{}-rounds 9999} so the budget binds, not the port's own iteration default; \code{-{}-reflective-merge} on \emph{every} arm, so it is not a difference between them; reasoning tokens disabled \\
 \addlinespace
 RQ2 (\cref{sec:exp-matrix})
 & \code{GLM-5.2}
@@ -383,10 +383,10 @@ RQ4, null 2 (\cref{sec:merge-vs-fork})
 \addlinespace
 RQ4, width 8 (\cref{sec:merge-vs-fork})
 & \code{GLM-5.2}
-& \code{bbh-keyed}: BBH crossed with \code{KeyedRules}; 60 train / 30 val / 30 test
+& \code{bbh-keyed}: BBH \code{dyck\_languages} crossed with \code{KeyedRules}; 60 train / 30 val / 30 test
 & serial / fork / merge, $N{=}8$
 & 32 rollouts per arm (4 rounds); seeds 0--5
-& Reflective merge, fusion tournament, and self-verification on. 16{,}124 calls, 28.3\,h model time \\
+& Keyed union (\code{DefaultFusion}) with the fusion tournament and self-verification on; \emph{not} reflective merge --- \code{ReflectiveFusion} records every trial unranked, so the contested counts reported below could not exist under it. 16{,}124 calls, 28.3\,h model time \\
 \addlinespace
 RQ4, width 4 (\cref{sec:merge-vs-fork})
 & \code{GLM-5.2}
@@ -473,7 +473,7 @@ RQ4, width 4 (\cref{sec:merge-vs-fork})
   (serial,49.3) (sync,37.6) (async,36.7)};
 \end{axis}
 \end{tikzpicture}
-\caption{Validation-cost reduction in the same runs (\cref{sec:lever-val}): model-seconds spent per rollout at a pinned rollout budget, per seed, with medians marked. The parallel arms evaluate less per unit of work --- median $49.3 \to 37.6 \to 36.7$ --- because reflective merge collapses each round's admissions into one gate sweep and stale proposals are discarded before they are scored.}
+\caption{Validation-cost reduction in the same runs (\cref{sec:lever-val}): model-seconds spent per rollout at a pinned rollout budget, per seed, with medians marked. The parallel arms evaluate less per unit of work --- median $49.3 \to 37.6 \to 36.7$. We do \emph{not} attribute this to fusion: RQ1's artifact is GEPA's single-key instruction slot, on which a keyed union is never contested, so the collapse of \cref{sec:lever-val} cannot be what fired here. The candidates are the admission cap (one merged candidate per round, so the Pareto pool grows by one instead of $N$) and staleness discards, which reach the gate at zero cost. Separating them needs an arm without the cap, which we have not run.}
 \label{fig:mspr}
 \end{minipage}
 \end{figure}
