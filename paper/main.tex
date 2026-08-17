@@ -48,7 +48,9 @@
 \maketitle
 
 \begin{abstract}
-Self-improving agent systems evolve their own skills, prompts, and harnesses, but largely through a \emph{serial} loop --- one candidate proposed, evaluated, and accepted per iteration --- bounding improvement throughput at $O(1/T_{\mathrm{iter}})$. We present \textbf{AgentDescent}, a framework that transplants the distributed-training stack onto agent self-evolution: artifacts as parameters, diffs with attached evidence as gradients, a version-vectored ledger as the parameter server, and merge decisions as optimizer steps. Because diffs, unlike gradients, do not add, aggregation is a discrete-space optimization: conflict resolution, fusion, and statistical acceptance under a per-artifact Beta posterior. Efficiency has three sources: overlap of I/O-bound rollouts; barrier-free execution under per-diff bounded staleness; and reduced validation cost, since merging $k$ concurrent proposals requires a single held-out acceptance test. Eighteen published algorithms are ported as plug-ins and run unchanged under serial, synchronous, and asynchronous scheduling. On live models, synchronous parallelism yields a median $1.36\times$ end-to-end speedup across eleven algorithms (11/11 improving, sign test $p{=}0.001$); on a gate-heavy workload it reaches a median $3.91\times$ effective concurrency against a control measured at $1.00\times$, and barrier removal adds a further median $6.28\times$ there while adding nothing in aggregate across the eleven ($0.99\times$, $p{=}1.00$) --- we characterize when it pays, and report that none of the speedups is accompanied by a measurable quality gain. An equal-budget comparison of merge-of-$N$ against best-of-$N$ selection does not separate the two, and instrumentation explains why: the engine proposes only from failed rollouts, so a near-saturated artifact starves the merge step however finely its keys are cut. We give that condition in closed form and use it to build a workload on which fusion fires. There, merging meets the claim the framework actually makes --- \emph{acceleration at no measurable quality cost}: quality indistinguishable from both baselines at six seeds, with $11$--$32\%$ fewer model calls and $1.28$--$1.53\times$ less wall-clock. It is not shown to improve quality, and its fused candidates lose more contests than they win. Code and reproduction commands for every number are open source.
+Self-improving agent systems evolve their own skills, prompts, and harnesses, but largely through a \emph{serial} loop that bounds improvement throughput at $O(1/T_{\mathrm{iter}})$. \textbf{AgentDescent} transplants the distributed-training stack onto this problem: artifacts as parameters, diffs with attached evidence as gradients, a version-vectored ledger as the parameter server, and merge decisions as optimizer steps. Because diffs do not add, aggregation becomes a discrete-space optimization --- conflict resolution, fusion, and statistical acceptance under a per-artifact Beta posterior. Eighteen published algorithms port onto the engine as plug-ins and run unchanged under serial, synchronous, and barrier-free scheduling.
+
+Measured on live models: synchronous parallelism gives a median $1.36\times$ end-to-end speedup across eleven algorithms (11/11, $p{=}0.001$), while barrier removal reaches $6.28\times$ effective concurrency where the gate is expensive and nothing in aggregate elsewhere. For merging we derive a precondition in closed form --- the engine proposes only from failed rollouts, so a near-saturated artifact starves the merge step however finely its keys are cut --- and on the workload that condition prescribes, merging delivers \emph{acceleration at no measurable quality cost}: indistinguishable from both baselines at six seeds, for $11$--$32\%$ fewer model calls. It is not shown to improve quality. Code and reproduction commands are open source.
 \end{abstract}
 
 \section{Introduction}
@@ -401,17 +403,26 @@ With fusion firing on demand, the comparison the question has been waiting for b
 \centering
 \footnotesize
 \setlength{\tabcolsep}{5pt}
-\caption{Merge-of-$N$ against best-of-$N$ selection and a serial control at an equal rollout budget ($N{=}8$, 32 rollouts, six seeds) on a workload built to satisfy \cref{eq:fusionrate}. A second configuration ($N{=}4$, 96 rollouts, three seeds) is discussed in the text. \emph{Test} is a split no gate in any arm ever saw. \emph{Oracle} is the best fork \emph{on test}, an upper bound that requires the answer to select; the fork row reports what fork-and-select can actually ship. Sign tests are paired by seed against the merge arm.}
+\caption{Merge-of-$N$ against best-of-$N$ selection and a serial control at an equal rollout budget, on a workload built to satisfy \cref{eq:fusionrate}, in two configurations. \emph{Test} is a split no gate in any arm ever saw; \emph{s.d.} is across seeds. \emph{Oracle} is the best fork \emph{on test}, an upper bound that requires the answer to select, against which the fork row reports what fork-and-select can actually ship. Wall-clock in the lower block is not comparable across arms (all nine runs shared one endpoint) and is omitted; calls are unaffected.}
 \label{tab:mergefork}
-\begin{tabular}{@{}lrrrrrr@{}}
+\begin{tabular}{@{}llrrrrrr@{}}
 \toprule
-\textbf{arm} & \textbf{test min/med/max} & \textbf{mean} & \textbf{oracle} & \textbf{calls} & \textbf{wall (s)} & \textbf{vs.\ merge} \\
+& \textbf{arm} & \textbf{test min/med/max} & \textbf{mean} & \textbf{s.d.} & \textbf{oracle} & \textbf{calls} & \textbf{wall (s)} \\
 \midrule
-serial     & 0.133 / \textbf{0.267} / 0.333 & \textbf{0.250} & ---   & 771  & 1483 & 4--1--1, $p{=}0.375$ \\
-fork-of-8  & 0.067 / 0.200 / 0.300          & 0.189 & 0.267 & 1004 & 1766 & 3--2--1, $p{=}1.00$ \\
-merge-of-8 & 0.033 / 0.217 / 0.400          & 0.194 & ---   & \textbf{685}  & \textbf{1157} & --- \\
+\multirow{3}{*}{\rotatebox{90}{\scriptsize $N{=}8$, 32}}
+& serial     & 0.133 / \textbf{0.267} / 0.333 & \textbf{0.250} & 0.076 & ---   & 772  & 1483 \\
+& fork-of-8  & 0.067 / 0.200 / 0.300          & 0.189 & 0.085 & 0.267 & 1004 & 1766 \\
+& merge-of-8 & 0.033 / 0.217 / 0.400          & 0.194 & 0.130 & ---   & \textbf{685}  & \textbf{1157} \\
+\midrule
+\multirow{3}{*}{\rotatebox{90}{\scriptsize $N{=}4$, 96}}
+& serial     & 0.100 / 0.133 / 0.367          & 0.200 & 0.119 & ---   & 2123 & --- \\
+& fork-of-4  & 0.133 / \textbf{0.333} / 0.400 & \textbf{0.289} & 0.113 & 0.333 & 2506 & --- \\
+& merge-of-4 & 0.200 / 0.267 / 0.267          & 0.244 & \textbf{0.031} & ---   & \textbf{1924} & --- \\
 \bottomrule
 \end{tabular}
+
+\vspace{2pt}
+{\scriptsize Upper block: six seeds, 4 rounds per run. Lower block: three seeds, 24 rounds per run.}
 \end{table}
 
 
