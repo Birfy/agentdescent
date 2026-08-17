@@ -98,10 +98,23 @@ class Peer:
         return self
 
     def close(self) -> None:
-        """Stop, and fail every outstanding call rather than leaving it hanging."""
+        """Stop, and fail every outstanding call rather than leaving it hanging.
+
+        Closes the **writer**, and deliberately not the reader. The read loop is
+        blocked in ``read()``, and closing a buffered reader from another thread
+        waits on the very lock that blocked read holds -- so "tidying up" the
+        reader here deadlocks `close()` itself. Closing the writer is safe and
+        does the same job from the other end: the peer sees EOF, its loop exits,
+        it closes its own writer, and this side's reader unblocks in turn.
+        """
         if self._closed.is_set():
             return
         self._closed.set()
+        with self._write_lock:
+            try:
+                self._writer.close()
+            except Exception:                     # noqa: BLE001 - teardown is best-effort
+                pass
         self._fail_all(PeerGone("bridge closed locally"))
 
     def wait(self, timeout: Optional[float] = None) -> bool:
