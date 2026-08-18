@@ -100,6 +100,16 @@ export interface EvolutionSpec {
   readonly workers?: number
   /** A hard ceiling, not advice: the engine stops starting rollouts at it. */
   readonly tokenBudget?: number
+  /**
+   * Run barrier-free, so evolution proceeds while the user works instead of in
+   * a batch they wait for. The engine states `maxRollouts` and `maxSeconds`
+   * outright in this mode, because their implicit values mean something else
+   * there.
+   */
+  readonly asynchronous?: boolean
+  readonly asyncRatio?: number
+  readonly maxRollouts?: number
+  readonly maxSeconds?: number
 }
 
 /** Where a run is. `budget-exhausted` is a normal ending, not a failure. */

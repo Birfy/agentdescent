@@ -171,15 +171,20 @@ class Engine:
             strategy = FileTree(initial_files=initial,
                                 max_files_per_diff=int(params.get("maxFilesPerDiff", 2)))
             state.phase = "running"
+            rounds = int(params.get("rounds", self._defaults["rounds"]))
+            workers = int(params.get("workers", self._defaults["workers"]))
             result = evolve(
                 tasks, self._reward_for(state), run=self._run_for(state),
                 propose=tree_reflector(self._completion_for(state), strategy=strategy),
                 strategy=strategy, initial_state=dict(initial),
                 artifact_id=_ledger_id(state.artifact),
                 blast_radius=float(params.get("blastRadius", 0.2)),
-                rounds=int(params.get("rounds", self._defaults["rounds"])),
-                n_workers=int(params.get("workers", self._defaults["workers"])),
-                max_concurrency=int(params.get("workers", self._defaults["workers"])),
+                rounds=rounds,
+                n_workers=workers,
+                max_concurrency=workers,
+                # Barrier-free, so evolution runs while the user works rather
+                # than in a batch they wait for.
+                **self._budget(params, rounds, workers),
                 # Both defaults are the ones `skilldir` already settled on for an
                 # agent-executed rollout: re-running every proposal's trajectory
                 # doubles the cost of the run, and ranking every candidate on the
@@ -199,6 +204,26 @@ class Engine:
             state.phase, state.error = "failed", f"{type(exc).__name__}: {exc}"
             return
         self._finish(state, initial, result)
+
+    @staticmethod
+    def _budget(params: Mapping[str, Any], rounds: int, workers: int) -> Dict[str, Any]:
+        """Async arguments, with both of its traps closed.
+
+        ``evolve(asynchronous=True)`` has no round barrier, and two of its
+        defaults mean something different there. ``rounds`` is reinterpreted as
+        a budget of ``rounds x n_workers`` rollouts, and ``max_seconds=None``
+        becomes **20 seconds** rather than "no limit". Left implicit, a run that
+        expired after twenty seconds reports the same ``stop_reason`` shape as
+        one that converged -- so both are stated outright here.
+        """
+        if not params.get("asynchronous"):
+            return {}
+        return {
+            "asynchronous": True,
+            "async_ratio": int(params.get("asyncRatio", 3)),
+            "max_rollouts": int(params.get("maxRollouts", rounds * max(1, workers))),
+            "max_seconds": float(params.get("maxSeconds", 3600.0)),
+        }
 
     def _finish(self, state: RunState, initial: Mapping[str, str], result: Any) -> None:
         # `evolve()` does not let a worker failure escape: it ends the run and

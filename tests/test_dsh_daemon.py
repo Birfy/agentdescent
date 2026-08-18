@@ -287,3 +287,32 @@ def test_a_staged_commit_does_not_become_a_head():
         assert harness_peer.call("ledger.history", {"artifact": "skill:total"}, timeout=10) == []
     finally:
         harness_peer.close(), engine_peer.close()
+
+
+def test_an_async_run_states_its_budget_instead_of_inheriting_a_20_second_default():
+    """`evolve(asynchronous=True)` has no unbounded mode.
+
+    Left implicit, `max_seconds=None` becomes 20 seconds and `rounds` silently
+    becomes a rollout budget -- so a run that expired after twenty seconds
+    reports the same shape as one that converged.
+    """
+    budget = Engine._budget({"asynchronous": True}, rounds=4, workers=2)
+    assert budget["asynchronous"] is True
+    assert budget["max_rollouts"] == 8              # rounds x workers, said outright
+    assert budget["max_seconds"] > 20.0             # not the silent default
+
+    assert Engine._budget({}, rounds=4, workers=2) == {}   # sync path untouched
+
+
+def test_an_async_run_reaches_a_terminal_phase_like_any_other():
+    harness = FakeHarness()
+    engine, harness_peer, engine_peer, _ = wire(harness)
+    try:
+        run_id = harness_peer.call(
+            "run.start", {**SPEC, "asynchronous": True, "maxRollouts": 8,
+                          "maxSeconds": 30.0}, timeout=10)
+        status = wait_for(harness_peer, run_id, {"done", "failed", "awaiting-review"})
+        assert status["phase"] in {"done", "awaiting-review"}, status.get("error")
+        assert harness.rollouts > 0
+    finally:
+        harness_peer.close(), engine_peer.close()
