@@ -3,7 +3,7 @@
 > 目标：让 **DeepSeek Harness（`dsh`）** 装上 AgentDescent 之后，它自己会变好 ——
 > 用户平时怎么用它，它就在那条真实轨迹上训练自己的 skill、prompt、preset 乃至插件代码。
 >
-> **状态：M0–M3 已落地。** 剩下的是 M4（L1 的 prompt section / preset 适配器）与 Web UI 节点。 本文写*为什么*这样切、边界划在哪、以及每一步的验收标准。
+> **状态：M0–M4 已落地**（`prompt:<section>` 与 `preset:<name>` 适配器在内）。剩 Web UI 的 conversation node。 本文写*为什么*这样切、边界划在哪、以及每一步的验收标准。
 >
 > 已落地的：[`agentdescent.backends.dsh()`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/backends.py)（把 dsh 当 agent 驱动）、
 > [`agentdescent.dsh.locate`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/dsh/locate.py)（按 dsh 自己的 rank 顺序解析 skill 根）、
@@ -345,7 +345,8 @@ export interface EvolutionRuntime {
 | `skill:<name>` | `ctx.skills.registerProvider` | provider 的 `invalidate()` → `skills/change` → 下次 `snapshot()` 拿到新版 | 0.2（L2，自动合并） | `evolve_skill_dir()` |
 | **`skills:<root>`（技能库）** | 同上，但**一个 provider 服务整个库** | 替换 provider ⇒ 服务的集合**恰好等于**提交的集合（增删都生效） | 0.2 | `evolve_skill_library()` |
 | `prompt:<section>` | `ctx.systemPrompt.section({name, order})` | 重新注册（旧 effect dispose） | 0.2，但**只在 `turn/end` 提交** | `evolve_skill()` / `AppendRules` |
-| `preset:<name>` | `agent.ctx` 上的 `ctx.tools.restrict()` + persona section | 下一个会话生效 | 0.6（L1，oracle + 人审） | `evolve_agent_dir()` |
+| `prompt:<section>` | `ctx.systemPrompt.section()` | **等到 turn 边界**再换（KV cache） | 0.2 | `evolve_skill()` |
+| `preset:<name>` | persona 全局 + `ctx.tools.restrict()` **只能按 agent** | persona 立即；工具集只对用了该 preset 的 agent | 0.6（L1，oracle + 人审） | `evolve_agent_dir()` |
 | `plugin:<pkg>` | profile 目录下的文件树 + Cordis HMR | 写文件 → HMR 重载该行 | 0.6（L1 + 测试门） | `evolve_agent_code()` |
 
 ### 6.1 演化「一个 skill」和演化「技能库」不是同一件事
@@ -668,7 +669,7 @@ monorepo 的四个具体后果，每一条都要落到文件：
 | **M1** ✅ | 插件最小可用：`plugin/` 骨架 + sidecar + `ctx.evolution` seam + skill 适配器 + 进程内 rollout + `/evolve` + `evolve_start` 工具。只有 L2 | `dsh plugin add ./plugin` 之后 `/evolve skill:x` 跑完，新 skill 在**同一个会话里**生效 | 1 周 |
 | **M2** ✅ | 奖励闭环：ScorerRegistry + A/B 档（`gold` / `command` / `judge`）+ C 档兜底（`replay-pairwise` + `efficiency`）+ transcript TaskSource（TS 侧 `session-query`） | 三档各跑通一个真实例子；**兜底档接受不了时能说清是因为 N 太小**，而不是静悄悄没结果 | 1–1.5 周 |
 | **M3** ✅ | 常驻形态：`ctx.jobs` + 空闲触发 + 异步运行时（`asynchronous=True, async_ratio=3`）+ Web UI 节点 + 预算上限 | 正常用 harness 的同时后台演化，任何用户输入立刻让路，花了多少 token 看得见 | 1 周 |
-| **M4** | L1：prompt section / preset / 插件代码，测试门 + `ctx.approval` 人审 + 冻结集双 guard | 一次 L1 提交必须弹审批；冻结行的补丁在两侧都被拒（各写一个测试） | 1–2 周 |
+| **M4** ◑ | L1：prompt section / preset / 插件代码，测试门 + `ctx.approval` 人审 + 冻结集双 guard | 一次 L1 提交必须弹审批；冻结行的补丁在两侧都被拒（各写一个测试） | 1–2 周 |
 
 M0 单独就值得做完再决定要不要继续 —— 它给出这条路线的第一个真实数字，而且已经是
 产品的缩微版：真实 profile、真实 harness、真实产物落盘。
