@@ -38,6 +38,12 @@ export { CommitQueue, renderPending } from './approval.js'
 export { idleTrigger } from './idle.js'
 export { startAsJob } from './jobs.js'
 export { evolutionHistory, recordHistory } from './history.js'
+export {
+  applyEvolutionEvent, COMMIT_EVENT, ENDED_EVENT, matchEvolutionEvent,
+  startEvolutionNode, summariseEvolutionNode, viewOfEvolutionNode,
+} from './web/node.js'
+
+export type { EvolutionNodeState, EvolutionNodeView } from './web/node.js'
 
 export type {
   EvolutionCommitEvent, EvolutionRunEvent, HistoryOptions, HistorySession,
