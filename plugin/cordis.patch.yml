@@ -35,6 +35,10 @@
         # them the moment you come back:
         #   idleRuns:
         #     - { artifact: skill:sql, scorer: gold, taskSource: manual }
+        # Off, and worth leaving off until you mean it: replaying a past turn
+        # sends its content to the model provider again. Needs
+        # @deepseek-ai/dsh-session-query mounted.
+        harvestTranscripts: false
         idleRuns: []
         idleAfterMs: 300000
         idleMinIntervalMs: 3600000

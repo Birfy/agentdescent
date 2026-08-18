@@ -16,6 +16,7 @@ import { skillArtifact } from './artifacts/skill.js'
 import { startEngine } from './engine.js'
 import type { EvolutionSpec } from './evolution.js'
 import { idleTrigger } from './idle.js'
+import { transcriptTaskSource, type TranscriptSource } from './transcripts.js'
 import { inProcessRollout } from './rollout.js'
 import { efficiency, goldScorer, replayPairwiseScorer } from './scorers.js'
 import { registerCommand, registerTools } from './surface.js'
@@ -53,6 +54,16 @@ export interface Config {
   readonly idleRuns?: readonly EvolutionSpec[]
   readonly idleAfterMs?: number
   readonly idleMinIntervalMs?: number
+  /**
+   * Use this harness's own past sessions as tasks.
+   *
+   * Off by default, and it should stay off until the user has been told what it
+   * means: replaying a past turn **sends that content to the model provider
+   * again**. It is the same content that went there when it was typed, but this
+   * is a new send, and it is not the kind of thing to start doing quietly.
+   */
+  readonly harvestTranscripts?: boolean
+  readonly maxTurnsPerSession?: number
 }
 
 /**
@@ -91,6 +102,25 @@ export function apply(ctx: Context, config: Config = {}): void {
   ctx.evolution.registerScorer(goldScorer())
   ctx.evolution.registerScorer(efficiency(goldScorer({ name: 'gold-efficient' })))
   ctx.evolution.registerScorer(replayPairwiseScorer())
+
+  if (config.harvestTranscripts === true) {
+    const query = (ctx as { sessionQuery?: TranscriptSource }).sessionQuery
+    if (query === undefined) {
+      ctx.logger.warn(
+        'harvestTranscripts is on but ctx.sessionQuery is not mounted, so there ' +
+        'is nothing to read; add @deepseek-ai/dsh-session-query to the profile.')
+    } else {
+      ctx.evolution.registerTaskSource(transcriptTaskSource({
+        query,
+        ...(config.maxTurnsPerSession === undefined
+          ? {}
+          : { maxPerSession: config.maxTurnsPerSession }),
+      }))
+      ctx.logger.info(
+        'transcripts are enabled as a task source: past turns from this harness ' +
+        'will be replayed, which sends their content to the model provider again.')
+    }
+  }
 
   registerCommand(ctx, { queue })
   registerTools(ctx)

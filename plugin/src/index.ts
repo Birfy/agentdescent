@@ -24,6 +24,9 @@ export { inProcessRollout } from './rollout.js'
 export { apply, inject, name, registerReflectionArtifact, REFLECTION_ARTIFACT } from './plugin.js'
 export { CommitQueue, renderPending } from './approval.js'
 export { idleTrigger } from './idle.js'
+export { transcriptTaskSource } from './transcripts.js'
+
+export type { TranscriptOptions, TranscriptSource } from './transcripts.js'
 
 export type { IdleTriggerOptions } from './idle.js'
 
