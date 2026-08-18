@@ -8,6 +8,30 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- **The slow-gate assertion measured the machine, not the gate.**
+  `test_stage_profile.py::test_a_slow_gate_starves_the_workers_on_the_async_path`
+  bounded its run by 1.5 seconds of wall-clock, so the number of merger sweeps
+  depended on how busy the host was that minute. Sampled six times, `gate_share()`
+  ranged **0.402 to 0.993** (stdev 0.266) against a threshold of 0.5 — the 0.402
+  is the intermittent full-suite failure, reproduced. Bounded by `max_iters`
+  instead: 0.987 to 0.994, stdev 0.003. `max_seconds` stays as a ceiling that
+  must never bind, and a new assertion fails loudly if it ever does.
+
+  Recorded because it is a property of the assertion rather than of this change:
+  it does not discriminate a slow gate from a fast one. The same configuration
+  with a costless gate passes both assertions, because at `async_ratio=1` the
+  workers starve on the lag budget whatever the gate does — which the sibling
+  test's docstring already says in other words. Narrowing what it asserts is a
+  separate decision.
+
+- **A closed bridge left its reader thread parked forever, and a handler that
+  outlived the bridge raised into a thread with nobody to catch it.**
+  `Peer.close()` set a flag, so the read loop stayed blocked in `read()` on a
+  pipe nobody would write to — one leaked thread per stopped sidecar. The
+  obvious fix deadlocks and is worth recording: closing the reader waits on the
+  same lock the blocked read holds, so `close()` itself hangs. Closing the
+  *writer* does the same job from the other end.
+
 - **A staleness test asserted a property of the machine, not of the policy.**
   `test_offline_examples.py::test_full_discards_nothing_and_guarded_discards_the_most`
   required `guarded.discarded_stale > 0` from `_async_stats` — an 8-second,
@@ -56,6 +80,63 @@ All notable changes to AgentDescent are documented here. The format follows
   nothing is the livelock's signature and must be counted.
 
 ### Added
+
+- **AgentDescent ships as a DeepSeek Harness plugin: `plugin/`, plus
+  `agentdescent.dsh`.** dsh makes every layer of the agent a swappable Cordis
+  plugin, which is the first time an agent's *parameters* have been addressable
+  rather than buried in a fixed stack — skills, a whole skill library, prompt
+  sections, presets, and a plugin's own source are all just registrations with
+  disposers. The bundle points an optimiser at them. Design record:
+  `docs/design-dsh-plugin.md`; usage: `docs/dsh-plugin.md`.
+
+  **Rollouts run inside the harness.** A candidate is registered against one
+  child agent's `agent.ctx`, where a nearer layer wins a name outright, so N
+  workers hold N candidates in one process — no containers, no second harness —
+  and what gets measured is the real harness with its real tools, sandbox,
+  approval policy and prompt assembly rather than a replica built to measure it.
+  Binding happens *before* the turn is submitted: prompt assembly reads the
+  registries at the first step, so binding after `followup()` races the loop and
+  the loser answers from the old artifact, scoring the wrong thing with nothing
+  going visibly wrong.
+
+  **The engine never talks to a model.** Reflection and judging go back through
+  the harness as ordinary child-agent turns, so credentials, the token budget
+  and the sandbox have exactly one home. An engine with its own API key would be
+  a second unpoliced path to the same provider, and the budget would be advisory
+  from the moment it existed.
+
+  **Objectives are the user's, and nothing invents them.** A dataset is JSONL
+  (a line that is not JSON is a bare prompt, because a list of questions is what
+  you have when your objective is a command). An objective is gold answers, a
+  command's exit code, a rubric, or — only if you bring none — a comparison
+  against what the log says happened last time. `all` takes the minimum, not the
+  mean, because a list of requirements is an "and"; `efficiency` multiplies a
+  hard pass gate rather than adding to it, because a weighted sum lets "two
+  fewer steps" buy off "got it wrong" while the held-out score still climbs.
+  `/evolve` refuses to choose when the naming is ambiguous, and a misconfigured
+  objective stops the plugin mounting — a run that quietly measured something
+  other than what was meant is not detectable from its output.
+
+  **Governance has two doors.** L2 (skills, libraries, prompt sections) merges
+  on held-out score; L1 (presets, plugin source) is staged in `/evolve pending`
+  until a person approves it. `ctx.approval` turned out to be unusable for this
+  — it requires an open agent turn, and a run lands its commits minutes after
+  `/evolve` returned — so the queue is the mechanism and approving happens
+  inside a command, which is both an open turn and the moment someone is
+  actually present. Evolving a plugin freezes `cordis.patch.yml`, `package.json`
+  and its tests on *both* sides of the bridge, and a caller's `frozen=` adds
+  rather than replaces: those files decide which rows mount, what runs at
+  install time, and what the tests check.
+
+  **A library is a different artifact from a skill, not a bigger one.** With the
+  root as the state a run can add a skill nobody wrote — discovery rather than
+  refinement — and one provider serves the whole set, because a provider per
+  skill makes additions work and deletions silently not.
+
+  It runs while you work: barrier-free, started when the harness goes quiet and
+  stopped the moment you come back, registered with `ctx.jobs` so the model can
+  list, read and kill it with the tools it already has. Commits and run endings
+  are durable `SessionEventMap` entries, so the record survives a reload.
 
 - **A design record for shipping AgentDescent as a DeepSeek Harness plugin.**
   `docs/design-dsh-plugin.md`. dsh makes every layer of the agent a swappable
