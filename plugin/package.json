@@ -10,10 +10,10 @@
     "url": "git+https://github.com/Birfy/agentdescent.git",
     "directory": "plugin"
   },
-  "main": "./lib/index.js",
-  "types": "./lib/index.d.ts",
+  "main": "./lib/plugin.js",
+  "types": "./lib/plugin.d.ts",
   "exports": {
-    ".": "./lib/index.js",
+    ".": "./lib/plugin.js",
     "./evolution": "./lib/evolution.js",
     "./artifacts/skill": "./lib/artifacts/skill.js",
     "./bridge": "./lib/bridge.js",
@@ -22,7 +22,8 @@
     "./rollout": "./lib/rollout.js",
     "./artifacts/plugin": "./lib/artifacts/plugin.js",
     "./approval": "./lib/approval.js",
-    "./scorers": "./lib/scorers.js"
+    "./scorers": "./lib/scorers.js",
+    "./api": "./lib/index.js"
   },
   "files": [
     "lib",

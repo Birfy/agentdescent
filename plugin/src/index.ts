@@ -21,7 +21,10 @@ export { startEngine } from './engine.js'
 export { ENTRYPOINT, EVOLVED_SKILL_RANK, parseSkill, skillArtifact } from './artifacts/skill.js'
 export { describeChoices, parseEvolveInput, registerCommand, registerTools } from './surface.js'
 export { inProcessRollout } from './rollout.js'
+export { apply, inject, name, registerReflectionArtifact, REFLECTION_ARTIFACT } from './plugin.js'
 export { CommitQueue, renderPending } from './approval.js'
+
+export type { Config } from './plugin.js'
 export {
   all, commandScorer, efficiency, goldScorer, judgeScorer, replayPairwiseScorer,
 } from './scorers.js'

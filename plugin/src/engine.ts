@@ -227,6 +227,17 @@ function defaultSpawn(python?: string, cwd?: string): () => Sidecar {
     // harness's own log, not swallowed into a pipe nobody drains.
     const child = spawn(python ?? 'python3', ['-m', 'agentdescent.dsh.daemon'],
                         { stdio: ['pipe', 'pipe', 'inherit'], ...(cwd === undefined ? {} : { cwd }) })
+    // A child that cannot be spawned at all -- a mistyped interpreter, a missing
+    // one -- emits `error` on the ChildProcess, and an unhandled `error` event
+    // is a process-level crash. Left alone, one wrong config field takes the
+    // whole harness down at boot instead of leaving /evolve reporting that no
+    // engine is mounted. Routing it into stdout keeps the reason: the bridge
+    // reports the spawn failure verbatim when the handshake fails.
+    child.on('error', (error: Error) => {
+      child.stdout?.destroy(error)
+      child.stdin?.destroy()
+    })
+    child.stdin.on('error', () => { /* the peer is gone; the bridge reports it */ })
     return { stdin: child.stdin, stdout: child.stdout, kill: () => { child.kill() } }
   }
 }

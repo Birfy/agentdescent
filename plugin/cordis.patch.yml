@@ -1,5 +1,32 @@
 # The layer this bundle contributes. A profile listing `dsh-plugin-agentdescent`
 # applies it after `@deepseek-ai/dsh-base`, so these rows see the base tree.
+#
+# Override any field from your profile's own `cordis.patch.yml` by restating the
+# row id with the whole `config` block -- a patch replaces a config, it does not
+# deep-merge it.
 - insert:
+    # The capability seam. Mounted separately from the provider so a different
+    # optimiser can replace the row below without touching the tool or command.
     - id: evolution
       name: dsh-plugin-agentdescent/evolution
+
+    - id: evolution-agentdescent
+      name: dsh-plugin-agentdescent
+      inject: [evolution, agents, skills, commands, tools]
+      config:
+        # Where the optimiser sidecar runs. It must be a directory the
+        # `agentdescent` Python package imports from.
+        cwd: !!js process.env.AGENTDESCENT_HOME
+        python: python3
+        # Skills merge on held-out score; anything harness-shaped waits for a
+        # person in `/evolve pending`.
+        autoMergeMaxBlastRadius: 0.2
+        # Nothing is evolvable until you say what is. Each entry becomes a
+        # `skill:<name>` artifact:
+        #   skills:
+        #     - { name: sql, dir: /home/you/.dsh/skills/sql }
+        # and each plugin entry a `plugin:<name>` artifact at L1:
+        #   plugins:
+        #     - { name: dsh-plugin-mine, dir: /home/you/src/dsh-plugin-mine }
+        skills: []
+        plugins: []
