@@ -25,7 +25,8 @@
     "./scorers": "./lib/scorers.js",
     "./api": "./lib/index.js",
     "./idle": "./lib/idle.js",
-    "./transcripts": "./lib/transcripts.js"
+    "./transcripts": "./lib/transcripts.js",
+    "./artifacts/library": "./lib/artifacts/library.js"
   },
   "files": [
     "lib",

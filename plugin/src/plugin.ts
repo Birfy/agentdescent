@@ -12,6 +12,7 @@ import { Context } from '@deepseek-ai/cordis'
 
 import { CommitQueue } from './approval.js'
 import { pluginArtifact } from './artifacts/plugin.js'
+import { skillLibraryArtifact } from './artifacts/library.js'
 import { skillArtifact } from './artifacts/skill.js'
 import { startEngine } from './engine.js'
 import type { EvolutionSpec } from './evolution.js'
@@ -31,8 +32,16 @@ export interface Config {
   readonly python?: string
   /** Where the sidecar runs. Must be somewhere `agentdescent` imports from. */
   readonly cwd?: string
-  /** Skills to expose as `skill:<name>` artifacts. */
+  /** Skills to expose as `skill:<name>` artifacts -- refining one skill. */
   readonly skills?: readonly { readonly name: string; readonly dir: string }[]
+  /**
+   * Whole skill *roots* to expose as `skills:<name>` artifacts.
+   *
+   * A different artifact from a skill, not a bigger one: a run over a library
+   * may add a skill nobody wrote and retire one that never earned its place,
+   * which is the only way evolution discovers rather than refines.
+   */
+  readonly libraries?: readonly { readonly name: string; readonly dir: string }[]
   /** Plugin checkouts to expose as `plugin:<name>` artifacts (L1). */
   readonly plugins?: readonly { readonly name: string; readonly dir: string }[]
   /**
@@ -84,6 +93,12 @@ export function apply(ctx: Context, config: Config = {}): void {
     ctx.evolution.registerArtifact(skillArtifact(ctx, {
       name: skill.name,
       load: async () => await readSkillDir(skill.dir),
+    }))
+  }
+  for (const library of config.libraries ?? []) {
+    ctx.evolution.registerArtifact(skillLibraryArtifact(ctx, {
+      name: library.name,
+      load: async () => await readSkillDir(library.dir),
     }))
   }
   for (const plugin of config.plugins ?? []) {

@@ -43,7 +43,8 @@ from typing import List, Optional
 from agentdescent import Task, evolve_skill_dir
 from agentdescent import rewards
 from agentdescent.backends import dsh
-from agentdescent.dsh import find_skill, list_skills
+from agentdescent.dsh import find_skill, list_skills, skill_roots
+from agentdescent.dsh.library import evolve_skill_library, library_root
 
 #: The gold-answer scorers, by the name you pass to ``--score``.
 SCORERS = {
@@ -97,11 +98,78 @@ def build_objective(args, tasks: List[Task]):
     return SCORERS[args.score](), f"{args.score} against task gold"
 
 
+def run_library(args, ap) -> int:
+    """Evolve a whole skill root: the run may add skills nobody wrote.
+
+    A library is a different artifact from a skill, not a bigger one. The
+    smallest useful proposal here is a *new* skill, which is why this path
+    exists at all -- `--skill` can only improve something already chosen.
+    """
+    if not args.tasks:
+        ap.error("--tasks is required with --library")
+    root = library_root(args.library, args.cwd)
+    if root is None:
+        print(f"no {args.library!r} skill root exists yet. Roots searched:", file=sys.stderr)
+        for candidate in skill_roots(args.cwd):
+            print(f"  {candidate.rank:>3} {candidate.source:<16} {candidate.path}"
+                  + ("" if candidate.exists else "   (absent)"), file=sys.stderr)
+        return 1
+
+    tasks = load_tasks(args.tasks)
+    reward, objective = build_objective(args, tasks)
+    existing = sorted(s.name for s in list_skills(args.cwd) if s.root.source == args.library)
+
+    print(f"library   : {args.library}")
+    print(f"path      : {root}")
+    print(f"holds     : {len(existing)} skill(s): {', '.join(existing) or '(empty)'}")
+    print(f"tasks     : {len(tasks)} from {args.tasks}")
+    print(f"objective : {objective}")
+    print(f"agent     : dsh({args.model})")
+    print("the run may add, edit and retire skills in this root")
+
+    if args.dry_run:
+        print("\ndry run -- nothing was called, nothing was written.")
+        return 0
+
+    result = evolve_skill_library(
+        root, tasks, agent=dsh(model=args.model), score=reward,
+        rounds=args.rounds, n_workers=args.workers, max_concurrency=args.workers,
+        verbose=True)
+
+    added = sorted(set(_skill_names(result.state)) - set(existing))
+    dropped = sorted(set(existing) - set(_skill_names(result.state)))
+    print(f"\nfinal reward : {result.final_reward:.3f}")
+    print(f"stop reason  : {result.stop_reason}")
+    print(f"added        : {', '.join(added) or '(none)'}")
+    print(f"retired      : {', '.join(dropped) or '(none)'}")
+    print(f"error        : {result.error}")
+
+    if args.install:
+        plan = result.write_to(root)
+        backup = plan["backup"][0] if plan.get("backup") else None
+        print(f"\ninstalled {len(plan['written'])} file(s) to {root}"
+              + (f" (backup: {backup})" if backup else ""))
+    else:
+        print("\nnot installed. Re-run with --install to write this back.")
+    return 0
+
+
+def _skill_names(state) -> List[str]:
+    """Top-level directories holding a SKILL.md -- the same rule dsh applies."""
+    return sorted({path.split("/")[0] for path in state
+                   if path.count("/") == 1 and path.endswith("/SKILL.md")})
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(
         description="Evolve a skill your real dsh loads.",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--skill", help="skill name, resolved the way dsh resolves it")
+    ap.add_argument("--library", nargs="?", const="user-dsh", default=None,
+                    metavar="SOURCE",
+                    help="evolve a whole skill root instead of one skill: the run "
+                         "may add, edit and retire skills. SOURCE is a provider "
+                         "root (user-dsh, project-dsh, ...), default user-dsh.")
     ap.add_argument("--tasks", help="JSONL of {prompt, gold?}")
     ap.add_argument("--list", action="store_true",
                     help="list the skills this harness would serve here, and exit")
@@ -136,6 +204,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             shape = "dir " if skill.is_directory else "flat"
             print(f"{skill.name:<28} {shape}  {skill.root.source:<16} {skill.path}")
         return 0
+
+    if args.library is not None:
+        return run_library(args, ap)
 
     if not args.skill or not args.tasks:
         ap.error("--skill and --tasks are required (or use --list)")

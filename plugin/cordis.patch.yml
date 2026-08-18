@@ -29,6 +29,11 @@
         #   plugins:
         #     - { name: dsh-plugin-mine, dir: /home/you/src/dsh-plugin-mine }
         skills: []
+        # A whole root, where a run may *add* skills and retire them -- the only
+        # setting under which evolution discovers rather than refines:
+        #   libraries:
+        #     - { name: user, dir: /home/you/.dsh/skills }
+        libraries: []
         plugins: []
         # Left empty on purpose. With entries here the harness starts these runs
         # by itself once everything has been quiet for `idleAfterMs`, and stops
