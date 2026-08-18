@@ -3,7 +3,7 @@
 > 目标：让 **DeepSeek Harness（`dsh`）** 装上 AgentDescent 之后，它自己会变好 ——
 > 用户平时怎么用它，它就在那条真实轨迹上训练自己的 skill、prompt、preset 乃至插件代码。
 >
-> **状态：M0 已落地，M1 大部分已落地（差进程内 rollout runner），M2 起未实现。** 本文写*为什么*这样切、边界划在哪、以及每一步的验收标准。
+> **状态：M0 与 M1 已落地；§6 的 `plugin:<pkg>`（演化 dsh 插件自身）也已落地。M2 起未实现。** 本文写*为什么*这样切、边界划在哪、以及每一步的验收标准。
 >
 > 已落地的：[`agentdescent.backends.dsh()`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/backends.py)（把 dsh 当 agent 驱动）、
 > [`agentdescent.dsh.locate`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/dsh/locate.py)（按 dsh 自己的 rank 顺序解析 skill 根）、
@@ -13,10 +13,14 @@
 > M1 的 [`plugin/`](https://github.com/Birfy/agentdescent/tree/main/plugin)（`ctx.evolution` seam、
 > `skill:<name>` 适配器、双向桥、引擎 provider、`/evolve` 与 `evolve_*` 工具）和
 > [`agentdescent/dsh/daemon.py`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/dsh/daemon.py)。
+> 进程内 rollout runner（`ctx.agents.create` + `agent.ctx` 作用域绑定 + 拥有到 idle 的区间）
+> 也已落地。
 >
-> **还差的那一块**：§7 的进程内 rollout runner —— 现在 `rollout` 是注入进来的函数，
-> 还没有基于 `ctx.sessions.fork` + `agent.ctx` 作用域绑定的默认实现。桥、适配器、
-> 引擎都已经就位并有测试，缺的是把候选真正跑在 harness 的子会话里那一段。
+> **演化 dsh 插件自身**：Python 侧
+> [`agentdescent.dsh.plugin`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/dsh/plugin.py)
+> + [`examples/dsh/evolve_dsh_plugin.py`](https://github.com/Birfy/agentdescent/blob/main/examples/dsh/evolve_dsh_plugin.py)，
+> TS 侧 `plugin:<pkg>` 适配器。冻结集（`cordis.patch.yml` / `package.json` / 测试）
+> **两侧各判一次**，且调用方的 `frozen=` 只能**追加**不能替换 —— 详见 §9.1。
 >
 > 对照阅读：[演化一个目录](directory-evolution.md)（本设计复用的底座）、
 > [治理 L0/L1/L2](governance.md)、[Where rollouts run](execution.md)、
@@ -513,6 +517,29 @@ AgentDescent 的 L0/L1/L2 直接映射到 dsh 的真实执行轴上，**不是�
    `dsh --profile x --dump-config` 能看差异，`git revert` 能退回去。
 4. **总开关是真的**。`/evolve off` dispose provider 的 effect，所有作用域注册随之解绑。
 
+### 9.1 演化插件时，冻结的是「能改规则的文件」
+
+`governance.FROZEN_IDS` 冻的是 **artifact id**，它表达不了「这个 artifact 可以演化，
+但它的某几个文件不行」。演化一个 dsh 插件时，恰好有三类文件属于后者 —— 每一类都不是
+「重要」，而是**能改写规则本身**：
+
+| 冻结的路径 | 它能做什么 |
+|---|---|
+| `cordis.patch.yml` | 决定**哪些行被插进插件树** —— 包括审批门、沙箱后端、以及演化引擎自己那几行。能改自己的 patch，就等于能把审自己的东西摘掉 |
+| `package.json` | 带 `prepare` / `postinstall`（安装期执行，在 agent 的沙箱之外），以及 `dsh.bundle` 指针 |
+| `test/**`、`*.test.ts` | 就是那道门。能改门的候选可以自己放自己过 |
+
+三条工程约束：
+
+1. **两侧各判一次**。Python 侧 `FROZEN_PLUGIN_PATHS`，TS 侧 `isFrozen()` —— 后者是
+   **重复实现而不是跨桥引用**：只在「提出改动的那一侧」执行的治理规则，只在那一侧
+   没出错的前提下成立。
+2. **调用方的 `frozen=` 只能追加，不能替换**。这是这里唯一一个**没有可见症状**的错误：
+   替换掉之后 run 照样跑完、照样提交，只是它已经被允许去改那些决定「有没有东西在审它」
+   的行了。
+3. **`npm ci --ignore-scripts`**。否则一个能加 `postinstall` 的候选，会在任何一个测试
+   跑起来之前先在你机器上执行代码 —— 而门本来应该是最先跑的那个。
+
 L1 强制 oracle 这一条顺带是免费的：oracle 评的是刚被接受性检验评过的同一份 artifact、
 同一个 held-out 集，评估缓存直接命中。
 
@@ -607,7 +634,7 @@ monorepo 的四个具体后果，每一条都要落到文件：
 | | 内容 | 验收 | 估时 |
 |---|---|---|---|
 | **M0** ✅ | **离线自我演化。** 纯 Python 零 TS：读用户真实 profile 的 skill 目录，任务和判据由用户给（A 档数据集，或 B 档一条命令），rollout 走 `deepseek-harness-sdk` 子进程，产物 `EvolutionResult.write_to()` 落回去 | 在**真实 profile** 上跑完，给出 before/after 两个数，产物能被 dsh 正常加载 | 3 天 |
-| **M1** ◑ | 插件最小可用：`plugin/` 骨架 + sidecar + `ctx.evolution` seam + skill 适配器 + 进程内 rollout + `/evolve` + `evolve_start` 工具。只有 L2 | `dsh plugin add ./plugin` 之后 `/evolve skill:x` 跑完，新 skill 在**同一个会话里**生效 | 1 周 |
+| **M1** ✅ | 插件最小可用：`plugin/` 骨架 + sidecar + `ctx.evolution` seam + skill 适配器 + 进程内 rollout + `/evolve` + `evolve_start` 工具。只有 L2 | `dsh plugin add ./plugin` 之后 `/evolve skill:x` 跑完，新 skill 在**同一个会话里**生效 | 1 周 |
 | **M2** | 奖励闭环：ScorerRegistry + A/B 档（`gold` / `command` / `judge`）+ C 档兜底（`replay-pairwise` + `efficiency`）+ transcript TaskSource（TS 侧 `session-query`） | 三档各跑通一个真实例子；**兜底档接受不了时能说清是因为 N 太小**，而不是静悄悄没结果 | 1–1.5 周 |
 | **M3** | 常驻形态：`ctx.jobs` + 空闲触发 + 异步运行时（`asynchronous=True, async_ratio=3`）+ Web UI 节点 + 预算上限 | 正常用 harness 的同时后台演化，任何用户输入立刻让路，花了多少 token 看得见 | 1 周 |
 | **M4** | L1：prompt section / preset / 插件代码，测试门 + `ctx.approval` 人审 + 冻结集双 guard | 一次 L1 提交必须弹审批；冻结行的补丁在两侧都被拒（各写一个测试） | 1–2 周 |
