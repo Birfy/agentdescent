@@ -159,7 +159,11 @@ def _acquire_file_lock(path: str, timeout: float = 120.0):
         except OSError:
             if time.time() >= deadline:
                 handle.close()
-                raise LedgerFailure(
+                # `LedgerFailure` is the tuple the drivers catch, not a class --
+                # raising it was a TypeError, so this diagnostic never reached
+                # anyone. TimeoutError is an OSError subclass, so it is still a
+                # member of that tuple and the drivers still catch it.
+                raise TimeoutError(
                     f"could not lock {path} within {timeout:g}s; another process "
                     "is holding the ledger. If none is running, remove the file.")
             time.sleep(0.01)
@@ -192,7 +196,7 @@ def _acquire_dir_lock(path: str, timeout: float) -> str:  # pragma: no cover
             return directory
         except FileExistsError:
             if time.time() >= deadline:
-                raise LedgerFailure(
+                raise TimeoutError(
                     f"could not lock {directory} within {timeout:g}s")
             time.sleep(0.01)
 

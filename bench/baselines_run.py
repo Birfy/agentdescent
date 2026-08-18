@@ -255,6 +255,81 @@ def _bbh(fetch: int, seed: int, completion, *, task: str = "dyck_languages",
         })
 
 
+#: The categories a solver's failures actually fall into on a reasoning task.
+#: Disjoint by construction, which is the point: two workers that diagnose
+#: different failures write different keys and their diffs *fuse*, where a
+#: one-key artifact would have made the same two proposals contradict.
+BBH_CATEGORIES = ("output-format", "method", "verification", "common-errors")
+
+
+def _bbh_keyed(fetch: int, seed: int, completion, *, task: str = "dyck_languages",
+               self_verify: bool = True, eval_concurrency: int = 8,
+               val_cap: Optional[int] = None) -> Workload:
+    """BBH's difficulty crossed with a **multi-key** artifact.
+
+    The two properties the merge-vs-select question needs have never been
+    available together in this repository. `finer` is multi-key (one key per
+    playbook bullet) but a current reasoning model already scores ~0.94 on its
+    gate, and a solver that rarely fails rarely proposes -- the engine only
+    calls `propose` on a rollout below the solve threshold, so a saturated
+    workload starves the merge step of the second diff it needs. `bbh` is
+    unsolved but one-key, so every pair of proposals contradicts and merging
+    degenerates into selection.
+
+    Dataset and strategy are independent seams, so this crosses them: BBH's
+    tasks with `KeyedRules` over the categories a failure diagnosis naturally
+    falls into. Nothing about the engine changes.
+    """
+    from agentdescent.dataloader import split_dataset
+    from agentdescent.evolution import LLMAgent
+    from agentdescent.strategies import KeyedRules
+
+    rows = hf_rows("lukaemon/bbh", "test", config=task, limit=fetch)
+    tasks = [Task(id=str(i), prompt=r["input"],
+                  meta={"gold": str(r["target"]).strip()})
+             for i, r in enumerate(rows)]
+    ds = split_dataset(tasks, ratios=(0.5, 0.25, 0.25), seed=seed,
+                       name=f"BBH/{task} (keyed)")
+
+    def reward(t, output: str) -> float:
+        lines = [ln.strip() for ln in str(output).splitlines() if ln.strip()]
+        got = lines[-1] if lines else ""
+        got = got.split("Answer:")[-1].strip().strip(".").strip()
+        return 1.0 if got.lower() == t.meta["gold"].lower() else 0.0
+
+    cats = ", ".join(BBH_CATEGORIES)
+    agent = LLMAgent(
+        completion,
+        solve_template="{artifact}\n\n{prompt}\n\n"
+                       "End with a line containing only the final answer.",
+        propose_template=(
+            "You are improving a solver's guidance notes. It scored "
+            "{reward:.2f} on this problem.\n\n"
+            "Current notes:\n{artifact}\n\n"
+            "Problem:\n{prompt}\n\n"
+            "Its answer (wrong or low-scoring):\n{output}\n\n"
+            f"Diagnose the single most important cause of this failure and "
+            f"file one note against exactly one of these categories: {cats}.\n"
+            "Reply with one line in the form `category: advice`, where the "
+            "advice is one general sentence. Output only that line."),
+    )
+
+    strategy = KeyedRules(categories=BBH_CATEGORIES, title="# Solver notes")
+
+    def test_eval(result: EvolutionResult) -> float:
+        return score_tasks(agent.solve, result.rendered, ds.test, reward)
+
+    tasks_, val_frac = _capped(ds.trainval, ds.val_frac, val_cap)
+    return Workload(
+        tasks=tasks_, reward=reward, test_eval=test_eval, agent=agent,
+        strategy=strategy,
+        evolve_kwargs={
+            "artifact_id": "bbh_notes", "blast_radius": 0.2,
+            "held_out_frac": val_frac, "rounds": 10_000,
+            "self_verify": self_verify, "eval_concurrency": eval_concurrency,
+        })
+
+
 def _bbeh(fetch: int, seed: int, completion, *, task: str = "disambiguation qa",
           self_verify: bool = True, eval_concurrency: int = 8,
           val_cap: Optional[int] = None) -> Workload:
@@ -365,7 +440,7 @@ def split_sizes(args) -> tuple:
         tasks = [Task(id=str(i), prompt=r["input"], meta={})
                  for i, r in enumerate(rows)]
         return split_dataset(tasks, ratios=(0.5, 0.25, 0.25), seed=0).sizes()
-    if args.dataset == "bbh":
+    if args.dataset in ("bbh", "bbh-keyed"):
         from agentdescent.dataloader import split_dataset
         rows = hf_rows("lukaemon/bbh", "test", config=args.bbh_task,
                        limit=args.fetch)
@@ -415,6 +490,8 @@ def _workload_for(args, seed: int, completion):
         return _gsm8k(args.fetch, seed, completion, **shared)
     if args.dataset == "bbh":
         return _bbh(args.fetch, seed, completion, task=args.bbh_task, **shared)
+    if args.dataset == "bbh-keyed":
+        return _bbh_keyed(args.fetch, seed, completion, task=args.bbh_task, **shared)
     if args.dataset == "bbeh":
         return _bbeh(args.fetch, seed, completion, task=args.bbeh_task, **shared)
     return _finer(args.pool, args.top_k, seed, completion, **shared)
@@ -423,7 +500,7 @@ def _workload_for(args, seed: int, completion):
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--dataset",
-                   choices=["hotpotqa", "finer", "gsm8k", "bbh", "bbeh"],
+                   choices=["hotpotqa", "finer", "gsm8k", "bbh", "bbh-keyed", "bbeh"],
                    default="hotpotqa")
     p.add_argument("--bbeh-task", default="disambiguation qa",
                    help="which BBEH subtask; the shortest is the default")
@@ -488,6 +565,22 @@ def build_parser() -> argparse.ArgumentParser:
                         "Without it, a one-key artifact (GEPA's InstructionSlot) "
                         "cannot fuse at all and the merge arm is really per-round "
                         "best-of-N selection -- `fusion.contested` is 0 and says so")
+    p.add_argument("--timeout", type=float,
+                   help="per-call timeout in seconds. claude()'s 120s default "
+                        "assumes Claude latency; a reasoning model behind an "
+                        "Anthropic-shaped endpoint on a long-reasoning task "
+                        "(BBH dyck_languages) exceeds it and the run dies")
+    p.add_argument("--no-thinking", dest="no_thinking", action="store_true",
+                   help="ask an Anthropic-shaped endpoint for no reasoning "
+                        "tokens. On this endpoint it is the difference between "
+                        "a usable and an unusable call budget")
+    p.add_argument("--fusion-tournament", action="store_true",
+                   help="rank each fused union against the individual candidates "
+                        "on held-out data before the gate. Costs one extra sweep "
+                        "per candidate, which is why it is off by default -- but "
+                        "it is the only setting under which `fusion.contested` "
+                        "and `win_rate` are populated, so a merge-vs-fork run "
+                        "that wants to say whether fusion *fired* needs it")
     p.add_argument("--allow-thin-headroom", action="store_true",
                    help="run even when the seed artifact already scores above "
                         f"{MAX_SEED_TEST_SCORE}. The refusal still prints and the "
@@ -609,6 +702,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return best_of_n_fork(workload, args.width, budget=budget, seed=seed,
                                   concurrency=args.fork_concurrency)
         if name == "merge":
+            if args.fusion_tournament:
+                # Only the merge arm can hold a tournament, and only a
+                # tournament populates `contested`/`win_rate`. Installed here
+                # rather than on the shared workload so the other two arms keep
+                # the gate they would have had without this flag.
+                workload = replace(workload, evolve_kwargs={
+                    **workload.evolve_kwargs, "fusion_tournament": True})
             if args.reflective_merge:
                 # Only the merge arm. serial has one proposal per step and fork
                 # never merges, so installing it there would change nothing and
@@ -678,6 +778,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(to_markdown(comparison))
     print()
     print(f"total model spend: {usage.summary()}")
+
+    # `contested` before `win_rate`, always: a merge arm whose fusions never
+    # fired is not evidence about merging, and the two are indistinguishable in
+    # a quality table. Printed for every merge arm, so a run that answered
+    # nothing says so on its own.
+    for arm in results:
+        if arm.fusion is not None:
+            print(f"fusion  {arm.arm} seed={arm.seed}: {arm.fusion.summary()}")
+        elif arm.arm.startswith("merge"):
+            print(f"fusion  {arm.arm} seed={arm.seed}: no tournament held "
+                  "(pass --fusion-tournament to populate contested/win_rate)")
 
     if "merge" in arms and "fork" in arms:
         merge_name, fork_name = f"merge-of-{args.width}", f"fork-of-{args.width}"
