@@ -3,7 +3,7 @@
 > 目标：让 **DeepSeek Harness（`dsh`）** 装上 AgentDescent 之后，它自己会变好 ——
 > 用户平时怎么用它，它就在那条真实轨迹上训练自己的 skill、prompt、preset 乃至插件代码。
 >
-> **状态：M0 / M1 / M2 的奖励与治理部分已落地；剩 `ctx.jobs` + 空闲触发 + 异步（M3）与 transcript 数据源。** 本文写*为什么*这样切、边界划在哪、以及每一步的验收标准。
+> **状态：M0–M3 已落地。** 剩下的是 M4（L1 的 prompt section / preset 适配器）与 Web UI 节点。 本文写*为什么*这样切、边界划在哪、以及每一步的验收标准。
 >
 > 已落地的：[`agentdescent.backends.dsh()`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/backends.py)（把 dsh 当 agent 驱动）、
 > [`agentdescent.dsh.locate`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/dsh/locate.py)（按 dsh 自己的 rank 顺序解析 skill 根）、
@@ -666,8 +666,8 @@ monorepo 的四个具体后果，每一条都要落到文件：
 |---|---|---|---|
 | **M0** ✅ | **离线自我演化。** 纯 Python 零 TS：读用户真实 profile 的 skill 目录，任务和判据由用户给（A 档数据集，或 B 档一条命令），rollout 走 `deepseek-harness-sdk` 子进程，产物 `EvolutionResult.write_to()` 落回去 | 在**真实 profile** 上跑完，给出 before/after 两个数，产物能被 dsh 正常加载 | 3 天 |
 | **M1** ✅ | 插件最小可用：`plugin/` 骨架 + sidecar + `ctx.evolution` seam + skill 适配器 + 进程内 rollout + `/evolve` + `evolve_start` 工具。只有 L2 | `dsh plugin add ./plugin` 之后 `/evolve skill:x` 跑完，新 skill 在**同一个会话里**生效 | 1 周 |
-| **M2** ◑ | 奖励闭环：ScorerRegistry + A/B 档（`gold` / `command` / `judge`）+ C 档兜底（`replay-pairwise` + `efficiency`）+ transcript TaskSource（TS 侧 `session-query`） | 三档各跑通一个真实例子；**兜底档接受不了时能说清是因为 N 太小**，而不是静悄悄没结果 | 1–1.5 周 |
-| **M3** | 常驻形态：`ctx.jobs` + 空闲触发 + 异步运行时（`asynchronous=True, async_ratio=3`）+ Web UI 节点 + 预算上限 | 正常用 harness 的同时后台演化，任何用户输入立刻让路，花了多少 token 看得见 | 1 周 |
+| **M2** ✅ | 奖励闭环：ScorerRegistry + A/B 档（`gold` / `command` / `judge`）+ C 档兜底（`replay-pairwise` + `efficiency`）+ transcript TaskSource（TS 侧 `session-query`） | 三档各跑通一个真实例子；**兜底档接受不了时能说清是因为 N 太小**，而不是静悄悄没结果 | 1–1.5 周 |
+| **M3** ✅ | 常驻形态：`ctx.jobs` + 空闲触发 + 异步运行时（`asynchronous=True, async_ratio=3`）+ Web UI 节点 + 预算上限 | 正常用 harness 的同时后台演化，任何用户输入立刻让路，花了多少 token 看得见 | 1 周 |
 | **M4** | L1：prompt section / preset / 插件代码，测试门 + `ctx.approval` 人审 + 冻结集双 guard | 一次 L1 提交必须弹审批；冻结行的补丁在两侧都被拒（各写一个测试） | 1–2 周 |
 
 M0 单独就值得做完再决定要不要继续 —— 它给出这条路线的第一个真实数字，而且已经是
