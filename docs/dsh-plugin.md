@@ -102,17 +102,30 @@ objective is not something you can detect from its output.
 |---|---|---|
 | `skill:<name>` | one skill — refinement | L2, merges on score |
 | `skills:<root>` | a whole skill root — **add, edit, retire** | L2 |
+| `prompt:<name>` | a system-prompt section | L2, commits at a turn boundary |
+| `preset:<name>` | a persona plus a tool mask | L1, waits for you |
 | `plugin:<pkg>` | a dsh plugin's own source | L1, waits for you |
 
 ```yaml
-    skills:    [{ name: sql, dir: /home/you/.dsh/skills/sql }]
+    skills:    [{ name: sql,  dir: /home/you/.dsh/skills/sql }]
     libraries: [{ name: user, dir: /home/you/.dsh/skills }]
+    prompts:   [{ name: house-style, dir: /home/you/.dsh/prompts/house-style }]
+    presets:   [{ name: careful, dir: /home/you/.dsh/presets/careful }]
     plugins:   [{ name: dsh-plugin-mine, dir: /home/you/src/dsh-plugin-mine }]
 ```
 
 A **library** is a different artifact from a skill, not a bigger one: with the
 root as the state, a run can add a skill nobody wrote. That is the only setting
 in which evolution discovers rather than refines.
+
+A **prompt section** is in every request, so its commit waits until no agent is
+mid-turn — swapping the request prefix costs every live session's KV cache, and
+that is worth a few seconds' wait.
+
+A **preset** is `PERSONA.md` plus `TOOLS.md` (one tool name per line, `-name`
+denies). Publishing one changes the persona immediately; the tool mask applies
+per agent, because dsh refuses a process-global restriction — it would mask
+every agent, including the ones not using the preset.
 
 ## 4. Running it
 

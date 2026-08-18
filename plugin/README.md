@@ -105,7 +105,7 @@ that knows a class of task keeps going wrong, usually before anyone else does.
 |---|---|
 | `ctx.evolution` | the capability seam — Service Definition, no optimiser in it |
 | the engine | drives a Python sidecar over a bidirectional NDJSON-RPC bridge |
-| artifacts | `skill:<name>` (L2) and `plugin:<pkg>` (L1) |
+| artifacts | `skill:<name>`, `skills:<root>`, `prompt:<name>` (L2); `preset:<name>`, `plugin:<pkg>` (L1) |
 | rollouts | run **inside this harness**, one child agent per candidate |
 | scorers | gold ▸ command ▸ rubric ▸ replay-comparison |
 | the queue | L1 changes wait for a person |
