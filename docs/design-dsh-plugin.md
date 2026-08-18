@@ -7,8 +7,9 @@
 >
 > M4 含 `prompt:<section>`、`preset:<name>` 两个适配器，以及写进 session log 的持久化历史
 > （`evolution/commit` / `evolution/run-ended`，log-only，不进模型上下文）。
-> **唯一还缺的是 Web UI conversation node 的 React 渲染器** —— 它需要浏览器端 bundle，
-> 在这个环境里无法验证，所以没有盲写；它要渲染的那份数据已经在日志里了。
+> Web UI 的 conversation node **装配逻辑**也已落地并有测试（`plugin/src/web/node.ts`）——
+> 客户端引擎的契约就是「Definition 是事件上的纯函数」，所以这一半不需要浏览器。
+> **只剩那个 keyed React 渲染器**：它要浏览器端 bundle，这个环境跑不了，所以没有盲写。
 >
 > 已落地的：[`agentdescent.backends.dsh()`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/backends.py)（把 dsh 当 agent 驱动）、
 > [`agentdescent.dsh.locate`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/dsh/locate.py)（按 dsh 自己的 rank 顺序解析 skill 根）、
