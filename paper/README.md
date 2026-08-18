@@ -1,7 +1,6 @@
 # AgentDescent paper
 
-LaTeX source for the AgentDescent paper, distributed with the repository
-rather than posted to a preprint server. All figures are TikZ / pgfplots and
+LaTeX source for the AgentDescent paper. All figures are TikZ / pgfplots and
 compile from source — no external image files.
 
 ## Files
@@ -29,10 +28,9 @@ latexmk -pdf main.tex
 ## Distribution
 
 The compiled `main.pdf` is committed, so the paper is readable straight from
-GitHub with no build step. If you ever do post it, upload `main.tex`,
-`arxiv.sty`, `references.bib` and the generated `main.bbl` together —
-`arxiv.sty` is not in a stock TeX Live tree and BibTeX is not re-run on the
-server.
+GitHub with no build step. To submit it anywhere, send `main.tex`, `arxiv.sty`,
+`references.bib` and the generated `main.bbl` together — `arxiv.sty` is not in a
+stock TeX Live tree, and most servers do not re-run BibTeX.
 
 Every measured number in the paper names the script that produced it; the
 Reproducibility section lists them per result, and the raw per-seed JSON for the
