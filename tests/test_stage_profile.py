@@ -208,7 +208,16 @@ def test_a_slow_gate_starves_the_workers_on_the_async_path():
     finished card. If this ever reads 0, evaluation is no longer on the merger's
     critical path and issue #151 is done.
     """
-    r = _async(run=_slow_gate_run, async_ratio=1, max_seconds=1.5)
+    # Bounded by **work**, not by wall-clock. A 1.5s budget makes the run's size
+    # depend on how busy the machine is, and this assertion then answers to
+    # whatever else was running: it failed intermittently in the full suite while
+    # passing 6/6 alone. `max_iters` fixes the number of sweeps, so the mechanism
+    # is what is measured. `max_seconds` stays only as a ceiling that must never
+    # bind -- if it ever does, the run was starved by something outside this test.
+    r = _async(run=_slow_gate_run, async_ratio=1, max_iters=12, max_seconds=60.0)
+    assert r.stop_reason != "max_seconds", (
+        "the wall-clock ceiling bound before the work budget did; this test is "
+        "measuring the machine, not the gate")
     assert r.worker_starved_seconds > 0.0
     # And the gate is where the merger's time went, not the merging.
     assert r.gate_share() > 0.5
