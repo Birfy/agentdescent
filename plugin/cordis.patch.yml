@@ -59,6 +59,13 @@
         #   libraries:
         #     - { name: user, dir: /home/you/.dsh/skills }
         libraries: []
+        # A system-prompt section -- in every request, so its commit waits for a
+        # turn boundary rather than spending every live session's KV cache:
+        #   prompts:
+        #     - { name: house-style, dir: /home/you/.dsh/prompts/house-style }
+        prompts: []
+        # An agent preset: PERSONA.md plus TOOLS.md. L1, so it waits for you.
+        presets: []
         plugins: []
         # Left empty on purpose. With entries here the harness starts these runs
         # by itself once everything has been quiet for `idleAfterMs`, and stops

@@ -14,6 +14,8 @@ import { CommitQueue } from './approval.js'
 import { buildScorer, buildTaskSource, type DatasetSpec, type ObjectiveSpec } from './declarative.js'
 import { pluginArtifact } from './artifacts/plugin.js'
 import { skillLibraryArtifact } from './artifacts/library.js'
+import { presetArtifact } from './artifacts/preset.js'
+import { promptArtifact, whenIdle } from './artifacts/prompt.js'
 import { skillArtifact } from './artifacts/skill.js'
 import { startEngine } from './engine.js'
 import type { EvolutionSpec } from './evolution.js'
@@ -45,6 +47,16 @@ export interface Config {
   readonly libraries?: readonly { readonly name: string; readonly dir: string }[]
   /** Plugin checkouts to expose as `plugin:<name>` artifacts (L1). */
   readonly plugins?: readonly { readonly name: string; readonly dir: string }[]
+  /**
+   * System-prompt sections to expose as `prompt:<name>` artifacts.
+   *
+   * The highest-leverage artifact here -- it is in every request -- and the one
+   * whose commit waits for a turn boundary, because swapping it rewrites the
+   * request prefix and every live session's KV cache goes with it.
+   */
+  readonly prompts?: readonly { readonly name: string; readonly dir: string }[]
+  /** Agent presets to expose as `preset:<name>` artifacts (L1). */
+  readonly presets?: readonly { readonly name: string; readonly dir: string }[]
   /**
    * The highest blast radius that merges without a person.
    *
@@ -120,6 +132,27 @@ export function apply(ctx: Context, config: Config = {}): void {
     ctx.evolution.registerArtifact(skillLibraryArtifact(ctx, {
       name: library.name,
       load: async () => await readSkillDir(library.dir),
+    }))
+  }
+  const busy = new Set<string>()
+  ctx.on('agent/status', (payload: any) => {
+    const id = String(payload?.agent?.id ?? '')
+    if (id.length === 0 || id.startsWith('evolve-')) return
+    if (payload.status === 'running') busy.add(id)
+    else busy.delete(id)
+  })
+
+  for (const prompt of config.prompts ?? []) {
+    ctx.evolution.registerArtifact(promptArtifact(ctx, {
+      name: prompt.name,
+      load: async () => await readSkillDir(prompt.dir),
+      atTurnBoundary: whenIdle(ctx, () => busy.size > 0),
+    }))
+  }
+  for (const preset of config.presets ?? []) {
+    ctx.evolution.registerArtifact(presetArtifact(ctx, {
+      name: preset.name,
+      load: async () => await readSkillDir(preset.dir),
     }))
   }
   for (const plugin of config.plugins ?? []) {

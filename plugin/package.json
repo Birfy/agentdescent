@@ -28,7 +28,9 @@
     "./transcripts": "./lib/transcripts.js",
     "./artifacts/library": "./lib/artifacts/library.js",
     "./declarative": "./lib/declarative.js",
-    "./jobs": "./lib/jobs.js"
+    "./jobs": "./lib/jobs.js",
+    "./artifacts/prompt": "./lib/artifacts/prompt.js",
+    "./artifacts/preset": "./lib/artifacts/preset.js"
   },
   "files": [
     "lib",

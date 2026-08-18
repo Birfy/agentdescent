@@ -20,6 +20,15 @@ export { Peer, PeerGone, PROTOCOL_VERSION, RpcError } from './bridge.js'
 export { startEngine } from './engine.js'
 export { ENTRYPOINT, EVOLVED_SKILL_RANK, parseSkill, skillArtifact } from './artifacts/skill.js'
 export { parseLibrary, skillLibraryArtifact } from './artifacts/library.js'
+export {
+  EVOLVED_SECTION_ORDER, promptArtifact, SECTION_FILE, whenIdle,
+} from './artifacts/prompt.js'
+export {
+  parseToolPolicy, PERSONA_FILE, presetArtifact, TOOLS_FILE,
+} from './artifacts/preset.js'
+
+export type { PromptArtifactOptions } from './artifacts/prompt.js'
+export type { PresetArtifactOptions, ToolPolicy } from './artifacts/preset.js'
 
 export type { LibrarySkill, SkillLibraryOptions } from './artifacts/library.js'
 export { describeChoices, parseEvolveInput, registerCommand, registerTools } from './surface.js'
