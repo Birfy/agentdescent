@@ -37,6 +37,11 @@ export { apply, inject, name, registerReflectionArtifact, REFLECTION_ARTIFACT } 
 export { CommitQueue, renderPending } from './approval.js'
 export { idleTrigger } from './idle.js'
 export { startAsJob } from './jobs.js'
+export { evolutionHistory, recordHistory } from './history.js'
+
+export type {
+  EvolutionCommitEvent, EvolutionRunEvent, HistoryOptions, HistorySession,
+} from './history.js'
 
 export type { JobHost, JobsBridgeOptions } from './jobs.js'
 export { transcriptTaskSource } from './transcripts.js'
