@@ -11,6 +11,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { CommandResult } from '@deepseek-ai/dsh-commands'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
+import { renderPending, type CommitQueue } from './approval.js'
 import type { EvolutionRegistry, EvolutionSpec, RunStatus } from './evolution.js'
 
 /**
@@ -75,13 +76,22 @@ function pick(evolution: EvolutionRegistry, kind: string, given: string | undefi
     `artifact, so this will not choose for you.`)
 }
 
+export interface CommandOptions {
+  /** The review queue L1 commits wait in. Without it, `pending` says so. */
+  readonly queue?: CommitQueue
+}
+
 /** Register `/evolve`. Requires `ctx.commands` and `ctx.evolution`. */
-export function registerCommand(ctx: Context): () => void {
+export function registerCommand(ctx: Context, options: CommandOptions = {}): () => void {
   const { evolution } = ctx
+  const { queue } = options
   return ctx.commands.register({
     name: 'evolve',
     description: 'Improve one of this harness\'s own artifacts against an objective',
-    input: { hint: '<artifact> [scorer] [task-source] | status <run> | cancel <run> | list' },
+    input: {
+      hint: '<artifact> [scorer] [task-source] | status <run> | cancel <run> | ' +
+            'list | pending | approve <id> | reject <id>',
+    },
     handler: async (invocation): Promise<CommandResult> => {
       const raw = invocation.rawInput.trim()
       const [verb, ...rest] = raw.split(/\s+/)
@@ -96,6 +106,35 @@ export function registerCommand(ctx: Context): () => void {
           return status === undefined
             ? { kind: 'error', text: `no run "${runId}"` }
             : { kind: 'success', text: renderStatus(status) }
+        }
+        if (verb === 'pending') {
+          if (queue === undefined) return { kind: 'error', text: 'no review queue is mounted' }
+          return { kind: 'success', text: renderPending(queue.list()) }
+        }
+        if (verb === 'approve' || verb === 'reject') {
+          if (queue === undefined) return { kind: 'error', text: 'no review queue is mounted' }
+          const id = rest[0]
+          if (id === undefined) return { kind: 'error', text: `/evolve ${verb} <id>` }
+          if (verb === 'reject') {
+            const dropped = queue.reject(id)
+            return dropped === undefined
+              ? { kind: 'error', text: `nothing pending as "${id}"` }
+              : { kind: 'success', text: `rejected ${id} (${dropped.artifact}); the ` +
+                                         'ledger keeps it, so it can be re-proposed' }
+          }
+          // Approving is the moment a person takes responsibility for an L1
+          // change, so it publishes here rather than anywhere the engine can
+          // reach on its own.
+          const held = await queue.approve(id, async (entry) => {
+            const adapter = evolution.artifact(entry.artifact)
+            if (adapter === undefined) {
+              throw new Error(`artifact "${entry.artifact}" is no longer registered`)
+            }
+            await adapter.publish(entry.state)
+          })
+          return held === undefined
+            ? { kind: 'error', text: `nothing pending as "${id}"` }
+            : { kind: 'success', text: `published ${held.artifact} — ${held.paths.length} file(s)` }
         }
         if (verb === 'cancel') {
           const runId = rest[0]

@@ -13,7 +13,10 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRegistry from '@deepseek-ai/dsh-tools'
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { EvolutionRegistry, type ArtifactAdapter, type EvolutionEngine } from '../src/evolution.js'
+import { CommitQueue } from '../src/approval.js'
+import {
+  EvolutionRegistry, type ArtifactAdapter, type ArtifactState, type EvolutionEngine,
+} from '../src/evolution.js'
 import {
   describeChoices, parseEvolveInput, registerCommand, registerTools,
 } from '../src/surface.js'
@@ -189,4 +192,78 @@ describe('the model-facing tools', () => {
     expect(fake.started).toHaveLength(1)
   })
 
+})
+
+
+describe('/evolve review', () => {
+  let ctx: Context
+  let evolution: EvolutionRegistry
+  let queue: CommitQueue
+  let published: ArtifactState[]
+
+  beforeEach(async () => {
+    ctx = new Context()
+    await ctx.plugin(CommandRegistry)
+    await ctx.plugin(EvolutionRegistry)
+    evolution = ctx.evolution
+    published = []
+    evolution.registerArtifact({
+      id: 'plugin:mine', blastRadius: 0.6,
+      load: async () => ({}),
+      bind: () => () => {},
+      publish: async (state) => { published.push(state); return () => {} },
+    })
+    evolution.registerScorer({ name: 'gold', score: async () => 1 })
+    evolution.registerTaskSource({ name: 'manual', fetch: async () => [] })
+    evolution.registerEngine(engine())
+    queue = new CommitQueue()
+    registerCommand(ctx, { queue })
+  })
+
+  async function run(input: string) {
+    const definition = ctx.commands.find(undefined as never, 'evolve')
+    return await definition!.handler({ name: 'evolve', rawInput: input } as never)
+  }
+
+  async function stage() {
+    await queue.submit(evolution.artifact('plugin:mine')!, { 'src/index.ts': 'evolved' }, 2, {
+      commitId: 'c1', runId: 'run-1', artifact: 'plugin:mine', blastRadius: 0.6,
+      version: 2, heldOutBefore: 0.5, heldOutAfter: 0.8,
+    })
+  }
+
+  it('says plainly when nothing is waiting', async () => {
+    expect((await run('pending')).text).toContain('nothing waiting')
+  })
+
+  it('lists a staged commit with what it would buy', async () => {
+    await stage()
+    const result = await run('pending')
+    expect(result.text).toContain('plugin:mine')
+    expect(result.text).toContain('0.500 -> 0.800')
+  })
+
+  it('publishes only when a person approves', async () => {
+    await stage()
+    expect(published).toEqual([])
+    const result = await run('approve pending-1')
+    expect(result.kind).toBe('success')
+    expect(published).toEqual([{ 'src/index.ts': 'evolved' }])
+  })
+
+  it('rejects without publishing, and says the ledger still has it', async () => {
+    await stage()
+    const result = await run('reject pending-1')
+    expect(result.text).toContain('re-proposed')
+    expect(published).toEqual([])
+  })
+
+  it('names an id it does not hold rather than doing nothing', async () => {
+    expect((await run('approve pending-99')).kind).toBe('error')
+    expect((await run('reject pending-99')).kind).toBe('error')
+  })
+
+  it('asks for an id when given none', async () => {
+    expect((await run('approve')).text).toContain('<id>')
+  })
 })

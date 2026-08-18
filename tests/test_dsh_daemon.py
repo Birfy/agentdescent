@@ -260,3 +260,30 @@ def test_a_run_that_improves_nothing_reports_done_without_publishing():
 ])
 def test_a_reward_outside_the_contract_is_clamped_rather_than_inherited(value, expected):
     assert _clamp(value) == expected
+
+
+def test_a_staged_commit_does_not_become_a_head():
+    """An L1 change is published only after a human approves it.
+
+    If the engine recorded a head anyway it would report a version the harness
+    is not serving, and the next run would start from a state that never
+    shipped -- neither of which shows up as an error.
+    """
+    class Staging(FakeHarness):
+        def publish(self, params):
+            self.published.append(params)
+            return {"status": "pending", "pendingId": "pending-1",
+                    "reason": "blast radius 0.6 is above the line"}
+
+    harness = Staging()
+    engine, harness_peer, engine_peer, _ = wire(harness)
+    try:
+        run_id = harness_peer.call("run.start", SPEC, timeout=10)
+        status = wait_for(harness_peer, run_id, {"awaiting-review", "done", "failed"})
+        assert status["phase"] == "awaiting-review", status.get("error")
+        assert len(harness.published) == 1          # it was offered
+        # ...and not recorded as landed.
+        assert harness_peer.call("ledger.head", {"artifact": "skill:total"}, timeout=10) is None
+        assert harness_peer.call("ledger.history", {"artifact": "skill:total"}, timeout=10) == []
+    finally:
+        harness_peer.close(), engine_peer.close()

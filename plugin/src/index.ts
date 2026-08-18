@@ -21,6 +21,9 @@ export { startEngine } from './engine.js'
 export { ENTRYPOINT, EVOLVED_SKILL_RANK, parseSkill, skillArtifact } from './artifacts/skill.js'
 export { describeChoices, parseEvolveInput, registerCommand, registerTools } from './surface.js'
 export { inProcessRollout } from './rollout.js'
+export { CommitQueue, renderPending } from './approval.js'
+
+export type { CommitQueueOptions, PendingCommit, PublishOutcome } from './approval.js'
 export {
   FROZEN_PLUGIN_PATHS, isFrozen, PLUGIN_BLAST_RADIUS, pluginArtifact,
 } from './artifacts/plugin.js'

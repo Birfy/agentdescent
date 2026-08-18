@@ -106,6 +106,8 @@ export interface EvolutionSpec {
 export type RunPhase =
   | 'starting' | 'running' | 'stopping'
   | 'done' | 'failed' | 'cancelled' | 'budget-exhausted'
+  /** Finished, and its commit is staged for a human -- see `/evolve pending`. */
+  | 'awaiting-review'
 
 export interface RunStatus {
   readonly runId: RunId

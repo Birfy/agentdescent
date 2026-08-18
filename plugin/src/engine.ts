@@ -17,6 +17,7 @@ import { spawn } from 'node:child_process'
 
 import type { Context } from '@deepseek-ai/cordis'
 
+import { CommitQueue, type PublishOutcome } from './approval.js'
 import { Peer, PROTOCOL_VERSION } from './bridge.js'
 import type {
   ArtifactHead,
@@ -57,6 +58,11 @@ export interface EngineOptions {
    */
   readonly cwd?: string
   readonly handshakeTimeoutMs?: number
+  /**
+   * Holds commits above the auto-merge line for review. Supplied by the caller
+   * so the command surface can list and approve the same queue.
+   */
+  readonly queue?: CommitQueue
 }
 
 const DEFAULT_HANDSHAKE_MS = 30_000
@@ -95,6 +101,7 @@ export async function startEngine(ctx: Context, options: EngineOptions): Promise
 
   const statuses = new Map<RunId, RunStatus>()
   const heads = new Map<ArtifactId, ArtifactHead>()
+  const queue = options.queue ?? new CommitQueue()
 
   const engine: EvolutionEngine = {
     name: `${shake.engine}@${shake.version}`,
@@ -125,20 +132,29 @@ export async function startEngine(ctx: Context, options: EngineOptions): Promise
     return null
   })
 
-  peer.handle('artifact.publish', async (params: any) => {
+  peer.handle('artifact.publish', async (params: any): Promise<PublishOutcome> => {
     const adapter = options.evolution.artifact(params.artifact)
     if (adapter === undefined) {
       throw new Error(`cannot publish unknown artifact "${String(params.artifact)}"`)
     }
-    await adapter.publish(params.state as ArtifactState)
+    const version = Number(params.version ?? 0)
+    const outcome = await queue.submit(adapter, params.state as ArtifactState, version,
+                                       params.commit as CommitRecord | undefined)
+    if (outcome.status === 'pending') {
+      // No head, no commit announcement. A staged change is not live, and
+      // recording it as one would have the engine start its next run from a
+      // state the harness is not serving.
+      ctx.logger.info(`${String(params.artifact)}: ${outcome.reason} (${outcome.pendingId})`)
+      return outcome
+    }
     heads.set(params.artifact, {
       artifact: params.artifact,
-      version: Number(params.version ?? 0),
+      version,
       heldOut: Number(params.commit?.heldOutAfter ?? 0),
       state: params.state as ArtifactState,
     })
     if (params.commit !== undefined) options.evolution.commit(params.commit as CommitRecord)
-    return null
+    return outcome
   })
 
   ctx.effect(() => () => { child.kill() }, 'evolution.sidecar')

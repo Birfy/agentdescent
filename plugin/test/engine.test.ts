@@ -14,6 +14,7 @@ import { Context } from '@deepseek-ai/cordis'
 import SkillRegistry from '@deepseek-ai/dsh-skill'
 import { beforeEach, describe, expect, it } from 'vitest'
 
+import { CommitQueue } from '../src/approval.js'
 import { Peer } from '../src/bridge.js'
 import { startEngine, type Sidecar } from '../src/engine.js'
 import {
@@ -192,6 +193,24 @@ describe('the engine provider', () => {
       expect(published).toEqual([{ 'SKILL.md': 'COLUMN: amount\n' }])
       expect(engine.head('skill:total')?.version).toBe(1)
       expect(announced).toEqual([commit])
+    })
+
+      it('stages a harness change instead of publishing it', async () => {
+      // The engine must be able to tell the two apart: recording a head for a
+      // staged commit reports a version the harness is not serving.
+      const queue = new CommitQueue()
+      evolution.registerArtifact({
+        ...adapter('plugin:mine', published), id: 'plugin:mine', blastRadius: 0.6,
+      })
+      const { sidecar, engineSide } = fakeSidecar()
+      const engine = await start(sidecar, { queue })
+      const outcome = await engineSide.call<any>('artifact.publish', {
+        artifact: 'plugin:mine', state: { 'src/index.ts': 'evolved' }, version: 2, commit,
+      })
+      expect(outcome.status).toBe('pending')
+      expect(published).toEqual([])
+      expect(engine.head('plugin:mine')).toBeUndefined()
+      expect(queue.list()).toHaveLength(1)
     })
 
     it('refuses to publish an artifact nothing registered', async () => {

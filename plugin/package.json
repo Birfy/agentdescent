@@ -20,7 +20,8 @@
     "./engine": "./lib/engine.js",
     "./surface": "./lib/surface.js",
     "./rollout": "./lib/rollout.js",
-    "./artifacts/plugin": "./lib/artifacts/plugin.js"
+    "./artifacts/plugin": "./lib/artifacts/plugin.js",
+    "./approval": "./lib/approval.js"
   },
   "files": [
     "lib",

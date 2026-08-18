@@ -229,10 +229,16 @@ class Engine:
             "version": self._next_version(state.artifact),
             "heldOutBefore": before, "heldOutAfter": result.final_reward,
         }
-        self._peer.call("artifact.publish", {
+        outcome = self._peer.call("artifact.publish", {
             "artifact": state.artifact, "state": final,
             "version": record["version"], "commit": record,
-        })
+        }) or {}
+        # A high-blast-radius change is staged for a human rather than published.
+        # Recording a head for it would have the *next* run start from a state
+        # the harness is not serving, and report a version nobody approved.
+        if isinstance(outcome, Mapping) and outcome.get("status") == "pending":
+            state.phase = "awaiting-review"
+            return
         with self._lock:
             self._heads[state.artifact] = {
                 "artifact": state.artifact, "version": record["version"],
