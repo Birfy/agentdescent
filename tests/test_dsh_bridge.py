@@ -135,11 +135,14 @@ def test_a_notification_to_an_unknown_method_is_silently_fine():
 def test_outstanding_calls_fail_when_the_peer_dies_rather_than_hanging_forever():
     """A hung call is worse than a failed one: the round never finishes and
     nothing says why."""
-    started = threading.Event()
+    started, release = threading.Event(), threading.Event()
 
     def never_returns(_params):
         started.set()
-        threading.Event().wait(30)
+        # Released in `finally`: a handler parked for a fixed 30s outlives the
+        # test, and a suite that leaves sleeping threads behind is a suite whose
+        # later wall-clock assertions answer to what ran before them.
+        release.wait(30)
 
     a, b, _ = connect(b_handlers={"hang": never_returns})
     outcome = {}
@@ -156,6 +159,7 @@ def test_outstanding_calls_fail_when_the_peer_dies_rather_than_hanging_forever()
     b.close()
     a.close()
     thread.join(10)
+    release.set()
     assert isinstance(outcome.get("error"), PeerGone)
 
 

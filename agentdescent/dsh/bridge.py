@@ -212,11 +212,23 @@ class Peer:
             self._on_error(f"handler {message.get('method')!r} raised: "
                            f"{traceback.format_exc().rstrip()}")
             if call_id is not None:
-                self._send({"id": call_id, "error": {
+                self._reply({"id": call_id, "error": {
                     "code": INTERNAL_ERROR, "message": f"{type(exc).__name__}: {exc}"}})
             return
         if call_id is not None:
-            self._send({"id": call_id, "result": result})
+            self._reply({"id": call_id, "result": result})
+
+    def _reply(self, message: Mapping[str, Any]) -> None:
+        """Answer a call, unless the caller has already gone.
+
+        A handler outlives the bridge whenever the peer disconnects mid-call --
+        ordinary at shutdown. Letting the write raise there turns a normal race
+        into an exception on a thread with no one to catch it.
+        """
+        try:
+            self._send(message)
+        except PeerGone:
+            pass
 
     def _settle(self, message: Dict[str, Any]) -> None:
         call_id = message.get("id")
