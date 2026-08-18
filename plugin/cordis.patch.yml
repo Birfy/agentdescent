@@ -30,3 +30,11 @@
         #     - { name: dsh-plugin-mine, dir: /home/you/src/dsh-plugin-mine }
         skills: []
         plugins: []
+        # Left empty on purpose. With entries here the harness starts these runs
+        # by itself once everything has been quiet for `idleAfterMs`, and stops
+        # them the moment you come back:
+        #   idleRuns:
+        #     - { artifact: skill:sql, scorer: gold, taskSource: manual }
+        idleRuns: []
+        idleAfterMs: 300000
+        idleMinIntervalMs: 3600000

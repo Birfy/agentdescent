@@ -23,6 +23,9 @@ export { describeChoices, parseEvolveInput, registerCommand, registerTools } fro
 export { inProcessRollout } from './rollout.js'
 export { apply, inject, name, registerReflectionArtifact, REFLECTION_ARTIFACT } from './plugin.js'
 export { CommitQueue, renderPending } from './approval.js'
+export { idleTrigger } from './idle.js'
+
+export type { IdleTriggerOptions } from './idle.js'
 
 export type { Config } from './plugin.js'
 export {

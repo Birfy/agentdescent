@@ -14,7 +14,8 @@ import { CommitQueue } from './approval.js'
 import { pluginArtifact } from './artifacts/plugin.js'
 import { skillArtifact } from './artifacts/skill.js'
 import { startEngine } from './engine.js'
-import { EvolutionRegistry } from './evolution.js'
+import type { EvolutionSpec } from './evolution.js'
+import { idleTrigger } from './idle.js'
 import { inProcessRollout } from './rollout.js'
 import { efficiency, goldScorer, replayPairwiseScorer } from './scorers.js'
 import { registerCommand, registerTools } from './surface.js'
@@ -42,6 +43,16 @@ export interface Config {
   readonly autoMergeMaxBlastRadius?: number
   readonly tokenBudget?: number
   readonly rolloutTimeoutMs?: number
+  /**
+   * Runs to start on their own once the harness goes quiet.
+   *
+   * Empty by default. A harness that started spending tokens the first time you
+   * walked away, without being asked, would be a surprise -- and the kind that
+   * shows up on a bill.
+   */
+  readonly idleRuns?: readonly EvolutionSpec[]
+  readonly idleAfterMs?: number
+  readonly idleMinIntervalMs?: number
 }
 
 /**
@@ -83,6 +94,17 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   registerCommand(ctx, { queue })
   registerTools(ctx)
+
+  if ((config.idleRuns ?? []).length > 0) {
+    idleTrigger(ctx, {
+      evolution: ctx.evolution,
+      runs: config.idleRuns ?? [],
+      ...(config.idleAfterMs === undefined ? {} : { afterMs: config.idleAfterMs }),
+      ...(config.idleMinIntervalMs === undefined
+        ? {}
+        : { minIntervalMs: config.idleMinIntervalMs }),
+    })
+  }
 
   const rollout = inProcessRollout(ctx, {
     evolution: ctx.evolution,

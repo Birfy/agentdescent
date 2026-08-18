@@ -23,7 +23,8 @@
     "./artifacts/plugin": "./lib/artifacts/plugin.js",
     "./approval": "./lib/approval.js",
     "./scorers": "./lib/scorers.js",
-    "./api": "./lib/index.js"
+    "./api": "./lib/index.js",
+    "./idle": "./lib/idle.js"
   },
   "files": [
     "lib",
