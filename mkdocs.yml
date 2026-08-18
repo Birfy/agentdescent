@@ -74,6 +74,7 @@ nav:
     - The aggregator_factory exit: aggregator-factory.md
   - API reference: api.md
   - Run everything, and extend it: usage.md
+  - DeepSeek Harness plugin: dsh-plugin.md
   - Examples and results:
     - Complete example — skill evolution: skill-evolution.md
     - Efficiency experiments: efficiency.md
