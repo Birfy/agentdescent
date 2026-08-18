@@ -44,8 +44,8 @@
 % Running head and the line under the title bar; the full title is too long to
 % sit in a page header.
 \renewcommand{\shorttitle}{AgentDescent}
-\renewcommand{\headeright}{Preprint}
-\renewcommand{\undertitle}{Preprint}
+\renewcommand{\undertitle}{}
+\renewcommand{\headeright}{}
 
 \author{
   Danyang Chen\\
@@ -626,9 +626,6 @@ AgentDescent is a research reference implementation, and seven boundaries delimi
 \label{sec:conclusion}
 
 The distributed-training stack admits a coherent counterpart in agent self-evolution once its necessary disanalogy --- diffs do not add --- is taken seriously and merging is constructed as a discrete-space optimizer. Efficiency decomposes into three sources, and the third is the one specific to merging: rollout overlap and barrier removal take wall-clock from $790$ to $116$\,s against a faithful serial control, while reduced validation cost --- $k$ acceptance tests collapsed into one --- is the saving selection cannot have. That third source is where this paper spends its evidence, because it is the one with a precondition that can fail silently. Eighteen published algorithms adapt as plug-ins rather than forks --- eleven of them measured here, the rest ported but not used as evidence --- and all run under the three schedulers unmodified --- which is what makes the scheduler a controlled variable instead of a property of each paper's own loop. Merging has two preconditions and both can fail quietly. It needs two diffs to exist, which \cref{eq:fusionrate} states in closed form and which a near-saturated artifact violates however finely its keys are cut; and it needs them to be fusable, which a one-key artifact violates absolutely --- measured here as $0$ fused unions in $48$ merges. \emph{Reflective merge} is what removes the second failure, and isolating it gives the paper its clearest result: $42$ of $48$ merges fused, and $40\%$ fewer model calls than the shipped defaults at a pinned rollout budget (95\% CI $27$--$54\%$) --- traced, after we first misattributed it, to resolving contradictions by recombination rather than by ranking, since both configurations run exactly one acceptance test per merge. Quality is not the claim; four seeds on a 30-task split cannot support one, and we report the interval rather than assert equivalence. What the result does support is a way of accounting we would like to see adopted: a self-evolution loop should be judged on accepted improvement per unit of \emph{validation}, not per proposal, because validation is what it actually pays for.
-
-\section*{Acknowledgments}
-OpenEvolve and the eleven microports and analogues were contributed by \code{cyanneko}.
 
 \section*{Reproducibility}
 \label{sec:repro}
