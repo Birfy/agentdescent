@@ -3,7 +3,10 @@
 > 目标：让 **DeepSeek Harness（`dsh`）** 装上 AgentDescent 之后，它自己会变好 ——
 > 用户平时怎么用它，它就在那条真实轨迹上训练自己的 skill、prompt、preset 乃至插件代码。
 >
-> **状态：M0–M4 已落地**（`prompt:<section>` 与 `preset:<name>` 适配器在内）。剩 Web UI 的 conversation node。 本文写*为什么*这样切、边界划在哪、以及每一步的验收标准。
+> **状态：M0–M4 已落地**（`prompt:<section>`、`preset:<name>` 适配器，以及写进 session log 的
+> 持久化历史 `evolution/commit` / `evolution/run-ended`）。
+> **唯一还缺的是 Web UI 的 conversation node 那个 React 渲染器** —— 它需要浏览器端 bundle，
+> 在这个环境里没法验证，所以没有盲写；它要渲染的那份数据已经在日志里了。 本文写*为什么*这样切、边界划在哪、以及每一步的验收标准。
 >
 > 已落地的：[`agentdescent.backends.dsh()`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/backends.py)（把 dsh 当 agent 驱动）、
 > [`agentdescent.dsh.locate`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/dsh/locate.py)（按 dsh 自己的 rank 顺序解析 skill 根）、
