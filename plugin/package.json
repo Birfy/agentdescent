@@ -21,7 +21,8 @@
     "./surface": "./lib/surface.js",
     "./rollout": "./lib/rollout.js",
     "./artifacts/plugin": "./lib/artifacts/plugin.js",
-    "./approval": "./lib/approval.js"
+    "./approval": "./lib/approval.js",
+    "./scorers": "./lib/scorers.js"
   },
   "files": [
     "lib",

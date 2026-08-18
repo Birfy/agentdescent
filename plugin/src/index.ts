@@ -22,6 +22,13 @@ export { ENTRYPOINT, EVOLVED_SKILL_RANK, parseSkill, skillArtifact } from './art
 export { describeChoices, parseEvolveInput, registerCommand, registerTools } from './surface.js'
 export { inProcessRollout } from './rollout.js'
 export { CommitQueue, renderPending } from './approval.js'
+export {
+  all, commandScorer, efficiency, goldScorer, judgeScorer, replayPairwiseScorer,
+} from './scorers.js'
+
+export type {
+  CommandOptions, EfficiencyOptions, GoldMatch, GoldOptions, Judge, JudgeOptions, ReplayOptions,
+} from './scorers.js'
 
 export type { CommitQueueOptions, PendingCommit, PublishOutcome } from './approval.js'
 export {
