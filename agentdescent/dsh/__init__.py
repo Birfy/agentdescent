@@ -7,7 +7,9 @@ them is what this package does; this subpackage is the part that knows where
 they live and how to reach them.
 
 Today it holds :mod:`agentdescent.dsh.locate` (where a real installation keeps
-its skills). The agent itself is :func:`agentdescent.backends.dsh`, which sits
+its skills and its plugins), :mod:`agentdescent.dsh.plugin` (evolving a plugin's
+source behind a test gate), and :mod:`agentdescent.dsh.daemon` (the optimiser,
+driven by the harness over :mod:`agentdescent.dsh.bridge`). The agent itself is :func:`agentdescent.backends.dsh`, which sits
 beside ``openhands()`` and ``claude_code()`` because it is the same contract
 they are, not a special case.
 
@@ -17,23 +19,31 @@ The plan is ``docs/design-dsh-plugin.md``.
 from __future__ import annotations
 
 from .locate import (
+    Plugin,
     Skill,
     SkillRoot,
     agents_home,
     dsh_home,
+    find_plugin,
     find_skill,
+    list_plugins,
     list_skills,
+    profile_dir,
     project_root,
     skill_roots,
 )
 
 __all__ = [
+    "Plugin",
     "Skill",
     "SkillRoot",
     "agents_home",
     "dsh_home",
+    "find_plugin",
     "find_skill",
+    "list_plugins",
     "list_skills",
+    "profile_dir",
     "project_root",
     "skill_roots",
 ]

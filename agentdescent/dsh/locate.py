@@ -30,6 +30,7 @@ user-invocable, and nothing here should second-guess that.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -38,12 +39,16 @@ from typing import Dict, List, Optional, Sequence
 __all__ = [
     "SkillRoot",
     "Skill",
+    "Plugin",
     "dsh_home",
     "agents_home",
     "project_root",
     "skill_roots",
     "list_skills",
     "find_skill",
+    "profile_dir",
+    "list_plugins",
+    "find_plugin",
 ]
 
 #: The child of the user DSH root that holds system-owned directories. The
@@ -230,4 +235,96 @@ def find_skill(name: str, cwd: Optional[str] = None, *,
                              environ=environ):
         if skill.name == name:
             return skill
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Profiles and their out-of-tree plugins
+# ---------------------------------------------------------------------------
+#
+# A profile is `$DSH_HOME/profiles/<name>`: a `package.json` holding the
+# out-of-tree plugin `dependencies` plus a `dsh.profile.bundles` layer list, and
+# the user's own `cordis.patch.yml`. Bare plugin names resolve through ordinary
+# Node parent-walk, so an installed plugin is under the profile's `node_modules`
+# or the flat `profiles/node_modules` beside it.
+
+
+@dataclass(frozen=True)
+class Plugin:
+    """One out-of-tree plugin installed into a profile."""
+
+    name: str
+    #: Where its code actually lives. For a `link:` dependency this is the
+    #: user's own checkout, reached through the symlink.
+    path: str
+    #: True when the profile depends on a local checkout rather than a published
+    #: tarball. Only a linked plugin is worth evolving -- see :func:`find_plugin`.
+    linked: bool
+    #: True when its manifest declares `dsh.bundle`, i.e. it contributes a
+    #: config layer rather than being a plain library dependency.
+    is_bundle: bool
+
+
+def profile_dir(name: str = "web", *, environ: Optional[Dict[str, str]] = None) -> str:
+    """``$DSH_HOME/profiles/<name>`` -- one runnable composition."""
+    return os.path.join(dsh_home(environ), "profiles", name)
+
+
+def _manifest(directory: str) -> Dict[str, object]:
+    try:
+        with open(os.path.join(directory, "package.json"), "r", encoding="utf-8") as fh:
+            loaded = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _plugin_roots(profile: str) -> List[str]:
+    """Where a bare plugin name resolves from, nearest first."""
+    return [os.path.join(profile, "node_modules"),
+            os.path.join(os.path.dirname(profile), "node_modules")]
+
+
+def list_plugins(profile_name: str = "web", *,
+                 environ: Optional[Dict[str, str]] = None) -> List[Plugin]:
+    """Every out-of-tree plugin the named profile depends on, sorted by name.
+
+    Read from the profile manifest rather than by scanning `node_modules`, so
+    transitive packages a plugin happens to pull in are not offered as things to
+    evolve.
+    """
+    profile = profile_dir(profile_name, environ=environ)
+    dependencies = _manifest(profile).get("dependencies")
+    if not isinstance(dependencies, dict):
+        return []
+    found: List[Plugin] = []
+    for name, requirement in sorted(dependencies.items()):
+        resolved = _resolve_plugin(profile, name, str(requirement))
+        if resolved is not None:
+            found.append(resolved)
+    return found
+
+
+def _resolve_plugin(profile: str, name: str, requirement: str) -> Optional[Plugin]:
+    for root in _plugin_roots(profile):
+        entry = os.path.join(root, *name.split("/"))
+        if not os.path.exists(entry):
+            continue
+        real = os.path.realpath(entry)
+        manifest = _manifest(real)
+        dsh_field = manifest.get("dsh")
+        is_bundle = isinstance(dsh_field, dict) and "bundle" in dsh_field
+        # `link:` in the manifest is the declaration; the symlink is the fact.
+        # Either one alone can be stale, so both count.
+        linked = requirement.startswith(("link:", "file:")) or os.path.islink(entry)
+        return Plugin(name, real, linked, is_bundle)
+    return None
+
+
+def find_plugin(name: str, profile_name: str = "web", *,
+                environ: Optional[Dict[str, str]] = None) -> Optional[Plugin]:
+    """The named plugin in the named profile, or ``None``."""
+    for plugin in list_plugins(profile_name, environ=environ):
+        if plugin.name == name:
+            return plugin
     return None
