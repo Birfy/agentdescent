@@ -343,9 +343,36 @@ export interface EvolutionRuntime {
 | Artifact id | dsh 注册点 | 提交后如何生效 | blast radius | 复用的入口 |
 |---|---|---|---|---|
 | `skill:<name>` | `ctx.skills.registerProvider` | provider 的 `invalidate()` → `skills/change` → 下次 `snapshot()` 拿到新版 | 0.2（L2，自动合并） | `evolve_skill_dir()` |
+| **`skills:<root>`（技能库）** | 同上，但**一个 provider 服务整个库** | 替换 provider ⇒ 服务的集合**恰好等于**提交的集合（增删都生效） | 0.2 | `evolve_skill_library()` |
 | `prompt:<section>` | `ctx.systemPrompt.section({name, order})` | 重新注册（旧 effect dispose） | 0.2，但**只在 `turn/end` 提交** | `evolve_skill()` / `AppendRules` |
 | `preset:<name>` | `agent.ctx` 上的 `ctx.tools.restrict()` + persona section | 下一个会话生效 | 0.6（L1，oracle + 人审） | `evolve_agent_dir()` |
 | `plugin:<pkg>` | profile 目录下的文件树 + Cordis HMR | 写文件 → HMR 重载该行 | 0.6（L1 + 测试门） | `evolve_agent_code()` |
+
+### 6.1 演化「一个 skill」和演化「技能库」不是同一件事
+
+`skill:<name>` 只能**改进一个已经有人决定要有的 skill**。技能库是另一个 artifact，
+不是更大的那个 —— 状态是整个根目录，于是一轮 run 可以：
+
+* **加一个没人写过的 skill**（这是单 skill artifact 结构上做不到的事）；
+* **退役**一个从来没帮上忙的；
+* 把一条经验从一个 skill 挪到另一个。
+
+引擎一行都不用改，原因值得写下来：state 是扁平的 `{path: content}`，aggregator 只问
+「两个 diff 有没有碰同一个 key」。以根目录为 artifact 时，**两个 worker 各写一个新
+skill = 互补 diff = fuse**；**两个改同一个 skill = 冲突 = 按 held-out 裁决**。
+「新增一个文件」就是「一个之前不存在的 key」。
+
+真正不同的只有两处：rollout 把候选摊在**根目录本身**（`LAYOUTS["dsh_skill_library"]`），
+以及 harness 侧的一个设计决定 ——
+
+> **一个 provider 服务整个库。** 每个 skill 一个 provider 的写法会让「新增」生效而
+> 「删除」**静默失效**：被删掉的 skill 仍由那个没人 dispose 的注册继续服务，模型还
+>看得见一个 ledger 说已经删了的 skill，held-out 分数于是不再描述 harness 的实际行为。
+> 换掉一个 provider，服务的集合就**恰好等于**提交的集合 —— 增删都对。
+
+`max_files_per_diff` 在库这一档是 3 而不是 2：最小的有意义提案是「新 skill + 一个
+reference + 在既有 skill 里提一句」，两个文件装不下。它仍然是信任域，只是按库提案的
+实际大小取的。
 
 **为什么这四个几乎是免费的**：`filetree.py` 已经确立了「state 的 key 就是相对路径」
 这个转换 —— 于是两个 worker 改不同文件 = 互补 diff = fuse，改同一文件 = 冲突 =
