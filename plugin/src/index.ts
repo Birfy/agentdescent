@@ -20,6 +20,11 @@ export { Peer, PeerGone, PROTOCOL_VERSION, RpcError } from './bridge.js'
 export { startEngine } from './engine.js'
 export { ENTRYPOINT, EVOLVED_SKILL_RANK, parseSkill, skillArtifact } from './artifacts/skill.js'
 export { describeChoices, parseEvolveInput, registerCommand, registerTools } from './surface.js'
+export { inProcessRollout } from './rollout.js'
+
+export type {
+  AgentStatus, InProcessRolloutOptions, RolloutAgent, RolloutAgentHandle, RolloutHost,
+} from './rollout.js'
 
 export type { Handler } from './bridge.js'
 export type { Completer, EngineOptions, RolloutRunner, Sidecar } from './engine.js'

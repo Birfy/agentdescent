@@ -18,7 +18,8 @@
     "./artifacts/skill": "./lib/artifacts/skill.js",
     "./bridge": "./lib/bridge.js",
     "./engine": "./lib/engine.js",
-    "./surface": "./lib/surface.js"
+    "./surface": "./lib/surface.js",
+    "./rollout": "./lib/rollout.js"
   },
   "files": [
     "lib",
