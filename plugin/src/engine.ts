@@ -102,6 +102,7 @@ export async function startEngine(ctx: Context, options: EngineOptions): Promise
   const statuses = new Map<RunId, RunStatus>()
   const heads = new Map<ArtifactId, ArtifactHead>()
   const queue = options.queue ?? new CommitQueue()
+  const phaseListeners = new Set<(status: RunStatus) => void>()
 
   const engine: EvolutionEngine = {
     name: `${shake.engine}@${shake.version}`,
@@ -116,6 +117,10 @@ export async function startEngine(ctx: Context, options: EngineOptions): Promise
     head: (artifact: ArtifactId) => heads.get(artifact),
     history: async (artifact: ArtifactId, limit?: number) =>
       await peer.call<readonly CommitRecord[]>('ledger.history', { artifact, limit }),
+    onPhase: (listener: (status: RunStatus) => void) => {
+      phaseListeners.add(listener)
+      return () => { phaseListeners.delete(listener) }
+    },
   }
 
   peer.handle('log.progress', (progress: any) => {
@@ -129,6 +134,32 @@ export async function startEngine(ctx: Context, options: EngineOptions): Promise
       rejected: Number(progress.rejected ?? 0),
       tokensSpent: Number(progress.tokensSpent ?? 0),
     })
+    return null
+  })
+
+  // Every phase transition, not just progress. Without it the last thing this
+  // side ever heard was a progress line saying `running`, so a finished run
+  // showed as running forever and `/evolve status` could never report an
+  // ending -- nor could anything wait for one.
+  peer.handle('log.phase', (status: any) => {
+    const previous = statuses.get(status?.runId)
+    statuses.set(status.runId, {
+      runId: status.runId,
+      artifact: status.artifact ?? previous?.artifact ?? '',
+      phase: status.phase,
+      round: Number(status.round ?? previous?.round ?? 0),
+      accepted: Number(status.accepted ?? previous?.accepted ?? 0),
+      rejected: Number(status.rejected ?? previous?.rejected ?? 0),
+      tokensSpent: Number(status.tokensSpent ?? previous?.tokensSpent ?? 0),
+      ...(status.error === undefined ? {} : { error: String(status.error) }),
+    })
+    for (const listener of [...phaseListeners]) {
+      try {
+        listener(statuses.get(status.runId) as RunStatus)
+      } catch (error) {
+        ctx.logger.warn(`evolution phase listener threw: ${String(error)}`)
+      }
+    }
     return null
   })
 

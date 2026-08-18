@@ -157,6 +157,14 @@ export interface EvolutionEngine {
   cancel(runId: RunId, reason?: string): Promise<void>
   head(artifact: ArtifactId): ArtifactHead | undefined
   history(artifact: ArtifactId, limit?: number): Promise<readonly CommitRecord[]>
+  /**
+   * Observe a run's phase changing, including the one that ends it.
+   *
+   * Optional because polling `status()` is enough for a render path, and
+   * required by nothing else -- but anything that must *wait* for a run needs
+   * an edge rather than a level.
+   */
+  onPhase?(listener: (status: RunStatus) => void): () => void
 }
 
 const NO_ENGINE =
@@ -251,6 +259,17 @@ export class EvolutionRegistry extends Service {
   }
 
   status(runId: RunId): RunStatus | undefined { return this.requireEngine().status(runId) }
+
+  /**
+   * Observe run phases, when the mounted engine reports them.
+   *
+   * Returns `undefined` from an engine that does not, rather than a disposer
+   * that unsubscribes from nothing -- a caller that must *wait* for a run needs
+   * to know the difference, because silence and "never happened" look alike.
+   */
+  onPhase(listener: (status: RunStatus) => void): (() => void) | undefined {
+    return this.requireEngine().onPhase?.(listener)
+  }
 
   async cancel(runId: RunId, reason?: string): Promise<void> {
     await this.requireEngine().cancel(runId, reason)

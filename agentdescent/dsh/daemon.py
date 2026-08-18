@@ -130,6 +130,20 @@ class Engine:
         thread.start()
         return run_id
 
+    def _phase(self, state: RunState, phase: str, error: Optional[str] = None) -> None:
+        """Move a run to a phase and tell the harness.
+
+        Announced rather than merely recorded: the harness keeps a synchronous
+        `status()` for callers polling from render paths, and it can only be
+        right if every transition arrives. Without this the last thing it ever
+        heard was a progress line saying `running`, so a finished run showed as
+        running forever -- and `/evolve status` could never report the ending.
+        """
+        state.phase = phase
+        if error is not None:
+            state.error = error
+        self._peer.notify("log.phase", state.wire())
+
     def run_status(self, params: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
         with self._lock:
             state = self._runs.get(str(params.get("runId")))
@@ -148,7 +162,7 @@ class Engine:
             return {"cancelled": False}
         state.cancel.set()
         if state.phase in ("starting", "running"):
-            state.phase = "stopping"
+            self._phase(state, "stopping")
         return {"cancelled": True}
 
     def ledger_head(self, params: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
@@ -170,7 +184,7 @@ class Engine:
             tasks = self._fetch_tasks(state, params)
             strategy = FileTree(initial_files=initial,
                                 max_files_per_diff=int(params.get("maxFilesPerDiff", 2)))
-            state.phase = "running"
+            self._phase(state, "running")
             rounds = int(params.get("rounds", self._defaults["rounds"]))
             workers = int(params.get("workers", self._defaults["workers"]))
             result = evolve(
@@ -195,13 +209,13 @@ class Engine:
                 on_round=self._on_round(state),
             )
         except RunCancelled:
-            state.phase = "cancelled"
+            self._phase(state, "cancelled")
             return
         except BudgetExhausted:
-            state.phase = "budget-exhausted"
+            self._phase(state, "budget-exhausted")
             return
         except Exception as exc:                  # noqa: BLE001 - reported, not raised
-            state.phase, state.error = "failed", f"{type(exc).__name__}: {exc}"
+            self._phase(state, "failed", f"{type(exc).__name__}: {exc}")
             return
         self._finish(state, initial, result)
 
@@ -232,20 +246,20 @@ class Engine:
         # can tell them apart. Checking them first is what keeps a cancelled run
         # from being reported as failed.
         if state.cancel.is_set():
-            state.phase = "cancelled"
+            self._phase(state, "cancelled")
             return
         if state.token_budget is not None and state.tokens_spent >= state.token_budget:
-            state.phase = "budget-exhausted"
+            self._phase(state, "budget-exhausted")
             return
         if result.error is not None:
-            state.phase, state.error = "failed", str(result.error)
+            self._phase(state, "failed", str(result.error))
             return
         final = dict(result.state)
         if final == dict(initial):
             # Nothing was accepted. Publishing here would be a no-op, but saying
             # "done" without a commit is the honest report: the gate declined,
             # which on a small held-out set is the expected outcome, not a fault.
-            state.phase = "done"
+            self._phase(state, "done")
             return
         before = result.history[0].held_out_reward if result.history else 0.0
         record = {
@@ -262,7 +276,7 @@ class Engine:
         # Recording a head for it would have the *next* run start from a state
         # the harness is not serving, and report a version nobody approved.
         if isinstance(outcome, Mapping) and outcome.get("status") == "pending":
-            state.phase = "awaiting-review"
+            self._phase(state, "awaiting-review")
             return
         with self._lock:
             self._heads[state.artifact] = {
@@ -270,7 +284,7 @@ class Engine:
                 "heldOut": result.final_reward, "state": final,
             }
             self._history.setdefault(state.artifact, []).append(record)
-        state.phase = "done"
+        self._phase(state, "done")
 
     def _next_version(self, artifact: str) -> int:
         with self._lock:

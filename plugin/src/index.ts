@@ -27,6 +27,9 @@ export { inProcessRollout } from './rollout.js'
 export { apply, inject, name, registerReflectionArtifact, REFLECTION_ARTIFACT } from './plugin.js'
 export { CommitQueue, renderPending } from './approval.js'
 export { idleTrigger } from './idle.js'
+export { startAsJob } from './jobs.js'
+
+export type { JobHost, JobsBridgeOptions } from './jobs.js'
 export { transcriptTaskSource } from './transcripts.js'
 export { buildScorer, buildTaskSource, ConfigError, readJsonl } from './declarative.js'
 

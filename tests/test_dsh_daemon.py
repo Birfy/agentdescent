@@ -316,3 +316,51 @@ def test_an_async_run_reaches_a_terminal_phase_like_any_other():
         assert harness.rollouts > 0
     finally:
         harness_peer.close(), engine_peer.close()
+
+
+def test_every_phase_transition_is_announced_not_just_progress():
+    """The harness keeps a synchronous `status()` for callers polling from render
+    paths, and it can only be right if every transition arrives.
+
+    Without this the last thing the harness ever heard was a progress line
+    saying `running`, so a finished run showed as running forever -- and nothing
+    could wait for one to end.
+    """
+    harness = FakeHarness()
+    phases = []
+    engine, harness_peer, engine_peer, _ = wire(harness)
+    harness_peer.handle("log.phase", lambda status: phases.append(status["phase"]))
+    try:
+        run_id = harness_peer.call("run.start", SPEC, timeout=10)
+        wait_for(harness_peer, run_id, {"done", "failed", "awaiting-review"})
+        # Give the notification a moment to cross; it is fire-and-forget.
+        for _ in range(100):
+            if "done" in phases:
+                break
+            threading.Event().wait(0.02)
+        assert "running" in phases
+        assert phases[-1] == "done", phases
+    finally:
+        harness_peer.close(), engine_peer.close()
+
+
+def test_a_cancelled_run_announces_its_ending_too():
+    harness = FakeHarness()
+    harness.block = threading.Event()
+    phases = []
+    engine, harness_peer, engine_peer, _ = wire(harness)
+    harness_peer.handle("log.phase", lambda status: phases.append(status["phase"]))
+    try:
+        run_id = harness_peer.call("run.start", SPEC, timeout=10)
+        wait_for(harness_peer, run_id, {"running", "starting"})
+        harness_peer.call("run.cancel", {"runId": run_id}, timeout=10)
+        harness.block.set()
+        wait_for(harness_peer, run_id, {"cancelled", "done", "failed"})
+        for _ in range(100):
+            if "cancelled" in phases:
+                break
+            threading.Event().wait(0.02)
+        assert "cancelled" in phases, phases
+    finally:
+        harness.block.set()
+        harness_peer.close(), engine_peer.close()
