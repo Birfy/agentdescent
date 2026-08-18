@@ -129,3 +129,68 @@ describe('the bundle row', () => {
     expect(result.text).toMatch(/no evolution engine/)
   })
 })
+
+describe('saying what to train on, in configuration', () => {
+  let ctx: Context
+
+  beforeEach(async () => {
+    ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRegistry)
+    await ctx.plugin(SkillRegistry)
+    await ctx.plugin(CommandRegistry)
+    await ctx.plugin(EvolutionRegistry)
+    Object.defineProperty(ctx, 'agents', {
+      value: { create: async () => { throw new Error('unused') } }, configurable: true,
+    })
+  })
+
+  function dataset(lines: string[]): string {
+    const file = join(mkdtempSync(join(tmpdir(), 'dsh-cfg-')), 'tasks.jsonl')
+    writeFileSync(file, lines.join('\n'), 'utf8')
+    return file
+  }
+
+  it('registers a declared dataset as a task source', async () => {
+    const file = dataset([JSON.stringify({ prompt: 'q1', gold: 'a1' }), 'a bare question'])
+    apply(ctx, { datasets: [{ name: 'sql-regressions', file }] })
+    expect(ctx.evolution.listTaskSources()).toContain('sql-regressions')
+    const tasks = await ctx.evolution.taskSource('sql-regressions')!.fetch(10)
+    expect(tasks.map((t) => t.prompt)).toEqual(['q1', 'a bare question'])
+  })
+
+  it('registers a declared objective as a scorer, under the name given', () => {
+    apply(ctx, {
+      objectives: [{ name: 'runs-on-my-db', kind: 'command', run: ['node', '-e', 'process.exit(0)'] }],
+    })
+    expect(ctx.evolution.listScorers()).toContain('runs-on-my-db')
+  })
+
+  it('makes /evolve able to name both without any TypeScript', async () => {
+    // The whole point: the two decisions that are the user's are reachable from
+    // a config file.
+    const file = dataset([JSON.stringify({ prompt: 'q', gold: 'a' })])
+    apply(ctx, {
+      skills: [{ name: 'total', dir: skillDir() }],
+      datasets: [{ name: 'mine', file }],
+      objectives: [{ name: 'my-check', kind: 'command', run: ['node', '-e', 'process.exit(0)'] }],
+    })
+    const definition = ctx.commands.find(undefined as never, 'evolve')
+    const listed = await definition!.handler({ name: 'evolve', rawInput: '' } as never)
+    expect(listed.text).toContain('skill:total')
+    expect(listed.text).toContain('my-check')
+    expect(listed.text).toContain('mine')
+  })
+
+  it('refuses to mount on a misconfigured objective, naming it', () => {
+    // A run that quietly used a different objective than the one intended is
+    // not something anyone can detect afterwards.
+    expect(() => apply(ctx, { objectives: [{ name: 'typo', kind: 'vibes' } as never] }))
+      .toThrow(/objective "typo".*unknown kind/s)
+  })
+
+  it('refuses to mount on a dataset that is not there', () => {
+    expect(() => apply(ctx, { datasets: [{ name: 'gone', file: '/no/such/file.jsonl' }] }))
+      .toThrow(/cannot be read/)
+  })
+})

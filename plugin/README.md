@@ -34,6 +34,58 @@ Then point it at something evolvable in your profile's `cordis.patch.yml`:
       - { name: dsh-plugin-mine, dir: /home/you/src/dsh-plugin-mine }
 ```
 
+## Saying what to train on, and what counts as better
+
+These are the two decisions that are yours, so neither needs TypeScript.
+
+**Which tasks.** A JSONL file — `{"prompt": ..., "gold": ...}` per line. A line
+that is not JSON is taken as a bare prompt, so a plain list of questions is a
+valid dataset:
+
+```yaml
+    datasets:
+      - { name: sql-regressions, file: /home/you/data/sql.jsonl }
+```
+
+**What counts as better.** Four kinds, strongest signal first — pick the highest
+one you can actually supply:
+
+```yaml
+    objectives:
+      # A: you have expected answers
+      - { name: right-answer, kind: gold, match: contains }
+
+      # B: you have a check that already exists
+      - { name: runs-on-my-db, kind: command,
+          run: ["psql", "--quiet", "-f", "{output}"] }
+
+      # B: you can describe what good looks like
+      - { name: house-style, kind: judge, rubric: |
+            snake_case table names. Never SELECT *.
+            Never touch anything under migrations/. }
+
+      # C: you have neither, but the log has what happened last time
+      - { name: better-than-before, kind: replay }
+```
+
+`{output}` in a command becomes a path to that rollout's answer; the same text
+also arrives on stdin. Stack objectives with `all` — the score is the
+**minimum**, because a list of requirements is an "and", not an average:
+
+```yaml
+      - { name: correct-and-cheap, kind: all, efficiency: true,
+          of: [{ kind: gold }, { kind: command, run: ["make", "check"] }] }
+```
+
+`efficiency: true` rewards reaching the same result in fewer steps. It
+multiplies a hard pass gate rather than adding to it, so being cheap can never
+buy off being wrong.
+
+Everything here is validated when the plugin mounts. A misspelled kind or a
+missing dataset stops it loading and names the row — because a run that quietly
+measured a different objective than the one you meant is not something you can
+detect afterwards.
+
 ## Use
 
 ```

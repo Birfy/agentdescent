@@ -11,6 +11,7 @@
 import { Context } from '@deepseek-ai/cordis'
 
 import { CommitQueue } from './approval.js'
+import { buildScorer, buildTaskSource, type DatasetSpec, type ObjectiveSpec } from './declarative.js'
 import { pluginArtifact } from './artifacts/plugin.js'
 import { skillLibraryArtifact } from './artifacts/library.js'
 import { skillArtifact } from './artifacts/skill.js'
@@ -73,6 +74,19 @@ export interface Config {
    */
   readonly harvestTranscripts?: boolean
   readonly maxTurnsPerSession?: number
+  /**
+   * The tasks to train on. A JSONL file of `{prompt, gold?}`, or inline tasks.
+   *
+   * Declarable here because *which tasks* is the user's decision, and requiring
+   * TypeScript for it would put the one thing they must choose behind the one
+   * skill they may not have.
+   */
+  readonly datasets?: readonly DatasetSpec[]
+  /**
+   * What counts as better: an expected answer, a command, a rubric, or a
+   * comparison against what happened last time. See `declarative.ts`.
+   */
+  readonly objectives?: readonly ObjectiveSpec[]
 }
 
 /**
@@ -84,6 +98,13 @@ export interface Config {
  * slower boot.
  */
 export function apply(ctx: Context, config: Config = {}): void {
+  // A `judge` objective needs a model, and the path to one is built further
+  // down. Declared here so the objectives below can close over it: the closure
+  // is only ever called during a run, long after this function returns.
+  let completeLater: (prompt: string) => Promise<string> = async () => {
+    throw new Error('the evolution engine has not finished starting yet')
+  }
+
   const queue = new CommitQueue(
     config.autoMergeMaxBlastRadius === undefined
       ? {}
@@ -112,11 +133,22 @@ export function apply(ctx: Context, config: Config = {}): void {
   // can ask for a completion.
   registerReflectionArtifact(ctx)
 
-  // Rung A and the fallback ship mounted; rung B needs the user's own command
-  // or rubric, so it is registered by whoever knows what the objective is.
+  // Rung A and the fallback are always available; rung B needs the user's own
+  // command or rubric, which arrives through `objectives` below.
   ctx.evolution.registerScorer(goldScorer())
   ctx.evolution.registerScorer(efficiency(goldScorer({ name: 'gold-efficient' })))
   ctx.evolution.registerScorer(replayPairwiseScorer())
+
+  for (const dataset of config.datasets ?? []) {
+    ctx.evolution.registerTaskSource(buildTaskSource(dataset))
+  }
+  for (const objective of config.objectives ?? []) {
+    // Built with a completer so a `judge` objective asks the harness's own
+    // model, on the same logged and budgeted path as everything else.
+    ctx.evolution.registerScorer(buildScorer(objective, {
+      complete: async (prompt) => await completeLater(prompt),
+    }))
+  }
 
   if (config.harvestTranscripts === true) {
     const query = (ctx as { sessionQuery?: TranscriptSource }).sessionQuery
@@ -155,6 +187,8 @@ export function apply(ctx: Context, config: Config = {}): void {
     evolution: ctx.evolution,
     ...(config.rolloutTimeoutMs === undefined ? {} : { timeoutMs: config.rolloutTimeoutMs }),
   })
+  completeLater = async (prompt) =>
+    (await rollout(REFLECTION_ARTIFACT, {}, { id: 'judge', prompt })).output
 
   // The engine is async to start, and a failure here must be loud: a harness
   // that booted with a dead sidecar would accept `/evolve` and never run it.

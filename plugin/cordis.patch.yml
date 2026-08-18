@@ -28,6 +28,31 @@
         # and each plugin entry a `plugin:<name>` artifact at L1:
         #   plugins:
         #     - { name: dsh-plugin-mine, dir: /home/you/src/dsh-plugin-mine }
+        # ---- the two decisions that are yours -------------------------------
+        #
+        # WHICH TASKS. A JSONL file of {"prompt": ..., "gold": ...} per line;
+        # a line that is not JSON is taken as a bare prompt, so a plain list of
+        # questions is a valid dataset.
+        #   datasets:
+        #     - { name: sql-regressions, file: /home/you/data/sql.jsonl }
+        datasets: []
+        #
+        # WHAT COUNTS AS BETTER. Four kinds, strongest signal first:
+        #   objectives:
+        #     - { name: right-answer, kind: gold, match: contains }
+        #     - { name: runs-on-my-db, kind: command,
+        #         run: ["psql", "--quiet", "-f", "{output}"] }
+        #     - { name: house-style, kind: judge, rubric: |
+        #           snake_case table names. Never SELECT *.
+        #           Never touch anything under migrations/. }
+        #     - { name: better-than-before, kind: replay }
+        # `all` stacks them as an AND (the score is the minimum), and
+        # `efficiency: true` on any of them rewards doing it in fewer steps --
+        # behind a hard pass gate, so cheap can never buy off wrong:
+        #     - { name: correct-and-cheap, kind: all, efficiency: true,
+        #         of: [{ kind: gold }, { kind: command, run: ["make", "check"] }] }
+        objectives: []
+        # ---------------------------------------------------------------------
         skills: []
         # A whole root, where a run may *add* skills and retire them -- the only
         # setting under which evolution discovers rather than refines:
