@@ -19,7 +19,8 @@
     "./bridge": "./lib/bridge.js",
     "./engine": "./lib/engine.js",
     "./surface": "./lib/surface.js",
-    "./rollout": "./lib/rollout.js"
+    "./rollout": "./lib/rollout.js",
+    "./artifacts/plugin": "./lib/artifacts/plugin.js"
   },
   "files": [
     "lib",
