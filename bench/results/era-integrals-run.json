@@ -1,0 +1,536 @@
+{
+  "experiment": "ERA on AgentDescent -- numerical solution of integrals",
+  "status": "completed",
+  "completed_at": "2026-08-19T08:34:25+00:00",
+  "upstream_commit": "b836730b5c000526af95116b1d0e2c60c8cf0a10",
+  "task": "nine hard one-dimensional integrals per problem set, mean correct significant digits",
+  "config": {
+    "provider": "claude",
+    "model": "glm-5.2",
+    "seed": 0,
+    "asynchronous": true,
+    "async_ratio": 1,
+    "max_seconds": 3600.0,
+    "pipelined_gate": false,
+    "gate_workers": 2,
+    "dry_run": false,
+    "serial": false,
+    "budget_rollouts": null,
+    "val_cap": null,
+    "eval_concurrency": 8,
+    "reflective_merge": false,
+    "eval_cache": "",
+    "no_thinking": false,
+    "staleness": "full",
+    "iterations": 12,
+    "workers": 3,
+    "shards": 8,
+    "test_shards": 4,
+    "held_out_frac": 0.5,
+    "c_puct": 1.0,
+    "candidate_timeout": 60.0,
+    "eval_budget": 200000,
+    "problem_seconds": 5.0,
+    "max_code_length": 20000,
+    "max_tokens": 16000,
+    "temperature": 0.7,
+    "thinking": "disabled",
+    "api_timeout": 600.0,
+    "shutdown_grace": 120.0,
+    "quality_target": null
+  },
+  "observation": {
+    "mode": "async",
+    "wall_seconds": 391.0135359410001,
+    "baseline": {
+      "index": 0,
+      "parent_index": null,
+      "program_id": "bc0250a68eac5bdf",
+      "iteration": 0,
+      "change_summary": "scipy.integrate.quad on default settings",
+      "score": 8.680632242061096,
+      "mean_digits": 8.680632242061096,
+      "num_visits": 12,
+      "valid": true,
+      "error": "",
+      "code_chars": 277
+    },
+    "best": {
+      "index": 8,
+      "parent_index": 3,
+      "program_id": "7486c45cc29a717e",
+      "iteration": 9,
+      "change_summary": "",
+      "score": 10.138992207080783,
+      "mean_digits": 10.138992207080783,
+      "num_visits": 2,
+      "valid": true,
+      "error": "",
+      "code_chars": 2204
+    },
+    "data": {
+      "families": 9,
+      "problems_per_shard": 9,
+      "scoring_shards": 8,
+      "test_shards": 4,
+      "eval_budget_per_problem": 200000,
+      "problem_seconds": 5.0,
+      "digit_cap": 12.0,
+      "seed": 0
+    },
+    "framework": {
+      "baseline_reward": 0.723386020171758,
+      "final_reward": 0.8449160172567319,
+      "quality_gain": 0.12152999708497392,
+      "stop_reason": "max_iters",
+      "error": null,
+      "outcomes": {
+        "tree-updated": 8,
+        "committed": 3,
+        "no-valid-candidates": 1
+      },
+      "rollouts": 14,
+      "rollout_seconds": 9.155525922775269,
+      "eval_seconds": 9.903860807418823,
+      "stale_considered": 12,
+      "stale_discarded": 0,
+      "stale_rate": 0.0,
+      "retired_workers": 0,
+      "history": [
+        {
+          "round": 0,
+          "held_out_reward": 0.7233860201717579,
+          "elapsed_s": 15.157490730285645,
+          "rollouts": 4,
+          "committed": 0,
+          "rejected": 1,
+          "reasons": {
+            "tree-updated": 1
+          }
+        },
+        {
+          "round": 1,
+          "held_out_reward": 0.7464433040867968,
+          "elapsed_s": 18.63645076751709,
+          "rollouts": 6,
+          "committed": 1,
+          "rejected": 0,
+          "reasons": {
+            "committed": 1
+          }
+        },
+        {
+          "round": 2,
+          "held_out_reward": 0.7810520907747083,
+          "elapsed_s": 22.056305408477783,
+          "rollouts": 6,
+          "committed": 1,
+          "rejected": 0,
+          "reasons": {
+            "committed": 1
+          }
+        },
+        {
+          "round": 3,
+          "held_out_reward": 0.7810520907747083,
+          "elapsed_s": 52.617823123931885,
+          "rollouts": 7,
+          "committed": 0,
+          "rejected": 1,
+          "reasons": {
+            "no-valid-candidates": 1
+          }
+        },
+        {
+          "round": 4,
+          "held_out_reward": 0.7810520907747083,
+          "elapsed_s": 57.67657399177551,
+          "rollouts": 8,
+          "committed": 0,
+          "rejected": 1,
+          "reasons": {
+            "tree-updated": 1
+          }
+        },
+        {
+          "round": 5,
+          "held_out_reward": 0.7810520907747083,
+          "elapsed_s": 64.59744453430176,
+          "rollouts": 9,
+          "committed": 0,
+          "rejected": 1,
+          "reasons": {
+            "tree-updated": 1
+          }
+        },
+        {
+          "round": 6,
+          "held_out_reward": 0.7810520907747083,
+          "elapsed_s": 76.6993260383606,
+          "rollouts": 10,
+          "committed": 0,
+          "rejected": 1,
+          "reasons": {
+            "tree-updated": 1
+          }
+        },
+        {
+          "round": 7,
+          "held_out_reward": 0.8449160172567319,
+          "elapsed_s": 90.33088326454163,
+          "rollouts": 11,
+          "committed": 1,
+          "rejected": 0,
+          "reasons": {
+            "committed": 1
+          }
+        },
+        {
+          "round": 8,
+          "held_out_reward": 0.8449160172567319,
+          "elapsed_s": 107.30864834785461,
+          "rollouts": 12,
+          "committed": 0,
+          "rejected": 1,
+          "reasons": {
+            "tree-updated": 1
+          }
+        },
+        {
+          "round": 9,
+          "held_out_reward": 0.8449160172567319,
+          "elapsed_s": 117.17773008346558,
+          "rollouts": 14,
+          "committed": 0,
+          "rejected": 1,
+          "reasons": {
+            "tree-updated": 1
+          }
+        },
+        {
+          "round": 10,
+          "held_out_reward": 0.8449160172567319,
+          "elapsed_s": 129.57203555107117,
+          "rollouts": 14,
+          "committed": 0,
+          "rejected": 1,
+          "reasons": {
+            "tree-updated": 1
+          }
+        },
+        {
+          "round": 11,
+          "held_out_reward": 0.8449160172567319,
+          "elapsed_s": 388.31318259239197,
+          "rollouts": 14,
+          "committed": 0,
+          "rejected": 1,
+          "reasons": {
+            "tree-updated": 1
+          }
+        }
+      ]
+    },
+    "actor_usage": {
+      "calls": 44,
+      "failures": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "model_seconds": 638.654801
+    },
+    "tree": {
+      "nodes": 13,
+      "valid_nodes": 12,
+      "max_depth": 3,
+      "root_visits": 12,
+      "c_puct": 1.0,
+      "tree": [
+        {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "bc0250a68eac5bdf",
+          "iteration": 0,
+          "change_summary": "scipy.integrate.quad on default settings",
+          "score": 8.680632242061096,
+          "mean_digits": 8.680632242061096,
+          "num_visits": 12,
+          "valid": true,
+          "error": "",
+          "code_chars": 277
+        },
+        {
+          "index": 1,
+          "parent_index": 0,
+          "program_id": "740e3f01d3f7ce02",
+          "iteration": 1,
+          "change_summary": "",
+          "score": 4.106462289132796,
+          "mean_digits": 4.106462289132796,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 760
+        },
+        {
+          "index": 2,
+          "parent_index": 0,
+          "program_id": "19e8b4f7f7337801",
+          "iteration": 3,
+          "change_summary": "",
+          "score": 8.95731964904156,
+          "mean_digits": 8.95731964904156,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 1191
+        },
+        {
+          "index": 3,
+          "parent_index": 0,
+          "program_id": "345dd61c3f7f3410",
+          "iteration": 2,
+          "change_summary": "",
+          "score": 9.372625089296498,
+          "mean_digits": 9.372625089296498,
+          "num_visits": 7,
+          "valid": true,
+          "error": "",
+          "code_chars": 818
+        },
+        {
+          "index": 4,
+          "parent_index": 0,
+          "program_id": "3094f80d53d85b56",
+          "iteration": 6,
+          "change_summary": "",
+          "score": null,
+          "mean_digits": null,
+          "num_visits": 1,
+          "valid": false,
+          "error": "ImportError: cannot import name 'pade' from 'scipy.special' (/usr/local/lib/python3.11/dist-packages/scipy/special/__init__.py)",
+          "code_chars": 3081
+        },
+        {
+          "index": 5,
+          "parent_index": 0,
+          "program_id": "95e7c4e16faab0e2",
+          "iteration": 5,
+          "change_summary": "",
+          "score": 1.3333333333333333,
+          "mean_digits": 1.3333333333333333,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 4258
+        },
+        {
+          "index": 6,
+          "parent_index": 3,
+          "program_id": "184c7f0fa058bce4",
+          "iteration": 7,
+          "change_summary": "",
+          "score": 9.32432871929135,
+          "mean_digits": 9.32432871929135,
+          "num_visits": 2,
+          "valid": true,
+          "error": "",
+          "code_chars": 812
+        },
+        {
+          "index": 7,
+          "parent_index": 0,
+          "program_id": "4f0a64ac490c8abc",
+          "iteration": 4,
+          "change_summary": "",
+          "score": 0.0,
+          "mean_digits": 0.0,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 5754
+        },
+        {
+          "index": 8,
+          "parent_index": 3,
+          "program_id": "7486c45cc29a717e",
+          "iteration": 9,
+          "change_summary": "",
+          "score": 10.138992207080783,
+          "mean_digits": 10.138992207080783,
+          "num_visits": 2,
+          "valid": true,
+          "error": "",
+          "code_chars": 2204
+        },
+        {
+          "index": 9,
+          "parent_index": 6,
+          "program_id": "a2f93cbac300ba9f",
+          "iteration": 10,
+          "change_summary": "",
+          "score": 9.87433817917367,
+          "mean_digits": 9.87433817917367,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 3008
+        },
+        {
+          "index": 10,
+          "parent_index": 3,
+          "program_id": "55ee281a50d7d90b",
+          "iteration": 11,
+          "change_summary": "",
+          "score": 6.986288190282636,
+          "mean_digits": 6.986288190282636,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 3096
+        },
+        {
+          "index": 11,
+          "parent_index": 8,
+          "program_id": "acc9f1322ad59911",
+          "iteration": 12,
+          "change_summary": "",
+          "score": 10.138992207080783,
+          "mean_digits": 10.138992207080783,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 2165
+        },
+        {
+          "index": 12,
+          "parent_index": 3,
+          "program_id": "c8ee0cb722d9e241",
+          "iteration": 8,
+          "change_summary": "",
+          "score": 8.363912059317641,
+          "mean_digits": 8.363912059317641,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 2707
+        }
+      ]
+    },
+    "test": {
+      "baseline": {
+        "mean_digits": 8.861890362434082,
+        "score": 8.861890362434082,
+        "solved": 20,
+        "problems": 36,
+        "worst": [
+          {
+            "shard": 8,
+            "index": 0,
+            "interval": "[0, inf)",
+            "digits": 0.0,
+            "calls": 1485,
+            "error": ""
+          },
+          {
+            "shard": 9,
+            "index": 4,
+            "interval": "[0, inf)",
+            "digits": 0.0,
+            "calls": 1485,
+            "error": ""
+          },
+          {
+            "shard": 10,
+            "index": 0,
+            "interval": "[0, inf)",
+            "digits": 0.0,
+            "calls": 1485,
+            "error": ""
+          },
+          {
+            "shard": 11,
+            "index": 0,
+            "interval": "[0, inf)",
+            "digits": 0.0,
+            "calls": 1485,
+            "error": ""
+          },
+          {
+            "shard": 11,
+            "index": 8,
+            "interval": "[0, inf)",
+            "digits": 1.72,
+            "calls": 1485,
+            "error": ""
+          }
+        ],
+        "calls": 33828,
+        "seconds": 2.409597059999669,
+        "limits_unavailable": [],
+        "error": ""
+      },
+      "best": {
+        "mean_digits": 10.205247789700486,
+        "score": 10.205247789700486,
+        "solved": 28,
+        "problems": 36,
+        "worst": [
+          {
+            "shard": 8,
+            "index": 0,
+            "interval": "[0, inf)",
+            "digits": 0.0,
+            "calls": 29043,
+            "error": ""
+          },
+          {
+            "shard": 9,
+            "index": 4,
+            "interval": "[0, inf)",
+            "digits": 0.0,
+            "calls": 23919,
+            "error": ""
+          },
+          {
+            "shard": 10,
+            "index": 0,
+            "interval": "[0, inf)",
+            "digits": 0.0,
+            "calls": 25725,
+            "error": ""
+          },
+          {
+            "shard": 11,
+            "index": 0,
+            "interval": "[0, inf)",
+            "digits": 0.0,
+            "calls": 19593,
+            "error": ""
+          },
+          {
+            "shard": 11,
+            "index": 4,
+            "interval": "[0, 1]",
+            "digits": 7.694,
+            "calls": 6489,
+            "error": ""
+          }
+        ],
+        "calls": 221277,
+        "seconds": 2.202271376999761,
+        "limits_unavailable": [],
+        "error": ""
+      },
+      "mean_digits_gain": 1.3433574272664046
+    }
+  },
+  "model_usage": {
+    "calls": 13,
+    "failures": 1,
+    "prompt_tokens": 13718,
+    "completion_tokens": 10159,
+    "total_tokens": 23877,
+    "model_seconds": 615.925103
+  }
+}

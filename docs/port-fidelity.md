@@ -312,6 +312,18 @@ column of each section below says exactly where to look.
   + `futs.compute_pucts` + the `argmax`. The tree bookkeeping (parent chain,
   backpropagation) stays on the aggregator's archive, the same division
   OpenEvolve uses for `EpsilonGreedy` and its islands.
+* **A second task on the same search**: `era_hard_integrals.py` runs the
+  paper's *numerical solution of integrals* — named in the abstract, with no
+  released implementation to port — through the identical tree, aggregator and
+  sandbox, behind a `Domain` that carries only the seed program, the evaluator,
+  the prompt and the metric name. It is **one entry point, not a ninth
+  algorithm**: nothing in this section changes for it, and the fidelity class
+  above is a statement about FUTS, which both tasks run unmodified. The task
+  itself is this port's construction — its nine integrand families and their
+  closed forms are not upstream's, since upstream released none — so it is
+  documented as a *faithful search on a constructed task*, and
+  [algo-era.md](algo-era.md#the-second-task-numerical-solution-of-integrals)
+  says which parts are the paper's and which are here.
 * **Details**: [algo-era.md](algo-era.md)
 
 ---

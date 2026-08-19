@@ -8,6 +8,33 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- **The ERA sandbox runner could not import a candidate that used
+  `@dataclass`.** `dataclasses` is on the port's import allowlist, so a model
+  writing `@dataclass class Split: ...` is writing an allowed program — and it
+  died with `AttributeError: 'NoneType' object has no attribute '__dict__'`,
+  scored `-inf`, and looked exactly like a model that had written a broken
+  program. `dataclasses` resolves its own module through
+  `sys.modules[cls.__module__]`, and `load_entrypoint` executed the candidate
+  without ever registering it there. Both runners now register the module
+  before executing it. Found while porting the second ERA task, whose *shared
+  catalogue module* is a dataclass and hit it on the first run.
+
+- **`test_the_sandbox_blocks_the_writes_and_network_it_claims_to_block`
+  asserted something Bubblewrap deliberately does not promise.** The probe
+  wrote to a path beside the scratch directory — which pytest puts under
+  `/tmp`, and the Bubblewrap profile mounts a **fresh tmpfs over `/tmp`**. The
+  write therefore succeeds *inside the sandbox* and reaches nothing, and the
+  test failed on any ordinary Linux host with `bwrap` installed, on `main`,
+  while the guarantee it exists to check (`not outside.exists()` on the host)
+  held the whole time.
+
+  The strict "was refused" assertion now targets a path under `/usr`, which no
+  profile makes writable on either platform; the `/tmp` probe keeps the
+  host-invisibility check that was always the real claim. A test that fails
+  where the code is correct is worse than no test: it trains the reader to
+  ignore the one assertion in this repository that decides whether running
+  model-written code is safe at all.
+
 - **A staleness test asserted a property of the machine, not of the policy.**
   `test_offline_examples.py::test_full_discards_nothing_and_guarded_discards_the_most`
   required `guarded.discarded_stale > 0` from `_async_stats` — an 8-second,
@@ -56,6 +83,51 @@ All notable changes to AgentDescent are documented here. The format follows
   nothing is the livelock's signature and must be counted.
 
 ### Added
+
+- **ERA's second task: the paper's own "numerical solution of integrals".**
+  `examples/era/era_hard_integrals.py` runs the *same* flat-PUCT search as the
+  Kaggle port — same tree, same visit reservation, same aggregator, same
+  sandbox profile, same governance layer — over a different kind of program.
+  A candidate is `integrate(f, a, b)` and is handed a **black-box scalar
+  integrand**: no formula, no parameters, no family name, over `[0, 1]`,
+  `[0, inf)` or `(-inf, inf)`. The seam is a `Domain` (seed program, evaluator,
+  prompt, metric name) and nothing algorithmic lives in it; `domain=None` is
+  upstream's task, so a caller who names no domain gets the port upstream ships.
+
+  **The reference is a closed form, not another integrator.** Nine integrand
+  families, each breaking a different assumption a quadrature rule makes —
+  singular at both endpoints, oscillation accumulating into a corner, a peak of
+  width 1e-7, an oscillation on a half-line that never decays, cancellation to
+  four orders of magnitude below the integrand — and every one of them has an
+  exact value in terms of `Γ`, `atan` and `π/sin(πs)`. Scoring against another
+  numerical method would have meant penalising a candidate for being *better*
+  than the reference. `test_the_closed_form_matches_high_precision_quadrature`
+  checks each identity against mpmath at 30 digits through a per-family
+  substitution, because mpmath's own quadrature on the raw integrand disagrees
+  with the closed form in the third decimal place on the Fresnel family — which
+  is the benchmark working, not a defect in the reference.
+
+  The metric is **mean correct significant digits**, `min(12, -log10(relative
+  error))`, with the cap set by the precision of the references themselves. A
+  problem that raises, returns `nan` or overruns its budget scores 0 and the
+  rest of the set still counts. Every problem has a **hard cap on calls to the
+  integrand**, enforced in the runner: without it the best program is whichever
+  one is allowed to spend the most, which is not a question about method.
+
+  Measured live on `glm-5.2`, 12 expansions, 3 workers, barrier-free: mean
+  correct digits **8.86 → 10.21** on 36 held-back integrals, 20/36 → 28/36
+  solved to 10+ digits, in 391 s. The winner keeps `quad` as its kernel and adds
+  the transformation and error control around it. Recorded in
+  `bench/results/era-integrals-run.json`; full notes in `docs/algo-era.md`.
+
+  **The first run of this task found a hole in the task**, which is the part
+  worth keeping. The whole-line family was `exp(-x²)·cos(bx)` — an *even*
+  integrand — and the winning program mapped both halves onto `[0, inf)` and
+  doubled, which is a plain bug that scores 12 digits on an even function. The
+  family now carries a nonzero offset and a test pins the asymmetry. The
+  reported numbers are from a rerun on the corrected suite; the first run's are
+  not reported at all, because they were measured against a suite that could be
+  passed without solving it.
 
 - **An eighth benchmark-faithful port: ERA, Google Research's empirical-software
   search.** `examples/era/` runs upstream's own bundled task — Kaggle Playground

@@ -27,7 +27,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from agentdescent.dataloader import cache_path, fetch_text
 
@@ -122,7 +122,14 @@ def program_id(code: str) -> str:
 # --------------------------------------------------------------------------
 
 
-def validate_source(source: str, max_length: int = 20_000) -> Tuple[bool, str]:
+def validate_source(
+    source: str,
+    max_length: int = 20_000,
+    *,
+    entrypoint: str = "train_and_predict",
+    allowed_imports: Optional[Set[str]] = None,
+    literal_top_level: bool = True,
+) -> Tuple[bool, str]:
     """Reject what the sandbox should never have to contain in the first place.
 
     Deliberately *not* as strict as the OpenEvolve port's gate: that one allows
@@ -131,7 +138,18 @@ def validate_source(source: str, max_length: int = 20_000) -> Tuple[bool, str]:
     common accidents -- a candidate that shells out, opens a file by hand, or
     reaches for a dunder -- fail in-process with a readable message instead of
     dying against a sandbox profile.
+
+    The three keyword arguments are what a second task on this evaluator needs
+    and nothing more. ``entrypoint`` names the function the candidate must
+    define; ``allowed_imports`` narrows or widens the import set; and
+    ``literal_top_level=False`` admits computed module-level constants -- a
+    Gauss-Legendre node table built once at import is ordinary numerics, and
+    refusing it would reject good programs for a rule whose real work (no
+    imports outside the set, no dunders, no ``exec``) is done elsewhere. The
+    cost is bounded by the sandbox: module-level work runs under the same CPU
+    limit as everything else the candidate does.
     """
+    allowed = ALLOWED_IMPORTS if allowed_imports is None else allowed_imports
     if not source.strip():
         return False, "empty source"
     if len(source) > max_length:
@@ -144,18 +162,18 @@ def validate_source(source: str, max_length: int = 20_000) -> Tuple[bool, str]:
         return False, f"SyntaxError: {exc.msg} at line {exc.lineno}"
 
     if not any(
-        isinstance(node, ast.FunctionDef) and node.name == "train_and_predict"
+        isinstance(node, ast.FunctionDef) and node.name == entrypoint
         for node in tree.body
     ):
-        return False, "missing train_and_predict function"
+        return False, f"missing {entrypoint} function"
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name.split(".")[0] not in ALLOWED_IMPORTS:
+                if alias.name.split(".")[0] not in allowed:
                     return False, f"import {alias.name!r} is not allowed"
         elif isinstance(node, ast.ImportFrom):
-            if not node.module or node.module.split(".")[0] not in ALLOWED_IMPORTS:
+            if not node.module or node.module.split(".")[0] not in allowed:
                 return False, f"import from {node.module!r} is not allowed"
         elif isinstance(node, ast.Attribute) and node.attr.startswith("__"):
             return False, f"dunder attribute {node.attr!r} is not allowed"
@@ -178,7 +196,7 @@ def validate_source(source: str, max_length: int = 20_000) -> Tuple[bool, str]:
             isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
         ):
             return False, "only a module docstring may be a top-level expression"
-        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+        if literal_top_level and isinstance(node, (ast.Assign, ast.AnnAssign)):
             value = node.value
             if not isinstance(value, (ast.Constant, ast.Tuple, ast.List, ast.Dict, ast.Set)):
                 return False, "top-level assignments must be literal constants"
@@ -372,6 +390,26 @@ def sandbox_command(
     timeout: float,
     nproc_limit: int,
 ) -> Tuple[List[str], Dict[str, str]]:
+    """The tabular task's runner, under this platform's isolation backend."""
+    return sandbox_wrapper(
+        [
+            str(RUNNER),
+            str(candidate),
+            "--train", str(train),
+            "--test", str(test),
+            "--rows", str(rows),
+            "--cpu-seconds", str(max(2, int(math.ceil(timeout)))),
+            "--nproc-limit", str(nproc_limit),
+        ],
+        scratch=candidate.parent.resolve(),
+    )
+
+
+def sandbox_wrapper(
+    runner_args: Sequence[str],
+    *,
+    scratch: Path,
+) -> Tuple[List[str], Dict[str, str]]:
     """The isolation backend this platform has, plus the environment to run it in.
 
     Neither backend is optional: a candidate here is model-written Python that
@@ -379,19 +417,15 @@ def sandbox_command(
     the sandbox is missing would be the wrong way to make an example portable.
     Upstream ships `Sandbox.run` as a `NotImplementedError` with the comment
     "Must provide a sandbox for executing untrusted code" -- this is that.
+
+    Split from :func:`sandbox_command` so a second task on this evaluator gets
+    the *same* profile rather than a copy of it. The profile is what
+    ``test_the_sandbox_blocks_the_writes_and_network_it_claims_to_block``
+    checks against the kernel, and a copy would be a second thing to check.
+    ``runner_args`` is everything after ``python -I``: the runner script and its
+    arguments, which is the only part a task owns.
     """
     backend = sandbox_backend()
-    cpu_seconds = str(max(2, int(math.ceil(timeout))))
-    scratch = candidate.parent.resolve()
-    runner_args = [
-        str(RUNNER),
-        str(candidate),
-        "--train", str(train),
-        "--test", str(test),
-        "--rows", str(rows),
-        "--cpu-seconds", cpu_seconds,
-        "--nproc-limit", str(nproc_limit),
-    ]
     env = dict(_THREAD_ENV)
     env["TMPDIR"] = str(scratch)
     env["PATH"] = "/usr/bin:/bin"
@@ -421,7 +455,7 @@ def sandbox_command(
         return command, env
 
     if backend is not None:
-        profile = candidate.parent / "sandbox.sb"
+        profile = scratch / "sandbox.sb"
         # `.resolve()` matters: `tempfile` hands back `/var/folders/...`, `/var`
         # is a symlink to `/private/var`, and Seatbelt matches the resolved path.
         profile.write_text(_SEATBELT_PROFILE.format(scratch=str(scratch)), encoding="utf-8")

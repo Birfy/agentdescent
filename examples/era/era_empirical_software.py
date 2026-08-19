@@ -36,6 +36,12 @@ Intentional differences:
   *selection* time instead of after execution -- which is what the serial loop
   would have seen had those expansions already been dispatched, and is
   identical to upstream at one worker.
+* The loop is parameterised by a :class:`~examples.era._era_domain.Domain` so a
+  second ERA task can run on it without a second copy of `futs.search`.
+  :func:`s3e1_domain` is the default and is upstream's task;
+  `era_hard_integrals.py` supplies the other one. Nothing about the search
+  differs between them -- the domain carries the seed program, the evaluator,
+  the prompt and the name of the metric, and that is all.
 """
 
 from __future__ import annotations
@@ -76,6 +82,7 @@ from examples._common import (
     report_engine,
     worker_count,
 )
+from examples.era._era_domain import Domain
 from examples.era._era_support import (
     INITIAL_PROGRAM,
     UPSTREAM_COMMIT,
@@ -179,6 +186,9 @@ class Node:
     program: Program
     score: float
     num_visits: int = 0
+    #: The domain's metric, reported under its own name. A node summary that
+    #: called every metric `rmse` would misreport the second task as the first.
+    metric_key: str = "rmse"
 
     def summary(self) -> Dict[str, Any]:
         return {
@@ -188,7 +198,7 @@ class Node:
             "iteration": self.program.iteration,
             "change_summary": self.program.change_summary,
             "score": _finite(self.score),
-            "rmse": self.program.metrics.get("rmse"),
+            self.metric_key: self.program.metrics.get(self.metric_key),
             "num_visits": self.num_visits,
             "valid": self.program.valid,
             "error": self.program.error,
@@ -210,6 +220,7 @@ class EraTree:
 
     c_puct: float = 1.0
     candidate_limit: Optional[int] = None
+    metric_key: str = "rmse"
     nodes: List[Node] = field(default_factory=list)
     _next_iteration: int = 1
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -222,7 +233,7 @@ class EraTree:
         with self._lock:
             if self.nodes:
                 return self.nodes[0]
-            root = Node(0, None, program, score)
+            root = Node(0, None, program, score, metric_key=self.metric_key)
             self.nodes.append(root)
             return root
 
@@ -260,7 +271,8 @@ class EraTree:
         with self._lock:
             if parent_index is None or not 0 <= parent_index < len(self.nodes):
                 parent_index = 0
-            node = Node(len(self.nodes), parent_index, program, score, num_visits=1)
+            node = Node(len(self.nodes), parent_index, program, score, num_visits=1,
+                        metric_key=self.metric_key)
             self.nodes.append(node)
             return node
 
@@ -297,15 +309,25 @@ class EraTree:
 class EraStrategy:
     """One executable program, and the parser that turns a reply into a Diff."""
 
+    def __init__(self, domain: Optional[Domain] = None) -> None:
+        self.domain = domain
+
+    @property
+    def _seed_program(self) -> str:
+        return self.domain.initial_program if self.domain else INITIAL_PROGRAM
+
     def initial(self) -> Dict[str, str]:
+        code = self._seed_program
         return {
-            "code": INITIAL_PROGRAM,
-            "program_id": program_id(INITIAL_PROGRAM),
-            "change_summary": "LinearRegression baseline",
+            "code": code,
+            "program_id": program_id(code),
+            "change_summary": (
+                self.domain.initial_summary if self.domain
+                else "LinearRegression baseline"),
         }
 
     def render(self, state: Dict[str, str]) -> str:
-        return state.get("code", INITIAL_PROGRAM)
+        return state.get("code", self._seed_program)
 
     def keys(self) -> Sequence[str]:
         return ("code", "program_id", "change_summary", "parent_id", "parent_index")
@@ -351,19 +373,25 @@ def make_propose(
     tree: EraTree,
     complete: Completion,
     *,
-    preview: str,
-    candidate_timeout: float,
+    preview: str = "",
+    candidate_timeout: float = 60.0,
+    prompt_for: Optional[Callable[[Program], str]] = None,
 ) -> Callable[[str, Task, str, float], Optional[str]]:
-    """`PlaygroundGenerator.__call__`, behind the engine's actor API."""
+    """`PlaygroundGenerator.__call__`, behind the engine's actor API.
+
+    ``prompt_for`` is the domain's mutation prompt; without one this is the
+    Kaggle task's, which is what upstream ships.
+    """
+    write_prompt = prompt_for or (
+        lambda program: mutation_prompt(
+            program, preview=preview, timeout=candidate_timeout))
 
     def propose(rendered: str, task: Task, output: str, reward: float) -> Optional[str]:
         selection = tree.select_parent()
         if selection is None:
             return None
         iteration, parent = selection
-        raw = complete(
-            mutation_prompt(parent.program, preview=preview, timeout=candidate_timeout)
-        ).strip()
+        raw = complete(write_prompt(parent.program)).strip()
         code, summary = extract_program(raw)
         if not code:
             _EMPTY_PROPOSALS["n"] += 1
@@ -391,20 +419,23 @@ def make_propose(
 
 def make_run(
     *,
-    splits: Splits,
-    candidate_timeout: float,
-    max_code_length: int,
+    splits: Optional[Splits] = None,
+    candidate_timeout: float = 60.0,
+    max_code_length: int = 20_000,
+    evaluate: Optional[Callable[[str, Sequence[int]], Tuple[bool, Dict[str, Any], str]]] = None,
 ) -> Callable[[str, Task], str]:
-    """One shard of the held-out split is one AgentDescent rollout."""
+    """One shard of the held-out split is one AgentDescent rollout.
+
+    ``evaluate`` is the domain's sandboxed scorer; without one this scores the
+    Kaggle task, which is what upstream ships.
+    """
+    score_shards = evaluate or (
+        lambda code, shards: evaluate_source(
+            code, splits=splits, shards=shards,
+            timeout=candidate_timeout, max_length=max_code_length))
 
     def run(rendered: str, task: Task) -> str:
-        valid, metrics, error = evaluate_source(
-            rendered,
-            splits=splits,
-            shards=(int(task.meta["shard"]),),
-            timeout=candidate_timeout,
-            max_length=max_code_length,
-        )
+        valid, metrics, error = score_shards(rendered, (int(task.meta["shard"]),))
         return json.dumps(
             {"valid": valid, "metrics": metrics, "error": error},
             separators=(",", ":"),
@@ -414,14 +445,23 @@ def make_run(
     return run
 
 
-def reward_program(task: Task, output: str) -> float:
-    try:
-        payload = json.loads(output)
-        if not payload.get("valid"):
+def make_reward(score: Callable[[Dict[str, Any]], float]) -> Callable[[Task, str], float]:
+    """The engine's `reward`, reading the runner payload `make_run` writes."""
+
+    def reward(task: Task, output: str) -> float:
+        try:
+            payload = json.loads(output)
+            if not payload.get("valid"):
+                return 0.0
+            return score(payload["metrics"])
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
             return 0.0
-        return framework_score(payload["metrics"])
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-        return 0.0
+
+    return reward
+
+
+#: The Kaggle task's reward, which is upstream's.
+reward_program = make_reward(framework_score)
 
 
 class EraTreeAggregator(AggregatorProtocol):
@@ -435,9 +475,10 @@ class EraTreeAggregator(AggregatorProtocol):
         config: AggregatorConfig,
         staleness_policy: Any,
         *,
-        splits: Splits,
-        candidate_timeout: float,
-        max_code_length: int,
+        splits: Optional[Splits] = None,
+        candidate_timeout: float = 60.0,
+        max_code_length: int = 20_000,
+        domain: Optional[Domain] = None,
         artifact_id: str = ARTIFACT_ID,
     ) -> None:
         self.ledger = ledger
@@ -448,6 +489,7 @@ class EraTreeAggregator(AggregatorProtocol):
         self.splits = splits
         self.candidate_timeout = candidate_timeout
         self.max_code_length = max_code_length
+        self.domain = domain
         self.artifact_id = artifact_id
         self.cards: List[EvidenceCard] = []
         self._cards_lock = threading.Lock()
@@ -461,6 +503,8 @@ class EraTreeAggregator(AggregatorProtocol):
         return shards
 
     def _evaluate(self, code: str) -> Tuple[bool, Dict[str, Any], str]:
+        if self.domain is not None:
+            return self.domain.evaluate(code, self._held_out_shards())
         return evaluate_source(
             code,
             splits=self.splits,
@@ -469,12 +513,18 @@ class EraTreeAggregator(AggregatorProtocol):
             max_length=self.max_code_length,
         )
 
+    def _reward(self, metrics: Dict[str, Any]) -> float:
+        return (self.domain.reward if self.domain else framework_score)(metrics)
+
     def seed(self) -> None:
         if self._seeded:
             return
         self._seeded = True
+        seed_program = self.domain.initial_program if self.domain else INITIAL_PROGRAM
+        summary = (self.domain.initial_summary if self.domain
+                   else "LinearRegression baseline")
         head = self.ledger.snapshot(Ledger.DEV).get(self.artifact_id)
-        code = head.state.get("code", INITIAL_PROGRAM)
+        code = head.state.get("code", seed_program)
         valid, metrics, error = self._evaluate(code)
         if not valid:
             # Upstream prints the initial score and carries on even if it is
@@ -482,8 +532,7 @@ class EraTreeAggregator(AggregatorProtocol):
             # sandbox or the data is broken, and every child would inherit it.
             raise RuntimeError(f"the initial ERA program failed to run: {error}")
         self.tree.seed(
-            Program(program_id(code), 0, None, code, "LinearRegression baseline",
-                    metrics, valid, error),
+            Program(program_id(code), 0, None, code, summary, metrics, valid, error),
             float(metrics["score"]),
         )
 
@@ -586,12 +635,13 @@ class EraTreeAggregator(AggregatorProtocol):
                 len(survivors),
                 len(discarded),
                 0,
-                framework_score(best.program.metrics),
+                self._reward(best.program.metrics),
                 committed_version,
                 (
                     f"valid={valid_candidates}/{len(survivors)} "
                     f"nodes={len(self.tree.nodes)} "
-                    f"best_rmse={best.program.metrics.get('rmse')}"
+                    f"best_{self.tree.metric_key}="
+                    f"{best.program.metrics.get(self.tree.metric_key)}"
                 ),
                 category,
             )
@@ -603,29 +653,36 @@ class EraRun:
     mode: str
     result: EvolutionResult
     tree: EraTree
-    splits: Splits
+    splits: Optional[Splits]
     wall_seconds: float
     baseline_test_metrics: Dict[str, Any] = field(default_factory=dict)
     best_test_metrics: Dict[str, Any] = field(default_factory=dict)
+    domain: Optional[Domain] = None
+
+    def _data_summary(self) -> Dict[str, Any]:
+        if self.domain is not None:
+            return dict(self.domain.data_summary)
+        return {
+            "train_rows": self.splits.train_rows,
+            "scoring_shards": len(self.splits.shard_paths),
+            "rows_per_shard": self.splits.rows(0),
+        }
 
     def summary(self, quality_target: Optional[float] = None) -> Dict[str, Any]:
         root = self.tree.root()
         best = self.tree.best()
+        reward = self.domain.reward if self.domain else framework_score
+        metric = self.tree.metric_key
         payload: Dict[str, Any] = {
             "mode": self.mode,
             "wall_seconds": self.wall_seconds,
             "baseline": root.summary(),
             "best": best.summary(),
-            "data": {
-                "train_rows": self.splits.train_rows,
-                "scoring_shards": len(self.splits.shard_paths),
-                "rows_per_shard": self.splits.rows(0),
-            },
+            "data": self._data_summary(),
             "framework": {
-                "baseline_reward": framework_score(root.program.metrics),
+                "baseline_reward": reward(root.program.metrics),
                 "final_reward": self.result.final_reward,
-                "quality_gain": self.result.final_reward
-                - framework_score(root.program.metrics),
+                "quality_gain": self.result.final_reward - reward(root.program.metrics),
                 "stop_reason": self.result.stop_reason,
                 "error": self.result.error,
                 "outcomes": self.result.outcomes(),
@@ -656,9 +713,12 @@ class EraRun:
                              "score": _finite(self.baseline_test_metrics.get("score"))},
                 "best": {**self.best_test_metrics,
                          "score": _finite(self.best_test_metrics.get("score"))},
-                "rmse_gain": (
-                    float(self.baseline_test_metrics.get("rmse") or 0.0)
-                    - float(self.best_test_metrics.get("rmse") or 0.0)
+                f"{metric}_gain": (
+                    self.domain.gain(self.baseline_test_metrics.get(metric),
+                                     self.best_test_metrics.get(metric))
+                    if self.domain is not None else
+                    float(self.baseline_test_metrics.get(metric) or 0.0)
+                    - float(self.best_test_metrics.get(metric) or 0.0)
                 ),
             },
         }
@@ -670,14 +730,51 @@ class EraRun:
         return payload
 
 
-def build_tasks(count: int, seed: int = 0) -> List[Task]:
+def s3e1_domain(
+    splits: Splits,
+    *,
+    candidate_timeout: float = 60.0,
+    max_code_length: int = 20_000,
+    shards: int = 8,
+    test_shards: int = 4,
+) -> Domain:
+    """Upstream's own task, expressed as a :class:`Domain`.
+
+    Every field here was a module-level constant or a direct call before the
+    second task arrived; collecting them changes nothing about what runs.
+    """
+    preview = data_preview(splits)
+    return Domain(
+        name="Kaggle Playground Series S3E1 (synthetic California housing), RMSE",
+        entrypoint="train_and_predict",
+        metric_key="rmse",
+        metric_better="lower",
+        initial_program=INITIAL_PROGRAM,
+        initial_summary="LinearRegression baseline",
+        evaluate=lambda code, shard_ids: evaluate_source(
+            code, splits=splits, shards=shard_ids,
+            timeout=candidate_timeout, max_length=max_code_length),
+        reward=framework_score,
+        prompt=lambda program: mutation_prompt(
+            program, preview=preview, timeout=candidate_timeout),
+        task_prompt=lambda index: (
+            f"Score the regression program on held-out shard {index}."),
+        test_shards=tuple(range(shards, shards + test_shards)),
+        data_summary={
+            "train_rows": splits.train_rows,
+            "scoring_shards": len(splits.shard_paths),
+            "rows_per_shard": splits.rows(0),
+        },
+    )
+
+
+def build_tasks(count: int, seed: int = 0,
+                prompt_for: Optional[Callable[[int], str]] = None) -> List[Task]:
     """One task per scoring shard. `seed` is accepted for the shared CLI only."""
+    describe = prompt_for or (
+        lambda index: f"Score the regression program on held-out shard {index}.")
     return [
-        Task(
-            id=f"shard-{index}",
-            prompt=f"Score the regression program on held-out shard {index}.",
-            meta={"shard": index},
-        )
+        Task(id=f"shard-{index}", prompt=describe(index), meta={"shard": index})
         for index in range(count)
     ]
 
@@ -702,9 +799,14 @@ def run_agentdescent_era(
     usage: Optional[Usage] = None,
     staleness: str = "guarded",
     splits: Optional[Splits] = None,
+    domain: Optional[Domain] = None,
     verbose: bool = False,
 ) -> EraRun:
-    """Run one fixed-expansion-budget serial, sync, or async experiment."""
+    """Run one fixed-expansion-budget serial, sync, or async experiment.
+
+    ``domain=None`` is upstream's Kaggle task; anything else runs the identical
+    search over that domain's programs, evaluator and prompt.
+    """
     if mode not in ("serial", "sync", "async"):
         raise ValueError("mode must be serial, sync, or async")
     if iterations < 1 or workers < 1 or iterations % workers:
@@ -712,19 +814,18 @@ def run_agentdescent_era(
     if not 0.0 < held_out_frac < 1.0:
         raise ValueError("held_out_frac must be in (0, 1)")
 
-    splits = splits or prepare_splits(
-        shards=shards, test_shards=test_shards, train_rows=train_rows)
-    tasks = build_tasks(shards, seed)
-    tree = EraTree(c_puct=c_puct, candidate_limit=iterations)
-    strategy = EraStrategy()
-    preview = data_preview(splits)
-    run = make_run(
-        splits=splits,
-        candidate_timeout=candidate_timeout,
-        max_code_length=max_code_length,
-    )
-    propose = make_propose(
-        tree, complete, preview=preview, candidate_timeout=candidate_timeout)
+    if domain is None:
+        splits = splits or prepare_splits(
+            shards=shards, test_shards=test_shards, train_rows=train_rows)
+        domain = s3e1_domain(splits, candidate_timeout=candidate_timeout,
+                             max_code_length=max_code_length,
+                             shards=shards, test_shards=test_shards)
+    tasks = build_tasks(shards, seed, domain.task_prompt)
+    tree = EraTree(c_puct=c_puct, candidate_limit=iterations,
+                   metric_key=domain.metric_key)
+    strategy = EraStrategy(domain)
+    run = make_run(evaluate=domain.evaluate)
+    propose = make_propose(tree, complete, prompt_for=domain.prompt)
 
     def factory(ledger, verifier, audit, config, policy):
         aggregator = EraTreeAggregator(
@@ -736,6 +837,7 @@ def run_agentdescent_era(
             splits=splits,
             candidate_timeout=candidate_timeout,
             max_code_length=max_code_length,
+            domain=domain,
         )
         aggregator.seed()
         return aggregator
@@ -761,10 +863,11 @@ def run_agentdescent_era(
         # from -- there is nothing for it to be stale against.
         "staleness_policy": get_policy(staleness),
     }
+    reward = make_reward(domain.reward)
     if mode == "async":
         result = async_evolve(
             tasks,
-            reward_program,
+            reward,
             async_ratio=async_ratio,
             max_seconds=max_seconds,
             max_iters=iterations,
@@ -774,7 +877,7 @@ def run_agentdescent_era(
     else:
         result = evolve(
             tasks,
-            reward_program,
+            reward,
             rounds=iterations // workers,
             max_concurrency=1 if mode == "serial" else workers,
             **common,
@@ -783,14 +886,10 @@ def run_agentdescent_era(
         report_engine(result)
     wall_seconds = time.monotonic() - started
 
-    test_range = tuple(range(shards, shards + test_shards))
-    _, baseline_test, _ = evaluate_source(
-        tree.root().program.code, splits=splits, shards=test_range,
-        timeout=candidate_timeout, max_length=max_code_length)
-    _, best_test, _ = evaluate_source(
-        tree.best().program.code, splits=splits, shards=test_range,
-        timeout=candidate_timeout, max_length=max_code_length)
-    return EraRun(mode, result, tree, splits, wall_seconds, baseline_test, best_test)
+    _, baseline_test, _ = domain.evaluate(tree.root().program.code, domain.test_shards)
+    _, best_test, _ = domain.evaluate(tree.best().program.code, domain.test_shards)
+    return EraRun(mode, result, tree, splits, wall_seconds, baseline_test, best_test,
+                  domain)
 
 
 def build_parser() -> argparse.ArgumentParser:

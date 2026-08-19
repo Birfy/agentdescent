@@ -14,6 +14,7 @@
 | **Upstream code** | [google-research/era@b836730](https://github.com/google-research/era/tree/b836730b5c000526af95116b1d0e2c60c8cf0a10), `implementation/futs.py` + `implementation/playground_s3e1.py` |
 | **Example** | [`examples/era/era_empirical_software.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/era_empirical_software.py) |
 | **Domain** | Kaggle Playground Series S3E1 (synthetic California housing), RMSE — upstream's own bundled task |
+| **Second task** | [`examples/era/era_hard_integrals.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/era_hard_integrals.py) — the paper's *numerical solution of integrals*, scored in correct significant digits |
 | **Layer** | L1 program (`blast_radius=0.6`, AST-gated and sandbox-isolated) |
 | **Fidelity** | `benchmark_faithful` — [what the classes mean](port-fidelity.md) |
 
@@ -186,6 +187,99 @@ deterministic and every worker in a batch would be handed the same parent.
     directory fails, a write inside it succeeds, and `socket.create_connection`
     cannot reach the network.
 
+## The second task — numerical solution of integrals
+
+The ERA abstract lists six demonstrations. Five are scored against a leaderboard
+or a held-out dataset; the sixth is not:
+
+> "ERA also produced expert-level software for geospatial analysis, neural
+> activity prediction in zebrafish, and **numerical solution of integrals**"
+
+Upstream released `futs.py` and one task, `playground_s3e1.py`; there is no
+integrals implementation to port. So what is faithful here is the **search** —
+and the nine-family suite below is this repository's construction, stated as
+such wherever it is reported. It lives in
+[`examples/era/era_hard_integrals.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/era_hard_integrals.py),
+and it runs on **the same search**: same flat-PUCT tree, same visit reservation,
+same aggregator, same governance layer, same sandbox profile. The seam is a
+[`Domain`](https://github.com/Birfy/agentdescent/blob/main/examples/era/_era_domain.py)
+— seed program, sandboxed evaluator, mutation prompt, metric name — and nothing
+algorithmic lives in it. `domain=None` is upstream's Kaggle task, so a caller
+who names no domain gets the port upstream ships.
+
+### What the candidate is asked for
+
+```python
+def integrate(f, a, b):     # a may be -inf, b may be +inf
+    ...                     # -> one float
+```
+
+`f` is a **black box**: a scalar function of one float, with no formula, no
+parameters and no family name attached. Nine integrals make a problem set, one
+from each of nine difficulty classes:
+
+| Class | What it breaks |
+|---|---|
+| algebraic singularities at **both** endpoints | boundedness, twice |
+| logarithmic singularity of integer power | boundedness, and every derivative |
+| oscillation accumulating at an endpoint | any fixed node count near the corner |
+| interior peak of width 1e-7 to 1e-4 | adaptive subdivision that never samples it |
+| barely damped oscillation on `[0, inf)` | tail truncation |
+| oscillation that **never** decays on `[0, inf)` | tail truncation, harder |
+| endpoint singularity × fast oscillation, damped | both at once |
+| cancellation over `(-inf, inf)` | relative accuracy, by 4 orders of magnitude |
+| endpoint singularity **and** a heavy tail | one substitution cannot fix both |
+
+### Why the score means something
+
+**The reference is a closed form, not another integrator.** Every family has an
+exact value in terms of `Γ`, `atan`, `π/sin(πs)` and friends, so a candidate is
+scored against arithmetic rather than against a rival method it might legitimately
+beat. `tests/test_era_integrals.py::test_the_closed_form_matches_high_precision_quadrature`
+checks each identity against mpmath at 30 digits — through a per-family
+substitution, because mpmath's own quadrature on the raw integrand disagrees
+with the closed form in the third decimal place on the Fresnel family. That
+disagreement is the benchmark working.
+
+**The metric is correct significant digits**, `min(12, -log10(relative error))`,
+averaged over the problem set. The cap is the precision of the references
+themselves: reporting 15 digits against a `math`-library reference would be
+measuring the reference's rounding. A problem that raises, returns `nan` or
+overruns its budget scores 0 and the rest of the set still counts — a quadrature
+suite is nine independent facts, and partial credit is what makes the tree's
+ranking informative.
+
+**Every problem has a hard cap on calls to the integrand** (200,000 by default,
+enforced in the runner, not trusted to the candidate). Without it the best
+program is whichever one is allowed to spend the most, which is not a question
+about method. `quad` on defaults uses ~1,000.
+
+**The family is never named to the model.** The prompt describes the *classes*,
+which is the task description an expert would be handed; the candidate sees a
+callable and two limits; and the failure report the search feeds back carries the
+interval and the digit count but not the family. Problems are shuffled within a
+shard, so position is not family either. Together those are what keep the task
+"write a quadrature rule" rather than "write a dispatch table".
+
+### Deviations this task adds
+
+1. **The gate is loosened in one place and narrowed in another.**
+   `literal_top_level=False` admits computed module-level constants, because a
+   Gauss-Legendre node table built once at import is ordinary numerics; the
+   import allowlist drops `pandas`/`scikit-learn` and adds `cmath`. The sandbox
+   is the boundary either way, and module-level work runs under the same CPU
+   limit as everything else.
+2. **The problem file is copied into the sandbox scratch** before the runner is
+   started. The Bubblewrap profile mounts a fresh tmpfs over `/tmp`, so a suite
+   living there would be invisible inside the sandbox and the candidate would be
+   blamed for a `FileNotFoundError`.
+3. **The problems are drawn, not downloaded.** A shard is a seeded draw from the
+   catalogue, reproducible from `--seed` alone, written once under the
+   dataloader cache. There is no dataset to fetch and no network in the loop.
+4. `score = mean digits` with no sign flip — FUTS maximises and more digits is
+   better — and the engine's `[0, 1]` reward is `mean_digits / 12`, which is
+   again exactly order-preserving with what the tree ranks on.
+
 ## Measured results — Playground S3E1
 
 ### The method
@@ -253,6 +347,91 @@ depth 2, and `--staleness full` considered 6 cards and discarded none.
     [port-fidelity.md](port-fidelity.md#the-parallelisation-matrix) is empty
     rather than filled from one arm.
 
+## Measured results — hard integrals
+
+### The method
+
+| Setting | Value |
+|---|---|
+| Model | `glm-5.2`, Anthropic-shaped API |
+| Sampling | temperature 0.7, **thinking disabled**, `--max-tokens 16000` |
+| Mode | `async_evolve(n_workers=3, async_ratio=1)`, `--staleness full` |
+| Budget | 12 expansions, hard-capped; `--max-seconds 3600` |
+| Search | `c_puct = 1.0`, `--candidate-timeout 60` (upstream's `Sandbox(timeout_seconds=60)`) |
+| Problems | 9 families × 12 problem sets, `--seed 0` |
+| Scoring sets | 8 (4 rollout, 4 held-out gate), 9 integrals each |
+| Independent test | 4 further sets, 36 integrals, never scored during the search |
+| Per problem | ≤ 200,000 integrand calls, ≤ 5 s |
+| Isolation | Bubblewrap, Linux |
+| Replay | none; a single live engine run |
+
+The recorded output is
+[`bench/results/era-integrals-run.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-integrals-run.json),
+and the winning program
+[`bench/results/era-integrals-run-best.py`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-integrals-run-best.py).
+
+### The result
+
+12 expansions, 13 mutation calls (one stalled on the endpoint and was retried by
+`with_retries`), 23,877 tokens, 615.9 s of model time, 391.0 s of wall clock.
+Every figure below is on the **test** problem sets, which the search never saw:
+
+| | baseline | best found | |
+|---|---:|---:|---:|
+| test mean correct digits | 8.862 | **10.205** | +1.34 |
+| test problems at 10+ digits | 20 / 36 | **28 / 36** | |
+| held-out gate mean digits | 8.681 | **10.139** | the split the tree ranked on |
+| framework reward `digits / 12` | 0.7234 | **0.8449** | |
+| integrand calls over the test set | 33,828 | 221,277 | of 7.2 M allowed |
+
+The baseline is `scipy.integrate.quad` on defaults. The winner keeps `quad` as
+its kernel and supplies what `quad` cannot infer: an explicit `t/(1 - t²)` map
+for `(-inf, inf)` and `t/(1 - t)` for a half-line, a singular point declared at
+the join, a ladder of `(limit, epsabs, epsrel)` settings that stops as soon as
+the returned error estimate is below `1e-12`, and a wrapper that turns a raised
+or non-finite integrand value into a zero rather than a dead program. That is
+the shape of the task: not a better formula, but the transformation and the
+error control an expert would add around a library routine.
+
+The tree machinery is live: 13 nodes, 12 valid, **depth 3**, root visited 12
+times, and `--staleness full` considered 12 cards and discarded none.
+
+!!! note "Two things this run showed that the score does not"
+    **The class that survived is the one that needs real analysis.** All four
+    of the winner's zero-digit failures are the same family — an oscillation on
+    `[0, inf)` whose amplitude never decays. Truncating that tail is wrong at
+    any truncation point, and no tolerance setting rescues it; it wants
+    half-period splitting plus a convergence acceleration, which is a different
+    program rather than a better-tuned one. The remaining headroom is therefore
+    concentrated and identifiable, which is what a benchmark is for.
+
+    **A node died on an import the gate had allowed.** One expansion wrote
+    `from scipy.interpolate import pade`, which the AST gate admits — `scipy` is
+    on the allowlist — and which does not exist at that path in the installed
+    version. It failed inside the sandbox, scored `-inf`, and was appended to
+    the tree as upstream requires. That is the gate and the sandbox doing
+    exactly what this port says they do: the gate is not the boundary, and a
+    program that cannot run is a node rather than a crash.
+
+!!! warning "The first run of this task found a hole in the task"
+    The `(-inf, inf)` family was `exp(-x²)·cos(bx)`, which is **even**. The
+    first live run's winner mapped both halves of the line onto `[0, inf)` and
+    doubled — a plain bug — and scored 12 digits on it. The family now carries
+    a nonzero offset, `exp(-(x - m)²)·cos(bx)`, with
+    `sqrt(pi)·e^(-b²/4)·cos(bm)` as its closed form, and
+    `test_the_whole_line_family_is_not_symmetric_about_the_origin` keeps it
+    that way. The numbers above are from a rerun on the corrected suite; the
+    first run's are not reported, because they were measured against a suite
+    that could be passed without solving it.
+
+!!! warning "One run, one seed, and no serial control"
+    As with the S3E1 numbers above: a single live run, so **no speedup or
+    parallel-efficiency claim is made from it**. The gate is a much smaller
+    share of the wall clock here than on S3E1 (31.3 s of 391 s, against 406 s of
+    422 s) because scoring nine integrals is milliseconds where training a
+    regressor on 29,709 rows is seconds — so on this task the model call, not
+    the sandbox, is what parallelism has to hide.
+
 ## Run it
 
 Preview without an API key, network access, or sandbox process:
@@ -276,4 +455,16 @@ not comparable to an uncapped one.
 + `ANTHROPIC_API_KEY`); `--provider openai`, the default, uses
 `OPENAI_BASE_URL` + `OPENAI_API_KEY`.
 
-Offline tests: `tests/test_era_example.py`.
+The integrals task takes the same flags, plus `--eval-budget` and
+`--problem-seconds`:
+
+```bash
+python -m examples.era.era_hard_integrals --dry-run
+
+python -m examples.era.era_hard_integrals --provider claude --model glm-5.2 \
+    --yes --iterations 12 --workers 3 --async --async-ratio 1 --staleness full \
+    --shards 8 --test-shards 4 --candidate-timeout 60 --max-tokens 16000 \
+    --eval-budget 200000 --problem-seconds 5
+```
+
+Offline tests: `tests/test_era_example.py`, `tests/test_era_integrals.py`.

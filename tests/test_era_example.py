@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import socket
 import subprocess
 import sys
@@ -368,10 +369,24 @@ def test_the_sandbox_blocks_the_writes_and_network_it_claims_to_block(tmp_path):
 
     The ERA gate allows scikit-learn, so it cannot be the boundary -- which
     makes this the test that decides whether the port is safe to run at all.
+
+    Two probes for "outside", because the two backends refuse differently and
+    one of them used to make this test fail on an ordinary Linux host:
+
+    * ``outside`` sits beside the scratch directory, which pytest puts under
+      ``/tmp``. The Bubblewrap profile mounts a **fresh tmpfs over `/tmp`**, so
+      the write there succeeds *inside the sandbox* and reaches nothing: the
+      guarantee is that it never lands on the host, which is what
+      ``outside.exists()`` checks from here. Asserting the write itself was
+      refused would be asserting an implementation detail that Seatbelt happens
+      to have and Bubblewrap deliberately does not.
+    * ``readonly`` sits under ``/usr``, which no profile makes writable on
+      either platform. That one has to be refused outright.
     """
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     outside = tmp_path / "outside.txt"
+    readonly = f"/usr/lib/era-sandbox-probe-{os.getpid()}"
     probe = scratch / "probe.py"
     probe.write_text(
         "import json, socket\n"
@@ -381,6 +396,11 @@ def test_the_sandbox_blocks_the_writes_and_network_it_claims_to_block(tmp_path):
         "    result['outside_write'] = 'allowed'\n"
         "except Exception as exc:\n"
         "    result['outside_write'] = type(exc).__name__\n"
+        "try:\n"
+        f"    open({readonly!r}, 'w').write('x')\n"
+        "    result['readonly_write'] = 'allowed'\n"
+        "except Exception as exc:\n"
+        "    result['readonly_write'] = type(exc).__name__\n"
         "try:\n"
         f"    open({str(scratch / 'inside.txt')!r}, 'w').write('x')\n"
         "    result['inside_write'] = 'allowed'\n"
@@ -402,7 +422,8 @@ def test_the_sandbox_blocks_the_writes_and_network_it_claims_to_block(tmp_path):
     completed = subprocess.run(command, capture_output=True, text=True,
                                timeout=90, env=env, cwd=str(scratch))
     payload = json.loads(completed.stdout.strip().splitlines()[-1])
-    assert payload["outside_write"] != "allowed"
+    assert payload["readonly_write"] != "allowed"
     assert payload["inside_write"] == "allowed"
     assert payload["network"] != "allowed"
     assert not outside.exists()
+    assert not os.path.exists(readonly)

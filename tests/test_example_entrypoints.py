@@ -1,4 +1,10 @@
-"""The command-line contract shared by the eight faithful algorithm ports."""
+"""The command-line contract shared by the eight faithful algorithm ports.
+
+Nine entry points, because ERA ships two tasks on one search: the Kaggle
+regression upstream bundles, and the paper's *numerical solution of integrals*.
+The contract is per entry point -- it is about the command line a user types --
+so both are rows here, and neither adds an algorithm to the fidelity table.
+"""
 
 from __future__ import annotations
 
@@ -15,6 +21,7 @@ from examples.ace import ace_context_evolution as ace
 from examples.adas import adas_meta_agent_search as adas
 from examples.dgm import dgm_self_improve as dgm
 from examples.era import era_empirical_software as era
+from examples.era import era_hard_integrals as era_integrals
 from examples.evoskill import evoskill_skill_discovery as evoskill
 from examples.gepa import gepa_prompt_evolution as gepa
 from examples.openevolve import openevolve_program_evolution as openevolve
@@ -65,6 +72,12 @@ PORTS = (
     # trains a model, so the async wall-clock budget is upstream's 60s timeout
     # times a tree's worth of expansions rather than a handful of API calls.
     Port(era, "iterations", "glm-5.2", 1800.0, "build_tasks",
+         provider="openai", async_ratio=1, budget_is_iterations=True),
+    # ERA's second task -- the paper's "numerical solution of integrals" -- on
+    # the same search. Same deviations, and one loader of its own: the problems
+    # are drawn rather than downloaded, so `prepare_suite` is the boundary a
+    # dry-run must not cross.
+    Port(era_integrals, "iterations", "glm-5.2", 1800.0, "prepare_suite",
          provider="openai", async_ratio=1, budget_is_iterations=True),
 )
 
