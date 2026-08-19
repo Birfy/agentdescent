@@ -6,6 +6,8 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.5] — 2026-08-19
+
 ### Fixed
 
 - **`--eval-concurrency` was parsed by the ERA ports, recorded in their result
@@ -2794,7 +2796,8 @@ First public release on PyPI as **`agentdescent`**.
   discrete-space `Aggregator`, staleness policies, DP/TP/PP parallelism, layered
   governance, and the provider-agnostic `agentdescent.agents` completion layer.
 
-[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.4.5...HEAD
+[0.4.5]: https://github.com/Birfy/agentdescent/compare/v0.4.2...v0.4.5
 [0.4.2]: https://github.com/Birfy/agentdescent/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/Birfy/agentdescent/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Birfy/agentdescent/compare/v0.3.0...v0.4.0
