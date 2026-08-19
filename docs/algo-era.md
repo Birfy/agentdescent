@@ -504,7 +504,7 @@ times, and `--staleness full` considered 12 cards and discarded none.
 | Mode | `async_evolve(n_workers=3, async_ratio=1)`, `--staleness full` |
 | Budget | 18 expansions, hard-capped; `--max-seconds 5400` |
 | Reply guard | `--reply-attempts 4` (see below — it was needed) |
-| Points | 20 per set; 8 sets scored (4 rollout, 4 gate) |
+| Points | 20 per set; 8 sets scored (4 rollout, 4 gate) — **the old suite**, see below |
 | Independent test | 4 further sets, **80 points**, never scored during the search |
 | Reference | mpmath 1.4.1 at 30 and 60 dps, kept where they agree to 25 |
 | Isolation | Bubblewrap, Linux |
@@ -577,58 +577,118 @@ Cephes is good at.
     whose difficulty is a chain of transformation identities, it may well be the
     binding constraint. This row is `thinking=disabled` and says so.
 
-### What a bigger budget bought: the gate, and nothing else
+### The 80-point split had no resolution, and both rows above are inside its noise
 
-The same configuration at **48 expansions** instead of 18, everything else
-identical ([`era-hyp2f1-run48.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-hyp2f1-run48.json)):
+The two rows above were measured on a suite of 240 points: 80 for the gate the
+tree ranks on, 80 held back. That was not enough, and the arithmetic is not
+close:
 
-| | 18 expansions | 48 expansions |
-|---|---:|---:|
-| gate mean digits (what the tree ranks on) | 10.202 (+0.02) | **10.747 (+0.56)** |
-| **held-back mean digits** | 9.826 (+0.13) | **9.546 (−0.15)** |
-| held-back points at 10+ digits | 52 / 80 | 54 / 80 |
-| nodes / depth | 19 / 3 | 49 / **14** |
-| wall, tokens | 404 s, 79 k | 1,280 s, 313 k |
+```
+per-point correct digits, standard deviation  : 3.20
+  standard error of an   80-point mean        : 0.358 digits
+  standard error of a  1000-point mean        : 0.101 digits
+```
 
-**The gate went up by half a digit and the held-back set went down.** That is
-the winner's curse, and it is worth stating plainly because the search is
-working exactly as specified while producing it: FUTS commits `argmax` over
-node scores with no significance test — the engine's Beta-posterior acceptance
-is bypassed by this port on purpose, because upstream has no such step — and the
-score being maximised is a mean over **80 points**. Take 48 draws against a
-noisy 80-point objective and the best of them is partly noise.
+The outcome per point is close to **bimodal** — a program either handles a
+region and scores near the 12-digit cap, or misses it and scores near zero — so
+the spread is enormous and averaging 80 of them settles very little. The
+smallest gain an 80-point gate can separate from noise at two standard errors is
+**0.72 digits**. Every number in the two rows above is smaller than that.
 
-Point by point on the 80 held-back points, the winner is not uniformly worse; it
-is **higher variance**:
+Pairing does not rescue it: the paired difference between two programs on the
+same points has an SD of 3.05 against the unpaired 3.20, because when a program
+changes a point it changes it by ten digits rather than by a tenth.
 
-| | points | total digits |
-|---|---:|---:|
-| improved by >0.5 digits | 18 | **+52.7** |
-| unchanged | 50 | — |
-| regressed by >0.5 digits | 12 | **−64.3** |
+**So the suite was regenerated at 250 points a shard — 3000 points, a 1000-point
+gate and 1000 held back** (`tools/gen_hyp2f1_stress.py`, twelve minutes of
+arbitrary-precision arithmetic, committed). Evaluation cost is not the reason it
+was small: a 250-point shard takes the baseline 0.30 s and the best evolved
+program 0.36 s, and scoring a node across the whole 1000-point gate takes 1.7 s.
 
-Its biggest wins are +8.9 and +7.7 digits (large `|a|, |b|` with `z` far to the
-left — the regime the transformations fix). Its worst regressions are
-**10.94 → 0.00**, **8.35 → 0.00** and **12.00 → 4.89**: a class it now gets
-catastrophically wrong that the baseline had right. `solved` rises 51 → 54 while
-the mean falls, which is the same fact seen twice.
+### What the resolving gate says about the run that was already made
 
-The tree shows where the budget went: the best score, 10.7469, was found at
-**expansion 8**, and the remaining 40 expansions produced **exact copies of it**
-— chains 14 deep in which every node scores 10.7469 to four decimals, because
-each rewrite kept the parent's behaviour. 39 of 48 expansions "beat the root",
-and all but one of those are that same plateau propagating downward.
+Re-scored on **1000 fresh points** it had never seen:
 
-!!! tip "What this says about the next experiment, not about the model"
-    Three levers, in the order they matter: a **larger gate** (80 points is too
-    few to rank 48 candidates), an **acceptance rule with a significance test**
-    rather than `argmax` (the engine already ships one; using it would be a
-    deliberate deviation from upstream and should be reported as such), and
-    **storing the top-K node programs** so gate-versus-test correlation can be
-    measured directly instead of inferred from two winners.
+| | mean digits | 10+ digits | vs baseline |
+|---|---:|---:|---|
+| baseline `scipy.special.hyp2f1`, 1000-point gate | 9.801 | 642 / 1000 | — |
+| baseline, 1000 held back | 9.836 | 659 / 1000 | — |
+| **the 48-expansion winner, on 1000 fresh points** | **10.148** | **737 / 1000** | **+0.347 ± 0.10, 3.2 SE** |
 
-    Also measured here: 12 of 60 replies arrived damaged — **20%**, which
-    matches the ~19% estimated over 58 earlier samples.
+**That reverses the reading recorded here earlier.** The 48-expansion search did
+produce a genuinely better program — about a third of a digit, and 95 more
+points solved out of 1000 — and the old split could not see it. What the old
+numbers showed (gate +0.56, held-back −0.15) was two draws from a distribution
+with a 0.36-digit standard error. The earlier text called that a winner's curse;
+it was an unresolved measurement, and the diagnosis was wrong.
+
+The corroborating detail: on the new suite the gate half and the held-back half
+score the baseline at **9.801 and 9.836**, a gap of 0.035. On the old suite the
+same two halves differed by **0.49** — the "gate is easier than the test set"
+effect visible in the earlier rows was itself noise.
+
+### And what it does for a run made under it
+
+48 expansions again, same model and sampling, `--workers 6` this time, scored
+against the 1000-point gate
+([`era-hyp2f1-run48-gate1000.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-hyp2f1-run48-gate1000.json)):
+
+| | baseline | best found | |
+|---|---:|---:|---:|
+| gate mean digits (1000 points) | 9.801 | **11.737** | **+1.936** |
+| **held-back mean digits (1000 points)** | 9.836 | **11.771** | **+1.935** |
+| held-back points at 10+ digits | 659 / 1000 | **965 / 1000** | |
+| over all 3000 points | 9.849 | **11.738** | +1.889, 1970 → 2880 solved |
+
+**The gate and the held-back set now agree to 0.001 digits** (+1.9359 against
++1.9346). That is the whole point of the resize: the two halves of the same
+distribution finally say the same thing, so a gate improvement is evidence about
+the program rather than about which 80 points were drawn.
+
+For scale, the ceilings measured on this distribution: the baseline is 9.80, a
+five-line decidable Pfaff rule reaches 10.15, and an **oracle** picking the best
+of four textbook transformations per point — which no program can do, since it
+requires the answer — reaches 10.84. At **11.74** the evolved program is well
+past the transformation-picking ceiling; it is not selecting among identities,
+it is carrying its own Taylor summation in complex arithmetic, its own
+non-positive-integer handling, its own `gamma`/`gammaln` guards, and a
+continuation for the region near `z = 1`.
+
+Cost: 598 s wall, 52 calls, 210 k tokens, 4 replies damaged. The same 48
+expansions at `--workers 3` took 1,280 s, so raising concurrency to the
+endpoint's measured knee bought **2.1×**.
+
+!!! warning "Better on 1284 points, worse on 111, and 13 of those catastrophically"
+    Across all 3000 points the winner gains 6,142 digits and loses 475. The
+    losses include **13 points where the baseline had 10+ digits and the winner
+    has under 1**. A mean is the right headline and the wrong acceptance rule: a
+    numerical library does not ship a change that breaks thirteen inputs it used
+    to get right, however good the average. The lever for that is an acceptance
+    condition of "mean improves **and** no new catastrophic regression", which
+    is a counting statistic and far less noisy than the mean it guards.
+
+!!! note "A silent splice, in the winning program"
+    Line 65 of the winner reads `w = z / (z - 1/ 1.0)`. Nobody writes `1/ 1.0`;
+    it has the shape of the transport damage documented below, and it parsed, so
+    the guard could not see it. It is harmless here — `1/1.0` is `1.0`, so the
+    expression is the Pfaff argument it was meant to be — but it is a concrete
+    instance of the limitation stated there: a splice inside a numeric literal
+    survives every check this port has.
+
+!!! note "What survives from the earlier reading"
+    Two observations do not depend on the resolution and still stand. The tree
+    spent its budget badly: the best score appeared at **expansion 8** and the
+    remaining 40 expansions produced exact copies of it, chains 14 deep in which
+    every node scores identically because each rewrite preserved the parent's
+    behaviour. And the reply channel damaged **12 of 60** replies, 20%, matching
+    the ~19% estimated over 58 earlier samples.
+
+!!! tip "The two levers still worth pulling"
+    A **behavioural signal in the prompt** — "your last program changed nothing
+    on 19 of the 22 points its parent failed" is computable host-side without
+    revealing an answer, and aims straight at the plateau. And **storing the
+    top-K node programs**, so gate-versus-test correlation can be measured
+    directly rather than inferred from whichever program happened to win.
 
 ## Run it
 

@@ -102,10 +102,11 @@ def hyp2f1(a, b, c, z):
 '''
 
 #: Wall-clock for one shard of points, inside `--candidate-timeout`. Generous:
-#: a special-function call is microseconds, and the point of the limit is to
-#: stop a candidate that has decided to sum a million terms per point, not to
-#: make speed part of the score.
-SHARD_SECONDS = 20.0
+#: a special-function call is microseconds -- the baseline does a 250-point
+#: shard in 0.3 s and the best evolved program so far in 0.36 s -- and the point
+#: of the limit is to stop a candidate that has decided to sum a million terms
+#: per point, not to make speed part of the score.
+SHARD_SECONDS = 45.0
 
 
 # --------------------------------------------------------------------------

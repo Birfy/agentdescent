@@ -131,31 +131,52 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
-- **A measured winner's curse: 48 ERA expansions raised the gate by half a digit
-  and lowered the held-back score.** Same configuration as the 18-expansion 2F1
-  row, only the budget changed: gate 10.185 → **10.747** (+0.56), held-back
-  9.692 → **9.546** (−0.15). Recorded in `bench/results/era-hyp2f1-run48.json`.
+- **The 2F1 suite is 3000 points, because 240 could not resolve anything —
+  including a result this changelog had already drawn a conclusion from.**
+  Per-point correct digits have a standard deviation of **3.20**: the outcome is
+  close to bimodal, a program either handles a region and scores near the
+  12-digit cap or misses it and scores near zero. An 80-point gate therefore
+  carries a standard error of **0.358 digits**, so the smallest gain it can tell
+  from noise at two standard errors is 0.72 — larger than every number measured
+  on it. Pairing does not help (paired SD 3.05 against unpaired 3.20; a program
+  that changes a point changes it by ten digits, not a tenth).
 
-  The search is behaving exactly as specified while producing this. FUTS commits
-  `argmax` over node scores with no significance test — this port bypasses the
-  engine's Beta-posterior acceptance on purpose, because upstream has no such
-  step — and the score being maximised is a mean over 80 points. Forty-eight
-  draws against a noisy 80-point objective select partly for noise.
+  `tools/gen_hyp2f1_stress.py` now draws **250 points a shard**: a 1000-point
+  acceptance gate and 1000 points held back. Twelve minutes of
+  arbitrary-precision arithmetic, once, committed. Evaluation was never the
+  constraint — a 250-point shard costs the baseline 0.30 s, and scoring a node
+  across the full gate 1.7 s. The generator is now seeded **per shard**, so
+  `test_the_committed_stress_file_redraws_identically` can redraw one shard and
+  demand it back instead of regenerating the file; `--check` still verifies all
+  of it.
 
-  The winner is not uniformly worse, it is higher variance: on the 80 held-back
-  points, 18 improved by +52.7 digits in total and 12 regressed by −64.3,
-  including 10.94 → 0.00 and 12.00 → 4.89. `solved` rises 51 → 54 while the mean
-  falls.
+  **This reverses a conclusion recorded above.** Re-scored on 1000 fresh points,
+  the 48-expansion winner beats the baseline by **+0.347 ± 0.10 digits (3.2 SE)**
+  with 737 of 1000 points solved against 642 — a real improvement the old split
+  could not see. The earlier entry called that run a winner's curse on the
+  strength of gate +0.56 and held-back −0.15; both were draws from a
+  0.36-standard-error distribution, and the diagnosis was wrong. Corroborating
+  it: on the new suite the gate and held-back halves score the baseline at 9.801
+  and 9.836, a gap of 0.035, where the old halves differed by 0.49.
 
-  The tree says where the budget went: the best score was found at expansion
-  **8**, and the other 40 expansions produced exact copies of it — chains 14 deep
-  scoring identically to four decimals, because each rewrite preserved the
-  parent's behaviour.
+  What survives unchanged: the tree still spent its budget badly (best score at
+  expansion 8, the remaining 40 expansions exact copies of it, chains 14 deep),
+  and the reply channel still damaged 12 of 60 replies.
 
-  Three levers for the next run, recorded in `docs/algo-era.md`: a larger gate,
-  an acceptance rule with a significance test (a deliberate deviation from
-  upstream, to be reported as one), and storing the top-K node programs so
-  gate-versus-test correlation can be measured rather than inferred.
+  **A run made under the resolving gate**, 48 expansions on `glm-5.2` at
+  `--workers 6`: gate 9.801 → **11.737**, held-back 9.836 → **11.771**, 965 of
+  1000 held-back points solved against 659. The two halves agree to **0.001
+  digits** (+1.9359 against +1.9346), which is what the resize was for. At 11.74
+  the program is past the 10.84 ceiling of picking the best of four textbook
+  transformations by oracle — it carries its own Taylor summation, degenerate
+  parameter handling and a continuation near `z = 1`. 598 s against 1,280 s for
+  the same budget at `--workers 3`, the endpoint's measured concurrency knee
+  being 6. Recorded in `bench/results/era-hyp2f1-run48-gate1000.json`.
+
+  It also earns the next lever: across 3000 points the winner gains 6,142 digits
+  and loses 475, and **13 of the losses are points the baseline had to 10+
+  digits and it has to under 1**. No numerical library ships that, whatever the
+  mean does.
 
 - **ERA's third task: double-precision evaluation of the Gauss hypergeometric
   function, and what replaces a leaderboard.** `examples/era/era_hypergeometric.py`

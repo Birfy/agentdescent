@@ -1,7 +1,7 @@
 # ERA — empirical-software search (Flat UCB tree search)
 
 Faithful port of Google Research's released ERA implementation onto the
-AgentDescent engine, running **two** of the paper's tasks on one search.
+AgentDescent engine, running **three** tasks on one search.
 
 | | |
 |---|---|
@@ -11,6 +11,7 @@ AgentDescent engine, running **two** of the paper's tasks on one search.
 | Upstream code | https://github.com/google-research/era (commit `b836730`) |
 | Dataset (faithful) | Kaggle Playground Series S3E1 — the upstream `implementation/playground_s3e1.py` task |
 | Second task | *Numerical solution of integrals* — named in the paper's abstract; upstream released no implementation, so the nine-family suite is constructed here |
+| Third task | Gauss hypergeometric `2F1` in double precision — not in the paper at all; 3000 points against a 25-digit mpmath reference, baseline `scipy.special.hyp2f1` |
 | `evolve()` plug-ins | `strategy` + `aggregator_factory=` FUTS tree, `selection.FlatPuct` |
 
 ## Run
@@ -24,9 +25,9 @@ python -m examples.era.era_hypergeometric --dry-run       # 2F1 vs a 25-digit re
 `--dry-run` prints the configuration and returns with **zero network access
 and no API key**.
 
-## The two tasks
+## The three tasks
 
-Both entry points run the *same* flat-PUCT tree search, the same aggregator, the
+All three entry points run the *same* flat-PUCT tree search, the same aggregator, the
 same sandbox and the same governance layer. What differs is a
 [`Domain`](_era_domain.py): the seed program, the sandboxed evaluator, the
 mutation prompt, and the name of the metric.
@@ -60,7 +61,10 @@ baseline is `scipy.special.hyp2f1`, which every scientist already calls and
 which loses more than six digits on about a third of the points; and the
 reference is mpmath at 30 **and** 60 digits, kept only where the two agree to
 25, committed as a file that `python -m tools.gen_hyp2f1_stress --check`
-re-derives byte for byte. `mpmath`, `decimal` and `fractions` are off this
+re-derives byte for byte. The suite is **3000 points** — a 1000-point acceptance
+gate and 1000 held back — because per-point correct digits have a standard
+deviation of 3.20, so an 80-point gate could not separate a half-digit gain from
+noise. `mpmath`, `decimal` and `fractions` are off this
 task's allowlist — the deliverable is a float64 routine.
 
 ## What is in here
@@ -106,8 +110,8 @@ run on a host with neither. Because the benchmark requires `pandas`, `numpy`
 and `scikit-learn`, the AST gate here is far weaker than the OpenEvolve port's,
 so the sandbox rather than the gate is the boundary;
 `test_the_sandbox_blocks_the_writes_and_network_it_claims_to_block` checks that
-against the kernel rather than by reading the profile back. Both tasks run under
-the same profile — `sandbox_wrapper` — rather than under a copy of it.
+against the kernel rather than by reading the profile back. All three tasks run
+under the same profile — `sandbox_wrapper` — rather than under a copy of it.
 
 All ports share one command-line contract (`--provider/--model/--seed/--async/--async-ratio/--max-seconds/--dry-run/--yes`),
 defined in [`examples/_common.py`](../_common.py) and enforced by

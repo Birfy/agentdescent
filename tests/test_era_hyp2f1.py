@@ -40,7 +40,8 @@ def test_the_stress_file_records_how_it_was_made():
     assert SUITE["distribution"]["z"] == "U(-40.0, 0.999)"
     assert isinstance(SUITE["seed"], int)
     assert len(SUITE["shards"]) == 12
-    assert all(len(shard) == 20 for shard in SUITE["shards"])
+    assert all(len(shard) == 250 for shard in SUITE["shards"]), (
+        "250 a shard is what makes the 1000-point gate; see the generator")
 
 
 def test_no_point_is_degenerate():
@@ -58,11 +59,17 @@ def test_no_point_is_degenerate():
 
 @pytest.mark.parametrize("shard", range(12))
 def test_the_stored_reference_matches_mpmath_at_higher_precision(shard):
-    """Re-derive the file's values, at a precision above the one it kept."""
+    """Re-derive the file's values, at a precision above the one it kept.
+
+    Every 25th point rather than every point: 3000 values at 60 digits is ten
+    minutes, and a test that slow is a test that gets skipped. The stride is
+    fixed, so the sample is the same on every run and covers all twelve shards;
+    `test_the_committed_stress_file_redraws_identically` is the exhaustive half.
+    """
     mpmath = pytest.importorskip("mpmath",
                                  reason="no mpmath to check the references with")
     mpmath.mp.dps = 60
-    for row in SUITE["shards"][shard]:
+    for row in SUITE["shards"][shard][::25]:
         value = mpmath.hyp2f1(float(row["a"]), float(row["b"]),
                               float(row["c"]), float(row["z"]))
         stored = mpmath.mpf(row["value"])
@@ -71,19 +78,20 @@ def test_the_stored_reference_matches_mpmath_at_higher_precision(shard):
             f"stored reference for {row} is off by {float(relative):.2e}")
 
 
-def test_the_committed_stress_file_is_exactly_what_the_generator_produces():
+def test_the_committed_stress_file_redraws_identically():
     """The points were drawn, not chosen -- and this is how a reader confirms it.
 
-    Re-runs the generator from its declared seed and distribution and demands
-    the committed file back, byte for byte. That covers the half the
-    value-by-value check above cannot: that nobody picked *which* points to
-    include after seeing how an implementation did on them.
+    Redraws **shard 0** from the declared seed and distribution and demands the
+    committed 250 points back, exactly. That covers the half the value-by-value
+    check cannot: that nobody picked *which* points to include after seeing how
+    an implementation did on them. It is one shard because the generator is
+    seeded per shard for this purpose -- the whole file is
+    `python -m tools.gen_hyp2f1_stress --check`, twelve minutes, which belongs
+    in a release check rather than in every test run.
     """
     pytest.importorskip("mpmath", reason="the generator needs mpmath")
-    completed = subprocess.run(
-        [sys.executable, "-m", "tools.gen_hyp2f1_stress", "--check"],
-        capture_output=True, text=True, timeout=900)
-    assert completed.returncode == 0, completed.stderr or completed.stdout
+    from tools import gen_hyp2f1_stress as generator
+    assert generator.build_shard(0) == SUITE["shards"][0]
 
 
 def test_the_baseline_is_not_a_strawman_and_not_perfect_either():
@@ -106,7 +114,7 @@ def test_the_baseline_is_not_a_strawman_and_not_perfect_either():
             digits_sum += digits
             solved += digits >= hyp.SOLVED_DIGITS
             total += 1
-    assert total == 240
+    assert total == 3000
     assert 8.0 < digits_sum / total < 11.0, "the baseline moved; rereport the numbers"
     assert 0.5 < solved / total < 0.8, "the baseline moved; rereport the numbers"
 
@@ -148,7 +156,7 @@ def test_the_reward_is_order_preserving_with_the_metric():
 def test_the_suite_splits_into_scored_and_held_back_sets():
     suite = hyp.load_suite(shards=8, test_shards=4)
     assert suite.test_range() == (8, 9, 10, 11)
-    assert suite.size(0) == 20
+    assert suite.size(0) == 250
     assert len(suite.shard_points) == len(suite.shard_truth) == 12
     for points, truth in zip(suite.shard_points, suite.shard_truth):
         assert len(points) == len(truth)
