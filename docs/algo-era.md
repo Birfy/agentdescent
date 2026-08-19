@@ -645,14 +645,35 @@ against the 1000-point gate
 distribution finally say the same thing, so a gate improvement is evidence about
 the program rather than about which 80 points were drawn.
 
-For scale, the ceilings measured on this distribution: the baseline is 9.80, a
-five-line decidable Pfaff rule reaches 10.15, and an **oracle** picking the best
-of four textbook transformations per point — which no program can do, since it
-requires the answer — reaches 10.84. At **11.74** the evolved program is well
-past the transformation-picking ceiling; it is not selecting among identities,
-it is carrying its own Taylor summation in complex arithmetic, its own
-non-positive-integer handling, its own `gamma`/`gammaln` guards, and a
-continuation for the region near `z = 1`.
+**What the program actually found — corrected after review.** An earlier
+version of this section claimed the program was "past the transformation-picking
+ceiling" because an oracle over four textbook transformations reaches 10.98
+while the program reaches 11.74. That comparison was invalid: the oracle basis
+excluded the identity the program itself uses. Measured over a basis that
+includes it:
+
+| on all 3000 points | mean digits | 10+ digits |
+|---|---:|---:|
+| `scipy.special.hyp2f1` | 9.849 | 1970 |
+| **the z→1/z connection formula, applied blindly, no selection at all** | **11.253** | 2772 |
+| the evolved program | 11.738 | 2880 |
+| oracle over 4 textbook transformations *(the old, invalid basis)* | 10.981 | 2485 |
+| oracle over those 4 **plus z→1/z** — still unreachable, it needs the answer | **11.919** | 2961 |
+
+So the evolved program sits **below** the transformation-picking ceiling, not
+above it, and **74% of its gain (+1.40 of +1.89) comes from one identity applied
+without any selection at all**. Instrumenting the winner confirms the mechanism:
+the z→1/z branch answers 2775 of 3000 points, SciPy 101, the direct Taylor 106,
+the Pfaff branch 18.
+
+The honest result is still a real one, and it is this: **the search rediscovered
+the z→1/z connection formula and a `z < −1` switching rule**, which is worth
++1.9 digits on this distribution. It is not evidence that the program carries
+machinery beyond the identities — a review found that `_safe_gammaln` is defined
+and never called, `numpy` and `poch` are imported and never used, the
+"complex" Taylor summation has an imaginary part of exactly zero at all 3000
+points (because `cmath.log(-z)` is real for `z < 0`), and `_analytic_cont` is
+invoked **zero** times on the suite.
 
 Cost: 598 s wall, 52 calls, 210 k tokens, 4 replies damaged. The same 48
 expansions at `--workers 3` took 1,280 s, so raising concurrency to the
@@ -666,6 +687,43 @@ endpoint's measured knee bought **2.1×**.
     to get right, however good the average. The lever for that is an acceptance
     condition of "mean improves **and** no new catastrophic regression", which
     is a counting statistic and far less noisy than the mean it guards.
+
+!!! danger "Two wrong identities in the winning program, in branches the suite never reaches"
+    A specialist review of the artifact found two mathematical errors, both
+    confirmed here independently.
+
+    **The z→1−z connection formula has both Γ coefficients wrong**
+    (`_analytic_cont`). DLMF 15.8.4 requires
+    `C₁ = Γ(c)Γ(c−a−b)/(Γ(c−a)Γ(c−b))` and `C₂ = Γ(c)Γ(a+b−c)/(Γ(a)Γ(b))`; the
+    program divides the first by `Γ(a)Γ(b)` and writes the second as
+    `Γ(c)Γ(1−c)/(Γ(c−a−b)Γ(1+a+b−c))`, which is neither. At
+    `a=0.3, b=0.7, c=1.9, z=0.6` it returns −0.0965 where the value is 1.0895 —
+    **zero correct digits**. It computes `Γ(c−a)` and `Γ(c−b)` and then never
+    uses them.
+
+    **The `a ≈ b` guard applies the wrong Pfaff transformation.** Pfaff needs
+    `₂F₁(a, c−b; c; z/(z−1))`; the branch sums `₂F₁(a, a; c; z/(z−1))`, which
+    agrees only on the line `c = 2a`. At `a = b = −2.3, c = 4.1, z = −6` it
+    returns 198.85 where the value is 0.7448 — 267× too large, and SciPy gets
+    that point right.
+
+    **Neither is visible to the benchmark.** `_analytic_cont` is never called on
+    the 3000 points, and the probability of `|b−a| < 10⁻⁵` under `U(−30,30)²` is
+    about 3×10⁻⁷, so the suite contains no point that would exercise either. A
+    benchmark that cannot reach a branch cannot penalise it — which is an
+    argument about this suite's coverage (see below), not a defence of the code.
+
+!!! warning "What the suite does not sample at all"
+    Measured on the committed file: **0 points** with `z ≥ 1` (excluded by
+    construction, `Z_HIGH = 0.999`), **1 point** above `z = 0.99`, **0 points**
+    with `a` or `b` a non-positive integer (the terminating/polynomial case —
+    the most common practical use of ₂F₁, and measure zero under a uniform
+    draw), **0 points** with `b−a` or `c−a−b` within 10⁻⁶ of an integer (the
+    logarithmic cases where both connection formulas degenerate), and **0.5%**
+    with all of `|a|, |b|, |c| < 5`, which is where most real calls live.
+    92.5% of the suite sits in `z < −2.2`, the single region the winner's main
+    branch covers. The +1.9-digit headline is a true statement about this
+    distribution and a weak proxy for "beats SciPy at computing ₂F₁".
 
 !!! note "A silent splice, in the winning program"
     Line 65 of the winner reads `w = z / (z - 1/ 1.0)`. Nobody writes `1/ 1.0`;
