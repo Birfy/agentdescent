@@ -25,9 +25,10 @@ import sys
 import sysconfig
 import tempfile
 import time
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 from agentdescent.dataloader import cache_path, fetch_text
 
@@ -649,6 +650,91 @@ def extract_program(reply: str) -> Tuple[str, str]:
     if doc:
         summary = doc.strip().splitlines()[0][:200]
     return code, summary
+
+
+#: Characters that cannot occur in Python source once strings and comments are
+#: removed. Their presence is proof the reply was damaged in transit rather than
+#: written badly -- no sampler emits `$` in the middle of an identifier.
+_IMPOSSIBLE = re.compile(r"[^\x20-\x7e\n\t\r]|[$?`]")
+_STRINGS_AND_COMMENTS = re.compile(
+    r"(\"\"\".*?\"\"\"|'''.*?'''|\"[^\"\n]*\"|'[^'\n]*'|#[^\n]*)", re.DOTALL)
+
+
+def reply_is_intact(reply: str) -> Tuple[bool, str]:
+    """Did this reply arrive as Python at all, or did the channel damage it?
+
+    Two checks, both of which a *badly written* program passes: the extracted
+    code parses, and it holds no character Python source cannot hold. A model
+    that writes a wrong algorithm, an unbounded loop or a call that raises
+    passes both and goes on to be a node scoring `-inf`, which is what upstream
+    requires. What fails here is a reply that came back with bytes spliced into
+    the middle of tokens.
+
+    Measured on one hosted GLM-5.2 endpoint (Anthropic-shaped): replies of a few
+    thousand characters came back damaged the majority of the time, with
+    fragments like ``return val9.3192`` and ``c_orig,0$ zG$C$F1_orig``. The rate
+    was identical through the Anthropic SDK, through the SDK's streaming API and
+    through a hand-rolled ``urllib`` request, while 25 fetches of a
+    similarly-sized file over the same proxy returned one identical hash -- so
+    the damage is at the endpoint, not in any client this repository controls.
+    """
+    if not reply.strip():
+        return False, "empty reply"
+    code, _ = extract_program(reply)
+    if not code.strip():
+        return False, "no code in the reply"
+    try:
+        ast.parse(code)
+    except SyntaxError as exc:
+        return False, f"reply did not parse: {exc.msg} at line {exc.lineno}"
+    found = sorted(set(_IMPOSSIBLE.findall(_STRINGS_AND_COMMENTS.sub("", code))))
+    if found:
+        return False, f"reply holds characters Python source cannot: {found}"
+    return True, ""
+
+
+def with_intact_replies(
+    completion: Callable[[str], str],
+    *,
+    attempts: int = 4,
+    counter: Optional[Dict[str, int]] = None,
+) -> Callable[[str], str]:
+    """Redraw a reply the channel damaged. **Not** a retry of a failed program.
+
+    The distinction is the whole justification. Upstream's loop turns a program
+    that fails into a node scoring `-inf`, and this port keeps that: every
+    program that arrives intact is executed and scored, however bad it is.
+    What this retries is a reply that never was a program -- and treating those
+    as failed candidates would silently attribute an endpoint defect to the
+    model, which on the endpoint measured above meant most of the search budget.
+
+    After ``attempts`` draws the last reply is returned unchanged, so a run
+    against a channel that is *always* damaged still terminates, and still
+    records those expansions as the failed nodes they are. ``counter`` collects
+    ``drawn`` / ``damaged`` so a run can report the tax it paid.
+    """
+
+    def complete(prompt: str) -> str:
+        reply = ""
+        for attempt in range(attempts):
+            reply = completion(prompt)
+            if counter is not None:
+                counter["drawn"] = counter.get("drawn", 0) + 1
+            intact, reason = reply_is_intact(reply)
+            if intact:
+                return reply
+            if counter is not None:
+                counter["damaged"] = counter.get("damaged", 0) + 1
+            if attempt == attempts - 1:
+                warnings.warn(
+                    f"{attempts} replies in a row arrived damaged ({reason}); "
+                    f"scoring the last one as the failed program it is. This is "
+                    f"an endpoint defect, not a model result -- see "
+                    f"examples.era._era_support.reply_is_intact.",
+                    RuntimeWarning, stacklevel=2)
+        return reply
+
+    return complete
 
 
 #: Upstream's `GeminiLLM.draw_sample` wraps every prompt in this preamble.

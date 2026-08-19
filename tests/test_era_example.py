@@ -262,6 +262,91 @@ def test_strategy_round_trips_a_proposal_into_a_diff():
     assert strategy.to_diff(state, "not json", "w", 0, port.ARTIFACT_ID) is None
 
 
+    # ------------------------------------------------------------------
+    # The damaged-reply guard
+    # ------------------------------------------------------------------
+
+
+DAMAGED_REPLIES = {
+    "spliced identifier": "```python\ndef train_and_predict(a, b):\n"
+                          "    x = c_orig,0$ zG$C$F1_orig\n    return x\n```",
+    "spliced number": "```python\ndef train_and_predict(a, b):\n"
+                      "    return val9.3192\n```",
+    "no code at all": "I would recommend a gradient boosting model here.",
+    "empty": "   ",
+}
+
+#: Programs that are wrong, slow or fatal -- and that the guard must let past,
+#: because turning them into nodes scoring -inf is the algorithm working.
+INTACT_BUT_BAD = {
+    "never terminates": "```python\ndef train_and_predict(a, b):\n"
+                        "    while True:\n        pass\n```",
+    "raises at runtime": "```python\ndef train_and_predict(a, b):\n"
+                         "    return 1.0 / 0.0\n```",
+    "wrong answer": "```python\ndef train_and_predict(a, b):\n    return []\n```",
+    "banned import": "```python\nimport os\ndef train_and_predict(a, b):\n"
+                     "    return []\n```",
+}
+
+
+@pytest.mark.parametrize("name", sorted(DAMAGED_REPLIES))
+def test_a_reply_the_channel_damaged_is_recognised(name):
+    intact, reason = support.reply_is_intact(DAMAGED_REPLIES[name])
+    assert not intact and reason
+
+
+@pytest.mark.parametrize("name", sorted(INTACT_BUT_BAD))
+def test_a_bad_program_is_not_treated_as_damage(name):
+    """The distinction the guard exists to keep.
+
+    Redrawing a program that merely fails would be the port quietly retrying
+    its own failures, which is a different algorithm: upstream appends the
+    failed node and this port pins that behaviour elsewhere in this file.
+    """
+    assert support.reply_is_intact(INTACT_BUT_BAD[name])[0]
+
+
+def test_the_guard_redraws_damage_counts_it_and_then_gives_up():
+    replies = [DAMAGED_REPLIES["spliced number"],
+               DAMAGED_REPLIES["spliced identifier"],
+               INTACT_BUT_BAD["raises at runtime"]]
+    drawn = []
+
+    def channel(prompt):
+        drawn.append(prompt)
+        return replies[len(drawn) - 1]
+
+    counter = {}
+    complete = support.with_intact_replies(channel, attempts=4, counter=counter)
+    assert complete("p") == replies[2]
+    assert len(drawn) == 3
+    assert counter == {"drawn": 3, "damaged": 2}
+
+    # A channel that is always damaged must terminate, hand back the last
+    # reply, and say so -- the run then records those expansions as the failed
+    # nodes they are rather than hanging.
+    calls = {"n": 0}
+
+    def always_damaged(prompt):
+        calls["n"] += 1
+        return DAMAGED_REPLIES["spliced number"]
+
+    with pytest.warns(RuntimeWarning, match="damaged"):
+        out = support.with_intact_replies(always_damaged, attempts=3)("p")
+    assert calls["n"] == 3 and out == DAMAGED_REPLIES["spliced number"]
+
+
+def test_the_guard_is_off_when_one_attempt_is_allowed():
+    calls = {"n": 0}
+
+    def channel(prompt):
+        calls["n"] += 1
+        return DAMAGED_REPLIES["spliced number"]
+
+    support.with_intact_replies(channel, attempts=1)("p")
+    assert calls["n"] == 1
+
+
 def test_an_empty_reply_still_becomes_a_node():
     """Upstream appends a node for every expansion, including a failed one.
 

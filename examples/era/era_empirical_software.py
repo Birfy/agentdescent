@@ -96,6 +96,7 @@ from examples.era._era_support import (
     prepare_splits,
     program_id,
     sandbox_backend,
+    with_intact_replies,
 )
 
 
@@ -924,6 +925,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--thinking", choices=("disabled", "enabled", "default"),
                         default="disabled")
     parser.add_argument("--api-timeout", type=float, default=180.0)
+    parser.add_argument(
+        "--reply-attempts", type=int, default=4,
+        help=("redraws allowed when a reply arrives damaged -- unparsable, or "
+              "holding characters Python source cannot hold. A *badly written* "
+              "program is never redrawn; it becomes a node scoring -inf, as "
+              "upstream requires. 1 disables the guard (see "
+              "examples.era._era_support.reply_is_intact)"))
     parser.add_argument("--shutdown-grace", type=float, default=120.0)
     parser.add_argument("--quality-target", type=float)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
@@ -967,7 +975,10 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
 
     model_usage = Usage()
     actor_usage = Usage()
-    complete = _make_completion(args, model_usage)
+    damage: Dict[str, int] = {}
+    complete = with_intact_replies(
+        _make_completion(args, model_usage),
+        attempts=max(1, args.reply_attempts), counter=damage)
     splits = prepare_splits(
         shards=args.shards, test_shards=args.test_shards, train_rows=args.train_rows)
     print(f"Data     : train={splits.train_rows} rows, "
@@ -1004,6 +1015,11 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         },
         "observation": run.summary(args.quality_target),
         "model_usage": _usage_dict(model_usage),
+        "reply_damage": {
+            "drawn": damage.get("drawn", 0),
+            "damaged": damage.get("damaged", 0),
+            "attempts_allowed": max(1, args.reply_attempts),
+        },
     }
     _write_json(args.output, payload)
     best_path = args.output.with_name(f"{args.output.stem}-best.py")

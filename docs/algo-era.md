@@ -280,6 +280,67 @@ shard, so position is not family either. Together those are what keep the task
    better — and the engine's `[0, 1]` reward is `mean_digits / 12`, which is
    again exactly order-preserving with what the tree ranks on.
 
+## The third task — 2F1, and what replaces a leaderboard
+
+The two tasks above are scored against a dataset and against arithmetic. The
+third is scored against **an independent arbitrary-precision computation**, and
+it exists to answer a specific objection: *a benchmark nobody else has run
+proves nothing, because the people who built it also set the bar.*
+
+[`examples/era/era_hypergeometric.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/era_hypergeometric.py)
+asks for a double-precision routine `hyp2f1(a, b, c, z)` — the Gauss
+hypergeometric function, real parameters, over a wide declared range. Three
+properties are what a leaderboard would otherwise have supplied.
+
+**The problem is hard, and not on this repository's say-so.** The standard
+survey — Pearson, Olver & Porter, *Numerical methods for the computation of the
+confluent and Gauss hypergeometric functions*, Numerical Algorithms 74:821–866
+(2017) — exists because no single method covers the parameter space: the Taylor
+series diverges outside the unit disc and cancels well inside it, every
+transformation has a bad region of its own, and the recurrences are unstable in
+one direction.
+
+**The baseline is the state of the practice, not a strawman.**
+`scipy.special.hyp2f1` — Cephes underneath, in production for decades, the
+function a working scientist already calls. On the declared distribution it
+**loses more than six digits on roughly a third of points**, and some of those
+land at zero correct digits. That is measured in
+`tests/test_era_hyp2f1.py::test_the_baseline_is_not_a_strawman_and_not_perfect_either`,
+which also fails if SciPy ever gets good enough that the numbers here need
+restating.
+
+**The reference cannot be argued with.** Every value comes from mpmath, which
+shares no code with SciPy and none with any candidate, computed at **30 and at
+60 decimal digits**, and kept only where the two agree to 25. Nothing in the
+sandbox can reach it — the file a candidate's shard is built from carries four
+parameters per point and no values. And the whole set is committed, so the
+claim is checkable rather than reported:
+
+```bash
+python -m tools.gen_hyp2f1_stress --check   # redraws and demands the file back
+```
+
+Two tests hold that down: one re-derives every stored value from mpmath at 60
+digits, the other reruns the generator and requires the committed file **byte
+for byte**, which is what rules out points having been chosen after seeing how
+an implementation did on them. The distribution — `a, b, c ~ U(-30, 30)`,
+`z ~ U(-40, 0.999)` — was fixed before anything was measured and is recorded in
+the data file beside the values.
+
+### The one constraint that keeps the comparison honest
+
+`mpmath`, `decimal` and `fractions` are **off this task's import allowlist**.
+The deliverable is a float64 routine, comparable with SciPy's; a candidate that
+reimplemented arbitrary-precision arithmetic would be answering a different
+question and would be scored against a reference produced the same way it was.
+`tests/test_era_hyp2f1.py` asserts each of those imports is refused by the gate.
+
+Everything else in `scipy.special` — including `hyp2f1` itself — is allowed, on
+purpose. Using the baseline where it is reliable and something better where it
+is not *is* the expert answer here; the search's job is to find where the line
+falls and what to do on the far side of it, from `(a, b, c, z)` alone, with no
+sight of the answer.
+
 ## Measured results — Playground S3E1
 
 ### The method
@@ -431,6 +492,90 @@ times, and `--staleness full` considered 12 cards and discarded none.
     422 s) because scoring nine integrals is milliseconds where training a
     regressor on 29,709 rows is seconds — so on this task the model call, not
     the sandbox, is what parallelism has to hide.
+
+## Measured results — 2F1
+
+### The method
+
+| Setting | Value |
+|---|---|
+| Model | `glm-5.2`, Anthropic-shaped API |
+| Sampling | temperature 0.7, **thinking disabled**, `--max-tokens 16000` |
+| Mode | `async_evolve(n_workers=3, async_ratio=1)`, `--staleness full` |
+| Budget | 18 expansions, hard-capped; `--max-seconds 5400` |
+| Reply guard | `--reply-attempts 4` (see below — it was needed) |
+| Points | 20 per set; 8 sets scored (4 rollout, 4 gate) |
+| Independent test | 4 further sets, **80 points**, never scored during the search |
+| Reference | mpmath 1.4.1 at 30 and 60 dps, kept where they agree to 25 |
+| Isolation | Bubblewrap, Linux |
+| Replay | none; a single live engine run |
+
+Recorded in
+[`bench/results/era-hyp2f1-run.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-hyp2f1-run.json).
+
+### The result, which is mostly a negative one
+
+18 expansions, 20 mutation calls (**2 arrived damaged and were redrawn**),
+79,378 tokens, 1,148 s of model time, 404 s of wall clock.
+
+| | baseline | best found | |
+|---|---:|---:|---:|
+| held-back mean correct digits | 9.692 | **9.826** | +0.13 |
+| held-back points at 10+ digits | 51 / 80 | **52 / 80** | +1 point |
+| gate mean digits | 10.185 | 10.202 | the split the tree ranked on |
+
+That is a real improvement on points the search never saw, and it is **small**.
+The comparison that says how small: a **five-line decidable rule** — apply Pfaff
+when `z < -1`, pick the branch by which one has the smaller parameters — scores
+10.148 against the baseline's 9.732 over all 240 points, about **+0.42**. A
+numerical analyst writes that in five minutes. Eighteen expansions of `glm-5.2`
+found roughly a third of it.
+
+The tree says where the budget went: 19 nodes, 18 valid, depth 3. **Seven scored
+exactly the baseline to six decimals** — programs that build a transformation and
+then wrap it in a fallback whose condition never fires, so every point takes the
+`scipy` branch. Five scored far *worse* (0.19, 0.88, 0.92, 4.20, 6.52): genuine
+attempts at the connection formulas that got a sign or a branch wrong. Only one
+node beat the root at all.
+
+The winner is not a trivial program — it tracks the sign of `loggamma` through
+negative arguments, sums with log-sum-exp to control cancellation, and keeps a
+series with a convergence test. It is simply not yet better than Cephes at what
+Cephes is good at.
+
+!!! note "The gate refused a candidate that reached for arbitrary precision"
+    One node died with `gate: import 'mpmath' is not allowed`. That is the
+    constraint working exactly as designed: the model correctly identified that
+    arbitrary precision would solve the problem, and the allowlist refused,
+    because a routine that reimplements mpmath is not comparable with SciPy and
+    would be scored against a reference produced the same way it was. The
+    refusal is worth more than the node would have been.
+
+!!! warning "Roughly one reply in five arrived damaged, and it was not the model"
+    Measured on this endpoint: replies of a few thousand characters came back
+    with bytes spliced into the middle of tokens — `return val9.3192`,
+    `c_orig,0$ zG$C$F1_orig` — at about **19%**, pooling every certain case (a
+    reply that does not parse) over 58 sampled replies. The rate is the same
+    through the Anthropic SDK, through its streaming API, and through a
+    hand-rolled `urllib` request, while 25 fetches of a similarly-sized file
+    over the same proxy hashed identically. So it is the endpoint.
+
+    The **first** 2F1 run was made without the guard, and 3 of its 15 expansions
+    died on a `SyntaxError` the model did not write; it finished at 9.692 →
+    9.692, no improvement at all. That run is not reported as a result, because
+    it measured a channel. `--reply-attempts` redraws a reply that is not Python
+    at all and never redraws a program that merely fails — the latter is still a
+    node scoring `-inf`, as upstream requires — and every run now records
+    `reply_damage` beside its numbers.
+
+    A splice that lands inside a numeric literal still parses, and nothing here
+    can catch it. Results measured through this endpoint carry that caveat.
+
+!!! warning "One run, one seed, one sampling mode"
+    No `--serial` arm, so no speedup claim. And `--thinking disabled` is a
+    choice that changes the model's output, not only its latency: on a task
+    whose difficulty is a chain of transformation identities, it may well be the
+    binding constraint. This row is `thinking=disabled` and says so.
 
 ## Run it
 

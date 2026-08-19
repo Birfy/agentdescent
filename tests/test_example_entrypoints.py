@@ -1,9 +1,10 @@
 """The command-line contract shared by the eight faithful algorithm ports.
 
-Nine entry points, because ERA ships two tasks on one search: the Kaggle
-regression upstream bundles, and the paper's *numerical solution of integrals*.
-The contract is per entry point -- it is about the command line a user types --
-so both are rows here, and neither adds an algorithm to the fidelity table.
+Ten entry points, because ERA ships three tasks on one search: the Kaggle
+regression upstream bundles, the paper's *numerical solution of integrals*, and
+double-precision evaluation of the Gauss hypergeometric function. The contract
+is per entry point -- it is about the command line a user types -- so all three
+are rows here, and none of them adds an algorithm to the fidelity table.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from examples.adas import adas_meta_agent_search as adas
 from examples.dgm import dgm_self_improve as dgm
 from examples.era import era_empirical_software as era
 from examples.era import era_hard_integrals as era_integrals
+from examples.era import era_hypergeometric as era_hyp2f1
 from examples.evoskill import evoskill_skill_discovery as evoskill
 from examples.gepa import gepa_prompt_evolution as gepa
 from examples.openevolve import openevolve_program_evolution as openevolve
@@ -78,6 +80,11 @@ PORTS = (
     # are drawn rather than downloaded, so `prepare_suite` is the boundary a
     # dry-run must not cross.
     Port(era_integrals, "iterations", "glm-5.2", 1800.0, "prepare_suite",
+         provider="openai", async_ratio=1, budget_is_iterations=True),
+    # ERA's third task, 2F1 in double precision. Its loader reads a committed
+    # file rather than drawing or downloading, so `load_suite` is the boundary
+    # a dry-run must not cross.
+    Port(era_hyp2f1, "iterations", "glm-5.2", 1800.0, "load_suite",
          provider="openai", async_ratio=1, budget_is_iterations=True),
 )
 

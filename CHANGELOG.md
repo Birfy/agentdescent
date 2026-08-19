@@ -8,6 +8,33 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- **A hosted endpoint was damaging replies in transit, and the search was
+  scoring the damage as if the model had written it.** Measured on a GLM-5.2
+  endpoint behind an Anthropic-shaped API: roughly **one reply in five** of a
+  few thousand characters came back with bytes spliced into the middle of
+  tokens — `return val9.3192`, `c_orig,0$ zG$C$F1_orig` — pooling the certain
+  cases (a reply that does not parse) across 58 sampled replies.
+
+  It is not the client. The rate is the same through the Anthropic SDK, through
+  the SDK's streaming API, and through a hand-rolled `urllib` request; 25
+  fetches of a similarly-sized file over the same proxy returned one identical
+  hash. It is also not free: on the first 2F1 run, 3 of 15 expansions died on a
+  `SyntaxError` the model did not write.
+
+  `examples/era/_era_support.py` gains `reply_is_intact` and
+  `with_intact_replies`, and all three ERA entry points a `--reply-attempts`
+  flag (default 4, `1` disables). **The distinction is the whole point**: a
+  reply is redrawn only when it is not Python at all — it does not parse, or it
+  holds a character Python source cannot hold. A program that is wrong, that
+  never terminates, that raises, or that imports something the gate bans is
+  *not* redrawn; it becomes a node scoring `-inf`, which is what upstream
+  requires and what `test_a_bad_program_is_not_treated_as_damage` pins. Each
+  run now records `reply_damage` beside its result, so the tax is in the data
+  rather than in prose.
+
+  Known limitation, stated rather than papered over: a splice that lands inside
+  a numeric literal still parses, and nothing here can see it.
+
 - **The ERA sandbox runner could not import a candidate that used
   `@dataclass`.** `dataclasses` is on the port's import allowlist, so a model
   writing `@dataclass class Split: ...` is writing an allowed program — and it
@@ -83,6 +110,37 @@ All notable changes to AgentDescent are documented here. The format follows
   nothing is the livelock's signature and must be counted.
 
 ### Added
+
+- **ERA's third task: double-precision evaluation of the Gauss hypergeometric
+  function, and what replaces a leaderboard.** `examples/era/era_hypergeometric.py`
+  asks for `hyp2f1(a, b, c, z)` over `a, b, c ~ U(-30, 30)`, `z ~ U(-40, 0.999)`.
+  Nobody has run an agentic program search on it, so there is no ranking to
+  join; three properties stand in for one.
+
+  *The problem is hard on somebody else's authority.* The standard survey —
+  Pearson, Olver & Porter, Numerical Algorithms 74:821–866 (2017) — exists
+  because no single method covers the parameter space.
+
+  *The baseline is the state of the practice.* `scipy.special.hyp2f1`, Cephes
+  underneath, the function a working scientist already calls. On the declared
+  distribution it loses more than six digits on roughly a third of points, some
+  of them at zero correct digits — and a test fails if SciPy ever improves
+  enough that the reported numbers need restating.
+
+  *The reference cannot be argued with.* mpmath at 30 **and** 60 decimal digits,
+  kept only where the two agree to 25, shipped as a committed file that
+  `python -m tools.gen_hyp2f1_stress --check` re-derives byte for byte. One test
+  re-computes every stored value at 60 digits; another reruns the generator and
+  demands the same file back, which is what rules out points having been picked
+  after seeing how an implementation did on them. `mpmath`, `decimal` and
+  `fractions` are off this task's import allowlist, because the deliverable is a
+  float64 routine and a candidate reimplementing arbitrary precision would be
+  answering a different question.
+
+  The headroom is real and was checked before the task was built: a five-line
+  rule that never sees the answer — Pfaff when `z < -1`, choosing the branch by
+  parameter size — moves 400 sampled points from 10.93 to 11.84 mean correct
+  digits and cuts failures from 144 to 101.
 
 - **ERA's second task: the paper's own "numerical solution of integrals".**
   `examples/era/era_hard_integrals.py` runs the *same* flat-PUCT search as the

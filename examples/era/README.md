@@ -18,6 +18,7 @@ AgentDescent engine, running **two** of the paper's tasks on one search.
 ```bash
 python -m examples.era.era_empirical_software --dry-run   # Kaggle S3E1, RMSE
 python -m examples.era.era_hard_integrals --dry-run       # hard integrals, correct digits
+python -m examples.era.era_hypergeometric --dry-run       # 2F1 vs a 25-digit reference
 ```
 
 `--dry-run` prints the configuration and returns with **zero network access
@@ -50,6 +51,18 @@ Each problem also has a hard cap on calls to the integrand. That pairing is the
 task — with no cap, the best program is whichever one is allowed to spend the
 most, which is not a question about method.
 
+**`era_hypergeometric.py` — the Gauss hypergeometric function.** A candidate
+writes `hyp2f1(a, b, c, z)` for real parameters over a wide declared range. No
+leaderboard exists for this, so three other things carry the result: the problem
+is hard on the standard survey's authority (Pearson, Olver & Porter, *Numerical
+Algorithms* 74:821–866, 2017 — no single method covers the parameter space); the
+baseline is `scipy.special.hyp2f1`, which every scientist already calls and
+which loses more than six digits on about a third of the points; and the
+reference is mpmath at 30 **and** 60 digits, kept only where the two agree to
+25, committed as a file that `python -m tools.gen_hyp2f1_stress --check`
+re-derives byte for byte. `mpmath`, `decimal` and `fractions` are off this
+task's allowlist — the deliverable is a float64 routine.
+
 ## What is in here
 
 - [`era_empirical_software.py`](era_empirical_software.py) — the runnable port, and the search every task shares
@@ -60,9 +73,29 @@ most, which is not a question about method.
 - [`_era_integrals.py`](_era_integrals.py) — the nine integrand families, their closed forms, and the draw
 - [`_era_integration.py`](_era_integration.py) — suite, sandboxed evaluator, prompt (integrals)
 - [`_era_integration_runner.py`](_era_integration_runner.py) — the sandbox-side runner (integrals)
+- [`era_hypergeometric.py`](era_hypergeometric.py) — the 2F1 entry point
+- [`_era_hyp2f1.py`](_era_hyp2f1.py) — suite, sandboxed evaluator, prompt (2F1)
+- [`_era_hyp2f1_runner.py`](_era_hyp2f1_runner.py) — the sandbox-side runner (2F1)
+- [`data/hyp2f1_stress.json`](data/hyp2f1_stress.json) — the committed stress set and its references,
+  produced by [`tools/gen_hyp2f1_stress.py`](../../tools/gen_hyp2f1_stress.py)
 - Port notes, upstream trace, and every recorded deviation: [`docs/algo-era.md`](../../docs/algo-era.md)
 - Offline tests: [`tests/test_era_example.py`](../../tests/test_era_example.py),
-  [`tests/test_era_integrals.py`](../../tests/test_era_integrals.py)
+  [`tests/test_era_integrals.py`](../../tests/test_era_integrals.py),
+  [`tests/test_era_hyp2f1.py`](../../tests/test_era_hyp2f1.py)
+
+## When the channel damages a reply
+
+Measured on a hosted GLM-5.2 endpoint: about **one reply in five** of a few
+thousand characters came back with bytes spliced into the middle of tokens
+(`return val9.3192`). Identical through the Anthropic SDK, its streaming API and
+a hand-rolled `urllib` request, while 25 fetches of a similar-sized file over
+the same proxy hashed identically — so it is the endpoint, not any client here.
+
+`--reply-attempts` (default 4) redraws a reply that **is not Python at all** —
+it does not parse, or holds a character Python source cannot hold. A program
+that is merely wrong, slow, fatal or gate-banned is never redrawn: it becomes a
+node scoring `-inf`, exactly as upstream requires. Every run records
+`reply_damage` beside its result.
 
 ## The one thing upstream does not ship
 

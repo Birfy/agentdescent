@@ -1,40 +1,40 @@
-"""ERA tree search on the paper's *numerical solution of integrals* task.
+"""ERA tree search on double-precision evaluation of 2F1 -- a task nobody has run.
 
-The ERA abstract lists six demonstrations, and five of them are scored against a
-leaderboard or a held-out dataset. The sixth is not: "numerical solution of
-integrals" is scored against arithmetic. That is the one ported here.
+Not a benchmark with a leaderboard, and deliberately so. The evidence that a run
+here means something comes from two places instead:
 
-    "ERA also produced expert-level software for geospatial analysis, neural
-    activity prediction in zebrafish, and numerical solution of integrals"
-    -- arXiv:2509.06503
+**The reference is independent of everything being scored.** Every point's value
+was computed by mpmath at 30 *and* 60 decimal digits, and points where the two
+disagreed above 25 digits were thrown away. mpmath shares no code with SciPy and
+none with any candidate, nothing in the sandbox can reach it, and the stress set
+with its references is a committed file that anyone can re-derive with
+``python -m tools.gen_hyp2f1_stress --check``.
 
-What the search optimises
--------------------------
-A candidate is a single function, ``integrate(f, a, b)``, and it is handed a
-**black-box scalar integrand** -- no formula, no parameters, no family name --
-over ``[0, 1]``, ``[0, inf)`` or ``(-inf, inf)``. Each problem set holds nine
-integrals, one from each of nine difficulty classes: singular at one endpoint,
-singular at both, oscillating infinitely often into a corner, spiked over a
-width of 1e-7, oscillating without ever decaying, cancelling down to a
-ten-thousandth of the integrand's own size, and so on. Every one of them has a
-**closed form**, so the score is correct significant digits against an exact
-value rather than agreement with a rival integrator.
+**The baseline is the state of the practice.** Not a strawman written for this
+example: ``scipy.special.hyp2f1``, Cephes underneath, the function every
+scientist already calls. On the declared distribution it loses more than six
+digits on roughly a third of the points -- and the failures are algorithmic, not
+a float64 wall, because a textbook Pfaff transformation chosen from
+``(a, b, c, z)`` alone recovers a large share of them.
 
-`scipy.integrate.quad` on defaults is the root node. It is a genuinely strong
-baseline -- adaptive Gauss-Kronrod with a documented infinite-range transform --
-and it solves several of the nine families to machine precision. It also returns
-confident nonsense on others, which is the headroom the tree search explores.
+That the problem is hard is not this repository's claim. The standard survey of
+the area -- Pearson, Olver & Porter, *Numerical methods for the computation of
+the confluent and Gauss hypergeometric functions*, Numerical Algorithms
+74:821-866 (2017) -- exists because no single method is reliable across the
+parameter space: the Taylor series diverges outside the unit disc, every
+transformation has a bad region of its own, the recurrences are unstable in one
+direction, and the useful identities cancel.
 
-Everything about the search itself is `era_empirical_software.py`: the flat-PUCT
-tree, the visit reservation, the staleness handling, the aggregator, the
-governance layer. This module supplies only a
-:class:`~examples.era._era_domain.Domain` -- seed program, sandboxed evaluator,
-mutation prompt, metric name -- and the command line the other ports share.
+The search itself is `era_empirical_software.py`, unchanged: the flat-PUCT tree,
+the visit reservation, the aggregator, the staleness handling, the governance
+layer and the sandbox profile. This module supplies a
+:class:`~examples.era._era_domain.Domain` and the command line the other ports
+share.
 
 Run
 ---
-    python -m examples.era.era_hard_integrals --dry-run
-    python -m examples.era.era_hard_integrals --provider claude --model glm-5.2 \\
+    python -m examples.era.era_hypergeometric --dry-run
+    python -m examples.era.era_hypergeometric --provider claude --model glm-5.2 \\
         --iterations 12 --workers 3 --yes
 """
 
@@ -55,16 +55,16 @@ from examples._common import (
     worker_count,
 )
 from examples.era._era_domain import Domain
-from examples.era._era_integrals import DIGIT_CAP, FAMILIES
-from examples.era._era_integration import (
-    EVAL_BUDGET,
+from examples.era._era_hyp2f1 import (
+    DIGIT_CAP,
     INITIAL_PROGRAM,
-    PROBLEM_SECONDS,
+    SHARD_SECONDS,
+    SOLVED_DIGITS,
     Suite,
     evaluate_source,
     framework_score,
+    load_suite,
     mutation_prompt,
-    prepare_suite,
     suite_preview,
 )
 from examples.era._era_support import (
@@ -82,22 +82,17 @@ from examples.era.era_empirical_software import (
 
 
 ARTIFACT_ID = "era_program"
-DEFAULT_OUTPUT = Path("era-integrals-result.json")
+DEFAULT_OUTPUT = Path("era-hyp2f1-result.json")
 
 
 def _make_completion(args: argparse.Namespace, usage: Usage):
-    """The sibling port's completion wiring, calling this module's own import.
+    """This module's own call into ``completion_for``.
 
-    Six lines rather than an import of the neighbour's private helper, because
-    `tests/test_example_entrypoints.py` proves a dry-run never crosses an
-    external boundary by replacing **this module's** `completion_for` with a
-    tripwire. A port whose network call is made through another module's name
-    would pass that test without the tripwire ever being in the path.
-
-    ``--thinking`` reaches an Anthropic-shaped endpoint and nothing else, as in
-    the sibling: left on its default, a reasoning model can spend the whole
-    token budget on hidden thinking and return empty visible content, which this
-    port would record as a node that scored -inf.
+    Not an import of the sibling's private helper: the shared contract test
+    proves a dry-run never crosses an external boundary by replacing **this
+    module's** `completion_for` with a tripwire, and a port whose network call
+    is made through another module's name would pass that test with the
+    tripwire outside the path.
     """
     options: Dict[str, Any] = {}
     if args.thinking != "default":
@@ -112,45 +107,44 @@ def _make_completion(args: argparse.Namespace, usage: Usage):
     )
 
 
-def integrals_domain(
+def hypergeometric_domain(
     suite: Suite,
     *,
     candidate_timeout: float = 60.0,
     max_code_length: int = 20_000,
-    eval_budget: int = EVAL_BUDGET,
-    problem_seconds: float = PROBLEM_SECONDS,
+    shard_seconds: float = SHARD_SECONDS,
 ) -> Domain:
     """This task, in the four terms the ERA search needs."""
     preview = suite_preview(suite)
     return Domain(
-        name=("nine hard one-dimensional integrals per problem set, "
-              "mean correct significant digits"),
-        entrypoint="integrate",
+        name=("Gauss hypergeometric 2F1(a, b; c; z) in double precision, "
+              "mean correct significant digits against a 25-digit reference"),
+        entrypoint="hyp2f1",
         metric_key="mean_digits",
         metric_better="higher",
         initial_program=INITIAL_PROGRAM,
-        initial_summary="scipy.integrate.quad on default settings",
+        initial_summary="scipy.special.hyp2f1, called directly",
         evaluate=lambda code, shard_ids: evaluate_source(
             code, suite=suite, shards=shard_ids, timeout=candidate_timeout,
-            eval_budget=eval_budget, problem_seconds=problem_seconds,
-            max_length=max_code_length),
+            shard_seconds=shard_seconds, max_length=max_code_length),
         reward=framework_score,
         prompt=lambda program: mutation_prompt(
             program, preview=preview, timeout=candidate_timeout,
-            eval_budget=eval_budget, problem_seconds=problem_seconds),
+            shard_seconds=shard_seconds),
         task_prompt=lambda index: (
-            f"Integrate held-out problem set {index} to as many correct digits "
-            f"as the evaluation budget allows."),
+            f"Evaluate held-out point set {index} of the 2F1 stress suite to as "
+            f"many correct digits as possible."),
         test_shards=suite.test_range(),
         data_summary={
-            "families": len(FAMILIES),
-            "problems_per_shard": suite.size(0),
+            "points_per_shard": suite.size(0),
             "scoring_shards": suite.scoring_shards,
             "test_shards": suite.test_shards,
-            "eval_budget_per_problem": eval_budget,
-            "problem_seconds": problem_seconds,
             "digit_cap": DIGIT_CAP,
-            "seed": suite.seed,
+            "solved_digits": SOLVED_DIGITS,
+            "shard_seconds": shard_seconds,
+            "reference": suite.metadata.get("reference", {}),
+            "distribution": suite.metadata.get("distribution", {}),
+            "suite_seed": suite.metadata.get("seed"),
         },
     )
 
@@ -169,20 +163,16 @@ def build_parser() -> argparse.ArgumentParser:
                         help="FUTS expansions in total (upstream's num_iterations)")
     parser.add_argument("--workers", type=int, default=3)
     parser.add_argument("--shards", type=int, default=8,
-                        help="problem sets the search may score against")
+                        help="point sets the search may score against")
     parser.add_argument("--test-shards", type=int, default=4,
-                        help="further problem sets the search never sees")
+                        help="further point sets the search never sees")
     parser.add_argument("--held-out-frac", type=float, default=0.5)
     parser.add_argument("--c-puct", type=float, default=1.0,
                         help="upstream's exploration constant (futs.search default)")
     parser.add_argument("--candidate-timeout", type=float, default=60.0,
-                        help="upstream's Sandbox(timeout_seconds=60), per problem set")
-    parser.add_argument("--eval-budget", type=int, default=EVAL_BUDGET,
-                        help=("calls to the integrand allowed per problem. This is "
-                              "half the task: with no cap the winner is whichever "
-                              "program is allowed to spend the most"))
-    parser.add_argument("--problem-seconds", type=float, default=PROBLEM_SECONDS,
-                        help="wall-clock per problem, inside --candidate-timeout")
+                        help="upstream's Sandbox(timeout_seconds=60), per point set")
+    parser.add_argument("--shard-seconds", type=float, default=SHARD_SECONDS,
+                        help="wall-clock for one point set, inside --candidate-timeout")
     parser.add_argument("--max-code-length", type=int, default=20_000)
     parser.add_argument("--max-tokens", type=int, default=16000)
     parser.add_argument("--temperature", type=float, default=0.7)
@@ -215,12 +205,11 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             "Use --staleness {guarded,reflective,full}.")
     mode = "async" if args.asynchronous else ("serial" if args.serial else "sync")
     print("Algorithm: ERA Flat UCB tree search (FUTS) on AgentDescent")
-    print("Task     : numerical solution of integrals -- "
-          f"{len(FAMILIES)} difficulty classes, mean correct digits (cap "
-          f"{DIGIT_CAP:.0f}), closed-form references")
+    print("Task     : Gauss hypergeometric 2F1 in double precision -- mean correct "
+          f"digits (cap {DIGIT_CAP:.0f}) against mpmath at 25 digits")
+    print("Baseline : scipy.special.hyp2f1, called directly")
     print(f"Evaluator: {sandbox_backend() or 'NO SANDBOX -- this run will fail'} "
-          f"isolated, {args.eval_budget} integrand calls and "
-          f"{args.problem_seconds:.0f}s per problem")
+          f"isolated, {args.shard_seconds:.0f}s per point set")
     print(
         f"Plan     : mode={mode}, model={args.model}, iterations={args.iterations}, "
         f"workers={args.workers}, c_puct={args.c_puct}, temperature={args.temperature}"
@@ -231,7 +220,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         f"-> {classify(artifact).name}"
     )
     if args.dry_run:
-        print("[dry-run] no API, problem set, or sandbox process was accessed.")
+        print("[dry-run] no API, stress set, or sandbox process was accessed.")
         return 0
 
     _require_api_environment(args.provider)
@@ -244,16 +233,16 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     complete = with_intact_replies(
         _make_completion(args, model_usage),
         attempts=max(1, args.reply_attempts), counter=damage)
-    suite = prepare_suite(seed=args.seed, shards=args.shards,
-                          test_shards=args.test_shards)
-    print(f"Problems : {suite.size(0)} per set, {args.shards} scored + "
-          f"{args.test_shards} held back, seed={args.seed}, files under {suite.root}")
-    domain = integrals_domain(
+    suite = load_suite(shards=args.shards, test_shards=args.test_shards)
+    reference = suite.metadata.get("reference", {})
+    print(f"Points   : {suite.size(0)} per set, {args.shards} scored + "
+          f"{args.test_shards} held back; reference {reference.get('library')} "
+          f"{reference.get('version')} at {reference.get('precisions_dps')} dps")
+    domain = hypergeometric_domain(
         suite,
         candidate_timeout=args.candidate_timeout,
         max_code_length=args.max_code_length,
-        eval_budget=args.eval_budget,
-        problem_seconds=args.problem_seconds,
+        shard_seconds=args.shard_seconds,
     )
     run = run_agentdescent_era(
         complete,
@@ -276,17 +265,20 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         verbose=True,
     )
     payload: Dict[str, Any] = {
-        "experiment": "ERA on AgentDescent -- numerical solution of integrals",
+        "experiment": "ERA on AgentDescent -- Gauss hypergeometric 2F1",
         "status": "completed" if run.result.error is None else "partial",
         "completed_at": _utc_now(),
         "upstream_commit": UPSTREAM_COMMIT,
         "task": domain.name,
+        "baseline": "scipy.special.hyp2f1",
         "config": {
             key: value for key, value in vars(args).items()
             if key not in ("output", "yes")
         },
         "observation": run.summary(args.quality_target),
         "model_usage": _usage_dict(model_usage),
+        # What the channel cost, kept beside the result rather than in prose: a
+        # reply that arrived damaged is not a program the search evaluated.
         "reply_damage": {
             "drawn": damage.get("drawn", 0),
             "damaged": damage.get("damaged", 0),
@@ -296,12 +288,15 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     _write_json(args.output, payload)
     best_path = args.output.with_name(f"{args.output.stem}-best.py")
     best_path.write_text(run.tree.best().program.code.rstrip() + "\n", encoding="utf-8")
-    baseline = run.baseline_test_metrics.get("mean_digits")
-    best = run.best_test_metrics.get("mean_digits")
+    baseline = run.baseline_test_metrics
+    best = run.best_test_metrics
     print(
-        f"completed: held-back mean digits {baseline} -> {best}, "
+        f"completed: held-back mean digits {baseline.get('mean_digits')} -> "
+        f"{best.get('mean_digits')}, solved {baseline.get('solved')}/"
+        f"{baseline.get('points')} -> {best.get('solved')}/{best.get('points')}, "
         f"nodes={len(run.tree.nodes)}, wall={run.wall_seconds:.2f}s, "
-        f"model_calls={model_usage.calls}, output={args.output}"
+        f"model_calls={model_usage.calls} "
+        f"({damage.get('damaged', 0)} damaged in transit), output={args.output}"
     )
     return 0 if run.result.error is None else 1
 
