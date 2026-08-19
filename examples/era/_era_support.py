@@ -25,9 +25,10 @@ import sys
 import sysconfig
 import tempfile
 import time
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 from agentdescent.dataloader import cache_path, fetch_text
 
@@ -122,7 +123,14 @@ def program_id(code: str) -> str:
 # --------------------------------------------------------------------------
 
 
-def validate_source(source: str, max_length: int = 20_000) -> Tuple[bool, str]:
+def validate_source(
+    source: str,
+    max_length: int = 20_000,
+    *,
+    entrypoint: str = "train_and_predict",
+    allowed_imports: Optional[Set[str]] = None,
+    literal_top_level: bool = True,
+) -> Tuple[bool, str]:
     """Reject what the sandbox should never have to contain in the first place.
 
     Deliberately *not* as strict as the OpenEvolve port's gate: that one allows
@@ -131,7 +139,18 @@ def validate_source(source: str, max_length: int = 20_000) -> Tuple[bool, str]:
     common accidents -- a candidate that shells out, opens a file by hand, or
     reaches for a dunder -- fail in-process with a readable message instead of
     dying against a sandbox profile.
+
+    The three keyword arguments are what a second task on this evaluator needs
+    and nothing more. ``entrypoint`` names the function the candidate must
+    define; ``allowed_imports`` narrows or widens the import set; and
+    ``literal_top_level=False`` admits computed module-level constants -- a
+    Gauss-Legendre node table built once at import is ordinary numerics, and
+    refusing it would reject good programs for a rule whose real work (no
+    imports outside the set, no dunders, no ``exec``) is done elsewhere. The
+    cost is bounded by the sandbox: module-level work runs under the same CPU
+    limit as everything else the candidate does.
     """
+    allowed = ALLOWED_IMPORTS if allowed_imports is None else allowed_imports
     if not source.strip():
         return False, "empty source"
     if len(source) > max_length:
@@ -144,18 +163,18 @@ def validate_source(source: str, max_length: int = 20_000) -> Tuple[bool, str]:
         return False, f"SyntaxError: {exc.msg} at line {exc.lineno}"
 
     if not any(
-        isinstance(node, ast.FunctionDef) and node.name == "train_and_predict"
+        isinstance(node, ast.FunctionDef) and node.name == entrypoint
         for node in tree.body
     ):
-        return False, "missing train_and_predict function"
+        return False, f"missing {entrypoint} function"
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name.split(".")[0] not in ALLOWED_IMPORTS:
+                if alias.name.split(".")[0] not in allowed:
                     return False, f"import {alias.name!r} is not allowed"
         elif isinstance(node, ast.ImportFrom):
-            if not node.module or node.module.split(".")[0] not in ALLOWED_IMPORTS:
+            if not node.module or node.module.split(".")[0] not in allowed:
                 return False, f"import from {node.module!r} is not allowed"
         elif isinstance(node, ast.Attribute) and node.attr.startswith("__"):
             return False, f"dunder attribute {node.attr!r} is not allowed"
@@ -178,7 +197,7 @@ def validate_source(source: str, max_length: int = 20_000) -> Tuple[bool, str]:
             isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
         ):
             return False, "only a module docstring may be a top-level expression"
-        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+        if literal_top_level and isinstance(node, (ast.Assign, ast.AnnAssign)):
             value = node.value
             if not isinstance(value, (ast.Constant, ast.Tuple, ast.List, ast.Dict, ast.Set)):
                 return False, "top-level assignments must be literal constants"
@@ -372,6 +391,26 @@ def sandbox_command(
     timeout: float,
     nproc_limit: int,
 ) -> Tuple[List[str], Dict[str, str]]:
+    """The tabular task's runner, under this platform's isolation backend."""
+    return sandbox_wrapper(
+        [
+            str(RUNNER),
+            str(candidate),
+            "--train", str(train),
+            "--test", str(test),
+            "--rows", str(rows),
+            "--cpu-seconds", str(max(2, int(math.ceil(timeout)))),
+            "--nproc-limit", str(nproc_limit),
+        ],
+        scratch=candidate.parent.resolve(),
+    )
+
+
+def sandbox_wrapper(
+    runner_args: Sequence[str],
+    *,
+    scratch: Path,
+) -> Tuple[List[str], Dict[str, str]]:
     """The isolation backend this platform has, plus the environment to run it in.
 
     Neither backend is optional: a candidate here is model-written Python that
@@ -379,19 +418,15 @@ def sandbox_command(
     the sandbox is missing would be the wrong way to make an example portable.
     Upstream ships `Sandbox.run` as a `NotImplementedError` with the comment
     "Must provide a sandbox for executing untrusted code" -- this is that.
+
+    Split from :func:`sandbox_command` so a second task on this evaluator gets
+    the *same* profile rather than a copy of it. The profile is what
+    ``test_the_sandbox_blocks_the_writes_and_network_it_claims_to_block``
+    checks against the kernel, and a copy would be a second thing to check.
+    ``runner_args`` is everything after ``python -I``: the runner script and its
+    arguments, which is the only part a task owns.
     """
     backend = sandbox_backend()
-    cpu_seconds = str(max(2, int(math.ceil(timeout))))
-    scratch = candidate.parent.resolve()
-    runner_args = [
-        str(RUNNER),
-        str(candidate),
-        "--train", str(train),
-        "--test", str(test),
-        "--rows", str(rows),
-        "--cpu-seconds", cpu_seconds,
-        "--nproc-limit", str(nproc_limit),
-    ]
     env = dict(_THREAD_ENV)
     env["TMPDIR"] = str(scratch)
     env["PATH"] = "/usr/bin:/bin"
@@ -421,7 +456,7 @@ def sandbox_command(
         return command, env
 
     if backend is not None:
-        profile = candidate.parent / "sandbox.sb"
+        profile = scratch / "sandbox.sb"
         # `.resolve()` matters: `tempfile` hands back `/var/folders/...`, `/var`
         # is a symlink to `/private/var`, and Seatbelt matches the resolved path.
         profile.write_text(_SEATBELT_PROFILE.format(scratch=str(scratch)), encoding="utf-8")
@@ -615,6 +650,91 @@ def extract_program(reply: str) -> Tuple[str, str]:
     if doc:
         summary = doc.strip().splitlines()[0][:200]
     return code, summary
+
+
+#: Characters that cannot occur in Python source once strings and comments are
+#: removed. Their presence is proof the reply was damaged in transit rather than
+#: written badly -- no sampler emits `$` in the middle of an identifier.
+_IMPOSSIBLE = re.compile(r"[^\x20-\x7e\n\t\r]|[$?`]")
+_STRINGS_AND_COMMENTS = re.compile(
+    r"(\"\"\".*?\"\"\"|'''.*?'''|\"[^\"\n]*\"|'[^'\n]*'|#[^\n]*)", re.DOTALL)
+
+
+def reply_is_intact(reply: str) -> Tuple[bool, str]:
+    """Did this reply arrive as Python at all, or did the channel damage it?
+
+    Two checks, both of which a *badly written* program passes: the extracted
+    code parses, and it holds no character Python source cannot hold. A model
+    that writes a wrong algorithm, an unbounded loop or a call that raises
+    passes both and goes on to be a node scoring `-inf`, which is what upstream
+    requires. What fails here is a reply that came back with bytes spliced into
+    the middle of tokens.
+
+    Measured on one hosted GLM-5.2 endpoint (Anthropic-shaped): replies of a few
+    thousand characters came back damaged the majority of the time, with
+    fragments like ``return val9.3192`` and ``c_orig,0$ zG$C$F1_orig``. The rate
+    was identical through the Anthropic SDK, through the SDK's streaming API and
+    through a hand-rolled ``urllib`` request, while 25 fetches of a
+    similarly-sized file over the same proxy returned one identical hash -- so
+    the damage is at the endpoint, not in any client this repository controls.
+    """
+    if not reply.strip():
+        return False, "empty reply"
+    code, _ = extract_program(reply)
+    if not code.strip():
+        return False, "no code in the reply"
+    try:
+        ast.parse(code)
+    except SyntaxError as exc:
+        return False, f"reply did not parse: {exc.msg} at line {exc.lineno}"
+    found = sorted(set(_IMPOSSIBLE.findall(_STRINGS_AND_COMMENTS.sub("", code))))
+    if found:
+        return False, f"reply holds characters Python source cannot: {found}"
+    return True, ""
+
+
+def with_intact_replies(
+    completion: Callable[[str], str],
+    *,
+    attempts: int = 4,
+    counter: Optional[Dict[str, int]] = None,
+) -> Callable[[str], str]:
+    """Redraw a reply the channel damaged. **Not** a retry of a failed program.
+
+    The distinction is the whole justification. Upstream's loop turns a program
+    that fails into a node scoring `-inf`, and this port keeps that: every
+    program that arrives intact is executed and scored, however bad it is.
+    What this retries is a reply that never was a program -- and treating those
+    as failed candidates would silently attribute an endpoint defect to the
+    model, which on the endpoint measured above meant most of the search budget.
+
+    After ``attempts`` draws the last reply is returned unchanged, so a run
+    against a channel that is *always* damaged still terminates, and still
+    records those expansions as the failed nodes they are. ``counter`` collects
+    ``drawn`` / ``damaged`` so a run can report the tax it paid.
+    """
+
+    def complete(prompt: str) -> str:
+        reply = ""
+        for attempt in range(attempts):
+            reply = completion(prompt)
+            if counter is not None:
+                counter["drawn"] = counter.get("drawn", 0) + 1
+            intact, reason = reply_is_intact(reply)
+            if intact:
+                return reply
+            if counter is not None:
+                counter["damaged"] = counter.get("damaged", 0) + 1
+            if attempt == attempts - 1:
+                warnings.warn(
+                    f"{attempts} replies in a row arrived damaged ({reason}); "
+                    f"scoring the last one as the failed program it is. This is "
+                    f"an endpoint defect, not a model result -- see "
+                    f"examples.era._era_support.reply_is_intact.",
+                    RuntimeWarning, stacklevel=2)
+        return reply
+
+    return complete
 
 
 #: Upstream's `GeminiLLM.draw_sample` wraps every prompt in this preamble.

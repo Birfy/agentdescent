@@ -6,7 +6,83 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.5] — 2026-08-19
+
 ### Fixed
+
+- **`--eval-concurrency` was parsed by the ERA ports, recorded in their result
+  files, and then ignored.** `run_agentdescent_era` hard-coded
+  `"eval_concurrency": workers`, so a run launched with the shared flag's
+  default of 8 wrote `eval_concurrency: 8` into its JSON while the engine
+  actually got 3. A recorded configuration that disagrees with the run is worse
+  than no record: it is the exact defect `examples/_common.py` was written to
+  prevent, and every measured row in `docs/algo-era.md` carried it.
+
+  Fixed the way that module documents: `eval_concurrency_default=None` on all
+  three ports ("this runner has a rule of its own; only override it when the
+  flag is given"), and the port's own rule — one evaluation per worker, because
+  a held-out evaluation here is a sandboxed process rather than an API call —
+  applies when it is not.
+
+  Measured while finding it, on the endpoint these runs use: the sandbox is
+  **0.7–2.5% of wall clock** and the model calls are ~95%, so concurrency here
+  should be sized to the endpoint and not to the host. That endpoint takes 6
+  concurrent requests with no latency penalty (17.9 → 90.2 tok/s aggregate from
+  1 to 6) and degrades past it (74.2 tok/s at 12, tail latency 10s → 24s).
+
+- **A hosted endpoint was damaging replies in transit, and the search was
+  scoring the damage as if the model had written it.** Measured on a GLM-5.2
+  endpoint behind an Anthropic-shaped API: roughly **one reply in five** of a
+  few thousand characters came back with bytes spliced into the middle of
+  tokens — `return val9.3192`, `c_orig,0$ zG$C$F1_orig` — pooling the certain
+  cases (a reply that does not parse) across 58 sampled replies.
+
+  It is not the client. The rate is the same through the Anthropic SDK, through
+  the SDK's streaming API, and through a hand-rolled `urllib` request; 25
+  fetches of a similarly-sized file over the same proxy returned one identical
+  hash. It is also not free: on the first 2F1 run, 3 of 15 expansions died on a
+  `SyntaxError` the model did not write.
+
+  `examples/era/_era_support.py` gains `reply_is_intact` and
+  `with_intact_replies`, and all three ERA entry points a `--reply-attempts`
+  flag (default 4, `1` disables). **The distinction is the whole point**: a
+  reply is redrawn only when it is not Python at all — it does not parse, or it
+  holds a character Python source cannot hold. A program that is wrong, that
+  never terminates, that raises, or that imports something the gate bans is
+  *not* redrawn; it becomes a node scoring `-inf`, which is what upstream
+  requires and what `test_a_bad_program_is_not_treated_as_damage` pins. Each
+  run now records `reply_damage` beside its result, so the tax is in the data
+  rather than in prose.
+
+  Known limitation, stated rather than papered over: a splice that lands inside
+  a numeric literal still parses, and nothing here can see it.
+
+- **The ERA sandbox runner could not import a candidate that used
+  `@dataclass`.** `dataclasses` is on the port's import allowlist, so a model
+  writing `@dataclass class Split: ...` is writing an allowed program — and it
+  died with `AttributeError: 'NoneType' object has no attribute '__dict__'`,
+  scored `-inf`, and looked exactly like a model that had written a broken
+  program. `dataclasses` resolves its own module through
+  `sys.modules[cls.__module__]`, and `load_entrypoint` executed the candidate
+  without ever registering it there. Both runners now register the module
+  before executing it. Found while porting the second ERA task, whose *shared
+  catalogue module* is a dataclass and hit it on the first run.
+
+- **`test_the_sandbox_blocks_the_writes_and_network_it_claims_to_block`
+  asserted something Bubblewrap deliberately does not promise.** The probe
+  wrote to a path beside the scratch directory — which pytest puts under
+  `/tmp`, and the Bubblewrap profile mounts a **fresh tmpfs over `/tmp`**. The
+  write therefore succeeds *inside the sandbox* and reaches nothing, and the
+  test failed on any ordinary Linux host with `bwrap` installed, on `main`,
+  while the guarantee it exists to check (`not outside.exists()` on the host)
+  held the whole time.
+
+  The strict "was refused" assertion now targets a path under `/usr`, which no
+  profile makes writable on either platform; the `/tmp` probe keeps the
+  host-invisibility check that was always the real claim. A test that fails
+  where the code is correct is worse than no test: it trains the reader to
+  ignore the one assertion in this repository that decides whether running
+  model-written code is safe at all.
 
 - **A staleness test asserted a property of the machine, not of the policy.**
   `test_offline_examples.py::test_full_discards_nothing_and_guarded_discards_the_most`
@@ -56,6 +132,154 @@ All notable changes to AgentDescent are documented here. The format follows
   nothing is the livelock's signature and must be counted.
 
 ### Added
+
+- **The 2F1 suite is 3000 points, because 240 could not resolve anything —
+  including a result this changelog had already drawn a conclusion from.**
+  Per-point correct digits have a standard deviation of **3.20**: the outcome is
+  close to bimodal, a program either handles a region and scores near the
+  12-digit cap or misses it and scores near zero. An 80-point gate therefore
+  carries a standard error of **0.358 digits**, so the smallest gain it can tell
+  from noise at two standard errors is 0.72 — larger than every number measured
+  on it. Pairing does not help (paired SD 3.05 against unpaired 3.20; a program
+  that changes a point changes it by ten digits, not a tenth).
+
+  `tools/gen_hyp2f1_stress.py` now draws **250 points a shard**: a 1000-point
+  acceptance gate and 1000 points held back. Twelve minutes of
+  arbitrary-precision arithmetic, once, committed. Evaluation was never the
+  constraint — a 250-point shard costs the baseline 0.30 s, and scoring a node
+  across the full gate 1.7 s. The generator is now seeded **per shard**, so
+  `test_the_committed_stress_file_redraws_identically` can redraw one shard and
+  demand it back instead of regenerating the file; `--check` still verifies all
+  of it.
+
+  **This reverses a conclusion recorded above.** Re-scored on 1000 fresh points,
+  the 48-expansion winner beats the baseline by **+0.347 ± 0.10 digits (3.2 SE)**
+  with 737 of 1000 points solved against 642 — a real improvement the old split
+  could not see. The earlier entry called that run a winner's curse on the
+  strength of gate +0.56 and held-back −0.15; both were draws from a
+  0.36-standard-error distribution, and the diagnosis was wrong. Corroborating
+  it: on the new suite the gate and held-back halves score the baseline at 9.801
+  and 9.836, a gap of 0.035, where the old halves differed by 0.49.
+
+  What survives unchanged: the tree still spent its budget badly (best score at
+  expansion 8, the remaining 40 expansions exact copies of it, chains 14 deep),
+  and the reply channel still damaged 12 of 60 replies.
+
+  **A run made under the resolving gate**, 48 expansions on `glm-5.2` at
+  `--workers 6`: gate 9.801 → **11.737**, held-back 9.836 → **11.771**, 965 of
+  1000 held-back points solved against 659. The two halves agree to **0.001
+  digits** (+1.9359 against +1.9346), which is what the resize was for. At 11.74
+  the program is past the 10.84 ceiling of picking the best of four textbook
+  transformations by oracle — it carries its own Taylor summation, degenerate
+  parameter handling and a continuation near `z = 1`. 598 s against 1,280 s for
+  the same budget at `--workers 3`, the endpoint's measured concurrency knee
+  being 6. Recorded in `bench/results/era-hyp2f1-run48-gate1000.json`.
+
+  **A specialist review of the artifact found two wrong identities in it, both
+  confirmed independently.** The `z→1−z` connection formula has both Γ
+  coefficients wrong against DLMF 15.8.4 (zero correct digits at
+  `a=0.3, b=0.7, c=1.9, z=0.6`), and the `a≈b` guard applies `₂F₁(a, a; c; ·)`
+  where Pfaff requires `₂F₁(a, c−b; c; ·)` (267× too large at
+  `a=b=−2.3, c=4.1, z=−6`, a point SciPy gets right). **Neither is reachable
+  from this suite** — the first branch is called zero times on the 3000 points,
+  and `|b−a| < 10⁻⁵` has probability ~3×10⁻⁷ under the draw — which indicts the
+  suite's coverage rather than defending the code.
+
+  The same review overturned a claim made here: the "oracle" ceiling of 10.98
+  was computed over a basis that **excluded the identity the program uses**.
+  With `z→1/z` included the oracle is 11.919 and the program's 11.738 is below
+  it; that identity applied blindly, with no selection at all, already scores
+  11.253. So 74% of the gain is one identity, and the honest result is that the
+  search **rediscovered the z→1/z connection formula and a `z < −1` switching
+  rule** — real, but not what was originally written down.
+
+  Coverage gaps the review quantified on the committed file: zero points with
+  `z ≥ 1`, one above `z = 0.99`, zero with `a` or `b` a non-positive integer
+  (the terminating case, the most common practical use of ₂F₁), zero with `b−a`
+  or `c−a−b` within 10⁻⁶ of an integer (the logarithmic cases), and 0.5% with
+  all parameters under 5 in magnitude. The program is left exactly as the search
+  produced it; hand-editing it would destroy its value as a record.
+
+  It also earns the next lever: across 3000 points the winner gains 6,142 digits
+  and loses 475, and **13 of the losses are points the baseline had to 10+
+  digits and it has to under 1**. No numerical library ships that, whatever the
+  mean does.
+
+- **ERA's third task: double-precision evaluation of the Gauss hypergeometric
+  function, and what replaces a leaderboard.** `examples/era/era_hypergeometric.py`
+  asks for `hyp2f1(a, b, c, z)` over `a, b, c ~ U(-30, 30)`, `z ~ U(-40, 0.999)`.
+  Nobody has run an agentic program search on it, so there is no ranking to
+  join; three properties stand in for one.
+
+  *The problem is hard on somebody else's authority.* The standard survey —
+  Pearson, Olver & Porter, Numerical Algorithms 74:821–866 (2017) — exists
+  because no single method covers the parameter space.
+
+  *The baseline is the state of the practice.* `scipy.special.hyp2f1`, Cephes
+  underneath, the function a working scientist already calls. On the declared
+  distribution it loses more than six digits on roughly a third of points, some
+  of them at zero correct digits — and a test fails if SciPy ever improves
+  enough that the reported numbers need restating.
+
+  *The reference cannot be argued with.* mpmath at 30 **and** 60 decimal digits,
+  kept only where the two agree to 25, shipped as a committed file that
+  `python -m tools.gen_hyp2f1_stress --check` re-derives byte for byte. One test
+  re-computes every stored value at 60 digits; another reruns the generator and
+  demands the same file back, which is what rules out points having been picked
+  after seeing how an implementation did on them. `mpmath`, `decimal` and
+  `fractions` are off this task's import allowlist, because the deliverable is a
+  float64 routine and a candidate reimplementing arbitrary precision would be
+  answering a different question.
+
+  The headroom is real and was checked before the task was built: a five-line
+  rule that never sees the answer — Pfaff when `z < -1`, choosing the branch by
+  parameter size — moves 400 sampled points from 10.93 to 11.84 mean correct
+  digits and cuts failures from 144 to 101.
+
+- **ERA's second task: the paper's own "numerical solution of integrals".**
+  `examples/era/era_hard_integrals.py` runs the *same* flat-PUCT search as the
+  Kaggle port — same tree, same visit reservation, same aggregator, same
+  sandbox profile, same governance layer — over a different kind of program.
+  A candidate is `integrate(f, a, b)` and is handed a **black-box scalar
+  integrand**: no formula, no parameters, no family name, over `[0, 1]`,
+  `[0, inf)` or `(-inf, inf)`. The seam is a `Domain` (seed program, evaluator,
+  prompt, metric name) and nothing algorithmic lives in it; `domain=None` is
+  upstream's task, so a caller who names no domain gets the port upstream ships.
+
+  **The reference is a closed form, not another integrator.** Nine integrand
+  families, each breaking a different assumption a quadrature rule makes —
+  singular at both endpoints, oscillation accumulating into a corner, a peak of
+  width 1e-7, an oscillation on a half-line that never decays, cancellation to
+  four orders of magnitude below the integrand — and every one of them has an
+  exact value in terms of `Γ`, `atan` and `π/sin(πs)`. Scoring against another
+  numerical method would have meant penalising a candidate for being *better*
+  than the reference. `test_the_closed_form_matches_high_precision_quadrature`
+  checks each identity against mpmath at 30 digits through a per-family
+  substitution, because mpmath's own quadrature on the raw integrand disagrees
+  with the closed form in the third decimal place on the Fresnel family — which
+  is the benchmark working, not a defect in the reference.
+
+  The metric is **mean correct significant digits**, `min(12, -log10(relative
+  error))`, with the cap set by the precision of the references themselves. A
+  problem that raises, returns `nan` or overruns its budget scores 0 and the
+  rest of the set still counts. Every problem has a **hard cap on calls to the
+  integrand**, enforced in the runner: without it the best program is whichever
+  one is allowed to spend the most, which is not a question about method.
+
+  Measured live on `glm-5.2`, 12 expansions, 3 workers, barrier-free: mean
+  correct digits **8.86 → 10.21** on 36 held-back integrals, 20/36 → 28/36
+  solved to 10+ digits, in 391 s. The winner keeps `quad` as its kernel and adds
+  the transformation and error control around it. Recorded in
+  `bench/results/era-integrals-run.json`; full notes in `docs/algo-era.md`.
+
+  **The first run of this task found a hole in the task**, which is the part
+  worth keeping. The whole-line family was `exp(-x²)·cos(bx)` — an *even*
+  integrand — and the winning program mapped both halves onto `[0, inf)` and
+  doubled, which is a plain bug that scores 12 digits on an even function. The
+  family now carries a nonzero offset and a test pins the asymmetry. The
+  reported numbers are from a rerun on the corrected suite; the first run's are
+  not reported at all, because they were measured against a suite that could be
+  passed without solving it.
 
 - **An eighth benchmark-faithful port: ERA, Google Research's empirical-software
   search.** `examples/era/` runs upstream's own bundled task — Kaggle Playground
@@ -2572,7 +2796,8 @@ First public release on PyPI as **`agentdescent`**.
   discrete-space `Aggregator`, staleness policies, DP/TP/PP parallelism, layered
   governance, and the provider-agnostic `agentdescent.agents` completion layer.
 
-[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.4.5...HEAD
+[0.4.5]: https://github.com/Birfy/agentdescent/compare/v0.4.2...v0.4.5
 [0.4.2]: https://github.com/Birfy/agentdescent/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/Birfy/agentdescent/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Birfy/agentdescent/compare/v0.3.0...v0.4.0

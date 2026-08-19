@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import socket
 import subprocess
 import sys
@@ -261,6 +262,91 @@ def test_strategy_round_trips_a_proposal_into_a_diff():
     assert strategy.to_diff(state, "not json", "w", 0, port.ARTIFACT_ID) is None
 
 
+    # ------------------------------------------------------------------
+    # The damaged-reply guard
+    # ------------------------------------------------------------------
+
+
+DAMAGED_REPLIES = {
+    "spliced identifier": "```python\ndef train_and_predict(a, b):\n"
+                          "    x = c_orig,0$ zG$C$F1_orig\n    return x\n```",
+    "spliced number": "```python\ndef train_and_predict(a, b):\n"
+                      "    return val9.3192\n```",
+    "no code at all": "I would recommend a gradient boosting model here.",
+    "empty": "   ",
+}
+
+#: Programs that are wrong, slow or fatal -- and that the guard must let past,
+#: because turning them into nodes scoring -inf is the algorithm working.
+INTACT_BUT_BAD = {
+    "never terminates": "```python\ndef train_and_predict(a, b):\n"
+                        "    while True:\n        pass\n```",
+    "raises at runtime": "```python\ndef train_and_predict(a, b):\n"
+                         "    return 1.0 / 0.0\n```",
+    "wrong answer": "```python\ndef train_and_predict(a, b):\n    return []\n```",
+    "banned import": "```python\nimport os\ndef train_and_predict(a, b):\n"
+                     "    return []\n```",
+}
+
+
+@pytest.mark.parametrize("name", sorted(DAMAGED_REPLIES))
+def test_a_reply_the_channel_damaged_is_recognised(name):
+    intact, reason = support.reply_is_intact(DAMAGED_REPLIES[name])
+    assert not intact and reason
+
+
+@pytest.mark.parametrize("name", sorted(INTACT_BUT_BAD))
+def test_a_bad_program_is_not_treated_as_damage(name):
+    """The distinction the guard exists to keep.
+
+    Redrawing a program that merely fails would be the port quietly retrying
+    its own failures, which is a different algorithm: upstream appends the
+    failed node and this port pins that behaviour elsewhere in this file.
+    """
+    assert support.reply_is_intact(INTACT_BUT_BAD[name])[0]
+
+
+def test_the_guard_redraws_damage_counts_it_and_then_gives_up():
+    replies = [DAMAGED_REPLIES["spliced number"],
+               DAMAGED_REPLIES["spliced identifier"],
+               INTACT_BUT_BAD["raises at runtime"]]
+    drawn = []
+
+    def channel(prompt):
+        drawn.append(prompt)
+        return replies[len(drawn) - 1]
+
+    counter = {}
+    complete = support.with_intact_replies(channel, attempts=4, counter=counter)
+    assert complete("p") == replies[2]
+    assert len(drawn) == 3
+    assert counter == {"drawn": 3, "damaged": 2}
+
+    # A channel that is always damaged must terminate, hand back the last
+    # reply, and say so -- the run then records those expansions as the failed
+    # nodes they are rather than hanging.
+    calls = {"n": 0}
+
+    def always_damaged(prompt):
+        calls["n"] += 1
+        return DAMAGED_REPLIES["spliced number"]
+
+    with pytest.warns(RuntimeWarning, match="damaged"):
+        out = support.with_intact_replies(always_damaged, attempts=3)("p")
+    assert calls["n"] == 3 and out == DAMAGED_REPLIES["spliced number"]
+
+
+def test_the_guard_is_off_when_one_attempt_is_allowed():
+    calls = {"n": 0}
+
+    def channel(prompt):
+        calls["n"] += 1
+        return DAMAGED_REPLIES["spliced number"]
+
+    support.with_intact_replies(channel, attempts=1)("p")
+    assert calls["n"] == 1
+
+
 def test_an_empty_reply_still_becomes_a_node():
     """Upstream appends a node for every expansion, including a failed one.
 
@@ -368,10 +454,24 @@ def test_the_sandbox_blocks_the_writes_and_network_it_claims_to_block(tmp_path):
 
     The ERA gate allows scikit-learn, so it cannot be the boundary -- which
     makes this the test that decides whether the port is safe to run at all.
+
+    Two probes for "outside", because the two backends refuse differently and
+    one of them used to make this test fail on an ordinary Linux host:
+
+    * ``outside`` sits beside the scratch directory, which pytest puts under
+      ``/tmp``. The Bubblewrap profile mounts a **fresh tmpfs over `/tmp`**, so
+      the write there succeeds *inside the sandbox* and reaches nothing: the
+      guarantee is that it never lands on the host, which is what
+      ``outside.exists()`` checks from here. Asserting the write itself was
+      refused would be asserting an implementation detail that Seatbelt happens
+      to have and Bubblewrap deliberately does not.
+    * ``readonly`` sits under ``/usr``, which no profile makes writable on
+      either platform. That one has to be refused outright.
     """
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     outside = tmp_path / "outside.txt"
+    readonly = f"/usr/lib/era-sandbox-probe-{os.getpid()}"
     probe = scratch / "probe.py"
     probe.write_text(
         "import json, socket\n"
@@ -381,6 +481,11 @@ def test_the_sandbox_blocks_the_writes_and_network_it_claims_to_block(tmp_path):
         "    result['outside_write'] = 'allowed'\n"
         "except Exception as exc:\n"
         "    result['outside_write'] = type(exc).__name__\n"
+        "try:\n"
+        f"    open({readonly!r}, 'w').write('x')\n"
+        "    result['readonly_write'] = 'allowed'\n"
+        "except Exception as exc:\n"
+        "    result['readonly_write'] = type(exc).__name__\n"
         "try:\n"
         f"    open({str(scratch / 'inside.txt')!r}, 'w').write('x')\n"
         "    result['inside_write'] = 'allowed'\n"
@@ -402,7 +507,8 @@ def test_the_sandbox_blocks_the_writes_and_network_it_claims_to_block(tmp_path):
     completed = subprocess.run(command, capture_output=True, text=True,
                                timeout=90, env=env, cwd=str(scratch))
     payload = json.loads(completed.stdout.strip().splitlines()[-1])
-    assert payload["outside_write"] != "allowed"
+    assert payload["readonly_write"] != "allowed"
     assert payload["inside_write"] == "allowed"
     assert payload["network"] != "allowed"
     assert not outside.exists()
+    assert not os.path.exists(readonly)
