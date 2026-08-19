@@ -131,6 +131,32 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- **A measured winner's curse: 48 ERA expansions raised the gate by half a digit
+  and lowered the held-back score.** Same configuration as the 18-expansion 2F1
+  row, only the budget changed: gate 10.185 → **10.747** (+0.56), held-back
+  9.692 → **9.546** (−0.15). Recorded in `bench/results/era-hyp2f1-run48.json`.
+
+  The search is behaving exactly as specified while producing this. FUTS commits
+  `argmax` over node scores with no significance test — this port bypasses the
+  engine's Beta-posterior acceptance on purpose, because upstream has no such
+  step — and the score being maximised is a mean over 80 points. Forty-eight
+  draws against a noisy 80-point objective select partly for noise.
+
+  The winner is not uniformly worse, it is higher variance: on the 80 held-back
+  points, 18 improved by +52.7 digits in total and 12 regressed by −64.3,
+  including 10.94 → 0.00 and 12.00 → 4.89. `solved` rises 51 → 54 while the mean
+  falls.
+
+  The tree says where the budget went: the best score was found at expansion
+  **8**, and the other 40 expansions produced exact copies of it — chains 14 deep
+  scoring identically to four decimals, because each rewrite preserved the
+  parent's behaviour.
+
+  Three levers for the next run, recorded in `docs/algo-era.md`: a larger gate,
+  an acceptance rule with a significance test (a deliberate deviation from
+  upstream, to be reported as one), and storing the top-K node programs so
+  gate-versus-test correlation can be measured rather than inferred.
+
 - **ERA's third task: double-precision evaluation of the Gauss hypergeometric
   function, and what replaces a leaderboard.** `examples/era/era_hypergeometric.py`
   asks for `hyp2f1(a, b, c, z)` over `a, b, c ~ U(-30, 30)`, `z ~ U(-40, 0.999)`.

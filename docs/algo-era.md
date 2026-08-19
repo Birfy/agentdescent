@@ -577,6 +577,59 @@ Cephes is good at.
     whose difficulty is a chain of transformation identities, it may well be the
     binding constraint. This row is `thinking=disabled` and says so.
 
+### What a bigger budget bought: the gate, and nothing else
+
+The same configuration at **48 expansions** instead of 18, everything else
+identical ([`era-hyp2f1-run48.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-hyp2f1-run48.json)):
+
+| | 18 expansions | 48 expansions |
+|---|---:|---:|
+| gate mean digits (what the tree ranks on) | 10.202 (+0.02) | **10.747 (+0.56)** |
+| **held-back mean digits** | 9.826 (+0.13) | **9.546 (−0.15)** |
+| held-back points at 10+ digits | 52 / 80 | 54 / 80 |
+| nodes / depth | 19 / 3 | 49 / **14** |
+| wall, tokens | 404 s, 79 k | 1,280 s, 313 k |
+
+**The gate went up by half a digit and the held-back set went down.** That is
+the winner's curse, and it is worth stating plainly because the search is
+working exactly as specified while producing it: FUTS commits `argmax` over
+node scores with no significance test — the engine's Beta-posterior acceptance
+is bypassed by this port on purpose, because upstream has no such step — and the
+score being maximised is a mean over **80 points**. Take 48 draws against a
+noisy 80-point objective and the best of them is partly noise.
+
+Point by point on the 80 held-back points, the winner is not uniformly worse; it
+is **higher variance**:
+
+| | points | total digits |
+|---|---:|---:|
+| improved by >0.5 digits | 18 | **+52.7** |
+| unchanged | 50 | — |
+| regressed by >0.5 digits | 12 | **−64.3** |
+
+Its biggest wins are +8.9 and +7.7 digits (large `|a|, |b|` with `z` far to the
+left — the regime the transformations fix). Its worst regressions are
+**10.94 → 0.00**, **8.35 → 0.00** and **12.00 → 4.89**: a class it now gets
+catastrophically wrong that the baseline had right. `solved` rises 51 → 54 while
+the mean falls, which is the same fact seen twice.
+
+The tree shows where the budget went: the best score, 10.7469, was found at
+**expansion 8**, and the remaining 40 expansions produced **exact copies of it**
+— chains 14 deep in which every node scores 10.7469 to four decimals, because
+each rewrite kept the parent's behaviour. 39 of 48 expansions "beat the root",
+and all but one of those are that same plateau propagating downward.
+
+!!! tip "What this says about the next experiment, not about the model"
+    Three levers, in the order they matter: a **larger gate** (80 points is too
+    few to rank 48 candidates), an **acceptance rule with a significance test**
+    rather than `argmax` (the engine already ships one; using it would be a
+    deliberate deviation from upstream and should be reported as such), and
+    **storing the top-K node programs** so gate-versus-test correlation can be
+    measured directly instead of inferred from two winners.
+
+    Also measured here: 12 of 60 replies arrived damaged — **20%**, which
+    matches the ~19% estimated over 58 earlier samples.
+
 ## Run it
 
 Preview without an API key, network access, or sandbox process:
