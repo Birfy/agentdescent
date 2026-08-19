@@ -801,6 +801,7 @@ def run_agentdescent_era(
     staleness: str = "guarded",
     splits: Optional[Splits] = None,
     domain: Optional[Domain] = None,
+    eval_concurrency: Optional[int] = None,
     verbose: bool = False,
 ) -> EraRun:
     """Run one fixed-expansion-budget serial, sync, or async experiment.
@@ -852,7 +853,12 @@ def run_agentdescent_era(
         "artifact_id": ARTIFACT_ID,
         "n_workers": workers,
         "self_verify": False,
-        "eval_concurrency": workers,
+        # This port's own rule is "as many as there are workers", because a
+        # held-out evaluation here is a sandboxed process rather than an API
+        # call. `--eval-concurrency` overrides it when given; it used to be
+        # parsed, recorded in the result file and then ignored, which made the
+        # recorded configuration disagree with the run.
+        "eval_concurrency": eval_concurrency if eval_concurrency else workers,
         "held_out_frac": held_out_frac,
         "solved_threshold": 1.0,
         "usage": usage,
@@ -895,7 +901,8 @@ def run_agentdescent_era(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    add_standard_args(parser, model_default="glm-5.2", max_seconds_default=1800.0)
+    add_standard_args(parser, model_default="glm-5.2", max_seconds_default=1800.0,
+                      eval_concurrency_default=None)
     parser.set_defaults(provider="openai", async_ratio=1)
     parser.add_argument("--staleness", default="guarded",
                         choices=["guarded", "reflective", "full"],
@@ -1001,6 +1008,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         shutdown_grace=args.shutdown_grace,
         seed=args.seed,
         usage=actor_usage,
+        eval_concurrency=args.eval_concurrency,
         splits=splits,
         verbose=True,
     )

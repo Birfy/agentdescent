@@ -8,6 +8,26 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- **`--eval-concurrency` was parsed by the ERA ports, recorded in their result
+  files, and then ignored.** `run_agentdescent_era` hard-coded
+  `"eval_concurrency": workers`, so a run launched with the shared flag's
+  default of 8 wrote `eval_concurrency: 8` into its JSON while the engine
+  actually got 3. A recorded configuration that disagrees with the run is worse
+  than no record: it is the exact defect `examples/_common.py` was written to
+  prevent, and every measured row in `docs/algo-era.md` carried it.
+
+  Fixed the way that module documents: `eval_concurrency_default=None` on all
+  three ports ("this runner has a rule of its own; only override it when the
+  flag is given"), and the port's own rule — one evaluation per worker, because
+  a held-out evaluation here is a sandboxed process rather than an API call —
+  applies when it is not.
+
+  Measured while finding it, on the endpoint these runs use: the sandbox is
+  **0.7–2.5% of wall clock** and the model calls are ~95%, so concurrency here
+  should be sized to the endpoint and not to the host. That endpoint takes 6
+  concurrent requests with no latency penalty (17.9 → 90.2 tok/s aggregate from
+  1 to 6) and degrades past it (74.2 tok/s at 12, tail latency 10s → 24s).
+
 - **A hosted endpoint was damaging replies in transit, and the search was
   scoring the damage as if the model had written it.** Measured on a GLM-5.2
   endpoint behind an Anthropic-shaped API: roughly **one reply in five** of a

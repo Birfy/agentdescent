@@ -157,7 +157,8 @@ def integrals_domain(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    add_standard_args(parser, model_default="glm-5.2", max_seconds_default=1800.0)
+    add_standard_args(parser, model_default="glm-5.2", max_seconds_default=1800.0,
+                      eval_concurrency_default=None)
     parser.set_defaults(provider="openai", async_ratio=1)
     parser.add_argument("--staleness", default="guarded",
                         choices=["guarded", "reflective", "full"],
@@ -272,6 +273,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         shutdown_grace=args.shutdown_grace,
         seed=args.seed,
         usage=actor_usage,
+        eval_concurrency=args.eval_concurrency,
         domain=domain,
         verbose=True,
     )
