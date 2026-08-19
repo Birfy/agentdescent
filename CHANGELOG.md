@@ -173,6 +173,31 @@ All notable changes to AgentDescent are documented here. The format follows
   the same budget at `--workers 3`, the endpoint's measured concurrency knee
   being 6. Recorded in `bench/results/era-hyp2f1-run48-gate1000.json`.
 
+  **A specialist review of the artifact found two wrong identities in it, both
+  confirmed independently.** The `z→1−z` connection formula has both Γ
+  coefficients wrong against DLMF 15.8.4 (zero correct digits at
+  `a=0.3, b=0.7, c=1.9, z=0.6`), and the `a≈b` guard applies `₂F₁(a, a; c; ·)`
+  where Pfaff requires `₂F₁(a, c−b; c; ·)` (267× too large at
+  `a=b=−2.3, c=4.1, z=−6`, a point SciPy gets right). **Neither is reachable
+  from this suite** — the first branch is called zero times on the 3000 points,
+  and `|b−a| < 10⁻⁵` has probability ~3×10⁻⁷ under the draw — which indicts the
+  suite's coverage rather than defending the code.
+
+  The same review overturned a claim made here: the "oracle" ceiling of 10.98
+  was computed over a basis that **excluded the identity the program uses**.
+  With `z→1/z` included the oracle is 11.919 and the program's 11.738 is below
+  it; that identity applied blindly, with no selection at all, already scores
+  11.253. So 74% of the gain is one identity, and the honest result is that the
+  search **rediscovered the z→1/z connection formula and a `z < −1` switching
+  rule** — real, but not what was originally written down.
+
+  Coverage gaps the review quantified on the committed file: zero points with
+  `z ≥ 1`, one above `z = 0.99`, zero with `a` or `b` a non-positive integer
+  (the terminating case, the most common practical use of ₂F₁), zero with `b−a`
+  or `c−a−b` within 10⁻⁶ of an integer (the logarithmic cases), and 0.5% with
+  all parameters under 5 in magnitude. The program is left exactly as the search
+  produced it; hand-editing it would destroy its value as a record.
+
   It also earns the next lever: across 3000 points the winner gains 6,142 digits
   and loses 475, and **13 of the losses are points the baseline had to 10+
   digits and it has to under 1**. No numerical library ships that, whatever the
