@@ -502,13 +502,17 @@ def evaluate_source(
     if not scored:
         return False, _zero_metrics("no problems scored"), "no problems scored"
     if valid_problems != scored:
-        failed = next(row for row in detail if not row["speedup"])
+        # Failures first in what the prompt gets to see. A report that led with
+        # the three problems that *worked* would answer a question nobody asked:
+        # this candidate scored nothing, and why is the only useful thing to say.
+        failed_rows = [row for row in detail if row["speedup"] is None]
         error = (f"{scored - valid_problems}/{scored} problems were not solved "
-                 f"correctly: {failed['error'] or 'is_solution rejected the output'}")
+                 f"correctly: "
+                 f"{failed_rows[0]['error'] or 'is_solution rejected the output'}")
         metrics = _zero_metrics(error)
         metrics.update({"problems": scored, "valid_problems": valid_problems,
-                        "slowest": detail[:slowest_reported], "seconds": seconds,
-                        "limits_unavailable": unavailable})
+                        "slowest": failed_rows[:slowest_reported],
+                        "seconds": seconds, "limits_unavailable": unavailable})
         return False, metrics, error
 
     # The mean of per-problem speedups, which is AlgoTune's `mean_speedup`. Not

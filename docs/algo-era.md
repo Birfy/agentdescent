@@ -914,10 +914,16 @@ python -m examples.era.era_algotune --dry-run
 python -m examples.era.era_algotune --list-tasks
 
 python -m examples.era.era_algotune --provider claude --model glm-5.2 \
-    --yes --iterations 6 --workers 3 --shards 4 --test-shards 2 --problems 2 \
+    --yes --iterations 9 --workers 3 --shards 6 --test-shards 3 --problems 2 \
     --repeats 3 --candidate-timeout 120 --max-tokens 16000 \
     --tasks svd,matrix_exponential,convolve_1d
 ```
+
+`--shards` wants to be at least `2 x --workers`: half of them become the gate's
+held-out split, a round dispatches one rollout per *train* set, and a worker with
+no set to be handed simply does not expand. At `--shards 4 --workers 3` a budget
+of nine expansions quietly buys six, so the port says so on stderr rather than
+letting the result file claim the budget it was given.
 
 `--tasks all` runs all 72; `--tasks default` (the default) runs the eight that
 span AlgoTune's categories.

@@ -212,9 +212,13 @@ def build_parser() -> argparse.ArgumentParser:
                         help=("FUTS expansions per task (upstream's "
                               "num_iterations). Each task gets its own tree"))
     parser.add_argument("--workers", type=int, default=3)
-    parser.add_argument("--shards", type=int, default=4,
-                        help="problem sets the search may score against")
-    parser.add_argument("--test-shards", type=int, default=2,
+    parser.add_argument("--shards", type=int, default=6,
+                        help=("problem sets the search may score against. Half of "
+                              "them become the gate's held-out split, and a round "
+                              "cannot run more rollouts than it has *train* sets "
+                              "-- so this wants to be at least 2x --workers or "
+                              "the expansion budget goes unspent"))
+    parser.add_argument("--test-shards", type=int, default=3,
                         help="further problem sets the search never sees")
     parser.add_argument("--problems", type=int, default=2,
                         help="problems per set, each one a fresh seed")
@@ -296,6 +300,18 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             f"--shards {args.shards} is too few: a shard is one rollout task, and "
             "the engine needs at least 4 to split train from held-out. Raise "
             "--shards, or lower --problems if the run is too slow.")
+    train_shards = args.shards - round(args.shards * args.held_out_frac)
+    if train_shards < args.workers:
+        # A round dispatches one rollout per *train* task, so a worker beyond
+        # that count has nothing to be handed and the round stops short of
+        # `workers` expansions. Left silent, `--iterations 9 --workers 3` on four
+        # shards quietly becomes six expansions and the result file still says
+        # nine were budgeted.
+        print(f"warning  : {args.shards} shards x held_out_frac="
+              f"{args.held_out_frac} leaves {train_shards} train set(s), so each "
+              f"round runs {train_shards} rollouts rather than {args.workers} and "
+              f"the tree will stop short of {args.iterations} expansions. Raise "
+              f"--shards to at least {2 * args.workers}.")
     mode = "async" if args.asynchronous else ("serial" if args.serial else "sync")
     print("Algorithm: ERA Flat UCB tree search (FUTS) on AgentDescent")
     print(f"Task     : AlgoTune -- {len(tasks)} task(s), one tree each, "
