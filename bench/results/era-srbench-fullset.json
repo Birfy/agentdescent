@@ -1,0 +1,178 @@
+{
+  "experiment": "ERA on AgentDescent -- LLM-SRBench, every problem scored by every program",
+  "why": "The measured section reports held-back shards, which is the clean before/after. This file is the other view: the seed program and both winners scored on ALL 240 problems, which is the population the paper's own tables report on. The seed's rows are uncontaminated -- it is a fixed algorithm that never saw anything. Each winner was selected on 6 of its category's 8 shards, so its rows here are optimistic and its clean number is the held-back one in the run file beside this.",
+  "runs": {
+    "lsr_synth": "era-srbench-synth.json",
+    "lsr_transform": "era-srbench-transform.json"
+  },
+  "problem_seconds": 4.0,
+  "metrics": {
+    "acc": "Acc(0.1), percent of problems, arXiv:2504.10415 Sec. 3",
+    "median_nmse": "median over the problems of that subset",
+    "mean_digits": "mean min(12, -log10 NMSE)"
+  },
+  "results": {
+    "lsr_synth::seed": {
+      "pooled": {
+        "mean_digits": 7.466916825782273,
+        "median_nmse": 8.565516963182419e-08,
+        "acc_0.1": 0.4806201550387597,
+        "problems": 129,
+        "ood_acc_0.1": 0.5271317829457365,
+        "ood_median_nmse": 0.00022141604081639122
+      },
+      "by_subset": {
+        "lsr_synth_bio_pop_growth": {
+          "n": 24,
+          "acc": 54.166666666666664,
+          "median_nmse": 2.7195536679917516e-10,
+          "mean_digits": 8.456583333333333
+        },
+        "lsr_synth_chem_react": {
+          "n": 36,
+          "acc": 80.55555555555556,
+          "median_nmse": 5.467353607997473e-10,
+          "mean_digits": 8.865388888888887
+        },
+        "lsr_synth_matsci": {
+          "n": 25,
+          "acc": 48.0,
+          "median_nmse": 5.5506712370490176e-08,
+          "mean_digits": 7.89392
+        },
+        "lsr_synth_phys_osc": {
+          "n": 44,
+          "acc": 18.181818181818183,
+          "median_nmse": 3.9104541721188277e-05,
+          "mean_digits": 5.540295454545455
+        }
+      }
+    },
+    "lsr_synth::synth winner": {
+      "pooled": {
+        "mean_digits": 8.77402161460686,
+        "median_nmse": 1.0380742643301367e-11,
+        "acc_0.1": 0.5968992248062015,
+        "problems": 129,
+        "ood_acc_0.1": 0.6511627906976745,
+        "ood_median_nmse": 4.842691207159376e-06
+      },
+      "by_subset": {
+        "lsr_synth_bio_pop_growth": {
+          "n": 24,
+          "acc": 79.16666666666667,
+          "median_nmse": 7.779385051316896e-13,
+          "mean_digits": 9.907833333333333
+        },
+        "lsr_synth_chem_react": {
+          "n": 36,
+          "acc": 83.33333333333333,
+          "median_nmse": 7.526585077696141e-13,
+          "mean_digits": 10.705583333333335
+        },
+        "lsr_synth_matsci": {
+          "n": 25,
+          "acc": 52.0,
+          "median_nmse": 1.222219275308558e-10,
+          "mean_digits": 8.29868
+        },
+        "lsr_synth_phys_osc": {
+          "n": 44,
+          "acc": 34.09090909090909,
+          "median_nmse": 4.59151517889789e-06,
+          "mean_digits": 6.845318181818183
+        }
+      }
+    },
+    "lsr_synth::transform winner": {
+      "pooled": {
+        "mean_digits": 5.454871925018595,
+        "median_nmse": 6.286151966525382e-05,
+        "acc_0.1": 0.3798449612403101,
+        "problems": 129,
+        "ood_acc_0.1": 0.18604651162790697,
+        "ood_median_nmse": 13.362150627244539
+      },
+      "by_subset": {
+        "lsr_synth_bio_pop_growth": {
+          "n": 24,
+          "acc": 58.333333333333336,
+          "median_nmse": 4.7827723453192704e-11,
+          "mean_digits": 8.576083333333331
+        },
+        "lsr_synth_chem_react": {
+          "n": 36,
+          "acc": 50.0,
+          "median_nmse": 0.00016135542034001517,
+          "mean_digits": 5.687444444444445
+        },
+        "lsr_synth_matsci": {
+          "n": 25,
+          "acc": 48.0,
+          "median_nmse": 9.94536024460931e-08,
+          "mean_digits": 6.524999999999999
+        },
+        "lsr_synth_phys_osc": {
+          "n": 44,
+          "acc": 11.363636363636363,
+          "median_nmse": 0.017001358323537785,
+          "mean_digits": 2.954068181818182
+        }
+      }
+    },
+    "lsr_transform::seed": {
+      "pooled": {
+        "mean_digits": 1.0649358482563716,
+        "median_nmse": 0.09409723222912629,
+        "acc_0.1": 0.009009009009009009,
+        "problems": 111,
+        "ood_acc_0.1": null,
+        "ood_median_nmse": null
+      },
+      "by_subset": {
+        "lsr_transform": {
+          "n": 111,
+          "acc": 0.9009009009009009,
+          "median_nmse": 0.09409723222912629,
+          "mean_digits": 1.064936936936937
+        }
+      }
+    },
+    "lsr_transform::synth winner": {
+      "pooled": {
+        "mean_digits": 0.7374805041879067,
+        "median_nmse": 0.2449386836857299,
+        "acc_0.1": 0.009009009009009009,
+        "problems": 111,
+        "ood_acc_0.1": null,
+        "ood_median_nmse": null
+      },
+      "by_subset": {
+        "lsr_transform": {
+          "n": 111,
+          "acc": 0.9009009009009009,
+          "median_nmse": 0.2449386836857299,
+          "mean_digits": 0.7375225225225231
+        }
+      }
+    },
+    "lsr_transform::transform winner": {
+      "pooled": {
+        "mean_digits": 1.8233021597212744,
+        "median_nmse": 0.07533112888226508,
+        "acc_0.1": 0.08108108108108109,
+        "problems": 111,
+        "ood_acc_0.1": null,
+        "ood_median_nmse": null
+      },
+      "by_subset": {
+        "lsr_transform": {
+          "n": 111,
+          "acc": 8.108108108108109,
+          "median_nmse": 0.07533112888226508,
+          "mean_digits": 1.8233063063063053
+        }
+      }
+    }
+  }
+}

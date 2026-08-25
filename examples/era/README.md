@@ -89,11 +89,14 @@ without its domain-chosen library.
 
 **The protocol is ERA's, not the benchmark's**, and that is the one thing to keep
 straight when putting a number from here beside the paper's tables. LLM-SRBench
-evaluates searchers that see one problem at a time with the data in context; here
-the model never sees a sample, it writes one program, and that program is run
-sandboxed over every problem. Same benchmark, same splits, same metrics,
-different experiment — said in the result file, in the module docstring, and in
-[`docs/algo-era.md`](../../docs/algo-era.md).
+evaluates searchers that evolve **per problem** — LLM-SR's own config gives each
+problem 1 000 samples — while here the model never sees a sample, writes **one**
+program, and that program is run sandboxed over every problem in the benchmark:
+14 model calls for a 129-problem category, about 0.11 per problem. Same
+benchmark, same splits, same metrics, different experiment — said in the result
+file, in the module docstring, and in
+[`docs/algo-era.md`](../../docs/algo-era.md), which also puts the two side by
+side with the budget column attached.
 
 The samples come from an **ungated mirror** (`pkuHaowei/llm-srbench`), because the
 benchmark's own release is gated and returns 401 without a HuggingFace token. The

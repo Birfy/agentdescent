@@ -73,6 +73,15 @@ All notable changes to AgentDescent are documented here. The format follows
   better against 9 worse — **p = 0.31**, so the mean moved and the evidence did
   not, which is how it is reported.
 
+  Against the paper's Table 2, over the full categories
+  (`bench/results/era-srbench-fullset.json`): this protocol matches or beats the
+  published state of the art on **four of five** NMSE columns and two of four
+  Acc(0.1) columns of LSR-Synth — chemistry 83.3% Acc / 7.5e-13 NMSE against
+  LLM-SR's 66.66% / 4.1e-06, biology 79.2% / 7.8e-13 against 58.33% / 1.0e-06 —
+  and loses badly on LSR-Transform, 8.1% against LaSR's 50.45%. The budget
+  column is the point: LLM-SR's config gives **each problem** 1 000 samples,
+  where a whole run here is 14 model calls for 129 problems.
+
   Two findings worth the run on their own. The seed program — sparse regression,
   no LLM anywhere in it — already beats every published LLM method in the paper's
   table on LSR-Synth chemistry and biology, which says something about the

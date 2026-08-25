@@ -986,42 +986,103 @@ it is measurable here only because the benchmark ships two categories that
 differ in kind. `--dataset all` runs the search against both at once; that run
 has not been made.
 
+### One search for the whole benchmark, not one per problem
+
+The single most important number for reading the next table is the **LLM budget**,
+because the two protocols do not sit on the same axis at all.
+
+The paper's methods evolve **per problem**: each of the 240 problems gets its own
+search. From the benchmark's own configs (`configs/llmsr_gpt4omini.yaml` and
+friends) —
+
+| Method | LLM budget, per problem | For a 129-problem category |
+|---|---|---|
+| LLM-SR | 1 000 samples (`global_max_sample_num`), 4 per prompt → 250 prompts | ~32 000 prompts |
+| LaSR | 2 000 samples (`max_num_samples`), 25 iterations × 10 populations | ~258 000 samples |
+| Direct prompting | 5 samples in 1 prompt | 129 prompts |
+| **this port** | — | **12 expansions = 14 prompts, for the whole category** |
+
+So the run measured above spends **14 model calls to cover 129 problems** —
+about **0.11 calls per problem**, roughly 2 300× less LLM per problem than
+LLM-SR, and an order of magnitude less than *direct prompting does for a single
+problem*. There is one program, written without the model ever seeing a data
+point, and it is run over every problem in the benchmark. Each problem then gets
+four seconds of CPU and no network.
+
+That is not a better way to run LLM-SRBench. It is a different question — "can a
+model write one method that solves a whole scientific distribution?" rather than
+"can a model find this equation?" — and the numbers below are only interesting
+with the budget column attached.
+
 ### Against the paper's own tables
 
-The comparison has to carry its caveat every time it is made: **same benchmark,
-same splits, same metrics, different experiment**. The paper's methods see one
-problem at a time with the data in the model's context and a per-problem sample
-budget; here the model never sees a sample and writes one program for all of
-them. Acc(0.1), per the paper's Table 2 (GPT-4o-mini backbone), against this
-run's held-back problems:
+Two of this port's three programs can be compared to the paper's numbers over
+the **full** category, which is what the paper reports on:
 
-| | LSR-Transform | chemistry | biology | physics | materials |
+* the **seed program** is a fixed algorithm that never saw anything — no
+  selection, no contamination, directly comparable;
+* each **winner** was selected on 6 of that category's 8 shards, so its full-set
+  row is optimistic and is marked as such; its clean number is the held-back
+  column beside it.
+
+Acc(0.1), best published result per column across all four methods × three
+backbones in the paper's Table 2. Every row below this port's own is in
+[`bench/results/era-srbench-fullset.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-srbench-fullset.json):
+
+| Acc(0.1) ↑ | LSR-Transform (111) | chemistry (36) | biology (24) | physics (44) | materials (25) |
 |---|---|---|---|---|---|
-| Direct prompting | 6.31% | 13.88% | 4.16% | 9.09% | 0.0% |
-| SGA | 8.11% | 16.66% | 12.51% | 9.09% | 36.11% |
-| LaSR | 50.45% | 38.92% | 20.83% | 31.81% | 72.04% |
-| LLM-SR | 39.64% | 52.77% | 29.16% | 36.36% | 88.28% |
-| this seed program (no LLM at all) | 0.0% | 87.5% | 66.7% | 25.0% | 33.3% |
-| this run's winner | 14.8% | 87.5% | 83.3% | 33.3% | 50.0% |
+| Direct prompting, best backbone | 6.31% | 13.88% | 4.16% | 9.09% | 0.0% |
+| SGA, best backbone | 8.11% | 16.66% | 12.51% | 9.09% | 36.11% |
+| LaSR, best backbone | **50.45%** | 38.92% | 20.83% | 31.81% | 72.04% |
+| LLM-SR, best backbone | 39.64% | 66.66% | 58.33% | **36.36%** | **88.28%** |
+| **seed program here** (no LLM at all, full set) | 0.9% | 80.6% | 54.2% | 18.2% | 48.0% |
+| **winner here** (full set, selection-contaminated) | 8.1% | **83.3%** | **79.2%** | 34.1% | 52.0% |
+| winner here (held-back only, clean) | 14.8% | 87.5% | 83.3% | 33.3% | 50.0% |
 
-Two things fall out of that, and the second is the more interesting:
+Median NMSE, same rows (the paper does not state how it aggregates its NMSE
+column; median is used here, and the per-problem values are in the result files
+so either aggregation can be recomputed):
 
-**On LSR-Synth a plain sparse-regression baseline is already competitive**, and
-on chemistry and biology it is ahead of every published method in the table
-before any LLM is involved. That is not a result about this search — it is a
-result about the benchmark: LSR-Synth problems are ODE right-hand sides built as
-a known term plus a novel one, which is the exact shape STLSQ was designed for,
-and the published methods are working under a sample budget that a direct
-least-squares fit does not have. Anyone quoting LLM-SRBench synthetic numbers
-should have this row in view.
+| NMSE ↓ | LSR-Transform | chemistry | biology | physics | materials |
+|---|---|---|---|---|---|
+| best published (method, backbone) | **0.0011** (LaSR) | 4.12e-06 (LLM-SR) | 1.04e-06 (LLM-SR) | 7.62e-05 (LLM-SR) | 3.21e-09 (LLM-SR) |
+| seed program here (full set) | 0.0941 | 5.47e-10 | 2.72e-10 | 3.91e-05 | 5.55e-08 |
+| winner here (full set) | 0.0753 | **7.53e-13** | **7.78e-13** | **4.59e-06** | **1.22e-10** |
 
-**On LSR-Transform the same baseline scores zero**, and twelve expansions take
-it to 14.8% against LaSR's 50.45%. Those problems are Feynman equations
-rearranged into products, quotients and nested roots — forms that no
-linear-in-a-library method can express at all, and where proposing a *structure*
-from the variable names is the whole task. That is what the paper's methods do
-per problem and what this protocol, one program for 111 problems in four seconds
-each, does not. The gap is the protocol's, not the search's.
+Three things fall out, and the third is the one worth arguing about:
+
+**On LSR-Synth this protocol matches or beats the published state of the art on
+four of five columns of NMSE and two of four on Acc(0.1)** — at 0.11 LLM calls
+per problem. Chemistry and biology are ahead of every published method on both
+metrics; physics is level on Acc and an order of magnitude better on NMSE.
+
+**And a plain sparse-regression baseline gets most of the way there on its own.**
+The seed program contains no LLM anywhere, and it scores 80.6% on chemistry
+against LLM-SR's 66.66% and a median NMSE four orders of magnitude below it.
+That is a fact about the benchmark rather than about this search: LSR-Synth
+problems are ODE right-hand sides built as *a known term plus a novel term*,
+which is the exact shape sequentially thresholded least squares was designed
+for, and the published methods are working under a per-problem sample budget
+that a direct least-squares fit does not have. Anyone quoting LSR-Synth numbers
+should have that row in view.
+
+**Materials science is where the two metrics disagree, and it is instructive.**
+The winner's median NMSE there (1.22e-10) is better than LLM-SR's (3.21e-09),
+while its Acc(0.1) (52.0%) is far worse than LLM-SR's (88.28%). Acc(0.1) is an
+indicator on the *worst* relative error over 500 test points, so an equation that
+is excellent in L2 and blows up relatively at a single near-zero target scores
+0 — and a library-fit equation does that where a structurally correct one does
+not. The two columns are measuring different virtues, and this protocol has the
+first without the second.
+
+**On LSR-Transform it loses, and the protocol is why.** The seed scores 0.9%,
+twelve expansions take it to 8.1% (14.8% on the held-back shards), against
+LaSR's 50.45%. Those problems are Feynman equations rearranged into products,
+quotients and nested roots — forms no linear-in-a-library method can express at
+all, where proposing a *structure* from the variable names is the entire task.
+That is exactly what a per-problem LLM search does and what one program run over
+111 problems in four seconds each cannot. The gap is the budget's and the
+protocol's, not the tree search's.
 
 ## Run it
 
