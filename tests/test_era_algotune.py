@@ -236,6 +236,36 @@ def test_two_seeds_draw_different_problem_sets(tmp_path, monkeypatch):
     assert set(first.seeds(0)).isdisjoint(second.seeds(0))
 
 
+def test_a_wider_reported_split_leaves_the_search_seeing_the_same_problems(tmp_path,
+                                                                          monkeypatch):
+    """`--test-problems` widens what is *reported on*, not what is searched.
+
+    Two properties, and both are load-bearing. The scoring sets keep the seeds
+    they had, so a run with a wider held-back split is still a rerun of the same
+    search rather than a different one. And no seed the search could score
+    against appears in the reported split -- widening the measurement must not
+    quietly start measuring the sets the optimiser was allowed to fit.
+    """
+    monkeypatch.setattr(algotune, "fetch_text",
+                        lambda url, **k: (json.dumps(FIXTURE_SIZES)
+                                          if url.endswith("generation.json")
+                                          else FIXTURE_TASK))
+    monkeypatch.setattr(algotune, "cache_path",
+                        lambda subdir, name: str(tmp_path / subdir / name))
+    narrow = algotune.prepare_suite("svd", shards=6, test_shards=3, problems=2)
+    wide = algotune.prepare_suite("svd", shards=6, test_shards=3, problems=2,
+                                  test_problems=50)
+
+    assert [narrow.seeds(s) for s in range(6)] == [wide.seeds(s) for s in range(6)]
+    assert narrow.size(0) == wide.size(0) == 2
+    assert wide.size(6) == 50 and narrow.size(6) == 2
+
+    searchable = set().union(*(set(wide.seeds(s)) for s in range(6)))
+    reported = set().union(*(set(wide.seeds(s)) for s in wide.test_range()))
+    assert not searchable & reported
+    assert len(reported) == 150
+
+
 def test_a_task_outside_the_runnable_set_is_refused_by_name():
     with pytest.raises(ValueError) as excinfo:
         algotune.prepare_suite("max_common_subgraph")

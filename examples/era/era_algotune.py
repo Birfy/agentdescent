@@ -150,6 +150,8 @@ def algotune_domain(
             "published_target_time_ms": suite.target_time_ms,
             "published_baseline_ms": suite.published_ms,
             "problems_per_shard": suite.problems,
+            "problems_per_test_shard": suite.size(suite.scoring_shards),
+            "reported_instances": suite.test_shards * suite.size(suite.scoring_shards),
             "scoring_shards": suite.scoring_shards,
             "test_shards": suite.test_shards,
             "timed_repeats": repeats,
@@ -221,7 +223,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--test-shards", type=int, default=3,
                         help="further problem sets the search never sees")
     parser.add_argument("--problems", type=int, default=2,
-                        help="problems per set, each one a fresh seed")
+                        help="problems per scoring set, each one a fresh seed")
+    parser.add_argument("--test-problems", type=int, default=0,
+                        help=("problems per held-back set; 0 means the same as "
+                              "--problems. The scoring sets are paid for on every "
+                              "rollout and every gate evaluation, the held-back "
+                              "sets twice per task at the end -- so this is the "
+                              "cheap way to make the *reported* figure precise. "
+                              "AlgoTune reports over 100 test instances, and "
+                              "--test-shards 2 --test-problems 50 matches that"))
     parser.add_argument("--repeats", type=int, default=REPEATS,
                         help=("timed runs per program per problem, after a "
                               "discarded warm-up. The metric is the ratio of the "
@@ -355,7 +365,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             suite = prepare_suite(
                 task, seed=args.seed, shards=args.shards,
                 test_shards=args.test_shards, problems=args.problems,
-                size_scale=args.size_scale)
+                test_problems=args.test_problems, size_scale=args.size_scale)
         except Exception as exc:  # a task that will not load is not a search
             print(f"[{index}/{len(tasks)}] {task}: skipped -- "
                   f"{type(exc).__name__}: {exc}", flush=True)
@@ -364,7 +374,9 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             continue
         print(f"\n[{index}/{len(tasks)}] {task}: n={suite.n} "
               f"(upstream {suite.published_n} at {suite.target_time_ms}ms), "
-              f"{args.problems} problems x {args.shards}+{args.test_shards} sets, "
+              f"{args.shards} scoring sets of {suite.problems} + "
+              f"{args.test_shards} held back of {suite.size(args.shards)} "
+              f"({args.test_shards * suite.size(args.shards)} reported instances), "
               f"seed program {len(suite.initial_program)} chars", flush=True)
         domain = algotune_domain(
             suite,

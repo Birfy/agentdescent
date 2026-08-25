@@ -232,18 +232,51 @@ class Suite:
     scoring_shards: int
     test_shards: int
     seed: int
+    #: Problems per **held-back** set, which the search never scores against and
+    #: therefore never pays for. Separate from :attr:`problems` because the two
+    #: numbers answer different questions and cost differently. The scoring sets
+    #: are paid for on every rollout and again on every gate evaluation, so
+    #: doubling them roughly doubles the run; the held-back sets are scored twice
+    #: per task, at the end, and are the only thing the *reported* number rests
+    #: on. AlgoTune reports over 100 test instances (`dataset.test_size`), and a
+    #: figure taken over six is not comparable with one taken over a hundred
+    #: however carefully each is measured -- so the reported split can be widened
+    #: to match without making the search itself a hundred times more expensive.
+    #:
+    #: Defaults to :attr:`problems`, which is what every run before this field
+    #: existed did.
+    test_problems: int = 0
+
+    def _count(self, shard: int) -> int:
+        return (self.test_problems or self.problems
+                if shard >= self.scoring_shards else self.problems)
 
     def seeds(self, shard: int) -> Tuple[int, ...]:
-        """The problem seeds of one shard -- disjoint across shards by construction."""
-        base = 1 + self.seed * 100_003 + shard * self.problems
-        return tuple(base + index for index in range(self.problems))
+        """The problem seeds of one shard -- disjoint across shards by construction.
+
+        The two splits are laid out in **separate runs of seeds**: the scoring
+        shards fill the first ``scoring_shards * problems``, the held-back ones
+        start after them. That is what lets ``--test-problems`` widen the
+        reported measurement without moving a single seed the search will score
+        against -- a run measured over a hundred problems is then a rerun of the
+        search that was measured over six, not a different experiment. A single
+        stride across both splits would have shifted every scoring shard the
+        moment the reported split changed size.
+        """
+        origin = 1 + self.seed * 100_003
+        if shard < self.scoring_shards:
+            base = origin + shard * self.problems
+        else:
+            base = (origin + self.scoring_shards * self.problems
+                    + (shard - self.scoring_shards) * self._count(shard))
+        return tuple(base + index for index in range(self._count(shard)))
 
     def test_range(self) -> Tuple[int, ...]:
         return tuple(range(self.scoring_shards,
                            self.scoring_shards + self.test_shards))
 
-    def size(self) -> int:
-        return self.problems
+    def size(self, shard: int = 0) -> int:
+        return self._count(shard)
 
 
 def published_sizes() -> Dict[str, Dict[str, Any]]:
@@ -273,6 +306,7 @@ def prepare_suite(
     shards: int = 4,
     test_shards: int = 2,
     problems: int = 2,
+    test_problems: int = 0,
     size_scale: float = 1.0,
 ) -> Suite:
     """Fetch one task, derive its seed program, and fix the shards.
@@ -294,6 +328,8 @@ def prepare_suite(
         raise ValueError("need at least two scoring shards and one test shard")
     if problems < 1:
         raise ValueError("need at least one problem per shard")
+    if test_problems and test_problems < 1:
+        raise ValueError("need at least one problem per held-back set")
     if not 0.0 < size_scale <= 1.0:
         raise ValueError("size_scale must be in (0, 1]")
 
@@ -329,6 +365,7 @@ def prepare_suite(
         scoring_shards=shards,
         test_shards=test_shards,
         seed=seed,
+        test_problems=test_problems,
     )
 
 
@@ -478,7 +515,7 @@ def evaluate_source(
             metrics["seconds"] = seconds
             return False, metrics, error
         results = payload.get("results") or []
-        expected = suite.size()
+        expected = suite.size(shard)
         if len(results) != expected:
             error = f"runner returned {len(results)} results for {expected} problems"
             return False, _zero_metrics(error), error
