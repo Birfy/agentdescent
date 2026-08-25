@@ -18,6 +18,7 @@ import dataclasses
 import inspect
 import json
 import math
+import os
 import textwrap
 
 import pytest
@@ -280,6 +281,44 @@ def test_the_gate_accepts_a_derived_reference_and_rejects_the_obvious_accidents(
             source, entrypoint="solve", allowed_imports=algotune.ALLOWED_IMPORTS,
             literal_top_level=False)
         assert not valid and expected in reason
+
+
+def test_the_allowlist_admits_the_compiler_directive_two_references_open_with():
+    """`from __future__ import annotations` is not a module, and it cost a task.
+
+    Left off the allowlist, `prepare_suite` still succeeds -- it parses the task
+    file, it does not execute it -- so the refusal arrives much later, as "the
+    initial ERA program failed to run", and the run reports one fewer task than
+    it was asked for with no obvious cause. Measured that way on
+    `sparse_lowest_eigenvalues_posdef`, in a 20-task run.
+    """
+    assert "__future__" in algotune.ALLOWED_IMPORTS
+
+
+@pytest.mark.skipif(not os.getenv("AGENTDESCENT_ALGOTUNE_NETWORK"),
+                    reason="set AGENTDESCENT_ALGOTUNE_NETWORK=1 to fetch the "
+                           "task files from upstream")
+def test_every_runnable_reference_derives_and_passes_this_tasks_own_gate():
+    """The sweep that would have caught the allowlist hole before a run did.
+
+    A root node the gate refuses is a task that cannot be searched at all, and
+    nothing else here checks the 72 real references against the gate that has to
+    admit them -- the fixtures above are this file's own task, not upstream's.
+    Opt-in because it fetches 72 files; the offline suite stays offline.
+    """
+    failures = []
+    for task in algotune.TASKS:
+        try:
+            derived = derive_seed_program(algotune.task_source(task))
+        except DerivationError as exc:
+            failures.append(f"{task}: derivation: {exc}")
+            continue
+        valid, reason = support.validate_source(
+            derived, entrypoint="solve", allowed_imports=algotune.ALLOWED_IMPORTS,
+            literal_top_level=False)
+        if not valid:
+            failures.append(f"{task}: gate: {reason}")
+    assert not failures, "\n".join(failures)
 
 
 def test_a_precomputed_table_is_allowed_here_and_refused_by_the_tabular_gate():

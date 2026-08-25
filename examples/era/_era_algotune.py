@@ -147,6 +147,13 @@ DEFAULT_TASKS: Tuple[str, ...] = (
 #: tasks, the sandbox rather than this set is the isolation boundary -- scipy
 #: alone can spawn processes and read files.
 ALLOWED_IMPORTS = {
+    # A compiler directive rather than a module, and two of the task files open
+    # with it. Left out, `prepare_suite` succeeds, the tree is built, and the
+    # *root node* is then refused by the gate -- so the task dies with "the
+    # initial ERA program failed to run" and the run reports one fewer task than
+    # it was asked for. Found exactly that way, on
+    # `sparse_lowest_eigenvalues_posdef`.
+    "__future__",
     "array",
     "bisect",
     "cmath",
