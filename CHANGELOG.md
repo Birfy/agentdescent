@@ -6,6 +6,45 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **A precision sweep over NumPy and SciPy, and a fourth ERA task built from
+  what it found.** `tools/scan_numeric_precision.py` scores 48 float64 entry
+  points against mpmath at 30 *and* 60 digits, over ranges declared before
+  anything was run, discarding any point where the two precisions disagree — so
+  a point whose reference has not converged can never become evidence against
+  the library. Its headline is reassuring: seven of eight NumPy probes return
+  the full 16 digits (`sin` and `tan` included at arguments up to 1e18) and 29
+  of 40 SciPy entry points sit above 15. Committed to
+  `docs/data/numeric_precision_scan.json`, because saying what is *not* worth
+  searching is half the result.
+- **`examples/era/era_special_precision.py`** — the two entry points the sweep
+  singled out, one tree per `--function`. `scipy.special.pbdv` averages 11.67
+  correct digits with 12.2% of points having none at all (it returns `4.81e100`
+  at `v=19.83, x=-29.28` where the value is `2.46e80`); `scipy.special.hyperu`
+  averages 14.36 and returns `nan` on 3% of its range, at points where the
+  function is finite and well-conditioned. Stress sets are drawn under the 2F1
+  generator's discipline and use the sweep's *declared* ranges rather than
+  narrowing onto the failures it found.
+- **Measured, including the half that did not work.** `hyperu` improved
+  11.5533 → 11.6385 held-back mean digits: +0.0852 paired at 2.69 SE, eight
+  points recovered, **zero regressed**, `nan` points down from 32 to 24. `pbdv`
+  moved one point in a thousand (+0.0012, 1.34 SE) and left all 129 of its
+  zero-digit points exactly where they were. Both runs are in `bench/results/`
+  and written up in `docs/algo-era.md`.
+
+### Fixed
+
+- **`temperature` stopped reaching Anthropic-shaped endpoints under `anthropic`
+  1.0.0, which dropped it from `Messages.create`.** Every worker of an ERA round
+  failed with `unexpected keyword argument 'temperature'` before any request was
+  made, while the run went on to record `temperature: 0.7` in its result file —
+  the same class of defect as the `--eval-concurrency` fix below, a recorded
+  configuration that disagrees with the run. `agentdescent.agents.claude` now
+  routes options the installed SDK does not name through `extra_body`, so they
+  reach the endpoint as before instead of being dropped behind a config that
+  still claims them.
+
 ## [0.4.5] — 2026-08-19
 
 ### Fixed

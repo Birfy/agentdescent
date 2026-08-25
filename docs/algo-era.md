@@ -348,7 +348,7 @@ measurement, which closes a gap the third one leaves open: *2F1 is known to be
 hard, so a task built on it might be the one place SciPy is weak.*
 
 [`tools/scan_numeric_precision.py`](https://github.com/Birfy/agentdescent/blob/main/tools/scan_numeric_precision.py)
-scores **47 NumPy and SciPy float64 entry points** against mpmath. Each probe
+scores **48 NumPy and SciPy float64 entry points** against mpmath. Each probe
 declares its parameter range up front; every point is evaluated at 30 *and* 60
 digits and discarded unless the two agree to 22, so a point where the reference
 has not converged can never become evidence against the library. What the sweep
@@ -363,10 +363,10 @@ python -m tools.scan_numeric_precision            # the whole sweep, ~21s
 python -m tools.scan_numeric_precision --only pbdv,hyperu --points 2000
 ```
 
-**The sweep's headline is that NumPy and SciPy are mostly excellent.** Every
-NumPy elementary function tested returns the full 16 digits — including `sin`
-and `tan` at arguments up to 1e18, where argument reduction is the whole
-problem — and around thirty SciPy entry points sit above 15 digits. `gammaln`,
+**The sweep's headline is that NumPy and SciPy are mostly excellent.** Seven
+of the eight NumPy probes return the full 16 digits — including `sin` and `tan`
+at arguments up to 1e18, where argument reduction is the whole problem — and 29
+of the 40 SciPy entry points sit above 15 digits. `gammaln`,
 `erfinv`, `ndtri`, `exp1`, `lambertw`, `ellipkinc`, `expi` and the rest are not
 improvable in double precision. That is a real result and it is why the sweep
 is committed alongside the tasks: it says what *is not* worth searching.
@@ -849,6 +849,82 @@ endpoint's measured knee bought **2.1×**.
     top-K node programs**, so gate-versus-test correlation can be measured
     directly rather than inferred from whichever program happened to win.
 
+## Measured results — pbdv and hyperu
+
+### The method
+
+Two runs, one per function, identical configuration and neither tuned after the
+fact: **24 expansions, 3 workers, sync**, `c_puct=1.0`, `temperature=0.7`,
+thinking disabled, `glm-5.2` behind an Anthropic-shaped endpoint. Eight shards
+(2000 points) are the acceptance gate; four shards (1000 points) are **never
+shown to the search** and are where every number below comes from. Recorded in
+[`bench/results/era-pbdv-run.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-pbdv-run.json)
+and
+[`era-hyperu-run.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-hyperu-run.json),
+with the winning programs beside them.
+
+Both are reported as **paired** comparisons — baseline and evolved program on
+the same 1000 held-back points — because the unpaired standard deviation here
+is 4.2 digits on `pbdv` and 2.1 on `hyperu`, which would put a 0.09-digit gain
+inside the noise while telling you nothing about whether any individual point
+moved. The paired difference is the quantity the search is actually trying to
+change, and it separates "improved a little everywhere" from "fixed eight
+points and touched nothing else" — which turns out to be the whole story.
+
+### The result: one clear negative, one small and unambiguous positive
+
+| | `pbdv` | `hyperu` |
+|---|---|---|
+| held-back mean digits | 9.9996 → 10.0008 | 11.5533 → **11.6385** |
+| paired difference | +0.0012 | **+0.0852** |
+| significance | 1.34 SE | **2.69 SE** |
+| points improved (>0.5 digit) | 1 / 1000 | **8 / 1000** |
+| points regressed (>0.5 digit) | 0 | **0** |
+| points with no correct digit | 129 → 129 | 32 → **24** |
+| solved (≥10 digits) | 804 → 804 | 958 → **965** |
+
+**`pbdv` is a negative result and should be read as one.** 24 expansions moved
+one point out of a thousand. The 129 points with no correct digit at the start
+are the same 129 at the end — the search never touched the failure region it
+was pointed at, which is exactly the region the prompt named and the worst-point
+feedback listed every round. The winning program does reach for the right
+identity (`D_v(x) = 2^(v/2) e^(-x²/4) U(-v/2, 1/2, x²/2)`, computed in logs),
+but guards it behind `v >= 15 and |x| >= 8` and then, for `x < 0`, needs the
+connection formula — which subtracts two quantities of wildly different size,
+and it does not get that part right. It is a plausible program that does not
+work, and the tree had no way to tell, because on the gate it scores what the
+baseline scores.
+
+**`hyperu` is a real gain, and a strictly dominating one.** +0.085 digits at
+2.69 SE is small but resolvable, and the shape behind it is better than the
+mean suggests: **eight points improved, zero regressed**. Those eight are `nan`
+points — the count of points returning no value at all fell from 32 to 24. The
+search did not make a good routine slightly better; it recovered a quarter of
+the places where SciPy declines to answer, and left everything else bit-identical.
+
+That "zero regressed" is a property of the strategy the search found, not luck.
+The winning program calls `scipy.special.hyperu` **first** and returns its
+answer whenever it is finite and non-zero; only on `nan` does it fall through to
+the Gamma-weighted 1F1 pair, then to the Kummer transformation, then back to the
+baseline. Layering a fallback under the state of the practice — rather than
+replacing it — is the move that makes a monotone improvement possible at all,
+and it is the same shape the 2F1 task's best programs found.
+
+!!! note "What the two results together say"
+    The tasks were built the same way, run under the same budget, and differ in
+    how far the fix is from what the baseline already computes. `hyperu`'s
+    failure is *reachable*: a textbook identity, evaluable with functions
+    already in `scipy.special`, and testable point by point because a `nan` is
+    unambiguous. `pbdv`'s is not: it needs a numerically careful treatment of a
+    connection formula in a region where the answer spans 250 orders of
+    magnitude, and a nearly-right attempt is indistinguishable from a wrong one
+    on any signal the search can see. A 24-expansion budget finds the first and
+    not the second, and reporting only the first would have made the method look
+    like it works on both.
+
+    The 1 reply in 25 damaged in transit on each run is the same endpoint defect
+    the 2F1 task documents, handled the same way.
+
 ## Run it
 
 Preview without an API key, network access, or sandbox process:
@@ -871,6 +947,15 @@ not comparable to an uncapped one.
 `--provider claude` selects an Anthropic-shaped endpoint (`ANTHROPIC_BASE_URL`
 + `ANTHROPIC_API_KEY`); `--provider openai`, the default, uses
 `OPENAI_BASE_URL` + `OPENAI_API_KEY`.
+
+The sweep-chosen tasks take the same flags, one tree per function:
+
+```bash
+python -m tools.scan_numeric_precision                    # pick targets by measurement
+python -m examples.era.era_special_precision --function hyperu \
+    --provider claude --model glm-5.2 --yes --iterations 24 --workers 3
+python -m examples.era.era_special_precision --function pbdv --dry-run
+```
 
 The integrals task takes the same flags, plus `--eval-budget` and
 `--problem-seconds`:

@@ -12,7 +12,7 @@ AgentDescent engine, running **four** tasks on one search.
 | Dataset (faithful) | Kaggle Playground Series S3E1 — the upstream `implementation/playground_s3e1.py` task |
 | Second task | *Numerical solution of integrals* — named in the paper's abstract; upstream released no implementation, so the nine-family suite is constructed here |
 | Third task | Gauss hypergeometric `2F1` in double precision — not in the paper at all; 3000 points against a 25-digit mpmath reference, baseline `scipy.special.hyp2f1` |
-| Fourth task | `scipy.special.pbdv` and `hyperu` — chosen by a 47-function precision sweep rather than from the literature; one tree per function |
+| Fourth task | `scipy.special.pbdv` and `hyperu` — chosen by a 48-probe precision sweep rather than from the literature; one tree per function |
 | `evolve()` plug-ins | `strategy` + `aggregator_factory=` FUTS tree, `selection.FlatPuct` |
 
 ## Run
@@ -73,14 +73,14 @@ task's allowlist — the deliverable is a float64 routine.
 **`era_special_precision.py` — the functions a sweep picked out.** The task
 above chose `2F1` from a survey paper. This one chooses by measurement:
 [`tools/scan_numeric_precision.py`](../../tools/scan_numeric_precision.py)
-scores **47 NumPy and SciPy float64 entry points** against mpmath at 30 and 60
+scores **48 NumPy and SciPy float64 entry points** against mpmath at 30 and 60
 digits, over ranges declared before anything was run, and keeps only the points
 where the two precisions agree.
 
-Its main finding is that the libraries are mostly excellent — every NumPy
-elementary function tested returns the full 16 digits, `sin` and `tan` included
-at arguments up to 1e18, and around thirty SciPy entry points sit above 15. Two
-do not, and they are this task's targets:
+Its main finding is that the libraries are mostly excellent — seven of the
+eight NumPy probes return the full 16 digits, `sin` and `tan` included at
+arguments up to 1e18, and 29 of the 40 SciPy entry points sit above 15. Two do
+not, and they are this task's targets:
 
 | target | mean digits | < 8 digits | < 1 digit |
 |---|---|---|---|
@@ -104,6 +104,23 @@ narrowing onto the failures the sweep found — a suite drawn around known
 failures would measure the drawing. Sizes come from the measured variance:
 per-point digits have an SD of 4.78 on `pbdv` and 2.83 on `hyperu`, so the
 2000-point gate carries a standard error of 0.11 digits.
+
+Measured at 24 expansions each, on the 1000 held-back points, paired:
+
+| | `pbdv` | `hyperu` |
+|---|---|---|
+| held-back mean digits | 9.9996 → 10.0008 | 11.5533 → **11.6385** |
+| paired difference | +0.0012 (1.34 SE) | **+0.0852 (2.69 SE)** |
+| improved / regressed | 1 / 0 | **8 / 0** |
+| points with no correct digit | 129 → 129 | 32 → **24** |
+
+`hyperu` is a small but unambiguous gain — eight `nan` points recovered, nothing
+made worse — because the program the search found calls SciPy first and only
+falls through to the Gamma-weighted 1F1 pair where SciPy returns nothing.
+`pbdv` is a negative result: 24 expansions moved one point in a thousand and
+never touched the failure region. Both are written up in
+[`docs/algo-era.md`](../../docs/algo-era.md), runs in
+[`bench/results/`](../../bench/results/).
 
 ## What is in here
 

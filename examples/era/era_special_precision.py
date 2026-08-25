@@ -1,13 +1,13 @@
 """ERA tree search on SciPy entry points a sweep found to be inaccurate.
 
 Where the 2F1 task next door picked its function from the literature, this one
-picks by measurement. ``tools/scan_numeric_precision.py`` scores 47 NumPy and
+picks by measurement. ``tools/scan_numeric_precision.py`` scores 48 NumPy and
 SciPy float64 entry points against mpmath -- each point evaluated at 30 *and*
 60 digits and kept only where the two agree -- over parameter ranges declared
-before anything was run. The sweep's answer is mostly reassuring: every NumPy
-elementary function tested returns 16 correct digits, ``sin`` and ``tan``
-included at arguments up to 1e18, and around thirty SciPy entry points sit
-above 15 digits. Two do not:
+before anything was run. The sweep's answer is mostly reassuring: seven of the
+eight NumPy probes return 16 correct digits, ``sin`` and ``tan`` included at
+arguments up to 1e18, and 29 of the 40 SciPy entry points sit above 15 digits.
+Two do not:
 
 ======================  ============  ==============  ==============
 target                  mean digits   < 8 digits      < 1 digit

@@ -6,13 +6,13 @@ sets are the committed files ``data/<target>_stress.json``, produced once by
 
 Where the targets came from
 ---------------------------
-Not from folklore. ``tools/scan_numeric_precision.py`` measures 47 NumPy and
+Not from folklore. ``tools/scan_numeric_precision.py`` measures 48 NumPy and
 SciPy float64 entry points against mpmath -- each one at 30 *and* 60 digits,
 keeping only points where the two agree -- over parameter ranges declared
-before anything was run. Most of what it measures is excellent: every NumPy
-elementary function tested returns 16 correct digits, including ``sin`` and
-``tan`` at arguments up to 1e18, and about thirty SciPy entry points sit above
-15. Two do not, and they are this module's targets:
+before anything was run. Most of what it measures is excellent: seven of the
+eight NumPy probes return 16 correct digits, including ``sin`` and ``tan`` at
+arguments up to 1e18, and 29 of the 40 SciPy entry points sit above 15. Two do
+not, and they are this module's targets:
 
 ``scipy.special.pbdv`` -- the parabolic cylinder function D_v(x). Mean 11.67
 correct digits, **12.2% of points with no correct digit at all**. The failures
