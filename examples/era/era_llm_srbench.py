@@ -70,6 +70,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import json
 import math
 import time
 import statistics
@@ -288,6 +289,11 @@ def build_parser() -> argparse.ArgumentParser:
               "runs --workers model calls in parallel, so this multiplies the "
               "load on the endpoint"))
     parser.add_argument(
+        "--resume", action="store_true",
+        help=("--per-problem only: pick up an interrupted sweep from --output, "
+              "skipping every problem already in it. Refuses if that file was "
+              "written under a different budget"))
+    parser.add_argument(
         "--val-frac-per-problem", type=float, default=0.25,
         help=("--per-problem only: share of a problem's training rows held out "
               "of the fit and split into the scoring shards"))
@@ -395,6 +401,53 @@ def _benchmark_summary(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
                           for name, group in sorted(by_subset.items())}}
 
 
+def _budget_fingerprint(args: argparse.Namespace) -> Dict[str, Any]:
+    """Everything that changes what a problem's number means.
+
+    A resume that quietly folded a 6-expansion row into a 20-expansion sweep
+    would produce a file holding two experiments under one heading, so the
+    fingerprint is compared rather than assumed and a mismatch refuses.
+    """
+    return {
+        "dataset": args.dataset,
+        "iterations": args.iterations,
+        "workers": args.workers,
+        "shards": args.shards,
+        "held_out_frac": args.held_out_frac,
+        "val_frac_per_problem": args.val_frac_per_problem,
+        "problem_seconds": args.problem_seconds,
+        "candidate_timeout": args.candidate_timeout,
+        "train_points": args.train_points,
+        "model": args.model,
+        "seed": args.seed,
+    }
+
+
+def _load_checkpoint(path: Path,
+                     fingerprint: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Rows already searched under exactly this budget, or nothing.
+
+    A per-problem sweep is hours of independent searches, and a container that
+    goes away takes the whole thing with it unless the file on disk is written as
+    it goes. This is the other half of that: `--resume` picks the file back up,
+    and every problem in it is skipped rather than paid for twice.
+    """
+    if not path.exists():
+        return []
+    try:
+        stored = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"--resume cannot read {path}: {exc}")
+    if stored.get("budget") != fingerprint:
+        raise SystemExit(
+            f"--resume refused: {path} was written under a different budget.\n"
+            f"  stored: {stored.get('budget')}\n"
+            f"  now   : {fingerprint}\n"
+            "Resuming into it would put two experiments in one file; write to a "
+            "different --output instead.")
+    return list(stored.get("per_problem") or [])
+
+
 def _one_problem(args: argparse.Namespace, complete, problem: SrProblem,
                  samples: Dict[str, Any], actor_usage: Usage,
                  mode: str) -> Dict[str, Any]:
@@ -460,6 +513,52 @@ def _one_problem(args: argparse.Namespace, complete, problem: SrProblem,
     }
 
 
+def _checkpoint(args: argparse.Namespace, fingerprint: Dict[str, Any],
+                rows: List[Dict[str, Any]], started: float, model_usage: Usage,
+                actor_usage: Usage, damage: Dict[str, int], *,
+                complete: bool) -> Dict[str, Any]:
+    """Write the sweep's file as it stands, and return what was written.
+
+    The same payload whether the sweep has finished or not, so a run killed
+    two-thirds of the way through leaves a file that reads exactly like a
+    finished one except for ``status`` and the problem count. `_write_json`
+    writes through a temporary file and renames, so a reader never sees a half
+    file even mid-sweep.
+    """
+    ordered = sorted(rows, key=lambda row: row["problem_id"])
+    payload: Dict[str, Any] = {
+        "experiment": ("ERA on AgentDescent -- LLM-SRBench, one search per "
+                       "problem (the benchmark's own protocol)"),
+        "status": "completed" if complete else "partial",
+        "completed_at": _utc_now(),
+        "upstream_commit": UPSTREAM_COMMIT,
+        "comparability": (
+            "One independent search per problem, scored on slices of that "
+            "problem's own training rows and reported on the benchmark's own "
+            "held-out split -- the protocol the paper's methods run under. The "
+            "budget is not the paper's: LLM-SR gives each problem 1000 samples, "
+            f"this gives it {args.iterations} expansions. Symbolic accuracy is "
+            "not measured here at all."),
+        "budget": fingerprint,
+        "config": {key: value for key, value in vars(args).items()
+                   if key not in ("output", "yes")},
+        "wall_seconds": time.monotonic() - started,
+        "baseline": _benchmark_summary([
+            {**row["baseline"], "subset": row["subset"]} for row in ordered]),
+        "best": _benchmark_summary(ordered),
+        "per_problem": ordered,
+        "model_usage": _usage_dict(model_usage),
+        "actor_usage": _usage_dict(actor_usage),
+        "reply_damage": {
+            "drawn": damage.get("drawn", 0),
+            "damaged": damage.get("damaged", 0),
+            "attempts_allowed": max(1, args.reply_attempts),
+        },
+    }
+    _write_json(args.output, payload)
+    return payload
+
+
 def _run_per_problem(args: argparse.Namespace, complete, model_usage: Usage,
                      actor_usage: Usage, damage: Dict[str, int],
                      mode: str) -> int:
@@ -481,7 +580,15 @@ def _run_per_problem(args: argparse.Namespace, complete, model_usage: Usage,
           f"{args.iterations} expansions each, {args.shards} validation shards "
           f"from {int(100 * args.val_frac_per_problem)}% of train, seed={args.seed}")
 
-    rows: List[Dict[str, Any]] = []
+    fingerprint = _budget_fingerprint(args)
+    rows: List[Dict[str, Any]] = (
+        _load_checkpoint(args.output, fingerprint) if args.resume else [])
+    if rows:
+        done = {row["problem_id"] for row in rows}
+        catalogue = [pair for pair in catalogue if pair[0].problem_id not in done]
+        print(f"Resuming : {len(done)} problems already in {args.output}, "
+              f"{len(catalogue)} left to search")
+    total = len(rows) + len(catalogue)
     lock = threading.Lock()
     started = time.monotonic()
 
@@ -499,12 +606,18 @@ def _run_per_problem(args: argparse.Namespace, complete, model_usage: Usage,
         with lock:
             rows.append(row)
             done = len(rows)
-            print(f"[{done:3d}/{len(catalogue)}] {row['problem_id']:34s} "
+            print(f"[{done:3d}/{total}] {row['problem_id']:34s} "
                   f"digits {row['baseline']['digits']:>6} -> {row['digits']:<6} "
                   f"acc {row['baseline']['acc']}->{row['acc']}  "
                   f"({time.monotonic() - started:.0f}s elapsed)"
                   + (f"  [{row['error'][:60]}]" if row.get("error") else ""),
                   flush=True)
+            # Written after every problem, not at the end. A sweep at this budget
+            # is hours of independent searches and the machine under it is not
+            # guaranteed to last that long; without this, an interruption costs
+            # every problem already paid for.
+            _checkpoint(args, fingerprint, rows, started, model_usage,
+                        actor_usage, damage, complete=False)
         return row
 
     workers = max(1, int(args.problem_concurrency))
@@ -516,40 +629,10 @@ def _run_per_problem(args: argparse.Namespace, complete, model_usage: Usage,
             list(pool.map(work, enumerate(catalogue)))
     rows.sort(key=lambda row: row["problem_id"])
 
-    best_summary = _benchmark_summary(rows)
-    baseline_summary = _benchmark_summary([
-        {**row["baseline"], "subset": row["subset"]} for row in rows])
-    payload: Dict[str, Any] = {
-        "experiment": ("ERA on AgentDescent -- LLM-SRBench, one search per "
-                       "problem (the benchmark's own protocol)"),
-        "status": "completed",
-        "completed_at": _utc_now(),
-        "upstream_commit": UPSTREAM_COMMIT,
-        "comparability": (
-            "One independent search per problem, scored on slices of that "
-            "problem's own training rows and reported on the benchmark's own "
-            "held-out split -- the protocol the paper's methods run under. The "
-            "budget is not the paper's: LLM-SR gives each problem 1000 samples, "
-            "this gives it "
-            f"{args.iterations} expansions. Symbolic accuracy is not measured "
-            "here at all."),
-        "config": {key: value for key, value in vars(args).items()
-                   if key not in ("output", "yes")},
-        "wall_seconds": time.monotonic() - started,
-        "baseline": baseline_summary,
-        "best": best_summary,
-        "per_problem": rows,
-        "model_usage": _usage_dict(model_usage),
-        "actor_usage": _usage_dict(actor_usage),
-        "reply_damage": {
-            "drawn": damage.get("drawn", 0),
-            "damaged": damage.get("damaged", 0),
-            "attempts_allowed": max(1, args.reply_attempts),
-        },
-    }
-    _write_json(args.output, payload)
-    overall_before = baseline_summary["overall"]
-    overall_after = best_summary["overall"]
+    payload = _checkpoint(args, fingerprint, rows, started, model_usage,
+                          actor_usage, damage, complete=True)
+    overall_before = payload["baseline"]["overall"]
+    overall_after = payload["best"]["overall"]
     print(
         f"completed: {overall_after['problems']} problems, "
         f"Acc(0.1) {_percent(overall_before['acc_0.1'])} -> "

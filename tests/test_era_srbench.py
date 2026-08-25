@@ -627,6 +627,46 @@ def test_a_per_problem_search_is_scored_on_the_benchmarks_own_split(tmp_path,
     assert metrics["per_problem"][0]["ood_acc"] == 1
 
 
+def test_a_resume_refuses_a_file_written_under_a_different_budget(tmp_path):
+    """Otherwise one file holds two experiments under one heading."""
+    import json as _json
+    path = tmp_path / "sweep.json"
+    args = port.build_parser().parse_args(["--per-problem", "--iterations", "20"])
+    path.write_text(_json.dumps({
+        "budget": {**port._budget_fingerprint(args), "iterations": 6},
+        "per_problem": [{"problem_id": "x"}],
+    }), encoding="utf-8")
+    with pytest.raises(SystemExit, match="different budget"):
+        port._load_checkpoint(path, port._budget_fingerprint(args))
+
+
+def test_a_resume_returns_the_rows_of_a_matching_sweep(tmp_path):
+    import json as _json
+    path = tmp_path / "sweep.json"
+    args = port.build_parser().parse_args(["--per-problem"])
+    fingerprint = port._budget_fingerprint(args)
+    path.write_text(_json.dumps({
+        "budget": fingerprint,
+        "per_problem": [{"problem_id": "a"}, {"problem_id": "b"}],
+    }), encoding="utf-8")
+    rows = port._load_checkpoint(path, fingerprint)
+    assert [row["problem_id"] for row in rows] == ["a", "b"]
+    assert port._load_checkpoint(tmp_path / "missing.json", fingerprint) == []
+
+
+def test_the_budget_fingerprint_covers_what_changes_a_number():
+    base = port.build_parser().parse_args(["--per-problem"])
+    for flag, value in (("--iterations", "20"), ("--problem-seconds", "30"),
+                        ("--shards", "8"), ("--train-points", "2000"),
+                        ("--seed", "7")):
+        other = port.build_parser().parse_args(["--per-problem", flag, value])
+        assert port._budget_fingerprint(base) != port._budget_fingerprint(other), flag
+    # --problem-concurrency is wall-clock only and must NOT split a sweep.
+    same = port.build_parser().parse_args(["--per-problem",
+                                           "--problem-concurrency", "4"])
+    assert port._budget_fingerprint(base) == port._budget_fingerprint(same)
+
+
 def test_the_per_problem_dry_run_says_which_protocol_it_would_run(capsys):
     assert port.main(["--dry-run", "--per-problem"]) == 0
     printed = capsys.readouterr().out
