@@ -1014,6 +1014,55 @@ model write one method that solves a whole scientific distribution?" rather than
 "can a model find this equation?" — and the numbers below are only interesting
 with the budget column attached.
 
+### The same benchmark under its own protocol (`--per-problem`)
+
+The section above says the LSR-Transform deficit is the protocol's rather than
+the search's. That is a testable claim, so it was tested: the same tree search,
+the same seed program, the same grammar and the same sandbox, run **once per
+problem** over all 111 LSR-Transform problems.
+
+| Setting | Value |
+|---|---|
+| Search | 6 expansions per problem, 3 workers, 6 validation shards from 25% of train |
+| Budget | 8 s per problem per expansion, `--train-points 4000`, `--problem-concurrency 2` |
+| Cost | 584 model calls for 111 problems — **5.26 per problem**, 1.62M tokens, 3 810 s wall |
+| Reported on | each problem's own benchmark test split, which no expansion is scored against |
+
+| LSR-Transform, all 111 problems | seed program | after 6 expansions |
+|---|---|---|
+| Acc(0.1) | 0.9% | **43.2%** |
+| median NMSE | 0.0941 | **0.00568** |
+| mean `min(12, -log10 NMSE)` | 1.074 | **5.391** |
+| problems at 6+ digits | 0 | **44** |
+| problems at the 12-digit cap | 0 | **41** |
+| paired per problem | — | 59 better, 1 worse, 51 tied, sign test **p = 1e-16** |
+
+Against the same category under the whole-category protocol — 8.1% Acc(0.1),
+0.0753 median NMSE — that is a **five-fold** move, and it is the protocol that
+moved rather than the search: identical tree, identical seed, identical grammar.
+
+**And it recovers equations, not just fits.** The answers are median 3 terms and
+126 characters against a ground truth of 1 term and 33; under the whole-category
+protocol they were 9 terms and 240+. Forty-one problems land on the 12-digit cap,
+and reading them shows why:
+
+| ground truth | what the search returned |
+|---|---|
+| `-sqrt(q1*q2/(F*epsilon))/(2*sqrt(pi))` | `-sqrt(q1*q2/(4*pi*epsilon*F))` |
+| `x1*cos(theta1 - theta2) - sqrt(x**2 + x1**2*cos(theta1 - theta2)**2 - x1**2)` | `x1*cos(theta1 - theta2) - sqrt(x**2 - x1**2*sin(theta1 - theta2)**2)` |
+| `(A + x2*y2 + x3*y3)/x1` | `0.999999995*(A/x1) + 0.999999986*(x2*y2/x1) + 1.000000024*(x3*y3/x1)` |
+| `-c*p*sqrt(1/(c**2*m_0**2 + p**2))` | `-0.99999999977*p/sqrt(m_0**2 + (p/c)**2)` |
+
+The first is the same expression, since `1/(2*sqrt(pi))` is `1/sqrt(4*pi)`. The
+second is the same expression through the Pythagorean identity — a rearrangement
+the benchmark was built to reward and that no library fit produces. These are the
+symbolic recoveries the whole-category protocol never once produced, and they are
+what the paper's symbolic-accuracy column is asking for. That column is still not
+measured here, but the answers are now the right shape to be asked about.
+
+Result file:
+[`bench/results/era-srbench-per-problem-transform.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-srbench-per-problem-transform.json).
+
 ### Against the paper's own tables
 
 Two of this port's three programs can be compared to the paper's numbers over
@@ -1166,6 +1215,21 @@ equations; `--dataset all` runs both. `--problems N` caps the count evenly acros
 subsets — a difficulty and cost knob, so a capped run is not comparable to an
 uncapped one, and every run records exactly which problems it used. Reading the
 benchmark's parquet needs `pyarrow`.
+
+`--per-problem` switches to **the benchmark's own protocol**: one independent
+search per problem, rather than one program for the whole category.
+
+```bash
+python -m examples.era.era_llm_srbench --provider claude --model glm-5.2 \
+    --per-problem --dataset lsr_transform --shards 6 --iterations 6 \
+    --workers 3 --problem-concurrency 2 --problem-seconds 8 --yes
+```
+
+There, `--iterations` is expansions *per problem*, `--shards` is how many slices
+of that problem's validation pool the search is gated on, and
+`--problem-concurrency` trades endpoint load for wall-clock. Note that rollout
+tasks are `shards * (1 - held_out_frac)` and a round proposes one expansion per
+task, so `--shards 4 --workers 3` leaves a worker idle.
 
 Offline tests: `tests/test_era_example.py`, `tests/test_era_integrals.py`,
 `tests/test_era_hyp2f1.py`, `tests/test_era_srbench.py`.

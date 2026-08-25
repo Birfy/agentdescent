@@ -22,6 +22,7 @@ python -m examples.era.era_empirical_software --dry-run   # Kaggle S3E1, RMSE
 python -m examples.era.era_hard_integrals --dry-run       # hard integrals, correct digits
 python -m examples.era.era_hypergeometric --dry-run       # 2F1 vs a 25-digit reference
 python -m examples.era.era_llm_srbench --dry-run          # LLM-SRBench equation discovery
+python -m examples.era.era_llm_srbench --dry-run --per-problem   # ... its own per-problem protocol
 ```
 
 `--dry-run` prints the configuration and returns with **zero network access

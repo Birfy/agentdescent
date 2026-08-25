@@ -88,6 +88,25 @@ All notable changes to AgentDescent are documented here. The format follows
   comes back is a 9–11 term library fit. Reaching NMSE 1e-13 on an equation it
   has interpolated rather than discovered is the honest description.
 
+  **`--per-problem` runs the benchmark's own protocol** — one independent search
+  per problem, scored on slices of that problem's training rows and reported on
+  its own held-out split — and it settles the LSR-Transform question. Same tree,
+  same seed program, same grammar, 6 expansions per problem, 5.26 model calls per
+  problem: Acc(0.1) **0.9% → 43.2%**, median NMSE 0.0941 → 0.00568, 41 of 111
+  problems solved to the 12-digit cap, 59 better against 1 worse
+  (`bench/results/era-srbench-per-problem-transform.json`). Against 8.1% under
+  the whole-category protocol, that is a five-fold move with only the protocol
+  changed — and it lands between LLM-SR (39.64%) and LaSR (50.45%) at about a
+  fiftieth of LLM-SR's per-problem budget.
+
+  It also recovers equations rather than fitting them. Answers are median 3
+  terms where the whole-category protocol returned 9, and among the 41 exact
+  solutions are `-sqrt(q1*q2/(4*pi*epsilon*F))` for a ground truth written
+  `-sqrt(q1*q2/(F*epsilon))/(2*sqrt(pi))`, and
+  `x1*cos(t1-t2) - sqrt(x**2 - x1**2*sin(t1-t2)**2)` for one written with
+  `cos**2` — the same equations, through the identities the benchmark was built
+  to reward.
+
   Two findings worth the run on their own. The seed program — sparse regression,
   no LLM anywhere in it — already beats every published LLM method in the paper's
   table on LSR-Synth chemistry and biology, which says something about the
