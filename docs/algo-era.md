@@ -15,6 +15,8 @@
 | **Example** | [`examples/era/era_empirical_software.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/era_empirical_software.py) |
 | **Domain** | Kaggle Playground Series S3E1 (synthetic California housing), RMSE — upstream's own bundled task |
 | **Second task** | [`examples/era/era_hard_integrals.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/era_hard_integrals.py) — the paper's *numerical solution of integrals*, scored in correct significant digits |
+| **Third task** | [`examples/era/era_hypergeometric.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/era_hypergeometric.py) — `2F1` in double precision, scored against a 25-digit mpmath reference |
+| **Fourth task** | [`examples/era/era_algotune.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/era_algotune.py) — [AlgoTune](https://github.com/oripress/AlgoTune) ([arXiv:2507.15887](https://arxiv.org/abs/2507.15887)), scored in **speedup** over each task's own reference, one tree per task |
 | **Layer** | L1 program (`blast_radius=0.6`, AST-gated and sandbox-isolated) |
 | **Fidelity** | `benchmark_faithful` — [what the classes mean](port-fidelity.md) |
 
@@ -340,6 +342,127 @@ purpose. Using the baseline where it is reliable and something better where it
 is not *is* the expert answer here; the search's job is to find where the line
 falls and what to do on the far side of it, from `(a, b, c, z)` alone, with no
 sight of the answer.
+
+## The fourth task — AlgoTune, and the other axis
+
+The three tasks above optimise **accuracy**: lower RMSE, more correct digits.
+[`examples/era/era_algotune.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/era_algotune.py)
+optimises **speed**, and holds accuracy fixed while doing it.
+
+[AlgoTune](https://github.com/oripress/AlgoTune) (Press et al.,
+[arXiv:2507.15887](https://arxiv.org/abs/2507.15887)) is 154 widely used maths,
+physics and computer-science functions. Each ships three things: a
+`generate_problem(n, random_seed)`, a reference `solve(problem)`, and an
+`is_solution(problem, solution)` oracle. The goal is a program that produces the
+same outputs as the reference while being faster, and the score is exactly that
+ratio.
+
+Two properties make it worth running under FUTS rather than only under
+AlgoTune's own agent:
+
+**The baseline is the state of the practice.** `scipy.linalg.eig`,
+`scipy.integrate.solve_ivp` on a stiff system, `scipy.signal.upfirdn`,
+`scipy.spatial.Delaunay`, `scipy.sparse.linalg.eigsh` — decades-old library code
+a working scientist already calls. A tree that improves on it has found
+something about the library, not about the benchmark.
+
+**Correctness is a precondition, not a term in the objective.** A solution
+`is_solution` rejects scores nothing at all, however fast it was. That is
+upstream's rule — `aggregate_results` sets `mean_speedup` to `None` the moment a
+single instance fails — and it is what stops the search from discovering that the
+fastest way to compute an SVD is not to compute it. In this port such a candidate
+still becomes a node, scoring `-inf`, exactly as a program that would not import
+does.
+
+### One tree per task
+
+Each AlgoTune task gets its own flat-PUCT tree, its own root, its own held-back
+shards and its own line in the result file. They are separate searches over
+separate program spaces — a factorisation trick found for `qr_factorization` is
+not a node in `ode_stiff_vanderpol`'s tree and could not be selected there — so
+one tree across tasks would be an averaging artefact rather than a search.
+
+Across tasks the run reports the **geometric** mean of the per-task speedups.
+The arithmetic mean of ratios is not one: 4x on one task and 0.25x on another is
+no change on average, and the arithmetic mean calls it 2.1x.
+
+### What the candidate is asked for
+
+A module-level `solve(problem)` — not AlgoTune's `class Solver`, which is the
+port's one contract-level deviation, because ERA's gate checks for a function and
+a second contract for one task would be a second thing to keep right. The
+mutation prompt carries upstream's own `description.txt` verbatim, the parent's
+code, its measured speedup, and the per-problem timings behind that number.
+
+The root node *is* the reference implementation, lifted out of its `Task` class
+into a runnable program by
+[`derive_seed_program`](https://github.com/Birfy/agentdescent/blob/main/examples/era/_algotune_tasks.py):
+the module's imports are kept, `solve` becomes a module-level function, every
+`self.x` it reads is lifted — a helper method into another function, an
+`__init__` constant into a module constant — and anything else raises rather than
+being guessed. `tests/test_era_algotune.py` checks the derived program computes
+what the class computed, because a speedup measured against a reference that is
+not the task's reference is a measurement of nothing.
+
+### Where the numbers come from
+
+* **Problem sizes are upstream's published ones.** AlgoTune's own
+  `reports/generation.json` records, for every task, the `n` at which the
+  reference took ~100 ms on the machine the dataset was generated on. Reading it
+  rather than re-calibrating means two runs of this port are comparable without
+  either of them measuring the host it happened to land on. `--size-scale`
+  shrinks it and says so in the result file.
+* **A shard is a set of seeds, not a file of problems.** AlgoTune's problems are
+  numpy arrays, sparse matrices and graphs that no JSON survives intact, and
+  `generate_problem` is deterministic — so the seeds cross the sandbox boundary
+  and the problems are rebuilt inside it. The last `--test-shards` sets are never
+  shown to the search.
+* **The reference is re-timed beside the candidate**, in the same sandboxed
+  process, on the same problem, moments apart, reference first. A baseline
+  measured once on the host and reused would fold the whole run's scheduling
+  weather into the score, so the score would move when the machine got busy
+  rather than when the program got faster.
+* **Timing is the minimum of `--repeats` runs after a discarded warm-up**, which
+  is what AlgoTune keeps (`min_time_ms`) and divides. Each run is handed its own
+  deep copy of the problem, made outside the timed region: identical arguments
+  across repeats would let a candidate memoise on the first run and report the
+  dictionary lookup of the second as its runtime.
+* **A candidate more than 20x slower than the reference is measured once.**
+  Repeating it would spend the shard's whole wall-clock proving a number already
+  in hand, and letting it overrun the timeout would record a correct-but-slow
+  program as one that failed to run — a different claim.
+
+### Which tasks, and why not all 154
+
+72. Two mechanical filters, both checked by the test file rather than asserted:
+the reference must import only numpy, scipy and the standard library (82 tasks
+need cvxpy, OR-Tools, networkx, sklearn, torch, faiss, python-sat, sympy, POT,
+hdbscan, numba or dace), and it must lift out of its class.
+
+`lqr` clears both and is still excluded: its own `is_solution` does
+`float(xt.T @ Q @ xt + ut.T @ R @ ut)` on a 1x1 array, which NumPy has refused
+since 1.25 — so on any current NumPy the *reference implementation* is invalid by
+the task's own oracle. That is upstream's defect, and searching against an oracle
+that rejects its own baseline would measure nothing. `--list-tasks` prints the
+runnable set.
+
+### Deviations this task adds
+
+1. **`literal_top_level=False` on the gate**, as for the integrals task and for a
+   stronger reason: a precomputed table, a cached plan or a preallocated
+   workspace is exactly what makes a numerical routine fast, and a gate that
+   refused them would reject the candidates the task is looking for.
+2. **4 GiB of address space** rather than the other tasks' 2 GiB. An AlgoTune
+   problem at its published size can be hundreds of megabytes on its own —
+   `outer_product` at n=10630 is a 904 MB result — and every timed run is handed
+   its own copy.
+3. **`--candidate-timeout` defaults to 120 s**, twice the other tasks', because
+   every problem here is timed twice.
+4. `score = mean speedup` with no sign flip — FUTS maximises and faster is
+   better — and the engine's `[0, 1]` reward is `s / (1 + s)`, order-preserving
+   with it and with no ceiling to saturate against: a 40x candidate still outranks
+   a 20x one, where a rescale by an assumed maximum would flatten both to 1.0 and
+   blind the acceptance gate exactly where the task gets interesting.
 
 ## Measured results — Playground S3E1
 
@@ -783,4 +906,21 @@ python -m examples.era.era_hard_integrals --provider claude --model glm-5.2 \
     --eval-budget 200000 --problem-seconds 5
 ```
 
-Offline tests: `tests/test_era_example.py`, `tests/test_era_integrals.py`.
+AlgoTune takes the same flags, plus `--tasks`, `--problems`, `--repeats` and
+`--size-scale`. `--iterations` is **per task**, since each task is its own tree:
+
+```bash
+python -m examples.era.era_algotune --dry-run
+python -m examples.era.era_algotune --list-tasks
+
+python -m examples.era.era_algotune --provider claude --model glm-5.2 \
+    --yes --iterations 6 --workers 3 --shards 4 --test-shards 2 --problems 2 \
+    --repeats 3 --candidate-timeout 120 --max-tokens 16000 \
+    --tasks svd,matrix_exponential,convolve_1d
+```
+
+`--tasks all` runs all 72; `--tasks default` (the default) runs the eight that
+span AlgoTune's categories.
+
+Offline tests: `tests/test_era_example.py`, `tests/test_era_integrals.py`,
+`tests/test_era_hyp2f1.py`, `tests/test_era_algotune.py`.

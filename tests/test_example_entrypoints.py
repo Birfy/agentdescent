@@ -1,10 +1,11 @@
 """The command-line contract shared by the eight faithful algorithm ports.
 
-Ten entry points, because ERA ships three tasks on one search: the Kaggle
-regression upstream bundles, the paper's *numerical solution of integrals*, and
-double-precision evaluation of the Gauss hypergeometric function. The contract
-is per entry point -- it is about the command line a user types -- so all three
-are rows here, and none of them adds an algorithm to the fidelity table.
+Eleven entry points, because ERA ships four tasks on one search: the Kaggle
+regression upstream bundles, the paper's *numerical solution of integrals*,
+double-precision evaluation of the Gauss hypergeometric function, and the
+AlgoTune speedup benchmark. The contract is per entry point -- it is about the
+command line a user types -- so all four are rows here, and none of them adds an
+algorithm to the fidelity table.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ import pytest
 from examples.ace import ace_context_evolution as ace
 from examples.adas import adas_meta_agent_search as adas
 from examples.dgm import dgm_self_improve as dgm
+from examples.era import era_algotune as era_algotune
 from examples.era import era_empirical_software as era
 from examples.era import era_hard_integrals as era_integrals
 from examples.era import era_hypergeometric as era_hyp2f1
@@ -85,6 +87,12 @@ PORTS = (
     # file rather than drawing or downloading, so `load_suite` is the boundary
     # a dry-run must not cross.
     Port(era_hyp2f1, "iterations", "glm-5.2", 1800.0, "load_suite",
+         provider="openai", async_ratio=1, budget_is_iterations=True),
+    # ERA's fourth task, AlgoTune: one tree per benchmark task, scored in
+    # speedup over the task's own reference implementation. Same deviations as
+    # its three siblings; `--iterations` is per task, because each task is its
+    # own search, and `prepare_suite` is the boundary a dry-run must not cross.
+    Port(era_algotune, "iterations", "glm-5.2", 1800.0, "prepare_suite",
          provider="openai", async_ratio=1, budget_is_iterations=True),
 )
 

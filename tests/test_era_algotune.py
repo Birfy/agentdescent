@@ -1,0 +1,510 @@
+"""The ERA port's AlgoTune task: the derivation, the gate, the runner, the score.
+
+The block that matters most is the first one. Everything else here checks that
+the machinery does what it says; ``test_the_derived_program_computes_what_the_
+reference_computes`` checks that the *benchmark* is right, because a speedup
+measured against a reference that is not the task's reference is a measurement
+of nothing.
+
+Offline, like the rest of the suite: the task file, its description and
+upstream's published problem sizes are all served from fixtures here, and the
+one test that reaches the real network is skipped unless it is asked for.
+"""
+
+from __future__ import annotations
+
+import ast
+import dataclasses
+import inspect
+import json
+import math
+import textwrap
+
+import pytest
+
+from examples.era import _algotune_tasks as tasks
+from examples.era import _era_algotune as algotune
+from examples.era import _era_support as support
+from examples.era import era_algotune as port
+from examples.era._algotune_tasks import DerivationError, derive_seed_program
+
+
+# ---------------------------------------------------------------------------
+# Fixtures: an AlgoTune-shaped task, without AlgoTune
+# ---------------------------------------------------------------------------
+
+
+FIXTURE_TASK = '''
+import logging
+from typing import Any
+
+import numpy as np
+
+from AlgoTuneTasks.base import register_task, Task
+
+
+@register_task("fixture_norm")
+class FixtureNorm(Task):
+    """Row-wise 2-norms of a random matrix -- the shape of a real task, no more."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.tolerance = 1e-09
+
+    def generate_problem(self, n: int, random_seed: int = 1) -> dict[str, Any]:
+        rng = np.random.default_rng(random_seed)
+        return {"matrix": rng.standard_normal((n, n))}
+
+    def _reference(self, matrix):
+        return np.sqrt((matrix * matrix).sum(axis=1))
+
+    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
+        logging.debug("solving")
+        return {"norms": self._reference(problem["matrix"])}
+
+    def is_solution(self, problem: dict[str, Any], solution: dict[str, Any]) -> bool:
+        if not isinstance(solution, dict) or "norms" not in solution:
+            return False
+        expected = np.linalg.norm(problem["matrix"], axis=1)
+        got = np.asarray(solution["norms"], dtype=float)
+        if got.shape != expected.shape:
+            return False
+        return bool(np.allclose(got, expected, atol=self.tolerance))
+'''
+
+FIXTURE_DESCRIPTION = "FixtureNorm Task:\n\nCompute the 2-norm of every row.\n"
+
+FIXTURE_SIZES = {
+    "svd": {"target_time_ms": 100, "n": 474,
+            "baseline_runs": {"0": {"avg_min_ms": 117.0}, "1": {"avg_min_ms": 119.0}}},
+}
+
+
+@pytest.fixture
+def fixture_suite(tmp_path, monkeypatch):
+    """A :class:`~examples.era._era_algotune.Suite` over the fixture task.
+
+    ``svd`` is borrowed as the name so the ``TASKS`` membership check -- which is
+    a real guard, not a formality -- is exercised rather than bypassed. What is
+    behind the name is the fixture above, so nothing here reaches the network.
+    """
+    def fake_fetch(url, **_kwargs):
+        if url.endswith("generation.json"):
+            return json.dumps(FIXTURE_SIZES)
+        if url.endswith("description.txt"):
+            return FIXTURE_DESCRIPTION
+        return FIXTURE_TASK
+
+    monkeypatch.setattr(algotune, "fetch_text", fake_fetch)
+    monkeypatch.setattr(algotune, "cache_path",
+                        lambda subdir, name: str(tmp_path / subdir / name))
+    suite = algotune.prepare_suite("svd", shards=2, test_shards=1, problems=1)
+    # The fixture's class registers itself as `fixture_norm`, so the shard spec
+    # has to name what the runner will look up inside the sandbox.
+    return dataclasses.replace(suite, task="fixture_norm")
+
+
+# ---------------------------------------------------------------------------
+# The benchmark: does the derived program compute the reference?
+# ---------------------------------------------------------------------------
+
+
+def test_the_derived_program_computes_what_the_reference_computes():
+    """The root node has to *be* the reference, not resemble it.
+
+    The whole metric is a ratio against this program. If lifting ``solve`` out of
+    its class changed what it computed -- dropped a helper, inlined the wrong
+    constant -- every speedup the search reported would be measured against
+    something upstream never wrote, and would still look perfectly plausible.
+    """
+    numpy = pytest.importorskip("numpy")
+    tasks.install_shim()
+    namespace: dict = {}
+    exec(compile(derive_seed_program(FIXTURE_TASK), "<derived>", "exec"), namespace)
+
+    module = {}
+    exec(compile(FIXTURE_TASK, "<fixture>", "exec"), module)
+    reference = module["FixtureNorm"]()
+
+    problem = reference.generate_problem(16, random_seed=3)
+    expected = reference.solve({"matrix": problem["matrix"].copy()})
+    derived = namespace["solve"]({"matrix": problem["matrix"].copy()})
+    assert numpy.allclose(derived["norms"], expected["norms"])
+    assert reference.is_solution(problem, derived)
+
+
+def test_the_derivation_lifts_helpers_and_constants_and_drops_the_class():
+    derived = derive_seed_program(FIXTURE_TASK)
+    tree = ast.parse(derived)
+    assert not [node for node in tree.body if isinstance(node, ast.ClassDef)]
+    top_level = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
+    assert "solve" in top_level and "_ref_reference" in top_level
+    assert "AlgoTuneTasks" not in derived
+    assert "self" not in {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+
+
+def test_a_constant_read_off_self_becomes_a_module_constant():
+    source = textwrap.dedent('''
+        from AlgoTuneTasks.base import register_task, Task
+
+        @register_task("k")
+        class K(Task):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+                self.mode = "full"
+
+            def solve(self, problem):
+                return (problem, self.mode)
+    ''')
+    derived = derive_seed_program(source)
+    assert "_REF_MODE = 'full'" in derived
+    namespace: dict = {}
+    exec(compile(derived, "<derived>", "exec"), namespace)
+    assert namespace["solve"](1) == (1, "full")
+
+
+def test_state_built_outside_init_is_refused_rather_than_guessed():
+    """A silent wrong answer is the failure mode this whole file exists to stop.
+
+    ``self.cache`` assigned inside ``solve`` has no value to lift, and a
+    derivation that invented one -- ``None``, an empty dict -- would produce a
+    program that imports, runs, and computes something else.
+    """
+    source = textwrap.dedent('''
+        from AlgoTuneTasks.base import register_task, Task
+
+        @register_task("k")
+        class K(Task):
+            def prepare(self):
+                self.cache = 1
+
+            def solve(self, problem):
+                return self.cache
+    ''')
+    with pytest.raises(DerivationError) as excinfo:
+        derive_seed_program(source)
+    assert "cache" in str(excinfo.value)
+
+
+def test_the_task_class_is_the_decorated_one_not_the_first_one():
+    source = textwrap.dedent('''
+        from AlgoTuneTasks.base import register_task, Task
+
+        class Helper:
+            def solve(self, problem):
+                return "helper"
+
+        @register_task("k")
+        class K(Task):
+            def solve(self, problem):
+                return "task"
+    ''')
+    namespace: dict = {}
+    exec(compile(derive_seed_program(source), "<derived>", "exec"), namespace)
+    assert namespace["solve"](None) == "task"
+
+
+# ---------------------------------------------------------------------------
+# The suite
+# ---------------------------------------------------------------------------
+
+
+def test_the_suite_reads_upstreams_published_problem_size(fixture_suite):
+    assert fixture_suite.n == 474
+    assert fixture_suite.published_n == 474
+    assert fixture_suite.target_time_ms == 100
+    assert fixture_suite.published_ms == pytest.approx(118.0)
+    assert fixture_suite.source_path.exists()
+
+
+def test_shards_draw_disjoint_seeds_and_a_redraw_is_identical(fixture_suite):
+    seen = [set(fixture_suite.seeds(shard)) for shard in range(3)]
+    assert seen[0].isdisjoint(seen[1]) and seen[1].isdisjoint(seen[2])
+    assert fixture_suite.seeds(1) == fixture_suite.seeds(1)
+
+
+def test_two_seeds_draw_different_problem_sets(tmp_path, monkeypatch):
+    monkeypatch.setattr(algotune, "fetch_text",
+                        lambda url, **k: (json.dumps(FIXTURE_SIZES)
+                                          if url.endswith("generation.json")
+                                          else FIXTURE_TASK))
+    monkeypatch.setattr(algotune, "cache_path",
+                        lambda subdir, name: str(tmp_path / subdir / name))
+    first = algotune.prepare_suite("svd", seed=0, shards=2, test_shards=1)
+    second = algotune.prepare_suite("svd", seed=1, shards=2, test_shards=1)
+    assert set(first.seeds(0)).isdisjoint(second.seeds(0))
+
+
+def test_a_task_outside_the_runnable_set_is_refused_by_name():
+    with pytest.raises(ValueError) as excinfo:
+        algotune.prepare_suite("max_common_subgraph")
+    assert "max_common_subgraph" in str(excinfo.value)
+
+
+def test_every_runnable_task_name_is_unique_and_sorted():
+    assert list(algotune.TASKS) == sorted(algotune.TASKS)
+    assert len(set(algotune.TASKS)) == len(algotune.TASKS)
+    assert set(algotune.DEFAULT_TASKS) <= set(algotune.TASKS)
+
+
+def test_lqr_is_excluded_and_the_exclusion_is_explained():
+    """The one task dropped for a reason a reader could not re-derive.
+
+    ``lqr`` clears both mechanical filters and is still absent, because its own
+    ``is_solution`` calls ``float()`` on a 1x1 array -- which NumPy has refused
+    since 1.25, so the reference is invalid by the task's own oracle. A silent
+    omission would look like an oversight and get "fixed".
+    """
+    assert "lqr" not in algotune.TASKS
+    assert "lqr" in inspect.getsource(algotune)
+
+
+# ---------------------------------------------------------------------------
+# The gate
+# ---------------------------------------------------------------------------
+
+
+def test_the_gate_accepts_a_derived_reference_and_rejects_the_obvious_accidents():
+    derived = derive_seed_program(FIXTURE_TASK)
+    valid, reason = support.validate_source(
+        derived, entrypoint="solve", allowed_imports=algotune.ALLOWED_IMPORTS,
+        literal_top_level=False)
+    assert valid, reason
+
+    for source, expected in (
+        ("import os\ndef solve(problem):\n    return 1\n", "os"),
+        ("def helper(problem):\n    return 1\n", "solve"),
+        ("def solve(problem):\n    return problem.__class__\n", "dunder"),
+    ):
+        valid, reason = support.validate_source(
+            source, entrypoint="solve", allowed_imports=algotune.ALLOWED_IMPORTS,
+            literal_top_level=False)
+        assert not valid and expected in reason
+
+
+def test_a_precomputed_table_is_allowed_here_and_refused_by_the_tabular_gate():
+    """Module-level setup is the point of the task, not a smell.
+
+    A cached plan, a precomputed twiddle table or a preallocated workspace is
+    exactly what makes a numerical routine fast, and the tabular task's gate --
+    which requires literal top-level assignments -- would reject every one of
+    them.
+    """
+    source = ("import numpy as np\n"
+              "TABLE = np.arange(1024, dtype=float)\n"
+              "def solve(problem):\n    return TABLE\n")
+    assert support.validate_source(
+        source, entrypoint="solve", allowed_imports=algotune.ALLOWED_IMPORTS,
+        literal_top_level=False)[0]
+    assert not support.validate_source(
+        source, entrypoint="solve", allowed_imports=algotune.ALLOWED_IMPORTS,
+        literal_top_level=True)[0]
+
+
+# ---------------------------------------------------------------------------
+# The score
+# ---------------------------------------------------------------------------
+
+
+def test_the_reward_is_order_preserving_with_the_metric():
+    """The tree ranks on `score` and the engine's gate ranks on this.
+
+    A port where those two disagreed would be selecting against its own
+    acceptance rule -- and unlike a rescale by an assumed maximum, this one never
+    saturates, so a 40x candidate still outranks a 20x one.
+    """
+    speedups = [0.1, 0.5, 1.0, 2.0, 8.0, 40.0, 200.0]
+    rewards = [algotune.framework_score({"speedup": value}) for value in speedups]
+    assert rewards == sorted(rewards)
+    assert all(0.0 <= reward <= 1.0 for reward in rewards)
+    assert algotune.framework_score({"speedup": 1.0}) == pytest.approx(0.5)
+    assert algotune.framework_score({"speedup": None}) == 0.0
+    assert algotune.framework_score({"speedup": float("nan")}) == 0.0
+
+
+def test_a_failed_metric_carries_upstreams_minus_infinity_sentinel():
+    metrics = algotune._zero_metrics("boom")
+    assert metrics["score"] == -math.inf
+    assert metrics["speedup"] is None
+    assert metrics["error"] == "boom"
+
+
+def test_the_geometric_mean_is_used_because_speedups_are_ratios():
+    """4x on one task and 0.25x on another is no change, not 2.1x."""
+    assert port.geometric_mean([4.0, 0.25]) == pytest.approx(1.0)
+    assert port.geometric_mean([2.0, 8.0]) == pytest.approx(4.0)
+    assert port.geometric_mean([]) is None
+    assert port.geometric_mean([None, float("inf"), 0.0]) is None
+
+
+# ---------------------------------------------------------------------------
+# The evaluator, through the sandbox
+# ---------------------------------------------------------------------------
+
+
+needs_sandbox = pytest.mark.skipif(
+    support.sandbox_backend() is None,
+    reason="no candidate isolation backend on this host")
+
+
+@needs_sandbox
+def test_the_reference_scores_about_one_through_the_sandbox(fixture_suite):
+    """The root node is the reference, so it must measure as the reference.
+
+    Not exactly 1.0 -- it is two independent timings of the same code, and the
+    band here is the noise a shared machine adds. A root that came out at 0.5x
+    or 2x would mean the two sides are not being timed alike, which would make
+    every number this task reports meaningless.
+    """
+    pytest.importorskip("numpy")
+    valid, metrics, error = algotune.evaluate_source(
+        fixture_suite.initial_program, suite=fixture_suite, shards=(0,),
+        timeout=60.0, repeats=2)
+    assert valid, error
+    assert 0.5 < metrics["speedup"] < 2.0
+    assert metrics["valid_problems"] == metrics["problems"] == fixture_suite.problems
+    assert metrics["baseline_ms"] > 0.0
+
+
+@needs_sandbox
+def test_one_wrong_answer_invalidates_the_whole_evaluation(fixture_suite):
+    """AlgoTune's own rule: not all valid, no speedup at all.
+
+    It is what keeps the benchmark about speed. A program a thousand times
+    faster on nine problems and wrong on the tenth has not sped anything up.
+    """
+    pytest.importorskip("numpy")
+    code = ("import numpy as np\n"
+            "def solve(problem):\n"
+            "    return {'norms': np.zeros(len(problem['matrix']))}\n")
+    valid, metrics, error = algotune.evaluate_source(
+        code, suite=fixture_suite, shards=(0,), timeout=60.0, repeats=1)
+    assert not valid
+    assert metrics["score"] == -math.inf
+    assert "not solved correctly" in error
+
+
+@needs_sandbox
+def test_a_faster_program_scores_above_the_reference(fixture_suite):
+    pytest.importorskip("numpy")
+    code = ("import numpy as np\n"
+            "def solve(problem):\n"
+            "    return {'norms': np.linalg.norm(problem['matrix'], axis=1)}\n")
+    valid, metrics, error = algotune.evaluate_source(
+        code, suite=fixture_suite, shards=(0,), timeout=60.0, repeats=3)
+    assert valid, error
+    assert metrics["speedup"] > 0.0
+
+
+@needs_sandbox
+def test_a_program_that_raises_is_a_scored_failure_not_a_crash(fixture_suite):
+    pytest.importorskip("numpy")
+    code = "def solve(problem):\n    raise RuntimeError('nope')\n"
+    valid, metrics, error = algotune.evaluate_source(
+        code, suite=fixture_suite, shards=(0,), timeout=60.0, repeats=1)
+    assert not valid
+    assert "RuntimeError" in error
+
+
+@needs_sandbox
+def test_the_gate_rejects_before_any_process_is_started(fixture_suite, monkeypatch):
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("the gate let a rejected program reach the sandbox")
+
+    monkeypatch.setattr(algotune.subprocess, "run", forbidden)
+    valid, _metrics, error = algotune.evaluate_source(
+        "import socket\ndef solve(problem):\n    return 1\n",
+        suite=fixture_suite, shards=(0,), timeout=10.0)
+    assert not valid and error.startswith("gate:")
+
+
+@needs_sandbox
+def test_the_candidate_is_timed_against_a_reference_measured_beside_it(fixture_suite):
+    """Both timings come out of one runner invocation, on the same problem.
+
+    A baseline measured once on the host and reused would fold the whole run's
+    scheduling weather into the score, so it would move when the machine got
+    busy rather than when the program got faster.
+    """
+    pytest.importorskip("numpy")
+    payload = algotune.run_candidate(
+        fixture_suite.initial_program, suite=fixture_suite, shard=0,
+        timeout=60.0, repeats=2)
+    assert payload["ok"], payload.get("error")
+    row = payload["results"][0]
+    assert row["baseline_ms"] > 0.0 and row["candidate_ms"] > 0.0
+    assert row["valid"] is True
+    assert row["seed"] in fixture_suite.seeds(0)
+
+
+# ---------------------------------------------------------------------------
+# The prompt
+# ---------------------------------------------------------------------------
+
+
+def test_the_prompt_carries_the_task_description_the_metric_and_the_parent(
+        fixture_suite):
+    parent = support.Program(
+        "id", 0, None, "def solve(problem):\n    return 1\n",
+        "baseline", {"speedup": 1.25, "slowest": [
+            {"seed": 7, "baseline_ms": 10.0, "candidate_ms": 8.0, "speedup": 1.25,
+             "valid": True, "error": ""}]}, True)
+    text = algotune.mutation_prompt(parent, suite=fixture_suite)
+    assert "Compute the 2-norm of every row." in text
+    assert "1.250x" in text
+    assert "seed 7" in text
+    assert "def solve(problem):" in text
+    assert "scores NOTHING AT ALL" in text
+
+
+def test_an_invalid_parent_says_so_rather_than_showing_a_missing_score(fixture_suite):
+    parent = support.Program(
+        "id", 1, None, "def solve(problem):\n    return 1\n", "",
+        algotune._zero_metrics("is_solution rejected the output"), False)
+    text = algotune.mutation_prompt(parent, suite=fixture_suite)
+    assert "invalid or failed to run" in text
+    assert "is_solution rejected the output" in text
+
+
+# ---------------------------------------------------------------------------
+# The command line
+# ---------------------------------------------------------------------------
+
+
+def test_tasks_resolves_the_three_forms_and_refuses_an_unknown_name():
+    assert port.resolve_tasks("default") == algotune.DEFAULT_TASKS
+    assert port.resolve_tasks("") == algotune.DEFAULT_TASKS
+    assert port.resolve_tasks("all") == algotune.TASKS
+    assert port.resolve_tasks("svd, qr_factorization") == ("svd", "qr_factorization")
+    with pytest.raises(SystemExit) as excinfo:
+        port.resolve_tasks("svd,not_a_task")
+    assert "not_a_task" in str(excinfo.value)
+
+
+def test_list_tasks_prints_the_runnable_set_and_touches_nothing(capsys, monkeypatch):
+    monkeypatch.setattr(port, "prepare_suite", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("--list-tasks loaded a task")))
+    assert port.main(["--list-tasks"]) == 0
+    printed = capsys.readouterr().out.split()
+    assert printed == list(algotune.TASKS)
+
+
+def test_dry_run_touches_no_network_task_file_or_sandbox(capsys, monkeypatch):
+    monkeypatch.setattr(port, "prepare_suite", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("dry-run crossed a boundary")))
+    monkeypatch.setattr(port, "completion_for", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("dry-run called a model")))
+    assert port.main(["--dry-run", "--tasks", "svd"]) == 0
+    out = capsys.readouterr().out
+    assert "dry-run" in out.lower()
+    assert "AlgoTune" in out and "svd" in out
+
+
+def test_the_domain_reports_its_own_metric_under_its_own_name(fixture_suite):
+    domain = port.algotune_domain(fixture_suite)
+    assert domain.metric_key == "speedup"
+    assert domain.metric_better == "higher"
+    assert domain.entrypoint == "solve"
+    assert domain.gain(1.0, 3.0) == pytest.approx(2.0)
+    assert domain.data_summary["published_n"] == 474
+    assert domain.test_shards == fixture_suite.test_range()

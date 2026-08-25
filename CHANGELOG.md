@@ -6,6 +6,45 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **A fourth ERA task: AlgoTune, scored in speedup rather than accuracy.**
+  `examples/era/era_algotune.py` runs the *same* flat-PUCT search, aggregator,
+  sandbox and governance layer as the other three ERA entry points over
+  [AlgoTune](https://github.com/oripress/AlgoTune)
+  ([arXiv:2507.15887](https://arxiv.org/abs/2507.15887)) — 72 of its 154 tasks,
+  **one tree per task**, with the task's own reference implementation as the root
+  node and its own `is_solution` as the correctness oracle.
+
+  Every ERA task so far optimised accuracy. This one holds accuracy fixed and
+  optimises time: a candidate is scored by how much faster than the reference it
+  is, and a solution the checker rejects scores nothing at all, however fast —
+  AlgoTune's own rule, and what keeps the benchmark about speed. The baseline is
+  not a strawman: it is `scipy.linalg.eig`, `scipy.integrate.solve_ivp`,
+  `scipy.signal.upfirdn`, `scipy.spatial.Delaunay`.
+
+  Three things make the number mean something. The root node *is* the reference,
+  lifted out of its `Task` class into a runnable program by an AST transform that
+  raises rather than guesses when it cannot (`_algotune_tasks.derive_seed_program`),
+  and a test checks the lifted program computes what the class computed. The
+  problem sizes are **upstream's published ones**, read from AlgoTune's own
+  `reports/generation.json`, so two runs are comparable without either
+  calibrating against its host. And the reference is re-timed inside the sandbox
+  beside the candidate, on the same problem, reference first — a baseline
+  measured once on the host and reused would make the score move when the
+  machine got busy rather than when the program got faster.
+
+  72 rather than 154 because the other 82 need a dependency this repository does
+  not carry (cvxpy, OR-Tools, networkx, torch, faiss, python-sat, …) or their
+  reference does not lift out of its class. `lqr` clears both filters and is
+  still excluded, and the reason is upstream's: its own `is_solution` calls
+  `float()` on a 1×1 array, which NumPy has refused since 1.25, so the reference
+  is invalid by the task's own oracle.
+
+  `python -m examples.era.era_algotune --list-tasks` prints the runnable set;
+  `--tasks all` runs it. Notes in [`docs/algo-era.md`](docs/algo-era.md), offline
+  tests in `tests/test_era_algotune.py`.
+
 ## [0.4.5] — 2026-08-19
 
 ### Fixed

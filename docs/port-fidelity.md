@@ -312,21 +312,27 @@ column of each section below says exactly where to look.
   + `futs.compute_pucts` + the `argmax`. The tree bookkeeping (parent chain,
   backpropagation) stays on the aggregator's archive, the same division
   OpenEvolve uses for `EpsilonGreedy` and its islands.
-* **Two further tasks on the same search**: `era_hard_integrals.py` runs the
+* **Three further tasks on the same search**: `era_hard_integrals.py` runs the
   paper's *numerical solution of integrals* — named in the abstract, with no
-  released implementation to port — and `era_hypergeometric.py` runs
-  double-precision evaluation of `2F1`, which the paper does not name at all.
-  Both go through the identical tree, aggregator and sandbox, behind a `Domain`
-  that carries only the seed program, the evaluator, the prompt and the metric
-  name. They are **entry points, not further algorithms**: nothing in this
-  section changes for them, and the fidelity class above is a statement about
-  FUTS, which all three tasks run unmodified. The tasks themselves are this
-  port's construction — the integrand families and the 2F1 stress set are not
-  upstream's, since upstream released none — so they are documented as a
-  *faithful search on a constructed task*, with
-  [algo-era.md](algo-era.md#the-second-task-numerical-solution-of-integrals)
-  and [its 2F1 section](algo-era.md#the-third-task-2f1-and-what-replaces-a-leaderboard)
-  saying which parts are the paper's, which are the literature's, and which are
+  released implementation to port — `era_hypergeometric.py` runs
+  double-precision evaluation of `2F1`, which the paper does not name at all,
+  and `era_algotune.py` runs the AlgoTune speedup benchmark, one tree per
+  benchmark task. All go through the identical tree, aggregator and sandbox,
+  behind a `Domain` that carries only the seed program, the evaluator, the
+  prompt and the metric name. They are **entry points, not further algorithms**:
+  nothing in this section changes for them, and the fidelity class above is a
+  statement about FUTS, which all four tasks run unmodified. Two of the tasks are
+  this port's construction — the integrand families and the 2F1 stress set are
+  not upstream's, since upstream released none — so they are documented as a
+  *faithful search on a constructed task*. AlgoTune is the opposite case: the
+  task, its problem generator, its correctness oracle, its published problem
+  sizes and its speedup metric are all upstream AlgoTune's, so what is
+  constructed there is only the seam (a module-level `solve` rather than a
+  `Solver` class, and generated rather than downloaded instances), which
+  [algo-era.md](algo-era.md#the-fourth-task-algotune-and-the-other-axis) names.
+  [The integrals section](algo-era.md#the-second-task-numerical-solution-of-integrals)
+  and [the 2F1 one](algo-era.md#the-third-task-2f1-and-what-replaces-a-leaderboard)
+  say which parts are the paper's, which are the literature's, and which are
   here.
 * **The channel is measured, not assumed**: `--reply-attempts` redraws a reply
   that arrived as something other than Python — a hosted GLM-5.2 endpoint
