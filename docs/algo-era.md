@@ -1049,11 +1049,41 @@ so either aggregation can be recomputed):
 | seed program here (full set) | 0.0941 | 5.47e-10 | 2.72e-10 | 3.91e-05 | 5.55e-08 |
 | winner here (full set) | 0.0753 | **7.53e-13** | **7.78e-13** | **4.59e-06** | **1.22e-10** |
 
-Three things fall out, and the third is the one worth arguing about:
+### The column this protocol does not contest
+
+The paper reports **three** metrics and the two tables above compare two of them.
+The third is **symbolic accuracy** — a GPT-4o judge asking whether the discovered
+equation is mathematically the same as the ground truth — and it is not
+implemented here, because it needs a judge model in the scoring loop that
+nothing else in this port requires.
+
+It is left out, but it is not left unsaid, because there is every reason to
+think this protocol scores near zero on it. Measured on the held-back answers:
+
+| | median terms | median characters |
+|---|---|---|
+| ground truth, LSR-Synth | 2 (max 5) | 104 |
+| ground truth, LSR-Transform | 1 (max 2) | 33 |
+| this port's seed and winner | 9–11 | 240+ (truncated in the files) |
+
+The winner returns a nine-to-eleven-term library fit where the truth is
+`0.316*P*exp(-0.054*t) + 0.316*P**2/(9.87*P + 1)`. It reaches NMSE 1e-13 on that
+problem — and it has not discovered the equation, it has interpolated it. The
+published methods' symbolic accuracy is low in absolute terms (LLM-SR's best
+column is 31.53% on LSR-Transform, 11.11% on chemistry) but it is not zero, and
+that difference is the whole distance between fitting and discovery.
+
+So: on **data fidelity** this protocol is competitive with and often ahead of the
+state of the art on LSR-Synth. On **symbolic discovery** it does not compete, and
+a reader should assume it loses that column outright until someone implements the
+judge and measures it.
+
+Three more things fall out, and the third is the one worth arguing about:
 
 **On LSR-Synth this protocol matches or beats the published state of the art on
 four of five columns of NMSE and two of four on Acc(0.1)** — at 0.11 LLM calls
-per problem. Chemistry and biology are ahead of every published method on both
+per problem, and on data fidelity only, with the symbolic-accuracy caveat above
+attached. Chemistry and biology are ahead of every published method on both
 metrics; physics is level on Acc and an order of magnitude better on NMSE.
 
 **And a plain sparse-regression baseline gets most of the way there on its own.**

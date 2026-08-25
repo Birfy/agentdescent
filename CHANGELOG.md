@@ -82,6 +82,12 @@ All notable changes to AgentDescent are documented here. The format follows
   column is the point: LLM-SR's config gives **each problem** 1 000 samples,
   where a whole run here is 14 model calls for 129 problems.
 
+  Those are the paper's two *data-fidelity* metrics. Its third, symbolic
+  accuracy, is not implemented here and this protocol should be assumed to lose
+  it outright: the ground truths are 1–2 terms and 33–104 characters, and what
+  comes back is a 9–11 term library fit. Reaching NMSE 1e-13 on an equation it
+  has interpolated rather than discovered is the honest description.
+
   Two findings worth the run on their own. The seed program — sparse regression,
   no LLM anywhere in it — already beats every published LLM method in the paper's
   table on LSR-Synth chemistry and biology, which says something about the
