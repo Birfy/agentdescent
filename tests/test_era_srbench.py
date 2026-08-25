@@ -505,6 +505,138 @@ def test_the_mirror_files_are_pinned_to_a_revision():
 
 
 # ---------------------------------------------------------------------------
+# The per-problem protocol -- the benchmark's own
+# ---------------------------------------------------------------------------
+
+
+def _one_problem_fixture(rows: int = 400):
+    rng = np.random.default_rng(3)
+    train_x = rng.uniform(1.0, 5.0, size=(rows, 2))
+    test_x = rng.uniform(1.0, 5.0, size=(50, 2))
+    ood_x = rng.uniform(5.0, 7.0, size=(40, 2))
+    truth = lambda m: 2.0 * m[:, 0] + 3.0  # noqa: E731
+    samples = {"train_x": train_x, "train_y": truth(train_x),
+               "test_x": test_x, "test_y": truth(test_x),
+               "ood_x": ood_x, "ood_y": truth(ood_x)}
+    problem = srbench.SrProblem(
+        problem_id="fixture-1", subset="fixture", input_vars=("a", "b"),
+        output_var="y", description="Discover y.\nInput 1: a\nInput 2: b",
+        gt_expression="2*a + 3", train_rows=rows, test_rows=50, ood_rows=40)
+    return problem, samples
+
+
+def test_a_per_problem_suite_scores_on_train_slices_and_reports_on_the_benchmark(tmp_path,
+                                                                                 monkeypatch):
+    """The split that makes `--per-problem` comparable with the paper at all."""
+    monkeypatch.setattr(srbench, "cache_path",
+                        lambda subdir, name: str(tmp_path / name))
+    problem, samples = _one_problem_fixture()
+    suite = srbench.prepare_problem_suite(problem, samples, seed=0, shards=4,
+                                          val_frac=0.25)
+    assert suite.scoring_shards == 4 and suite.test_shards == 1
+    assert suite.test_range() == (4,)
+
+    fit_rows = suite.shard_problems[0][0].train_rows
+    assert fit_rows == 300                      # 400 rows, a quarter held out
+    pool = 0
+    for shard in range(4):
+        data = np.load(suite.shard_paths[shard])
+        assert data["p0_train_x"].shape[0] == fit_rows
+        pool += data["p0_test_x"].shape[0]
+        assert "p0_ood_x" not in data           # a scoring shard is train-only
+    assert pool == 100                          # the slices partition the pool
+
+    # The one test shard is the benchmark's own split, untouched.
+    final = np.load(suite.shard_paths[4])
+    assert final["p0_test_x"].shape[0] == samples["test_x"].shape[0]
+    assert final["p0_ood_x"].shape[0] == samples["ood_x"].shape[0]
+    assert np.allclose(final["p0_test_x"], samples["test_x"])
+
+
+def test_the_validation_pool_is_drawn_rather_than_taken_from_the_tail(tmp_path,
+                                                                     monkeypatch):
+    """Several subsets vary a state variable monotonically, so a tail split
+    would hold out a *region* and every gate score would be an extrapolation."""
+    monkeypatch.setattr(srbench, "cache_path",
+                        lambda subdir, name: str(tmp_path / name))
+    problem, samples = _one_problem_fixture()
+    # Make the ordering carry the signal: column `a` increases down the table.
+    samples["train_x"] = samples["train_x"][np.argsort(samples["train_x"][:, 0])]
+    samples["train_y"] = 2.0 * samples["train_x"][:, 0] + 3.0
+    suite = srbench.prepare_problem_suite(problem, samples, seed=0, shards=4,
+                                          val_frac=0.25)
+    held = np.concatenate([np.load(suite.shard_paths[i])["p0_test_x"][:, 0]
+                           for i in range(4)])
+    fit = np.load(suite.shard_paths[0])["p0_train_x"][:, 0]
+    # A tail split would put every held-out `a` above every fitted one.
+    assert held.min() < fit.mean() < held.max()
+
+
+def test_a_per_problem_suite_refuses_too_few_shards_to_split(tmp_path, monkeypatch):
+    monkeypatch.setattr(srbench, "cache_path",
+                        lambda subdir, name: str(tmp_path / name))
+    problem, samples = _one_problem_fixture()
+    with pytest.raises(ValueError, match="at least four"):
+        srbench.prepare_problem_suite(problem, samples, shards=3)
+
+
+def test_the_per_problem_preview_carries_the_statement_and_not_the_answer():
+    problem, samples = _one_problem_fixture()
+    text = srbench.problem_preview(problem, samples)
+    assert "Discover y." in text
+    assert "a: [" in text and "b: [" in text
+    assert "y (the target)" in text
+    assert "2*a + 3" not in text
+
+
+def test_the_per_problem_prompt_feeds_back_the_equation_that_was_tried():
+    """What a per-problem search buys and a whole-category one cannot have."""
+    parent = type("P", (), {
+        "code": "def discover(x, y, spec):\n    return '1.0'\n",
+        "metrics": {"mean_digits": 1.25, "worst": [
+            {"equation": "1.0*a + 2.0", "digits": 1.25, "seconds": 0.3,
+             "error": "", "problem_id": "fixture-1", "subset": "fixture",
+             "variables": ["a", "b"]}]},
+    })()
+    text = srbench.per_problem_prompt(parent, preview="THE STATEMENT",
+                                      timeout=60.0, problem_seconds=8.0,
+                                      functions=("sin", "exp"))
+    assert "THE STATEMENT" in text
+    assert "1.0*a + 2.0" in text                   # the structure that was tried
+    assert "1.2500" in text
+    assert "least_squares" in text                 # fit the constants
+    assert "one or two terms" in text              # and stay short
+    assert "2*a + 3" not in text                   # never the ground truth
+
+
+@needs_sandbox
+def test_a_per_problem_search_is_scored_on_the_benchmarks_own_split(tmp_path,
+                                                                   monkeypatch):
+    monkeypatch.setattr(srbench, "cache_path",
+                        lambda subdir, name: str(tmp_path / name))
+    problem, samples = _one_problem_fixture()
+    suite = srbench.prepare_problem_suite(problem, samples, seed=0, shards=4)
+    domain = port.per_problem_domain(suite, problem, samples)
+    assert domain.data_summary["problem_id"] == "fixture-1"
+    assert domain.test_shards == (4,)
+    valid, metrics, error = domain.evaluate(srbench.INITIAL_PROGRAM,
+                                            domain.test_shards)
+    assert valid, error
+    assert metrics["problems"] == 1
+    assert metrics["mean_digits"] > 8.0
+    assert metrics["per_problem"][0]["ood_acc"] == 1
+
+
+def test_the_per_problem_dry_run_says_which_protocol_it_would_run(capsys):
+    assert port.main(["--dry-run", "--per-problem"]) == 0
+    printed = capsys.readouterr().out
+    assert "one search per problem" in printed
+    assert "iterations 6/problem" in printed.replace("iterations=", "iterations ")
+    assert port.main(["--dry-run"]) == 0
+    assert "one search for the whole category" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
 # The prompt and the port
 # ---------------------------------------------------------------------------
 

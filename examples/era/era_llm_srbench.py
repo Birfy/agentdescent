@@ -29,15 +29,26 @@ reaching for an LLM: it recovers several of the synthetic right-hand sides
 outright, and its ceiling is its library, which is the headroom the tree search
 explores.
 
-How this differs from the benchmark's own leaderboard
+Two protocols, and the flag that chooses between them
 -----------------------------------------------------
-LLM-SRBench evaluates LLM-based *searchers* that see one problem at a time, with
-the data in context, and propose hypotheses for that problem. This runs ERA's
-protocol instead: the model never sees a sample, it writes one program, and that
-program is run sandboxed against every problem. Numbers from here are therefore
-not directly comparable to the paper's tables -- the same benchmark, splits and
-metrics, a different experiment -- and both the result file and
-``docs/algo-era.md`` say so.
+By default this runs **ERA's** protocol: one search writes **one program**, and
+that program is run sandboxed over every problem in the category. The model never
+sees a sample. It is cheap -- 14 model calls for 129 problems -- and it answers
+ERA's question, "can a model write one method that solves a whole scientific
+distribution?". It is *not* the benchmark's protocol, so its numbers are not
+directly comparable to the paper's tables.
+
+``--per-problem`` runs **the benchmark's** protocol instead: one independent
+search per problem, each with its own tree, its own seed program and its own
+budget, scored on slices of that problem's own training rows and reported on that
+problem's own held-out split. That is what LLM-SR, LaSR and SGA do, so a number
+from it belongs in the same column as theirs -- with the budget stated, since
+LLM-SR gives each problem 1 000 samples where this gives it a handful of
+expansions.
+
+The difference is not a tuning knob. A single program cannot express
+``(-A + x1*y1 - x2*y2)/x3``; a per-problem search can propose exactly that
+structure and fit it. Both result files record which protocol produced them.
 
 Everything about the search itself is `era_empirical_software.py`: the flat-PUCT
 tree, the visit reservation, the staleness handling, the aggregator, the
@@ -50,14 +61,23 @@ Run
     python -m examples.era.era_llm_srbench --dry-run
     python -m examples.era.era_llm_srbench --provider claude --model glm-5.2 \\
         --iterations 12 --workers 3 --problems 48 --yes
+    python -m examples.era.era_llm_srbench --provider claude --model glm-5.2 \\
+        --per-problem --dataset lsr_transform --shards 6 --iterations 6 \\
+        --workers 3 --problem-concurrency 2 --problem-seconds 8 --yes
 """
 
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import math
+import time
+import statistics
+import threading
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+
+import numpy as np
 
 from agentdescent.agents import Usage
 from agentdescent.evolution import EvolvingArtifact
@@ -79,11 +99,16 @@ from examples.era._era_srbench import (
     MIRROR_REVISION,
     PROBLEM_SECONDS,
     SUBSETS,
+    SrProblem,
     Suite,
     evaluate_source,
     framework_score,
+    load_catalogue,
     mutation_prompt,
+    per_problem_prompt,
+    prepare_problem_suite,
     prepare_suite,
+    problem_preview,
     suite_preview,
 )
 from examples.era._era_srbench_expr import DIGIT_CAP, FUNCTIONS, TOLERANCE
@@ -179,6 +204,61 @@ def srbench_domain(
     )
 
 
+def per_problem_domain(
+    suite: Suite,
+    problem: SrProblem,
+    samples: Dict[str, Any],
+    *,
+    candidate_timeout: float = 120.0,
+    max_code_length: int = 20_000,
+    problem_seconds: float = PROBLEM_SECONDS,
+    train_points: int = 0,
+) -> Domain:
+    """One LLM-SRBench problem, in the four terms the ERA search needs.
+
+    The same evaluator, sandbox, grammar and metrics as the whole-category
+    domain; what changes is that a shard is a slice of *this problem's* held-out
+    training rows, and the single test shard is the benchmark's own id-test (with
+    OOD beside it where the category has one).
+    """
+    preview = problem_preview(problem, samples, train_points=train_points)
+    return Domain(
+        name=(f"LLM-SRBench {problem.problem_id}: recover one equation, "
+              f"min(12, -log10(NMSE)) on the benchmark's held-out samples"),
+        entrypoint="discover",
+        metric_key="mean_digits",
+        metric_better="higher",
+        initial_program=INITIAL_PROGRAM,
+        initial_summary=INITIAL_SUMMARY,
+        evaluate=lambda code, shard_ids: evaluate_source(
+            code, suite=suite, shards=shard_ids, timeout=candidate_timeout,
+            problem_seconds=problem_seconds, max_length=max_code_length),
+        reward=framework_score,
+        prompt=lambda program: per_problem_prompt(
+            program, preview=preview, timeout=candidate_timeout,
+            problem_seconds=problem_seconds, functions=EQUATION_FUNCTIONS),
+        task_prompt=lambda index: (
+            f"Recover the equation behind {problem.problem_id}, scored on "
+            f"held-out slice {index} of its training data."),
+        test_shards=suite.test_range(),
+        data_summary={
+            "benchmark": "LLM-SRBench",
+            "paper": BENCHMARK_PAPER,
+            "problem_id": problem.problem_id,
+            "subset": problem.subset,
+            "input_vars": list(problem.input_vars),
+            "fit_rows": problem.train_rows,
+            "validation_shards": suite.scoring_shards,
+            "test_rows": suite.shard_problems[-1][0].test_rows,
+            "ood_rows": suite.shard_problems[-1][0].ood_rows,
+            "problem_seconds": problem_seconds,
+            "digit_cap": DIGIT_CAP,
+            "tolerance": TOLERANCE,
+            "seed": suite.seed,
+        },
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     add_standard_args(parser, model_default="glm-5.2", max_seconds_default=1800.0,
@@ -191,8 +271,26 @@ def build_parser() -> argparse.ArgumentParser:
                               "append-only, so `full` is the honest default for "
                               "a comparison and `guarded` the conservative one"))
     parser.add_argument("--iterations", type=int, default=6,
-                        help="FUTS expansions in total (upstream's num_iterations)")
+                        help=("FUTS expansions in total (upstream's "
+                              "num_iterations); with --per-problem, expansions "
+                              "*per problem*"))
     parser.add_argument("--workers", type=int, default=3)
+    parser.add_argument(
+        "--per-problem", action="store_true",
+        help=("run the benchmark's own protocol: one independent search per "
+              "problem, scored on slices of that problem's training data and "
+              "reported on its own held-out split. Without it, one search "
+              "writes one program for the whole category, which is ERA's "
+              "protocol and a different experiment"))
+    parser.add_argument(
+        "--problem-concurrency", type=int, default=1,
+        help=("--per-problem only: problems searched at once. Each one already "
+              "runs --workers model calls in parallel, so this multiplies the "
+              "load on the endpoint"))
+    parser.add_argument(
+        "--val-frac-per-problem", type=float, default=0.25,
+        help=("--per-problem only: share of a problem's training rows held out "
+              "of the fit and split into the scoring shards"))
     parser.add_argument("--dataset", default="lsr_synth",
                         choices=sorted(set(GROUPS) | set(SUBSETS)),
                         help=("which of the benchmark's categories to run. "
@@ -205,7 +303,13 @@ def build_parser() -> argparse.ArgumentParser:
                               "the chosen subsets; 0 runs all of them. A run "
                               "reports exactly which problems it used"))
     parser.add_argument("--shards", type=int, default=6,
-                        help="problem sets the search may score against")
+                        help=("problem sets the search may score against; with "
+                              "--per-problem, slices of one problem's validation "
+                              "pool. Note that `shards * (1 - held_out_frac)` is "
+                              "how many rollout tasks exist, and a round can "
+                              "only propose one expansion per task -- so "
+                              "--shards 4 --workers 3 leaves a worker idle and "
+                              "produces two expansions a round, not three"))
     parser.add_argument("--test-shards", type=int, default=2,
                         help="further problem sets the search never sees")
     parser.add_argument("--held-out-frac", type=float, default=0.5)
@@ -256,6 +360,210 @@ def _number(value: Any) -> str:
     return f"{number:.4g}"
 
 
+def _pooled(rows: Sequence[Dict[str, Any]], key: str) -> Optional[float]:
+    values = [float(row[key]) for row in rows
+              if row.get(key) is not None and math.isfinite(float(row[key]))]
+    return statistics.median(values) if values else None
+
+
+def _benchmark_summary(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """The benchmark's own numbers over however many problems were searched."""
+    if not rows:
+        return {"problems": 0}
+    by_subset: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows:
+        by_subset.setdefault(row["subset"], []).append(row)
+
+    def block(group: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+        digits = [float(r["digits"]) for r in group]
+        ood = [r for r in group if r.get("ood_digits") is not None]
+        payload: Dict[str, Any] = {
+            "problems": len(group),
+            "acc_0.1": sum(int(r["acc"]) for r in group) / len(group),
+            "median_nmse": _pooled(group, "nmse"),
+            "mean_digits": sum(digits) / len(digits),
+            "solved_6_digits": sum(1 for d in digits if d >= 6.0),
+        }
+        if ood:
+            payload["ood_acc_0.1"] = sum(int(r["ood_acc"]) for r in ood) / len(ood)
+            payload["ood_mean_digits"] = (
+                sum(float(r["ood_digits"]) for r in ood) / len(ood))
+        return payload
+
+    return {"overall": block(rows),
+            "by_subset": {name: block(group)
+                          for name, group in sorted(by_subset.items())}}
+
+
+def _one_problem(args: argparse.Namespace, complete, problem: SrProblem,
+                 samples: Dict[str, Any], actor_usage: Usage,
+                 mode: str) -> Dict[str, Any]:
+    """One independent search, for one problem, reported on its own held-out split."""
+    suite = prepare_problem_suite(
+        problem, samples, seed=args.seed, shards=args.shards,
+        val_frac=args.val_frac_per_problem, train_points=args.train_points)
+    domain = per_problem_domain(
+        suite, problem, samples,
+        candidate_timeout=args.candidate_timeout,
+        max_code_length=args.max_code_length,
+        problem_seconds=args.problem_seconds,
+        train_points=args.train_points)
+    run = run_agentdescent_era(
+        complete,
+        mode=mode,
+        iterations=args.iterations,
+        workers=args.workers,
+        shards=args.shards,
+        test_shards=1,
+        held_out_frac=args.held_out_frac,
+        c_puct=args.c_puct,
+        candidate_timeout=args.candidate_timeout,
+        max_code_length=args.max_code_length,
+        async_ratio=args.async_ratio,
+        staleness=args.staleness,
+        max_seconds=args.max_seconds,
+        shutdown_grace=args.shutdown_grace,
+        seed=args.seed,
+        usage=actor_usage,
+        eval_concurrency=args.eval_concurrency,
+        domain=domain,
+        verbose=False,
+    )
+
+    def cell(metrics: Dict[str, Any]) -> Dict[str, Any]:
+        detail = (metrics.get("per_problem") or [{}])[0]
+        return {
+            "digits": detail.get("digits", 0.0),
+            "nmse": detail.get("nmse"),
+            "acc": detail.get("acc", 0),
+            "ood_digits": detail.get("ood_digits"),
+            "ood_acc": detail.get("ood_acc"),
+            "equation": detail.get("equation", ""),
+            "error": detail.get("error", ""),
+        }
+
+    best = cell(run.best_test_metrics)
+    baseline = cell(run.baseline_test_metrics)
+    return {
+        "problem_id": problem.problem_id,
+        "subset": problem.subset,
+        "input_vars": list(problem.input_vars),
+        "gt_expression": problem.gt_expression,
+        "fit_rows": problem.train_rows,
+        "test_rows": suite.shard_problems[-1][0].test_rows,
+        "nodes": len(run.tree.nodes),
+        "wall_seconds": run.wall_seconds,
+        "gate_best": run.tree.best().score,
+        "baseline": baseline,
+        "best": best,
+        **best,
+    }
+
+
+def _run_per_problem(args: argparse.Namespace, complete, model_usage: Usage,
+                     actor_usage: Usage, damage: Dict[str, int],
+                     mode: str) -> int:
+    """The benchmark's own protocol: one independent search per problem.
+
+    Each problem gets its own tree, its own seed program, its own budget, and is
+    reported on its own held-out split -- which is what makes a number here
+    comparable with the paper's tables in a way the whole-category protocol
+    never is. The cost is linear in the number of problems, so `--problems`
+    caps it and `--problem-concurrency` trades endpoint load for wall-clock.
+    """
+    catalogue = load_catalogue(args.dataset, problems=args.problems,
+                               seed=args.seed)
+    counts: Dict[str, int] = {}
+    for problem, _samples in catalogue:
+        counts[problem.subset] = counts.get(problem.subset, 0) + 1
+    print(f"Problems : {len(catalogue)} searched one at a time, from "
+          f"{', '.join(f'{k}={v}' for k, v in sorted(counts.items()))}; "
+          f"{args.iterations} expansions each, {args.shards} validation shards "
+          f"from {int(100 * args.val_frac_per_problem)}% of train, seed={args.seed}")
+
+    rows: List[Dict[str, Any]] = []
+    lock = threading.Lock()
+    started = time.monotonic()
+
+    def work(index_problem):
+        index, (problem, samples) = index_problem
+        try:
+            row = _one_problem(args, complete, problem, samples, actor_usage, mode)
+        except Exception as exc:  # one problem must not take the sweep down
+            row = {"problem_id": problem.problem_id, "subset": problem.subset,
+                   "gt_expression": problem.gt_expression,
+                   "digits": 0.0, "nmse": None, "acc": 0, "equation": "",
+                   "error": f"{type(exc).__name__}: {exc}",
+                   "baseline": {"digits": 0.0, "acc": 0, "nmse": None},
+                   "best": {"digits": 0.0, "acc": 0, "nmse": None}}
+        with lock:
+            rows.append(row)
+            done = len(rows)
+            print(f"[{done:3d}/{len(catalogue)}] {row['problem_id']:34s} "
+                  f"digits {row['baseline']['digits']:>6} -> {row['digits']:<6} "
+                  f"acc {row['baseline']['acc']}->{row['acc']}  "
+                  f"({time.monotonic() - started:.0f}s elapsed)"
+                  + (f"  [{row['error'][:60]}]" if row.get("error") else ""),
+                  flush=True)
+        return row
+
+    workers = max(1, int(args.problem_concurrency))
+    if workers == 1:
+        for item in enumerate(catalogue):
+            work(item)
+    else:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            list(pool.map(work, enumerate(catalogue)))
+    rows.sort(key=lambda row: row["problem_id"])
+
+    best_summary = _benchmark_summary(rows)
+    baseline_summary = _benchmark_summary([
+        {**row["baseline"], "subset": row["subset"]} for row in rows])
+    payload: Dict[str, Any] = {
+        "experiment": ("ERA on AgentDescent -- LLM-SRBench, one search per "
+                       "problem (the benchmark's own protocol)"),
+        "status": "completed",
+        "completed_at": _utc_now(),
+        "upstream_commit": UPSTREAM_COMMIT,
+        "comparability": (
+            "One independent search per problem, scored on slices of that "
+            "problem's own training rows and reported on the benchmark's own "
+            "held-out split -- the protocol the paper's methods run under. The "
+            "budget is not the paper's: LLM-SR gives each problem 1000 samples, "
+            "this gives it "
+            f"{args.iterations} expansions. Symbolic accuracy is not measured "
+            "here at all."),
+        "config": {key: value for key, value in vars(args).items()
+                   if key not in ("output", "yes")},
+        "wall_seconds": time.monotonic() - started,
+        "baseline": baseline_summary,
+        "best": best_summary,
+        "per_problem": rows,
+        "model_usage": _usage_dict(model_usage),
+        "actor_usage": _usage_dict(actor_usage),
+        "reply_damage": {
+            "drawn": damage.get("drawn", 0),
+            "damaged": damage.get("damaged", 0),
+            "attempts_allowed": max(1, args.reply_attempts),
+        },
+    }
+    _write_json(args.output, payload)
+    overall_before = baseline_summary["overall"]
+    overall_after = best_summary["overall"]
+    print(
+        f"completed: {overall_after['problems']} problems, "
+        f"Acc(0.1) {_percent(overall_before['acc_0.1'])} -> "
+        f"{_percent(overall_after['acc_0.1'])}, "
+        f"median NMSE {_number(overall_before['median_nmse'])} -> "
+        f"{_number(overall_after['median_nmse'])}, "
+        f"mean digits {overall_before['mean_digits']:.3f} -> "
+        f"{overall_after['mean_digits']:.3f}, "
+        f"wall={payload['wall_seconds']:.0f}s, model_calls={model_usage.calls}, "
+        f"output={args.output}"
+    )
+    return 0
+
+
 def main(argv: Optional[Iterable[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     args.workers = worker_count(args, args.workers)
@@ -275,9 +583,17 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     print(f"Evaluator: {sandbox_backend() or 'NO SANDBOX -- this run will fail'} "
           f"isolated, {args.problem_seconds:.0f}s per problem, equations parsed "
           f"and never executed")
+    protocol = ("one search per problem (the benchmark's own protocol)"
+                if args.per_problem
+                else "one search for the whole category (ERA's protocol)")
+    print(f"Protocol : {protocol}")
     print(
-        f"Plan     : mode={mode}, model={args.model}, iterations={args.iterations}, "
-        f"workers={args.workers}, c_puct={args.c_puct}, temperature={args.temperature}"
+        f"Plan     : mode={mode}, model={args.model}, iterations={args.iterations}"
+        + ("/problem" if args.per_problem else "")
+        + f", workers={args.workers}, c_puct={args.c_puct}, "
+        f"temperature={args.temperature}"
+        + (f", problem_concurrency={args.problem_concurrency}"
+           if args.per_problem else "")
     )
     artifact = EvolvingArtifact(ARTIFACT_ID, blast_radius=0.6)
     print(
@@ -298,6 +614,10 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     complete = with_intact_replies(
         _make_completion(args, model_usage),
         attempts=max(1, args.reply_attempts), counter=damage)
+    if args.per_problem:
+        return _run_per_problem(args, complete, model_usage, actor_usage, damage,
+                                mode)
+
     suite = prepare_suite(seed=args.seed, shards=args.shards,
                           test_shards=args.test_shards, dataset=args.dataset,
                           problems=args.problems, train_points=args.train_points)

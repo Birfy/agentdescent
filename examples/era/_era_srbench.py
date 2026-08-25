@@ -480,6 +480,144 @@ def prepare_suite(
                  train_points)
 
 
+def load_catalogue(dataset: str, *, problems: int = 0,
+                   seed: int = 0) -> List[Tuple[SrProblem, Dict[str, np.ndarray]]]:
+    """Every problem of a category, with its samples, in the order a run uses.
+
+    The same selection `prepare_suite` makes, exposed on its own because the
+    per-problem protocol needs the problems one at a time rather than dealt into
+    shards.
+    """
+    loaded: List[Tuple[SrProblem, Dict[str, np.ndarray]]] = []
+    for subset in resolve_subsets(dataset):
+        loaded.extend(_read_subset(subset))
+    if problems:
+        keep = {p.problem_id for p in _stratified_cap([p for p, _ in loaded],
+                                                      problems, seed)}
+        loaded = [pair for pair in loaded if pair[0].problem_id in keep]
+    return loaded
+
+
+def prepare_problem_suite(
+    problem: SrProblem,
+    samples: Dict[str, np.ndarray],
+    *,
+    seed: int = 0,
+    shards: int = 4,
+    val_frac: float = 0.25,
+    train_points: int = TRAIN_POINTS,
+) -> Suite:
+    """One problem, split the way the benchmark's own per-problem protocol splits it.
+
+    This is the seam that makes ``--per-problem`` possible without a second
+    runner or a second evaluator. A shard here is not a set of problems -- it is
+    **the same problem, scored on a different slice of held-out training data**:
+
+    * the candidate is handed the same fitting rows every time, which is what
+      LLM-SRBench hands its searchers;
+    * each scoring shard holds out one slice of a validation pool carved from
+      *train*, so a node's gate score is not the score of its own fit;
+    * the single test shard is the benchmark's **own** ``id_test`` split, with
+      ``ood_test`` beside it where the category has one. That is the number a
+      run reports, and no expansion is ever scored against it.
+
+    The pool is drawn by a seeded permutation rather than by taking a tail: the
+    published samples are not shuffled, and several subsets vary a state variable
+    monotonically, so a tail split would hold out a *region* rather than a
+    sample and every gate score would be an extrapolation.
+    """
+    if shards < 4:
+        # `evolve()` refuses fewer than four tasks to split train/held-out, and
+        # a per-problem run has no other source of shards.
+        raise ValueError("a per-problem suite needs at least four scoring shards")
+    if not 0.05 <= val_frac <= 0.5:
+        raise ValueError("val_frac must leave a usable fit set and a usable pool")
+
+    train_x = samples["train_x"]
+    train_y = samples["train_y"]
+    if train_points:
+        train_x, train_y = train_x[:train_points], train_y[:train_points]
+    rows = int(train_x.shape[0])
+    rng = np.random.default_rng(seed)
+    order = rng.permutation(rows)
+    pool_size = max(shards, int(round(rows * val_frac)))
+    pool, fit = order[:pool_size], order[pool_size:]
+    if fit.size < 32:
+        raise ValueError(f"{problem.problem_id}: {fit.size} fitting rows is too few")
+    slices = np.array_split(pool, shards)
+
+    fingerprint = hashlib.sha256(json.dumps(
+        [problem.problem_id, seed, shards, val_frac, int(train_points), rows],
+        sort_keys=True).encode("utf-8")).hexdigest()[:12]
+    root = Path(cache_path("llm-srbench", f"one-{fingerprint}"))
+    root.mkdir(parents=True, exist_ok=True)
+
+    paths: List[Path] = []
+    metas: List[Path] = []
+    held: List[Tuple[SrProblem, ...]] = []
+    for index in range(shards + 1):
+        data_path = root / f"shard-{index:03d}.npz"
+        meta_path = root / f"shard-{index:03d}.json"
+        if index < shards:
+            test_x, test_y = train_x[slices[index]], train_y[slices[index]]
+            ood: Optional[Tuple[np.ndarray, np.ndarray]] = None
+        else:
+            test_x, test_y = samples["test_x"], samples["test_y"]
+            ood = ((samples["ood_x"], samples["ood_y"])
+                   if "ood_x" in samples else None)
+        record = SrProblem(
+            problem_id=problem.problem_id,
+            subset=problem.subset,
+            input_vars=problem.input_vars,
+            output_var=problem.output_var,
+            description=problem.description,
+            gt_expression=problem.gt_expression,
+            train_rows=int(fit.size),
+            test_rows=int(test_x.shape[0]),
+            ood_rows=int(ood[0].shape[0]) if ood else 0,
+        )
+        if not data_path.exists() or not meta_path.exists():
+            payload = {
+                "p0_train_x": train_x[fit], "p0_train_y": train_y[fit],
+                "p0_test_x": test_x, "p0_test_y": test_y,
+            }
+            if ood:
+                payload["p0_ood_x"], payload["p0_ood_y"] = ood
+            np.savez(data_path, **payload)
+            meta_path.write_text(json.dumps([record.to_dict()], indent=1) + "\n",
+                                 encoding="utf-8")
+        paths.append(data_path)
+        metas.append(meta_path)
+        held.append((record,))
+    return Suite(root, seed, (problem.subset,), tuple(paths), tuple(metas),
+                 tuple(held), shards, 1, train_points)
+
+
+def problem_preview(problem: SrProblem, samples: Dict[str, np.ndarray],
+                    *, train_points: int = TRAIN_POINTS) -> str:
+    """The briefing for one problem: its own statement, and the range of its data.
+
+    The benchmark's description is what LLM-SRBench hands a searcher, and it is
+    reproduced verbatim. The ranges are this port's addition, and they are a
+    fact about the samples the candidate already holds rather than a hint: a
+    method cannot decide between ``log(t)`` and ``sqrt(t)`` without knowing
+    whether ``t`` is ever negative, and making it spend an expansion to find out
+    would be measuring the prompt.
+    """
+    train_x = samples["train_x"]
+    train_y = samples["train_y"]
+    if train_points:
+        train_x, train_y = train_x[:train_points], train_y[:train_points]
+    lines = [problem.description.strip(), "",
+             f"You have {train_x.shape[0]} samples. Observed ranges:"]
+    for index, name in enumerate(problem.input_vars):
+        column = train_x[:, index]
+        lines.append(f"  {name}: [{column.min():.6g}, {column.max():.6g}]")
+    lines.append(f"  {problem.output_var} (the target): "
+                 f"[{train_y.min():.6g}, {train_y.max():.6g}]")
+    return "\n".join(lines)
+
+
 def suite_preview(suite: Suite) -> str:
     """What the model is told about the benchmark -- never a problem's answer.
 
@@ -841,6 +979,119 @@ def _failure_report(metrics: Dict[str, Any], limit: int = 5) -> str:
             f"  {row['problem_id']} ({', '.join(row['variables'])}): "
             f"{row['digits']} digits in {row['seconds']}s{note}{shown}")
     return "\n".join(lines)
+
+
+PER_PROBLEM_PREAMBLE = """You are an expert scientist and an expert Python
+programmer. Your task is to write Python code that recovers the closed-form
+equation behind one scientific dataset. Return ONLY the python code."""
+
+
+def per_problem_prompt(
+    parent: Any,
+    *,
+    preview: str,
+    timeout: float = 120.0,
+    problem_seconds: float = PROBLEM_SECONDS,
+    functions: Sequence[str] = (),
+) -> str:
+    """The mutation prompt for ``--per-problem``: one dataset, one equation.
+
+    The same shape as :func:`mutation_prompt` -- upstream's preamble, task,
+    preview, metric, parent score, parent code, numbered contract, constraints --
+    with two differences that are the whole point of the protocol:
+
+    * the preview is **this problem's own statement** and the ranges of its
+      columns, rather than a description of a benchmark; and
+    * the feedback carries **the equation the parent actually returned**, so an
+      expansion can reason about a specific wrong structure instead of about a
+      mean over a hundred problems.
+
+    That second one is what a per-problem search buys and what a
+    one-program-for-everything search cannot have. It is also where the
+    protocol's risk lives: the score being fed back is a fit on held-out
+    *training* rows, and a search told a number often enough will find the
+    number. The benchmark's own test split is never in this loop.
+    """
+    score = parent.metrics.get("mean_digits")
+    shown = f"{float(score):.4f}" if score is not None else "failed to run"
+    rows = parent.metrics.get("worst") or []
+    attempt = ""
+    if rows:
+        row = rows[0]
+        equation = (row.get("equation") or "").strip()
+        note = f" It raised: {row['error']}." if row.get("error") else ""
+        attempt = (f"The equation it returned was:\n  {equation or '(none)'}\n"
+                   f"which scored {row['digits']} in {row['seconds']}s.{note}")
+    allowed = ", ".join(functions)
+    imports = ", ".join(sorted(ALLOWED_IMPORTS))
+    return f"""{PER_PROBLEM_PREAMBLE}
+
+--- BEGIN PROMPT ---
+
+Recover the closed-form equation behind this dataset.
+
+{preview}
+
+The metric is min({DIGIT_CAP:.0f}, -log10(NMSE)) on held-out samples your program
+never sees, where NMSE is the mean squared error of your equation divided by the
+variance of the target. An equation that is rejected, raises, produces a
+non-finite value anywhere, or overruns its time scores 0. Higher is better,
+{DIGIT_CAP:.0f} is the maximum.
+
+The previous solution scored: {shown}
+{attempt}
+
+Previous Solution Code:
+```python
+{parent.code}
+```
+
+Please generate a NEW, IMPROVED Python function named `discover` that:
+1. Has the signature `discover(x, y, spec)` and returns a STRING.
+2. `x` is a float64 numpy array of shape (n_samples, n_inputs) whose columns are
+   `spec["input_vars"]` in order, and `y` is a float64 array of shape
+   (n_samples,). `spec` also holds `output_var`, `description`, `seconds` and
+   `evaluate`.
+3. Returns the equation as an expression in those variable names -- for example
+   `"1.7*P - 0.02*P**2 + sin(t)"`. It is parsed, not executed: numeric
+   constants, those names, `pi`, `e`, the operators + - * / **, and these
+   functions: {allowed}. Anything else is rejected and scores zero.
+4. **Proposes a structure and fits its constants to the data.** Think about what
+   equation the description implies -- a rate law, an oscillator, a growth model,
+   a rearranged physical identity -- write that form with free parameters, and
+   fit the parameters numerically (`scipy.optimize.least_squares` or
+   `curve_fit`). Then check it with
+   `spec["evaluate"](expression, x)`, which is the grader's own parser, and try
+   another form if it is poor. Keep the best.
+5. Is allowed to be specific to THIS dataset. There is only one, and its
+   description is above; a form chosen because it fits this science is the
+   answer, not a shortcut.
+
+Your code must look like this:
+```python
+import numpy as np
+from scipy.optimize import least_squares
+# ... other imports
+
+def discover(x, y, spec):
+    # ... propose a form, fit its constants, score it, keep the best ...
+    return "..."
+```
+Provide the full, runnable code including imports.
+
+IMPORTANT CONSTRAINTS:
+1. {problem_seconds:.0f} seconds of wall-clock, and a program that overruns is
+   interrupted and scores zero. Budget the fit and keep the best form so far.
+2. These are the only imports a static gate accepts, and a refused program scores
+   nothing at all: {imports}. `eval`, `exec`, `compile` and `sympy` are refused
+   too. There is no network and no filesystem, and do not set any thread count
+   above 1.
+3. Seed every random number generator you use, from a constant.
+4. A short equation that generalises beats a long one that interpolates. The
+   ground truth here is one or two terms; a twenty-term fit that scores well on
+   the samples is not the answer being looked for.
+--- END PROMPT ---
+"""
 
 
 def mutation_prompt(
