@@ -12,7 +12,7 @@ AgentDescent engine, running **four** tasks on one search.
 | Dataset (faithful) | Kaggle Playground Series S3E1 — the upstream `implementation/playground_s3e1.py` task |
 | Second task | *Numerical solution of integrals* — named in the paper's abstract; upstream released no implementation, so the nine-family suite is constructed here |
 | Third task | Gauss hypergeometric `2F1` in double precision — not in the paper at all; 3000 points against a 25-digit mpmath reference, baseline `scipy.special.hyp2f1` |
-| Fourth task | **LLM-SRBench** (arXiv:2504.10415, ICML 2025) — 240 scientific equation-discovery problems, someone else's benchmark and someone else's metrics |
+| Fourth task | **LLM-SRBench** (arXiv:2504.10415, ICML 2025) — the 240 scientific equation-discovery problems the benchmark released (its paper says 239), someone else's benchmark and someone else's metrics |
 | `evolve()` plug-ins | `strategy` + `aggregator_factory=` FUTS tree, `selection.FlatPuct` |
 
 ## Run

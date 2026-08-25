@@ -360,10 +360,21 @@ repository's choice.
 
 | | |
 |---|---|
-| Problems | 240 in five subsets: `lsr_transform` (111 Feynman equations rearranged into unfamiliar forms) and `lsr_synth` (chemistry 36, biology 24, physics 44, materials 25) |
+| Problems | 240 in five subsets: `lsr_transform` (111 Feynman equations rearranged into unfamiliar forms) and `lsr_synth` (chemistry 36, biology 24, physics 44, materials 25) — the paper's abstract says **239**, see below |
 | Samples | LSR-Synth: 4 000 train / 500 in-domain test / 500 **out-of-distribution** test. LSR-Transform: 80 000 / 20 000, no OOD split |
 | Metrics | The paper's own: `NMSE = Σ(ŷ−y)² / Σ(y−ȳ)²`, and `Acc_τ = 1(max_i \|(ŷ_i−y_i)/y_i\| ≤ τ)` with τ = 0.1 |
 | Baseline node | Sequentially thresholded least squares over a fixed nonlinear library — SINDy's fitting step (Brunton et al., 2016) without its domain-chosen library |
+
+The **240 is the released data's count, and the paper says 239.** The gap is one
+physics problem: the paper's text reads "111 problems in the first category
+(LSR-Transform), and 128 problems in the second category (LSR-Synth), spanning
+… chemistry (36), biology (24), physics (43), and material science (25)", while
+the benchmark's own gated HuggingFace dataset card lists `lsr_synth_phys_osc` at
+44 — and the ungated mirror agrees with the card. This port follows the data,
+because the data is what gets scored: dropping a problem to make the abstract's
+arithmetic work would be reporting a benchmark nobody published.
+`test_the_released_data_holds_240_problems_where_the_paper_says_239` pins it so
+it stays a recorded fact rather than something quietly "fixed" later.
 
 ### What the candidate is asked for
 
@@ -879,7 +890,11 @@ endpoint's measured knee bought **2.1×**.
 | Budget | 4 s per problem, 120 s per problem set, `--max-tokens 16000` |
 | LSR-Transform only | `--train-points 4000`, matching LSR-Synth's training size — it ships 80 000 |
 
-Two runs, one per category, so between them they cover all 240 problems.
+Two runs, one per category, so between them they cover **all 240 problems** —
+129 and 111, no cap, no overlap. Note what that does and does not mean: every
+problem was in a run, but each run scores its search against 6 shards and
+holds 2 back, so the before/after numbers below rest on the **59 held-back
+problems** (32 + 27) and the other 181 are what the search was gated on.
 Everything below is the **held-back** shards: problems no expansion was ever
 scored against. Files:
 [`bench/results/era-srbench-synth.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-srbench-synth.json)

@@ -13,7 +13,7 @@ All notable changes to AgentDescent are documented here. The format follows
   search, the same aggregator, the same sandbox and the same governance layer,
   behind the same `Domain` seam the integrals and 2F1 tasks use. What is new is
   where the yardstick comes from: [LLM-SRBench](https://arxiv.org/abs/2504.10415)
-  (ICML 2025 Oral) is 240 published scientific equation-discovery problems in
+  (ICML 2025 Oral) is the 240 published scientific equation-discovery problems in
   five subsets — 111 Feynman equations rearranged into unfamiliar forms, and 129
   synthetic problems across chemistry, biology, physics and materials science
   with out-of-distribution splits — with its own metrics and its own leaderboard
@@ -56,6 +56,12 @@ All notable changes to AgentDescent are documented here. The format follows
   subsets, `--problem-seconds` is enforced with `SIGALRM` inside the runner, and
   `--train-points` caps the rows a candidate is handed. Reading the benchmark's
   parquet needs `pyarrow`. Notes: `docs/algo-era.md`, `examples/era/README.md`.
+
+  One count to be careful with: the released data holds **240** problems and the
+  paper says **239**. The gap is one physics problem — the paper's text gives
+  physics as 43 where the benchmark's own dataset card lists
+  `lsr_synth_phys_osc` at 44 — and the port follows the data, since the data is
+  what gets scored.
 
   **Measured**, two runs of 12 expansions on `glm-5.2` covering all 240 problems
   (`bench/results/era-srbench-synth.json`,

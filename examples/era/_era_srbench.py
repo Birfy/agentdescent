@@ -87,9 +87,20 @@ MIRROR_URL = (
 #: LLM-SRBench's own paper: arXiv:2504.10415 (ICML 2025).
 BENCHMARK_PAPER = "arXiv:2504.10415"
 
-#: Each subset, the mirror's files for it, and the problem count the paper
-#: states. The counts are asserted at load time: a mirror that silently changed
-#: shape would otherwise be scored as if it were the benchmark.
+#: Each subset, the mirror's files for it, and the problem count the **released
+#: data** holds. Asserted at load time: a mirror that silently changed shape
+#: would otherwise be scored as if it were the benchmark.
+#:
+#: These sum to 240 and the paper says 239. The gap is one physics problem: the
+#: paper's text reads "111 problems in the first category (LSR-Transform), and
+#: 128 problems in the second category (LSR-Synth), spanning ... chemistry (36),
+#: biology (24), physics (43), and material science (25)", while the benchmark's
+#: own HuggingFace dataset card -- the gated original, not the mirror -- lists
+#: `lsr_synth_phys_osc` at 44. So the released data ships one more oscillator
+#: problem than the paper describes. The counts below follow the data, because
+#: the data is what gets scored; a run that quietly dropped a problem to make
+#: the abstract's arithmetic work would be reporting a benchmark nobody
+#: published.
 SUBSETS: Dict[str, Tuple[Tuple[str, ...], int]] = {
     "lsr_synth_bio_pop_growth": (
         ("lsr_synth_bio_pop_growth/train-00000-of-00001.parquet",), 24),

@@ -103,6 +103,24 @@ def test_every_subset_holds_the_number_of_problems_the_paper_states():
         assert len({problem.problem_id for problem, _ in loaded}) == expected
 
 
+def test_the_released_data_holds_240_problems_where_the_paper_says_239():
+    """One physics problem more than the abstract's arithmetic, and it is upstream's.
+
+    The paper reads "111 problems in the first category (LSR-Transform), and 128
+    problems in the second category (LSR-Synth) ... chemistry (36), biology (24),
+    physics (43), and material science (25)" -- 239. The benchmark's own gated
+    HuggingFace dataset card lists `lsr_synth_phys_osc` at 44, which makes 240,
+    and the ungated mirror agrees with the card. The port follows the data.
+    Pinned here so the discrepancy is a recorded fact rather than a typo someone
+    later "fixes" in one direction or the other.
+    """
+    counts = {name: expected for name, (_files, expected) in srbench.SUBSETS.items()}
+    assert counts["lsr_synth_phys_osc"] == 44, "the paper's text says 43"
+    assert sum(counts.values()) == 240
+    assert sum(counts[name] for name in srbench.GROUPS["lsr_synth"]) == 129
+    assert counts["lsr_transform"] == 111
+
+
 def test_the_four_synthetic_domains_carry_an_out_of_distribution_split():
     """OOD is what separates LSR-Synth from LSR-Transform, and it has to be there."""
     loaded = _mirror_subset("lsr_synth_matsci")
