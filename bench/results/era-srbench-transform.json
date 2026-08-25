@@ -1,0 +1,3311 @@
+{
+  "experiment": "ERA on AgentDescent -- LLM-SRBench equation discovery",
+  "status": "completed",
+  "completed_at": "2026-08-25T14:02:29+00:00",
+  "upstream_commit": "b836730b5c000526af95116b1d0e2c60c8cf0a10",
+  "task": "LLM-SRBench scientific equation discovery, mean min(12, -log10(NMSE)) on held-out samples",
+  "comparability": "Same benchmark, splits and metrics as arXiv:2504.10415; different protocol. The paper's methods see one problem at a time with the data in context; here the model writes one program that never sees a sample and is run sandboxed over every problem. Numbers here are not directly comparable to the paper's tables.",
+  "config": {
+    "provider": "claude",
+    "model": "glm-5.2",
+    "seed": 0,
+    "asynchronous": false,
+    "async_ratio": 1,
+    "max_seconds": 1800.0,
+    "pipelined_gate": false,
+    "gate_workers": 2,
+    "dry_run": false,
+    "serial": false,
+    "budget_rollouts": null,
+    "val_cap": null,
+    "eval_concurrency": null,
+    "reflective_merge": false,
+    "eval_cache": "",
+    "no_thinking": false,
+    "staleness": "guarded",
+    "iterations": 12,
+    "workers": 3,
+    "dataset": "lsr_transform",
+    "problems": 0,
+    "shards": 6,
+    "test_shards": 2,
+    "held_out_frac": 0.5,
+    "c_puct": 1.0,
+    "candidate_timeout": 120.0,
+    "problem_seconds": 4.0,
+    "train_points": 4000,
+    "max_code_length": 20000,
+    "max_tokens": 16000,
+    "temperature": 0.7,
+    "thinking": "disabled",
+    "api_timeout": 180.0,
+    "reply_attempts": 4,
+    "shutdown_grace": 120.0,
+    "quality_target": null
+  },
+  "problems": [
+    {
+      "problem_id": "lsr_transform_iii.19.51_3_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "E_n",
+        "m",
+        "q",
+        "h",
+        "epsilon"
+      ],
+      "output_var": "n",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: n - the principal quantum number\nInput 1: E_n - the energy of the nth energy level\nInput 2: m - the mass of the electron\nInput 3: q - the elementary charge\nInput 4: h - the Planck constant\nInput 5: epsilon - the electric constant (permittivity of free space)",
+      "gt_expression": "-sqrt(2)*q**2*sqrt(-m/E_n)/(4*epsilon*h)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.32.17_2_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "Pwr",
+        "epsilon",
+        "c",
+        "r",
+        "omega",
+        "omega_0"
+      ],
+      "output_var": "Ef",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: Ef - the strength of the external electric field\nInput 1: Pwr - the power of the scattered radiation\nInput 2: epsilon - the electric constant (permittivity of free space)\nInput 3: c - the speed of light\nInput 4: r - the radius of the scattering object or atom\nInput 5: omega - the frequency of the external electric field\nInput 6: omega_0 - the natural frequency of the oscillator or resonant frequency",
+      "gt_expression": "sqrt(3)*sqrt(Pwr/(c*epsilon))*(-omega**2 + omega_0**2)/(2*sqrt(pi)*omega**2*r)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_iii.15.27_2_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "k",
+        "alpha",
+        "n"
+      ],
+      "output_var": "d",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: d - the diameter or a characteristic length\nInput 1: k - the spring constant or a proportionality constant\nInput 2: alpha - a material-dependent constant or a dimensionless parameter\nInput 3: n - the number of turns or a dimensionless quantity",
+      "gt_expression": "2*pi*alpha/(k*n)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.32.17_4_3",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "Pwr",
+        "epsilon",
+        "c",
+        "Ef",
+        "r",
+        "omega_0"
+      ],
+      "output_var": "omega",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: omega - the frequency of the external electric field\nInput 1: Pwr - the power of the scattered radiation\nInput 2: epsilon - the electric constant (permittivity of free space)\nInput 3: c - the speed of light\nInput 4: Ef - the strength of the external electric field\nInput 5: r - the radius of the scattering object or atom\nInput 6: omega_0 - the natural frequency of the oscillator or resonant frequency",
+      "gt_expression": "sqrt(2*sqrt(3)*sqrt(pi)*Ef*omega_0**2*r*sqrt(Pwr*c*epsilon)/(4*pi*Ef**2*c*epsilon*r**2 - 3*Pwr) - 3*Pwr*omega_0**2/(4*pi*Ef**2*c*epsilon*r**2 - 3*Pwr))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.11.19_3_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "A",
+        "x1",
+        "x2",
+        "x3",
+        "y2",
+        "y3"
+      ],
+      "output_var": "y1",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: y1 - the first variable or value\nInput 1: A - the resulting sum of products\nInput 2: x1 - the first coefficient\nInput 3: x2 - the second coefficient\nInput 4: x3 - the third coefficient\nInput 5: y2 - the second variable or value\nInput 6: y3 - the third variable or value",
+      "gt_expression": "(A + x2*y2 + x3*y3)/x1",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.6.15a_4_1",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "Ef",
+        "epsilon",
+        "p_d",
+        "r",
+        "x",
+        "z"
+      ],
+      "output_var": "y",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: y - the y-coordinate of the point where the field is being measured\nInput 1: Ef - the electric field strength at a point\nInput 2: epsilon - the electric constant (permittivity of free space)\nInput 3: p_d - the electric dipole moment\nInput 4: r - the distance from the dipole to the point where the field is being measured\nInput 5: x - the x-coordinate of the point where the field is being measured\nInput 6: z - the z-coordinate of the point where the field is being measured",
+      "gt_expression": "sqrt(16*pi**2*Ef**2*epsilon**2*r**10/(p_d**2*z**2) - 9*x**2)/3",
+      "train_rows": 77219,
+      "test_rows": 19304,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.6.15b_3_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "Ef",
+        "epsilon",
+        "p_d",
+        "theta"
+      ],
+      "output_var": "r",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: r - the distance from the dipole to the point where the electric field is being measured\nInput 1: Ef - the electric field\nInput 2: epsilon - the electric constant or permittivity of the medium\nInput 3: p_d - the dipole moment\nInput 4: theta - the angle between the dipole axis and the position vector",
+      "gt_expression": "6**(1/3)*(p_d*sin(theta)*cos(theta)/(Ef*epsilon))**(1/3)/(2*pi**(1/3))",
+      "train_rows": 44348,
+      "test_rows": 11087,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.11.19_2_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "A",
+        "x1",
+        "x2",
+        "y1",
+        "y2",
+        "y3"
+      ],
+      "output_var": "x3",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: x3 - the third coefficient\nInput 1: A - the resulting sum of products\nInput 2: x1 - the first coefficient\nInput 3: x2 - the second coefficient\nInput 4: y1 - the first variable or value\nInput 5: y2 - the second variable or value\nInput 6: y3 - the third variable or value",
+      "gt_expression": "(-A + x1*y1 - x2*y2)/y3",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.32.17_3_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "Pwr",
+        "epsilon",
+        "c",
+        "Ef",
+        "omega",
+        "omega_0"
+      ],
+      "output_var": "r",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: r - the radius of the scattering object or atom\nInput 1: Pwr - the power of the scattered radiation\nInput 2: epsilon - the electric constant (permittivity of free space)\nInput 3: c - the speed of light\nInput 4: Ef - the strength of the external electric field\nInput 5: omega - the frequency of the external electric field\nInput 6: omega_0 - the natural frequency of the oscillator or resonant frequency",
+      "gt_expression": "sqrt(3)*sqrt(Pwr/(c*epsilon))*(-omega**2 + omega_0**2)/(2*sqrt(pi)*Ef*omega**2)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.27.18_1_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "E_den",
+        "epsilon"
+      ],
+      "output_var": "Ef",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: Ef - the electric field strength\nInput 1: E_den - the energy density\nInput 2: epsilon - the electric permittivity",
+      "gt_expression": "-sqrt(E_den/epsilon)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_iii.21.20_2_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "j",
+        "rho_c_0",
+        "q",
+        "m"
+      ],
+      "output_var": "A_vec",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: A_vec - the vector potential\nInput 1: j - the current density\nInput 2: rho_c_0 - the charge carrier density\nInput 3: q - the elementary charge\nInput 4: m - the mass of a charge carrier",
+      "gt_expression": "-j*m/(q*rho_c_0)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.24.17_0_1",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "k",
+        "c",
+        "d"
+      ],
+      "output_var": "omega",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: omega - the angular frequency\nInput 1: k - the wave number\nInput 2: c - the speed of the wave\nInput 3: d - the diameter or thickness of the waveguide or medium",
+      "gt_expression": "c*sqrt(d**2*k**2 + pi**2)/d",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.36.38_3_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "f",
+        "mom",
+        "H",
+        "kb",
+        "alpha",
+        "epsilon",
+        "c",
+        "M"
+      ],
+      "output_var": "T",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: T - the temperature in Kelvin\nInput 1: f - the resultant value of the function\nInput 2: mom - the momentum of an object or particle\nInput 3: H - the magnetic field strength\nInput 4: kb - the Boltzmann constant\nInput 5: alpha - the polarizability of a medium or molecule\nInput 6: epsilon - the electric permittivity of a medium\nInput 7: c - the speed of light in vacuum\nInput 8: M - the magnetization of a material",
+      "gt_expression": "mom*(H*c**2*epsilon - M*alpha)/(c**2*epsilon*f*kb)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.15.5_0_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "E_n",
+        "Ef",
+        "theta"
+      ],
+      "output_var": "p_d",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: p_d - the dipole moment per unit area\nInput 1: E_n - the normal component of the electric field at the surface\nInput 2: Ef - the external electric field\nInput 3: theta - the angle between the dipole moment and the external electric field",
+      "gt_expression": "-E_n/(Ef*cos(theta))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.35.21_2_1",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "M",
+        "n_rho",
+        "mom",
+        "kb",
+        "T"
+      ],
+      "output_var": "B",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: B - the magnetic field strength\nInput 1: M - the magnetization of a material\nInput 2: n_rho - the density of magnetic moments\nInput 3: mom - the magnetic moment of a particle\nInput 4: kb - the Boltzmann constant\nInput 5: T - the temperature in Kelvin",
+      "gt_expression": "T*kb*log(sqrt(-(M + mom*n_rho)/(M - mom*n_rho)))/mom",
+      "train_rows": 30585,
+      "test_rows": 7646,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_iii.10.19_1_1",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "E_n",
+        "mom",
+        "By",
+        "Bz"
+      ],
+      "output_var": "Bx",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: Bx - the x-component of the magnetic field\nInput 1: E_n - the energy of a particle in a magnetic field\nInput 2: mom - the magnetic moment of the particle\nInput 3: By - the y-component of the magnetic field\nInput 4: Bz - the z-component of the magnetic field",
+      "gt_expression": "sqrt(-By**2 - Bz**2 + E_n**2/mom**2)",
+      "train_rows": 59013,
+      "test_rows": 14753,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.15.3t_0_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "t1",
+        "c",
+        "u",
+        "t"
+      ],
+      "output_var": "x",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: x - the position of the event in the observer's frame\nInput 1: t1 - the relativistic time in the observer's frame\nInput 2: c - the speed of light\nInput 3: u - the relative velocity between the observer's frame and the object's frame\nInput 4: t - the time of the event in the object's frame",
+      "gt_expression": "c**2*(t - t1*sqrt((c**2 - u**2)/c**2))/u",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.30.3_0_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "Int",
+        "theta",
+        "n"
+      ],
+      "output_var": "Int_0",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: Int_0 - the initial intensity\nInput 1: Int - the resulting intensity\nInput 2: theta - the angle of diffraction\nInput 3: n - the number of slits",
+      "gt_expression": "2*Int*sin(theta/2)**2/(1 - cos(n*theta))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.32.5_1_1",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "Pwr",
+        "q",
+        "epsilon",
+        "c"
+      ],
+      "output_var": "a",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: a - the acceleration of the charged particle\nInput 1: Pwr - the power of an electromagnetic wave\nInput 2: q - the charge of a particle\nInput 3: epsilon - the electric constant or permittivity of free space\nInput 4: c - the speed of light",
+      "gt_expression": "sqrt(6)*sqrt(pi)*sqrt(Pwr*c**3*epsilon)/q",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.36.38_0_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "f",
+        "H",
+        "kb",
+        "T",
+        "alpha",
+        "epsilon",
+        "c",
+        "M"
+      ],
+      "output_var": "mom",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: mom - the momentum of an object or particle\nInput 1: f - the resultant value of the function\nInput 2: H - the magnetic field strength\nInput 3: kb - the Boltzmann constant\nInput 4: T - the temperature in Kelvin\nInput 5: alpha - the polarizability of a medium or molecule\nInput 6: epsilon - the electric permittivity of a medium\nInput 7: c - the speed of light in vacuum\nInput 8: M - the magnetization of a material",
+      "gt_expression": "T*c**2*epsilon*f*kb/(H*c**2*epsilon - M*alpha)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.11.27_0_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "Pol",
+        "alpha",
+        "epsilon",
+        "Ef"
+      ],
+      "output_var": "n",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: n - the number density of polarizable units\nInput 1: Pol - the polarization of a material\nInput 2: alpha - the polarizability of a unit\nInput 3: epsilon - the permittivity of free space or a constant\nInput 4: Ef - the external electric field",
+      "gt_expression": "3*Pol/(alpha*(3*Ef*epsilon + Pol))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.11.19_0_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "A",
+        "x2",
+        "x3",
+        "y1",
+        "y2",
+        "y3"
+      ],
+      "output_var": "x1",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: x1 - the first coefficient\nInput 1: A - the resulting sum of products\nInput 2: x2 - the second coefficient\nInput 3: x3 - the third coefficient\nInput 4: y1 - the first variable or value\nInput 5: y2 - the second variable or value\nInput 6: y3 - the third variable or value",
+      "gt_expression": "(A + x2*y2 + x3*y3)/y1",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.35.18_3_1",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "n",
+        "n_0",
+        "kb",
+        "T",
+        "B"
+      ],
+      "output_var": "mom",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: mom - the magnetic moment of a particle\nInput 1: n - the number of particles in a given state\nInput 2: n_0 - the number of particles at equilibrium\nInput 3: kb - the Boltzmann constant\nInput 4: T - the temperature of the system\nInput 5: B - the magnetic field strength",
+      "gt_expression": "T*kb*log((n_0 + sqrt(-4*n**2 + n_0**2))/(2*n))/B",
+      "train_rows": 54904,
+      "test_rows": 13725,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.11.27_3_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "Pol",
+        "n",
+        "alpha",
+        "epsilon"
+      ],
+      "output_var": "Ef",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: Ef - the external electric field\nInput 1: Pol - the polarization of a material\nInput 2: n - the number density of polarizable units\nInput 3: alpha - the polarizability of a unit\nInput 4: epsilon - the permittivity of free space or a constant",
+      "gt_expression": "-Pol/(3*epsilon) + Pol/(alpha*epsilon*n)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.11.17_4_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "n",
+        "n_0",
+        "kb",
+        "T",
+        "theta",
+        "Ef"
+      ],
+      "output_var": "p_d",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: p_d - the dipole moment of the carrier\nInput 1: n - the carrier density\nInput 2: n_0 - the equilibrium carrier density\nInput 3: kb - the Boltzmann constant\nInput 4: T - the temperature in Kelvin\nInput 5: theta - the angle between the electric field and the carrier movement direction\nInput 6: Ef - the electric field strength",
+      "gt_expression": "T*kb*(n - n_0)/(Ef*n_0*cos(theta))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.24.6_2_1",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "E_n",
+        "m",
+        "omega",
+        "x"
+      ],
+      "output_var": "omega_0",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: omega_0 - the natural angular frequency\nInput 1: E_n - the quantum mechanical energy of the nth state\nInput 2: m - the mass of the object\nInput 3: omega - the angular frequency of the perturbation\nInput 4: x - the displacement from the equilibrium position",
+      "gt_expression": "sqrt(4*E_n/m - omega**2*x**2)/x",
+      "train_rows": 72373,
+      "test_rows": 18093,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.36.38_1_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "f",
+        "mom",
+        "kb",
+        "T",
+        "alpha",
+        "epsilon",
+        "c",
+        "M"
+      ],
+      "output_var": "H",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: H - the magnetic field strength\nInput 1: f - the resultant value of the function\nInput 2: mom - the momentum of an object or particle\nInput 3: kb - the Boltzmann constant\nInput 4: T - the temperature in Kelvin\nInput 5: alpha - the polarizability of a medium or molecule\nInput 6: epsilon - the electric permittivity of a medium\nInput 7: c - the speed of light in vacuum\nInput 8: M - the magnetization of a material",
+      "gt_expression": "M*alpha/(c**2*epsilon) + T*f*kb/mom",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.37.4_1_1",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "Int",
+        "I1",
+        "delta"
+      ],
+      "output_var": "I2",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: I2 - the intensity of the second wave source\nInput 1: Int - the resultant intensity of two wave sources\nInput 2: I1 - the intensity of the first wave source\nInput 3: delta - the phase difference between the two wave sources",
+      "gt_expression": "2*I1*cos(delta)**2 + I1 - Int + 2*sqrt(I1*(I1*cos(delta)**2 + I1 - Int))*cos(delta)",
+      "train_rows": 25006,
+      "test_rows": 6251,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.11.17_2_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "n",
+        "n_0",
+        "kb",
+        "theta",
+        "p_d",
+        "Ef"
+      ],
+      "output_var": "T",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: T - the temperature in Kelvin\nInput 1: n - the carrier density\nInput 2: n_0 - the equilibrium carrier density\nInput 3: kb - the Boltzmann constant\nInput 4: theta - the angle between the electric field and the carrier movement direction\nInput 5: p_d - the dipole moment of the carrier\nInput 6: Ef - the electric field strength",
+      "gt_expression": "Ef*n_0*p_d*cos(theta)/(kb*(n - n_0))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.44.4_4_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "E_n",
+        "n",
+        "kb",
+        "T",
+        "V1"
+      ],
+      "output_var": "V2",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: V2 - the final volume of the gas\nInput 1: E_n - the energy change of an ideal gas\nInput 2: n - the number of moles of the gas\nInput 3: kb - the Boltzmann constant\nInput 4: T - the temperature of the gas in Kelvin\nInput 5: V1 - the initial volume of the gas",
+      "gt_expression": "V1*exp(E_n/(T*kb*n))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.32.17_5_3",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "Pwr",
+        "epsilon",
+        "c",
+        "Ef",
+        "r",
+        "omega"
+      ],
+      "output_var": "omega_0",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: omega_0 - the natural frequency of the oscillator or resonant frequency\nInput 1: Pwr - the power of the scattered radiation\nInput 2: epsilon - the electric constant (permittivity of free space)\nInput 3: c - the speed of light\nInput 4: Ef - the strength of the external electric field\nInput 5: r - the radius of the scattering object or atom\nInput 6: omega - the frequency of the external electric field",
+      "gt_expression": "sqrt(3)*sqrt(2*sqrt(3)*sqrt(pi)*Ef*omega**2*r*sqrt(Pwr*c*epsilon)/Pwr + 3*omega**2)/3",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.34.29b_2_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "E_n",
+        "g_",
+        "h",
+        "mom",
+        "B"
+      ],
+      "output_var": "Jz",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: Jz - the z-component of the total angular momentum\nInput 1: E_n - the energy of the nth state\nInput 2: g_ - the g-factor of the particle or atom\nInput 3: h - the Planck constant\nInput 4: mom - the magnetic moment of the particle or atom\nInput 5: B - the magnetic field strength",
+      "gt_expression": "E_n*h/(2*pi*B*g_*mom)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.6.15a_2_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "Ef",
+        "epsilon",
+        "p_d",
+        "x",
+        "y",
+        "z"
+      ],
+      "output_var": "r",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: r - the distance from the dipole to the point where the field is being measured\nInput 1: Ef - the electric field strength at a point\nInput 2: epsilon - the electric constant (permittivity of free space)\nInput 3: p_d - the electric dipole moment\nInput 4: x - the x-coordinate of the point where the field is being measured\nInput 5: y - the y-coordinate of the point where the field is being measured\nInput 6: z - the z-coordinate of the point where the field is being measured",
+      "gt_expression": "2**(3/5)*3**(1/5)*(p_d*z*sqrt(x**2 + y**2)/(Ef*epsilon))**(1/5)/(2*pi**(1/5))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.11.20_1_1",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "Pol",
+        "n_rho",
+        "Ef",
+        "kb",
+        "T"
+      ],
+      "output_var": "p_d",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: p_d - the dipole moment of a molecule\nInput 1: Pol - the polarization of a medium\nInput 2: n_rho - the density of molecules or dipoles\nInput 3: Ef - the external electric field strength\nInput 4: kb - the Boltzmann constant\nInput 5: T - the temperature in Kelvin",
+      "gt_expression": "sqrt(3)*sqrt(Pol*T*kb/(Ef*n_rho))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.29.16_0_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "x",
+        "x2",
+        "theta1",
+        "theta2"
+      ],
+      "output_var": "x1",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: x1 - the magnitude of the first vector\nInput 1: x - the distance between two points\nInput 2: x2 - the magnitude of the second vector\nInput 3: theta1 - the angle of the first vector\nInput 4: theta2 - the angle of the second vector",
+      "gt_expression": "x2*cos(theta1 - theta2) - sqrt(x**2 + x2**2*cos(theta1 - theta2)**2 - x2**2)",
+      "train_rows": 64888,
+      "test_rows": 16221,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.34.29b_3_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "E_n",
+        "g_",
+        "h",
+        "Jz",
+        "B"
+      ],
+      "output_var": "mom",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: mom - the magnetic moment of the particle or atom\nInput 1: E_n - the energy of the nth state\nInput 2: g_ - the g-factor of the particle or atom\nInput 3: h - the Planck constant\nInput 4: Jz - the z-component of the total angular momentum\nInput 5: B - the magnetic field strength",
+      "gt_expression": "E_n*h/(2*pi*B*Jz*g_)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_iii.17.37_0_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "f",
+        "alpha",
+        "theta"
+      ],
+      "output_var": "beta",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: beta - a scaling factor\nInput 1: f - the resultant value of the function\nInput 2: alpha - a coefficient modifying the cosine term\nInput 3: theta - the angle in radians",
+      "gt_expression": "f/(alpha*cos(theta) + 1)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_iii.10.19_3_1",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "E_n",
+        "mom",
+        "Bx",
+        "By"
+      ],
+      "output_var": "Bz",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: Bz - the z-component of the magnetic field\nInput 1: E_n - the energy of a particle in a magnetic field\nInput 2: mom - the magnetic moment of the particle\nInput 3: Bx - the x-component of the magnetic field\nInput 4: By - the y-component of the magnetic field",
+      "gt_expression": "sqrt(-Bx**2 - By**2 + E_n**2/mom**2)",
+      "train_rows": 59013,
+      "test_rows": 14753,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.27.16_2_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "flux",
+        "epsilon",
+        "c"
+      ],
+      "output_var": "Ef",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: Ef - the magnitude of the electric field\nInput 1: flux - the energy flux density\nInput 2: epsilon - the electric constant or permittivity of free space\nInput 3: c - the speed of light",
+      "gt_expression": "-sqrt(flux/(c*epsilon))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.35.18_4_1",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "n",
+        "n_0",
+        "kb",
+        "T",
+        "mom"
+      ],
+      "output_var": "B",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: B - the magnetic field strength\nInput 1: n - the number of particles in a given state\nInput 2: n_0 - the number of particles at equilibrium\nInput 3: kb - the Boltzmann constant\nInput 4: T - the temperature of the system\nInput 5: mom - the magnetic moment of a particle",
+      "gt_expression": "T*kb*log((n_0 + sqrt(-4*n**2 + n_0**2))/(2*n))/mom",
+      "train_rows": 54904,
+      "test_rows": 13725,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.12.2_3_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "F",
+        "q1",
+        "q2",
+        "epsilon"
+      ],
+      "output_var": "r",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: r - the distance between the centers of the two charges\nInput 1: F - the electrostatic force between two charges\nInput 2: q1 - the first electric charge\nInput 3: q2 - the second electric charge\nInput 4: epsilon - the electric constant (permittivity of free space)",
+      "gt_expression": "-sqrt(q1*q2/(F*epsilon))/(2*sqrt(pi))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.11.17_5_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "n",
+        "n_0",
+        "kb",
+        "T",
+        "theta",
+        "p_d"
+      ],
+      "output_var": "Ef",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: Ef - the electric field strength\nInput 1: n - the carrier density\nInput 2: n_0 - the equilibrium carrier density\nInput 3: kb - the Boltzmann constant\nInput 4: T - the temperature in Kelvin\nInput 5: theta - the angle between the electric field and the carrier movement direction\nInput 6: p_d - the dipole moment of the carrier",
+      "gt_expression": "T*kb*(n - n_0)/(n_0*p_d*cos(theta))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.11.19_4_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "A",
+        "x1",
+        "x2",
+        "x3",
+        "y1",
+        "y3"
+      ],
+      "output_var": "y2",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: y2 - the second variable or value\nInput 1: A - the resulting sum of products\nInput 2: x1 - the first coefficient\nInput 3: x2 - the second coefficient\nInput 4: x3 - the third coefficient\nInput 5: y1 - the first variable or value\nInput 6: y3 - the third variable or value",
+      "gt_expression": "(-A + x1*y1 - x3*y3)/x2",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.8.31_1_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "E_den",
+        "epsilon"
+      ],
+      "output_var": "Ef",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: Ef - the electric field strength\nInput 1: E_den - the energy density\nInput 2: epsilon - the electric permittivity",
+      "gt_expression": "-sqrt(2)*sqrt(E_den/epsilon)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.12.4_2_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "Ef",
+        "q1",
+        "epsilon"
+      ],
+      "output_var": "r",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: r - the distance from the charge to the point where the electric field is being measured\nInput 1: Ef - the electric field at a given point\nInput 2: q1 - the charge of the object generating the electric field\nInput 3: epsilon - the electric constant (permittivity of free space)",
+      "gt_expression": "-sqrt(q1/(Ef*epsilon))/(2*sqrt(pi))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.15.5_1_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "E_n",
+        "p_d",
+        "theta"
+      ],
+      "output_var": "Ef",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: Ef - the external electric field\nInput 1: E_n - the normal component of the electric field at the surface\nInput 2: p_d - the dipole moment per unit area\nInput 3: theta - the angle between the dipole moment and the external electric field",
+      "gt_expression": "-E_n/(p_d*cos(theta))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.50.26_3_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "x",
+        "x1",
+        "omega",
+        "t"
+      ],
+      "output_var": "alpha",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: alpha - the non-linearity coefficient\nInput 1: x - the resulting displacement\nInput 2: x1 - the initial amplitude\nInput 3: omega - the angular frequency\nInput 4: t - the time",
+      "gt_expression": "(x/cos(omega*t) - x1)/(x1*cos(omega*t))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.24.6_3_1",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "E_n",
+        "m",
+        "omega",
+        "omega_0"
+      ],
+      "output_var": "x",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: x - the displacement from the equilibrium position\nInput 1: E_n - the quantum mechanical energy of the nth state\nInput 2: m - the mass of the object\nInput 3: omega - the angular frequency of the perturbation\nInput 4: omega_0 - the natural angular frequency",
+      "gt_expression": "2*sqrt(E_n/(m*(omega**2 + omega_0**2)))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.37.1_2_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "E_n",
+        "mom",
+        "B"
+      ],
+      "output_var": "chi",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: chi - the magnetic susceptibility\nInput 1: E_n - the nth energy level\nInput 2: mom - the magnetic moment\nInput 3: B - the magnetic field strength",
+      "gt_expression": "-1 + E_n/(B*mom)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.15.4_1_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "E_n",
+        "mom",
+        "theta"
+      ],
+      "output_var": "B",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: B - the magnetic field strength\nInput 1: E_n - the normal component of the electric field\nInput 2: mom - the magnetic moment of a magnet\nInput 3: theta - the angle between the magnetic moment and the magnetic field",
+      "gt_expression": "-E_n/(mom*cos(theta))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.35.18_2_1",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "n",
+        "n_0",
+        "kb",
+        "mom",
+        "B"
+      ],
+      "output_var": "T",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: T - the temperature of the system\nInput 1: n - the number of particles in a given state\nInput 2: n_0 - the number of particles at equilibrium\nInput 3: kb - the Boltzmann constant\nInput 4: mom - the magnetic moment of a particle\nInput 5: B - the magnetic field strength",
+      "gt_expression": "B*mom/(kb*log((n_0 + sqrt(-4*n**2 + n_0**2))/(2*n)))",
+      "train_rows": 54904,
+      "test_rows": 13725,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.34.14_2_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "omega",
+        "c",
+        "v"
+      ],
+      "output_var": "omega_0",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: omega_0 - the object's rest angular frequency\nInput 1: omega - the relativistic angular frequency\nInput 2: c - the speed of light\nInput 3: v - the object's velocity",
+      "gt_expression": "c*omega*sqrt(1 - v**2/c**2)/(c + v)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.24.6_0_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "E_n",
+        "omega",
+        "omega_0",
+        "x"
+      ],
+      "output_var": "m",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: m - the mass of the object\nInput 1: E_n - the quantum mechanical energy of the nth state\nInput 2: omega - the angular frequency of the perturbation\nInput 3: omega_0 - the natural angular frequency\nInput 4: x - the displacement from the equilibrium position",
+      "gt_expression": "4*E_n/(x**2*(omega**2 + omega_0**2))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.11.17_0_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "n",
+        "kb",
+        "T",
+        "theta",
+        "p_d",
+        "Ef"
+      ],
+      "output_var": "n_0",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: n_0 - the equilibrium carrier density\nInput 1: n - the carrier density\nInput 2: kb - the Boltzmann constant\nInput 3: T - the temperature in Kelvin\nInput 4: theta - the angle between the electric field and the carrier movement direction\nInput 5: p_d - the dipole moment of the carrier\nInput 6: Ef - the electric field strength",
+      "gt_expression": "T*kb*n/(Ef*p_d*cos(theta) + T*kb)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.3.24_1_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "flux",
+        "Pwr"
+      ],
+      "output_var": "r",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: r - the distance from the object\nInput 1: flux - the radiant flux of an object\nInput 2: Pwr - the power emitted by the object",
+      "gt_expression": "-sqrt(Pwr/flux)/(2*sqrt(pi))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.21.32_2_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "Volt",
+        "q",
+        "epsilon",
+        "v",
+        "c"
+      ],
+      "output_var": "r",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: r - the distance from the charge\nInput 1: Volt - the electric potential\nInput 2: q - the electric charge\nInput 3: epsilon - the electric constant (permittivity of free space)\nInput 4: v - the velocity of the charge\nInput 5: c - the speed of light",
+      "gt_expression": "c*q/(4*pi*Volt*epsilon*(c - v))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.27.6_2_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "foc",
+        "d1",
+        "d2"
+      ],
+      "output_var": "n",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: n - the refractive index of the medium between the two optical components\nInput 1: foc - the focal length of a combination of two optical components\nInput 2: d1 - the distance from the first optical component to the object\nInput 3: d2 - the distance from the second optical component to the image",
+      "gt_expression": "d2/foc - d2/d1",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.36.38_7_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "f",
+        "mom",
+        "H",
+        "kb",
+        "T",
+        "alpha",
+        "epsilon",
+        "c"
+      ],
+      "output_var": "M",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: M - the magnetization of a material\nInput 1: f - the resultant value of the function\nInput 2: mom - the momentum of an object or particle\nInput 3: H - the magnetic field strength\nInput 4: kb - the Boltzmann constant\nInput 5: T - the temperature in Kelvin\nInput 6: alpha - the polarizability of a medium or molecule\nInput 7: epsilon - the electric permittivity of a medium\nInput 8: c - the speed of light in vacuum",
+      "gt_expression": "c**2*epsilon*(H*mom - T*f*kb)/(alpha*mom)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.11.27_1_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "Pol",
+        "n",
+        "epsilon",
+        "Ef"
+      ],
+      "output_var": "alpha",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: alpha - the polarizability of a unit\nInput 1: Pol - the polarization of a material\nInput 2: n - the number density of polarizable units\nInput 3: epsilon - the permittivity of free space or a constant\nInput 4: Ef - the external electric field",
+      "gt_expression": "3*Pol/(n*(3*Ef*epsilon + Pol))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.6.15b_1_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "Ef",
+        "epsilon",
+        "theta",
+        "r"
+      ],
+      "output_var": "p_d",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: p_d - the dipole moment\nInput 1: Ef - the electric field\nInput 2: epsilon - the electric constant or permittivity of the medium\nInput 3: theta - the angle between the dipole axis and the position vector\nInput 4: r - the distance from the dipole to the point where the electric field is being measured",
+      "gt_expression": "8*pi*Ef*epsilon*r**3/(3*sin(2*theta))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.37.1_1_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "E_n",
+        "mom",
+        "chi"
+      ],
+      "output_var": "B",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: B - the magnetic field strength\nInput 1: E_n - the nth energy level\nInput 2: mom - the magnetic moment\nInput 3: chi - the magnetic susceptibility",
+      "gt_expression": "E_n/(mom*(chi + 1))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.40.1_4_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "n",
+        "n_0",
+        "m",
+        "x",
+        "T",
+        "kb"
+      ],
+      "output_var": "g",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: g - the acceleration due to gravity\nInput 1: n - the density of particles at a given point\nInput 2: n_0 - the density of particles at the reference point\nInput 3: m - the mass of a particle\nInput 4: x - the height or distance from the reference point\nInput 5: T - the temperature in Kelvin\nInput 6: kb - the Boltzmann constant",
+      "gt_expression": "T*kb*log(n_0/n)/(m*x)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.37.4_0_1",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "Int",
+        "I2",
+        "delta"
+      ],
+      "output_var": "I1",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: I1 - the intensity of the first wave source\nInput 1: Int - the resultant intensity of two wave sources\nInput 2: I2 - the intensity of the second wave source\nInput 3: delta - the phase difference between the two wave sources",
+      "gt_expression": "2*I2*cos(delta)**2 + I2 + Int + 2*sqrt(I2*(I2*cos(delta)**2 + I2 + Int))*cos(delta)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.32.5_0_1",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "Pwr",
+        "a",
+        "epsilon",
+        "c"
+      ],
+      "output_var": "q",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: q - the charge of a particle\nInput 1: Pwr - the power of an electromagnetic wave\nInput 2: a - the acceleration of the charged particle\nInput 3: epsilon - the electric constant or permittivity of free space\nInput 4: c - the speed of light",
+      "gt_expression": "sqrt(6)*sqrt(pi)*sqrt(Pwr*c**3*epsilon)/a",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.11.3_0_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "x",
+        "Ef",
+        "m",
+        "omega_0",
+        "omega"
+      ],
+      "output_var": "q",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: q - the electric charge of the object\nInput 1: x - the displacement of an object from its equilibrium position\nInput 2: Ef - the external electric field strength\nInput 3: m - the mass of the object\nInput 4: omega_0 - the natural angular frequency of the oscillation\nInput 5: omega - the angular frequency of the external force",
+      "gt_expression": "m*x*(-omega**2 + omega_0**2)/Ef",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.13.23_1_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "rho_c",
+        "rho_c_0",
+        "c"
+      ],
+      "output_var": "v",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: v - the velocity of the object or frame of reference\nInput 1: rho_c - the critical density of the universe at a given velocity\nInput 2: rho_c_0 - the critical density of the universe at rest\nInput 3: c - the speed of light",
+      "gt_expression": "-c*sqrt(1 - rho_c_0**2/rho_c**2)",
+      "train_rows": 47719,
+      "test_rows": 11929,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_iii.9.52_0_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "prob",
+        "Ef",
+        "t",
+        "h",
+        "omega",
+        "omega_0"
+      ],
+      "output_var": "p_d",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: p_d - the dipole moment of the transition\nInput 1: prob - the transition probability of an atomic system\nInput 2: Ef - the amplitude of the external electric field\nInput 3: t - the interaction time between the atomic system and the external field\nInput 4: h - the Planck constant\nInput 5: omega - the frequency of the external field\nInput 6: omega_0 - the resonant frequency of the atomic transition",
+      "gt_expression": "h*prob*t*(omega - omega_0)**2/(4*pi*Ef*(1 - cos(t*(omega - omega_0))))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_iii.15.12_0_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "E_n",
+        "k",
+        "d"
+      ],
+      "output_var": "U",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: U - the characteristic potential energy\nInput 1: E_n - the n-th energy level\nInput 2: k - the wave number\nInput 3: d - the distance between potential energy wells",
+      "gt_expression": "-E_n/(2*cos(d*k) - 2)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_iii.9.52_1_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "prob",
+        "p_d",
+        "t",
+        "h",
+        "omega",
+        "omega_0"
+      ],
+      "output_var": "Ef",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: Ef - the amplitude of the external electric field\nInput 1: prob - the transition probability of an atomic system\nInput 2: p_d - the dipole moment of the transition\nInput 3: t - the interaction time between the atomic system and the external field\nInput 4: h - the Planck constant\nInput 5: omega - the frequency of the external field\nInput 6: omega_0 - the resonant frequency of the atomic transition",
+      "gt_expression": "h*prob*t*(omega - omega_0)**2/(4*pi*p_d*(1 - cos(t*(omega - omega_0))))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.44.4_2_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "E_n",
+        "n",
+        "kb",
+        "V1",
+        "V2"
+      ],
+      "output_var": "T",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: T - the temperature of the gas in Kelvin\nInput 1: E_n - the energy change of an ideal gas\nInput 2: n - the number of moles of the gas\nInput 3: kb - the Boltzmann constant\nInput 4: V1 - the initial volume of the gas\nInput 5: V2 - the final volume of the gas",
+      "gt_expression": "E_n/(kb*n*log(V2/V1))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.13.34_1_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "j",
+        "rho_c_0",
+        "c"
+      ],
+      "output_var": "v",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: v - the object's velocity\nInput 1: j - the current density of a charged object\nInput 2: rho_c_0 - the object's rest charge density\nInput 3: c - the speed of light",
+      "gt_expression": "-c*j*sqrt(1/(c**2*rho_c_0**2 + j**2))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.15.1_1_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "p",
+        "m_0",
+        "c"
+      ],
+      "output_var": "v",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: v - the object's velocity\nInput 1: p - the relativistic momentum of an object\nInput 2: m_0 - the object's rest mass\nInput 3: c - the speed of light",
+      "gt_expression": "-c*p*sqrt(1/(c**2*m_0**2 + p**2))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.13.12_3_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "U",
+        "m1",
+        "m2",
+        "r1",
+        "G"
+      ],
+      "output_var": "r2",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: r2 - the final distance between the two objects\nInput 1: U - the potential energy of two objects\nInput 2: m1 - the mass of the first object\nInput 3: m2 - the mass of the second object\nInput 4: r1 - the initial distance between the two objects\nInput 5: G - the gravitational constant",
+      "gt_expression": "G*m1*m2*r1/(G*m1*m2 + U*r1)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.34.29b_0_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "E_n",
+        "h",
+        "Jz",
+        "mom",
+        "B"
+      ],
+      "output_var": "g_",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: g_ - the g-factor of the particle or atom\nInput 1: E_n - the energy of the nth state\nInput 2: h - the Planck constant\nInput 3: Jz - the z-component of the total angular momentum\nInput 4: mom - the magnetic moment of the particle or atom\nInput 5: B - the magnetic field strength",
+      "gt_expression": "E_n*h/(2*pi*B*Jz*mom)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.11.3_4_1",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "x",
+        "q",
+        "Ef",
+        "m",
+        "omega_0"
+      ],
+      "output_var": "omega",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: omega - the angular frequency of the external force\nInput 1: x - the displacement of an object from its equilibrium position\nInput 2: q - the electric charge of the object\nInput 3: Ef - the external electric field strength\nInput 4: m - the mass of the object\nInput 5: omega_0 - the natural angular frequency of the oscillation",
+      "gt_expression": "sqrt(-Ef*q/(m*x) + omega_0**2)",
+      "train_rows": 70108,
+      "test_rows": 17527,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.11.19_1_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "A",
+        "x1",
+        "x3",
+        "y1",
+        "y2",
+        "y3"
+      ],
+      "output_var": "x2",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: x2 - the second coefficient\nInput 1: A - the resulting sum of products\nInput 2: x1 - the first coefficient\nInput 3: x3 - the third coefficient\nInput 4: y1 - the first variable or value\nInput 5: y2 - the second variable or value\nInput 6: y3 - the third variable or value",
+      "gt_expression": "(-A + x1*y1 - x3*y3)/y2",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_iii.19.51_1_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "E_n",
+        "m",
+        "h",
+        "n",
+        "epsilon"
+      ],
+      "output_var": "q",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: q - the elementary charge\nInput 1: E_n - the energy of the nth energy level\nInput 2: m - the mass of the electron\nInput 3: h - the Planck constant\nInput 4: n - the principal quantum number\nInput 5: epsilon - the electric constant (permittivity of free space)",
+      "gt_expression": "-2**(3/4)*(-E_n*epsilon**2*h**2*n**2/m)**(1/4)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_iii.13.18_0_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "v",
+        "d",
+        "k",
+        "h"
+      ],
+      "output_var": "E_n",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: E_n - the nth energy level of a quantum system\nInput 1: v - the velocity of a particle or wave\nInput 2: d - the distance between particles or the diameter of a nanoparticle\nInput 3: k - Boltzmann's constant, relating energy to temperature\nInput 4: h - the Planck constant, relating energy to frequency",
+      "gt_expression": "h*v/(4*pi*d**2*k)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.10.7_1_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "m",
+        "m_0",
+        "c"
+      ],
+      "output_var": "v",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: v - the object's velocity\nInput 1: m - the relativistic mass of an object\nInput 2: m_0 - the object's rest mass\nInput 3: c - the speed of light",
+      "gt_expression": "-c*sqrt(1 - m_0**2/m**2)",
+      "train_rows": 50038,
+      "test_rows": 12509,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.11.3_3_1",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "x",
+        "q",
+        "Ef",
+        "m",
+        "omega"
+      ],
+      "output_var": "omega_0",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: omega_0 - the natural angular frequency of the oscillation\nInput 1: x - the displacement of an object from its equilibrium position\nInput 2: q - the electric charge of the object\nInput 3: Ef - the external electric field strength\nInput 4: m - the mass of the object\nInput 5: omega - the angular frequency of the external force",
+      "gt_expression": "sqrt(Ef*q/(m*x) + omega**2)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.43.43_3_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "kappa",
+        "gamma",
+        "kb",
+        "A"
+      ],
+      "output_var": "v",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: v - the velocity\nInput 1: kappa - the isentropic expansion factor\nInput 2: gamma - the adiabatic index\nInput 3: kb - Boltzmann's constant\nInput 4: A - a constant area",
+      "gt_expression": "A*kappa*(gamma - 1)/kb",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.43.43_0_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "kappa",
+        "kb",
+        "A",
+        "v"
+      ],
+      "output_var": "gamma",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: gamma - the adiabatic index\nInput 1: kappa - the isentropic expansion factor\nInput 2: kb - Boltzmann's constant\nInput 3: A - a constant area\nInput 4: v - the velocity",
+      "gt_expression": "1 + kb*v/(A*kappa)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.34.2_1_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "mom",
+        "q",
+        "r"
+      ],
+      "output_var": "v",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: v - the velocity of an object\nInput 1: mom - the momentum of an object\nInput 2: q - a factor or quantity, possibly a charge or a proportionality constant, though more context is needed for precise definition\nInput 3: r - possibly the radius of a circular path or a distance, more context is needed for precise definition",
+      "gt_expression": "2*mom/(q*r)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.36.38_5_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "f",
+        "mom",
+        "H",
+        "kb",
+        "T",
+        "alpha",
+        "c",
+        "M"
+      ],
+      "output_var": "epsilon",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: epsilon - the electric permittivity of a medium\nInput 1: f - the resultant value of the function\nInput 2: mom - the momentum of an object or particle\nInput 3: H - the magnetic field strength\nInput 4: kb - the Boltzmann constant\nInput 5: T - the temperature in Kelvin\nInput 6: alpha - the polarizability of a medium or molecule\nInput 7: c - the speed of light in vacuum\nInput 8: M - the magnetization of a material",
+      "gt_expression": "M*alpha*mom/(c**2*(H*mom - T*f*kb))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.34.1_2_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "omega",
+        "c",
+        "v"
+      ],
+      "output_var": "omega_0",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: omega_0 - the object's proper angular frequency (at rest)\nInput 1: omega - the relativistic angular frequency of an object\nInput 2: c - the speed of light\nInput 3: v - the object's velocity",
+      "gt_expression": "omega*(c - v)/c",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.37.1_0_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "E_n",
+        "B",
+        "chi"
+      ],
+      "output_var": "mom",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: mom - the magnetic moment\nInput 1: E_n - the nth energy level\nInput 2: B - the magnetic field strength\nInput 3: chi - the magnetic susceptibility",
+      "gt_expression": "E_n/(B*(chi + 1))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.50.26_0_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "x",
+        "omega",
+        "t",
+        "alpha"
+      ],
+      "output_var": "x1",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: x1 - the initial amplitude\nInput 1: x - the resulting displacement\nInput 2: omega - the angular frequency\nInput 3: t - the time\nInput 4: alpha - the non-linearity coefficient",
+      "gt_expression": "x/(alpha*cos(omega*t)**2 + cos(omega*t))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.34.29b_4_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "E_n",
+        "g_",
+        "h",
+        "Jz",
+        "mom"
+      ],
+      "output_var": "B",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: B - the magnetic field strength\nInput 1: E_n - the energy of the nth state\nInput 2: g_ - the g-factor of the particle or atom\nInput 3: h - the Planck constant\nInput 4: Jz - the z-component of the total angular momentum\nInput 5: mom - the magnetic moment of the particle or atom",
+      "gt_expression": "E_n*h/(2*pi*Jz*g_*mom)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.34.29a_2_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "mom",
+        "q",
+        "h"
+      ],
+      "output_var": "m",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: m - the mass of a particle\nInput 1: mom - the momentum of a particle\nInput 2: q - the charge of a particle\nInput 3: h - the Planck constant",
+      "gt_expression": "h*q/(4*pi*mom)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.48.2_1_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "E_n",
+        "m",
+        "c"
+      ],
+      "output_var": "v",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: v - the object's velocity\nInput 1: E_n - the total energy of an object\nInput 2: m - the relativistic mass of an object\nInput 3: c - the speed of light",
+      "gt_expression": "-c*sqrt(1 - c**4*m**2/E_n**2)",
+      "train_rows": 59071,
+      "test_rows": 14767,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.29.16_1_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "x",
+        "x1",
+        "theta1",
+        "theta2"
+      ],
+      "output_var": "x2",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: x2 - the magnitude of the second vector\nInput 1: x - the distance between two points\nInput 2: x1 - the magnitude of the first vector\nInput 3: theta1 - the angle of the first vector\nInput 4: theta2 - the angle of the second vector",
+      "gt_expression": "x1*cos(theta1 - theta2) - sqrt(x**2 + x1**2*cos(theta1 - theta2)**2 - x1**2)",
+      "train_rows": 64888,
+      "test_rows": 16221,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.6.15a_1_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "Ef",
+        "epsilon",
+        "r",
+        "x",
+        "y",
+        "z"
+      ],
+      "output_var": "p_d",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: p_d - the electric dipole moment\nInput 1: Ef - the electric field strength at a point\nInput 2: epsilon - the electric constant (permittivity of free space)\nInput 3: r - the distance from the dipole to the point where the field is being measured\nInput 4: x - the x-coordinate of the point where the field is being measured\nInput 5: y - the y-coordinate of the point where the field is being measured\nInput 6: z - the z-coordinate of the point where the field is being measured",
+      "gt_expression": "4*pi*Ef*epsilon*r**5/(3*z*sqrt(x**2 + y**2))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.24.17_2_1",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "k",
+        "omega",
+        "c"
+      ],
+      "output_var": "d",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: d - the diameter or thickness of the waveguide or medium\nInput 1: k - the wave number\nInput 2: omega - the angular frequency\nInput 3: c - the speed of the wave",
+      "gt_expression": "pi*c*sqrt(-1/((c*k - omega)*(c*k + omega)))",
+      "train_rows": 35030,
+      "test_rows": 8757,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.6.15a_5_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "Ef",
+        "epsilon",
+        "p_d",
+        "r",
+        "x",
+        "y"
+      ],
+      "output_var": "z",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: z - the z-coordinate of the point where the field is being measured\nInput 1: Ef - the electric field strength at a point\nInput 2: epsilon - the electric constant (permittivity of free space)\nInput 3: p_d - the electric dipole moment\nInput 4: r - the distance from the dipole to the point where the field is being measured\nInput 5: x - the x-coordinate of the point where the field is being measured\nInput 6: y - the y-coordinate of the point where the field is being measured",
+      "gt_expression": "4*pi*Ef*epsilon*r**5/(3*p_d*sqrt(x**2 + y**2))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_iii.21.20_3_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "j",
+        "rho_c_0",
+        "q",
+        "A_vec"
+      ],
+      "output_var": "m",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: m - the mass of a charge carrier\nInput 1: j - the current density\nInput 2: rho_c_0 - the charge carrier density\nInput 3: q - the elementary charge\nInput 4: A_vec - the vector potential",
+      "gt_expression": "-A_vec*q*rho_c_0/j",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_iii.15.14_1_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "m",
+        "h",
+        "d"
+      ],
+      "output_var": "E_n",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: E_n - the nth energy level of the system\nInput 1: m - the mass of a particle in a quantum mechanical system\nInput 2: h - the Planck constant\nInput 3: d - the width or distance between the boundaries of the quantum well",
+      "gt_expression": "h**2/(8*pi**2*d**2*m)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.36.38_4_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "f",
+        "mom",
+        "H",
+        "kb",
+        "T",
+        "epsilon",
+        "c",
+        "M"
+      ],
+      "output_var": "alpha",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: alpha - the polarizability of a medium or molecule\nInput 1: f - the resultant value of the function\nInput 2: mom - the momentum of an object or particle\nInput 3: H - the magnetic field strength\nInput 4: kb - the Boltzmann constant\nInput 5: T - the temperature in Kelvin\nInput 6: epsilon - the electric permittivity of a medium\nInput 7: c - the speed of light in vacuum\nInput 8: M - the magnetization of a material",
+      "gt_expression": "c**2*epsilon*(H*mom - T*f*kb)/(M*mom)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_iii.12.43_0_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "L",
+        "h"
+      ],
+      "output_var": "n",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: n - a quantum number representing the energy level\nInput 1: L - the angular momentum of an object\nInput 2: h - the Planck constant",
+      "gt_expression": "2*pi*L/h",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.24.6_1_1",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "E_n",
+        "m",
+        "omega_0",
+        "x"
+      ],
+      "output_var": "omega",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: omega - the angular frequency of the perturbation\nInput 1: E_n - the quantum mechanical energy of the nth state\nInput 2: m - the mass of the object\nInput 3: omega_0 - the natural angular frequency\nInput 4: x - the displacement from the equilibrium position",
+      "gt_expression": "sqrt(4*E_n/m - omega_0**2*x**2)/x",
+      "train_rows": 72373,
+      "test_rows": 18093,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_iii.10.19_2_1",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "E_n",
+        "mom",
+        "Bx",
+        "Bz"
+      ],
+      "output_var": "By",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: By - the y-component of the magnetic field\nInput 1: E_n - the energy of a particle in a magnetic field\nInput 2: mom - the magnetic moment of the particle\nInput 3: Bx - the x-component of the magnetic field\nInput 4: Bz - the z-component of the magnetic field",
+      "gt_expression": "sqrt(-Bx**2 - Bz**2 + E_n**2/mom**2)",
+      "train_rows": 59013,
+      "test_rows": 14753,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_iii.4.33_3_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "E_n",
+        "h",
+        "omega",
+        "kb"
+      ],
+      "output_var": "T",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: T - the temperature of the system\nInput 1: E_n - the energy of the nth mode of a quantum harmonic oscillator\nInput 2: h - the Planck constant\nInput 3: omega - the angular frequency of the oscillator\nInput 4: kb - the Boltzmann constant",
+      "gt_expression": "h*omega/(2*pi*kb*log(1 + h*omega/(2*pi*E_n)))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_iii.15.27_1_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "k",
+        "alpha",
+        "d"
+      ],
+      "output_var": "n",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: n - the number of turns or a dimensionless quantity\nInput 1: k - the spring constant or a proportionality constant\nInput 2: alpha - a material-dependent constant or a dimensionless parameter\nInput 3: d - the diameter or a characteristic length",
+      "gt_expression": "2*pi*alpha/(d*k)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.6.15a_3_1",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "Ef",
+        "epsilon",
+        "p_d",
+        "r",
+        "y",
+        "z"
+      ],
+      "output_var": "x",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: x - the x-coordinate of the point where the field is being measured\nInput 1: Ef - the electric field strength at a point\nInput 2: epsilon - the electric constant (permittivity of free space)\nInput 3: p_d - the electric dipole moment\nInput 4: r - the distance from the dipole to the point where the field is being measured\nInput 5: y - the y-coordinate of the point where the field is being measured\nInput 6: z - the z-coordinate of the point where the field is being measured",
+      "gt_expression": "sqrt(16*pi**2*Ef**2*epsilon**2*r**10/(p_d**2*z**2) - 9*y**2)/3",
+      "train_rows": 77219,
+      "test_rows": 19304,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_iii.13.18_1_1",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "v",
+        "E_n",
+        "k",
+        "h"
+      ],
+      "output_var": "d",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: d - the distance between particles or the diameter of a nanoparticle\nInput 1: v - the velocity of a particle or wave\nInput 2: E_n - the nth energy level of a quantum system\nInput 3: k - Boltzmann's constant, relating energy to temperature\nInput 4: h - the Planck constant, relating energy to frequency",
+      "gt_expression": "sqrt(h*v/(E_n*k))/(2*sqrt(pi))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_i.11.19_5_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "A",
+        "x1",
+        "x2",
+        "x3",
+        "y1",
+        "y2"
+      ],
+      "output_var": "y3",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: y3 - the third variable or value\nInput 1: A - the resulting sum of products\nInput 2: x1 - the first coefficient\nInput 3: x2 - the second coefficient\nInput 4: x3 - the third coefficient\nInput 5: y1 - the first variable or value\nInput 6: y2 - the second variable or value",
+      "gt_expression": "(-A + x1*y1 - x2*y2)/x3",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.21.32_3_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "Volt",
+        "q",
+        "epsilon",
+        "r",
+        "c"
+      ],
+      "output_var": "v",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: v - the velocity of the charge\nInput 1: Volt - the electric potential\nInput 2: q - the electric charge\nInput 3: epsilon - the electric constant (permittivity of free space)\nInput 4: r - the distance from the charge\nInput 5: c - the speed of light",
+      "gt_expression": "c - c*q/(4*pi*Volt*epsilon*r)",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.35.18_0_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "n",
+        "kb",
+        "T",
+        "mom",
+        "B"
+      ],
+      "output_var": "n_0",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: n_0 - the number of particles at equilibrium\nInput 1: n - the number of particles in a given state\nInput 2: kb - the Boltzmann constant\nInput 3: T - the temperature of the system\nInput 4: mom - the magnetic moment of a particle\nInput 5: B - the magnetic field strength",
+      "gt_expression": "n*exp(B*mom/(T*kb)) + n*exp(-B*mom/(T*kb))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_iii.17.37_1_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "f",
+        "beta",
+        "theta"
+      ],
+      "output_var": "alpha",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: alpha - a coefficient modifying the cosine term\nInput 1: f - the resultant value of the function\nInput 2: beta - a scaling factor\nInput 3: theta - the angle in radians",
+      "gt_expression": "(-beta + f)/(beta*cos(theta))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.11.28_0_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "theta",
+        "alpha"
+      ],
+      "output_var": "n",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: n - the number of terms or iterations\nInput 1: theta - the resulting angle or parameter\nInput 2: alpha - the angle of incidence or a constant factor",
+      "gt_expression": "3*(theta - 1)/(alpha*(theta - 4))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.11.3_2_0",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "x",
+        "q",
+        "Ef",
+        "omega_0",
+        "omega"
+      ],
+      "output_var": "m",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: m - the mass of the object\nInput 1: x - the displacement of an object from its equilibrium position\nInput 2: q - the electric charge of the object\nInput 3: Ef - the external electric field strength\nInput 4: omega_0 - the natural angular frequency of the oscillation\nInput 5: omega - the angular frequency of the external force",
+      "gt_expression": "-Ef*q/(x*(omega**2 - omega_0**2))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    },
+    {
+      "problem_id": "lsr_transform_ii.24.17_1_1",
+      "subset": "lsr_transform",
+      "input_vars": [
+        "k",
+        "omega",
+        "d"
+      ],
+      "output_var": "c",
+      "description": "Discover the mathematical equation relating the following variables:\nOutput: c - the speed of the wave\nInput 1: k - the wave number\nInput 2: omega - the angular frequency\nInput 3: d - the diameter or thickness of the waveguide or medium",
+      "gt_expression": "d*omega*sqrt(1/(d**2*k**2 + pi**2))",
+      "train_rows": 80000,
+      "test_rows": 20000,
+      "ood_rows": 0
+    }
+  ],
+  "observation": {
+    "mode": "sync",
+    "wall_seconds": 569.4965585050004,
+    "baseline": {
+      "index": 0,
+      "parent_index": null,
+      "program_id": "b6789c8c4a048416",
+      "iteration": 0,
+      "change_summary": "sequentially thresholded least squares over a fixed library",
+      "score": 0.9787196941265286,
+      "mean_digits": 0.9787196941265286,
+      "num_visits": 12,
+      "valid": true,
+      "error": "",
+      "code_chars": 3210
+    },
+    "best": {
+      "index": 11,
+      "parent_index": 8,
+      "program_id": "d809b31550846944",
+      "iteration": 12,
+      "change_summary": "",
+      "score": 1.6605446234058943,
+      "mean_digits": 1.6605446234058943,
+      "num_visits": 1,
+      "valid": true,
+      "error": "",
+      "code_chars": 10665
+    },
+    "data": {
+      "benchmark": "LLM-SRBench",
+      "paper": "arXiv:2504.10415",
+      "source": "pkuHaowei/llm-srbench@f4101e201952",
+      "subsets": [
+        "lsr_transform"
+      ],
+      "problems_per_subset": {
+        "lsr_transform": 111
+      },
+      "problems_total": 111,
+      "problems_per_shard": 14,
+      "scoring_shards": 6,
+      "test_shards": 2,
+      "train_points": 4000,
+      "problem_seconds": 4.0,
+      "digit_cap": 12.0,
+      "tolerance": 0.1,
+      "seed": 0
+    },
+    "framework": {
+      "baseline_reward": 0.08155997451054404,
+      "final_reward": 0.1383787186171579,
+      "quality_gain": 0.05681874410661385,
+      "stop_reason": "rounds",
+      "error": null,
+      "outcomes": {
+        "tree-updated": 2,
+        "committed": 2
+      },
+      "rollouts": 12,
+      "rollout_seconds": 57.8516047000885,
+      "eval_seconds": 53.91314673423767,
+      "stale_considered": 12,
+      "stale_discarded": 0,
+      "stale_rate": 0.0,
+      "retired_workers": 0,
+      "history": [
+        {
+          "round": 0,
+          "held_out_reward": 0.08155997451054407,
+          "elapsed_s": 75.99701452255249,
+          "rollouts": 3,
+          "committed": 0,
+          "rejected": 1,
+          "reasons": {
+            "tree-updated": 1
+          }
+        },
+        {
+          "round": 1,
+          "held_out_reward": 0.08155997451054407,
+          "elapsed_s": 164.83580660820007,
+          "rollouts": 6,
+          "committed": 0,
+          "rejected": 1,
+          "reasons": {
+            "tree-updated": 1
+          }
+        },
+        {
+          "round": 2,
+          "held_out_reward": 0.11923130284750727,
+          "elapsed_s": 324.51108384132385,
+          "rollouts": 9,
+          "committed": 1,
+          "rejected": 0,
+          "reasons": {
+            "committed": 1
+          }
+        },
+        {
+          "round": 3,
+          "held_out_reward": 0.1383787186171579,
+          "elapsed_s": 565.5449194908142,
+          "rollouts": 12,
+          "committed": 1,
+          "rejected": 0,
+          "reasons": {
+            "committed": 1
+          }
+        }
+      ]
+    },
+    "actor_usage": {
+      "calls": 33,
+      "failures": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "model_seconds": 1001.55352
+    },
+    "tree": {
+      "nodes": 13,
+      "valid_nodes": 13,
+      "max_depth": 2,
+      "root_visits": 12,
+      "c_puct": 1.0,
+      "tree": [
+        {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "b6789c8c4a048416",
+          "iteration": 0,
+          "change_summary": "sequentially thresholded least squares over a fixed library",
+          "score": 0.9787196941265286,
+          "mean_digits": 0.9787196941265286,
+          "num_visits": 12,
+          "valid": true,
+          "error": "",
+          "code_chars": 3210
+        },
+        {
+          "index": 1,
+          "parent_index": 0,
+          "program_id": "5b132dc6d35db0a4",
+          "iteration": 3,
+          "change_summary": "",
+          "score": 0.819415864858066,
+          "mean_digits": 0.819415864858066,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 5359
+        },
+        {
+          "index": 2,
+          "parent_index": 0,
+          "program_id": "5eaa6ca5dbce84f9",
+          "iteration": 2,
+          "change_summary": "",
+          "score": 0.07769419808977056,
+          "mean_digits": 0.07769419808977056,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 5955
+        },
+        {
+          "index": 3,
+          "parent_index": 0,
+          "program_id": "d1e2f5a85e0e2e2c",
+          "iteration": 1,
+          "change_summary": "",
+          "score": 0.0,
+          "mean_digits": 0.0,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 7904
+        },
+        {
+          "index": 4,
+          "parent_index": 0,
+          "program_id": "5e1f75038da4aa7f",
+          "iteration": 5,
+          "change_summary": "",
+          "score": 0.0,
+          "mean_digits": 0.0,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 4207
+        },
+        {
+          "index": 5,
+          "parent_index": 0,
+          "program_id": "088e97359d07efbf",
+          "iteration": 4,
+          "change_summary": "",
+          "score": 0.8619284128317933,
+          "mean_digits": 0.8619284128317933,
+          "num_visits": 2,
+          "valid": true,
+          "error": "",
+          "code_chars": 9413
+        },
+        {
+          "index": 6,
+          "parent_index": 0,
+          "program_id": "499a80ea352c43e5",
+          "iteration": 6,
+          "change_summary": "",
+          "score": 0.0,
+          "mean_digits": 0.0,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 10219
+        },
+        {
+          "index": 7,
+          "parent_index": 5,
+          "program_id": "d244059e578fe07e",
+          "iteration": 7,
+          "change_summary": "",
+          "score": 0.8619284128317933,
+          "mean_digits": 0.8619284128317933,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 10082
+        },
+        {
+          "index": 8,
+          "parent_index": 0,
+          "program_id": "4957e4935b227007",
+          "iteration": 8,
+          "change_summary": "",
+          "score": 1.4250544142675876,
+          "mean_digits": 1.4250544142675876,
+          "num_visits": 4,
+          "valid": true,
+          "error": "",
+          "code_chars": 10230
+        },
+        {
+          "index": 9,
+          "parent_index": 0,
+          "program_id": "db7bd4dbcdd10d3e",
+          "iteration": 9,
+          "change_summary": "",
+          "score": 0.0,
+          "mean_digits": 0.0,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 8084
+        },
+        {
+          "index": 10,
+          "parent_index": 8,
+          "program_id": "633a3104e826cf28",
+          "iteration": 10,
+          "change_summary": "",
+          "score": 1.4250544142675876,
+          "mean_digits": 1.4250544142675876,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 11072
+        },
+        {
+          "index": 11,
+          "parent_index": 8,
+          "program_id": "d809b31550846944",
+          "iteration": 12,
+          "change_summary": "",
+          "score": 1.6605446234058943,
+          "mean_digits": 1.6605446234058943,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 10665
+        },
+        {
+          "index": 12,
+          "parent_index": 8,
+          "program_id": "ea2e7abd006ba711",
+          "iteration": 11,
+          "change_summary": "",
+          "score": 1.402292333963441,
+          "mean_digits": 1.402292333963441,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 10430
+        }
+      ]
+    },
+    "test": {
+      "baseline": {
+        "mean_digits": 1.0579251293782403,
+        "median_nmse": 0.1101016834918397,
+        "median_nmse_upstream": 0.1101016834918397,
+        "acc_0.1": 0.0,
+        "solved": 0,
+        "problems": 27,
+        "failed": 0,
+        "score": 1.0579251293782403,
+        "worst": [
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_i.50.26_0_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "x",
+              "omega",
+              "t",
+              "alpha"
+            ],
+            "digits": 0.0,
+            "nmse": 1.0000507899571707,
+            "acc": 0,
+            "equation": "(14360947443.510864)*1 + (-246.97974003590113)*x + (49.72149815557618)*x**2 + (-2.8998201120063056)*x**3 + (-13.966026524943109)*sin(x) + (-49.04783857138722)*cos(x) + (-0.006063388701951976)*1/(x) + (-261.40851515845657)*exp(-(x)) + (31201",
+            "error": "",
+            "seconds": 0.03
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_ii.11.28_0_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "theta",
+              "alpha"
+            ],
+            "digits": 0.0,
+            "nmse": 1.8933352745791105,
+            "acc": 0,
+            "equation": "(-291347262.5158516)*1 + (-117068817.49070667)*theta + (6952863.5023729885)*theta**2 + (-339970.6598279479)*theta**3 + (244611.77334754393)*sin(theta) + (221297.61751601574)*cos(theta) + (-84748762.64043412)*log(theta) + (396475275.53241277",
+            "error": "",
+            "seconds": 0.01
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_iii.17.37_1_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "f",
+              "beta",
+              "theta"
+            ],
+            "digits": 0.0,
+            "nmse": 1.0002196103104375,
+            "acc": 0,
+            "equation": "(804392938.5311232)*1 + (-12.023278576197454)*f + (-0.16530110811635462)*f**2 + (0.0035775487060956948)*f**3 + (-27.645383248893438)*sin(f) + (-9.485286296120652)*cos(f) + (0.5641830102681729)*1/(f) + (1.7986449266543395e-06)*exp(-(f)) + (2",
+            "error": "",
+            "seconds": 0.02
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_ii.35.18_0_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "n",
+              "kb",
+              "T",
+              "mom",
+              "B"
+            ],
+            "digits": 0.126,
+            "nmse": 0.748103010710107,
+            "acc": 0,
+            "equation": "(-482241388.82604104)*1 + (91556.36596116851)*n + (-77143.39975994923)*n**2 + (14519.68485327469)*n**3 + (928.5126390291294)*sin(n) + (-62708.86176279645)*cos(n) + (21.253342283201743)*log(n) + (-165.28270197994394)*sqrt(n) + (0.18659886333",
+            "error": "",
+            "seconds": 0.06
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_iii.15.14_1_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "m",
+              "h",
+              "d"
+            ],
+            "digits": 0.196,
+            "nmse": 0.6370328294689198,
+            "acc": 0,
+            "equation": "(-5256240.767136427)*1 + (10957629.844848542)*m + (388270661.6469869)*m**2 + (-130246961.83618574)*m**3 + (-395964932.50193727)*sin(m) + (391508356.9065416)*cos(m) + (-24.284668741073553)*log(m) + (864.6626905986392)*sqrt(m) + (0.0069976757",
+            "error": "",
+            "seconds": 0.02
+          }
+        ],
+        "per_problem": [
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_i.34.1_2_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "omega",
+              "c",
+              "v"
+            ],
+            "digits": 2.697,
+            "nmse": 0.002007961953537259,
+            "acc": 0,
+            "equation": "(103667052.82386382)*1 + (31.39234381767759)*omega + (-0.4753428307547616)*omega**2 + (0.0058136387920909235)*omega**3 + (120.57386449164885)*log(omega) + (-219.13834652088173)*sqrt(omega) + (32.664688582757776)*1/(omega) + (25.690092081898",
+            "error": "",
+            "seconds": 0.06
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_ii.37.1_0_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "E_n",
+              "B",
+              "chi"
+            ],
+            "digits": 1.472,
+            "nmse": 0.03373604712806951,
+            "acc": 0,
+            "equation": "(290248.52367018186)*1 + (-0.30368883877364167)*E_n + (0.0016324607380322205)*E_n**2 + (-3.1583997239334727e-06)*E_n**3 + (-14.052491026699073)*log(E_n) + (10.776698270817226)*sqrt(E_n) + (-26.860145802465116)*1/(E_n) + (-274919.6494750281)",
+            "error": "",
+            "seconds": 0.09
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_i.50.26_0_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "x",
+              "omega",
+              "t",
+              "alpha"
+            ],
+            "digits": 0.0,
+            "nmse": 1.0000507899571707,
+            "acc": 0,
+            "equation": "(14360947443.510864)*1 + (-246.97974003590113)*x + (49.72149815557618)*x**2 + (-2.8998201120063056)*x**3 + (-13.966026524943109)*sin(x) + (-49.04783857138722)*cos(x) + (-0.006063388701951976)*1/(x) + (-261.40851515845657)*exp(-(x)) + (31201",
+            "error": "",
+            "seconds": 0.03
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_ii.34.29b_4_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "E_n",
+              "g_",
+              "h",
+              "Jz",
+              "mom"
+            ],
+            "digits": 0.835,
+            "nmse": 0.14628930082542987,
+            "acc": 0,
+            "equation": "(-42361761.407513864)*1 + (0.31730589409950205)*E_n + (-4.609937186004983e-05)*E_n**2 + (6.231684567181292e-09)*E_n**3 + (0.3743309048046351)*sin(E_n) + (37.63197506660514)*log(E_n) + (-10.909175569042752)*sqrt(E_n) + (253.4679960437803)*1/",
+            "error": "",
+            "seconds": 0.19
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_ii.34.29a_2_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "mom",
+              "q",
+              "h"
+            ],
+            "digits": 0.813,
+            "nmse": 0.1536565827627392,
+            "acc": 0,
+            "equation": "(2967236.4145136704)*1 + (30838.426682350975)*mom + (-18399.11387554941)*mom**2 + (2833.496220562833)*mom**3 + (-4404.131005768766)*sin(mom) + (-11139.700778471935)*cos(mom) + (-205.5960839415614)*log(mom) + (2197.974453500324)*sqrt(mom) + ",
+            "error": "",
+            "seconds": 0.02
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_i.48.2_1_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "E_n",
+              "m",
+              "c"
+            ],
+            "digits": 0.931,
+            "nmse": 0.11709709298436247,
+            "acc": 0,
+            "equation": "(553354.2253960411)*1 + (0.37967520520334)*E_n + (-0.0002185803667142868)*E_n**2 + (1.1105776835949005e-07)*E_n**3 + (31.823277474974105)*log(E_n) + (-12.531264327020763)*sqrt(E_n) + (269.17160700763463)*1/(E_n) + (-80539.39560225866)*m + (",
+            "error": "",
+            "seconds": 0.07
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_i.29.16_1_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "x",
+              "x1",
+              "theta1",
+              "theta2"
+            ],
+            "digits": 1.026,
+            "nmse": 0.09409723222912629,
+            "acc": 0,
+            "equation": "(-1539421.6038302677)*1 + (-29.757287986979858)*x + (1.369385292047757)*x**2 + (-0.038201085505685545)*x**3 + (2.9992390178722816)*log(x) + (78.69832133908932)*sqrt(x) + (2.5069685602206895)*1/(x) + (37.04668532805607)*exp(-(x)) + (-42308.3",
+            "error": "",
+            "seconds": 0.1
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_ii.6.15a_1_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "Ef",
+              "epsilon",
+              "r",
+              "x",
+              "y",
+              "z"
+            ],
+            "digits": 0.999,
+            "nmse": 0.10020891881046512,
+            "acc": 0,
+            "equation": "(710330452.5944656)*1 + (2782.809577138332)*Ef + (-1056.3699510429672)*Ef**2 + (101.71167643038645)*Ef**3 + (-548.426290194911)*sin(Ef) + (66.20167578224168)*cos(Ef) + (-99.05988653632868)*log(Ef) + (1238.2319880226366)*sqrt(Ef) + (-0.16184",
+            "error": "",
+            "seconds": 0.09
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_ii.24.17_2_1",
+            "subset": "lsr_transform",
+            "variables": [
+              "k",
+              "omega",
+              "c"
+            ],
+            "digits": 0.202,
+            "nmse": 0.6283222024034012,
+            "acc": 0,
+            "equation": "(745316996.2322154)*1 + (7611.3825751765025)*k + (-918.095705357748)*k**2 + (23.590191244504584)*k**3 + (61.502062790711875)*sin(k) + (-153.45463669880462)*cos(k) + (-80301.42351418156)*log(k) + (65690.75623755126)*sqrt(k) + (-24776.0678576",
+            "error": "",
+            "seconds": 0.02
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_ii.6.15a_5_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "Ef",
+              "epsilon",
+              "p_d",
+              "r",
+              "x",
+              "y"
+            ],
+            "digits": 0.958,
+            "nmse": 0.1101016834918397,
+            "acc": 0,
+            "equation": "(-622046428.5790557)*1 + (-25527.011108730963)*Ef + (10232.602996921678)*Ef**2 + (-1135.4934158974606)*Ef**3 + (5022.651726163608)*sin(Ef) + (1814.6361658270605)*cos(Ef) + (335.4285269281053)*log(Ef) + (-4950.144821489673)*sqrt(Ef) + (0.722",
+            "error": "",
+            "seconds": 0.08
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_iii.21.20_3_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "j",
+              "rho_c_0",
+              "q",
+              "A_vec"
+            ],
+            "digits": 0.555,
+            "nmse": 0.27887526985865857,
+            "acc": 0,
+            "equation": "(3310653.610014119)*1 + (-0.1885565464143548)*j + (0.00011364244069842971)*j**2 + (4.5150447429658103e-07)*j**3 + (-26.136547026057265)*1/(j) + (559899.8542442658)*rho_c_0 + (-29078.173180392205)*rho_c_0**2 + (1060.4339030323863)*rho_c_0**3",
+            "error": "",
+            "seconds": 0.11
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_iii.15.14_1_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "m",
+              "h",
+              "d"
+            ],
+            "digits": 0.196,
+            "nmse": 0.6370328294689198,
+            "acc": 0,
+            "equation": "(-5256240.767136427)*1 + (10957629.844848542)*m + (388270661.6469869)*m**2 + (-130246961.83618574)*m**3 + (-395964932.50193727)*sin(m) + (391508356.9065416)*cos(m) + (-24.284668741073553)*log(m) + (864.6626905986392)*sqrt(m) + (0.0069976757",
+            "error": "",
+            "seconds": 0.02
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_ii.36.38_4_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "f",
+              "mom",
+              "H",
+              "kb",
+              "T",
+              "epsilon",
+              "c",
+              "M"
+            ],
+            "digits": 1.003,
+            "nmse": 0.09924776848255518,
+            "acc": 0,
+            "equation": "(-326083885.84276396)*1 + (-394.27231030901294)*f + (17.960699047675075)*f**2 + (-0.48422627380962674)*f**3 + (0.5660414769084706)*sin(f) + (-139.83337238510046)*log(f) + (1334.0328835591977)*sqrt(f) + (6.543358719898239)*1/(f) + (392.75273",
+            "error": "",
+            "seconds": 0.72
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_iii.12.43_0_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "L",
+              "h"
+            ],
+            "digits": 1.751,
+            "nmse": 0.017736415399834803,
+            "acc": 0,
+            "equation": "(-373967.8589389107)*1 + (-83.57892406157791)*L + (-56.941974445777014)*L**2 + (6.558709655603983)*L**3 + (-31.709983495907792)*sin(L) + (2.0312167883615317)*cos(L) + (-166.71365564501664)*log(L) + (1032.9661079999787)*sqrt(L) + (-6.8473538",
+            "error": "",
+            "seconds": 0.01
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_i.24.6_1_1",
+            "subset": "lsr_transform",
+            "variables": [
+              "E_n",
+              "m",
+              "omega_0",
+              "x"
+            ],
+            "digits": 2.148,
+            "nmse": 0.007112650528316946,
+            "acc": 0,
+            "equation": "(-4077222.1105937087)*1 + (-0.39190413349047903)*E_n + (0.002005567786027925)*E_n**2 + (-6.134090166978009e-06)*E_n**3 + (-5.0843991188784345)*log(E_n) + (6.700027027112542)*sqrt(E_n) + (-5.720210124563328)*1/(E_n) + (-185653.384767669)*m +",
+            "error": "",
+            "seconds": 0.13
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_iii.10.19_2_1",
+            "subset": "lsr_transform",
+            "variables": [
+              "E_n",
+              "mom",
+              "Bx",
+              "Bz"
+            ],
+            "digits": 1.929,
+            "nmse": 0.01176689073735748,
+            "acc": 0,
+            "equation": "(-88626.33918124471)*1 + (0.7989292396177714)*E_n + (0.022313910206642248)*E_n**2 + (-0.00019893038686285338)*E_n**3 + (50.20183940112381)*log(E_n) + (-25.631380088847884)*sqrt(E_n) + (110.22201609920386)*1/(E_n) + (-262600.1727843992)*mom ",
+            "error": "",
+            "seconds": 0.09
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_iii.4.33_3_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "E_n",
+              "h",
+              "omega",
+              "kb"
+            ],
+            "digits": 1.741,
+            "nmse": 0.018165614739872812,
+            "acc": 0,
+            "equation": "(-652885.685596428)*1 + (-1.7493672888095018)*E_n + (0.04101780187831953)*E_n**2 + (-0.0004732712186143421)*E_n**3 + (-9.159549105475257)*log(E_n) + (17.89469210125282)*sqrt(E_n) + (-2.2827414392821384)*1/(E_n) + (-0.5557844613521881)*exp(-",
+            "error": "",
+            "seconds": 0.13
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_iii.15.27_1_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "k",
+              "alpha",
+              "d"
+            ],
+            "digits": 0.652,
+            "nmse": 0.22273336283600573,
+            "acc": 0,
+            "equation": "(-93771.60509295746)*1 + (-18.487512583873215)*k + (0.23096344558631515)*k**2 + (-0.002207056677083354)*k**3 + (-82.63061173903166)*log(k) + (142.7889669903553)*sqrt(k) + (-10.730881401317005)*1/(k) + (-27.865534894227793)*exp(-(k)) + (-662",
+            "error": "",
+            "seconds": 0.07
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_ii.6.15a_3_1",
+            "subset": "lsr_transform",
+            "variables": [
+              "Ef",
+              "epsilon",
+              "p_d",
+              "r",
+              "y",
+              "z"
+            ],
+            "digits": 0.973,
+            "nmse": 0.1065191445364769,
+            "acc": 0,
+            "equation": "(-7239801098.042374)*1 + (-47814.025701617975)*Ef + (19564.652609983696)*Ef**2 + (-2155.8653662488205)*Ef**3 + (9567.629197134784)*sin(Ef) + (3111.015647992764)*cos(Ef) + (1353.4434257444218)*log(Ef) + (-15934.288166869394)*sqrt(Ef) + (7.70",
+            "error": "",
+            "seconds": 0.08
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_iii.13.18_1_1",
+            "subset": "lsr_transform",
+            "variables": [
+              "v",
+              "E_n",
+              "k",
+              "h"
+            ],
+            "digits": 1.892,
+            "nmse": 0.012835461131634286,
+            "acc": 0,
+            "equation": "(-813130.5233267945)*1 + (0.002112939223727421)*v + (-6.816184806418427e-08)*v**2 + (2.6369122617528612e-12)*v**3 + (0.3554376417155706)*log(v) + (0.10947566045502419)*sqrt(v) + (4.888066762854539)*1/(v) + (-122263.49664886128)*E_n + (6238.",
+            "error": "",
+            "seconds": 0.11
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_i.11.19_5_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "A",
+              "x1",
+              "x2",
+              "x3",
+              "y1",
+              "y2"
+            ],
+            "digits": 1.752,
+            "nmse": 0.01768536331437571,
+            "acc": 0,
+            "equation": "(1936974.583899911)*1 + (42.28436761479512)*A + (-0.19072235898653625)*A**2 + (0.0006958480622299522)*A**3 + (653.6678803241213)*log(A) + (-593.1456194898589)*sqrt(A) + (1102.8409580100338)*1/(A) + (376158.87927497854)*x1 + (-19513.97464874",
+            "error": "",
+            "seconds": 0.29
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_ii.21.32_3_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "Volt",
+              "q",
+              "epsilon",
+              "r",
+              "c"
+            ],
+            "digits": 0.51,
+            "nmse": 0.30874067786496784,
+            "acc": 0,
+            "equation": "(30395397.544754263)*1 + (-170707007.62335104)*Volt + (358791219.59658504)*Volt**2 + (-94519278.76385759)*Volt**3 + (-199232383.71772313)*sin(Volt) + (347795606.4633821)*cos(Volt) + (608.5171281353653)*log(Volt) + (-14469.856796180826)*sqrt",
+            "error": "",
+            "seconds": 0.05
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_ii.35.18_0_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "n",
+              "kb",
+              "T",
+              "mom",
+              "B"
+            ],
+            "digits": 0.126,
+            "nmse": 0.748103010710107,
+            "acc": 0,
+            "equation": "(-482241388.82604104)*1 + (91556.36596116851)*n + (-77143.39975994923)*n**2 + (14519.68485327469)*n**3 + (928.5126390291294)*sin(n) + (-62708.86176279645)*cos(n) + (21.253342283201743)*log(n) + (-165.28270197994394)*sqrt(n) + (0.18659886333",
+            "error": "",
+            "seconds": 0.06
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_iii.17.37_1_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "f",
+              "beta",
+              "theta"
+            ],
+            "digits": 0.0,
+            "nmse": 1.0002196103104375,
+            "acc": 0,
+            "equation": "(804392938.5311232)*1 + (-12.023278576197454)*f + (-0.16530110811635462)*f**2 + (0.0035775487060956948)*f**3 + (-27.645383248893438)*sin(f) + (-9.485286296120652)*cos(f) + (0.5641830102681729)*1/(f) + (1.7986449266543395e-06)*exp(-(f)) + (2",
+            "error": "",
+            "seconds": 0.02
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_ii.11.28_0_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "theta",
+              "alpha"
+            ],
+            "digits": 0.0,
+            "nmse": 1.8933352745791105,
+            "acc": 0,
+            "equation": "(-291347262.5158516)*1 + (-117068817.49070667)*theta + (6952863.5023729885)*theta**2 + (-339970.6598279479)*theta**3 + (244611.77334754393)*sin(theta) + (221297.61751601574)*cos(theta) + (-84748762.64043412)*log(theta) + (396475275.53241277",
+            "error": "",
+            "seconds": 0.01
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_ii.11.3_2_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "x",
+              "q",
+              "Ef",
+              "omega_0",
+              "omega"
+            ],
+            "digits": 0.788,
+            "nmse": 0.16283035872046273,
+            "acc": 0,
+            "equation": "(45288747.85801391)*1 + (132650.92235884682)*x + (-120019.5255386424)*x**2 + (23606.298385726874)*x**3 + (9215.551823209673)*sin(x) + (-99567.2090535165)*cos(x) + (-52.390068580462284)*log(x) + (773.2364880701341)*sqrt(x) + (-0.017956839795",
+            "error": "",
+            "seconds": 0.06
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_ii.24.17_1_1",
+            "subset": "lsr_transform",
+            "variables": [
+              "k",
+              "omega",
+              "d"
+            ],
+            "digits": 2.613,
+            "nmse": 0.0024365293102755,
+            "acc": 0,
+            "equation": "(-6852539.1293284)*1 + (3539.5128241533785)*k + (-203.7892851313795)*k**2 + (6.957589407343346)*k**3 + (8.972543228706973)*sin(k) + (-2.2964216654371183)*cos(k) + (-792.0474985521345)*log(k) + (-8578.373191835924)*sqrt(k) + (-803.8080087132",
+            "error": "",
+            "seconds": 0.02
+          }
+        ],
+        "seconds": 2.9587067780003053,
+        "limits_unavailable": [],
+        "error": ""
+      },
+      "best": {
+        "mean_digits": 2.4529283696909223,
+        "median_nmse": 0.09741553770385138,
+        "median_nmse_upstream": 0.09741553770385138,
+        "acc_0.1": 0.14814814814814814,
+        "solved": 3,
+        "problems": 27,
+        "failed": 0,
+        "score": 2.4529283696909223,
+        "worst": [
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_i.50.26_0_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "x",
+              "omega",
+              "t",
+              "alpha"
+            ],
+            "digits": 0.0,
+            "nmse": 1.0000728022496699,
+            "acc": 0,
+            "equation": "(-879818969751.46277)*1 + (441.45988088885275)*x + (4733.5382944478051)*x**2 + (5.5634906429308071)*x**3 + (-0.18648152517478936)*1/x + (-3.5958953168796553e-05)*1/x**2 + (-245.3977206267829)*sqrt(Abs(x)) + (-1.9216908662956289)*sin(x) + (6",
+            "error": "",
+            "seconds": 0.19
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_ii.11.28_0_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "theta",
+              "alpha"
+            ],
+            "digits": 0.0,
+            "nmse": 125.79069295526836,
+            "acc": 0,
+            "equation": "(-480353303.24785751)*1 + (289931477.98537397)*theta + (-78933312.784249097)*theta**2 + (22849288.922911055)*theta**3 + (93749189.554247916)*1/theta + (-8140753.0648528589)*1/theta**2 + (75503456.789841831)*sqrt(Abs(theta)) + (-46416150.224",
+            "error": "",
+            "seconds": 0.02
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_iii.17.37_1_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "f",
+              "beta",
+              "theta"
+            ],
+            "digits": 0.0,
+            "nmse": 1.0000314365804588,
+            "acc": 0,
+            "equation": "(1.491111482738769)*1 + (0.035842954762078626)*f*beta + (-1.0125322944850255)*f/beta",
+            "error": "",
+            "seconds": 0.07
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_ii.24.17_2_1",
+            "subset": "lsr_transform",
+            "variables": [
+              "k",
+              "omega",
+              "c"
+            ],
+            "digits": 0.191,
+            "nmse": 0.6443722095959484,
+            "acc": 0,
+            "equation": "(-34.760717491179214)*1 + (5.5980082306382126)*k + (-4.4430438216115506)*omega + (8.8973100688311266)*c + (15.568757194164206)*k/omega + (-5.315394447485466)*k/c + (8.6198875404842443)*omega/k + (4.3376980894004662)*omega/c + (-18.462274130",
+            "error": "",
+            "seconds": 0.06
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_ii.35.18_0_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "n",
+              "kb",
+              "T",
+              "mom",
+              "B"
+            ],
+            "digits": 0.252,
+            "nmse": 0.5602796738095752,
+            "acc": 0,
+            "equation": "(-0.399680820583312)*1 + (-70.613510810046733)*n + (50.066907401388178)*kb + (51.120019814674478)*T + (-47.18976621081881)*mom + (-49.949922095789233)*B + (-13.27424606305606)*n*kb/T + (7.6872730879448969)*n*kb/mom + (8.7270285040199287)*n*",
+            "error": "",
+            "seconds": 0.54
+          }
+        ],
+        "per_problem": [
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_i.34.1_2_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "omega",
+              "c",
+              "v"
+            ],
+            "digits": 12.0,
+            "nmse": 7.450918995091593e-15,
+            "acc": 1,
+            "equation": "(-2.0858853039317371e-08)*1 + (0.99999999890951408)*omega + (-4.2241543173538512e-09)*c + (1.2556155504661947e-08)*v + (5.9580174990506757e-10)*omega*c/v + (-0.50000000050594495)*omega*v/c + (5.9580176624091439e-10)*c*omega/v + (1.641796325",
+            "error": "",
+            "seconds": 0.02
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_ii.37.1_0_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "E_n",
+              "B",
+              "chi"
+            ],
+            "digits": 1.761,
+            "nmse": 0.017352325970922386,
+            "acc": 0,
+            "equation": "(4.7565556410721488)*1 + (-0.089053882140094964)*E_n + (0.46382780018268738)*B + (-0.38074978122914405)*chi + (0.29724549848496695)*E_n/B + (0.19653857148750223)*E_n/chi + (-1.3315386123111392)*B/E_n + (-2.3680135868825891)*B/chi + (1.02139",
+            "error": "",
+            "seconds": 0.06
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_i.50.26_0_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "x",
+              "omega",
+              "t",
+              "alpha"
+            ],
+            "digits": 0.0,
+            "nmse": 1.0000728022496699,
+            "acc": 0,
+            "equation": "(-879818969751.46277)*1 + (441.45988088885275)*x + (4733.5382944478051)*x**2 + (5.5634906429308071)*x**3 + (-0.18648152517478936)*1/x + (-3.5958953168796553e-05)*1/x**2 + (-245.3977206267829)*sqrt(Abs(x)) + (-1.9216908662956289)*sin(x) + (6",
+            "error": "",
+            "seconds": 0.19
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_ii.34.29b_4_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "E_n",
+              "g_",
+              "h",
+              "Jz",
+              "mom"
+            ],
+            "digits": 0.975,
+            "nmse": 0.10590505987622191,
+            "acc": 0,
+            "equation": "(-23.149939593377582)*1 + (-0.047095220184807114)*E_n + (12.641101339300308)*g_ + (-30.890779986579616)*h + (12.017421608989485)*Jz + (11.910143916328172)*mom + (0.082582581275046182)*E_n/g_ + (-0.050014218732872644)*E_n/h + (0.079605209114",
+            "error": "",
+            "seconds": 0.5
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_ii.34.29a_2_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "mom",
+              "q",
+              "h"
+            ],
+            "digits": 12.0,
+            "nmse": 3.0087409535352473e-15,
+            "acc": 1,
+            "equation": "(1.2457829730130716e-08)*1 + (-2.1004351838597518e-08)*mom + (-8.1368228894230071e-09)*q + (1.0941328363872133e-08)*h + (5.8182993322458749e-09)*mom*q/h + (-3.0803704909043885e-09)*mom*h/q + (5.8183003970503759e-09)*q*mom/h + (0.03978873556",
+            "error": "",
+            "seconds": 0.01
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_i.48.2_1_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "E_n",
+              "m",
+              "c"
+            ],
+            "digits": 0.92,
+            "nmse": 0.12009898952402633,
+            "acc": 0,
+            "equation": "(-8519879.1617385056)*1 + (0.95746151725550777)*E_n + (-0.00027957495657810578)*E_n**2 + (2.7840343326856023e-07)*E_n**3 + (1470.8243728414532)*1/E_n + (-6855.8449809573658)*1/E_n**2 + (-34.547679743520156)*sqrt(Abs(E_n)) + (-0.004956366547",
+            "error": "",
+            "seconds": 0.07
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_i.29.16_1_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "x",
+              "x1",
+              "theta1",
+              "theta2"
+            ],
+            "digits": 1.022,
+            "nmse": 0.09510733041274444,
+            "acc": 0,
+            "equation": "(-8197757.7305692872)*1 + (380.63880367556948)*x + (-9.4313593582971791)*x**2 + (0.65209201453849064)*x**3 + (31.025747899840439)*1/x + (-0.84984909695746136)*1/x**2 + (-1363.0128134288161)*sqrt(Abs(x)) + (0.91689955715136184)*sin(x) + (0.0",
+            "error": "",
+            "seconds": 0.22
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_ii.6.15a_1_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "Ef",
+              "epsilon",
+              "r",
+              "x",
+              "y",
+              "z"
+            ],
+            "digits": 0.986,
+            "nmse": 0.1033384370630639,
+            "acc": 0,
+            "equation": "(76204522248.395432)*1 + (13374.4939424453)*Ef + (1224.8737978476124)*Ef**2 + (1298.4331170504597)*Ef**3 + (-2.5025012485739881)*1/Ef + (0.0029030559645233478)*1/Ef**2 + (2209.8465562572137)*sqrt(Abs(Ef)) + (-1719.8963173933523)*sin(Ef) + (",
+            "error": "",
+            "seconds": 1.67
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_ii.24.17_2_1",
+            "subset": "lsr_transform",
+            "variables": [
+              "k",
+              "omega",
+              "c"
+            ],
+            "digits": 0.191,
+            "nmse": 0.6443722095959484,
+            "acc": 0,
+            "equation": "(-34.760717491179214)*1 + (5.5980082306382126)*k + (-4.4430438216115506)*omega + (8.8973100688311266)*c + (15.568757194164206)*k/omega + (-5.315394447485466)*k/c + (8.6198875404842443)*omega/k + (4.3376980894004662)*omega/c + (-18.462274130",
+            "error": "",
+            "seconds": 0.06
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_ii.6.15a_5_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "Ef",
+              "epsilon",
+              "p_d",
+              "r",
+              "x",
+              "y"
+            ],
+            "digits": 0.947,
+            "nmse": 0.11309668514697356,
+            "acc": 0,
+            "equation": "(-96761394816.268784)*1 + (-90521.798501779296)*Ef + (19118.281851660362)*Ef**2 + (-5961.9432259302712)*Ef**3 + (9.207479872849186)*1/Ef + (-0.0080366750448110438)*1/Ef**2 + (-18240.890238763943)*sqrt(Abs(Ef)) + (14323.104514925737)*sin(Ef)",
+            "error": "",
+            "seconds": 1.59
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_iii.21.20_3_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "j",
+              "rho_c_0",
+              "q",
+              "A_vec"
+            ],
+            "digits": 1.319,
+            "nmse": 0.04797841508023602,
+            "acc": 0,
+            "equation": "(-1.3936843976352575)*1 + (0.039089793882069068)*j + (0.47947133811177145)*rho_c_0 + (0.29277200022431393)*q + (0.43879177779211098)*A_vec + (-0.0046035386994937788)*j*rho_c_0/q + (-0.0007118696334807511)*j*rho_c_0/A_vec + (-0.0034184379875",
+            "error": "",
+            "seconds": 0.18
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_iii.15.14_1_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "m",
+              "h",
+              "d"
+            ],
+            "digits": 0.406,
+            "nmse": 0.39220067090754107,
+            "acc": 0,
+            "equation": "(-0.20047445416480084)*1 + (19.103226106820326)*m + (-1.5853504019595468)*h + (0.58372547438583022)*d + (7.0765271471368045)*m/h + (-76.206014020977577)*m/d + (0.013371377543221546)*h/m + (3.9247568003865649)*h/d + (-0.0073414041924155585)*",
+            "error": "",
+            "seconds": 0.06
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_ii.36.38_4_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "f",
+              "mom",
+              "H",
+              "kb",
+              "T",
+              "epsilon",
+              "c",
+              "M"
+            ],
+            "digits": 0.992,
+            "nmse": 0.10182464607821326,
+            "acc": 0,
+            "equation": "(94467694018.126328)*1 + (-3170.3278091118373)*f + (-185.27353535671759)*f**2 + (-4.0439261456912261)*f**3 + (-52.409813809092483)*1/f + (-0.16022598399598412)*1/f**2 + (10817.676302066893)*sqrt(Abs(f)) + (-0.7396830039513006)*sin(f) + (7.0",
+            "error": "",
+            "seconds": 3.81
+          },
+          {
+            "shard": 6,
+            "problem_id": "lsr_transform_iii.12.43_0_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "L",
+              "h"
+            ],
+            "digits": 12.0,
+            "nmse": 5.137337006851776e-15,
+            "acc": 1,
+            "equation": "(-1.3588183346796535e-08)*1 + (-1.101011419023722e-08)*L + (6.142161901123274e-09)*h + (6.2831853236423179)*L/h + (-7.2002817067885871e-10)*h/L",
+            "error": "",
+            "seconds": 0.01
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_i.24.6_1_1",
+            "subset": "lsr_transform",
+            "variables": [
+              "E_n",
+              "m",
+              "omega_0",
+              "x"
+            ],
+            "digits": 2.143,
+            "nmse": 0.007201630529113873,
+            "acc": 0,
+            "equation": "(-216847253.42850181)*1 + (1.4665702264201113)*E_n + (3.080105544082117e-05)*E_n**2 + (1.2303475399972818e-05)*E_n**3 + (64.861711757938352)*1/E_n + (-20.482402229767764)*1/E_n**2 + (-21.366800721323777)*sqrt(Abs(E_n)) + (-0.007865492007381",
+            "error": "",
+            "seconds": 0.21
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_iii.10.19_2_1",
+            "subset": "lsr_transform",
+            "variables": [
+              "E_n",
+              "mom",
+              "Bx",
+              "Bz"
+            ],
+            "digits": 2.845,
+            "nmse": 0.001428290178553571,
+            "acc": 0,
+            "equation": "(2.9800061797007649)*1 + (0.12014872441385395)*E_n + (-0.70298196877578412)*mom + (-0.65219291627216924)*Bx + (-0.63547053358098626)*Bz + (0.88033922410597609)*E_n/mom + (-0.063604503163343623)*E_n/Bx + (-0.062027191272161782)*E_n/Bz + (-0.",
+            "error": "",
+            "seconds": 0.2
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_iii.4.33_3_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "E_n",
+              "h",
+              "omega",
+              "kb"
+            ],
+            "digits": 4.272,
+            "nmse": 5.340593326872411e-05,
+            "acc": 0,
+            "equation": "(-0.27446311529895284)*1 + (0.0026047592460538087)*E_n + (0.070341461870670086)*h + (0.069619588556765435)*omega + (-0.059496735308311462)*kb + (-0.00065266027176863863)*E_n/h + (-0.00093546817739362557)*E_n/omega + (0.99608303582700686)*E_",
+            "error": "",
+            "seconds": 0.19
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_iii.15.27_1_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "k",
+              "alpha",
+              "d"
+            ],
+            "digits": 1.011,
+            "nmse": 0.09741553770385138,
+            "acc": 0,
+            "equation": "(1.0633380297246771)*1 + (0.11895680938223395)*k + (-0.95659362954707738)*alpha + (-0.011550198482126885)*d + (-0.10857869392194908)*k/alpha + (-0.20228618172402071)*k/d + (3.7843510378840675)*alpha/k + (1.4978745304556289)*alpha/d + (-1.31",
+            "error": "",
+            "seconds": 0.06
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_ii.6.15a_3_1",
+            "subset": "lsr_transform",
+            "variables": [
+              "Ef",
+              "epsilon",
+              "p_d",
+              "r",
+              "y",
+              "z"
+            ],
+            "digits": 0.803,
+            "nmse": 0.157503580482109,
+            "acc": 0,
+            "equation": "(-2464.3945211492505)*1 + (374.89970372034611)*Ef + (190.66151200469753)*epsilon + (-549.06051352889801)*p_d + (1355.1436469531066)*r + (-244.90084008203681)*y + (-586.53113528981669)*z + (-238.64120688709443)*Ef/epsilon + (326.445969252072",
+            "error": "",
+            "seconds": 1.72
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_iii.13.18_1_1",
+            "subset": "lsr_transform",
+            "variables": [
+              "v",
+              "E_n",
+              "k",
+              "h"
+            ],
+            "digits": 1.673,
+            "nmse": 0.021217351759070104,
+            "acc": 0,
+            "equation": "(2.9631728805491275)*1 + (0.00079202803091744554)*v + (-0.21515294778656091)*E_n + (-0.21331423692985418)*k + (-0.079410408643763308)*h + (0.0021961240219288327)*v/E_n + (0.0024515349466957925)*v/k + (-0.0018402410799538171)*v/h + (17.18425",
+            "error": "",
+            "seconds": 0.18
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_i.11.19_5_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "A",
+              "x1",
+              "x2",
+              "x3",
+              "y1",
+              "y2"
+            ],
+            "digits": 2.653,
+            "nmse": 0.0022211781412097443,
+            "acc": 0,
+            "equation": "(0.033752141676632909)*1 + (0.0056915209911613642)*A + (0.77486935084297981)*x1 + (-0.87161200438781716)*x2 + (-0.021611595486948985)*x3 + (0.88126449820751374)*y1 + (-0.83451414094572385)*y2 + (0.015845362087520822)*A/x1 + (-0.015996203571",
+            "error": "",
+            "seconds": 1.82
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_ii.21.32_3_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "Volt",
+              "q",
+              "epsilon",
+              "r",
+              "c"
+            ],
+            "digits": 0.795,
+            "nmse": 0.16014671501816582,
+            "acc": 0,
+            "equation": "(1.3258038266082184)*1 + (-33.982893283955036)*Volt + (2.0960370696946997)*q + (-0.42771302883894474)*epsilon + (-0.84419660431333954)*r + (2.086896498179478)*c + (14.2061900142998)*Volt/q + (22.189021475186458)*Volt/epsilon + (14.487562935",
+            "error": "",
+            "seconds": 0.56
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_ii.35.18_0_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "n",
+              "kb",
+              "T",
+              "mom",
+              "B"
+            ],
+            "digits": 0.252,
+            "nmse": 0.5602796738095752,
+            "acc": 0,
+            "equation": "(-0.399680820583312)*1 + (-70.613510810046733)*n + (50.066907401388178)*kb + (51.120019814674478)*T + (-47.18976621081881)*mom + (-49.949922095789233)*B + (-13.27424606305606)*n*kb/T + (7.6872730879448969)*n*kb/mom + (8.7270285040199287)*n*",
+            "error": "",
+            "seconds": 0.54
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_iii.17.37_1_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "f",
+              "beta",
+              "theta"
+            ],
+            "digits": 0.0,
+            "nmse": 1.0000314365804588,
+            "acc": 0,
+            "equation": "(1.491111482738769)*1 + (0.035842954762078626)*f*beta + (-1.0125322944850255)*f/beta",
+            "error": "",
+            "seconds": 0.07
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_ii.11.28_0_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "theta",
+              "alpha"
+            ],
+            "digits": 0.0,
+            "nmse": 125.79069295526836,
+            "acc": 0,
+            "equation": "(-480353303.24785751)*1 + (289931477.98537397)*theta + (-78933312.784249097)*theta**2 + (22849288.922911055)*theta**3 + (93749189.554247916)*1/theta + (-8140753.0648528589)*1/theta**2 + (75503456.789841831)*sqrt(Abs(theta)) + (-46416150.224",
+            "error": "",
+            "seconds": 0.02
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_ii.11.3_2_0",
+            "subset": "lsr_transform",
+            "variables": [
+              "x",
+              "q",
+              "Ef",
+              "omega_0",
+              "omega"
+            ],
+            "digits": 1.388,
+            "nmse": 0.040904069682142115,
+            "acc": 0,
+            "equation": "(-3.5264267012302688)*1 + (3.5231457941191011)*x + (-0.83943229130215824)*q + (-1.133703077538353)*Ef + (0.51948423195137627)*omega_0 + (-0.78598299802719629)*omega + (-0.35153941332408079)*x/q + (-0.33869842315956683)*x/Ef + (-7.5569331010",
+            "error": "",
+            "seconds": 0.5
+          },
+          {
+            "shard": 7,
+            "problem_id": "lsr_transform_ii.24.17_1_1",
+            "subset": "lsr_transform",
+            "variables": [
+              "k",
+              "omega",
+              "d"
+            ],
+            "digits": 2.874,
+            "nmse": 0.0013363835255070858,
+            "acc": 1,
+            "equation": "(-0.27529207991471477)*1 + (-0.25006240521519407)*k + (0.30086379281176545)*omega + (-0.081736222431992661)*d + (0.89767768365339273)*k/omega + (0.0060398221896134441)*k/d + (0.38161450664101504)*omega/k + (-0.097887235540127598)*omega/d + ",
+            "error": "",
+            "seconds": 0.06
+          }
+        ],
+        "seconds": 14.766644782000185,
+        "limits_unavailable": [],
+        "error": ""
+      },
+      "mean_digits_gain": 1.395003240312682
+    }
+  },
+  "model_usage": {
+    "calls": 14,
+    "failures": 0,
+    "prompt_tokens": 48679,
+    "completion_tokens": 34413,
+    "total_tokens": 83092,
+    "model_seconds": 888.416434
+  },
+  "reply_damage": {
+    "drawn": 14,
+    "damaged": 2,
+    "attempts_allowed": 4
+  }
+}

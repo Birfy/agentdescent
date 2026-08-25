@@ -866,6 +866,148 @@ endpoint's measured knee bought **2.1×**.
     top-K node programs**, so gate-versus-test correlation can be measured
     directly rather than inferred from whichever program happened to win.
 
+## Measured results — LLM-SRBench
+
+### The method
+
+| Setting | Value |
+|---|---|
+| Model | `glm-5.2`, Anthropic-shaped API (`--provider claude`), `--thinking disabled` |
+| Search | sync, 12 expansions, 3 workers, `c_puct=1.0`, `--staleness guarded`, `--seed 0` |
+| Data | every problem in the category — 129 (LSR-Synth) and 111 (LSR-Transform) |
+| Shards | 6 scored + 2 held back, dealt per domain; `held_out_frac=0.5`, so a node is gated on 3 shards |
+| Budget | 4 s per problem, 120 s per problem set, `--max-tokens 16000` |
+| LSR-Transform only | `--train-points 4000`, matching LSR-Synth's training size — it ships 80 000 |
+
+Two runs, one per category, so between them they cover all 240 problems.
+Everything below is the **held-back** shards: problems no expansion was ever
+scored against. Files:
+[`bench/results/era-srbench-synth.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-srbench-synth.json)
+and
+[`bench/results/era-srbench-transform.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-srbench-transform.json),
+with the winning programs beside them.
+
+### The result
+
+| | LSR-Synth, 32 held-back problems | LSR-Transform, 27 held-back problems |
+|---|---|---|
+| mean `min(12, -log10 NMSE)` | **7.225 → 8.439** | **1.058 → 2.453** |
+| median NMSE | 2.85e-07 → **4.83e-11** | 0.1101 → 0.0974 |
+| Acc(0.1) | 50.0% → **59.4%** | 0.0% → **14.8%** |
+| OOD mean digits | 4.718 → **5.463** | no OOD split in this category |
+| OOD Acc(0.1) | 53.1% → **68.8%** | — |
+| problems at 6+ digits | 20/32 → 22/32 | 0/27 → 3/27 |
+| paired per problem | 18 better, 5 worse, 9 tied — sign test **p = 0.011** | 15 better, 9 worse, 3 tied — sign test p = 0.31 |
+| wall / model calls / tokens | 584 s / 14 / 76 230 | 570 s / 14 / 83 092 |
+| damaged replies redrawn | 2 of 14 | 2 of 14 |
+| expansions that scored zero | 2 of 12 | 4 of 12 |
+
+**The pooled means are the weaker half of that table.** Thirty-two problems put
+one problem at 3.1 points of Acc(0.1), so a 9-point move is three problems and
+proves very little on its own. The paired column is what carries the LSR-Synth
+result: the same 32 problems, the same splits, 18 improved against 5 that
+regressed, which a two-sided sign test puts at p = 0.011. On LSR-Transform the
+same test says **p = 0.31** — the mean nearly doubled and the median NMSE barely
+moved, which is the signature of a method that solved three more problems
+outright while losing ground on others. Reported as such rather than as a win.
+
+Per domain on LSR-Synth, with the caveat that a domain here is 6 to 12 problems
+and each one is worth 8 to 17 points of Acc:
+
+| Domain | Held-back | mean digits | Acc(0.1) |
+|---|---|---|---|
+| chemistry (reaction kinetics) | 8 | 8.97 → 11.03 | 87.5% → 87.5% |
+| biology (population growth) | 6 | 7.61 → 9.42 | 66.7% → 83.3% |
+| material science | 6 | 6.39 → 7.92 | 33.3% → 50.0% |
+| physics (nonlinear oscillators) | 12 | 6.29 → 6.48 | 25.0% → 33.3% |
+
+The gate agreed with the held-back set on direction and overstated the size:
+the winning node scored 8.726 on the three shards it was gated against versus
+8.439 on the two it never saw, against a root at 7.364 / 7.225. Four rounds,
+committing at rounds 1 and 3 (0.6137 → 0.6938 → 0.7272 held-out reward).
+
+### What the search actually found
+
+Both winners are recognisably the seed program with two things done to it, and
+neither is a new idea about symbolic regression:
+
+* **A wider library.** The seed offers `1, v, v², v³, sin, cos, log, √, 1/v,
+  e^-v` per variable plus pairwise products. The LSR-Synth winner adds `v⁴`,
+  `tanh`, `e^+v`, `sin(v_i)·v_j`, `cos(v_i)·v_j`, `v_i²v_j`, `v_iv_j²` and
+  triple products — which is what the four synthetic domains want, since their
+  ground truths are ODE right-hand sides that are *additive* in terms like
+  these.
+* **A validation split and an escalation schedule.** Both winners hold back a
+  quarter of the training samples, select on that rather than on the fit, and
+  try term sets in increasing size under a wall-clock check against
+  `spec["seconds"]`, keeping the best answer found so far. The LSR-Transform
+  winner is almost entirely this: constant, then linear, then a growing set with
+  `1/v`, `1/v²`, `√|v|`.
+
+Both call `spec["evaluate"]` on the assembled expression before returning it, so
+the answer is checked by the grader's own parser first. That idiom is in the
+seed program, which is where they got it.
+
+### Neither winner transfers to the other category
+
+The prompt asks for "one method that works across every domain above, not a
+dispatch on the problem id", and within a category that is what comes back. The
+categories are another matter. Each winner, run on the *other* run's held-back
+shards — problems it never saw, in a category it was never scored on:
+
+| Program | LSR-Synth (32 held back) | LSR-Transform (27 held back) |
+|---|---|---|
+| seed (STLSQ over a fixed library) | 7.225 digits, 50.0% Acc | 1.058 digits, 0.0% Acc |
+| LSR-Synth winner | **8.439**, 59.4% | 0.788, 0.0% |
+| LSR-Transform winner | 5.238, 37.5% | **2.453**, 14.8% |
+
+Each is best on its own category and **worse than the seed on the other**. Twelve
+expansions of program search against one category produce a method tuned to it:
+the LSR-Synth winner's wide additive library is dead weight on equations that are
+products and quotients, and the LSR-Transform winner's escalation schedule never
+reaches the terms the synthetic right-hand sides need inside four seconds. This
+is the honest cost of the protocol — one program for a whole distribution — and
+it is measurable here only because the benchmark ships two categories that
+differ in kind. `--dataset all` runs the search against both at once; that run
+has not been made.
+
+### Against the paper's own tables
+
+The comparison has to carry its caveat every time it is made: **same benchmark,
+same splits, same metrics, different experiment**. The paper's methods see one
+problem at a time with the data in the model's context and a per-problem sample
+budget; here the model never sees a sample and writes one program for all of
+them. Acc(0.1), per the paper's Table 2 (GPT-4o-mini backbone), against this
+run's held-back problems:
+
+| | LSR-Transform | chemistry | biology | physics | materials |
+|---|---|---|---|---|---|
+| Direct prompting | 6.31% | 13.88% | 4.16% | 9.09% | 0.0% |
+| SGA | 8.11% | 16.66% | 12.51% | 9.09% | 36.11% |
+| LaSR | 50.45% | 38.92% | 20.83% | 31.81% | 72.04% |
+| LLM-SR | 39.64% | 52.77% | 29.16% | 36.36% | 88.28% |
+| this seed program (no LLM at all) | 0.0% | 87.5% | 66.7% | 25.0% | 33.3% |
+| this run's winner | 14.8% | 87.5% | 83.3% | 33.3% | 50.0% |
+
+Two things fall out of that, and the second is the more interesting:
+
+**On LSR-Synth a plain sparse-regression baseline is already competitive**, and
+on chemistry and biology it is ahead of every published method in the table
+before any LLM is involved. That is not a result about this search — it is a
+result about the benchmark: LSR-Synth problems are ODE right-hand sides built as
+a known term plus a novel one, which is the exact shape STLSQ was designed for,
+and the published methods are working under a sample budget that a direct
+least-squares fit does not have. Anyone quoting LLM-SRBench synthetic numbers
+should have this row in view.
+
+**On LSR-Transform the same baseline scores zero**, and twelve expansions take
+it to 14.8% against LaSR's 50.45%. Those problems are Feynman equations
+rearranged into products, quotients and nested roots — forms that no
+linear-in-a-library method can express at all, and where proposing a *structure*
+from the variable names is the whole task. That is what the paper's methods do
+per problem and what this protocol, one program for 111 problems in four seconds
+each, does not. The gap is the protocol's, not the search's.
+
 ## Run it
 
 Preview without an API key, network access, or sandbox process:

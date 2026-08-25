@@ -57,6 +57,24 @@ All notable changes to AgentDescent are documented here. The format follows
   `--train-points` caps the rows a candidate is handed. Reading the benchmark's
   parquet needs `pyarrow`. Notes: `docs/algo-era.md`, `examples/era/README.md`.
 
+  **Measured**, two runs of 12 expansions on `glm-5.2` covering all 240 problems
+  (`bench/results/era-srbench-synth.json`,
+  `bench/results/era-srbench-transform.json`). On the held-back LSR-Synth shards
+  the winner moves mean digits 7.225 → 8.439, median NMSE 2.85e-07 → 4.83e-11,
+  Acc(0.1) 50.0% → 59.4% and OOD Acc(0.1) 53.1% → 68.8%; paired over the same 32
+  problems that is 18 better against 5 worse, sign test p = 0.011. On
+  LSR-Transform it is 1.058 → 2.453 digits and 0.0% → 14.8% Acc(0.1), but 15
+  better against 9 worse — **p = 0.31**, so the mean moved and the evidence did
+  not, which is how it is reported.
+
+  Two findings worth the run on their own. The seed program — sparse regression,
+  no LLM anywhere in it — already beats every published LLM method in the paper's
+  table on LSR-Synth chemistry and biology, which says something about the
+  benchmark's synthetic half rather than about this search. And neither winner
+  transfers: each is best on the category it was scored against and *worse than
+  the seed* on the other, which is the cost of one-program-for-a-distribution
+  stated in numbers.
+
 ## [0.4.5] — 2026-08-19
 
 ### Fixed
