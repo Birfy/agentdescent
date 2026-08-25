@@ -1,0 +1,510 @@
+"""The ERA LLM-SRBench task: the benchmark itself, the answer grammar, the metrics.
+
+The first block is the one that matters most, for the same reason it does in
+``tests/test_era_integrals.py``: the samples this task scores against are
+downloaded from a **third party's re-upload** of a gated dataset, and a
+benchmark whose data does not match the equations it claims to hold measures
+nothing at all. So every ground-truth expression that is evaluable as published
+is re-evaluated on the samples shipped beside it, and has to reproduce them.
+
+Everything after that checks the machinery. The grammar block is the security
+boundary as much as the scientific one: an answer is a string this repository
+interprets, on data the candidate is not allowed to see, so "only an equation
+gets through" is not a stylistic rule.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import urllib.error
+
+import pytest
+
+pytest.importorskip("numpy", reason="the LLM-SRBench task is numeric throughout")
+
+import numpy as np  # noqa: E402
+
+from examples.era import _era_srbench as srbench  # noqa: E402
+from examples.era import _era_srbench_expr as expr  # noqa: E402
+from examples.era import _era_support as support  # noqa: E402
+from examples.era import era_llm_srbench as port  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# The benchmark
+# ---------------------------------------------------------------------------
+
+
+def _mirror_subset(subset: str):
+    """One subset's problems and samples, or a skip if the mirror is unreachable."""
+    pytest.importorskip("pyarrow", reason="reading the benchmark parquet needs pyarrow")
+    try:
+        return srbench._read_subset(subset)
+    except (urllib.error.URLError, OSError) as exc:  # offline CI
+        pytest.skip(f"LLM-SRBench mirror unreachable: {exc}")
+
+
+def _ground_truth_prediction(problem, samples):
+    """Evaluate a published ground truth, or None when it is not evaluable.
+
+    Two whole subsets are not, and both are metadata defects in the published
+    copy rather than anything this port does: ``chem_react`` expressions carry a
+    mangled parameter (``0.189…_z``) and ``phys_osc`` expressions are symbolic
+    templates whose parameters (``F0``, ``beta``, ``omega0``) have no values
+    attached. Scoring never touches these strings -- it is numeric throughout --
+    so they are reported and skipped rather than repaired.
+    """
+    text = problem.gt_expression
+    # `A(t)` is sympy's function-call notation for the state variable; the same
+    # symbol is a plain column here.
+    for name in problem.input_vars:
+        text = text.replace(f"{name}(t)", name)
+    try:
+        tree = expr.validate_expression(text, problem.input_vars)
+    except expr.ExpressionError:
+        return None
+    del tree
+    try:
+        return expr.evaluate_expression(text, problem.input_vars, samples["train_x"])
+    except expr.ExpressionError:
+        return None
+
+
+@pytest.mark.parametrize("subset", sorted(srbench.GROUPS["lsr_synth"]))
+def test_the_published_equations_reproduce_the_published_samples(subset):
+    """The check that makes a number from this task mean anything."""
+    loaded = _mirror_subset(subset)
+    checked = 0
+    for problem, samples in loaded:
+        prediction = _ground_truth_prediction(problem, samples)
+        if prediction is None:
+            continue
+        scored = expr.score_predictions(prediction, samples["train_y"])
+        assert scored["nmse"] < 1e-6, (
+            f"{problem.problem_id}: ground truth does not reproduce its own "
+            f"samples (NMSE {scored['nmse']:.3e})")
+        checked += 1
+    if subset in ("lsr_synth_chem_react", "lsr_synth_phys_osc"):
+        # Documented defects in the published metadata, asserted so that a
+        # mirror which quietly *fixed* them stops being described as broken.
+        assert checked == 0, (
+            f"{subset} ground truths now evaluate; update the port's notes")
+    else:
+        assert checked == len(loaded)
+
+
+def test_every_subset_holds_the_number_of_problems_the_paper_states():
+    for subset, (_files, expected) in srbench.SUBSETS.items():
+        if subset == "lsr_transform":
+            continue  # 353 MB; covered by the count assertion inside _read_subset
+        loaded = _mirror_subset(subset)
+        assert len(loaded) == expected
+        assert len({problem.problem_id for problem, _ in loaded}) == expected
+
+
+def test_the_four_synthetic_domains_carry_an_out_of_distribution_split():
+    """OOD is what separates LSR-Synth from LSR-Transform, and it has to be there."""
+    loaded = _mirror_subset("lsr_synth_matsci")
+    for problem, samples in loaded:
+        assert problem.ood_rows > 0
+        assert "ood_x" in samples and "ood_y" in samples
+        assert samples["ood_x"].shape[0] == problem.ood_rows
+
+
+# ---------------------------------------------------------------------------
+# The answer grammar -- the boundary the held-out samples sit behind
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("equation", [
+    "1.5*P - 0.02*P**2",
+    "sin(t) + exp(-P)/2",
+    "-3.0*sqrt(abs(t)) + pi*P",
+    "2.0",
+    "P**0.3333 * log(t + 1.0)",
+])
+def test_an_equation_is_accepted(equation):
+    assert expr.validate_expression(equation, ("t", "P")) is not None
+
+
+@pytest.mark.parametrize("equation,reason", [
+    ("__import__('os').listdir()", "dunder"),
+    ("open('/etc/passwd').read()", "unknown function"),
+    ("t if t > 0 else P", "conditional"),
+    ("t[0]", "subscript"),
+    ("np.sin(t)", "attribute"),
+    ("lambda t: t", "lambda"),
+    ("(t > 1) * P", "comparison"),
+    ("sin(t, P)", "arity"),
+    ("q * 2", "unknown symbol"),
+    ("", "empty"),
+    ("t +", "syntax"),
+])
+def test_anything_that_is_not_an_equation_is_refused(equation, reason):
+    with pytest.raises(expr.ExpressionError):
+        expr.validate_expression(equation, ("t", "P"))
+
+
+def test_a_caret_is_read_as_a_power_rather_than_as_xor():
+    """What a scientist writes, and what sympy prints."""
+    x = np.array([[2.0, 3.0]])
+    assert expr.evaluate_expression("t^2", ("t", "P"), x)[0] == pytest.approx(4.0)
+
+
+def test_an_equation_is_evaluated_column_wise_in_the_declared_order():
+    x = np.array([[1.0, 10.0], [2.0, 20.0]])
+    values = expr.evaluate_expression("t + 0.5*P", ("t", "P"), x)
+    assert values == pytest.approx([6.0, 12.0])
+
+
+def test_a_constant_equation_is_broadcast_rather_than_rejected():
+    x = np.zeros((4, 2))
+    assert expr.evaluate_expression("7.0", ("t", "P"), x) == pytest.approx([7.0] * 4)
+
+
+def test_an_overflowing_equation_returns_non_finite_rather_than_raising():
+    x = np.array([[800.0, 0.0], [900.0, 0.0]])
+    values = expr.evaluate_expression("exp(t)*exp(t)", ("t", "P"), x)
+    assert not np.all(np.isfinite(values))
+
+
+# ---------------------------------------------------------------------------
+# The metrics -- the benchmark's own definitions
+# ---------------------------------------------------------------------------
+
+
+def test_nmse_and_accuracy_are_the_papers_definitions():
+    truth = np.array([1.0, 2.0, 3.0, 4.0])
+    prediction = truth * np.array([1.05, 0.96, 1.02, 0.99])
+    scored = expr.score_predictions(prediction, truth)
+    expected = np.sum((prediction - truth) ** 2) / np.sum((truth - truth.mean()) ** 2)
+    assert scored["nmse"] == pytest.approx(expected)
+    # Acc_0.1 is an indicator on the *worst* relative error, not a mean of them,
+    # so the 5% point is what decides it and the 1% points cannot rescue it.
+    assert scored["max_relative"] == pytest.approx(0.05)
+    assert scored["acc"] == 1
+
+
+def test_one_bad_point_is_enough_to_lose_the_accuracy_indicator():
+    truth = np.array([1.0, 2.0, 3.0])
+    prediction = np.array([1.0, 2.0, 3.9])
+    assert expr.score_predictions(prediction, truth)["acc"] == 0
+
+
+def test_a_pole_in_the_test_range_fails_the_problem_here_and_not_upstream():
+    """The port's one deliberate deviation from `compute_output_base_metrics`."""
+    truth = np.array([1.0, 2.0, 3.0, 4.0])
+    prediction = np.array([1.0, 2.0, np.inf, 4.0])
+    scored = expr.score_predictions(prediction, truth)
+    assert scored["nmse"] == math.inf and scored["acc"] == 0
+    assert scored["nonfinite_points"] == 1
+    # Upstream drops the non-finite point and scores the rest, which is why the
+    # two numbers are both reported rather than one of them being chosen.
+    assert scored["nmse_upstream"] == pytest.approx(0.0)
+
+
+def test_digits_are_monotone_in_nmse_and_capped_at_the_data_precision():
+    assert expr.digits_of(1.0) == 0.0
+    assert expr.digits_of(1e-6) == pytest.approx(6.0)
+    assert expr.digits_of(1e-30) == expr.DIGIT_CAP
+    assert expr.digits_of(math.inf) == 0.0
+    assert expr.digits_of(1e-4) > expr.digits_of(1e-3)
+
+
+def test_aggregation_pools_over_problems_and_counts_the_failures():
+    rows = [
+        {"id": {"digits": 6.0, "nmse": 1e-6, "nmse_upstream": 1e-6, "acc": 1},
+         "ood": {"digits": 3.0, "nmse": 1e-3, "acc": 0}},
+        {"id": {"digits": 0.0, "nmse": 2.0, "nmse_upstream": 2.0, "acc": 0},
+         "ood": None},
+        {"id": None, "ood": None},
+    ]
+    pooled = expr.aggregate(rows)
+    assert pooled["problems"] == 2 and pooled["failed"] == 1
+    assert pooled["mean_digits"] == pytest.approx(3.0)
+    assert pooled["acc_0.1"] == pytest.approx(0.5)
+    assert pooled["median_nmse"] == pytest.approx(0.5 * (1e-6 + 2.0))
+    assert pooled["ood_problems"] == 1
+
+
+def test_the_framework_reward_is_order_preserving_with_the_metric():
+    better = srbench.framework_score({"mean_digits": 8.0})
+    worse = srbench.framework_score({"mean_digits": 2.0})
+    assert 0.0 <= worse < better <= 1.0
+    assert srbench.framework_score({"mean_digits": None}) == 0.0
+    assert srbench.framework_score({"mean_digits": -math.inf}) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# The gate
+# ---------------------------------------------------------------------------
+
+
+def _gate(source: str):
+    return support.validate_source(
+        source, 20_000, entrypoint="discover",
+        allowed_imports=srbench.ALLOWED_IMPORTS, literal_top_level=False)
+
+
+def test_the_gate_wants_a_discover_function():
+    valid, reason = _gate("import numpy as np\n\ndef fit(x, y, spec):\n    return '1'\n")
+    assert not valid and "discover" in reason
+
+
+def test_the_gate_refuses_an_import_the_task_has_no_use_for():
+    valid, reason = _gate("import os\n\ndef discover(x, y, spec):\n    return '1'\n")
+    assert not valid and "os" in reason
+
+
+def test_the_gate_admits_the_seed_program():
+    valid, reason = _gate(srbench.INITIAL_PROGRAM)
+    assert valid, reason
+
+
+# ---------------------------------------------------------------------------
+# The runner and the evaluator, on a suite built here rather than downloaded
+# ---------------------------------------------------------------------------
+
+
+def _fixture_suite(tmp_path, *, rows: int = 200, problems: int = 2,
+                   shards: int = 2) -> srbench.Suite:
+    """A two-shard suite over ``y = 2x0 + 3`` -- solvable, and offline."""
+    rng = np.random.default_rng(0)
+    paths, metas, dealt = [], [], []
+    for shard in range(shards):
+        payload = {}
+        holds = []
+        for position in range(problems):
+            train_x = rng.uniform(1.0, 5.0, size=(rows, 2))
+            test_x = rng.uniform(1.0, 5.0, size=(rows // 4, 2))
+            ood_x = rng.uniform(5.0, 7.0, size=(rows // 4, 2))
+            for name, matrix in (("train", train_x), ("test", test_x), ("ood", ood_x)):
+                payload[f"p{position}_{name}_x"] = matrix
+                payload[f"p{position}_{name}_y"] = 2.0 * matrix[:, 0] + 3.0
+            holds.append(srbench.SrProblem(
+                problem_id=f"fixture-{shard}-{position}",
+                subset="fixture",
+                input_vars=("a", "b"),
+                output_var="y",
+                description="Discover y from a and b.",
+                gt_expression="2*a + 3",
+                train_rows=rows, test_rows=rows // 4, ood_rows=rows // 4))
+        data_path = tmp_path / f"shard-{shard:03d}.npz"
+        meta_path = tmp_path / f"shard-{shard:03d}.json"
+        np.savez(data_path, **payload)
+        meta_path.write_text(
+            json.dumps([problem.to_dict() for problem in holds]), encoding="utf-8")
+        paths.append(data_path)
+        metas.append(meta_path)
+        dealt.append(tuple(holds))
+    return srbench.Suite(tmp_path, 0, ("fixture",), tuple(paths), tuple(metas),
+                         tuple(dealt), shards - 1, 1)
+
+
+needs_sandbox = pytest.mark.skipif(
+    support.sandbox_backend() is None,
+    reason="no Bubblewrap or Seatbelt on this host")
+
+
+@needs_sandbox
+def test_the_seed_program_solves_a_linear_fixture(tmp_path):
+    suite = _fixture_suite(tmp_path)
+    valid, metrics, error = srbench.evaluate_source(
+        srbench.INITIAL_PROGRAM, suite=suite, shards=(0,), timeout=60.0,
+        problem_seconds=10.0)
+    assert valid, error
+    assert metrics["problems"] == 2
+    assert metrics["mean_digits"] > 8.0
+    assert metrics["acc_0.1"] == 1.0
+    assert metrics["ood_problems"] == 2
+
+
+@needs_sandbox
+def test_one_failed_problem_does_not_take_the_shard_down(tmp_path):
+    """A method that is wrong on one problem has still earned the other."""
+    suite = _fixture_suite(tmp_path)
+    source = (
+        "import numpy as np\n\n\n"
+        "def discover(x, y, spec):\n"
+        "    if spec['description'].endswith('b.') and x.shape[0] % 2 == 0:\n"
+        "        return '2*a + 3'\n"
+        "    return '2*a + 3'\n"
+    )
+    valid, metrics, error = srbench.evaluate_source(
+        source, suite=suite, shards=(0,), timeout=60.0, problem_seconds=10.0)
+    assert valid, error
+    assert metrics["mean_digits"] == pytest.approx(expr.DIGIT_CAP)
+
+
+@needs_sandbox
+def test_an_answer_that_is_not_an_equation_scores_zero_rather_than_failing(tmp_path):
+    suite = _fixture_suite(tmp_path)
+    source = (
+        "import numpy as np\n\n\n"
+        "def discover(x, y, spec):\n"
+        "    return \"__import__('os').listdir('/')\"\n"
+    )
+    valid, metrics, error = srbench.evaluate_source(
+        source, suite=suite, shards=(0,), timeout=60.0, problem_seconds=10.0)
+    assert valid, error
+    assert metrics["mean_digits"] == 0.0
+    assert all("ExpressionError" in row["error"] for row in metrics["per_problem"])
+
+
+@needs_sandbox
+def test_the_candidate_is_handed_the_graders_own_evaluator(tmp_path):
+    """The way a method scores its own forms has to be the way its answer is scored.
+
+    The gate refuses `eval`, so without this a candidate would have to
+    re-implement the grammar and hope its copy matched -- and a near-miss there
+    shows up as a good method scoring zero.
+    """
+    suite = _fixture_suite(tmp_path)
+    source = (
+        "import numpy as np\n\n\n"
+        "def discover(x, y, spec):\n"
+        "    fitted = spec['evaluate']('2*a + 3', x)\n"
+        "    if not np.allclose(fitted, y):\n"
+        "        return 'wrong values'\n"
+        "    try:\n"
+        "        spec['evaluate'](\"open('/etc/passwd')\", x)\n"
+        "    except Exception:\n"
+        "        return '2*a + 3'\n"
+        "    return 'the grammar let anything through'\n"
+    )
+    valid, metrics, error = srbench.evaluate_source(
+        source, suite=suite, shards=(0,), timeout=60.0, problem_seconds=10.0)
+    assert valid, error
+    assert metrics["mean_digits"] == pytest.approx(expr.DIGIT_CAP)
+
+
+@needs_sandbox
+def test_a_program_without_an_entrypoint_fails_the_whole_evaluation(tmp_path):
+    suite = _fixture_suite(tmp_path)
+    valid, metrics, error = srbench.evaluate_source(
+        "import numpy as np\n\n\ndef search(x, y, spec):\n    return '1'\n",
+        suite=suite, shards=(0,), timeout=60.0, problem_seconds=5.0)
+    assert not valid
+    assert metrics["score"] == -math.inf
+    assert "discover" in error
+
+
+@needs_sandbox
+def test_a_problem_that_overruns_its_budget_is_interrupted(tmp_path):
+    """The per-problem deadline, enforced in the runner rather than trusted.
+
+    Without it, one method that never returns costs every remaining problem in
+    the shard its score -- so the budget has to be a property of the harness.
+    """
+    suite = _fixture_suite(tmp_path, problems=1)
+    source = (
+        "import numpy as np\n\n\n"
+        "def discover(x, y, spec):\n"
+        "    total = 0.0\n"
+        "    while True:\n"
+        "        total += 1.0\n"
+        "    return '2*a + 3'\n"
+    )
+    valid, metrics, error = srbench.evaluate_source(
+        source, suite=suite, shards=(0,), timeout=60.0, problem_seconds=1.0)
+    assert valid, error
+    assert metrics["mean_digits"] == 0.0
+    assert "Deadline" in metrics["per_problem"][0]["error"]
+
+
+# ---------------------------------------------------------------------------
+# The suite
+# ---------------------------------------------------------------------------
+
+
+def test_dealing_keeps_every_domain_in_every_shard():
+    problems = [
+        srbench.SrProblem(f"{subset}-{index}", subset, ("t",), "y", "", "", 1, 1, 0)
+        for subset in ("a", "b") for index in range(8)
+    ]
+    dealt = srbench._deal(problems, 4, seed=0)
+    assert sum(len(shard) == 4 for shard in dealt) == 4
+    for shard in dealt:
+        assert len({problem.subset for problem in shard}) == 2
+
+
+def test_capping_the_problem_count_stays_even_across_subsets():
+    problems = [
+        srbench.SrProblem(f"{subset}-{index}", subset, ("t",), "y", "", "", 1, 1, 0)
+        for subset, count in (("a", 20), ("b", 4)) for index in range(count)
+    ]
+    chosen = srbench._stratified_cap(problems, 8, seed=0)
+    assert len(chosen) == 8
+    counts = {}
+    for problem in chosen:
+        counts[problem.subset] = counts.get(problem.subset, 0) + 1
+    assert counts == {"a": 4, "b": 4}
+    # Deterministic: the same seed picks the same problems.
+    assert [p.problem_id for p in chosen] == [
+        p.problem_id for p in srbench._stratified_cap(problems, 8, seed=0)]
+
+
+def test_the_dataset_names_the_paper_uses_all_resolve():
+    assert srbench.resolve_subsets("lsr_synth") == srbench.GROUPS["lsr_synth"]
+    assert srbench.resolve_subsets("lsr_transform") == ("lsr_transform",)
+    assert len(srbench.resolve_subsets("all")) == 5
+    assert srbench.resolve_subsets("lsr_synth_matsci") == ("lsr_synth_matsci",)
+    with pytest.raises(ValueError):
+        srbench.resolve_subsets("feynman")
+
+
+def test_the_mirror_files_are_pinned_to_a_revision():
+    """`main` moving under a benchmark is how a rerun stops being a rerun."""
+    assert len(srbench.MIRROR_REVISION) == 40
+    url = srbench.MIRROR_URL.format(repo=srbench.MIRROR_REPO,
+                                    revision=srbench.MIRROR_REVISION,
+                                    path="lsr_synth_matsci/train.parquet")
+    assert srbench.MIRROR_REVISION in url and "/main/" not in url
+
+
+# ---------------------------------------------------------------------------
+# The prompt and the port
+# ---------------------------------------------------------------------------
+
+
+class _Parent:
+    code = "def discover(x, y, spec):\n    return '0.0'\n"
+    metrics = {"mean_digits": 4.5, "acc_0.1": 0.25, "median_nmse": 3e-5,
+               "worst": [{"problem_id": "matsci-3", "subset": "lsr_synth_matsci",
+                          "variables": ["epsilon", "T"], "digits": 0.0,
+                          "equation": "1.0*epsilon", "error": "", "seconds": 0.4}]}
+
+
+def test_the_prompt_states_the_contract_without_leaking_an_answer(tmp_path):
+    suite = _fixture_suite(tmp_path)
+    text = srbench.mutation_prompt(
+        _Parent(), preview=srbench.suite_preview(suite), timeout=300.0,
+        problem_seconds=10.0, functions=("sin", "cos", "exp"))
+    assert "discover(x, y, spec)" in text
+    assert "returns a STRING" in text
+    assert "4.5000" in text and "Acc(0.1) = 25.0%" in text
+    assert "matsci-3" in text                      # which problem failed
+    assert "2*a + 3" not in text                   # never the ground truth
+    assert "sin, cos, exp" in text
+
+
+def test_the_domain_reports_the_benchmark_it_ran(tmp_path):
+    suite = _fixture_suite(tmp_path)
+    domain = port.srbench_domain(suite)
+    assert domain.entrypoint == "discover"
+    assert domain.metric_key == "mean_digits"
+    assert domain.metric_better == "higher"
+    assert domain.gain(2.0, 6.0) == pytest.approx(4.0)
+    summary = domain.data_summary
+    assert summary["benchmark"] == "LLM-SRBench"
+    assert summary["paper"] == srbench.BENCHMARK_PAPER
+    assert srbench.MIRROR_REPO in summary["source"]
+    assert domain.test_shards == suite.test_range()
+
+
+def test_the_ports_dry_run_says_it_touched_nothing(capsys):
+    assert port.main(["--dry-run"]) == 0
+    printed = capsys.readouterr().out
+    assert "dry-run" in printed.lower()
+    assert "LLM-SRBench" in printed

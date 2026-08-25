@@ -6,6 +6,57 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **ERA runs LLM-SRBench — a benchmark this repository did not build.**
+  `examples/era/era_llm_srbench.py` is a fourth task on the same flat-PUCT tree
+  search, the same aggregator, the same sandbox and the same governance layer,
+  behind the same `Domain` seam the integrals and 2F1 tasks use. What is new is
+  where the yardstick comes from: [LLM-SRBench](https://arxiv.org/abs/2504.10415)
+  (ICML 2025 Oral) is 240 published scientific equation-discovery problems in
+  five subsets — 111 Feynman equations rearranged into unfamiliar forms, and 129
+  synthetic problems across chemistry, biology, physics and materials science
+  with out-of-distribution splits — with its own metrics and its own leaderboard
+  of LLM-based methods. The other two constructed tasks answer "is this search
+  any good?" against a bar this repository set; this one does not.
+
+  A candidate writes `discover(x, y, spec)` and returns a **closed-form equation
+  as a string**, parsed and never executed: numeric constants, the problem's own
+  variables, `pi`/`e`, `+ - * / **`, and a fixed list of elementary functions.
+  That is what keeps the task equation discovery rather than regression — a
+  nearest-neighbour table cannot be written in the grammar — and it is also the
+  boundary the held-out samples sit behind, since the candidate hands back a
+  formula rather than code that runs. Scoring is the paper's own `NMSE` and
+  `Acc_0.1`; the tree ranks on `min(12, -log10(NMSE))` averaged over the problem
+  set, because `Acc_0.1` is an indicator that is flat almost everywhere. The root
+  node is sequentially thresholded least squares over a fixed nonlinear library
+  — SINDy's fitting step without its domain-chosen library.
+
+  **The protocol is ERA's, not the benchmark's**, and every result file says so
+  under `comparability`: LLM-SRBench evaluates searchers that see one problem at
+  a time with the data in context, while here the model never sees a sample, it
+  writes one program, and that program is run sandboxed over every problem. Same
+  benchmark, splits and metrics; different experiment.
+
+  Three things are checked rather than assumed. The benchmark's own HuggingFace
+  release is **gated** — 401 without a token — so the task reads an ungated
+  re-upload pinned to a revision, and
+  `tests/test_era_srbench.py::test_the_published_equations_reproduce_the_published_samples`
+  re-evaluates every ground-truth expression that parses against the samples
+  shipped beside it. Two subsets' ground-truth *strings* are damaged in that copy
+  (36 chemistry expressions carry a mangled parameter; 44 physics expressions are
+  templates with unbound `F0`/`beta`/`omega0`), which the test asserts is still
+  true so the note cannot go stale silently; scoring never touches those strings.
+  And a non-finite prediction fails the problem here where upstream's
+  `compute_output_base_metrics` drops the point and scores the rest — a search
+  told otherwise learns to place poles — so both numbers are reported, `nmse`
+  under this rule and `nmse_upstream` under the paper's.
+
+  `--dataset` selects the category, `--problems` caps the count evenly across
+  subsets, `--problem-seconds` is enforced with `SIGALRM` inside the runner, and
+  `--train-points` caps the rows a candidate is handed. Reading the benchmark's
+  parquet needs `pyarrow`. Notes: `docs/algo-era.md`, `examples/era/README.md`.
+
 ## [0.4.5] — 2026-08-19
 
 ### Fixed
