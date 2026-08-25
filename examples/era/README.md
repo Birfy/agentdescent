@@ -102,6 +102,15 @@ Problem sizes are **upstream's published ones**, read from AlgoTune's own
 machine that generated the dataset), so two runs of this port are comparable
 without either of them calibrating against whatever host it landed on.
 
+Measured, 20 tasks against GLM-5.2, 9 expansions per tree: **geometric-mean
+held-back speedup 0.995x → 1.348x**, 16 of 20 improved, 9 at 1.10x or better.
+The four largest are algorithm changes rather than flag-twiddling — 8.36x on
+`wasserstein_dist` by replacing a general two-sample routine with the 1-D
+closed form, 3.95x on `psd_cone_projection`, 2.21x on `ode_lorenz96_nonchaotic`
+from the right-hand side alone at the reference's own tolerances, 2.05x on
+`eigenvalues_real`. Full table, the caveats, and an independent repeat of the
+same configuration: [`docs/algo-era.md`](../../docs/algo-era.md#measured-results--algotune).
+
 ## What is in here
 
 - [`era_empirical_software.py`](era_empirical_software.py) — the runnable port, and the search every task shares

@@ -1,0 +1,413 @@
+{
+  "experiment": "ERA on AgentDescent -- AlgoTune, one tree per task",
+  "status": "completed",
+  "completed_at": "2026-08-25T17:10:26+00:00",
+  "upstream_commit": "dff9914c10800c7a031c9e8c3d4d1c8cd1b38906",
+  "benchmark": "AlgoTune (arXiv:2507.15887), oripress/AlgoTune",
+  "config": {
+    "provider": "claude",
+    "model": "glm-5.2",
+    "seed": 0,
+    "asynchronous": false,
+    "async_ratio": 1,
+    "max_seconds": 1800.0,
+    "pipelined_gate": false,
+    "gate_workers": 2,
+    "dry_run": false,
+    "serial": false,
+    "budget_rollouts": null,
+    "val_cap": null,
+    "eval_concurrency": null,
+    "reflective_merge": false,
+    "eval_cache": "",
+    "no_thinking": false,
+    "tasks": "sparse_lowest_eigenvalues_posdef",
+    "list_tasks": false,
+    "staleness": "guarded",
+    "iterations": 9,
+    "workers": 3,
+    "shards": 6,
+    "test_shards": 3,
+    "problems": 2,
+    "repeats": 3,
+    "size_scale": 1.0,
+    "held_out_frac": 0.5,
+    "c_puct": 1.0,
+    "candidate_timeout": 120.0,
+    "problem_seconds": 60.0,
+    "max_code_length": 20000,
+    "max_tokens": 16000,
+    "temperature": 0.7,
+    "thinking": "disabled",
+    "api_timeout": 180.0,
+    "reply_attempts": 4,
+    "shutdown_grace": 120.0,
+    "quality_target": null
+  },
+  "summary": {
+    "tasks_run": 1,
+    "tasks_failed": 0,
+    "tasks_improved": 0,
+    "geometric_mean_baseline_speedup": 1.046575518428317,
+    "geometric_mean_best_speedup": 1.0105941023722462,
+    "wall_seconds": 203.59295030799876
+  },
+  "tasks": [
+    {
+      "task": "sparse_lowest_eigenvalues_posdef",
+      "status": "completed",
+      "held_out_baseline_speedup": 1.046575518428317,
+      "held_out_best_speedup": 1.0105941023722462,
+      "speedup_gain": -0.03598141605607075,
+      "nodes": 10,
+      "wall_seconds": 182.70502761199896,
+      "best_program": "from __future__ import annotations\nfrom typing import Any\nimport numpy as np\nfrom scipy import sparse\nfrom scipy.sparse.linalg import eigsh\n\ndef solve(problem: dict[str, Any]) -> list[float]:\n    mat: sparse.spmatrix = problem['matrix'].asformat('csr')\n    k: int = int(problem['k'])\n    n = mat.shape[0]\n    if k >= n or n < 2 * k + 1:\n        vals = np.linalg.eigvalsh(mat.toarray())\n        return [float(v) for v in vals[:k]]\n    try:\n        vals = eigsh(mat, k=k, which='SM', return_eigenvectors=False, maxiter=n * 200, ncv=min(n - 1, max(2 * k + 1, 20)))\n    except Exception:\n        vals = np.linalg.eigvalsh(mat.toarray())[:k]\n    return [float(v) for v in np.sort(np.real(vals))]\n",
+      "observation": {
+        "mode": "sync",
+        "wall_seconds": 182.70502761199896,
+        "baseline": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "8476d163a1b3bf47",
+          "iteration": 0,
+          "change_summary": "AlgoTune reference implementation for sparse_lowest_eigenvalues_posdef",
+          "score": 1.020786890187159,
+          "speedup": 1.020786890187159,
+          "num_visits": 9,
+          "valid": true,
+          "error": "",
+          "code_chars": 691
+        },
+        "best": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "8476d163a1b3bf47",
+          "iteration": 0,
+          "change_summary": "AlgoTune reference implementation for sparse_lowest_eigenvalues_posdef",
+          "score": 1.020786890187159,
+          "speedup": 1.020786890187159,
+          "num_visits": 9,
+          "valid": true,
+          "error": "",
+          "code_chars": 691
+        },
+        "data": {
+          "task": "sparse_lowest_eigenvalues_posdef",
+          "n": 1341,
+          "published_n": 1341,
+          "published_target_time_ms": 100,
+          "published_baseline_ms": 111.00749585,
+          "problems_per_shard": 2,
+          "scoring_shards": 6,
+          "test_shards": 3,
+          "timed_repeats": 3,
+          "seed": 0
+        },
+        "framework": {
+          "baseline_reward": 0.5051432662909927,
+          "final_reward": 0.5035713067106345,
+          "quality_gain": -0.001571959580358162,
+          "stop_reason": "rounds",
+          "error": null,
+          "outcomes": {
+            "tree-updated": 3
+          },
+          "rollouts": 9,
+          "rollout_seconds": 30.36894679069519,
+          "eval_seconds": 9.359809160232544,
+          "stale_considered": 9,
+          "stale_discarded": 0,
+          "stale_rate": 0.0,
+          "retired_workers": 0,
+          "history": [
+            {
+              "round": 0,
+              "held_out_reward": 0.5035713067106345,
+              "elapsed_s": 66.18517112731934,
+              "rollouts": 3,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 1,
+              "held_out_reward": 0.5035713067106345,
+              "elapsed_s": 124.30700922012329,
+              "rollouts": 6,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 2,
+              "held_out_reward": 0.5035713067106345,
+              "elapsed_s": 172.61360478401184,
+              "rollouts": 9,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            }
+          ]
+        },
+        "actor_usage": {
+          "calls": 21,
+          "failures": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "model_seconds": 159.734508
+        },
+        "tree": {
+          "nodes": 10,
+          "valid_nodes": 6,
+          "max_depth": 2,
+          "root_visits": 9,
+          "c_puct": 1.0,
+          "tree": [
+            {
+              "index": 0,
+              "parent_index": null,
+              "program_id": "8476d163a1b3bf47",
+              "iteration": 0,
+              "change_summary": "AlgoTune reference implementation for sparse_lowest_eigenvalues_posdef",
+              "score": 1.020786890187159,
+              "speedup": 1.020786890187159,
+              "num_visits": 9,
+              "valid": true,
+              "error": "",
+              "code_chars": 691
+            },
+            {
+              "index": 1,
+              "parent_index": 0,
+              "program_id": "9a3d544421b4b395",
+              "iteration": 1,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output",
+              "code_chars": 528
+            },
+            {
+              "index": 2,
+              "parent_index": 0,
+              "program_id": "d8c1b4d06c920e40",
+              "iteration": 3,
+              "change_summary": "",
+              "score": 1.000280131629647,
+              "speedup": 1.000280131629647,
+              "num_visits": 2,
+              "valid": true,
+              "error": "",
+              "code_chars": 585
+            },
+            {
+              "index": 3,
+              "parent_index": 0,
+              "program_id": "794d739535baddf6",
+              "iteration": 2,
+              "change_summary": "",
+              "score": 0.41110986190501647,
+              "speedup": 0.41110986190501647,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1677
+            },
+            {
+              "index": 4,
+              "parent_index": 0,
+              "program_id": "d85477514ed831e0",
+              "iteration": 5,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output",
+              "code_chars": 569
+            },
+            {
+              "index": 5,
+              "parent_index": 0,
+              "program_id": "cafe279948bce9f3",
+              "iteration": 4,
+              "change_summary": "",
+              "score": 0.3173044798579611,
+              "speedup": 0.3173044798579611,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 904
+            },
+            {
+              "index": 6,
+              "parent_index": 0,
+              "program_id": "930f7aac6d8a2262",
+              "iteration": 6,
+              "change_summary": "",
+              "score": 0.6498482976207473,
+              "speedup": 0.6498482976207473,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 649
+            },
+            {
+              "index": 7,
+              "parent_index": 0,
+              "program_id": "da020690907fa162",
+              "iteration": 8,
+              "change_summary": "",
+              "score": 0.9546047626946715,
+              "speedup": 0.9546047626946715,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 685
+            },
+            {
+              "index": 8,
+              "parent_index": 0,
+              "program_id": "2561e8555e88ca18",
+              "iteration": 9,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output",
+              "code_chars": 884
+            },
+            {
+              "index": 9,
+              "parent_index": 2,
+              "program_id": "f9b919b86c169486",
+              "iteration": 7,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "1/6 problems were not solved correctly: is_solution rejected the output",
+              "code_chars": 1227
+            }
+          ]
+        },
+        "test": {
+          "baseline": {
+            "speedup": 1.046575518428317,
+            "score": 1.046575518428317,
+            "valid_problems": 6,
+            "problems": 6,
+            "baseline_ms": 170.1939703334574,
+            "candidate_ms": 162.8456420000172,
+            "slowest": [
+              {
+                "seed": 17,
+                "shard": 8,
+                "baseline_ms": 165.0282,
+                "candidate_ms": 164.8372,
+                "speedup": 1.0012,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 16,
+                "shard": 7,
+                "baseline_ms": 202.6186,
+                "candidate_ms": 199.3283,
+                "speedup": 1.0165,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 18,
+                "shard": 8,
+                "baseline_ms": 151.8537,
+                "candidate_ms": 149.0269,
+                "speedup": 1.019,
+                "valid": true,
+                "error": ""
+              }
+            ],
+            "seconds": 10.345675332999235,
+            "limits_unavailable": [],
+            "error": ""
+          },
+          "best": {
+            "speedup": 1.0105941023722462,
+            "score": 1.0105941023722462,
+            "valid_problems": 6,
+            "problems": 6,
+            "baseline_ms": 155.52073000011055,
+            "candidate_ms": 153.5125598338709,
+            "slowest": [
+              {
+                "seed": 13,
+                "shard": 6,
+                "baseline_ms": 129.9073,
+                "candidate_ms": 148.9497,
+                "speedup": 0.8722,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 18,
+                "shard": 8,
+                "baseline_ms": 131.6707,
+                "candidate_ms": 135.7709,
+                "speedup": 0.9698,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 17,
+                "shard": 8,
+                "baseline_ms": 169.1895,
+                "candidate_ms": 167.5363,
+                "speedup": 1.0099,
+                "valid": true,
+                "error": ""
+              }
+            ],
+            "seconds": 10.000488829999085,
+            "limits_unavailable": [],
+            "error": ""
+          },
+          "speedup_gain": -0.03598141605607075
+        }
+      },
+      "actor_usage": {
+        "calls": 21,
+        "failures": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "model_seconds": 159.734508
+      }
+    }
+  ],
+  "failures": [],
+  "model_usage": {
+    "calls": 9,
+    "failures": 0,
+    "prompt_tokens": 11833,
+    "completion_tokens": 2285,
+    "total_tokens": 14118,
+    "model_seconds": 119.441267
+  },
+  "reply_damage": {
+    "drawn": 9,
+    "damaged": 0,
+    "attempts_allowed": 4
+  }
+}

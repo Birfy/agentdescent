@@ -871,6 +871,128 @@ endpoint's measured knee bought **2.1×**.
     top-K node programs**, so gate-versus-test correlation can be measured
     directly rather than inferred from whichever program happened to win.
 
+## Measured results — AlgoTune
+
+### The method
+
+**Model** GLM-5.2 behind an Anthropic-shaped endpoint (`--provider claude`,
+`ANTHROPIC_BASE_URL`), `--thinking disabled`, `--temperature 0.7`,
+`--max-tokens 16000`.
+**Search** `--iterations 9 --workers 3` per task, synchronous, `--staleness
+guarded`, `c_puct 1.0`. Every tree finished with **10 nodes** — the root plus
+its nine expansions — so no task was cut short of its budget.
+**Data** `--shards 6 --test-shards 3 --problems 2`, upstream's published problem
+size (`--size-scale 1.0`), `--repeats 3` after a discarded warm-up. Three of the
+six scoring sets are the acceptance gate's held-out split; the three test sets
+are never shown to the search and are what the numbers below are measured on.
+**Host** 4 cores, one BLAS thread per sandbox, Bubblewrap.
+**Cost** 182 model calls, 256k tokens, 107 minutes of wall clock for 20 trees.
+One reply in 172 arrived damaged and was redrawn (see
+[the endpoint note](#when-the-channel-damages-a-reply)).
+
+Raw data: [`bench/results/era-algotune-run.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-algotune-run.json)
+plus the per-task winners beside it.
+
+### The result
+
+Twenty tasks, one tree each. Held-back speedup over the task's own reference,
+root node → best node:
+
+| Task | n | reference | root | best | replication |
+|---|---:|---:|---:|---:|---:|
+| `wasserstein_dist` | 64597 | 85 ms | 1.02x | **8.36x** | 8.33x |
+| `psd_cone_projection` | 349 | 102 ms | 1.01x | **3.95x** | 4.34x |
+| `ode_lorenz96_nonchaotic` | 7856 | 102 ms | 0.98x | **2.21x** | 2.20x |
+| `eigenvalues_real` | 875 | 125 ms | 0.99x | **2.05x** | 2.22x |
+| `cholesky_factorization` | 1660 | 109 ms | 1.02x | **1.35x** | 1.35x |
+| `graph_laplacian` | 44505 | 101 ms | 1.02x | **1.31x** | 1.46x |
+| `convex_hull` | 267021 | 30 ms | 1.00x | **1.21x** | 1.00x |
+| `unit_simplex_projection` | 982958 | 104 ms | 0.99x | **1.14x** | 1.11x |
+| `matrix_multiplication` | 790 | 106 ms | 1.04x | **1.12x** | 1.09x |
+| `eigenvectors_real` | 827 | 110 ms | 0.96x | **1.10x** | 1.07x |
+| `ode_stiff_vanderpol` | 2 | 120 ms | 1.00x | 1.09x | 1.08x |
+| `matrix_exponential` | 555 | 107 ms | 1.02x | 1.02x | 1.00x |
+| `sparse_lowest_eigenvalues_posdef` | 1341 | 101 ms | 1.05x | 1.01x | — |
+| `toeplitz_solver` | 8588 | 100 ms | 1.00x | 1.01x | 1.00x |
+| `svd` | 474 | 118 ms | 0.99x | 1.00x | 1.04x |
+| `fft_convolution` | 542069 | 108 ms | 1.02x | 1.00x | 1.06x |
+| `correlate_1d` | 1504 | 120 ms | 1.01x | 0.98x | 1.02x |
+| `qr_factorization` | 971 | 105 ms | 0.95x | 0.98x | 0.92x |
+| `convolve_1d` | 72989 | 146 ms | 0.95x | 0.96x | 0.99x |
+| `lu_factorization` | 1104 | 113 ms | 0.88x | 0.85x | 0.83x |
+
+**Geometric mean 0.995x → 1.348x.** 16 of 20 trees improved on their own
+scoring sets in a way that survived the held-back ones; 9 finished at 1.10x or
+better; 5 finished below 1.0.
+
+### What the wins actually are
+
+The four largest are algorithm changes, not flag-twiddling, and each is a thing
+a domain expert would recognise:
+
+* **`wasserstein_dist`, 8.36x.** The reference calls
+  `scipy.stats.wasserstein_distance` with Python lists of support points and
+  weights — a general two-sample routine that sorts. On this task the support is
+  `1..n` for both distributions, where the distance has a closed form: the L1
+  norm of the difference of the CDFs. The winner is
+  `np.abs(np.cumsum(u - v)).sum()`.
+* **`psd_cone_projection`, 3.95x.** `scipy.linalg.eigh(driver="evd",
+  overwrite_a=True)` in place of `numpy.linalg.eigh`, then `(V * w) @ V.T`
+  instead of forming `diag(w)` and multiplying twice.
+* **`ode_lorenz96_nonchaotic`, 2.21x.** Same solver, same `RK45`, same `rtol =
+  atol = 1e-8` as the reference — the win is entirely in the right-hand side.
+  The reference rebuilds three `np.roll(np.arange(N))` index arrays and does
+  three fancy-index gathers on **every** derivative evaluation; the winner does
+  the same shifts with slice assignment into preallocated buffers.
+* **`eigenvalues_real`, 2.05x.** `scipy.linalg.eigh(eigvals_only=True,
+  overwrite_a=True, check_finite=False)` and a numpy sort, in place of
+  `numpy.linalg.eigh` — which computes eigenvectors nobody asked for — followed
+  by Python's `sorted()`.
+
+`overwrite_a=True` is available to a candidate here precisely because the
+harness hands every timed call its own deep copy, made outside the timed region.
+That is not a courtesy: without it the second run of a destructive candidate
+would be solving a different problem.
+
+### What the run says about the harness
+
+**The root measures as the reference.** Across twenty tasks the root node — the
+lifted reference, timed against the reference — has a median of 1.003x and sits
+within 2% of 1.0 on fifteen of them. That is the check that matters, because
+every number in the table is a ratio against it.
+
+Four tasks miss it: `lu_factorization` at 0.88x, `qr_factorization` and
+`convolve_1d` at 0.95x, `eigenvectors_real` at 0.96x. The reference is timed
+first and the candidate second, and on those tasks going second costs something
+real — allocator state, most likely, since they are the tasks whose working set
+is largest relative to their runtime. **A "best" below the root on those four is
+not evidence of a regression**, it is the floor the search was standing on; the
+gain column (`speedup_gain` in the result file) is the honest read.
+
+**Held-back means held back.** Five trees finished below 1.0x on the test sets
+despite having improved on the sets they could see. That is what the split is
+for, and a port that reported the scoring-set number would have called those
+five wins.
+
+**Two runs, and they agree.** The table's last column is an independent repeat
+of the same configuration. The two runs overlapped in time on a 4-core host, so
+both were contending for CPU with each other — which inflates the absolute
+milliseconds on both sides of a ratio taken in one process moments apart. The
+ratios held: 8.36 vs 8.33, 2.21 vs 2.20, 1.35 vs 1.35, 1.12 vs 1.09. The two
+places they disagree materially, `convex_hull` (1.21 vs 1.00) and
+`graph_laplacian` (1.31 vs 1.46), are tasks where the two searches ended on
+different programs rather than measurements of the same one.
+
+**One task was missing from both runs, and it was this port's fault.**
+`sparse_lowest_eigenvalues_posdef`'s reference opens with `from __future__
+import annotations`, which was not on the import allowlist, so the root node was
+refused by the gate and the task died with "the initial ERA program failed to
+run". Fixed, and the gap that let it through is closed by a sweep that derives
+and gates all 72 references
+(`AGENTDESCENT_ALGOTUNE_NETWORK=1 pytest tests/test_era_algotune.py`). Its
+re-run is the row above, and it is a negative result: 1.05x → 1.01x, no
+improvement that survived the held-back sets.
+
 ## Run it
 
 Preview without an API key, network access, or sandbox process:

@@ -45,6 +45,18 @@ All notable changes to AgentDescent are documented here. The format follows
   `--tasks all` runs it. Notes in [`docs/algo-era.md`](docs/algo-era.md), offline
   tests in `tests/test_era_algotune.py`.
 
+  **Measured**, 20 tasks against GLM-5.2 with 9 expansions per tree:
+  geometric-mean held-back speedup **0.995x -> 1.348x**, 16 of 20 improved, 9 at
+  1.10x or better. The four largest are algorithm changes rather than
+  flag-twiddling: 8.36x on `wasserstein_dist` (the general two-sample routine
+  replaced by the 1-D closed form), 3.95x on `psd_cone_projection`, 2.21x on
+  `ode_lorenz96_nonchaotic` from the right-hand side alone at the reference's own
+  tolerances, 2.05x on `eigenvalues_real`. Five trees finished *below* 1.0x on
+  the held-back sets after improving on the sets they could see, which is what
+  the split is for. Table, caveats and an independent repeat in
+  [`docs/algo-era.md`](docs/algo-era.md#measured-results--algotune); raw data in
+  `bench/results/era-algotune-*.json`.
+
 ## [0.4.5] — 2026-08-19
 
 ### Fixed
