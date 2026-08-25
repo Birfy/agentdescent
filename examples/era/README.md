@@ -1,7 +1,7 @@
 # ERA — empirical-software search (Flat UCB tree search)
 
 Faithful port of Google Research's released ERA implementation onto the
-AgentDescent engine, running **three** tasks on one search.
+AgentDescent engine, running **four** tasks on one search.
 
 | | |
 |---|---|
@@ -12,6 +12,7 @@ AgentDescent engine, running **three** tasks on one search.
 | Dataset (faithful) | Kaggle Playground Series S3E1 — the upstream `implementation/playground_s3e1.py` task |
 | Second task | *Numerical solution of integrals* — named in the paper's abstract; upstream released no implementation, so the nine-family suite is constructed here |
 | Third task | Gauss hypergeometric `2F1` in double precision — not in the paper at all; 3000 points against a 25-digit mpmath reference, baseline `scipy.special.hyp2f1` |
+| Fourth task | `scipy.special.pbdv` and `hyperu` — chosen by a 47-function precision sweep rather than from the literature; one tree per function |
 | `evolve()` plug-ins | `strategy` + `aggregator_factory=` FUTS tree, `selection.FlatPuct` |
 
 ## Run
@@ -20,14 +21,16 @@ AgentDescent engine, running **three** tasks on one search.
 python -m examples.era.era_empirical_software --dry-run   # Kaggle S3E1, RMSE
 python -m examples.era.era_hard_integrals --dry-run       # hard integrals, correct digits
 python -m examples.era.era_hypergeometric --dry-run       # 2F1 vs a 25-digit reference
+python -m examples.era.era_special_precision --function pbdv --dry-run    # one tree
+python -m examples.era.era_special_precision --function hyperu --dry-run  # another
 ```
 
 `--dry-run` prints the configuration and returns with **zero network access
 and no API key**.
 
-## The three tasks
+## The four tasks
 
-All three entry points run the *same* flat-PUCT tree search, the same aggregator, the
+All four entry points run the *same* flat-PUCT tree search, the same aggregator, the
 same sandbox and the same governance layer. What differs is a
 [`Domain`](_era_domain.py): the seed program, the sandboxed evaluator, the
 mutation prompt, and the name of the metric.
@@ -67,6 +70,41 @@ deviation of 3.20, so an 80-point gate could not separate a half-digit gain from
 noise. `mpmath`, `decimal` and `fractions` are off this
 task's allowlist — the deliverable is a float64 routine.
 
+**`era_special_precision.py` — the functions a sweep picked out.** The task
+above chose `2F1` from a survey paper. This one chooses by measurement:
+[`tools/scan_numeric_precision.py`](../../tools/scan_numeric_precision.py)
+scores **47 NumPy and SciPy float64 entry points** against mpmath at 30 and 60
+digits, over ranges declared before anything was run, and keeps only the points
+where the two precisions agree.
+
+Its main finding is that the libraries are mostly excellent — every NumPy
+elementary function tested returns the full 16 digits, `sin` and `tan` included
+at arguments up to 1e18, and around thirty SciPy entry points sit above 15. Two
+do not, and they are this task's targets:
+
+| target | mean digits | < 8 digits | < 1 digit |
+|---|---|---|---|
+| `scipy.special.pbdv` | 11.67 | 17.8% | 12.2% |
+| `scipy.special.hyperu` | 14.36 | 3.0% | 2.8% |
+
+Not rounding complaints. `pbdv` returns `4.81e100` at `v=19.83, x=-29.28` where
+the value is `2.46e80`, and `-2.44e24` at `v=17.02, x=-14.61` where it is
+`+6.01e15` — wrong sign, wrong magnitude, on a coherent region (large positive
+order, negative argument). `hyperu` does not return a wrong number at all: on
+3% of its range it returns **`nan`**, at points like `a=-15.82, b=-1.30,
+x=23.10` where the function equals `2.45e17` and is perfectly well-conditioned.
+
+`--function` picks the target and **each call is its own tree** — its own
+stress set, root node, search and result file, sharing code and nothing else. A
+single pooled score across both would let a gain on one hide a regression on
+the other, and the claim being tested is per-function.
+
+The stress sets use the sweep's *declared* ranges verbatim rather than
+narrowing onto the failures the sweep found — a suite drawn around known
+failures would measure the drawing. Sizes come from the measured variance:
+per-point digits have an SD of 4.78 on `pbdv` and 2.83 on `hyperu`, so the
+2000-point gate carries a standard error of 0.11 digits.
+
 ## What is in here
 
 - [`era_empirical_software.py`](era_empirical_software.py) — the runnable port, and the search every task shares
@@ -82,6 +120,13 @@ task's allowlist — the deliverable is a float64 routine.
 - [`_era_hyp2f1_runner.py`](_era_hyp2f1_runner.py) — the sandbox-side runner (2F1)
 - [`data/hyp2f1_stress.json`](data/hyp2f1_stress.json) — the committed stress set and its references,
   produced by [`tools/gen_hyp2f1_stress.py`](../../tools/gen_hyp2f1_stress.py)
+- [`era_special_precision.py`](era_special_precision.py) — the sweep-chosen targets, one tree per `--function`
+- [`_era_special.py`](_era_special.py) — target registry, suite, sandboxed evaluator, prompt
+- [`_era_special_runner.py`](_era_special_runner.py) — the sandbox-side runner (shared by every target)
+- [`data/pbdv_stress.json`](data/pbdv_stress.json), [`data/hyperu_stress.json`](data/hyperu_stress.json) —
+  committed stress sets, produced by [`tools/gen_special_stress.py`](../../tools/gen_special_stress.py)
+- The sweep itself: [`tools/scan_numeric_precision.py`](../../tools/scan_numeric_precision.py),
+  results in [`docs/data/numeric_precision_scan.json`](../../docs/data/numeric_precision_scan.json)
 - Port notes, upstream trace, and every recorded deviation: [`docs/algo-era.md`](../../docs/algo-era.md)
 - Offline tests: [`tests/test_era_example.py`](../../tests/test_era_example.py),
   [`tests/test_era_integrals.py`](../../tests/test_era_integrals.py),

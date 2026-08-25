@@ -18,6 +18,7 @@ into whatever task interface they need.
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import threading
@@ -26,7 +27,9 @@ import subprocess
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Optional, Protocol, Sequence, runtime_checkable
+from typing import (
+    Callable, Dict, Optional, Protocol, Sequence, Tuple, runtime_checkable,
+)
 
 Completion = Callable[[str], str]
 
@@ -279,9 +282,38 @@ def claude(model: str = "claude-opus-4-8", max_tokens: int = 4096,
     Raise it for an agentic backend that legitimately takes longer; the
     equivalent knob on :func:`openai_compatible` has always been here."""
     _client = client
+    _split: Optional[Tuple[Dict[str, object], Dict[str, object]]] = None
+
+    def _partition(create) -> Tuple[Dict[str, object], Dict[str, object]]:
+        """Split ``create_kwargs`` into what the installed SDK names, and the rest.
+
+        ``anthropic`` 1.0.0 dropped ``temperature`` from ``Messages.create``'s
+        signature, so a keyword this module has always forwarded began raising
+        ``TypeError`` *before* any request was made -- measured here as every
+        worker of an ERA round failing with
+        ``got an unexpected keyword argument 'temperature'`` while the run went
+        on to report ``temperature=0.7`` in its result file.
+
+        Dropping the option would be wrong twice over: the run loses the
+        setting, and its recorded configuration keeps claiming it. But
+        ``temperature`` is still part of the wire format and endpoints still
+        honour it, so the option is moved into ``extra_body`` -- the SDK's own
+        escape hatch for fields it does not model -- and reaches the server
+        exactly as before. A future SDK that adds a parameter back simply stops
+        routing it this way.
+        """
+        try:
+            accepted = inspect.signature(create).parameters
+        except (TypeError, ValueError):  # a mock, or a C-level callable
+            return dict(create_kwargs), {}
+        if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in accepted.values()):
+            return dict(create_kwargs), {}
+        named = {k: v for k, v in create_kwargs.items() if k in accepted}
+        overflow = {k: v for k, v in create_kwargs.items() if k not in accepted}
+        return named, overflow
 
     def complete(prompt: str) -> str:
-        nonlocal _client
+        nonlocal _client, _split
         if _client is None:
             from anthropic import Anthropic  # lazy, optional dependency
             # max_retries=0: retrying is this function's job (`with_retries`
@@ -289,11 +321,18 @@ def claude(model: str = "claude-opus-4-8", max_tokens: int = 4096,
             # layers -- attempts x (1 + max_retries) x timeout -- and one
             # logical call against a stalled endpoint blocked ~45 minutes.
             _client = Anthropic(max_retries=0)
+        if _split is None:
+            _split = _partition(_client.messages.create)
+        named, overflow = _split
+        if overflow:
+            named = dict(named)
+            # Merge rather than overwrite: a caller may have passed its own.
+            named["extra_body"] = {**overflow, **(named.get("extra_body") or {})}
         t0 = time.time()
         try:
             msg = _client.messages.create(
                 model=model, max_tokens=max_tokens, timeout=timeout,
-                messages=[{"role": "user", "content": prompt}], **create_kwargs,
+                messages=[{"role": "user", "content": prompt}], **named,
             )
         except Exception:
             if usage is not None:

@@ -341,6 +341,107 @@ is not *is* the expert answer here; the search's job is to find where the line
 falls and what to do on the far side of it, from `(a, b, c, z)` alone, with no
 sight of the answer.
 
+## The fourth task — the targets a sweep chose, not the literature
+
+The 2F1 task picked its function from a survey paper. The fourth picks by
+measurement, which closes a gap the third one leaves open: *2F1 is known to be
+hard, so a task built on it might be the one place SciPy is weak.*
+
+[`tools/scan_numeric_precision.py`](https://github.com/Birfy/agentdescent/blob/main/tools/scan_numeric_precision.py)
+scores **47 NumPy and SciPy float64 entry points** against mpmath. Each probe
+declares its parameter range up front; every point is evaluated at 30 *and* 60
+digits and discarded unless the two agree to 22, so a point where the reference
+has not converged can never become evidence against the library. What the sweep
+reports per function is the mean, the 10th percentile, and the share of points
+under 8 correct digits — that last number being the one that matters, because
+these functions do not degrade smoothly. A mean of 11 can mean "uniformly a bit
+lossy" or "exact on four fifths of the space and garbage on the rest", and only
+the tail tells them apart.
+
+```bash
+python -m tools.scan_numeric_precision            # the whole sweep, ~21s
+python -m tools.scan_numeric_precision --only pbdv,hyperu --points 2000
+```
+
+**The sweep's headline is that NumPy and SciPy are mostly excellent.** Every
+NumPy elementary function tested returns the full 16 digits — including `sin`
+and `tan` at arguments up to 1e18, where argument reduction is the whole
+problem — and around thirty SciPy entry points sit above 15 digits. `gammaln`,
+`erfinv`, `ndtri`, `exp1`, `lambertw`, `ellipkinc`, `expi` and the rest are not
+improvable in double precision. That is a real result and it is why the sweep
+is committed alongside the tasks: it says what *is not* worth searching.
+
+Three targets are not in that group:
+
+| target | mean digits | < 8 digits | < 1 digit |
+|---|---|---|---|
+| `scipy.special.hyp2f1` | 10.72 | 25.8% | 3.8% |
+| `scipy.special.pbdv` | 11.67 | 17.8% | 12.2% |
+| `scipy.special.hyperu` | 14.36 | 3.0% | 2.8% |
+
+`hyp2f1` arriving third-worst *by measurement*, having been chosen for the
+third task from the literature alone, is the sweep's own calibration — the
+method finds the function that was already known to be hard, without being told.
+
+The other two become
+[`examples/era/era_special_precision.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/era_special_precision.py).
+Neither number above is a rounding complaint:
+
+**`pbdv` — the parabolic cylinder function D_v(x).** At `v=19.83, x=-29.28`
+SciPy returns `4.81e100` where the value is `2.46e80`: wrong by twenty orders
+of magnitude. At `v=17.02, x=-14.61` it returns `-2.44e24` where the value is
+`+6.01e15` — wrong sign, wrong size. The bad region is coherent rather than
+scattered: large positive order with negative argument, where the recurrence is
+unstable in the direction it is being run. 12.2% of the declared range has **no
+correct digit at all**.
+
+**`hyperu` — the confluent hypergeometric function U(a, b, x).** Here the
+failure is not inaccuracy but refusal: on about 3% of the range SciPy returns
+`nan`. At `a=-15.82, b=-1.30, x=23.10` the function equals `2.45e17`, an
+entirely ordinary well-conditioned number, and SciPy declines to produce it.
+The bad region is concentrated on `a < 0`.
+
+### One function, one tree
+
+`--function` selects the target, and each call is a **search of its own**: its
+own committed stress set, its own root node, its own flat-PUCT tree, its own
+result file. They share code and nothing else — no pooled score, no transfer of
+programs between them.
+
+That is not a scheduling convenience. The claim being tested is per-function
+("can a search beat SciPy *here*"), and one number pooled across both would let
+a large gain on `pbdv` hide a regression on `hyperu`. It also keeps the two
+honest about difficulty: they start 2.9 digits apart and have entirely
+different failure modes, so a shared budget would silently spend itself on
+whichever tree was easier to move.
+
+### What is inherited unchanged
+
+The suites are drawn by
+[`tools/gen_special_stress.py`](https://github.com/Birfy/agentdescent/blob/main/tools/gen_special_stress.py)
+under exactly the 2F1 generator's discipline — mpmath at 30 and 60 digits, kept
+only where the two agree to 25, 12 shards of 250 points, committed and
+re-derivable byte for byte with `--check`. `mpmath`, `decimal` and `fractions`
+are off the allowlist for the same reason as before: the deliverable is a
+float64 routine.
+
+One property is worth stating because it would be easy to get wrong. **The
+stress sets use the sweep's declared ranges verbatim** — `v ~ U(-20, 20)`,
+`x ~ U(-30, 30)` for `pbdv`; `a, b ~ U(-20, 20)`, `x ~ logU(1e-3, 100)` for
+`hyperu`. The sweep found *where* SciPy fails, and the suite does **not** then
+narrow onto those regions. Drawing a stress set around known failures would
+inflate every number reported here and would measure the drawing rather than
+the implementation; the honest question is what these functions do over a range
+a user might plausibly call them on.
+
+The sizes are chosen from the measured variance rather than from taste.
+Per-point correct digits have a standard deviation of **4.78** on `pbdv` and
+**2.83** on `hyperu` — both close to bimodal, since a program either handles a
+region or scores zero across it — so the 2000-point acceptance gate carries a
+standard error of 0.11 digits and the 1000-point held-back set 0.15. This is
+the same reasoning that resized the 2F1 suite, applied before the fact instead
+of after.
+
 ## Measured results — Playground S3E1
 
 ### The method

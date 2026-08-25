@@ -24,6 +24,7 @@ from examples.dgm import dgm_self_improve as dgm
 from examples.era import era_empirical_software as era
 from examples.era import era_hard_integrals as era_integrals
 from examples.era import era_hypergeometric as era_hyp2f1
+from examples.era import era_special_precision as era_special
 from examples.evoskill import evoskill_skill_discovery as evoskill
 from examples.gepa import gepa_prompt_evolution as gepa
 from examples.openevolve import openevolve_program_evolution as openevolve
@@ -85,6 +86,12 @@ PORTS = (
     # file rather than drawing or downloading, so `load_suite` is the boundary
     # a dry-run must not cross.
     Port(era_hyp2f1, "iterations", "glm-5.2", 1800.0, "load_suite",
+         provider="openai", async_ratio=1, budget_is_iterations=True),
+    # ERA's fourth task: the SciPy entry points tools/scan_numeric_precision.py
+    # measured as inaccurate. One `--function` is one tree, so the same module
+    # is the entry point for every target; like the 2F1 port its loader reads a
+    # committed file, so `load_suite` is the boundary a dry-run must not cross.
+    Port(era_special, "iterations", "glm-5.2", 1800.0, "load_suite",
          provider="openai", async_ratio=1, budget_is_iterations=True),
 )
 
