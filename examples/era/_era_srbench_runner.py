@@ -135,6 +135,7 @@ def solve(entrypoint, expr_module, samples, problems: List[Dict[str, Any]], *,
         variables = list(problem["input_vars"])
         train_x = np.asarray(samples[f"p{position}_train_x"], dtype=np.float64)
         train_y = np.asarray(samples[f"p{position}_train_y"], dtype=np.float64)
+
         def evaluate(expression, data, _variables=tuple(variables)):
             """The scorer's own parser, handed to the candidate.
 
@@ -184,11 +185,17 @@ def solve(entrypoint, expr_module, samples, problems: List[Dict[str, Any]], *,
         }
         if isinstance(equation, str) and not error:
             try:
-                row["id"] = _score(expr_module, equation, variables, samples,
-                                   position, "test")
-                if f"p{position}_ood_x" in samples:
-                    row["ood"] = _score(expr_module, equation, variables, samples,
-                                        position, "ood")
+                # Under the same deadline as the search that produced it: the
+                # grammar caps an expression at 4 000 characters, but scoring one
+                # against 20 000 held-out rows is still the candidate's spending,
+                # and an unbounded step here would let one problem take the rest
+                # of the shard's budget.
+                with time_limit(seconds):
+                    row["id"] = _score(expr_module, equation, variables, samples,
+                                       position, "test")
+                    if f"p{position}_ood_x" in samples:
+                        row["ood"] = _score(expr_module, equation, variables,
+                                            samples, position, "ood")
             except BaseException as exc:
                 row["id"] = None
                 row["ood"] = None

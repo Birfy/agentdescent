@@ -598,6 +598,22 @@ INITIAL_SUMMARY = "sequentially thresholded least squares over a fixed library"
 # --------------------------------------------------------------------------
 
 
+def _reportable(value: Any) -> Optional[float]:
+    """`inf` is a real NMSE here and is not valid strict JSON.
+
+    A problem whose equation has a pole on the test set has an infinite NMSE,
+    which is the honest number and which `json.dump` writes as the bare token
+    `Infinity` -- a file that Python reads back and most other parsers reject.
+    The tree summary already runs `-inf` through the same treatment for the
+    score sentinel; this does it for the metrics beside it. `digits` is 0.0 for
+    exactly these cases, so nothing is lost by reporting `null`.
+    """
+    if value is None:
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else None
+
+
 def _zero_metrics(error: str) -> Dict[str, Any]:
     return {
         "mean_digits": None,
@@ -722,18 +738,27 @@ def evaluate_source(
         unavailable = payload.get("limits_unavailable") or unavailable
         for result, problem in zip(results, problems):
             rows.append(result)
-            digits = (result["id"]["digits"] if result.get("id") is not None
-                      else 0.0)
-            detail.append({
+            scored = result.get("id")
+            ood = result.get("ood")
+            row = {
                 "shard": shard,
                 "problem_id": problem.problem_id,
                 "subset": problem.subset,
                 "variables": list(problem.input_vars),
-                "digits": round(float(digits), 3),
+                # `digits` is what the search ranks on; `nmse` and `acc` are the
+                # benchmark's own metrics, kept per problem so a result file can
+                # be re-aggregated by domain without rerunning anything.
+                "digits": round(float(scored["digits"]) if scored else 0.0, 3),
+                "nmse": _reportable(scored["nmse"]) if scored else None,
+                "acc": (int(scored["acc"]) if scored else 0),
                 "equation": (result.get("equation") or "")[:240],
                 "error": str(result.get("error") or ""),
                 "seconds": round(float(result.get("seconds") or 0.0), 2),
-            })
+            }
+            if ood is not None:
+                row["ood_digits"] = round(float(ood["digits"]), 3)
+                row["ood_acc"] = int(ood["acc"])
+            detail.append(row)
 
     if not rows:
         return False, _zero_metrics("no problems scored"), "no problems scored"
@@ -742,6 +767,9 @@ def evaluate_source(
         # Every problem failed. That is a legitimate node, not a broken run:
         # it scores the floor and the tree keeps it as something to improve on.
         pooled["mean_digits"] = 0.0
+    for key in ("median_nmse", "median_nmse_upstream", "ood_median_nmse"):
+        if key in pooled:
+            pooled[key] = _reportable(pooled[key])
     worst = sorted(detail, key=lambda row: (row["digits"], row["problem_id"]))
     metrics: Dict[str, Any] = dict(pooled)
     metrics.update({

@@ -204,6 +204,21 @@ def test_a_pole_in_the_test_range_fails_the_problem_here_and_not_upstream():
     assert scored["nmse_upstream"] == pytest.approx(0.0)
 
 
+def test_a_zero_target_leaves_the_papers_accuracy_undefined_and_it_is_counted():
+    """Not a choice here: `Acc_tau` divides by `y_i`, so `y_i = 0` has no answer.
+
+    Five of LSR-Synth's 129 problems carry one in their in-domain test targets,
+    which caps Acc(0.1) on that dataset at 124/129 for every method including the
+    ground truth. Reported rather than patched, because patching it would be
+    reporting a different metric under the paper's name.
+    """
+    truth = np.array([0.0, 1.0, 2.0])
+    scored = expr.score_predictions(truth.copy(), truth)
+    assert scored["nmse"] == pytest.approx(0.0)     # an exact fit, and still
+    assert scored["acc"] == 0                       # no Acc credit
+    assert scored["zero_targets"] == 1
+
+
 def test_digits_are_monotone_in_nmse_and_capped_at_the_data_precision():
     assert expr.digits_of(1.0) == 0.0
     assert expr.digits_of(1e-6) == pytest.approx(6.0)
@@ -226,6 +241,14 @@ def test_aggregation_pools_over_problems_and_counts_the_failures():
     assert pooled["acc_0.1"] == pytest.approx(0.5)
     assert pooled["median_nmse"] == pytest.approx(0.5 * (1e-6 + 2.0))
     assert pooled["ood_problems"] == 1
+
+
+def test_an_infinite_nmse_is_reported_as_null_rather_than_as_invalid_json():
+    """`json.dump` writes `inf` as the bare token `Infinity`, which is not JSON."""
+    assert srbench._reportable(math.inf) is None
+    assert srbench._reportable(float("nan")) is None
+    assert srbench._reportable(None) is None
+    assert srbench._reportable(1e-9) == pytest.approx(1e-9)
 
 
 def test_the_framework_reward_is_order_preserving_with_the_metric():

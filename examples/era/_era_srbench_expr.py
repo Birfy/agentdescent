@@ -219,6 +219,12 @@ def score_predictions(prediction: np.ndarray, truth: np.ndarray) -> Dict[str, An
     else:
         upstream = math.inf
 
+    # Acc_tau divides by the target, so a target of exactly zero leaves the
+    # paper's formula undefined at that point and no equation -- the ground
+    # truth included -- can satisfy it. Five of LSR-Synth's 129 problems have
+    # one, which caps Acc(0.1) there at 124/129. That is the published metric on
+    # the published data, so it is counted and reported rather than patched.
+    zero_targets = int(np.count_nonzero(truth == 0.0))
     if n_finite < n_points or spread <= 0.0:
         nmse = math.inf
         acc = 0
@@ -238,6 +244,7 @@ def score_predictions(prediction: np.ndarray, truth: np.ndarray) -> Dict[str, An
         "max_relative": max_relative,
         "points": n_points,
         "nonfinite_points": n_points - n_finite,
+        "zero_targets": zero_targets,
     }
 
 
