@@ -950,3 +950,96 @@ def test_the_ports_dry_run_says_it_touched_nothing(capsys):
     printed = capsys.readouterr().out
     assert "dry-run" in printed.lower()
     assert "LLM-SRBench" in printed
+
+
+# ---------------------------------------------------------------------------
+# The reachability tool: what the answer format itself puts out of reach
+# ---------------------------------------------------------------------------
+
+
+def _reach():
+    pytest.importorskip("sympy", reason="the reachability tool rewrites truths with sympy")
+    pytest.importorskip("scipy", reason="the reachability tool fits with BFGS")
+    from tools import srbench_reachability
+
+    return srbench_reachability
+
+
+def test_holing_a_truth_leaves_its_exponents_alone():
+    """`x**2` is structure. Fitting the exponent measures a harder problem."""
+    reach = _reach()
+    source, params = reach.hole_coefficients("3.5*x**2 + 2.0*y", ["x", "y"])
+    assert "x**2" in source
+    assert "params[0]" in source and "params[1]" in source
+    assert "params[2]" not in source
+    assert params == 2
+
+
+def test_holing_a_truth_keeps_the_values_that_carry_structure():
+    """A sign or an identity is not a magnitude, so it is not a `params[i]`."""
+    reach = _reach()
+    source, params = reach.hole_coefficients("-x + y/2", ["x", "y"])
+    assert params == 1                            # only the 2, not the -1
+    assert source.count("params[") == 1
+
+
+def test_a_truth_with_no_coefficient_still_gets_one_to_fit():
+    """Upstream's format always fits something; a fixed scale is a stricter claim."""
+    reach = _reach()
+    source, params = reach.hole_coefficients("x*y", ["x", "y"])
+    assert params == 1
+    assert "params[0]" in source
+
+
+def test_holing_binds_the_problems_own_names_before_sympy_claims_them():
+    """`beta` and `gamma` are sympy *functions*; a variable named for one must survive."""
+    reach = _reach()
+    source, _ = reach.hole_coefficients("(f - beta)/(beta*gamma)", ["f", "beta", "gamma"])
+    assert "def equation(f, beta, gamma, params):" in source
+    assert "beta" in source and "gamma" in source
+
+
+def test_a_holed_truth_is_the_answer_format_the_run_had_to_write_in():
+    """What the tool scores has to be loadable by the grader's own compiler."""
+    reach = _reach()
+    source, _ = reach.hole_coefficients("2.5*a/b", ["a", "b"])
+    call = expr.compile_program(source, ["a", "b"])
+    x = np.array([[4.0, 2.0], [9.0, 3.0]])
+    params = np.zeros(expr.MAX_NPARAMS)
+    params[0] = 2.5
+    assert call(x, params) == pytest.approx([5.0, 7.5])
+
+
+def test_reachability_separates_the_optimiser_from_the_parameterisation():
+    """The three columns are only useful if the summary attributes the gaps."""
+    reach = _reach()
+    rows = [
+        {"expression_digits": 12.0, "program_digits": 12.0, "restart_digits": 12.0},
+        {"expression_digits": 12.0, "program_digits": 0.0, "restart_digits": 11.0},
+        {"expression_digits": 12.0, "program_digits": 0.0, "restart_digits": 0.0},
+    ]
+    summary = reach.summarise(rows)
+    assert summary["problems"] == 3
+    assert summary["expression_reachable"] == 3
+    assert summary["program_reachable"] == 1
+    assert summary["restart_reachable"] == 2
+    assert summary["lost_to_single_start"] == 1
+    assert summary["lost_to_parameterisation"] == 1
+
+
+def test_reachability_reports_a_truth_it_cannot_rewrite_rather_than_dying():
+    """One unparseable truth must not stop a sweep over a hundred of them."""
+    reach = _reach()
+
+    class _Problem:
+        problem_id = "broken-1"
+        subset = "lsr_transform"
+        input_vars = ("x",)
+        gt_expression = "this is not an equation"
+
+    row = reach.measure(_Problem(), {"train_x": np.zeros((4, 1)), "train_y": np.zeros(4),
+                                     "test_x": np.zeros((4, 1)), "test_y": np.zeros(4)},
+                        train_points=4, restarts=2, seed=0)
+    assert row["problem_id"] == "broken-1"
+    assert row["program_digits"] is None
+    assert "program_error" in row
