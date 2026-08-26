@@ -117,6 +117,15 @@ All notable changes to AgentDescent are documented here. The format follows
   `cos**2` — the same equations, through the identities the benchmark was built
   to reward.
 
+  One caveat that cuts against the headline: the benchmark ships **no program**,
+  so every method brings its own starting point, and these are not equal. LLM-SR
+  starts each problem from a plain linear model in the raw inputs; this port's
+  root is sparse regression over thirty to sixty nonlinear basis functions. On
+  LSR-Synth — additive ODE right-hand sides — that root starts inside the
+  function space the answer lives in, so "a seed with no LLM in it beats LLM-SR
+  on chemistry" reads as "a stronger starting point beats a weaker one". On
+  LSR-Transform the same seed scores 0.9% and the asymmetry does not carry.
+
   Two findings worth the run on their own. The seed program — sparse regression,
   no LLM anywhere in it — already beats every published LLM method in the paper's
   table on LSR-Synth chemistry and biology, which says something about the

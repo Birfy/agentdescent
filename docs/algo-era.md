@@ -1168,6 +1168,32 @@ judge and measures it.
 
 Three more things fall out, and the third is the one worth arguing about:
 
+#### The root nodes are not the same strength, and it matters on LSR-Synth
+
+The benchmark ships **no program**: its rows are an id, a description, the
+sample arrays, the variable names and a ground-truth string. Every method brings
+its own starting point, and the two here are not comparable in strength.
+
+LLM-SR starts each problem from a plain linear model in the raw inputs — from
+its own `methods/llmsr/searcher.py`:
+
+```python
+def equation(x1, x2, ..., params):
+    y = params[0]*x1 + params[1]*x2 + ... + params[n]
+```
+
+This port's root is sparse regression over a fixed library of thirty to sixty
+*nonlinear* basis functions. On LSR-Synth that gap is not incidental — it is
+most of the result. Those problems are ODE right-hand sides built as a known
+term plus a novel one, additive in exactly such a library, so the root node
+starts inside the function space the answer lives in. **"A seed program with no
+LLM in it beats LLM-SR on chemistry" should therefore be read as "a stronger
+starting point beats a weaker one", not as "this search is better."**
+
+The asymmetry does not carry to LSR-Transform, where the same seed scores 0.9%
+and is worth nothing: the 49.5% there was earned by the search, not handed to it
+by the root.
+
 **On LSR-Synth this protocol matches or beats the published state of the art on
 four of five columns of NMSE and two of four on Acc(0.1)** — at 0.11 LLM calls
 per problem, and on data fidelity only, with the symbolic-accuracy caveat above
