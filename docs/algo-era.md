@@ -1364,6 +1364,47 @@ reachable**.
 Result file:
 [`bench/results/era-srbench-deepseek-transform.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-srbench-deepseek-transform.json).
 
+### What LSR-Synth's own ceiling is, and why it can only be quoted for 49 problems
+
+The reachability sweep run over LSR-Synth splits the category into two halves
+that have to be read differently, and the split is not one this port chose:
+
+| subset | problems | truth as published | as `equation(..., params)`, grader's BFGS | with restarts | truth unreadable |
+|---|---|---|---|---|---|
+| `bio_pop_growth` | 24 | 24 | **14 (58%)** | 21 | 0 |
+| `matsci` | 25 | 25 | **25 (100%)** | 25 | 0 |
+| `chem_react` | 36 | — | — | — | **36** |
+| `phys_osc` | 44 | — | — | — | **44** |
+
+**Where the truth is readable, the ceiling is subset-specific and it is not the
+data.** Every `bio_pop_growth` and `matsci` truth reproduces its own samples to
+the full 12 digits with its constants intact, so there is no noise floor
+anywhere here. Holed out as `params[i]` and fitted the way the grader fits,
+`matsci` loses nothing at all and `bio_pop_growth` loses ten of twenty-four —
+seven of them to the single BFGS start alone. The truths say why: a coefficient
+of 0.95 sitting beside a carrying capacity of 96.9 is not a place a single
+gradient descent from `[1.0]*10` arrives. That ceiling is the benchmark's own
+protocol and every method measured under it pays the same price, but it means a
+low `bio_pop_growth` score is half protocol and a low `matsci` score is all
+search.
+
+**The other 80 truths cannot be read at all, and the two subsets fail
+differently.** All 36 `chem_react` truths carry a mangled constant — a number
+with an identifier fused onto it, as in
+`0.18997742423620262*A(t)**2 + 0.18997742423620262_z*A(t)**2/(...)`, where the
+second coefficient's value is simply gone. All 44 `phys_osc` truths are symbolic
+templates whose parameters were never bound: `F0*sin(t) - omega0**2*x(t)**3 -
+...` against data whose only columns are `x`, `t` and `v`.
+
+Scoring those 80 problems is unaffected — the samples are intact and nothing in
+the run reads a ground truth — so their Acc(0.1) and NMSE are as real as any
+other. What cannot be said for them is how far from reachable they were, and
+that is the caveat to carry into any comparison with the paper's `chem_react`
+and `phys_osc` columns.
+
+Result file:
+[`bench/results/era-srbench-reachability-synth.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-srbench-reachability-synth.json).
+
 ### Against the paper's own tables
 
 Two of this port's three programs can be compared to the paper's numbers over
