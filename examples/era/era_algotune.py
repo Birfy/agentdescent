@@ -56,7 +56,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from agentdescent.agents import Usage
+from agentdescent.agents import Usage, with_retries
 from agentdescent.evolution import EvolvingArtifact
 from agentdescent.governance import classify
 
@@ -108,14 +108,24 @@ def _make_completion(args: argparse.Namespace, usage: Usage):
     options: Dict[str, Any] = {}
     if args.thinking != "default":
         options["thinking"] = {"type": args.thinking}
-    return completion_for(
+    completion = completion_for(
         args,
         usage=usage,
         max_tokens=args.max_tokens,
         timeout=args.api_timeout,
         temperature=args.temperature,
+        # The adapter's own retry is disabled so it does not multiply with the
+        # one below: three attempts at 0.5s and 1.0s is right for a dropped
+        # connection and useless against a per-minute rate limit.
+        retries=1,
         **options,
     )
+    # `--repair-attempts N` multiplies model calls by up to N, and this endpoint
+    # answers that with 429s: four in twenty-two minutes at N=4, each one killing
+    # a worker's whole round (`+0/-0` -- an expansion bought and not spent).
+    # Backing off in seconds rather than fractions of one is what a rate limit
+    # asks for, and it costs nothing when there is no limit to hit.
+    return with_retries(completion, attempts=5, backoff=4.0)
 
 
 def algotune_domain(
