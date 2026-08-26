@@ -263,6 +263,56 @@ interval and the digit count but not the family. Problems are shuffled within a
 shard, so position is not family either. Together those are what keep the task
 "write a quadrature rule" rather than "write a dispatch table".
 
+### Alignment with the benchmark, item by item
+
+Checked against the benchmark's own code (`bench/pipelines.py`,
+`bench/datamodules.py`, `methods/llmsr/searcher.py`) and against the paper's §3,
+rather than against memory of them.
+
+**Aligned.**
+
+* **The problems** are all 240 as released, with the paper-versus-data count
+  discrepancy recorded above rather than smoothed over.
+* **The splits** are the published ones — `train` / `id_test` / `ood_test`,
+  taken verbatim — and no expansion is ever scored against a test split.
+* **The column convention.** Upstream reads `samples[:, 0]` as the output and
+  `samples[:, 1:]` as the inputs in `symbols[1:]` order. The mirror splits these
+  into named arrays, and `output_vars + input_vars == symbols` holds on every
+  subset checked, so the variable a name refers to is the variable upstream
+  means. The ground-truth reproduction test is the second, independent check on
+  the same thing.
+* **NMSE** is upstream's number. It computes `np.mean((y - ŷ)**2) / np.var(y)`;
+  this computes `Σ(ŷ-y)² / Σ(y-ȳ)²`. Those are the same quantity.
+* **Acc(0.1)** is the paper's `1(max_i |(ŷ_i - y_i)/y_i| ≤ 0.1)`. Upstream's
+  released code does not compute it at all — its pipeline logs mse, nmse, r2,
+  kendall-tau and mape — so the paper's formula is the only source, and it is
+  transcribed rather than reinvented.
+* **The ground truth** is never read by the search or by scoring.
+
+**Deviations, with the direction each one pushes.** Most make this harder than
+the benchmark's own setup; two do not, and those are the ones to watch.
+
+| | Benchmark / LLM-SR | Here | Direction |
+|---|---|---|---|
+| what an answer may be | arbitrary Python in the `equation()` body — `np.where`, branches, loops | a restricted expression grammar | **harder here** |
+| what the search is selected on | MSE on the **full training set** (`searcher.py`) | NMSE on a 25% validation split carved out of train | **harder here** |
+| rows available to fit | all of train | 75% of train (the rest is the validation pool) | **harder here** |
+| LSR-Transform training rows | all 80 000 | `--train-points 4000` | **harder here** |
+| a non-finite prediction | dropped, the rest scored | fails the problem; both numbers reported | **harder here** |
+| budget per problem | 1 000 samples (~250 prompts) | 24 expansions (~16 model calls) | **harder here** |
+| **constant fitting** | one `scipy.optimize.minimize(..., 'BFGS')` from `[1.0]*10`, no restarts | the candidate fits its own, and may use least squares or multi-start | **easier here** |
+| **the root node** | a fitted linear model in the raw inputs | `library` (sparse regression over a nonlinear basis) or `linear` | **easier here** unless `--seed-program linear` |
+| NMSE aggregation | the paper does not state mean or median | median, stated, with per-problem values in the result files | unknown |
+| symbolic accuracy | a GPT-4o judge, the paper's third metric | **not implemented** | **missing** |
+
+The last three rows are the ones that decide how a number here should be read.
+The root is worth 45 points of Acc(0.1) on LSR-Synth and nothing on
+LSR-Transform, which is measured above. Constant fitting is a smaller edge in
+the same direction: upstream runs a single BFGS from all-ones over at most ten
+parameters, while a candidate here can solve a linear-in-parameters model
+exactly. And symbolic accuracy is the column this protocol would lose, which the
+answer-length evidence above says plainly.
+
 ### Deviations this task adds
 
 1. **The gate is loosened in one place and narrowed in another.**

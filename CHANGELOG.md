@@ -117,6 +117,21 @@ All notable changes to AgentDescent are documented here. The format follows
   `cos**2` — the same equations, through the identities the benchmark was built
   to reward.
 
+  **Alignment with the benchmark, checked against its code rather than from
+  memory.** The problems, the splits, the column convention
+  (`output_vars + input_vars == symbols`, matching upstream's
+  `samples[:,0]`/`samples[:,1:]`), the NMSE (upstream's
+  `np.mean((y-y_hat)**2)/np.var(y)` is this port's `sum/sum` — the same
+  quantity) and the paper's `Acc_0.1` all line up. Most deviations make this
+  harder than the benchmark's own setup: a restricted answer grammar where
+  upstream allows arbitrary Python, selection on a held-out slice of train where
+  upstream selects on all of train, 75% of the rows to fit with, and a fraction
+  of the budget. Two go the other way and both are now stated wherever a number
+  is: the root node (worth 45 points on LSR-Synth, measured), and constant
+  fitting — upstream runs one BFGS from `[1.0]*10` with no restarts, while a
+  candidate here can solve a linear-in-parameters model exactly. Symbolic
+  accuracy remains unimplemented.
+
   One caveat that cuts against the headline: the benchmark ships **no program**,
   so every method brings its own starting point, and these are not equal. LLM-SR
   starts each problem from a plain linear model in the raw inputs; this port's
