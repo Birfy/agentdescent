@@ -8,6 +8,24 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- **`--recall-attempts` gives an ERA per-problem search a memory of what it
+  already tried.** Upstream's mutation prompt shows one parent and one score,
+  and `--recall-attempts 0` — the default — keeps exactly that. Above zero the
+  prompt also lists the best N structures this problem has already scored,
+  ranked, with their scores and a repeat count for the ones proposed more than
+  once. The scores are the mechanism rather than decoration: a bare "already
+  tried" list pushes the model off a near-miss as hard as off a dead end, and
+  the near-misses on LLM-SRBench are real — one failure returned
+  `params[0]*(n - n_0)*kb*T/(p_d*cos(theta))` against a truth of
+  `T*kb*(n - n_0)/(n_0*p_d*cos(theta))`. `EraTree.select_parent` builds the
+  snapshot inside the lock that chooses the parent, so the two come from one
+  view of the tree, and the setting is part of the `--resume` fingerprint
+  because it changes what a number means.
+- **`python -m tools.srbench_reachability` measures what an LLM-SRBench answer
+  format puts out of reach**, by rewriting each ground truth in the format a run
+  had to answer in and scoring it exactly as the run's answers were scored. On
+  LSR-Transform the ceiling is 105 of 111 problems under the benchmark's own
+  single-BFGS fit.
 - **ERA runs LLM-SRBench — a benchmark this repository did not build.**
   `examples/era/era_llm_srbench.py` is a fourth task on the same flat-PUCT tree
   search, the same aggregator, the same sandbox and the same governance layer,

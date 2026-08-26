@@ -63,6 +63,7 @@ import time
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
+from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -1165,6 +1166,57 @@ def answer_contract(answer_format: str, variables: Sequence[str],
    functions: {allowed}. Anything else is rejected and scores zero."""
 
 
+def recalled_structures(recalled: Sequence[Any], *, limit: int = 8) -> str:
+    """The structures this search has already scored, best first, with scores.
+
+    Empty unless a run passed ``--recall-attempts``, so the default prompt is
+    upstream's: one parent, one score, no memory.
+
+    The scores are not decoration and dropping them would invert the effect. A
+    bare list of "already tried" pushes the model away from a near-miss exactly
+    as hard as from a dead end -- and on this benchmark the near-misses are
+    real: one failure returned `params[0]*(n - n_0)*kb*T/(p_d*cos(theta))`
+    against a truth of `T*kb*(n - n_0)/(n_0*p_d*cos(theta))`, wrong by one
+    factor in the denominator. Ordered by score, the same list says "this
+    direction is worth refining" and "this one is ruled out" with the same
+    words.
+
+    Identical answers are collapsed with a count, because that is the signal
+    worth spending prompt on: four separate programs returning one structure is
+    what a stuck search looks like from inside.
+    """
+    if not recalled:
+        return ""
+    seen: "OrderedDict[str, List[float]]" = OrderedDict()
+    for metrics, score in recalled:
+        rows = (metrics or {}).get("worst") or [{}]
+        answer = (rows[0].get("equation") or "").strip()
+        if not answer:
+            continue
+        body = answer.split("return", 1)[-1].strip() if "return" in answer else answer
+        seen.setdefault(" ".join(body.split()), []).append(float(score))
+    if not seen:
+        return ""
+    # Sorted here rather than trusted to the caller: "best first" is this
+    # function's own promise to the model, and a list that quietly arrived in
+    # tree order would still read as a ranking.
+    ranked = sorted(seen.items(), key=lambda pair: max(pair[1]), reverse=True)
+    shown = [(body[:110], scores) for body, scores in ranked[:limit]]
+    width = max(len(body) for body, _ in shown)
+    lines = []
+    for body, scores in shown:
+        repeats = f"  (x{len(scores)})" if len(scores) > 1 else ""
+        lines.append(f"  {body:<{width}}  {max(scores):7.3f}{repeats}")
+    return ("Structures this search has already scored on this dataset, best "
+            "first:\n" + "\n".join(lines) + """
+
+Do not propose a re-parameterisation of a structure already listed -- it will
+score what it scored before. A high score above is a direction worth refining;
+a low one has been ruled out, and a structure listed with a repeat count has
+been proposed that many times already.
+""")
+
+
 def per_problem_prompt(
     parent: Any,
     *,
@@ -1174,6 +1226,7 @@ def per_problem_prompt(
     functions: Sequence[str] = (),
     variables: Sequence[str] = (),
     answer_format: str = "expression",
+    recalled: Sequence[Any] = (),
 ) -> str:
     """The mutation prompt for ``--per-problem``: one dataset, one equation.
 
@@ -1204,6 +1257,7 @@ def per_problem_prompt(
         attempt = (f"The equation it returned was:\n  {equation or '(none)'}\n"
                    f"which scored {row['digits']} in {row['seconds']}s.{note}")
     imports = ", ".join(sorted(ALLOWED_IMPORTS))
+    memory = recalled_structures(recalled)
     contract = answer_contract(answer_format, variables, functions)
     shape = ("a STRING holding `def equation(...)` source"
              if answer_format == "program" else "a STRING holding the equation")
@@ -1224,6 +1278,7 @@ non-finite value anywhere, or overruns its time scores 0. Higher is better,
 The previous solution scored: {shown}
 {attempt}
 
+{memory}
 Previous Solution Code:
 ```python
 {parent.code}

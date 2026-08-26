@@ -1043,3 +1043,82 @@ def test_reachability_reports_a_truth_it_cannot_rewrite_rather_than_dying():
     assert row["problem_id"] == "broken-1"
     assert row["program_digits"] is None
     assert "program_error" in row
+
+
+# ---------------------------------------------------------------------------
+# Recall: what the tree already tried, in the prompt that proposes the next one
+# ---------------------------------------------------------------------------
+
+
+def _attempt(answer: str, score: float):
+    """One entry of a tree's recall snapshot, shaped as the tree hands it over."""
+    return ({"mean_digits": score,
+             "worst": [{"equation": answer, "digits": score, "seconds": 0.2,
+                        "error": "", "problem_id": "fixture-1"}]}, score)
+
+
+def test_no_recall_renders_nothing_which_is_upstreams_prompt():
+    """`--recall-attempts 0` has to be byte-for-byte the prompt without it."""
+    assert srbench.recalled_structures(()) == ""
+    parent = type("P", (), {"code": "def discover(x, y, spec):\n    return '1.0'\n",
+                            "metrics": {"mean_digits": 1.25, "worst": []}})()
+    without = srbench.per_problem_prompt(parent, preview="P", timeout=60.0,
+                                         problem_seconds=8.0, functions=("sin",))
+    assert "already scored" not in without
+
+
+def test_recall_lists_the_structures_with_their_scores_best_first():
+    """The ordering and the scores are the mechanism, not decoration.
+
+    A bare list of "already tried" pushes the model off a near-miss as hard as
+    off a dead end. Ranked and scored, the same list separates them.
+    """
+    text = srbench.recalled_structures((
+        _attempt("def equation(o, c, v, params):\n    return o*np.sqrt(1 - v**2/c**2)", 0.363),
+        _attempt("def equation(o, c, v, params):\n    return params[0]*o + params[1]*c", 1.597),
+    ))
+    assert "o*np.sqrt(1 - v**2/c**2)" in text
+    assert "params[0]*o + params[1]*c" in text
+    assert "1.597" in text and "0.363" in text
+    assert text.index("params[0]*o") < text.index("o*np.sqrt")   # best first
+    assert "def equation" not in text                            # the body, not the signature
+
+
+def test_recall_collapses_a_repeated_structure_into_a_count():
+    """Four programs returning one structure is what a stuck search looks like."""
+    same = "def equation(o, c, v, params):\n    return o*np.sqrt(1 - v**2/c**2)"
+    text = srbench.recalled_structures(tuple(_attempt(same, 0.363) for _ in range(4)))
+    assert "(x4)" in text
+    assert text.count("o*np.sqrt") == 1
+
+
+def test_recall_skips_an_attempt_that_returned_no_equation():
+    """A node that failed to produce an answer has no structure to rule out."""
+    assert srbench.recalled_structures((({"worst": [{"equation": ""}]}, 0.0),)) == ""
+    assert srbench.recalled_structures((({}, 0.0),)) == ""
+
+
+def test_the_per_problem_prompt_carries_the_recall_it_is_given():
+    parent = type("P", (), {"code": "def discover(x, y, spec):\n    return '1.0'\n",
+                            "metrics": {"mean_digits": 1.25, "worst": []}})()
+    text = srbench.per_problem_prompt(
+        parent, preview="P", timeout=60.0, problem_seconds=8.0,
+        functions=("sin",),
+        recalled=(_attempt("def equation(a, b, params):\n    return params[0]*a", 0.5),))
+    assert "already scored" in text
+    assert "params[0]*a" in text
+    assert "re-parameterisation" in text
+
+
+def test_a_resume_refuses_to_fold_a_recall_run_into_one_without_it(tmp_path):
+    """`--recall-attempts` changes what a number means, so it is in the fingerprint."""
+    import argparse
+
+    base = dict(dataset="lsr_transform", iterations=24, workers=3, shards=6,
+                held_out_frac=0.5, val_frac_per_problem=0.25, problem_seconds=20.0,
+                candidate_timeout=120.0, train_points=4000, seed_program="linear",
+                answer_format="program", model="glm-5.2", seed=0)
+    off = port._budget_fingerprint(argparse.Namespace(recall_attempts=0, **base))
+    on = port._budget_fingerprint(argparse.Namespace(recall_attempts=12, **base))
+    assert off != on
+    assert off["recall_attempts"] == 0 and on["recall_attempts"] == 12

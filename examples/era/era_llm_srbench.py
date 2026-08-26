@@ -189,7 +189,7 @@ def srbench_domain(
             problem_seconds=problem_seconds, max_length=max_code_length,
             answer_format=answer_format),
         reward=framework_score,
-        prompt=lambda program: mutation_prompt(
+        prompt=lambda program, recalled=(): mutation_prompt(
             program, preview=preview, timeout=candidate_timeout,
             problem_seconds=problem_seconds, functions=EQUATION_FUNCTIONS),
         task_prompt=lambda index: (
@@ -252,10 +252,11 @@ def per_problem_domain(
             problem_seconds=problem_seconds, max_length=max_code_length,
             answer_format=answer_format),
         reward=framework_score,
-        prompt=lambda program: per_problem_prompt(
+        prompt=lambda program, recalled=(): per_problem_prompt(
             program, preview=preview, timeout=candidate_timeout,
             problem_seconds=problem_seconds, functions=EQUATION_FUNCTIONS,
-            variables=problem.input_vars, answer_format=answer_format),
+            variables=problem.input_vars, answer_format=answer_format,
+            recalled=recalled),
         task_prompt=lambda index: (
             f"Recover the equation behind {problem.problem_id}, scored on "
             f"held-out slice {index} of its training data."),
@@ -329,6 +330,13 @@ def build_parser() -> argparse.ArgumentParser:
         help=("--per-problem only: pick up an interrupted sweep from --output, "
               "skipping every problem already in it. Refuses if that file was "
               "written under a different budget"))
+    parser.add_argument(
+        "--recall-attempts", type=int, default=0,
+        help=("--per-problem only: how many already-scored structures to list "
+              "in each mutation prompt, best first. 0 -- the default -- is "
+              "upstream's view, where a mutation sees one parent and one score. "
+              "A search that keeps re-proposing the same structure has nothing "
+              "in the prompt telling it so; this is what tells it"))
     parser.add_argument(
         "--val-frac-per-problem", type=float, default=0.25,
         help=("--per-problem only: share of a problem's training rows held out "
@@ -456,6 +464,7 @@ def _budget_fingerprint(args: argparse.Namespace) -> Dict[str, Any]:
         "train_points": args.train_points,
         "seed_program": args.seed_program,
         "answer_format": args.answer_format,
+        "recall_attempts": args.recall_attempts,
         "model": args.model,
         "seed": args.seed,
     }
@@ -513,6 +522,7 @@ def _one_problem(args: argparse.Namespace, complete, problem: SrProblem,
         candidate_timeout=args.candidate_timeout,
         max_code_length=args.max_code_length,
         async_ratio=args.async_ratio,
+        recall_attempts=args.recall_attempts,
         staleness=args.staleness,
         max_seconds=args.max_seconds,
         shutdown_grace=args.shutdown_grace,
@@ -769,6 +779,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         candidate_timeout=args.candidate_timeout,
         max_code_length=args.max_code_length,
         async_ratio=args.async_ratio,
+        recall_attempts=args.recall_attempts,
         staleness=args.staleness,
         max_seconds=args.max_seconds,
         shutdown_grace=args.shutdown_grace,

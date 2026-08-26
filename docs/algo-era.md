@@ -543,6 +543,19 @@ beside it, for in-domain and OOD alike.
 6. `score = mean digits` with no sign flip — FUTS maximises — and the engine's
    `[0, 1]` reward is `mean_digits / 12`, exactly order-preserving with what the
    tree ranks on.
+7. **`--recall-attempts N` lets a mutation prompt see what the tree already
+   tried, and it is off by default.** Upstream's `PlaygroundGenerator` shows a
+   mutation one parent and one score; with `N = 0` — the default — so does this,
+   byte for byte. Above zero the prompt carries the best `N` structures already
+   scored on this problem, ranked, with their scores and a repeat count. It
+   exists because the failure mode measured below is a search re-proposing one
+   structure until its budget runs out, and nothing in upstream's prompt tells
+   it that. LLM-SR's island model and experience buffer are the same idea
+   arranged differently, so this is a deviation from *FUTS*, not from the
+   benchmark's field. The snapshot is built inside `select_parent`'s own lock,
+   so a prompt can never call a node "already tried" that did not exist when its
+   parent was chosen — and because it changes what a number means, it is part of
+   the `--resume` fingerprint.
 
 ## Measured results — Playground S3E1
 

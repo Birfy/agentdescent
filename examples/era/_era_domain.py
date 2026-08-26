@@ -44,8 +44,13 @@ class Domain:
     evaluate: Callable[[str, Sequence[int]], Tuple[bool, Dict[str, Any], str]]
     #: `metrics -> [0, 1]`, order-preserving with `metrics["score"]`.
     reward: Callable[[Dict[str, Any]], float]
-    #: `parent_program -> prompt`, upstream's `PlaygroundGenerator.__call__`.
-    prompt: Callable[[Any], str]
+    #: `(parent_program, recalled) -> prompt`, upstream's
+    #: `PlaygroundGenerator.__call__`. ``recalled`` is the tree's recall
+    #: snapshot -- `(metrics, score)` pairs for nodes it already holds, best
+    #: first -- and it is **empty unless a run asks for it**, which is upstream:
+    #: there a mutation sees one parent and one score. A domain that wants that
+    #: view ignores the second argument.
+    prompt: Callable[..., str]
     #: `shard_index -> task prompt`, for the rollout tasks.
     task_prompt: Callable[[int], str]
     #: The shards the search never sees, scored once at the end.
