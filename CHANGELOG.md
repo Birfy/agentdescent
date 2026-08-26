@@ -99,6 +99,16 @@ All notable changes to AgentDescent are documented here. The format follows
   changed — and it lands between LLM-SR (39.64%) and LaSR (50.45%) at about a
   fiftieth of LLM-SR's per-problem budget.
 
+  **Three times that budget** — 24 expansions and 20 s per problem, 16.46 model
+  calls per problem — over the same 111 problems takes it to Acc(0.1) **49.5%**
+  (55 of 111) with a median NMSE of **9.75e-06**, 48 problems at the 12-digit
+  cap, and **75 better against 0 worse** (`...-transform-24x.json`). That is one
+  problem short of LaSR's 50.45%, ahead of LLM-SR's 39.64%, and two orders of
+  magnitude below LaSR's NMSE — at a fifteenth of LLM-SR's per-problem budget.
+  The interesting number is the NMSE: three times the budget moved Acc(0.1) by
+  six points and the median NMSE by 580x, because Acc is an indicator a problem
+  either clears or does not while NMSE says how right the typical answer is.
+
   It also recovers equations rather than fitting them. Answers are median 3
   terms where the whole-category protocol returned 9, and among the 41 exact
   solutions are `-sqrt(q1*q2/(4*pi*epsilon*F))` for a ground truth written

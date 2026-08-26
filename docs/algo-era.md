@@ -1063,6 +1063,42 @@ measured here, but the answers are now the right shape to be asked about.
 Result file:
 [`bench/results/era-srbench-per-problem-transform.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-srbench-per-problem-transform.json).
 
+### What a bigger budget buys
+
+The run above spends 5.26 model calls per problem. Raising it to **24
+expansions and 20 s per problem** — about three times the calls and two and a
+half times the compute — was run over the same 111 problems, same seed, same
+splits, and nothing else changed:
+
+| LSR-Transform, all 111 problems | seed | 6 expansions, 8 s | **24 expansions, 20 s** |
+|---|---|---|---|
+| model calls per problem | 0 | 5.26 | **16.46** |
+| Acc(0.1) | 0.9% | 43.2% | **49.5%** (55 of 111) |
+| median NMSE | 0.0941 | 5.68e-03 | **9.75e-06** |
+| mean `min(12, -log10 NMSE)` | 1.074 | 5.391 | **6.271** |
+| problems at 6+ digits | 0 | 44 | **52** |
+| problems at the 12-digit cap | 0 | 41 | **48** |
+| paired against the seed | — | 59 better, 1 worse | **75 better, 0 worse** (p = 5e-23) |
+| median answer length | 9 terms | 3 terms, 126 chars | **2 terms, 98 chars** |
+| wall / tokens | — | 3 810 s / 1.6M | 8 801 s / 5.6M |
+
+Three times the budget buys **six points of Acc(0.1) and a 580-fold drop in
+median NMSE** — the second number being the more informative one, because
+Acc(0.1) is an indicator that a problem either clears or does not, while the
+median NMSE says the typical answer went from "roughly right" to "right to five
+decimal places". Seven more problems reach the 12-digit cap. Nothing regressed:
+75 problems improved on the seed and **zero** got worse.
+
+The answers also keep getting shorter — 9 terms under the whole-category
+protocol, 3 at the small per-problem budget, 2 here, against a ground truth of
+1. More search is not buying a longer fit; it is buying the right structure.
+
+Result file:
+[`bench/results/era-srbench-per-problem-transform-24x.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-srbench-per-problem-transform-24x.json).
+Both sweeps write their result file **after every problem**, so an interrupted
+run keeps what it has paid for and `--resume` picks it up; the budget is
+fingerprinted in the file and a resume under a different one is refused.
+
 ### Against the paper's own tables
 
 Two of this port's three programs can be compared to the paper's numbers over
@@ -1085,8 +1121,10 @@ backbones in the paper's Table 2. Every row below this port's own is in
 | LaSR, best backbone | **50.45%** | 38.92% | 20.83% | 31.81% | 72.04% |
 | LLM-SR, best backbone | 39.64% | 66.66% | 58.33% | **36.36%** | **88.28%** |
 | **seed program here** (no LLM at all, full set) | 0.9% | 80.6% | 54.2% | 18.2% | 48.0% |
-| **winner here** (full set, selection-contaminated) | 8.1% | **83.3%** | **79.2%** | 34.1% | 52.0% |
-| winner here (held-back only, clean) | 14.8% | 87.5% | 83.3% | 33.3% | 50.0% |
+| **whole-category winner here** (full set, selection-contaminated) | 8.1% | **83.3%** | **79.2%** | 34.1% | 52.0% |
+| whole-category winner here (held-back only, clean) | 14.8% | 87.5% | 83.3% | 33.3% | 50.0% |
+| **per-problem here**, 5.26 calls/problem | 43.2% | — | — | — | — |
+| **per-problem here**, 16.46 calls/problem | **49.5%** | — | — | — | — |
 
 Median NMSE, same rows (the paper does not state how it aggregates its NMSE
 column; median is used here, and the per-problem values are in the result files
@@ -1094,9 +1132,10 @@ so either aggregation can be recomputed):
 
 | NMSE ↓ | LSR-Transform | chemistry | biology | physics | materials |
 |---|---|---|---|---|---|
-| best published (method, backbone) | **0.0011** (LaSR) | 4.12e-06 (LLM-SR) | 1.04e-06 (LLM-SR) | 7.62e-05 (LLM-SR) | 3.21e-09 (LLM-SR) |
+| best published (method, backbone) | 0.0011 (LaSR) | 4.12e-06 (LLM-SR) | 1.04e-06 (LLM-SR) | 7.62e-05 (LLM-SR) | 3.21e-09 (LLM-SR) |
 | seed program here (full set) | 0.0941 | 5.47e-10 | 2.72e-10 | 3.91e-05 | 5.55e-08 |
-| winner here (full set) | 0.0753 | **7.53e-13** | **7.78e-13** | **4.59e-06** | **1.22e-10** |
+| whole-category winner here (full set) | 0.0753 | **7.53e-13** | **7.78e-13** | **4.59e-06** | **1.22e-10** |
+| per-problem here, 16.46 calls/problem | **9.75e-06** | — | — | — | — |
 
 ### The column this protocol does not contest
 
@@ -1154,14 +1193,16 @@ is excellent in L2 and blows up relatively at a single near-zero target scores
 not. The two columns are measuring different virtues, and this protocol has the
 first without the second.
 
-**On LSR-Transform it loses, and the protocol is why.** The seed scores 0.9%,
-twelve expansions take it to 8.1% (14.8% on the held-back shards), against
-LaSR's 50.45%. Those problems are Feynman equations rearranged into products,
-quotients and nested roots — forms no linear-in-a-library method can express at
-all, where proposing a *structure* from the variable names is the entire task.
-That is exactly what a per-problem LLM search does and what one program run over
-111 problems in four seconds each cannot. The gap is the budget's and the
-protocol's, not the tree search's.
+**On LSR-Transform the whole-category protocol loses, and the protocol is why.**
+The seed scores 0.9%, twelve expansions take it to 8.1% (14.8% on the held-back
+shards), against LaSR's 50.45%. Those problems are Feynman equations rearranged
+into products, quotients and nested roots — forms no linear-in-a-library method
+can express at all, where proposing a *structure* from the variable names is the
+entire task. Switching to the benchmark's own protocol closes it: **49.5%**, one
+problem short of LaSR's 50.45% (55 against 56 of 111) and ahead of LLM-SR's
+39.64%, with a median NMSE two orders of magnitude below LaSR's — at 16.46 model
+calls per problem against LLM-SR's 250 prompts. The gap was the protocol's and
+the budget's, not the tree search's, and it was tested rather than asserted.
 
 ## Run it
 
