@@ -225,14 +225,70 @@ def measure(support, task: Any, entrypoint: Callable[[Any], Any],
     return row
 
 
+def profile(entrypoint: Callable[[Any], Any], problem: Any, *,
+            top: int = 25) -> str:
+    """Line-level cost of one call, in the shape AlgoTune's `profile` returns.
+
+    AlgoTuner hands its model a `line_profiler` table on demand and this port
+    had no equivalent, so a mutation was rewriting code it could not see the
+    cost of. Same tool, same 25-line cut.
+
+    Run **after** timing and never inside it: `line_profiler` traces every line,
+    which inflates the call several-fold. It would land on whichever program was
+    profiled and silently move the ratio the whole benchmark is.
+
+    Returns "" on any failure. A profiler that can break an evaluation is worth
+    less than no profiler.
+    """
+    try:
+        from line_profiler import LineProfiler
+    except Exception:
+        return ""
+    try:
+        profiler = LineProfiler()
+        wrapped = profiler(entrypoint)
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            wrapped(copy.deepcopy(problem))
+        buffer = io.StringIO()
+        profiler.print_stats(buffer, output_unit=1e-3)
+        rows = []
+        header = []
+        for line in buffer.getvalue().splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith("Line #") or stripped.startswith("="):
+                header.append(line)
+                continue
+            parts = stripped.split(None, 5)
+            if len(parts) >= 5 and parts[0].isdigit():
+                try:
+                    rows.append((float(parts[2]), line))
+                except ValueError:
+                    continue
+            elif not rows:
+                header.append(line)
+        if not rows:
+            return ""
+        keep = sorted(rows, key=lambda row: -row[0])[:top]
+        kept = {id(row[1]) for row in keep}
+        body = [line for _cost, line in rows if id(line) in kept]
+        body.sort(key=lambda line: int(line.strip().split(None, 1)[0]))
+        return "\n".join(header[-2:] + body)
+    except BaseException:
+        return ""
+
+
 def evaluate(support, task: Any, entrypoint: Callable[[Any], Any],
              spec: Dict[str, Any]) -> List[Dict[str, Any]]:
     """One row per problem in the shard, in the order the seeds were drawn."""
     results: List[Dict[str, Any]] = []
     n = int(spec["n"])
     repeats = int(spec.get("repeats") or 3)
-    slow_factor = float(spec.get("slow_factor") or 20.0)
+    slow_factor = float(spec.get("slow_factor") or 10.0)
     seconds = float(spec.get("problem_seconds") or 60.0)
+    want_profile = bool(spec.get("profile"))
     for seed in spec["seeds"]:
         started = time.monotonic()
         with contextlib.redirect_stdout(io.StringIO()), \
@@ -243,6 +299,10 @@ def evaluate(support, task: Any, entrypoint: Callable[[Any], Any],
                       deadline=time.monotonic() + seconds)
         row["seed"] = int(seed)
         row["seconds"] = time.monotonic() - started
+        # One profile per shard, on the first problem, and only when asked: it
+        # costs an extra traced call and every row of it is the same code.
+        if want_profile and not results and row["candidate_ms"] is not None:
+            row["profile"] = profile(entrypoint, problem)
         results.append(row)
     return results
 

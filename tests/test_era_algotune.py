@@ -566,28 +566,100 @@ def test_the_candidate_is_timed_against_a_reference_measured_beside_it(fixture_s
 # ---------------------------------------------------------------------------
 
 
-def test_the_prompt_carries_the_task_description_the_metric_and_the_parent(
+def test_the_prompt_is_upstreams_system_message_and_carries_upstreams_eval_block(
         fixture_suite):
+    """Aligned means aligned: the framing is AlgoTuner's, not this port's.
+
+    A speedup measured under a prompt that also named the levers is not
+    comparable with upstream's, whose system message describes the setting and
+    the rules and then stops. So the default carries upstream's wording -- the
+    10x rule, "setup is not charged", "Be creative" -- and its post-eval summary
+    verbatim, and says nothing about how to make code fast.
+    """
     parent = support.Program(
-        "id", 0, None, "def solve(problem):\n    return 1\n",
-        "baseline", {"speedup": 1.25, "slowest": [
+        "id", 0, None, "def solve(problem):\n    return 1\n", "baseline",
+        {"speedup": 1.25, "problems": 4, "valid_problems": 4, "slowest": [
             {"seed": 7, "baseline_ms": 10.0, "candidate_ms": 8.0, "speedup": 1.25,
              "valid": True, "error": ""}]}, True)
     text = algotune.mutation_prompt(parent, suite=fixture_suite)
+    # Upstream's wording is hard-wrapped; compare on a whitespace-normalised
+    # copy so a rewrap does not read as a change of meaning.
+    flat = " ".join(text.split())
+
+    assert "You're an autonomous programmer" in flat
+    assert "at most 10x the reference runtime" in flat
+    assert "Be creative and optimize your approach!" in flat
+    assert "Speedup: 1.250x" in text
+    assert "(Speedup = Baseline Time / Your Time; Higher is better)" in text
+    assert "Valid Solutions: 100% (4/4)" in text
     assert "Compute the 2-norm of every row." in text
-    assert "1.250x" in text
-    assert "seed 7" in text
     assert "def solve(problem):" in text
-    assert "scores NOTHING AT ALL" in text
+    assert "seed 7" in text
+    # The levers upstream does not name, and this prompt must not either.
+    assert "numba.njit" not in text
+    assert "WHERE THE LARGE WINS" not in text
 
 
-def test_an_invalid_parent_says_so_rather_than_showing_a_missing_score(fixture_suite):
-    parent = support.Program(
-        "id", 1, None, "def solve(problem):\n    return 1\n", "",
-        algotune._zero_metrics("is_solution rejected the output"), False)
+def test_the_guided_arm_is_the_only_one_that_names_the_levers(fixture_suite):
+    """What the strategy paragraph is worth has to be measurable, not assumed.
+
+    Without it the search sat at 1.2x on ode_stiff_vanderpol for ten rounds;
+    with it, 39.65x. That is a large enough effect that baking it into every
+    number silently would misattribute the result to the search.
+    """
+    parent = support.Program("id", 0, None, "def solve(problem):\n    return 1\n",
+                             "", {"speedup": 1.0, "problems": 2,
+                                  "valid_problems": 2}, True)
+    aligned = algotune.mutation_prompt(parent, suite=fixture_suite, style="aligned")
+    guided = algotune.mutation_prompt(parent, suite=fixture_suite, style="guided")
+    assert "WHERE THE LARGE WINS" in guided and "WHERE THE LARGE WINS" not in aligned
+    assert len(guided) > len(aligned)
+    with pytest.raises(ValueError):
+        algotune.mutation_prompt(parent, suite=fixture_suite, style="nonsense")
+
+
+def test_a_rejected_answer_reaches_the_prompt_as_upstreams_invalid_example(
+        fixture_suite):
+    """Upstream shows up to three rejected instances; so does this.
+
+    What goes inside the block is this port's own: upstream can only print the
+    checker's source context when the checker raised, and a checker that returns
+    False leaves it nothing. The distance from the reference is the thing that
+    separates "structurally wrong" from "a factor of three short".
+    """
+    metrics = algotune._zero_metrics("1/2 problems were not solved correctly")
+    metrics.update({"problems": 2, "valid_problems": 1, "slowest": [
+        {"seed": 3, "baseline_ms": 10.0, "candidate_ms": None, "speedup": None,
+         "valid": False,
+         "error": "is_solution rejected the output (largest relative "
+                  "difference from the reference 7.050e-03)"}]})
+    parent = support.Program("id", 1, None, "def solve(problem):\n    return 1\n",
+                             "", metrics, False)
     text = algotune.mutation_prompt(parent, suite=fixture_suite)
-    assert "invalid or failed to run" in text
-    assert "is_solution rejected the output" in text
+    assert "Invalid Example #1:" in text
+    assert "Error in 'is_solution':" in text
+    assert "7.050e-03" in text
+    assert "Valid Solutions: 50% (1/2)" in text
+
+
+def test_the_profile_reaches_the_prompt_when_one_was_taken(fixture_suite):
+    """Upstream's `profile` command, in the one place this port can put it."""
+    parent = support.Program(
+        "id", 0, None, "def solve(problem):\n    return 1\n", "",
+        {"speedup": 1.0, "problems": 1, "valid_problems": 1,
+         "profile": "Line #      Hits         Time\n     8   1   706.5"}, True)
+    text = algotune.mutation_prompt(parent, suite=fixture_suite)
+    assert "Line-level profile" in text and "706.5" in text
+    without = algotune.mutation_prompt(
+        support.Program("id", 0, None, "def solve(problem):\n    return 1\n", "",
+                        {"speedup": 1.0, "problems": 1, "valid_problems": 1}, True),
+        suite=fixture_suite)
+    assert "Line-level profile" not in without
+
+
+def test_the_slow_factor_matches_upstreams_per_instance_rule():
+    """AlgoTune: "your function can run for at most 10x the reference runtime"."""
+    assert algotune.SLOW_FACTOR == 10.0
 
 
 # ---------------------------------------------------------------------------

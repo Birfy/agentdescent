@@ -207,7 +207,12 @@ PROBLEM_SECONDS = 60.0
 #: candidate 200x slower is not a measurement worth repeating, and without this
 #: it would instead overrun the shard timeout and be recorded as a program that
 #: failed -- which is a different claim from "correct, and far too slow".
-SLOW_FACTOR = 20.0
+#:
+#: Ten because that is AlgoTune's own per-instance rule ("your function can run
+#: for at most 10x the reference runtime for that instance"), and a limit this
+#: port sets higher would let a candidate be counted that upstream's harness
+#: would have cut off.
+SLOW_FACTOR = 10.0
 
 #: Address space per sandboxed evaluation. Larger than the 2 GiB the other ERA
 #: tasks use because an AlgoTune problem at its published size can be hundreds of
@@ -417,6 +422,7 @@ def run_candidate(
     problem_seconds: float = PROBLEM_SECONDS,
     max_length: int = 20_000,
     nproc_limit: int = 64,
+    want_profile: bool = False,
 ) -> Dict[str, Any]:
     """Execute one candidate against one shard and return the runner's payload."""
     valid, reason = validate_source(
@@ -456,6 +462,7 @@ def run_candidate(
             "repeats": int(repeats),
             "problem_seconds": float(problem_seconds),
             "slow_factor": SLOW_FACTOR,
+            "profile": bool(want_profile),
         }), encoding="utf-8")
         command, env = sandbox_wrapper(
             [
@@ -545,6 +552,7 @@ def evaluate_source(
     problem_seconds: float = PROBLEM_SECONDS,
     max_length: int = 20_000,
     slowest_reported: int = 3,
+    want_profile: bool = False,
 ) -> Tuple[bool, Dict[str, Any], str]:
     """Score a candidate over one or more shards: mean speedup, or nothing.
 
@@ -568,10 +576,14 @@ def evaluate_source(
     unavailable: List[str] = []
     detail: List[Dict[str, Any]] = []
 
-    for shard in shards:
+    profile_text = ""
+    for index, shard in enumerate(shards):
         payload = run_candidate(
             code, suite=suite, shard=shard, timeout=timeout, repeats=repeats,
-            problem_seconds=problem_seconds, max_length=max_length)
+            problem_seconds=problem_seconds, max_length=max_length,
+            # Profiled once per evaluation, on the first shard. Every shard would
+            # produce the same table for the same code at a real cost.
+            want_profile=want_profile and index == 0)
         seconds += float(payload.get("seconds") or 0.0)
         if not payload.get("ok"):
             error = str(payload.get("error") or "candidate failed")
@@ -585,6 +597,7 @@ def evaluate_source(
             return False, _zero_metrics(error), error
         unavailable = payload.get("limits_unavailable") or unavailable
         for result in results:
+            profile_text = profile_text or str(result.get("profile") or "")
             scored += 1
             baseline_ms = float(result.get("baseline_ms") or 0.0)
             candidate_ms = result.get("candidate_ms")
@@ -642,6 +655,7 @@ def evaluate_source(
             "baseline_ms": baseline_total / valid_problems,
             "candidate_ms": candidate_total / valid_problems,
             "slowest": slowest[:slowest_reported],
+            "profile": profile_text,
             "seconds": seconds,
             "limits_unavailable": unavailable,
             "error": "",
@@ -698,72 +712,141 @@ def _timing_report(metrics: Dict[str, Any], limit: int = 3) -> str:
     return "\n".join(lines)
 
 
-def mutation_prompt(
-    parent: Any,
-    *,
-    suite: Suite,
-    timeout: float = 120.0,
-    repeats: int = REPEATS,
-) -> str:
-    """`PlaygroundGenerator.__call__`, re-pointed at AlgoTune.
+def _eval_block(metrics: Dict[str, Any]) -> str:
+    """AlgoTuner's own post-`eval` summary, in its own words and order.
 
-    Upstream ERA's shape is kept exactly -- system preamble, task, data preview,
-    metric, the parent's score, the parent's code, a numbered contract, then a
-    block of constraints -- and only the contents are this task's. The data
-    preview is AlgoTune's own ``description.txt``, verbatim, because that is the
-    problem statement its own agent is given.
+    Upstream's `MessageWriter.format_evaluation_result_from_raw` prints exactly
+    this shape after every evaluation, and it is the only quantitative feedback
+    its agent gets between edits. Matched line for line so the two systems'
+    models are reading the same report.
+
+    One deviation, and it is a correction rather than a liberty: the counts are
+    printed beside the percentages. Upstream evaluates 100 instances, where
+    "Invalid Solutions: 50%" is a rate; here a scoring set is a handful, where
+    the same string would be one failure out of two dressed up as a statistic.
     """
-    speedup = parent.metrics.get("speedup")
-    shown = (f"{float(speedup):.3f}x" if speedup is not None
-             else "invalid or failed to run")
-    error = parent.metrics.get("error") or ""
-    failure_line = f"The previous solution's error was: {error}" if error else ""
-    timing = _timing_report(parent.metrics)
-    return f"""{SYSTEM_PREAMBLE}
+    total = int(metrics.get("problems") or 0)
+    valid = int(metrics.get("valid_problems") or 0)
+    speedup = metrics.get("speedup")
+    shown = f"{float(speedup):.3f}x" if speedup is not None else "N/A"
+    if not total:
+        return f"Speedup: {shown}\n  (Speedup = Baseline Time / Your Time; Higher is better)"
+    invalid = total - valid
+    return (
+        f"Speedup: {shown}\n"
+        f"  (Speedup = Baseline Time / Your Time; Higher is better)\n"
+        f"\n"
+        f"  Valid Solutions: {100.0 * valid / total:.0f}% ({valid}/{total})\n"
+        f"  Invalid Solutions: {100.0 * invalid / total:.0f}% ({invalid}/{total})\n"
+        f"  Timeouts: 0% (0/{total})"
+    )
 
---- BEGIN PROMPT ---
 
-Speed up the reference implementation of the AlgoTune task `{suite.task}`.
+def _invalid_examples(metrics: Dict[str, Any], limit: int = 3) -> str:
+    """Upstream's `Invalid Example #i` block, carrying this port's own detail.
 
-{suite.description}
+    AlgoTuner shows up to three rejected instances with the source context from
+    `is_solution`. That context is only available to it because its checker
+    raised; a checker that simply returns False leaves nothing to print. This
+    reports the distance instead -- which upstream has no equivalent of, and
+    which is the one thing that separates "structurally wrong" from "a factor of
+    three short on tolerance".
+    """
+    rows = [row for row in (metrics.get("slowest") or []) if row.get("speedup") is None]
+    if not rows:
+        return ""
+    lines = ["Snapshot not saved - invalid solutions present", ""]
+    for index, row in enumerate(rows[:limit], start=1):
+        lines.append(f"Invalid Example #{index}:")
+        lines.append("Error in 'is_solution':")
+        lines.append(f"  {row.get('error') or 'is_solution returned False'}")
+        lines.append("")
+    return "\n".join(lines)
 
-Problems are generated by the task's own generator at n = {suite.n}, and your
-output is checked by the task's own `is_solution`. The metric is SPEEDUP:
-(reference time) / (your time), measured as the minimum of {repeats} runs of
-each on the same problem, averaged over the problems in the set. Higher is
-better; the reference itself scores 1.0.
 
-A solution that `is_solution` rejects scores NOTHING AT ALL, no matter how fast
-it is. Correctness first, then speed.
+def _timing_report(metrics: Dict[str, Any], limit: int = 3) -> str:
+    """Per-problem timings, which upstream's summary does not carry.
 
-The previous solution scored: {shown}
-{failure_line}
-{timing}
+    Kept because the mean alone cannot separate a program that is uniformly
+    1.2x from one that is 5x on two problems and 0.3x on a third, and those need
+    opposite next moves. The seed is shown so a failure is reproducible.
+    """
+    rows = [row for row in (metrics.get("slowest") or []) if row.get("speedup") is not None]
+    if not rows:
+        return ""
+    lines = ["Per-problem timing:"]
+    for row in rows[:limit]:
+        lines.append(f"  seed {row['seed']}: reference {row['baseline_ms']} ms, "
+                     f"yours {row['candidate_ms']} ms, speedup {row['speedup']}x")
+    return "\n".join(lines)
 
-Previous Solution Code:
-```python
-{parent.code}
+
+def _profile_block(metrics: Dict[str, Any]) -> str:
+    """The `line_profiler` table, which is upstream's `profile` command."""
+    text = str(metrics.get("profile") or "").strip()
+    if not text:
+        return ""
+    return ("Line-level profile of your previous solve (25 most expensive lines, "
+            "milliseconds):\n" + text)
+
+
+#: Upstream's `AlgoTuner/messages/initial_system_message.txt`, adapted only where
+#: this port's contract genuinely differs -- a module-level `solve(problem)`
+#: rather than a `Solver` class, and one rewrite per turn rather than an `edit`
+#: command loop. Everything else is upstream's wording, including the 10x rule,
+#: the note that setup cost is not charged, and "Be creative".
+#:
+#: **It says nothing about how to make code fast.** That is the point of the
+#: alignment: upstream's agent is told the setting and the rules and left to it,
+#: so a number measured against a prompt that also named the levers is not
+#: comparable with upstream's. :data:`GUIDED_STRATEGY` is that prompt, kept
+#: behind ``--prompt guided`` so the difference can be measured rather than
+#: argued about.
+ALIGNED_SETTING = """SETTING:
+You're an autonomous programmer tasked with solving a specific problem. You are
+to write a single Python function, and you will be evaluated based on the
+best-performing piece of code you produce.
+
+Apart from the default Python packages, you have access to the following
+additional packages:
+ - numpy
+ - scipy
+ - numba
+ - cython
+
+YOUR TASK:
+Your objective is to define a module-level function in `solver.py`:
+```
+def solve(problem):
+    \"\"\"Your implementation goes here.\"\"\"
+    ...
 ```
 
-Please generate a NEW, FASTER Python function named `solve` that:
-1. Has the signature `solve(problem)` and returns the same thing the reference
-   returns, in the same structure and dtype.
-2. Is a module-level function, not a method and not a class.
-3. Produces an answer the task's own `is_solution` accepts. **That checker is
-   the contract**, and any method meeting it is in scope: a different algorithm,
-   a different integration or quadrature scheme, a cheaper factorisation, a
-   specialised LAPACK/BLAS driver, a compiled kernel, or skipping work the
-   reference does that the answer does not need. What is out of scope is
-   returning something you know is not the answer -- constants, zeros, a result
-   cached from an earlier call, or output shaped to exploit a hole in the
-   checker.
-4. May do setup work at module level -- a precomputed table, a plan, a compiled
-   kernel, a cached workspace -- if that is what makes it fast. Module-level
-   work runs once, at import, and is not charged to your measured time.
+IMPORTANT: Work your code does at import time -- building a table, compiling a
+kernel -- will not count towards your function's runtime.
 
-WHERE THE LARGE WINS ACTUALLY COME FROM. The reference is a library call, so
-beating it means finding what the library is paying for that this task does not
-need. Two things dominate, and both are worth checking before tuning flags:
+This `solve` function will be the entrypoint called by the evaluation harness.
+Strive to align your implementation as closely as possible with the desired
+performance criteria. For each instance, your function can run for at most 10x
+the reference runtime for that instance. Strive to have your implementation run
+as fast as possible, while returning the same output as the reference function
+(for the same given input). Be creative and optimize your approach!
+
+**GOALS:**
+Your primary objective is to optimize the `solve` function to run as fast as
+possible, while returning the optimal solution. You will receive better scores
+the quicker your solution runs, and you will be penalized for exceeding the time
+limit or returning non-optimal solutions."""
+
+#: The strategy paragraph this port wrote before the alignment: it names where
+#: the large wins come from. Not upstream's, and measurably worth a great deal
+#: -- on `ode_stiff_vanderpol` the search sat at 1.2x for ten rounds without it
+#: and reached 39.65x with it. Kept so that value can be measured as a
+#: difference between two arms instead of baked silently into every number.
+GUIDED_STRATEGY = """WHERE THE LARGE WINS ACTUALLY COME FROM. The reference is a
+library call, so beating it means finding what the library is paying for that
+this task does not need. Two things dominate, and both are worth checking before
+tuning flags:
 
   (a) **An interpreted loop the library cannot vectorise.** A step-by-step
       integrator whose right-hand side is a Python callback, a scan with a
@@ -774,40 +857,55 @@ need. Two things dominate, and both are worth checking before tuning flags:
       calls back into Python per step, write the loop and compile it.
   (b) **Work the reference does that its caller does not need.** Input
       validation it can skip, a copy it can overwrite in place, a conversion of
-      the result into Python objects that the checker never required.
+      the result into Python objects that the checker never required."""
 
-Your code must look like this:
-```python
-import numpy as np
-# ... other imports
+PROMPT_STYLES = ("aligned", "guided")
 
-def solve(problem):
-    # ... the fast path ...
-    return result
-```
-Provide the full, runnable code including imports.
 
-IMPORTANT CONSTRAINTS:
-1. You may use numpy, scipy, **numba**, **cython** and the standard library.
-   Nothing else is installed -- no torch, no jax, no dace, no GPU.
-   - `numba.njit` compiles in-process. Compilation happens on the first call,
-     which is a discarded warm-up, so it is NOT charged to your time. Call your
-     jitted function once at module level to force it.
-   - `cython.inline("...C-like Python...", a=..., b=...)` compiles with gcc at
-     module level, which is also outside the timed region. Give it typed locals
-     and `boundscheck=False` to get anything out of it.
-   - Compiling is worth it exactly where NumPy cannot express the loop: a
-     step-by-step integrator whose right-hand side is a Python callback, a scan
-     with a carried dependency, an early-exit search. It is not worth it in front
-     of a BLAS or FFT call, which is already native code.
-2. ONE CPU THREAD. The sandbox pins every BLAS thread pool to 1, so a solution
-   that "parallelises" will be measured on one core and will not be faster.
-   Do not set any thread count.
-3. There is no network and no filesystem: do not read or write files.
-4. {timeout:.0f} seconds of wall-clock for the whole problem set. A candidate
-   more than {SLOW_FACTOR:.0f}x slower than the reference is measured once and
-   reported as-is rather than repeated.
-5. Do not import, read or reconstruct the task's own reference implementation to
-   call it. Write the computation.
---- END PROMPT ---
-"""
+def mutation_prompt(
+    parent: Any,
+    *,
+    suite: Suite,
+    timeout: float = 300.0,
+    repeats: int = REPEATS,
+    style: str = "aligned",
+) -> str:
+    """One rewrite of the parent program, in AlgoTuner's own framing.
+
+    Upstream's agent sees: its system message, the task description, and after
+    every `eval` a speedup summary, the invalid examples, and -- on demand -- a
+    line profile. This assembles the same things around the parent's code, which
+    is the closest a one-rewrite-per-node search can get to that loop without
+    becoming a different algorithm.
+
+    ``style="guided"`` adds :data:`GUIDED_STRATEGY`; ``"aligned"`` does not, and
+    is the default, because a number measured under extra guidance is not
+    comparable with upstream's.
+    """
+    if style not in PROMPT_STYLES:
+        raise ValueError(f"style must be one of {PROMPT_STYLES}")
+    blocks = [
+        ALIGNED_SETTING,
+        "**TASK DESCRIPTION:**\n" + suite.description,
+        (f"Problems are generated by the task's own generator at n = {suite.n}, "
+         f"and your output is checked by the task's own `is_solution`. Timing is "
+         f"the minimum of {repeats} runs after a discarded warm-up, averaged over "
+         f"the problem set. {timeout:.0f} seconds of CPU for the whole set, "
+         f"including any compilation."),
+    ]
+    if style == "guided":
+        blocks.append(GUIDED_STRATEGY)
+    blocks.append("**EVALUATION OF YOUR PREVIOUS CODE:**\n" + _eval_block(parent.metrics))
+    for optional in (_invalid_examples(parent.metrics),
+                     _timing_report(parent.metrics),
+                     _profile_block(parent.metrics)):
+        if optional:
+            blocks.append(optional)
+    blocks.append("**YOUR PREVIOUS CODE:**\n```python\n" + parent.code.rstrip()
+                  + "\n```")
+    blocks.append(
+        "Write the full contents of `solver.py` -- a complete, runnable module "
+        "defining `solve(problem)`, with its imports. Return ONLY the python "
+        "code, in a single fenced block. Do not read or reconstruct the task's "
+        "reference implementation to call it; write the computation.")
+    return "\n\n".join(blocks) + "\n"

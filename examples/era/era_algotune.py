@@ -70,6 +70,7 @@ from examples.era._algotune_tasks import UPSTREAM_COMMIT
 from examples.era._era_algotune import (
     DEFAULT_TASKS,
     PROBLEM_SECONDS,
+    PROMPT_STYLES,
     REPEATS,
     TASKS,
     Suite,
@@ -123,6 +124,8 @@ def algotune_domain(
     max_code_length: int = 20_000,
     repeats: int = REPEATS,
     problem_seconds: float = PROBLEM_SECONDS,
+    prompt_style: str = "aligned",
+    profile: bool = True,
 ) -> Domain:
     """One AlgoTune task, in the four terms the ERA search needs."""
     return Domain(
@@ -135,10 +138,11 @@ def algotune_domain(
         evaluate=lambda code, shard_ids: evaluate_source(
             code, suite=suite, shards=shard_ids, timeout=candidate_timeout,
             repeats=repeats, problem_seconds=problem_seconds,
-            max_length=max_code_length),
+            max_length=max_code_length, want_profile=profile),
         reward=framework_score,
         prompt=lambda program: mutation_prompt(
-            program, suite=suite, timeout=candidate_timeout, repeats=repeats),
+            program, suite=suite, timeout=candidate_timeout, repeats=repeats,
+            style=prompt_style),
         task_prompt=lambda index: (
             f"Time the {suite.task} program against the reference on held-out "
             f"problem set {index}."),
@@ -155,6 +159,8 @@ def algotune_domain(
             "scoring_shards": suite.scoring_shards,
             "test_shards": suite.test_shards,
             "timed_repeats": repeats,
+            "prompt_style": prompt_style,
+            "line_profile": profile,
             "seed": suite.seed,
         },
     )
@@ -232,6 +238,17 @@ def build_parser() -> argparse.ArgumentParser:
                               "cheap way to make the *reported* figure precise. "
                               "AlgoTune reports over 100 test instances, and "
                               "--test-shards 2 --test-problems 50 matches that"))
+    parser.add_argument("--prompt", default="aligned", choices=PROMPT_STYLES,
+                        help=("`aligned` reproduces AlgoTune's own system "
+                              "message, which says nothing about how to make "
+                              "code fast; `guided` adds this port's paragraph "
+                              "naming where the large wins come from. The "
+                              "difference between the two arms is what that "
+                              "paragraph is worth"))
+    parser.add_argument("--no-profile", action="store_true",
+                        help=("skip the line_profiler table in the mutation "
+                              "prompt. It is upstream's `profile` command and "
+                              "costs one extra traced call per evaluation"))
     parser.add_argument("--repeats", type=int, default=REPEATS,
                         help=("timed runs per program per problem, after a "
                               "discarded warm-up. The metric is the ratio of the "
@@ -334,6 +351,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         f"/task, workers={args.workers}, c_puct={args.c_puct}, "
         f"temperature={args.temperature}"
     )
+    print(f"Prompt   : {args.prompt}"
+          f"{'' if args.no_profile else ' + line profile (upstream `profile`)'}")
     print(f"Tasks    : {', '.join(tasks)}")
     artifact = EvolvingArtifact(ARTIFACT_ID, blast_radius=0.6)
     print(
@@ -384,6 +403,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             max_code_length=args.max_code_length,
             repeats=args.repeats,
             problem_seconds=args.problem_seconds,
+            prompt_style=args.prompt,
+            profile=not args.no_profile,
         )
         try:
             run = run_agentdescent_era(
