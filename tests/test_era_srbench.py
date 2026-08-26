@@ -650,7 +650,11 @@ def test_a_program_answer_is_reduced_to_its_equation_before_judging():
     from tools import score_symbolic_accuracy as sa
     source = ("import numpy as np\n\n\ndef equation(a, b, params):\n"
               "    return params[0]*a*np.sin(b) + params[1]\n")
-    assert sa.normalise(source, ["a", "b"]) == "params[0]*a*sin(b) + params[1]"
+    # With no fitted values the holes become free symbols, which is what makes
+    # them comparable at all; with them they become the numbers that were fitted.
+    assert sa.normalise(source, ["a", "b"]) == "__p0*a*sin(b) + __p1"
+    assert sa.normalise(source, ["a", "b"], fitted=[2.5, -0.75]) == (
+        "(2.5)*a*sin(b) + (-0.75)")
     assert sa.normalise("0.3*P(t)**2", ["t", "P"]) == "0.3*P**2"
 
 
