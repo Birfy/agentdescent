@@ -1,34 +1,39 @@
 """ERA tree search on SciPy entry points a sweep found to be inaccurate.
 
 Where the 2F1 task next door picked its function from the literature, this one
-picks by measurement. ``tools/scan_numeric_precision.py`` scores 48 NumPy and
+picks by measurement. ``tools/scan_numeric_precision.py`` scores 79 NumPy and
 SciPy float64 entry points against mpmath -- each point evaluated at 30 *and*
 60 digits and kept only where the two agree -- over parameter ranges declared
-before anything was run. The sweep's answer is mostly reassuring: seven of the
-eight NumPy probes return 16 correct digits, ``sin`` and ``tan`` included at
-arguments up to 1e18, and 29 of the 40 SciPy entry points sit above 15 digits.
-Two do not:
+before anything was run, and each drawn over the domain SciPy documents. The
+sweep's answer is mostly reassuring: seven of the eight NumPy probes return 16
+correct digits, ``sin`` and ``tan`` included at arguments up to 1e18, and 50 of
+the 71 SciPy entry points sit above 15 digits. Three return points with no
+correct digit at all:
 
 ======================  ============  ==============  ==============
 target                  mean digits   < 8 digits      < 1 digit
 ======================  ============  ==============  ==============
 scipy.special.pbdv          11.67         17.8%          12.2%
-scipy.special.hyperu        14.36          3.0%           2.8%
+scipy.special.pbvv          11.87         16.7%           9.4%
+scipy.special.hyperu        14.36          3.0%           3.0%
 ======================  ============  ==============  ==============
 
-Neither number is a rounding complaint. SciPy's ``pbdv`` returns 4.81e100 at
+None of these is a rounding complaint. SciPy's ``pbdv`` returns 4.81e100 at
 ``v=19.83, x=-29.28`` where the value is 2.46e80, and -2.44e24 at ``v=17.02,
-x=-14.61`` where the value is +6.01e15 -- wrong sign, wrong magnitude. SciPy's
-``hyperu`` returns ``nan`` on 3% of its declared range, at points such as
-``a=-15.82, b=-1.30, x=23.10`` where the function equals 2.45e17 and is
-perfectly well-conditioned.
+x=-14.61`` where the value is +6.01e15 -- wrong sign, wrong magnitude. Its
+companion ``pbvv`` has the same disease in the same region: -2.75e14 at
+``v=19.01, x=-15.76`` where the value is +2029.5. SciPy's ``hyperu`` returns
+``nan`` on 3% of its declared range, at points such as ``a=-15.82, b=-1.30,
+x=23.10`` where the function equals 2.45e17 and is perfectly well-conditioned.
 
 **One function, one tree.** Each ``--function`` is a search of its own: its own
 stress set, its own root node, its own flat-PUCT tree and its own result file.
 They share the code and nothing else -- no pooled score, no transfer between
 them -- because the whole claim being tested is per-function ("can a search
 beat SciPy *here*"), and a pooled number would let a large gain on one hide a
-regression on the other.
+regression on another. ``pbdv`` and ``pbvv`` are the case that makes this
+concrete: siblings with the same failure region, which a shared score would
+merge into one number describing neither.
 
 The search itself is `era_empirical_software.py`, unchanged: the flat-PUCT
 tree, the visit reservation, the aggregator, the staleness handling, the
@@ -37,6 +42,7 @@ governance layer and the sandbox profile.
 Run
 ---
     python -m examples.era.era_special_precision --function pbdv --dry-run
+    python -m examples.era.era_special_precision --function pbvv --dry-run
     python -m examples.era.era_special_precision --function hyperu \\
         --provider claude --model glm-5.2 --iterations 12 --workers 3 --yes
 """

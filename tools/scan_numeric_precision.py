@@ -65,6 +65,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 import mpmath as mp
 import numpy as np
 import scipy.special as sp
+import scipy.stats as st
 
 
 OUTPUT = Path(__file__).resolve().parents[1] / "docs" / "data" / "numeric_precision_scan.json"
@@ -128,6 +129,51 @@ def _logu(rng: random.Random, low: float, high: float) -> float:
 
 def _near_nonpositive_integer(x: float, tol: float = 1e-6) -> bool:
     return x <= 0.5 and abs(x - round(x)) < tol
+
+
+def _verified_root(residual: Callable[[Any], Any], guess: float,
+                   target: float) -> Any:
+    """Invert a function by root-finding, and refuse to return an unchecked root.
+
+    An inverse like ``betaincinv`` has no closed form, so its reference has to
+    be solved for -- and the obvious way to solve for it is to hand mpmath the
+    library's own answer as a starting point. That is a trap the dual-precision
+    gate cannot catch: seeded from the same guess, the solver lands on the same
+    wrong root at 30 digits and at 60, the two agree perfectly, and the point is
+    scored as though the reference were sound.
+
+    Measured: doing exactly that reported ``betaincinv`` as returning zero
+    correct digits on 1.3% of its range. Bisecting from a bracket instead showed
+    SciPy right to the last digit on every one of those points -- the *solver*
+    had failed, not the library. So the root is substituted back here, and a
+    root that does not reproduce ``target`` raises, which drops the point rather
+    than turning a reference failure into a finding.
+
+    Substituting back is necessary but **not sufficient**, which is the second
+    lesson this function encodes, and the residual is not what catches it. At
+    ``a=3.63, b=0.037, y=0.575`` the solver walked off the real line and
+    converged to ``0.853 - 3.893j`` -- a genuine root of the analytic
+    continuation, whose residual is zero to 36 digits at 30 dps and to 66 at 60.
+    Every check above passes. The probe scored SciPy at 0.76 correct digits
+    against a complex number, while bisection on a real bracket put the real
+    root within a double's spacing of SciPy's answer.
+
+    So the root must also be **real and inside the domain the inverse is
+    defined on**. That is the guard that fires; a point whose solve leaves the
+    real line is dropped rather than scored.
+    """
+    root = mp.findroot(residual, mp.mpf(guess))
+    if not mp.isfinite(root):
+        raise ValueError("root-find did not converge")
+    # A complex root is a root of the continuation, not the inverse being probed.
+    imaginary = abs(mp.im(root))
+    if imaginary > abs(mp.re(root)) * mp.mpf("1e-25") + mp.mpf("1e-300"):
+        raise ValueError("root-find left the real line")
+    root = mp.re(root)
+    scale = max(abs(mp.mpf(target)), mp.mpf("1e-300"))
+    if abs(residual(root)) / scale > mp.mpf("1e-20"):
+        raise ValueError("root does not reproduce the target")
+    return root
 
 
 PROBES: Tuple[Probe, ...] = (
@@ -279,6 +325,307 @@ PROBES: Tuple[Probe, ...] = (
         reference=lambda p: mp.pcfd(p["v"], p["x"]),
         points_scale=0.6,
         note="parabolic cylinder D_v(x)",
+    ),
+    Probe(
+        key="pbvv",
+        target="scipy.special.pbvv[V]",
+        domain="v ~ U(-20,20); x ~ U(-30,30)",
+        draw=lambda r: {"v": _u(r, -20, 20), "x": _u(r, -30, 30)},
+        library=lambda p: float(sp.pbvv(p["v"], p["x"])[0]),
+        # SciPy indexes V by the same v as its D_v; mpmath indexes by DLMF's
+        # `a`, and U(a, z) = D_{-a-1/2}(z), so a = -v - 1/2. Checked against
+        # SciPy on points where both are reliable before being used to judge
+        # points where one is not -- comparing the two conventions directly
+        # would have reported 100% failure and meant nothing.
+        reference=lambda p: mp.pcfv(-p["v"] - 0.5, p["x"]),
+        points_scale=0.6,
+        note="parabolic cylinder V_v(x); same failure region as pbdv",
+    ),
+    Probe(
+        key="pbwa",
+        target="scipy.special.pbwa[W]",
+        domain="a ~ U(-5,5); x ~ U(-5,5)",
+        draw=lambda r: {"a": _u(r, -5, 5), "x": _u(r, -5, 5)},
+        library=lambda p: float(sp.pbwa(p["a"], p["x"])[0]),
+        reference=lambda p: mp.pcfw(p["a"], p["x"]),
+        points_scale=0.4,
+        note="SciPy documents this one as accurate only on |a|,|x| <= 5",
+    ),
+    Probe(
+        key="hyp0f1",
+        target="scipy.special.hyp0f1",
+        domain="v ~ U(-20,20); z ~ U(-200,200)",
+        draw=lambda r: {"v": _u(r, -20, 20), "z": _u(r, -200, 200)},
+        library=lambda p: float(sp.hyp0f1(p["v"], p["z"])),
+        reference=lambda p: mp.hyp0f1(p["v"], p["z"]),
+        reject=lambda p: _near_nonpositive_integer(p["v"]),
+    ),
+    Probe(
+        key="wrightomega",
+        target="scipy.special.wrightomega",
+        domain="x ~ U(-50,50)",
+        draw=lambda r: {"x": _u(r, -50, 50)},
+        library=lambda p: float(sp.wrightomega(p["x"]).real),
+        reference=lambda p: mp.lambertw(mp.e ** mp.mpf(p["x"])),
+    ),
+    Probe(
+        key="erfcx",
+        target="scipy.special.erfcx",
+        domain="x ~ U(-25,300)",
+        draw=lambda r: {"x": _u(r, -25, 300)},
+        library=lambda p: float(sp.erfcx(p["x"])),
+        reference=lambda p: mp.e ** (mp.mpf(p["x"]) ** 2) * mp.erfc(p["x"]),
+    ),
+    Probe(
+        key="dawsn",
+        target="scipy.special.dawsn",
+        domain="x ~ U(-100,100)",
+        draw=lambda r: {"x": _u(r, -100, 100)},
+        library=lambda p: float(sp.dawsn(p["x"])),
+        reference=lambda p: (mp.sqrt(mp.pi) / 2 * mp.e ** (-mp.mpf(p["x"]) ** 2)
+                             * mp.erfi(p["x"])),
+    ),
+    Probe(
+        key="fresnel_s",
+        target="scipy.special.fresnel[S]",
+        domain="x ~ U(-50,50)",
+        draw=lambda r: {"x": _u(r, -50, 50)},
+        library=lambda p: float(sp.fresnel(p["x"])[0]),
+        reference=lambda p: mp.fresnels(p["x"]),
+    ),
+    Probe(
+        key="voigt_profile",
+        target="scipy.special.voigt_profile",
+        domain="x ~ U(-50,50); sigma,gamma ~ logU(1e-3,10)",
+        draw=lambda r: {"x": _u(r, -50, 50), "sigma": _logu(r, 1e-3, 10),
+                        "gamma": _logu(r, 1e-3, 10)},
+        library=lambda p: float(sp.voigt_profile(p["x"], p["sigma"], p["gamma"])),
+        reference=lambda p: (
+            (mp.e ** (-(((mp.mpf(p["x"]) + 1j * mp.mpf(p["gamma"]))
+                         / (mp.mpf(p["sigma"]) * mp.sqrt(2))) ** 2))
+             * mp.erfc(-1j * (mp.mpf(p["x"]) + 1j * mp.mpf(p["gamma"]))
+                       / (mp.mpf(p["sigma"]) * mp.sqrt(2)))).real
+            / (mp.mpf(p["sigma"]) * mp.sqrt(2 * mp.pi))),
+    ),
+    Probe(
+        key="ive",
+        target="scipy.special.ive",
+        domain="v ~ U(-60,60); x ~ logU(1e-2,500)",
+        draw=lambda r: {"v": _u(r, -60, 60), "x": _logu(r, 1e-2, 500)},
+        library=lambda p: float(sp.ive(p["v"], p["x"])),
+        reference=lambda p: (mp.e ** (-abs(mp.mpf(p["x"])))
+                             * mp.besseli(p["v"], p["x"])),
+    ),
+    Probe(
+        key="kve",
+        target="scipy.special.kve",
+        domain="v ~ U(-60,60); x ~ logU(1e-2,500)",
+        draw=lambda r: {"v": _u(r, -60, 60), "x": _logu(r, 1e-2, 500)},
+        library=lambda p: float(sp.kve(p["v"], p["x"])),
+        reference=lambda p: mp.e ** mp.mpf(p["x"]) * mp.besselk(p["v"], p["x"]),
+    ),
+    Probe(
+        key="eval_chebyt",
+        target="scipy.special.eval_chebyt",
+        domain="n ~ U{0..200}; x ~ U(-1,1)",
+        draw=lambda r: {"n": float(r.randint(0, 200)), "x": _u(r, -1, 1)},
+        library=lambda p: float(sp.eval_chebyt(int(p["n"]), p["x"])),
+        reference=lambda p: mp.chebyt(int(p["n"]), p["x"]),
+    ),
+    Probe(
+        key="eval_hermite",
+        target="scipy.special.eval_hermite",
+        domain="n ~ U{0..80}; x ~ U(-10,10)",
+        draw=lambda r: {"n": float(r.randint(0, 80)), "x": _u(r, -10, 10)},
+        library=lambda p: float(sp.eval_hermite(int(p["n"]), p["x"])),
+        reference=lambda p: mp.hermite(int(p["n"]), p["x"]),
+    ),
+    Probe(
+        key="eval_genlaguerre",
+        target="scipy.special.eval_genlaguerre",
+        # `alpha > -1` because SciPy *documents* that restriction. Drawn wider,
+        # this probe reports 21% of points with no correct digit -- every one of
+        # them a `nan` at alpha < -1, which is the documented contract being
+        # honoured rather than a defect. A sweep that ranks functions has to
+        # draw each one's documented domain or it ranks its own mistakes.
+        domain="n ~ U{0..80}; alpha ~ U(-1,20); x ~ U(0,60)",
+        draw=lambda r: {"n": float(r.randint(0, 80)), "alpha": _u(r, -0.999, 20),
+                        "x": _u(r, 0, 60)},
+        library=lambda p: float(sp.eval_genlaguerre(int(p["n"]), p["alpha"], p["x"])),
+        reference=lambda p: mp.laguerre(int(p["n"]), p["alpha"], p["x"]),
+    ),
+    Probe(
+        key="eval_jacobi",
+        target="scipy.special.eval_jacobi",
+        domain="n ~ U{0..60}; a,b ~ U(-0.9,10); x ~ U(-1,1)",
+        draw=lambda r: {"n": float(r.randint(0, 60)), "a": _u(r, -0.9, 10),
+                        "b": _u(r, -0.9, 10), "x": _u(r, -1, 1)},
+        library=lambda p: float(sp.eval_jacobi(int(p["n"]), p["a"], p["b"], p["x"])),
+        reference=lambda p: mp.jacobi(int(p["n"]), p["a"], p["b"], p["x"]),
+    ),
+    Probe(
+        key="gammaincinv",
+        target="scipy.special.gammaincinv",
+        domain="a ~ logU(1e-2,1e4); y ~ U(0,1)",
+        draw=lambda r: {"a": _logu(r, 1e-2, 1e4), "y": _u(r, 1e-12, 1 - 1e-12)},
+        library=lambda p: float(sp.gammaincinv(p["a"], p["y"])),
+        reference=lambda p: _verified_root(
+            lambda x: mp.gammainc(p["a"], 0, x, regularized=True) - mp.mpf(p["y"]),
+            float(sp.gammaincinv(p["a"], p["y"])), p["y"]),
+        points_scale=0.15,
+        note="reference is a root-find, so this probe runs fewer points",
+    ),
+    Probe(
+        key="betaincinv",
+        target="scipy.special.betaincinv",
+        domain="a,b ~ logU(1e-2,1e3); y ~ U(0,1)",
+        draw=lambda r: {"a": _logu(r, 1e-2, 1e3), "b": _logu(r, 1e-2, 1e3),
+                        "y": _u(r, 1e-10, 1 - 1e-10)},
+        library=lambda p: float(sp.betaincinv(p["a"], p["b"], p["y"])),
+        reference=lambda p: _verified_root(
+            lambda x: mp.betainc(p["a"], p["b"], 0, x, regularized=True) - mp.mpf(p["y"]),
+            float(sp.betaincinv(p["a"], p["b"], p["y"])), p["y"]),
+        points_scale=0.12,
+        note="reference is a root-find, so this probe runs fewer points",
+    ),
+    Probe(
+        key="elliprd",
+        target="scipy.special.elliprd",
+        domain="x,y,z ~ logU(1e-3,100)",
+        draw=lambda r: {"x": _logu(r, 1e-3, 100), "y": _logu(r, 1e-3, 100),
+                        "z": _logu(r, 1e-3, 100)},
+        library=lambda p: float(sp.elliprd(p["x"], p["y"], p["z"])),
+        reference=lambda p: mp.elliprd(p["x"], p["y"], p["z"]),
+    ),
+    Probe(
+        key="ellipkm1",
+        target="scipy.special.ellipkm1",
+        domain="p ~ logU(1e-300,1)",
+        draw=lambda r: {"p": _logu(r, 1e-300, 1.0)},
+        library=lambda p: float(sp.ellipkm1(p["p"])),
+        reference=lambda p: mp.ellipk(1 - mp.mpf(p["p"])),
+    ),
+    Probe(
+        key="spence",
+        target="scipy.special.spence",
+        domain="z ~ logU(1e-6,1e6)",
+        draw=lambda r: {"z": _logu(r, 1e-6, 1e6)},
+        library=lambda p: float(sp.spence(p["z"])),
+        reference=lambda p: mp.polylog(2, 1 - mp.mpf(p["z"])),
+    ),
+    Probe(
+        key="exprel",
+        target="scipy.special.exprel",
+        domain="x ~ logU(1e-18,700), random sign",
+        draw=lambda r: {"x": r.choice([-1.0, 1.0]) * _logu(r, 1e-18, 700)},
+        library=lambda p: float(sp.exprel(p["x"])),
+        reference=lambda p: (mp.e ** mp.mpf(p["x"]) - 1) / mp.mpf(p["x"]),
+    ),
+    Probe(
+        key="powm1",
+        target="scipy.special.powm1",
+        domain="x ~ logU(0.1,10); y ~ U(-30,30)",
+        draw=lambda r: {"x": _logu(r, 0.1, 10), "y": _u(r, -30, 30)},
+        library=lambda p: float(sp.powm1(p["x"], p["y"])),
+        reference=lambda p: mp.mpf(p["x"]) ** mp.mpf(p["y"]) - 1,
+    ),
+    Probe(
+        key="logit",
+        target="scipy.special.logit",
+        domain="p ~ logU(1e-300,0.5)",
+        draw=lambda r: {"p": _logu(r, 1e-300, 0.5)},
+        library=lambda p: float(sp.logit(p["p"])),
+        reference=lambda p: mp.log(mp.mpf(p["p"]) / (1 - mp.mpf(p["p"]))),
+    ),
+    Probe(
+        key="zetac",
+        target="scipy.special.zetac",
+        domain="x ~ U(-30,30) \\ {1}",
+        draw=lambda r: {"x": _u(r, -30, 30)},
+        library=lambda p: float(sp.zetac(p["x"])),
+        reference=lambda p: mp.zeta(p["x"]) - 1,
+        reject=lambda p: abs(p["x"] - 1.0) < 1e-3,
+    ),
+    Probe(
+        key="multigammaln",
+        target="scipy.special.multigammaln",
+        domain="a ~ U(5,200); d ~ U{1..8}",
+        draw=lambda r: {"a": _u(r, 5, 200), "d": float(r.randint(1, 8))},
+        library=lambda p: float(sp.multigammaln(p["a"], int(p["d"]))),
+        reference=lambda p: (
+            mp.mpf(int(p["d"])) * (int(p["d"]) - 1) / 4 * mp.log(mp.pi)
+            + mp.fsum([mp.loggamma(mp.mpf(p["a"]) - mp.mpf(j) / 2)
+                       for j in range(int(p["d"]))])),
+    ),
+    Probe(
+        key="agm",
+        target="scipy.special.agm",
+        domain="a,b ~ logU(1e-6,1e6)",
+        draw=lambda r: {"a": _logu(r, 1e-6, 1e6), "b": _logu(r, 1e-6, 1e6)},
+        library=lambda p: float(sp.agm(p["a"], p["b"])),
+        reference=lambda p: mp.agm(p["a"], p["b"]),
+    ),
+    # ---- scipy.stats tail probabilities and quantiles -----------------------
+    # Where a statistician actually meets a lost digit: a p-value far out in a
+    # tail, or a critical value recovered from one.
+    Probe(
+        key="norm_sf",
+        target="scipy.stats.norm.sf",
+        domain="x ~ U(0,40)",
+        draw=lambda r: {"x": _u(r, 0, 40)},
+        library=lambda p: float(st.norm.sf(p["x"])),
+        reference=lambda p: mp.erfc(mp.mpf(p["x"]) / mp.sqrt(2)) / 2,
+    ),
+    Probe(
+        key="norm_isf",
+        target="scipy.stats.norm.isf",
+        domain="p ~ logU(1e-300,0.5)",
+        draw=lambda r: {"p": _logu(r, 1e-300, 0.5)},
+        library=lambda p: float(st.norm.isf(p["p"])),
+        reference=lambda p: -mp.sqrt(2) * mp.erfinv(2 * mp.mpf(p["p"]) - 1),
+    ),
+    Probe(
+        key="t_sf",
+        target="scipy.stats.t.sf",
+        domain="x ~ U(0,60); df ~ logU(1,300)",
+        draw=lambda r: {"x": _u(r, 0, 60), "df": _logu(r, 1, 300)},
+        library=lambda p: float(st.t.sf(p["x"], p["df"])),
+        reference=lambda p: mp.betainc(
+            mp.mpf(p["df"]) / 2, mp.mpf("0.5"), 0,
+            mp.mpf(p["df"]) / (mp.mpf(p["df"]) + mp.mpf(p["x"]) ** 2),
+            regularized=True) / 2,
+        points_scale=0.5,
+    ),
+    Probe(
+        key="chi2_sf",
+        target="scipy.stats.chi2.sf",
+        domain="x ~ logU(1e-2,1e4); df ~ logU(1,500)",
+        draw=lambda r: {"x": _logu(r, 1e-2, 1e4), "df": _logu(r, 1, 500)},
+        library=lambda p: float(st.chi2.sf(p["x"], p["df"])),
+        reference=lambda p: mp.gammainc(mp.mpf(p["df"]) / 2, mp.mpf(p["x"]) / 2,
+                                        mp.inf, regularized=True),
+    ),
+    Probe(
+        key="poisson_sf",
+        target="scipy.stats.poisson.sf",
+        domain="k ~ U{0..200}; mu ~ logU(0.1,200)",
+        draw=lambda r: {"k": float(r.randint(0, 200)), "mu": _logu(r, 0.1, 200)},
+        library=lambda p: float(st.poisson.sf(p["k"], p["mu"])),
+        reference=lambda p: mp.gammainc(int(p["k"]) + 1, 0, mp.mpf(p["mu"]),
+                                        regularized=True),
+    ),
+    Probe(
+        key="binom_sf",
+        target="scipy.stats.binom.sf",
+        domain="n ~ U{1..500}; k ~ U{0..n}; p ~ U(0.01,0.99)",
+        draw=lambda r: (lambda n: {"n": float(n), "k": float(r.randint(0, n)),
+                                   "p": _u(r, 0.01, 0.99)})(r.randint(1, 500)),
+        library=lambda p: float(st.binom.sf(p["k"], int(p["n"]), p["p"])),
+        reference=lambda p: mp.betainc(
+            mp.mpf(int(p["k"]) + 1), mp.mpf(int(p["n"]) - int(p["k"])),
+            0, mp.mpf(p["p"]), regularized=True),
+        points_scale=0.5,
+        reject=lambda p: int(p["k"]) >= int(p["n"]),
     ),
     Probe(
         key="kelvin_ber",

@@ -18,7 +18,7 @@
   "loss_threshold": 8.0,
   "points_requested": 600,
   "seed": 20260825,
-  "wall_seconds": 21.35,
+  "wall_seconds": 32.15,
   "results": [
     {
       "key": "hyp2f1",
@@ -83,7 +83,7 @@
           "raised": ""
         }
       ],
-      "seconds": 0.72
+      "seconds": 0.76
     },
     {
       "key": "pbdv",
@@ -138,7 +138,62 @@
           "raised": ""
         }
       ],
-      "seconds": 1.26
+      "seconds": 1.41
+    },
+    {
+      "key": "pbvv",
+      "target": "scipy.special.pbvv[V]",
+      "domain": "v ~ U(-20,20); x ~ U(-30,30)",
+      "note": "parabolic cylinder V_v(x); same failure region as pbdv",
+      "scored": 360,
+      "drawn": 360,
+      "mean_digits": 11.874,
+      "median_digits": 13.853,
+      "p10_digits": 1.418,
+      "min_digits": 0.0,
+      "frac_below_8": 0.1667,
+      "frac_below_1": 0.0944,
+      "library_raised": 0,
+      "reference_rejected": 0,
+      "degenerate_rejected": 0,
+      "worst_points": [
+        {
+          "v": 9.628127939828111,
+          "x": -23.177960283840477,
+          "digits": 0.0,
+          "library": "2.632294034446341e+45",
+          "raised": ""
+        },
+        {
+          "v": 16.85159503196293,
+          "x": -8.412123946425375,
+          "digits": 0.0,
+          "library": "-2.6517509170090036e-07",
+          "raised": ""
+        },
+        {
+          "v": 19.013155237555125,
+          "x": -15.76003768824143,
+          "digits": 0.0,
+          "library": "-275477181371889.34",
+          "raised": ""
+        },
+        {
+          "v": 9.912414777347927,
+          "x": -22.297099601231224,
+          "digits": 0.0,
+          "library": "-1.696035337023123e+40",
+          "raised": ""
+        },
+        {
+          "v": 16.300360545981178,
+          "x": -13.989124297570815,
+          "digits": 0.0,
+          "library": "88104357.1333815",
+          "raised": ""
+        }
+      ],
+      "seconds": 0.86
     },
     {
       "key": "airy_bi",
@@ -188,7 +243,7 @@
           "raised": ""
         }
       ],
-      "seconds": 1.11
+      "seconds": 1.12
     },
     {
       "key": "airy_ai",
@@ -238,7 +293,57 @@
           "raised": ""
         }
       ],
-      "seconds": 1.15
+      "seconds": 1.17
+    },
+    {
+      "key": "norm_sf",
+      "target": "scipy.stats.norm.sf",
+      "domain": "x ~ U(0,40)",
+      "note": "",
+      "scored": 600,
+      "drawn": 669,
+      "mean_digits": 14.014,
+      "median_digits": 13.809,
+      "p10_digits": 13.072,
+      "min_digits": 12.763,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 0,
+      "degenerate_rejected": 69,
+      "worst_points": [
+        {
+          "x": 33.926583788491584,
+          "digits": 12.763,
+          "library": "1.3510678935930898e-252",
+          "raised": ""
+        },
+        {
+          "x": 33.91570421481515,
+          "digits": 12.779,
+          "library": "1.9547514966206093e-252",
+          "raised": ""
+        },
+        {
+          "x": 35.053049590202605,
+          "digits": 12.784,
+          "library": "1.7517825522768692e-269",
+          "raised": ""
+        },
+        {
+          "x": 32.5414919522228,
+          "digits": 12.797,
+          "library": "1.3812594651755515e-232",
+          "raised": ""
+        },
+        {
+          "x": 31.68072019738332,
+          "digits": 12.807,
+          "library": "1.4319879262642587e-220",
+          "raised": ""
+        }
+      ],
+      "seconds": 0.23
     },
     {
       "key": "np_sinc",
@@ -288,7 +393,117 @@
           "raised": ""
         }
       ],
-      "seconds": 0.07
+      "seconds": 0.08
+    },
+    {
+      "key": "pbwa",
+      "target": "scipy.special.pbwa[W]",
+      "domain": "a ~ U(-5,5); x ~ U(-5,5)",
+      "note": "SciPy documents this one as accurate only on |a|,|x| <= 5",
+      "scored": 240,
+      "drawn": 241,
+      "mean_digits": 14.115,
+      "median_digits": 14.664,
+      "p10_digits": 12.27,
+      "min_digits": 8.11,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 1,
+      "degenerate_rejected": 0,
+      "worst_points": [
+        {
+          "a": 4.66865710020841,
+          "x": 4.866158620133051,
+          "digits": 8.11,
+          "library": "0.00019002167559642986",
+          "raised": ""
+        },
+        {
+          "a": 4.954864883778622,
+          "x": 4.720338892380095,
+          "digits": 8.137,
+          "library": "0.00020542202973258247",
+          "raised": ""
+        },
+        {
+          "a": 4.627069554102308,
+          "x": 4.494376262125538,
+          "digits": 8.393,
+          "library": "0.00038357969398151033",
+          "raised": ""
+        },
+        {
+          "a": 3.389463400230351,
+          "x": 4.9004223894339045,
+          "digits": 9.37,
+          "library": "-0.0011549616501109422",
+          "raised": ""
+        },
+        {
+          "a": 2.6863733937771226,
+          "x": 4.281488151323295,
+          "digits": 9.915,
+          "library": "-0.0004787450875921699",
+          "raised": ""
+        }
+      ],
+      "seconds": 2.84
+    },
+    {
+      "key": "poisson_sf",
+      "target": "scipy.stats.poisson.sf",
+      "domain": "k ~ U{0..200}; mu ~ logU(0.1,200)",
+      "note": "",
+      "scored": 600,
+      "drawn": 681,
+      "mean_digits": 14.251,
+      "median_digits": 13.941,
+      "p10_digits": 13.091,
+      "min_digits": 12.636,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 0,
+      "degenerate_rejected": 81,
+      "worst_points": [
+        {
+          "k": 166.0,
+          "mu": 30.165015491793792,
+          "digits": 12.636,
+          "library": "7.678632657310257e-67",
+          "raised": ""
+        },
+        {
+          "k": 185.0,
+          "mu": 100.90686011769111,
+          "digits": 12.637,
+          "library": "2.265206553215193e-14",
+          "raised": ""
+        },
+        {
+          "k": 170.0,
+          "mu": 66.99172930815581,
+          "digits": 12.649,
+          "library": "1.883693530829593e-26",
+          "raised": ""
+        },
+        {
+          "k": 194.0,
+          "mu": 5.1948577845947685,
+          "digits": 12.722,
+          "library": "7.56506118839703e-227",
+          "raised": ""
+        },
+        {
+          "k": 182.0,
+          "mu": 3.057675181369687,
+          "digits": 12.722,
+          "library": "2.6472183564279637e-249",
+          "raised": ""
+        }
+      ],
+      "seconds": 0.29
     },
     {
       "key": "hyperu",
@@ -348,7 +563,7 @@
           "raised": ""
         }
       ],
-      "seconds": 1.29
+      "seconds": 1.38
     },
     {
       "key": "spherical_jn",
@@ -403,7 +618,62 @@
           "raised": ""
         }
       ],
-      "seconds": 0.37
+      "seconds": 0.38
+    },
+    {
+      "key": "ive",
+      "target": "scipy.special.ive",
+      "domain": "v ~ U(-60,60); x ~ logU(1e-2,500)",
+      "note": "",
+      "scored": 600,
+      "drawn": 600,
+      "mean_digits": 14.44,
+      "median_digits": 14.328,
+      "p10_digits": 13.616,
+      "min_digits": 11.544,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 0,
+      "degenerate_rejected": 0,
+      "worst_points": [
+        {
+          "v": -12.999857062049628,
+          "x": 0.02098641081628176,
+          "digits": 11.544,
+          "library": "3.581956204216654e+30",
+          "raised": ""
+        },
+        {
+          "v": -40.001303402514466,
+          "x": 1.9242247158258632,
+          "digits": 11.733,
+          "library": "1.7854555912241763e+43",
+          "raised": ""
+        },
+        {
+          "v": -24.995289923045185,
+          "x": 0.14148215593051752,
+          "digits": 12.178,
+          "library": "1.413934649953141e+50",
+          "raised": ""
+        },
+        {
+          "v": -17.240506322972692,
+          "x": 11.496120333945088,
+          "digits": 12.408,
+          "library": "-6.731254238325503e-08",
+          "raised": ""
+        },
+        {
+          "v": -25.997661961131904,
+          "x": 0.03541146403285455,
+          "digits": 12.508,
+          "library": "-1.2183258365239674e+68",
+          "raised": ""
+        }
+      ],
+      "seconds": 0.39
     },
     {
       "key": "jv",
@@ -461,6 +731,71 @@
       "seconds": 0.41
     },
     {
+      "key": "eval_jacobi",
+      "target": "scipy.special.eval_jacobi",
+      "domain": "n ~ U{0..60}; a,b ~ U(-0.9,10); x ~ U(-1,1)",
+      "note": "",
+      "scored": 600,
+      "drawn": 600,
+      "mean_digits": 14.59,
+      "median_digits": 14.525,
+      "p10_digits": 13.836,
+      "min_digits": 12.0,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 0,
+      "degenerate_rejected": 0,
+      "worst_points": [
+        {
+          "n": 42.0,
+          "a": 8.889025337767041,
+          "b": 0.3214752158696982,
+          "x": -0.1677420018751914,
+          "digits": 12.0,
+          "library": "-0.008472678468494541",
+          "raised": ""
+        },
+        {
+          "n": 22.0,
+          "a": 5.3345906041343225,
+          "b": 4.434262276581366,
+          "x": -0.9556258428840831,
+          "digits": 12.2,
+          "library": "-29.596254961235342",
+          "raised": ""
+        },
+        {
+          "n": 21.0,
+          "a": 6.17600775303396,
+          "b": 0.799554076923097,
+          "x": -0.8648212969123412,
+          "digits": 12.452,
+          "library": "-0.014034545514032026",
+          "raised": ""
+        },
+        {
+          "n": 56.0,
+          "a": 1.126304808581435,
+          "b": 7.346563126333219,
+          "x": -0.9145849322172701,
+          "digits": 12.649,
+          "library": "2083.63226843781",
+          "raised": ""
+        },
+        {
+          "n": 50.0,
+          "a": 4.403201437571664,
+          "b": 4.1558573985321186,
+          "x": -0.4210611915552631,
+          "digits": 12.707,
+          "library": "0.03814963715323586",
+          "raised": ""
+        }
+      ],
+      "seconds": 0.31
+    },
+    {
       "key": "yv",
       "target": "scipy.special.yv",
       "domain": "v ~ U(-60,60); x ~ logU(1e-2,500)",
@@ -513,7 +848,67 @@
           "raised": ""
         }
       ],
-      "seconds": 0.88
+      "seconds": 0.86
+    },
+    {
+      "key": "eval_genlaguerre",
+      "target": "scipy.special.eval_genlaguerre",
+      "domain": "n ~ U{0..80}; alpha ~ U(-1,20); x ~ U(0,60)",
+      "note": "",
+      "scored": 600,
+      "drawn": 600,
+      "mean_digits": 14.677,
+      "median_digits": 14.589,
+      "p10_digits": 13.851,
+      "min_digits": 12.172,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 0,
+      "degenerate_rejected": 0,
+      "worst_points": [
+        {
+          "n": 36.0,
+          "alpha": 10.976108646180311,
+          "x": 24.63206116742473,
+          "digits": 12.172,
+          "library": "620.1071748842294",
+          "raised": ""
+        },
+        {
+          "n": 19.0,
+          "alpha": 3.254553088812082,
+          "x": 57.907246233273376,
+          "digits": 12.575,
+          "library": "592079346.4920373",
+          "raised": ""
+        },
+        {
+          "n": 58.0,
+          "alpha": 6.756131046796381,
+          "x": 11.704005220561687,
+          "digits": 12.85,
+          "library": "-15.86690145051194",
+          "raised": ""
+        },
+        {
+          "n": 49.0,
+          "alpha": 14.25468970604737,
+          "x": 46.73105672814867,
+          "digits": 13.059,
+          "library": "164613467.34325716",
+          "raised": ""
+        },
+        {
+          "n": 73.0,
+          "alpha": 8.742250070496937,
+          "x": 18.57919820511585,
+          "digits": 13.119,
+          "library": "9336.188992397649",
+          "raised": ""
+        }
+      ],
+      "seconds": 0.26
     },
     {
       "key": "poch",
@@ -569,6 +964,61 @@
         }
       ],
       "seconds": 0.12
+    },
+    {
+      "key": "hyp0f1",
+      "target": "scipy.special.hyp0f1",
+      "domain": "v ~ U(-20,20); z ~ U(-200,200)",
+      "note": "",
+      "scored": 600,
+      "drawn": 600,
+      "mean_digits": 14.764,
+      "median_digits": 14.788,
+      "p10_digits": 14.103,
+      "min_digits": 11.294,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 0,
+      "degenerate_rejected": 0,
+      "worst_points": [
+        {
+          "v": -10.802752318877857,
+          "z": -34.92014004504588,
+          "digits": 11.294,
+          "library": "9.948602358285655",
+          "raised": ""
+        },
+        {
+          "v": -3.9948298184689435,
+          "z": -40.83437065998109,
+          "digits": 11.409,
+          "library": "-7682.185686246096",
+          "raised": ""
+        },
+        {
+          "v": -9.017451319867433,
+          "z": -40.4182853206886,
+          "digits": 11.424,
+          "library": "4368.254209036624",
+          "raised": ""
+        },
+        {
+          "v": -14.130069575364432,
+          "z": -42.95192731406834,
+          "digits": 11.548,
+          "library": "47.13468019204576",
+          "raised": ""
+        },
+        {
+          "v": -17.159682218915364,
+          "z": -38.32986406493495,
+          "digits": 11.733,
+          "library": "11.407993770869444",
+          "raised": ""
+        }
+      ],
+      "seconds": 0.29
     },
     {
       "key": "hyp1f1",
@@ -628,7 +1078,62 @@
           "raised": ""
         }
       ],
-      "seconds": 0.91
+      "seconds": 0.99
+    },
+    {
+      "key": "kve",
+      "target": "scipy.special.kve",
+      "domain": "v ~ U(-60,60); x ~ logU(1e-2,500)",
+      "note": "",
+      "scored": 600,
+      "drawn": 600,
+      "mean_digits": 14.795,
+      "median_digits": 14.714,
+      "p10_digits": 13.916,
+      "min_digits": 13.357,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 0,
+      "degenerate_rejected": 0,
+      "worst_points": [
+        {
+          "v": 57.3427452805782,
+          "x": 0.21829318055404515,
+          "digits": 13.357,
+          "library": "2.5683068074592354e+130",
+          "raised": ""
+        },
+        {
+          "v": 58.58196610646938,
+          "x": 0.05288077747141724,
+          "digits": 13.419,
+          "library": "6.048828184491048e+169",
+          "raised": ""
+        },
+        {
+          "v": -59.567073788633735,
+          "x": 12.968845474728527,
+          "digits": 13.459,
+          "library": "1.0840652579586795e+36",
+          "raised": ""
+        },
+        {
+          "v": 59.086354889515775,
+          "x": 17.86234709087133,
+          "digits": 13.49,
+          "library": "1.6037468108387784e+29",
+          "raised": ""
+        },
+        {
+          "v": 59.172952761711116,
+          "x": 0.04574024570666319,
+          "digits": 13.521,
+          "library": "3.0386203055348847e+175",
+          "raised": ""
+        }
+      ],
+      "seconds": 1.25
     },
     {
       "key": "kv",
@@ -683,7 +1188,62 @@
           "raised": ""
         }
       ],
-      "seconds": 1.11
+      "seconds": 1.18
+    },
+    {
+      "key": "eval_hermite",
+      "target": "scipy.special.eval_hermite",
+      "domain": "n ~ U{0..80}; x ~ U(-10,10)",
+      "note": "",
+      "scored": 600,
+      "drawn": 600,
+      "mean_digits": 14.85,
+      "median_digits": 14.84,
+      "p10_digits": 13.886,
+      "min_digits": 12.166,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 0,
+      "degenerate_rejected": 0,
+      "worst_points": [
+        {
+          "n": 37.0,
+          "x": -4.1564258989619285,
+          "digits": 12.166,
+          "library": "1.905468411489058e+28",
+          "raised": ""
+        },
+        {
+          "n": 77.0,
+          "x": -4.654167526050859,
+          "digits": 12.515,
+          "library": "-3.8775538842704314e+70",
+          "raised": ""
+        },
+        {
+          "n": 76.0,
+          "x": -3.4773696161584873,
+          "digits": 12.7,
+          "library": "4.385173338906183e+67",
+          "raised": ""
+        },
+        {
+          "n": 30.0,
+          "x": -4.481083909446495,
+          "digits": 12.752,
+          "library": "-6.4808343463496545e+22",
+          "raised": ""
+        },
+        {
+          "n": 43.0,
+          "x": -2.3856786718950262,
+          "digits": 12.909,
+          "library": "-7.425095858659087e+31",
+          "raised": ""
+        }
+      ],
+      "seconds": 0.16
     },
     {
       "key": "owens_t",
@@ -738,7 +1298,7 @@
           "raised": ""
         }
       ],
-      "seconds": 7.89
+      "seconds": 9.46
     },
     {
       "key": "eval_legendre",
@@ -793,7 +1353,7 @@
           "raised": ""
         }
       ],
-      "seconds": 0.12
+      "seconds": 0.13
     },
     {
       "key": "struve",
@@ -849,6 +1409,61 @@
         }
       ],
       "seconds": 0.28
+    },
+    {
+      "key": "t_sf",
+      "target": "scipy.stats.t.sf",
+      "domain": "x ~ U(0,60); df ~ logU(1,300)",
+      "note": "",
+      "scored": 300,
+      "drawn": 300,
+      "mean_digits": 15.138,
+      "median_digits": 15.249,
+      "p10_digits": 14.206,
+      "min_digits": 13.43,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 0,
+      "degenerate_rejected": 0,
+      "worst_points": [
+        {
+          "x": 22.170046201583375,
+          "df": 268.70732775933163,
+          "digits": 13.43,
+          "library": "6.275986387229491e-63",
+          "raised": ""
+        },
+        {
+          "x": 48.545079219552726,
+          "df": 252.02990266353422,
+          "digits": 13.478,
+          "library": "3.3184108393501514e-130",
+          "raised": ""
+        },
+        {
+          "x": 35.05259602460623,
+          "df": 280.4238126503354,
+          "digits": 13.687,
+          "library": "8.6945908273475e-105",
+          "raised": ""
+        },
+        {
+          "x": 15.639052860874553,
+          "df": 236.28959738290814,
+          "digits": 13.696,
+          "library": "1.262838179129385e-38",
+          "raised": ""
+        },
+        {
+          "x": 32.357341012546485,
+          "df": 184.27250497312164,
+          "digits": 13.75,
+          "library": "3.1612354620495305e-78",
+          "raised": ""
+        }
+      ],
+      "seconds": 0.22
     },
     {
       "key": "binom",
@@ -1013,7 +1628,122 @@
           "raised": ""
         }
       ],
-      "seconds": 0.36
+      "seconds": 0.37
+    },
+    {
+      "key": "eval_chebyt",
+      "target": "scipy.special.eval_chebyt",
+      "domain": "n ~ U{0..200}; x ~ U(-1,1)",
+      "note": "",
+      "scored": 600,
+      "drawn": 600,
+      "mean_digits": 15.29,
+      "median_digits": 15.386,
+      "p10_digits": 14.556,
+      "min_digits": 12.409,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 0,
+      "degenerate_rejected": 0,
+      "worst_points": [
+        {
+          "n": 119.0,
+          "x": -0.8432165079469749,
+          "digits": 12.409,
+          "library": "0.0048982318567654115",
+          "raised": ""
+        },
+        {
+          "n": 101.0,
+          "x": 0.9854295442322722,
+          "digits": 12.421,
+          "library": "-0.016338955912488906",
+          "raised": ""
+        },
+        {
+          "n": 131.0,
+          "x": -0.9132447543504085,
+          "digits": 12.96,
+          "library": "0.00795070749014215",
+          "raised": ""
+        },
+        {
+          "n": 70.0,
+          "x": -0.910610000878596,
+          "digits": 13.081,
+          "library": "-0.022425579603764234",
+          "raised": ""
+        },
+        {
+          "n": 129.0,
+          "x": 0.9910891378304509,
+          "digits": 13.232,
+          "library": "-0.04468496355291851",
+          "raised": ""
+        }
+      ],
+      "seconds": 0.17
+    },
+    {
+      "key": "binom_sf",
+      "target": "scipy.stats.binom.sf",
+      "domain": "n ~ U{1..500}; k ~ U{0..n}; p ~ U(0.01,0.99)",
+      "note": "",
+      "scored": 300,
+      "drawn": 307,
+      "mean_digits": 15.322,
+      "median_digits": 16.0,
+      "p10_digits": 13.964,
+      "min_digits": 2.049,
+      "frac_below_8": 0.0033,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 0,
+      "degenerate_rejected": 7,
+      "worst_points": [
+        {
+          "n": 442.0,
+          "k": 415.0,
+          "p": 0.17106292484425945,
+          "digits": 2.049,
+          "library": "5.319056211145495e-280",
+          "raised": ""
+        },
+        {
+          "n": 425.0,
+          "k": 343.0,
+          "p": 0.09954213203306636,
+          "digits": 13.126,
+          "library": "1.7035638395902408e-260",
+          "raised": ""
+        },
+        {
+          "n": 477.0,
+          "k": 331.0,
+          "p": 0.18997141048746707,
+          "digits": 13.322,
+          "library": "1.3787043749773951e-127",
+          "raised": ""
+        },
+        {
+          "n": 421.0,
+          "k": 220.0,
+          "p": 0.21434752502658935,
+          "digits": 13.393,
+          "library": "2.763806523189235e-44",
+          "raised": ""
+        },
+        {
+          "n": 413.0,
+          "k": 103.0,
+          "p": 0.06000673809666896,
+          "digits": 13.394,
+          "library": "3.909971204963508e-36",
+          "raised": ""
+        }
+      ],
+      "seconds": 0.26
     },
     {
       "key": "iv",
@@ -1068,7 +1798,7 @@
           "raised": ""
         }
       ],
-      "seconds": 0.37
+      "seconds": 0.38
     },
     {
       "key": "betainc",
@@ -1128,7 +1858,7 @@
           "raised": ""
         }
       ],
-      "seconds": 20.47
+      "seconds": 22.84
     },
     {
       "key": "zeta",
@@ -1178,7 +1908,57 @@
           "raised": ""
         }
       ],
-      "seconds": 0.53
+      "seconds": 0.57
+    },
+    {
+      "key": "fresnel_s",
+      "target": "scipy.special.fresnel[S]",
+      "domain": "x ~ U(-50,50)",
+      "note": "",
+      "scored": 600,
+      "drawn": 600,
+      "mean_digits": 15.416,
+      "median_digits": 15.465,
+      "p10_digits": 14.771,
+      "min_digits": 14.327,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 0,
+      "degenerate_rejected": 0,
+      "worst_points": [
+        {
+          "x": 47.65504777569136,
+          "digits": 14.327,
+          "library": "0.4999633904942599",
+          "raised": ""
+        },
+        {
+          "x": 48.03279420152289,
+          "digits": 14.337,
+          "library": "0.4984607595357988",
+          "raised": ""
+        },
+        {
+          "x": -45.44056001763561,
+          "digits": 14.366,
+          "library": "-0.49830483275345794",
+          "raised": ""
+        },
+        {
+          "x": -47.71600383119643,
+          "digits": 14.372,
+          "library": "-0.49810802721041086",
+          "raised": ""
+        },
+        {
+          "x": -45.810856438555106,
+          "digits": 14.413,
+          "library": "-0.5037739221880249",
+          "raised": ""
+        }
+      ],
+      "seconds": 2.46
     },
     {
       "key": "kelvin_ber",
@@ -1228,7 +2008,122 @@
           "raised": ""
         }
       ],
-      "seconds": 0.25
+      "seconds": 0.26
+    },
+    {
+      "key": "chi2_sf",
+      "target": "scipy.stats.chi2.sf",
+      "domain": "x ~ logU(1e-2,1e4); df ~ logU(1,500)",
+      "note": "",
+      "scored": 600,
+      "drawn": 705,
+      "mean_digits": 15.496,
+      "median_digits": 16.0,
+      "p10_digits": 14.077,
+      "min_digits": 12.701,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 0,
+      "degenerate_rejected": 105,
+      "worst_points": [
+        {
+          "x": 1900.1715048813196,
+          "df": 405.6127679276503,
+          "digits": 12.701,
+          "library": "2.286505164321294e-191",
+          "raised": ""
+        },
+        {
+          "x": 1966.1379219881344,
+          "df": 321.4461696563909,
+          "digits": 12.775,
+          "library": "1.141273552230573e-233",
+          "raised": ""
+        },
+        {
+          "x": 2276.7289225382933,
+          "df": 370.2661605830555,
+          "digits": 12.92,
+          "library": "6.368846662510124e-271",
+          "raised": ""
+        },
+        {
+          "x": 2.052871689687604,
+          "df": 1.0101535021112424,
+          "digits": 13.279,
+          "library": "0.15384734091787888",
+          "raised": ""
+        },
+        {
+          "x": 1176.5091167702703,
+          "df": 1.6994549576581186,
+          "digits": 13.292,
+          "library": "1.1523810502990166e-256",
+          "raised": ""
+        }
+      ],
+      "seconds": 0.82
+    },
+    {
+      "key": "betaincinv",
+      "target": "scipy.special.betaincinv",
+      "domain": "a,b ~ logU(1e-2,1e3); y ~ U(0,1)",
+      "note": "reference is a root-find, so this probe runs fewer points",
+      "scored": 72,
+      "drawn": 98,
+      "mean_digits": 15.501,
+      "median_digits": 15.802,
+      "p10_digits": 14.552,
+      "min_digits": 13.816,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 26,
+      "degenerate_rejected": 0,
+      "worst_points": [
+        {
+          "a": 0.04062256751728708,
+          "b": 15.570913176906014,
+          "y": 0.6088088851862257,
+          "digits": 13.816,
+          "library": "1.9025900559215105e-07",
+          "raised": ""
+        },
+        {
+          "a": 0.019362424011121794,
+          "b": 0.01912247373106635,
+          "y": 0.3672883471952688,
+          "digits": 14.076,
+          "library": "1.6154551181120865e-07",
+          "raised": ""
+        },
+        {
+          "a": 0.0890000908895661,
+          "b": 1.4225145134275243,
+          "y": 0.46617647357025993,
+          "digits": 14.081,
+          "library": "0.0001131219016699093",
+          "raised": ""
+        },
+        {
+          "a": 0.04212354801407279,
+          "b": 0.030977500859190203,
+          "y": 0.3655146056691528,
+          "digits": 14.104,
+          "library": "0.02774062716593571",
+          "raised": ""
+        },
+        {
+          "a": 0.048495025796798076,
+          "b": 2.057350105119345,
+          "y": 0.4187071015792471,
+          "digits": 14.138,
+          "library": "5.806235556318631e-09",
+          "raised": ""
+        }
+      ],
+      "seconds": 1.58
     },
     {
       "key": "gammaincc",
@@ -1283,7 +2178,7 @@
           "raised": ""
         }
       ],
-      "seconds": 8.59
+      "seconds": 8.89
     },
     {
       "key": "gammainc",
@@ -1338,7 +2233,117 @@
           "raised": ""
         }
       ],
-      "seconds": 0.86
+      "seconds": 0.88
+    },
+    {
+      "key": "voigt_profile",
+      "target": "scipy.special.voigt_profile",
+      "domain": "x ~ U(-50,50); sigma,gamma ~ logU(1e-3,10)",
+      "note": "",
+      "scored": 600,
+      "drawn": 601,
+      "mean_digits": 15.552,
+      "median_digits": 15.674,
+      "p10_digits": 14.676,
+      "min_digits": 13.817,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 1,
+      "degenerate_rejected": 0,
+      "worst_points": [
+        {
+          "x": -49.99081279961456,
+          "sigma": 5.0059819297976516,
+          "gamma": 0.07403652527760342,
+          "digits": 13.817,
+          "library": "9.729072868920826e-06",
+          "raised": ""
+        },
+        {
+          "x": -13.225267174537912,
+          "sigma": 0.0031133922679606454,
+          "gamma": 5.093551516814336,
+          "digits": 13.896,
+          "library": "0.008072253847258062",
+          "raised": ""
+        },
+        {
+          "x": -9.53818413174303,
+          "sigma": 0.0016983386083590586,
+          "gamma": 0.38121333927523177,
+          "digits": 13.994,
+          "library": "0.0013316609938537377",
+          "raised": ""
+        },
+        {
+          "x": -31.06164227544994,
+          "sigma": 3.3248385534736715,
+          "gamma": 0.1296045818565904,
+          "digits": 14.015,
+          "library": "4.43190510236426e-05",
+          "raised": ""
+        },
+        {
+          "x": 22.794859044669792,
+          "sigma": 0.003959886211243068,
+          "gamma": 0.1409390928396314,
+          "digits": 14.033,
+          "library": "8.633585896509307e-05",
+          "raised": ""
+        }
+      ],
+      "seconds": 0.64
+    },
+    {
+      "key": "zetac",
+      "target": "scipy.special.zetac",
+      "domain": "x ~ U(-30,30) \\ {1}",
+      "note": "",
+      "scored": 600,
+      "drawn": 600,
+      "mean_digits": 15.568,
+      "median_digits": 16.0,
+      "p10_digits": 14.447,
+      "min_digits": 12.251,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 0,
+      "degenerate_rejected": 0,
+      "worst_points": [
+        {
+          "x": -26.000092185559055,
+          "digits": 12.251,
+          "library": "31.85738328153704",
+          "raised": ""
+        },
+        {
+          "x": -23.977168031820156,
+          "digits": 13.951,
+          "library": "477.98249956262606",
+          "raised": ""
+        },
+        {
+          "x": -28.531596308780276,
+          "digits": 14.017,
+          "library": "-7230868.355012566",
+          "raised": ""
+        },
+        {
+          "x": -28.047523215205256,
+          "digits": 14.027,
+          "library": "-348179.5306131311",
+          "raised": ""
+        },
+        {
+          "x": -29.393480725051088,
+          "digits": 14.051,
+          "library": "-30112579.336626243",
+          "raised": ""
+        }
+      ],
+      "seconds": 0.54
     },
     {
       "key": "elliprj",
@@ -1403,7 +2408,112 @@
           "raised": ""
         }
       ],
-      "seconds": 2.38
+      "seconds": 2.84
+    },
+    {
+      "key": "dawsn",
+      "target": "scipy.special.dawsn",
+      "domain": "x ~ U(-100,100)",
+      "note": "",
+      "scored": 600,
+      "drawn": 600,
+      "mean_digits": 15.685,
+      "median_digits": 15.92,
+      "p10_digits": 14.912,
+      "min_digits": 14.702,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 0,
+      "degenerate_rejected": 0,
+      "worst_points": [
+        {
+          "x": -44.53811661650753,
+          "digits": 14.702,
+          "library": "-0.011229170968737105",
+          "raised": ""
+        },
+        {
+          "x": -44.71903722958424,
+          "digits": 14.713,
+          "library": "-0.011183718117688403",
+          "raised": ""
+        },
+        {
+          "x": -44.98119344214457,
+          "digits": 14.713,
+          "library": "-0.011118505612906754",
+          "raised": ""
+        },
+        {
+          "x": 44.76794229063975,
+          "digits": 14.73,
+          "library": "0.011171494777022672",
+          "raised": ""
+        },
+        {
+          "x": -44.56561625253461,
+          "digits": 14.731,
+          "library": "-0.011222238408058308",
+          "raised": ""
+        }
+      ],
+      "seconds": 0.4
+    },
+    {
+      "key": "gammaincinv",
+      "target": "scipy.special.gammaincinv",
+      "domain": "a ~ logU(1e-2,1e4); y ~ U(0,1)",
+      "note": "reference is a root-find, so this probe runs fewer points",
+      "scored": 90,
+      "drawn": 95,
+      "mean_digits": 15.701,
+      "median_digits": 16.0,
+      "p10_digits": 14.882,
+      "min_digits": 13.852,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 5,
+      "degenerate_rejected": 0,
+      "worst_points": [
+        {
+          "a": 0.026363328457158892,
+          "y": 0.8886023306070759,
+          "digits": 13.852,
+          "library": "0.006543021647942883",
+          "raised": ""
+        },
+        {
+          "a": 0.042998796400717965,
+          "y": 0.35598824952216446,
+          "digits": 13.865,
+          "library": "2.1495315678735126e-11",
+          "raised": ""
+        },
+        {
+          "a": 0.10670272377296193,
+          "y": 0.1275401105897521,
+          "digits": 14.219,
+          "library": "2.5342801225243887e-09",
+          "raised": ""
+        },
+        {
+          "a": 0.09508406573113523,
+          "y": 0.18738730900201414,
+          "digits": 14.472,
+          "library": "1.35895280652975e-08",
+          "raised": ""
+        },
+        {
+          "a": 0.17103425991437304,
+          "y": 0.3940734333725432,
+          "digits": 14.499,
+          "library": "0.0027688196818445535",
+          "raised": ""
+        }
+      ],
+      "seconds": 0.9
     },
     {
       "key": "expi",
@@ -1453,7 +2563,57 @@
           "raised": ""
         }
       ],
-      "seconds": 0.18
+      "seconds": 0.2
+    },
+    {
+      "key": "wrightomega",
+      "target": "scipy.special.wrightomega",
+      "domain": "x ~ U(-50,50)",
+      "note": "",
+      "scored": 600,
+      "drawn": 600,
+      "mean_digits": 15.731,
+      "median_digits": 16.0,
+      "p10_digits": 14.959,
+      "min_digits": 14.491,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 0,
+      "degenerate_rejected": 0,
+      "worst_points": [
+        {
+          "x": -32.147934879065616,
+          "digits": 14.491,
+          "library": "1.092268168639357e-14",
+          "raised": ""
+        },
+        {
+          "x": -33.373917968750646,
+          "digits": 14.498,
+          "library": "3.205469040516504e-15",
+          "raised": ""
+        },
+        {
+          "x": -33.412807553039315,
+          "digits": 14.506,
+          "library": "3.083202538070953e-15",
+          "raised": ""
+        },
+        {
+          "x": -33.48468451960193,
+          "digits": 14.534,
+          "library": "2.8693682262383032e-15",
+          "raised": ""
+        },
+        {
+          "x": -33.50479060515916,
+          "digits": 14.549,
+          "library": "2.812252573380712e-15",
+          "raised": ""
+        }
+      ],
+      "seconds": 0.19
     },
     {
       "key": "expn",
@@ -1508,7 +2668,7 @@
           "raised": ""
         }
       ],
-      "seconds": 0.15
+      "seconds": 0.16
     },
     {
       "key": "digamma",
@@ -1558,7 +2718,7 @@
           "raised": ""
         }
       ],
-      "seconds": 0.13
+      "seconds": 0.14
     },
     {
       "key": "shichi_shi",
@@ -1608,7 +2768,7 @@
           "raised": ""
         }
       ],
-      "seconds": 0.34
+      "seconds": 0.38
     },
     {
       "key": "log_ndtr",
@@ -1659,6 +2819,56 @@
         }
       ],
       "seconds": 0.13
+    },
+    {
+      "key": "erfcx",
+      "target": "scipy.special.erfcx",
+      "domain": "x ~ U(-25,300)",
+      "note": "",
+      "scored": 600,
+      "drawn": 600,
+      "mean_digits": 15.827,
+      "median_digits": 16.0,
+      "p10_digits": 15.658,
+      "min_digits": 13.552,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 0,
+      "degenerate_rejected": 0,
+      "worst_points": [
+        {
+          "x": -21.710713033709595,
+          "digits": 13.552,
+          "library": "1.0184313474528636e+205",
+          "raised": ""
+        },
+        {
+          "x": -17.272555878840237,
+          "digits": 13.651,
+          "library": "7.395389547975961e+129",
+          "raised": ""
+        },
+        {
+          "x": -24.287668547223507,
+          "digits": 13.651,
+          "library": "3.071625295958989e+256",
+          "raised": ""
+        },
+        {
+          "x": -20.69140051200666,
+          "digits": 13.701,
+          "library": "1.726981405097974e+186",
+          "raised": ""
+        },
+        {
+          "x": -18.00732455521041,
+          "digits": 13.739,
+          "library": "1.3396209557214723e+141",
+          "raised": ""
+        }
+      ],
+      "seconds": 0.11
     },
     {
       "key": "polygamma",
@@ -1713,7 +2923,7 @@
           "raised": ""
         }
       ],
-      "seconds": 0.59
+      "seconds": 0.72
     },
     {
       "key": "ellipeinc",
@@ -1768,7 +2978,7 @@
           "raised": ""
         }
       ],
-      "seconds": 2.35
+      "seconds": 3.01
     },
     {
       "key": "ellipkinc",
@@ -1823,7 +3033,57 @@
           "raised": ""
         }
       ],
-      "seconds": 0.75
+      "seconds": 0.98
+    },
+    {
+      "key": "spence",
+      "target": "scipy.special.spence",
+      "domain": "z ~ logU(1e-6,1e6)",
+      "note": "",
+      "scored": 600,
+      "drawn": 600,
+      "mean_digits": 15.873,
+      "median_digits": 16.0,
+      "p10_digits": 15.551,
+      "min_digits": 14.797,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 0,
+      "degenerate_rejected": 0,
+      "worst_points": [
+        {
+          "z": 0.4542191550698378,
+          "digits": 14.797,
+          "library": "0.6470445452381733",
+          "raised": ""
+        },
+        {
+          "z": 1.8537967890584572,
+          "digits": 14.853,
+          "library": "-0.7189882251128117",
+          "raised": ""
+        },
+        {
+          "z": 2.0432478626743653,
+          "digits": 14.894,
+          "library": "-0.8522653530552253",
+          "raised": ""
+        },
+        {
+          "z": 1.7990416631169863,
+          "digits": 14.914,
+          "library": "-0.6790773629096157",
+          "raised": ""
+        },
+        {
+          "z": 2.007712619707223,
+          "digits": 14.929,
+          "library": "-0.8278072797950947",
+          "raised": ""
+        }
+      ],
+      "seconds": 0.56
     },
     {
       "key": "sici_ci",
@@ -1873,7 +3133,177 @@
           "raised": ""
         }
       ],
-      "seconds": 0.09
+      "seconds": 0.1
+    },
+    {
+      "key": "elliprd",
+      "target": "scipy.special.elliprd",
+      "domain": "x,y,z ~ logU(1e-3,100)",
+      "note": "",
+      "scored": 600,
+      "drawn": 600,
+      "mean_digits": 15.914,
+      "median_digits": 16.0,
+      "p10_digits": 15.69,
+      "min_digits": 15.395,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 0,
+      "degenerate_rejected": 0,
+      "worst_points": [
+        {
+          "x": 5.7992434085812,
+          "y": 0.7136348310278258,
+          "z": 0.0012359378440032116,
+          "digits": 15.395,
+          "library": "40.06462979824636",
+          "raised": ""
+        },
+        {
+          "x": 7.425068679109158,
+          "y": 2.808948774628704,
+          "z": 1.278566193987211,
+          "digits": 15.403,
+          "library": "0.29204345558523354",
+          "raised": ""
+        },
+        {
+          "x": 3.676628206051033,
+          "y": 2.657192053304386,
+          "z": 0.804755076994654,
+          "digits": 15.433,
+          "library": "0.558614202159366",
+          "raised": ""
+        },
+        {
+          "x": 0.003282723243565714,
+          "y": 0.017222943696611998,
+          "z": 0.12677734195968282,
+          "digits": 15.438,
+          "library": "77.62461884609297",
+          "raised": ""
+        },
+        {
+          "x": 0.0013982594817216574,
+          "y": 0.003792715561467239,
+          "z": 0.00437339427178455,
+          "digits": 15.46,
+          "library": "4867.2665378506335",
+          "raised": ""
+        }
+      ],
+      "seconds": 1.5
+    },
+    {
+      "key": "multigammaln",
+      "target": "scipy.special.multigammaln",
+      "domain": "a ~ U(5,200); d ~ U{1..8}",
+      "note": "",
+      "scored": 600,
+      "drawn": 600,
+      "mean_digits": 15.92,
+      "median_digits": 16.0,
+      "p10_digits": 15.709,
+      "min_digits": 15.442,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 0,
+      "degenerate_rejected": 0,
+      "worst_points": [
+        {
+          "a": 156.99973349343378,
+          "d": 8.0,
+          "digits": 15.442,
+          "library": "5027.160657943439",
+          "raised": ""
+        },
+        {
+          "a": 13.161227523397724,
+          "d": 1.0,
+          "digits": 15.474,
+          "library": "20.395509200280884",
+          "raised": ""
+        },
+        {
+          "a": 154.2331952437012,
+          "d": 8.0,
+          "digits": 15.486,
+          "library": "4915.773397270915",
+          "raised": ""
+        },
+        {
+          "a": 53.729418856690366,
+          "d": 7.0,
+          "digits": 15.487,
+          "library": "1085.287986080077",
+          "raised": ""
+        },
+        {
+          "a": 82.78919932125125,
+          "d": 4.0,
+          "digits": 15.497,
+          "library": "1116.4021897370528",
+          "raised": ""
+        }
+      ],
+      "seconds": 0.28
+    },
+    {
+      "key": "agm",
+      "target": "scipy.special.agm",
+      "domain": "a,b ~ logU(1e-6,1e6)",
+      "note": "",
+      "scored": 600,
+      "drawn": 600,
+      "mean_digits": 15.926,
+      "median_digits": 16.0,
+      "p10_digits": 15.729,
+      "min_digits": 15.436,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 0,
+      "degenerate_rejected": 0,
+      "worst_points": [
+        {
+          "a": 0.03613017533285616,
+          "b": 624.2576885561612,
+          "digits": 15.436,
+          "library": "87.99596611765048",
+          "raised": ""
+        },
+        {
+          "a": 49235.29319146406,
+          "b": 0.005926992980748756,
+          "digits": 15.47,
+          "library": "4465.562121136223",
+          "raised": ""
+        },
+        {
+          "a": 2908.6225286437284,
+          "b": 10.815321984486944,
+          "digits": 15.516,
+          "library": "654.4898415297007",
+          "raised": ""
+        },
+        {
+          "a": 0.10667026362555272,
+          "b": 39829.43310515106,
+          "digits": 15.53,
+          "library": "4400.744558156598",
+          "raised": ""
+        },
+        {
+          "a": 12.146955961947745,
+          "b": 290985.60358250584,
+          "digits": 15.531,
+          "library": "39849.11601357627",
+          "raised": ""
+        }
+      ],
+      "seconds": 0.06
     },
     {
       "key": "gammaln",
@@ -1973,7 +3403,7 @@
           "raised": ""
         }
       ],
-      "seconds": 0.25
+      "seconds": 0.26
     },
     {
       "key": "exp1",
@@ -2023,7 +3453,7 @@
           "raised": ""
         }
       ],
-      "seconds": 0.08
+      "seconds": 0.09
     },
     {
       "key": "erfinv",
@@ -2123,7 +3553,107 @@
           "raised": ""
         }
       ],
-      "seconds": 3.96
+      "seconds": 4.47
+    },
+    {
+      "key": "norm_isf",
+      "target": "scipy.stats.norm.isf",
+      "domain": "p ~ logU(1e-300,0.5)",
+      "note": "",
+      "scored": 358,
+      "drawn": 7200,
+      "mean_digits": 15.964,
+      "median_digits": 16.0,
+      "p10_digits": 15.856,
+      "min_digits": 15.466,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 6842,
+      "degenerate_rejected": 0,
+      "worst_points": [
+        {
+          "p": 0.10882510970843255,
+          "digits": 15.466,
+          "library": "1.2328004607322371",
+          "raised": ""
+        },
+        {
+          "p": 0.15206466393360407,
+          "digits": 15.504,
+          "library": "1.0276184799283865",
+          "raised": ""
+        },
+        {
+          "p": 0.09191393910613595,
+          "digits": 15.527,
+          "library": "1.329060901473957",
+          "raised": ""
+        },
+        {
+          "p": 0.0003295450783683364,
+          "digits": 15.599,
+          "library": "3.40605452075234",
+          "raised": ""
+        },
+        {
+          "p": 4.300586006267458e-07,
+          "digits": 15.618,
+          "library": "4.9212078586125125",
+          "raised": ""
+        }
+      ],
+      "seconds": 4.59
+    },
+    {
+      "key": "ellipkm1",
+      "target": "scipy.special.ellipkm1",
+      "domain": "p ~ logU(1e-300,1)",
+      "note": "",
+      "scored": 382,
+      "drawn": 7200,
+      "mean_digits": 15.976,
+      "median_digits": 16.0,
+      "p10_digits": 15.889,
+      "min_digits": 15.648,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 6818,
+      "degenerate_rejected": 0,
+      "worst_points": [
+        {
+          "p": 3.593072830743963e-14,
+          "digits": 15.648,
+          "library": "16.864886123027155",
+          "raised": ""
+        },
+        {
+          "p": 0.0008609198622993279,
+          "digits": 15.66,
+          "library": "4.915891954392125",
+          "raised": ""
+        },
+        {
+          "p": 8.140577303435574e-12,
+          "digits": 15.725,
+          "library": "14.153374369462131",
+          "raised": ""
+        },
+        {
+          "p": 0.0002504323113404576,
+          "digits": 15.742,
+          "library": "5.532739112026801",
+          "raised": ""
+        },
+        {
+          "p": 6.037896072936987e-07,
+          "digits": 15.746,
+          "library": "8.546315516211108",
+          "raised": ""
+        }
+      ],
+      "seconds": 0.25
     },
     {
       "key": "sici_si",
@@ -2173,7 +3703,57 @@
           "raised": ""
         }
       ],
-      "seconds": 0.14
+      "seconds": 0.15
+    },
+    {
+      "key": "exprel",
+      "target": "scipy.special.exprel",
+      "domain": "x ~ logU(1e-18,700), random sign",
+      "note": "",
+      "scored": 600,
+      "drawn": 995,
+      "mean_digits": 15.988,
+      "median_digits": 16.0,
+      "p10_digits": 15.96,
+      "min_digits": 15.736,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 395,
+      "degenerate_rejected": 0,
+      "worst_points": [
+        {
+          "x": 7.564420105819273e-09,
+          "digits": 15.736,
+          "library": "1.0000000037822099",
+          "raised": ""
+        },
+        {
+          "x": 2.489406717465352e-07,
+          "digits": 15.765,
+          "library": "1.000000124470346",
+          "raised": ""
+        },
+        {
+          "x": 0.000314581841949294,
+          "digits": 15.781,
+          "library": "1.0001573074158943",
+          "raised": ""
+        },
+        {
+          "x": 0.008705952527592726,
+          "digits": 15.782,
+          "library": "1.0043656360739557",
+          "raised": ""
+        },
+        {
+          "x": 2.249106717916525e-08,
+          "digits": 15.786,
+          "library": "1.0000000112455338",
+          "raised": ""
+        }
+      ],
+      "seconds": 0.09
     },
     {
       "key": "lambertw_k0",
@@ -2223,7 +3803,62 @@
           "raised": ""
         }
       ],
-      "seconds": 0.2
+      "seconds": 0.22
+    },
+    {
+      "key": "powm1",
+      "target": "scipy.special.powm1",
+      "domain": "x ~ logU(0.1,10); y ~ U(-30,30)",
+      "note": "",
+      "scored": 600,
+      "drawn": 600,
+      "mean_digits": 15.997,
+      "median_digits": 16.0,
+      "p10_digits": 16.0,
+      "min_digits": 15.792,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 0,
+      "degenerate_rejected": 0,
+      "worst_points": [
+        {
+          "x": 0.7317337992358225,
+          "y": -2.7145024333020977,
+          "digits": 15.792,
+          "library": "1.334607074161151",
+          "raised": ""
+        },
+        {
+          "x": 0.4722050929872146,
+          "y": -0.5153742346995323,
+          "digits": 15.81,
+          "library": "0.472124898690071",
+          "raised": ""
+        },
+        {
+          "x": 0.2893321081604362,
+          "y": 0.06277891718615791,
+          "digits": 15.813,
+          "library": "-0.07490344488297702",
+          "raised": ""
+        },
+        {
+          "x": 0.9781371647395555,
+          "y": -10.14462009301846,
+          "digits": 15.861,
+          "library": "0.2513845343396114",
+          "raised": ""
+        },
+        {
+          "x": 0.5385563742025065,
+          "y": -0.04324770413191459,
+          "digits": 15.888,
+          "library": "0.027125791908376697",
+          "raised": ""
+        }
+      ],
+      "seconds": 0.07
     },
     {
       "key": "np_power",
@@ -2275,6 +3910,56 @@
           "y": -28.681472495654347,
           "digits": 15.968,
           "library": "2.305976121836051e-134",
+          "raised": ""
+        }
+      ],
+      "seconds": 0.07
+    },
+    {
+      "key": "logit",
+      "target": "scipy.special.logit",
+      "domain": "p ~ logU(1e-300,0.5)",
+      "note": "",
+      "scored": 600,
+      "drawn": 600,
+      "mean_digits": 16.0,
+      "median_digits": 16.0,
+      "p10_digits": 16.0,
+      "min_digits": 16.0,
+      "frac_below_8": 0.0,
+      "frac_below_1": 0.0,
+      "library_raised": 0,
+      "reference_rejected": 0,
+      "degenerate_rejected": 0,
+      "worst_points": [
+        {
+          "p": 3.133584787051475e-231,
+          "digits": 16.0,
+          "library": "-530.75497883305",
+          "raised": ""
+        },
+        {
+          "p": 7.768928094360895e-91,
+          "digits": 16.0,
+          "library": "-207.4851112619889",
+          "raised": ""
+        },
+        {
+          "p": 8.717898518071061e-280,
+          "digits": 16.0,
+          "library": "-642.5584478250901",
+          "raised": ""
+        },
+        {
+          "p": 4.0885089625786616e-80,
+          "digits": 16.0,
+          "library": "-182.79862709276267",
+          "raised": ""
+        },
+        {
+          "p": 2.0755721910730427e-203,
+          "digits": 16.0,
+          "library": "-466.69453700738796",
           "raised": ""
         }
       ],
@@ -2378,7 +4063,7 @@
           "raised": ""
         }
       ],
-      "seconds": 0.05
+      "seconds": 0.06
     },
     {
       "key": "np_exp",
@@ -2478,7 +4163,7 @@
           "raised": ""
         }
       ],
-      "seconds": 0.05
+      "seconds": 0.06
     },
     {
       "key": "np_logaddexp",
@@ -2533,7 +4218,7 @@
           "raised": ""
         }
       ],
-      "seconds": 0.07
+      "seconds": 0.09
     },
     {
       "key": "np_hypot",
@@ -2588,7 +4273,7 @@
           "raised": ""
         }
       ],
-      "seconds": 0.04
+      "seconds": 0.05
     }
   ]
 }

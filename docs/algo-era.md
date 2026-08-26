@@ -348,10 +348,13 @@ measurement, which closes a gap the third one leaves open: *2F1 is known to be
 hard, so a task built on it might be the one place SciPy is weak.*
 
 [`tools/scan_numeric_precision.py`](https://github.com/Birfy/agentdescent/blob/main/tools/scan_numeric_precision.py)
-scores **48 NumPy and SciPy float64 entry points** against mpmath. Each probe
-declares its parameter range up front; every point is evaluated at 30 *and* 60
-digits and discarded unless the two agree to 22, so a point where the reference
-has not converged can never become evidence against the library. What the sweep
+scores **79 NumPy and SciPy float64 entry points** against mpmath — special
+functions, their inverses, orthogonal polynomials, elliptic integrals, and
+`scipy.stats` tail probabilities and quantiles, which is where a working
+statistician actually meets a lost digit. Each probe declares its parameter
+range up front; every point is evaluated at 30 *and* 60 digits and discarded
+unless the two agree to 22, so a point where the reference has not converged
+can never become evidence against the library. What the sweep
 reports per function is the mean, the 10th percentile, and the share of points
 under 8 correct digits — that last number being the one that matters, because
 these functions do not degrade smoothly. A mean of 11 can mean "uniformly a bit
@@ -365,25 +368,27 @@ python -m tools.scan_numeric_precision --only pbdv,hyperu --points 2000
 
 **The sweep's headline is that NumPy and SciPy are mostly excellent.** Seven
 of the eight NumPy probes return the full 16 digits — including `sin` and `tan`
-at arguments up to 1e18, where argument reduction is the whole problem — and 29
-of the 40 SciPy entry points sit above 15 digits. `gammaln`,
-`erfinv`, `ndtri`, `exp1`, `lambertw`, `ellipkinc`, `expi` and the rest are not
-improvable in double precision. That is a real result and it is why the sweep
-is committed alongside the tasks: it says what *is not* worth searching.
+at arguments up to 1e18, where argument reduction is the whole problem — and 50
+of the 71 SciPy entry points sit above 15 digits. `gammaln`, `erfinv`, `ndtri`,
+`exp1`, `lambertw`, `ellipkinc`, `expi`, both incomplete-gamma inverses, and
+every `scipy.stats` tail tested are not improvable in double precision. That is
+a real result and it is why the sweep is committed alongside the tasks: it says
+what *is not* worth searching.
 
-Three targets are not in that group:
+Exactly **four** entry points return points with no correct digit at all:
 
 | target | mean digits | < 8 digits | < 1 digit |
 |---|---|---|---|
 | `scipy.special.hyp2f1` | 10.72 | 25.8% | 3.8% |
 | `scipy.special.pbdv` | 11.67 | 17.8% | 12.2% |
-| `scipy.special.hyperu` | 14.36 | 3.0% | 2.8% |
+| `scipy.special.pbvv` | 11.87 | 16.7% | 9.4% |
+| `scipy.special.hyperu` | 14.36 | 3.0% | 3.0% |
 
-`hyp2f1` arriving third-worst *by measurement*, having been chosen for the
+`hyp2f1` arriving in that group *by measurement*, having been chosen for the
 third task from the literature alone, is the sweep's own calibration — the
 method finds the function that was already known to be hard, without being told.
 
-The other two become
+The other three become
 [`examples/era/era_special_precision.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/era_special_precision.py).
 Neither number above is a rounding complaint:
 
@@ -395,11 +400,48 @@ scattered: large positive order with negative argument, where the recurrence is
 unstable in the direction it is being run. 12.2% of the declared range has **no
 correct digit at all**.
 
+**`pbvv` — the parabolic cylinder function V_v(x).** `pbdv`'s companion
+solution, and the same disease in very nearly the same place: 9.4% of the range
+with no correct digit, at large positive order with negative argument. At
+`v=19.01, x=-15.76` SciPy returns `-2.75e14` where the value is `+2029.5`.
+Found only because the sweep was widened — nothing in the literature flags
+`pbvv` specifically, and the first sweep had not covered it.
+
 **`hyperu` — the confluent hypergeometric function U(a, b, x).** Here the
 failure is not inaccuracy but refusal: on about 3% of the range SciPy returns
 `nan`. At `a=-15.82, b=-1.30, x=23.10` the function equals `2.45e17`, an
 entirely ordinary well-conditioned number, and SciPy declines to produce it.
 The bad region is concentrated on `a < 0`.
+
+### Two findings that were not findings
+
+Widening the sweep produced two confident-looking results that were both the
+measuring instrument failing, and they are worth stating because each needed a
+different guard.
+
+**A probe drawn outside a documented domain.** Over `alpha ~ U(-5, 20)`,
+`eval_genlaguerre` reports **21% of points with no correct digit**. Every one is
+a `nan` at `alpha < -1` — and SciPy *documents* `alpha > -1`. The `nan`s are the
+contract being honoured. Drawn over the documented domain the function returns
+14.68 mean digits and nothing below 8. A sweep that ranks functions has to draw
+each one's documented domain, or it ranks its own mistakes; `hyperu` and `pbdv`
+survive this test because SciPy documents no restriction on either.
+
+**A reference that left the real line.** `betaincinv` has no closed form, so its
+reference is solved for — seeded, naturally, from SciPy's own answer. At
+`a=3.63, b=0.037, y=0.575` the solver converged to `0.853 - 3.893j`: a genuine
+root of the analytic continuation, residual zero to 36 digits at 30 dps and 66
+at 60. The dual-precision gate is powerless here, because both precisions agree
+perfectly on the same wrong root, and the probe duly reported SciPy at 0.76
+correct digits. Bisection on a real bracket put SciPy within a double's spacing
+of the truth. `_verified_root` now substitutes the root back *and* requires it
+to be real; `betaincinv` reads 15.52 with nothing below 8.
+
+The rule both cases point at: **the dual-precision agreement gate checks that
+the reference converged, not that it converged to the right thing.** Anything
+solved for rather than evaluated needs a separate check that it is the quantity
+being asked for, and anything measured outside its documented domain is not a
+measurement of the library at all.
 
 ### One function, one tree
 
@@ -410,8 +452,8 @@ programs between them.
 
 That is not a scheduling convenience. The claim being tested is per-function
 ("can a search beat SciPy *here*"), and one number pooled across both would let
-a large gain on `pbdv` hide a regression on `hyperu`. It also keeps the two
-honest about difficulty: they start 2.9 digits apart and have entirely
+a large gain on `pbdv` hide a regression on `hyperu`. It also keeps them
+honest about difficulty: they start almost 2 digits apart and have entirely
 different failure modes, so a shared budget would silently spend itself on
 whichever tree was easier to move.
 
@@ -427,18 +469,18 @@ float64 routine.
 
 One property is worth stating because it would be easy to get wrong. **The
 stress sets use the sweep's declared ranges verbatim** — `v ~ U(-20, 20)`,
-`x ~ U(-30, 30)` for `pbdv`; `a, b ~ U(-20, 20)`, `x ~ logU(1e-3, 100)` for
-`hyperu`. The sweep found *where* SciPy fails, and the suite does **not** then
+`x ~ U(-30, 30)` for `pbdv` and `pbvv`; `a, b ~ U(-20, 20)`,
+`x ~ logU(1e-3, 100)` for `hyperu`. The sweep found *where* SciPy fails, and the suite does **not** then
 narrow onto those regions. Drawing a stress set around known failures would
 inflate every number reported here and would measure the drawing rather than
 the implementation; the honest question is what these functions do over a range
 a user might plausibly call them on.
 
 The sizes are chosen from the measured variance rather than from taste.
-Per-point correct digits have a standard deviation of **4.78** on `pbdv` and
-**2.83** on `hyperu` — both close to bimodal, since a program either handles a
-region or scores zero across it — so the 2000-point acceptance gate carries a
-standard error of 0.11 digits and the 1000-point held-back set 0.15. This is
+Per-point correct digits have a standard deviation of **4.78** on `pbdv`,
+**4.6** on `pbvv` and **2.83** on `hyperu` — all close to bimodal, since a
+program either handles a region or scores zero across it — so the 2000-point
+acceptance gate carries a standard error of about 0.11 digits and the 1000-point held-back set 0.15. This is
 the same reasoning that resized the 2F1 suite, applied before the fact instead
 of after.
 
@@ -849,39 +891,40 @@ endpoint's measured knee bought **2.1×**.
     top-K node programs**, so gate-versus-test correlation can be measured
     directly rather than inferred from whichever program happened to win.
 
-## Measured results — pbdv and hyperu
+## Measured results — pbdv, pbvv and hyperu
 
 ### The method
 
-Two runs, one per function, identical configuration and neither tuned after the
+Three runs, one per function, identical configuration and none tuned after the
 fact: **24 expansions, 3 workers, sync**, `c_puct=1.0`, `temperature=0.7`,
 thinking disabled, `glm-5.2` behind an Anthropic-shaped endpoint. Eight shards
 (2000 points) are the acceptance gate; four shards (1000 points) are **never
 shown to the search** and are where every number below comes from. Recorded in
-[`bench/results/era-pbdv-run.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-pbdv-run.json)
+[`bench/results/era-pbdv-run.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-pbdv-run.json),
+[`era-pbvv-run.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-pbvv-run.json)
 and
 [`era-hyperu-run.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-hyperu-run.json),
 with the winning programs beside them.
 
-Both are reported as **paired** comparisons — baseline and evolved program on
-the same 1000 held-back points — because the unpaired standard deviation here
-is 4.2 digits on `pbdv` and 2.1 on `hyperu`, which would put a 0.09-digit gain
-inside the noise while telling you nothing about whether any individual point
-moved. The paired difference is the quantity the search is actually trying to
+All three are reported as **paired** comparisons — baseline and evolved program
+on the same 1000 held-back points — because the unpaired standard deviation
+here is 4.2 digits on `pbdv`, 4.1 on `pbvv` and 2.1 on `hyperu`, which would put
+a 0.09-digit gain inside the noise while telling you nothing about whether any
+individual point moved. The paired difference is the quantity the search is actually trying to
 change, and it separates "improved a little everywhere" from "fixed eight
 points and touched nothing else" — which turns out to be the whole story.
 
-### The result: one clear negative, one small and unambiguous positive
+### The result: two clear negatives, one small and unambiguous positive
 
-| | `pbdv` | `hyperu` |
-|---|---|---|
-| held-back mean digits | 9.9996 → 10.0008 | 11.5533 → **11.6385** |
-| paired difference | +0.0012 | **+0.0852** |
-| significance | 1.34 SE | **2.69 SE** |
-| points improved (>0.5 digit) | 1 / 1000 | **8 / 1000** |
-| points regressed (>0.5 digit) | 0 | **0** |
-| points with no correct digit | 129 → 129 | 32 → **24** |
-| solved (≥10 digits) | 804 → 804 | 958 → **965** |
+| | `pbdv` | `pbvv` | `hyperu` |
+|---|---|---|---|
+| held-back mean digits | 9.9996 → 10.0008 | 10.0677 → 10.0698 | 11.5533 → **11.6385** |
+| paired difference | +0.0012 | +0.0021 | **+0.0852** |
+| significance | 1.34 SE | 0.41 SE | **2.69 SE** |
+| points improved (>0.5 digit) | 1 / 1000 | 6 / 1000 | **8 / 1000** |
+| points regressed (>0.5 digit) | 0 | 4 | **0** |
+| points with no correct digit | 129 → 129 | 112 → 113 | 32 → **24** |
+| solved (≥10 digits) | 804 → 804 | 807 → 807 | 958 → **965** |
 
 **`pbdv` is a negative result and should be read as one.** 24 expansions moved
 one point out of a thousand. The 129 points with no correct digit at the start
@@ -894,6 +937,15 @@ connection formula — which subtracts two quantities of wildly different size,
 and it does not get that part right. It is a plausible program that does not
 work, and the tree had no way to tell, because on the gate it scores what the
 baseline scores.
+
+**`pbvv` is a negative result with churn, which is worse than a flat one.**
+0.41 SE is indistinguishable from zero, and underneath it the search traded six
+improved points for four regressed ones and gained a zero-digit point. The gate
+tells the story: +0.0117 there against +0.0021 held back, a gate gain **5.6×**
+the held-back one, which is the overfitting the 48-expansion 2F1 run documents
+further up this page showing at a quarter of the budget. The winning program is
+144 lines with a hand-rolled 1F1 series and a large-parameter asymptotic
+expansion — far more machinery than `pbdv`'s attempt, and no more correct.
 
 **`hyperu` is a real gain, and a strictly dominating one.** +0.085 digits at
 2.69 SE is small but resolvable, and the shape behind it is better than the
@@ -910,17 +962,24 @@ baseline. Layering a fallback under the state of the practice — rather than
 replacing it — is the move that makes a monotone improvement possible at all,
 and it is the same shape the 2F1 task's best programs found.
 
-!!! note "What the two results together say"
+!!! note "What the three results together say"
     The tasks were built the same way, run under the same budget, and differ in
     how far the fix is from what the baseline already computes. `hyperu`'s
     failure is *reachable*: a textbook identity, evaluable with functions
     already in `scipy.special`, and testable point by point because a `nan` is
-    unambiguous. `pbdv`'s is not: it needs a numerically careful treatment of a
-    connection formula in a region where the answer spans 250 orders of
-    magnitude, and a nearly-right attempt is indistinguishable from a wrong one
-    on any signal the search can see. A 24-expansion budget finds the first and
-    not the second, and reporting only the first would have made the method look
-    like it works on both.
+    unambiguous — a candidate can tell locally whether it has helped. The two
+    parabolic-cylinder failures are not: they need a numerically careful
+    treatment of a connection formula in a region where the answer spans 250
+    orders of magnitude, and a nearly-right attempt is indistinguishable from a
+    wrong one on any signal the search can see. So the search flails there, and
+    on `pbvv` the flailing is visible as churn rather than as a flat line.
+
+    That `pbdv` and `pbvv` fail the *same way* is the useful part. They are
+    siblings with the same failure region, they were found independently — one
+    in the first sweep, one only after it was widened — and they were searched
+    separately. Two independent negatives on the same mechanism is a statement
+    about the mechanism; one would have been an anecdote. And reporting only
+    `hyperu` would have made the method look like it works on all three.
 
     The 1 reply in 25 damaged in transit on each run is the same endpoint defect
     the 2F1 task documents, handled the same way.

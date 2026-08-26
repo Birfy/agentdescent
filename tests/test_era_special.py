@@ -3,8 +3,9 @@
 Two blocks here carry the result rather than the plumbing.
 
 The first is the **sweep**. `tools/scan_numeric_precision.py` is what chose
-`pbdv` and `hyperu` over the other forty-five entry points it measures, so the
-claim "these two are the inaccurate ones" is only as good as that tool. It is
+`pbdv`, `pbvv` and `hyperu` over the other seventy-six entry points it measures,
+so the claim "these three are the inaccurate ones" is only as good as that
+tool. It is
 tested the way a measuring instrument is: on inputs whose answer is known
 independently -- a library that is exactly right must score the cap, one that is
 deliberately wrong in a known digit must score that digit -- and by checking
@@ -29,7 +30,7 @@ from examples.era import _era_special as special
 from examples.era import _era_support as support
 
 
-TARGET_KEYS = ("pbdv", "hyperu")
+TARGET_KEYS = ("pbdv", "pbvv", "hyperu")
 SUITES = {key: json.loads(special.suite_path(key).read_text(encoding="utf-8"))
           for key in TARGET_KEYS}
 
@@ -106,6 +107,59 @@ def test_the_sweep_rejects_a_point_instead_of_scoring_an_unconverged_reference()
     assert result.reference_rejected > 0
 
 
+def test_an_inverse_reference_refuses_a_root_off_the_real_line():
+    """The guard that caught a false positive, kept as a test because it did.
+
+    Inverting `betaincinv` by handing mpmath SciPy's own answer as a starting
+    point produced, at `a=3.63, b=0.037, y=0.575`, the complex root
+    `0.853 - 3.893j` -- a genuine root of the analytic continuation whose
+    residual is zero to 36 digits at 30 dps and 66 at 60. The dual-precision
+    gate cannot catch that: both precisions agree perfectly on a wrong answer.
+    The probe duly reported SciPy at 0.76 correct digits, and bisection on a
+    real bracket put SciPy within a double's spacing of the truth.
+
+    So `_verified_root` requires a real root, and this pins that: it is the only
+    thing standing between the committed report and a fabricated finding.
+    """
+    pytest.importorskip("mpmath")
+    import mpmath as mp
+
+    from tools import scan_numeric_precision as scan
+
+    mp.mp.dps = 30
+    # x^2 + 1 has no real root; a solver started near 0 finds +-i.
+    with pytest.raises(ValueError):
+        scan._verified_root(lambda x: x ** 2 + 1, 0.5, 1.0)
+    # A well-posed real inversion still works.
+    root = scan._verified_root(lambda x: x ** 2 - 2, 1.4, 2.0)
+    assert abs(float(root) - math.sqrt(2)) < 1e-20
+
+
+def test_a_probe_drawn_outside_a_documented_domain_is_not_a_finding():
+    """The other false positive, and the rule that prevents it.
+
+    Drawn over `alpha ~ U(-5, 20)`, `eval_genlaguerre` reports 21% of points
+    with no correct digit -- every one a `nan` at `alpha < -1`. SciPy documents
+    `alpha > -1`, so those `nan`s are the contract being honoured, not a defect,
+    and the probe must draw the documented domain. This asserts the committed
+    probe does, and that SciPy is in fact clean inside it.
+    """
+    pytest.importorskip("mpmath")
+    scipy_special = pytest.importorskip("scipy.special")
+    from tools import scan_numeric_precision as scan
+
+    probe = scan.PROBES_BY_KEY["eval_genlaguerre"]
+    assert "alpha > -1" in (scipy_special.eval_genlaguerre.__doc__ or ""), (
+        "SciPy no longer documents the restriction this probe is drawn to")
+    for _ in range(200):
+        point = probe.draw(__import__("random").Random(0))
+        assert point["alpha"] > -1.0
+    summary = scan.run_probe(probe, points=200, dps=30, agree=22).summary()
+    assert summary["frac_below_1"] == 0.0, (
+        "eval_genlaguerre is clean inside its documented domain; a failure here "
+        "means the probe drifted back outside it")
+
+
 def test_the_two_targets_are_the_ones_the_sweep_singled_out():
     """The example's targets and the sweep's findings must not drift apart.
 
@@ -142,7 +196,7 @@ def test_the_stress_file_records_how_it_was_made(key):
     assert reference["precisions_dps"] == [30, 60]
     assert reference["kept_when_they_agree_to_digits"] == 25
     assert suite["entrypoint"] == key
-    assert suite["params"] == {"pbdv": ["v", "x"],
+    assert suite["params"] == {"pbdv": ["v", "x"], "pbvv": ["v", "x"],
                                "hyperu": ["a", "b", "x"]}[key]
     for name in suite["params"]:
         assert name in suite["distribution"], f"{name} has no declared range"
@@ -263,6 +317,7 @@ def test_the_baselines_are_not_strawmen_and_not_perfect_either():
     scipy_special = pytest.importorskip("scipy.special")
     calls = {
         "pbdv": lambda p: scipy_special.pbdv(p["v"], p["x"])[0],
+        "pbvv": lambda p: scipy_special.pbvv(p["v"], p["x"])[0],
         "hyperu": lambda p: scipy_special.hyperu(p["a"], p["b"], p["x"]),
     }
     for key in TARGET_KEYS:
@@ -419,10 +474,16 @@ def test_each_target_gets_its_own_prompt_and_not_a_shared_one():
         prompts[key] = special.mutation_prompt(
             program, target=target, suite=suite,
             preview=special.suite_preview(suite))
-    assert prompts["pbdv"] != prompts["hyperu"]
+    assert len({prompts[key] for key in TARGET_KEYS}) == len(TARGET_KEYS)
     assert "parabolic cylinder" in prompts["pbdv"].lower()
     assert "Tricomi" in prompts["hyperu"]
     assert "scipy.special.pbdv" not in prompts["hyperu"]
+    # The two parabolic-cylinder tasks are siblings, so the risk is that one is
+    # a copy of the other: they must state their own function and their own
+    # baseline, not D_v twice.
+    assert "scipy.special.pbvv" in prompts["pbvv"]
+    assert "scipy.special.pbvv" not in prompts["pbdv"]
+    assert "pbvv(v, x)" in prompts["pbvv"] and "pbdv(v, x)" in prompts["pbdv"]
 
 
 # ---------------------------------------------------------------------------

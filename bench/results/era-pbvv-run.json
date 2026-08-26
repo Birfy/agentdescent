@@ -1,0 +1,690 @@
+{
+  "experiment": "ERA on AgentDescent -- scipy.special.pbvv precision",
+  "status": "completed",
+  "completed_at": "2026-08-26T01:16:37+00:00",
+  "upstream_commit": "b836730b5c000526af95116b1d0e2c60c8cf0a10",
+  "function": "pbvv",
+  "task": "Parabolic cylinder V_v(x) in double precision, mean correct significant digits against a 25-digit reference",
+  "baseline": "scipy.special.pbvv",
+  "config": {
+    "provider": "claude",
+    "model": "glm-5.2",
+    "seed": 0,
+    "asynchronous": false,
+    "async_ratio": 1,
+    "max_seconds": 5400.0,
+    "pipelined_gate": false,
+    "gate_workers": 2,
+    "dry_run": false,
+    "serial": false,
+    "budget_rollouts": null,
+    "val_cap": null,
+    "eval_concurrency": null,
+    "reflective_merge": false,
+    "eval_cache": "",
+    "no_thinking": false,
+    "function": "pbvv",
+    "staleness": "guarded",
+    "iterations": 24,
+    "workers": 3,
+    "shards": 8,
+    "test_shards": 4,
+    "held_out_frac": 0.5,
+    "c_puct": 1.0,
+    "candidate_timeout": 60.0,
+    "shard_seconds": 45.0,
+    "max_code_length": 20000,
+    "max_tokens": 16000,
+    "temperature": 0.7,
+    "thinking": "disabled",
+    "api_timeout": 180.0,
+    "reply_attempts": 4,
+    "shutdown_grace": 120.0,
+    "quality_target": null
+  },
+  "observation": {
+    "mode": "sync",
+    "wall_seconds": 427.4968503010001,
+    "baseline": {
+      "index": 0,
+      "parent_index": null,
+      "program_id": "5f0442c2b8bf1a8b",
+      "iteration": 0,
+      "change_summary": "scipy.special.pbvv, called directly",
+      "score": 10.25298114312456,
+      "mean_digits": 10.25298114312456,
+      "num_visits": 24,
+      "valid": true,
+      "error": "",
+      "code_chars": 182
+    },
+    "best": {
+      "index": 6,
+      "parent_index": 0,
+      "program_id": "70aef0b925d19bc1",
+      "iteration": 4,
+      "change_summary": "",
+      "score": 10.264701123090411,
+      "mean_digits": 10.264701123090411,
+      "num_visits": 16,
+      "valid": true,
+      "error": "",
+      "code_chars": 4795
+    },
+    "data": {
+      "points_per_shard": 250,
+      "scoring_shards": 8,
+      "test_shards": 4,
+      "digit_cap": 12.0,
+      "solved_digits": 10.0,
+      "shard_seconds": 45.0,
+      "reference": {
+        "kept_when_they_agree_to_digits": 25,
+        "library": "mpmath",
+        "precisions_dps": [
+          30,
+          60
+        ],
+        "stored_digits": 25,
+        "version": "1.4.1"
+      },
+      "distribution": {
+        "rejected": "|value| outside [1e-250, 1e250]; the two precisions disagreeing",
+        "v": "U(-20.0, 20.0)",
+        "x": "U(-30.0, 30.0)"
+      },
+      "baseline_scan": {
+        "baseline": "scipy.special.pbvv(v, x)[0]",
+        "frac_below_1_digit": 0.094,
+        "frac_below_8_digits": 0.167,
+        "mean_digits": 11.87,
+        "note": "pbdv's sibling and the same disease: on v >~ 9 with x < 0 SciPy returns values wrong by up to eleven orders of magnitude, and with the wrong sign"
+      },
+      "suite_seed": 20260825
+    },
+    "framework": {
+      "baseline_reward": 0.85441509526038,
+      "final_reward": 0.8553917602575342,
+      "quality_gain": 0.0009766649971542085,
+      "stop_reason": "rounds",
+      "error": null,
+      "outcomes": {
+        "tree-updated": 7,
+        "committed": 1
+      },
+      "rollouts": 24,
+      "rollout_seconds": 7.4380784034729,
+      "eval_seconds": 2.3453221321105957,
+      "stale_considered": 24,
+      "stale_discarded": 0,
+      "stale_rate": 0.0,
+      "retired_workers": 0,
+      "history": [
+        {
+          "round": 0,
+          "held_out_reward": 0.85441509526038,
+          "elapsed_s": 48.53959274291992,
+          "rollouts": 3,
+          "committed": 0,
+          "rejected": 1,
+          "reasons": {
+            "tree-updated": 1
+          }
+        },
+        {
+          "round": 1,
+          "held_out_reward": 0.8553917602575342,
+          "elapsed_s": 105.84737825393677,
+          "rollouts": 6,
+          "committed": 1,
+          "rejected": 0,
+          "reasons": {
+            "committed": 1
+          }
+        },
+        {
+          "round": 2,
+          "held_out_reward": 0.8553917602575342,
+          "elapsed_s": 163.14572477340698,
+          "rollouts": 9,
+          "committed": 0,
+          "rejected": 1,
+          "reasons": {
+            "tree-updated": 1
+          }
+        },
+        {
+          "round": 3,
+          "held_out_reward": 0.8553917602575342,
+          "elapsed_s": 213.35484337806702,
+          "rollouts": 12,
+          "committed": 0,
+          "rejected": 1,
+          "reasons": {
+            "tree-updated": 1
+          }
+        },
+        {
+          "round": 4,
+          "held_out_reward": 0.8553917602575342,
+          "elapsed_s": 263.0614457130432,
+          "rollouts": 15,
+          "committed": 0,
+          "rejected": 1,
+          "reasons": {
+            "tree-updated": 1
+          }
+        },
+        {
+          "round": 5,
+          "held_out_reward": 0.8553917602575342,
+          "elapsed_s": 320.6638774871826,
+          "rollouts": 18,
+          "committed": 0,
+          "rejected": 1,
+          "reasons": {
+            "tree-updated": 1
+          }
+        },
+        {
+          "round": 6,
+          "held_out_reward": 0.8553917602575342,
+          "elapsed_s": 371.71243238449097,
+          "rollouts": 21,
+          "committed": 0,
+          "rejected": 1,
+          "reasons": {
+            "tree-updated": 1
+          }
+        },
+        {
+          "round": 7,
+          "held_out_reward": 0.8553917602575342,
+          "elapsed_s": 426.24847292900085,
+          "rollouts": 24,
+          "committed": 0,
+          "rejected": 1,
+          "reasons": {
+            "tree-updated": 1
+          }
+        }
+      ]
+    },
+    "actor_usage": {
+      "calls": 56,
+      "failures": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "model_seconds": 1011.3464
+    },
+    "tree": {
+      "nodes": 25,
+      "valid_nodes": 25,
+      "max_depth": 4,
+      "root_visits": 24,
+      "c_puct": 1.0,
+      "tree": [
+        {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "5f0442c2b8bf1a8b",
+          "iteration": 0,
+          "change_summary": "scipy.special.pbvv, called directly",
+          "score": 10.25298114312456,
+          "mean_digits": 10.25298114312456,
+          "num_visits": 24,
+          "valid": true,
+          "error": "",
+          "code_chars": 182
+        },
+        {
+          "index": 1,
+          "parent_index": 0,
+          "program_id": "165e9a504494cdff",
+          "iteration": 2,
+          "change_summary": "",
+          "score": 10.246326401354834,
+          "mean_digits": 10.246326401354834,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 3042
+        },
+        {
+          "index": 2,
+          "parent_index": 0,
+          "program_id": "580f743f7512285d",
+          "iteration": 1,
+          "change_summary": "",
+          "score": 9.835063545709273,
+          "mean_digits": 9.835063545709273,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 3644
+        },
+        {
+          "index": 3,
+          "parent_index": 0,
+          "program_id": "2de956645f92964c",
+          "iteration": 3,
+          "change_summary": "",
+          "score": 10.128108331755469,
+          "mean_digits": 10.128108331755469,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 4249
+        },
+        {
+          "index": 4,
+          "parent_index": 0,
+          "program_id": "c0dc57bebce120fa",
+          "iteration": 6,
+          "change_summary": "",
+          "score": 9.755357742445197,
+          "mean_digits": 9.755357742445197,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 2837
+        },
+        {
+          "index": 5,
+          "parent_index": 0,
+          "program_id": "293031d90cde91e3",
+          "iteration": 5,
+          "change_summary": "",
+          "score": 10.25298114312456,
+          "mean_digits": 10.25298114312456,
+          "num_visits": 4,
+          "valid": true,
+          "error": "",
+          "code_chars": 4717
+        },
+        {
+          "index": 6,
+          "parent_index": 0,
+          "program_id": "70aef0b925d19bc1",
+          "iteration": 4,
+          "change_summary": "",
+          "score": 10.264701123090411,
+          "mean_digits": 10.264701123090411,
+          "num_visits": 16,
+          "valid": true,
+          "error": "",
+          "code_chars": 4795
+        },
+        {
+          "index": 7,
+          "parent_index": 6,
+          "program_id": "23effcb08368c60d",
+          "iteration": 8,
+          "change_summary": "",
+          "score": 9.836490754786835,
+          "mean_digits": 9.836490754786835,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 3394
+        },
+        {
+          "index": 8,
+          "parent_index": 6,
+          "program_id": "835580e253dbba0c",
+          "iteration": 7,
+          "change_summary": "",
+          "score": 10.264701123090411,
+          "mean_digits": 10.264701123090411,
+          "num_visits": 13,
+          "valid": true,
+          "error": "",
+          "code_chars": 4054
+        },
+        {
+          "index": 9,
+          "parent_index": 6,
+          "program_id": "bd19f34bbcb8e197",
+          "iteration": 9,
+          "change_summary": "",
+          "score": 9.835077633075903,
+          "mean_digits": 9.835077633075903,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 5659
+        },
+        {
+          "index": 10,
+          "parent_index": 8,
+          "program_id": "232a99e6aad0a90c",
+          "iteration": 12,
+          "change_summary": "",
+          "score": 10.240162590446992,
+          "mean_digits": 10.240162590446992,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 3440
+        },
+        {
+          "index": 11,
+          "parent_index": 8,
+          "program_id": "b7efbde33b497bb0",
+          "iteration": 11,
+          "change_summary": "",
+          "score": 10.249224360603609,
+          "mean_digits": 10.249224360603609,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 4412
+        },
+        {
+          "index": 12,
+          "parent_index": 8,
+          "program_id": "13e5e6841cbe3b43",
+          "iteration": 10,
+          "change_summary": "",
+          "score": 9.854482377561997,
+          "mean_digits": 9.854482377561997,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 4064
+        },
+        {
+          "index": 13,
+          "parent_index": 5,
+          "program_id": "232ec6af1a5ba374",
+          "iteration": 15,
+          "change_summary": "",
+          "score": 10.25298114312456,
+          "mean_digits": 10.25298114312456,
+          "num_visits": 3,
+          "valid": true,
+          "error": "",
+          "code_chars": 5145
+        },
+        {
+          "index": 14,
+          "parent_index": 8,
+          "program_id": "e4e10e31e85089d8",
+          "iteration": 13,
+          "change_summary": "",
+          "score": 9.841921900255846,
+          "mean_digits": 9.841921900255846,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 4645
+        },
+        {
+          "index": 15,
+          "parent_index": 8,
+          "program_id": "802175d333845ebb",
+          "iteration": 14,
+          "change_summary": "",
+          "score": 9.852542943461739,
+          "mean_digits": 9.852542943461739,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 4474
+        },
+        {
+          "index": 16,
+          "parent_index": 8,
+          "program_id": "e4b6f770e12838d9",
+          "iteration": 17,
+          "change_summary": "",
+          "score": 10.264701123090411,
+          "mean_digits": 10.264701123090411,
+          "num_visits": 6,
+          "valid": true,
+          "error": "",
+          "code_chars": 4060
+        },
+        {
+          "index": 17,
+          "parent_index": 8,
+          "program_id": "e5110fcde26073a1",
+          "iteration": 18,
+          "change_summary": "",
+          "score": 9.85540429158909,
+          "mean_digits": 9.85540429158909,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 4175
+        },
+        {
+          "index": 18,
+          "parent_index": 13,
+          "program_id": "b1543e0597db1d9b",
+          "iteration": 16,
+          "change_summary": "",
+          "score": 10.25298114312456,
+          "mean_digits": 10.25298114312456,
+          "num_visits": 2,
+          "valid": true,
+          "error": "",
+          "code_chars": 6404
+        },
+        {
+          "index": 19,
+          "parent_index": 16,
+          "program_id": "42dada651ef055b2",
+          "iteration": 20,
+          "change_summary": "",
+          "score": 9.83506352527352,
+          "mean_digits": 9.83506352527352,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 1836
+        },
+        {
+          "index": 20,
+          "parent_index": 16,
+          "program_id": "db6f3d1bd4e8ace1",
+          "iteration": 21,
+          "change_summary": "",
+          "score": 0.04738600636308658,
+          "mean_digits": 0.04738600636308658,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 1642
+        },
+        {
+          "index": 21,
+          "parent_index": 16,
+          "program_id": "046d6777af42bb95",
+          "iteration": 19,
+          "change_summary": "",
+          "score": 9.835427113246833,
+          "mean_digits": 9.835427113246833,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 4810
+        },
+        {
+          "index": 22,
+          "parent_index": 16,
+          "program_id": "ba1b04de36a0f884",
+          "iteration": 22,
+          "change_summary": "",
+          "score": 0.02381403066342981,
+          "mean_digits": 0.02381403066342981,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 3942
+        },
+        {
+          "index": 23,
+          "parent_index": 18,
+          "program_id": "3fc9ea6430a55ad1",
+          "iteration": 24,
+          "change_summary": "",
+          "score": 10.25298114312456,
+          "mean_digits": 10.25298114312456,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 5519
+        },
+        {
+          "index": 24,
+          "parent_index": 16,
+          "program_id": "a3ef9a694fcf5e8a",
+          "iteration": 23,
+          "change_summary": "",
+          "score": 10.249224360600659,
+          "mean_digits": 10.249224360600659,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 4871
+        }
+      ]
+    },
+    "test": {
+      "baseline": {
+        "mean_digits": 10.067710996694545,
+        "score": 10.067710996694545,
+        "solved": 807,
+        "points": 1000,
+        "worst": [
+          {
+            "shard": 8,
+            "index": 33,
+            "digits": 0.0,
+            "error": "",
+            "v": 11.637527104697355,
+            "x": -19.761950803598594
+          },
+          {
+            "shard": 8,
+            "index": 35,
+            "digits": 0.0,
+            "error": "",
+            "v": 11.11085810932444,
+            "x": -27.72034423807279
+          },
+          {
+            "shard": 8,
+            "index": 39,
+            "digits": 0.0,
+            "error": "",
+            "v": 15.750221508197818,
+            "x": -7.579136157974233
+          },
+          {
+            "shard": 8,
+            "index": 46,
+            "digits": 0.0,
+            "error": "",
+            "v": 12.61444708804109,
+            "x": -18.99172706388334
+          },
+          {
+            "shard": 8,
+            "index": 50,
+            "digits": 0.0,
+            "error": "",
+            "v": 9.239914552333346,
+            "x": -20.583467471461674
+          },
+          {
+            "shard": 8,
+            "index": 68,
+            "digits": 0.0,
+            "error": "",
+            "v": 19.750467845566604,
+            "x": -16.948922562463142
+          }
+        ],
+        "seconds": 0.7325736509999388,
+        "limits_unavailable": [],
+        "error": ""
+      },
+      "best": {
+        "mean_digits": 10.069790531920653,
+        "score": 10.069790531920653,
+        "solved": 807,
+        "points": 1000,
+        "worst": [
+          {
+            "shard": 8,
+            "index": 33,
+            "digits": 0.0,
+            "error": "",
+            "v": 11.637527104697355,
+            "x": -19.761950803598594
+          },
+          {
+            "shard": 8,
+            "index": 35,
+            "digits": 0.0,
+            "error": "",
+            "v": 11.11085810932444,
+            "x": -27.72034423807279
+          },
+          {
+            "shard": 8,
+            "index": 39,
+            "digits": 0.0,
+            "error": "",
+            "v": 15.750221508197818,
+            "x": -7.579136157974233
+          },
+          {
+            "shard": 8,
+            "index": 46,
+            "digits": 0.0,
+            "error": "",
+            "v": 12.61444708804109,
+            "x": -18.99172706388334
+          },
+          {
+            "shard": 8,
+            "index": 50,
+            "digits": 0.0,
+            "error": "",
+            "v": 9.239914552333346,
+            "x": -20.583467471461674
+          },
+          {
+            "shard": 8,
+            "index": 68,
+            "digits": 0.0,
+            "error": "",
+            "v": 19.750467845566604,
+            "x": -16.948922562463142
+          }
+        ],
+        "seconds": 0.7618015530001685,
+        "limits_unavailable": [],
+        "error": ""
+      },
+      "mean_digits_gain": 0.0020795352261071542
+    }
+  },
+  "model_usage": {
+    "calls": 25,
+    "failures": 1,
+    "prompt_tokens": 65843,
+    "completion_tokens": 36711,
+    "total_tokens": 102554,
+    "model_seconds": 994.077634
+  },
+  "reply_damage": {
+    "drawn": 24,
+    "damaged": 0,
+    "attempts_allowed": 4
+  }
+}

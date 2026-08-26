@@ -114,6 +114,29 @@ TARGETS: Tuple[Target, ...] = (
         },
     ),
     Target(
+        key="pbvv",
+        task=("Parabolic cylinder function V_v(x), real order and argument, "
+              "float64"),
+        entrypoint="pbvv",
+        params=("v", "x"),
+        distribution={"v": "U(-20.0, 20.0)", "x": "U(-30.0, 30.0)"},
+        draw=lambda r: {"v": r.uniform(-20.0, 20.0), "x": r.uniform(-30.0, 30.0)},
+        # SciPy indexes V by the same v as its D_v; mpmath indexes by DLMF's
+        # `a`, and U(a, z) = D_{-a-1/2}(z), so a = -v - 1/2. Verified against
+        # SciPy on points where both are reliable before being used to judge
+        # points where one is not.
+        reference=lambda p, mp: mp.pcfv(-p["v"] - 0.5, p["x"]),
+        baseline_scan={
+            "baseline": "scipy.special.pbvv(v, x)[0]",
+            "mean_digits": 11.87,
+            "frac_below_8_digits": 0.167,
+            "frac_below_1_digit": 0.094,
+            "note": ("pbdv's sibling and the same disease: on v >~ 9 with x < 0 "
+                     "SciPy returns values wrong by up to eleven orders of "
+                     "magnitude, and with the wrong sign"),
+        },
+    ),
+    Target(
         key="hyperu",
         task=("Confluent hypergeometric function of the second kind U(a, b, x), "
               "real parameters, x > 0, float64"),

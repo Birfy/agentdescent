@@ -12,7 +12,7 @@ AgentDescent engine, running **four** tasks on one search.
 | Dataset (faithful) | Kaggle Playground Series S3E1 — the upstream `implementation/playground_s3e1.py` task |
 | Second task | *Numerical solution of integrals* — named in the paper's abstract; upstream released no implementation, so the nine-family suite is constructed here |
 | Third task | Gauss hypergeometric `2F1` in double precision — not in the paper at all; 3000 points against a 25-digit mpmath reference, baseline `scipy.special.hyp2f1` |
-| Fourth task | `scipy.special.pbdv` and `hyperu` — chosen by a 48-probe precision sweep rather than from the literature; one tree per function |
+| Fourth task | `scipy.special.pbdv`, `pbvv` and `hyperu` — chosen by a 79-probe precision sweep rather than from the literature; one tree per function |
 | `evolve()` plug-ins | `strategy` + `aggregator_factory=` FUTS tree, `selection.FlatPuct` |
 
 ## Run
@@ -22,7 +22,8 @@ python -m examples.era.era_empirical_software --dry-run   # Kaggle S3E1, RMSE
 python -m examples.era.era_hard_integrals --dry-run       # hard integrals, correct digits
 python -m examples.era.era_hypergeometric --dry-run       # 2F1 vs a 25-digit reference
 python -m examples.era.era_special_precision --function pbdv --dry-run    # one tree
-python -m examples.era.era_special_precision --function hyperu --dry-run  # another
+python -m examples.era.era_special_precision --function pbvv --dry-run    # another
+python -m examples.era.era_special_precision --function hyperu --dry-run  # a third
 ```
 
 `--dry-run` prints the configuration and returns with **zero network access
@@ -73,52 +74,67 @@ task's allowlist — the deliverable is a float64 routine.
 **`era_special_precision.py` — the functions a sweep picked out.** The task
 above chose `2F1` from a survey paper. This one chooses by measurement:
 [`tools/scan_numeric_precision.py`](../../tools/scan_numeric_precision.py)
-scores **48 NumPy and SciPy float64 entry points** against mpmath at 30 and 60
-digits, over ranges declared before anything was run, and keeps only the points
-where the two precisions agree.
+scores **79 NumPy and SciPy float64 entry points** against mpmath at 30 and 60
+digits — special functions, their inverses, orthogonal polynomials, elliptic
+integrals and `scipy.stats` tails — over ranges declared before anything was
+run, keeping only the points where the two precisions agree.
 
 Its main finding is that the libraries are mostly excellent — seven of the
 eight NumPy probes return the full 16 digits, `sin` and `tan` included at
-arguments up to 1e18, and 29 of the 40 SciPy entry points sit above 15. Two do
-not, and they are this task's targets:
+arguments up to 1e18, and 50 of the 71 SciPy entry points sit above 15. Exactly
+three return points with no correct digit at all (a fourth, `hyp2f1`, is the
+task above), and they are this task's targets:
 
 | target | mean digits | < 8 digits | < 1 digit |
 |---|---|---|---|
 | `scipy.special.pbdv` | 11.67 | 17.8% | 12.2% |
-| `scipy.special.hyperu` | 14.36 | 3.0% | 2.8% |
+| `scipy.special.pbvv` | 11.87 | 16.7% | 9.4% |
+| `scipy.special.hyperu` | 14.36 | 3.0% | 3.0% |
 
 Not rounding complaints. `pbdv` returns `4.81e100` at `v=19.83, x=-29.28` where
 the value is `2.46e80`, and `-2.44e24` at `v=17.02, x=-14.61` where it is
 `+6.01e15` — wrong sign, wrong magnitude, on a coherent region (large positive
-order, negative argument). `hyperu` does not return a wrong number at all: on
-3% of its range it returns **`nan`**, at points like `a=-15.82, b=-1.30,
-x=23.10` where the function equals `2.45e17` and is perfectly well-conditioned.
+order, negative argument). `pbvv`, its companion solution, has the same disease
+in the same place. `hyperu` does not return a wrong number at all: on 3% of its
+range it returns **`nan`**, at points like `a=-15.82, b=-1.30, x=23.10` where
+the function equals `2.45e17` and is perfectly well-conditioned.
+
+Widening the sweep also produced two findings that were *not* findings, and the
+guards against them are in the tool: `eval_genlaguerre` looks 21% broken until
+you notice SciPy documents `alpha > -1` and the probe was drawing below it, and
+`betaincinv` looks broken until you notice the reference's root-finder had
+wandered off the real line onto a root of the analytic continuation. Both are
+written up in [`docs/algo-era.md`](../../docs/algo-era.md).
 
 `--function` picks the target and **each call is its own tree** — its own
 stress set, root node, search and result file, sharing code and nothing else. A
-single pooled score across both would let a gain on one hide a regression on
-the other, and the claim being tested is per-function.
+single pooled score would let a gain on one hide a regression on another, and
+the claim being tested is per-function.
 
 The stress sets use the sweep's *declared* ranges verbatim rather than
 narrowing onto the failures the sweep found — a suite drawn around known
 failures would measure the drawing. Sizes come from the measured variance:
-per-point digits have an SD of 4.78 on `pbdv` and 2.83 on `hyperu`, so the
-2000-point gate carries a standard error of 0.11 digits.
+per-point digits have an SD of 4.78 on `pbdv`, 4.6 on `pbvv` and 2.83 on
+`hyperu`, so the 2000-point gate carries a standard error of about 0.11 digits.
 
 Measured at 24 expansions each, on the 1000 held-back points, paired:
 
-| | `pbdv` | `hyperu` |
-|---|---|---|
-| held-back mean digits | 9.9996 → 10.0008 | 11.5533 → **11.6385** |
-| paired difference | +0.0012 (1.34 SE) | **+0.0852 (2.69 SE)** |
-| improved / regressed | 1 / 0 | **8 / 0** |
-| points with no correct digit | 129 → 129 | 32 → **24** |
+| | `pbdv` | `pbvv` | `hyperu` |
+|---|---|---|---|
+| held-back mean digits | 9.9996 → 10.0008 | 10.0677 → 10.0698 | 11.5533 → **11.6385** |
+| paired difference | +0.0012 (1.34 SE) | +0.0021 (0.41 SE) | **+0.0852 (2.69 SE)** |
+| improved / regressed | 1 / 0 | 6 / 4 | **8 / 0** |
+| points with no correct digit | 129 → 129 | 112 → 113 | 32 → **24** |
 
 `hyperu` is a small but unambiguous gain — eight `nan` points recovered, nothing
 made worse — because the program the search found calls SciPy first and only
-falls through to the Gamma-weighted 1F1 pair where SciPy returns nothing.
-`pbdv` is a negative result: 24 expansions moved one point in a thousand and
-never touched the failure region. Both are written up in
+falls through to the Gamma-weighted 1F1 pair where SciPy returns nothing. The
+two parabolic-cylinder tasks are negative results: `pbdv` moved one point in a
+thousand and never touched the failure region, and `pbvv` churned six points up
+and four down for a gate gain 5.6× its held-back gain — overfitting, at a
+quarter of the budget the 2F1 run needed to show it. That both siblings fail the
+same way, found independently and searched separately, says more than either
+would alone. All three are written up in
 [`docs/algo-era.md`](../../docs/algo-era.md), runs in
 [`bench/results/`](../../bench/results/).
 

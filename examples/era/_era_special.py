@@ -6,13 +6,13 @@ sets are the committed files ``data/<target>_stress.json``, produced once by
 
 Where the targets came from
 ---------------------------
-Not from folklore. ``tools/scan_numeric_precision.py`` measures 48 NumPy and
+Not from folklore. ``tools/scan_numeric_precision.py`` measures 79 NumPy and
 SciPy float64 entry points against mpmath -- each one at 30 *and* 60 digits,
 keeping only points where the two agree -- over parameter ranges declared
 before anything was run. Most of what it measures is excellent: seven of the
 eight NumPy probes return 16 correct digits, including ``sin`` and ``tan`` at
-arguments up to 1e18, and 29 of the 40 SciPy entry points sit above 15. Two do
-not, and they are this module's targets:
+arguments up to 1e18, and 50 of the 71 SciPy entry points sit above 15. Three
+return points with no correct digit at all, and they are this module's targets:
 
 ``scipy.special.pbdv`` -- the parabolic cylinder function D_v(x). Mean 11.67
 correct digits, **12.2% of points with no correct digit at all**. The failures
@@ -21,6 +21,11 @@ the value is 2.46e80: wrong by twenty orders of magnitude. At ``v=17.02,
 x=-14.61`` it returns -2.44e24 where the value is +6.01e15 -- wrong sign, wrong
 size. The bad region is coherent: large positive order with negative argument,
 where the recurrence SciPy uses is unstable in the direction it is run.
+
+``scipy.special.pbvv`` -- the parabolic cylinder function V_v(x), ``pbdv``'s
+companion solution. Mean 11.87 digits, 9.4% of points with none at all, in very
+nearly the same region: at ``v=19.01, x=-15.76`` SciPy returns -2.75e14 where
+the value is +2029.5.
 
 ``scipy.special.hyperu`` -- the confluent hypergeometric function U(a, b, x).
 Mean 14.36 digits, and 3% of points where SciPy returns **nan** -- not an
@@ -40,6 +45,11 @@ What keeps it honest
 * The parameter distribution was **declared before anything was measured** --
   it is the sweep's own declared range, not a region drawn around the failures
   the sweep found -- and is recorded in the data file next to the values.
+* Each target is drawn over the domain SciPy **documents**. That is not
+  pedantry: drawn wider, ``eval_genlaguerre`` reports 21% of points with no
+  correct digit, every one a ``nan`` at ``alpha < -1`` where SciPy documents
+  ``alpha > -1``. None of the three targets here has a documented restriction
+  being violated.
 * Arbitrary-precision arithmetic is **off the allowlist** (``decimal``,
   ``fractions``, ``mpmath``). The deliverable is a float64 routine comparable to
   SciPy's; a candidate that reimplemented mpmath would be answering a different
@@ -170,6 +180,55 @@ recurses in the wrong direction loses everything.""",
             "`scipy.special.gammaln` and `scipy.special.poch` are all available and "
             "all far more accurate than `pbdv` is on that region. Composing them "
             "through one of the identities above is a legitimate and strong move.",
+            "Values in this range run from 1e-250 to 1e250. Compute in logs and "
+            "restore the sign and scale at the end wherever the direct product "
+            "would overflow -- a routine that overflows to inf scores 0 on that "
+            "point, and `gammaln` plus a sign is how that is avoided.",
+        ),
+    ),
+    Target(
+        key="pbvv",
+        title=("Parabolic cylinder V_v(x) in double precision, mean correct "
+               "significant digits against a 25-digit reference"),
+        baseline="scipy.special.pbvv",
+        initial_program='''"""Baseline: scipy.special.pbvv, the implementation everyone already calls."""
+from scipy.special import pbvv as _scipy_pbvv
+
+
+def pbvv(v, x):
+    return float(_scipy_pbvv(v, x)[0])
+''',
+        background="""V_v(x) is the *second* solution of the Weber equation
+y'' + (v + 1/2 - x^2/4) y = 0, the companion to D_v(x) that grows where
+D_v decays. In SciPy's indexing it is related to the first solution by
+
+    V_v(x) = [Gamma(-v) / pi] * [ -cos(pi*v) * D_v(x) + D_v(-x) ]
+
+which you can check against `scipy.special.pbdv` wherever that is reliable.
+Through the confluent hypergeometric functions, with x > 0,
+
+    D_v(x) = 2^(v/2) exp(-x^2/4) * U(-v/2, 1/2, x^2/2)
+
+and the even/odd 1F1 pair that stays finite through x = 0 is
+
+    D_v(x) = 2^(v/2) sqrt(pi) exp(-x^2/4) * [
+                 1F1(-v/2, 1/2, x^2/2) / Gamma((1-v)/2)
+        - sqrt(2) x 1F1((1-v)/2, 3/2, x^2/2) / Gamma(-v/2) ]
+
+Note that the identity above combines D_v(x) and D_v(-x), which for large
+positive v differ by many orders of magnitude -- so evaluating it directly in
+double precision subtracts a large quantity from a small one, and that is
+exactly where an implementation loses everything.""",
+        guidance=(
+            "The measured failure region of the baseline is large positive order "
+            "with negative argument (roughly v >= 9, x < 0), where it returns "
+            "values wrong by up to eleven orders of magnitude and sometimes with "
+            "the wrong sign. That region is where the score is.",
+            "`scipy.special.pbdv`, `hyperu`, `hyp1f1`, `gamma`, `gammaln` and "
+            "`poch` are all available. Composing them through the identities "
+            "above is a legitimate and strong move -- but check `pbdv` before "
+            "leaning on it, because it has a bad region of its own in very "
+            "nearly the same place.",
             "Values in this range run from 1e-250 to 1e250. Compute in logs and "
             "restore the sign and scale at the end wherever the direct product "
             "would overflow -- a routine that overflows to inf scores 0 on that "

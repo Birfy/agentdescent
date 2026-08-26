@@ -9,29 +9,48 @@ All notable changes to AgentDescent are documented here. The format follows
 ### Added
 
 - **A precision sweep over NumPy and SciPy, and a fourth ERA task built from
-  what it found.** `tools/scan_numeric_precision.py` scores 48 float64 entry
-  points against mpmath at 30 *and* 60 digits, over ranges declared before
-  anything was run, discarding any point where the two precisions disagree — so
-  a point whose reference has not converged can never become evidence against
-  the library. Its headline is reassuring: seven of eight NumPy probes return
-  the full 16 digits (`sin` and `tan` included at arguments up to 1e18) and 29
-  of 40 SciPy entry points sit above 15. Committed to
+  what it found.** `tools/scan_numeric_precision.py` scores **79** float64 entry
+  points against mpmath at 30 *and* 60 digits — special functions, their
+  inverses, orthogonal polynomials, elliptic integrals, and `scipy.stats` tail
+  probabilities and quantiles — over ranges declared before anything was run and
+  drawn over the domain SciPy documents, discarding any point where the two
+  precisions disagree. Its headline is reassuring: seven of eight NumPy probes
+  return the full 16 digits (`sin` and `tan` included at arguments up to 1e18)
+  and 50 of 71 SciPy entry points sit above 15. Committed to
   `docs/data/numeric_precision_scan.json`, because saying what is *not* worth
   searching is half the result.
-- **`examples/era/era_special_precision.py`** — the two entry points the sweep
-  singled out, one tree per `--function`. `scipy.special.pbdv` averages 11.67
-  correct digits with 12.2% of points having none at all (it returns `4.81e100`
-  at `v=19.83, x=-29.28` where the value is `2.46e80`); `scipy.special.hyperu`
-  averages 14.36 and returns `nan` on 3% of its range, at points where the
-  function is finite and well-conditioned. Stress sets are drawn under the 2F1
-  generator's discipline and use the sweep's *declared* ranges rather than
-  narrowing onto the failures it found.
-- **Measured, including the half that did not work.** `hyperu` improved
+- **`examples/era/era_special_precision.py`** — the entry points the sweep
+  singled out, one tree per `--function`. Exactly three return points with no
+  correct digit at all (a fourth, `hyp2f1`, already had a task):
+  `scipy.special.pbdv` averages 11.67 correct digits with 12.2% of points having
+  none (it returns `4.81e100` at `v=19.83, x=-29.28` where the value is
+  `2.46e80`); its companion `scipy.special.pbvv` averages 11.87 with 9.4% and
+  the same failure region; `scipy.special.hyperu` averages 14.36 and returns
+  `nan` on 3% of its range, at points where the function is finite and
+  well-conditioned. Stress sets are drawn under the 2F1 generator's discipline
+  and use the sweep's *declared* ranges rather than narrowing onto the failures
+  it found.
+- **Two guards against the sweep measuring itself**, both added because the
+  unguarded version produced a confident false finding. Drawn over
+  `alpha ~ U(-5, 20)`, `eval_genlaguerre` reports 21% of points with no correct
+  digit — every one a `nan` at `alpha < -1`, which SciPy *documents*; probes now
+  draw documented domains. And `betaincinv`'s root-found reference converged to
+  `0.853 - 3.893j`, a root of the analytic continuation whose residual is zero
+  at both precisions, scoring SciPy at 0.76 digits where bisection put it within
+  a double's spacing of the truth; `_verified_root` now requires a real root
+  that reproduces its target. The lesson both encode: the dual-precision gate
+  checks that a reference *converged*, not that it converged to the right thing.
+- **Measured, including the two thirds that did not work.** `hyperu` improved
   11.5533 → 11.6385 held-back mean digits: +0.0852 paired at 2.69 SE, eight
   points recovered, **zero regressed**, `nan` points down from 32 to 24. `pbdv`
   moved one point in a thousand (+0.0012, 1.34 SE) and left all 129 of its
-  zero-digit points exactly where they were. Both runs are in `bench/results/`
-  and written up in `docs/algo-era.md`.
+  zero-digit points exactly where they were. `pbvv` churned — +0.0021 at 0.41
+  SE, six points up and four down, one more zero-digit point, and a gate gain
+  5.6× its held-back gain, which is the 2F1 run's overfitting at a quarter of
+  the budget. Two independent negatives on the same mechanism, found in separate
+  sweeps and searched separately, is a statement about the mechanism rather than
+  an anecdote. All three runs are in `bench/results/` and written up in
+  `docs/algo-era.md`.
 
 ### Fixed
 
