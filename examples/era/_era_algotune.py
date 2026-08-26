@@ -827,6 +827,41 @@ Compiling is what you reach for when the cost is an interpreted loop that NumPy
 cannot express as array operations. It buys nothing in front of a call that is
 already native code."""
 
+#: The acceleration techniques, in upstream's own TIPS slot -- which is where
+#: its system message puts mechanical guidance (its one entry explains how a
+#: `.pyx` edit gets compiled). The four classes are not invented: they are what
+#: upstream's own 2076 published solutions actually do, read off the corpus.
+#: Compiling an interpreted loop is 40% of every result at 100x or better;
+#: skipping work the caller does not need is the whole of `lu_factorization` at
+#: 35x, where the reference serialises three matrices into Python lists and the
+#: winner returns the arrays; picking the specialised routine is
+#: `eigvals_only=True` on `eigenvalues_real` at 2.5x; doing less arithmetic is
+#: `wasserstein_dist` at 8x, a general two-sample routine replaced by the 1-D
+#: closed form.
+#:
+#: Only ``--prompt guided`` carries them. Upstream's agent is told none of this
+#: and reaches for numba on 24% of tasks anyway, over ~100 turns of watching its
+#: own edits fail -- so these tips are this port's substitute for a depth it does
+#: not have, and a number measured with them is not comparable with upstream's
+#: without saying so.
+ACCELERATION_TIPS = """Things that make numerical Python faster here, roughly in order of how much they usually buy:
+
+  1. **Compile an interpreted loop.** `@numba.njit` on a function whose cost is
+     a Python-level loop -- a step-by-step integrator, a scan with a carried
+     dependency, an early-exit search -- routinely buys 100x or more. The usual
+     place this applies is a library routine that calls back into Python once
+     per step: `solve_ivp`, `quad`, `root` and friends with a Python callable.
+     Write the loop yourself and compile it.
+  2. **Skip work the answer does not need.** Validation the caller can vouch for
+     (`check_finite=False`), a copy that can be overwritten in place
+     (`overwrite_a=True`), a conversion of the result into Python objects that
+     nothing downstream required.
+  3. **Pick the specialised routine.** `eigh` rather than `eig` for a symmetric
+     matrix, `eigvals_only=True` when the vectors go unused, a LAPACK driver
+     chosen for the shape (`gesdd`, `evd`), a sparse routine for a sparse input.
+  4. **Do less arithmetic.** A cheaper factorisation, a closed form in place of
+     a general solver, an identity that cancels a term, a better exponent."""
+
 ALIGNED_SETTING = """SETTING:
 You're an autonomous programmer tasked with solving a specific problem. You are
 to write a single Python function, and you will be evaluated based on the
@@ -859,32 +894,13 @@ This harness evaluates a single module, so a `.pyx` file has nothing to build
 it. Reach Cython through `cython.inline("...", a=..., b=...)`, which compiles
 when your module is imported.
 
+{tips}
+
 **GOALS:**
 Your primary objective is to optimize the `solve` function to run as fast as
 possible, while returning the optimal solution. You will receive better scores
 the quicker your solution runs, and you will be penalized for exceeding the time
 limit or returning non-optimal solutions."""
-
-#: The strategy paragraph this port wrote before the alignment: it names where
-#: the large wins come from. Not upstream's, and measurably worth a great deal
-#: -- on `ode_stiff_vanderpol` the search sat at 1.2x for ten rounds without it
-#: and reached 39.65x with it. Kept so that value can be measured as a
-#: difference between two arms instead of baked silently into every number.
-GUIDED_STRATEGY = """WHERE THE LARGE WINS ACTUALLY COME FROM. The reference is a
-library call, so beating it means finding what the library is paying for that
-this task does not need. Two things dominate, and both are worth checking before
-tuning flags:
-
-  (a) **An interpreted loop the library cannot vectorise.** A step-by-step
-      integrator whose right-hand side is a Python callback, a scan with a
-      carried dependency, an early-exit search. The interpreter, not the
-      arithmetic, is the cost. An `@numba.njit` kernel over the same recurrence
-      is routinely 100x or more here, and it is the single biggest lever
-      available to you. If you see `solve_ivp`, `quad`, or any routine that
-      calls back into Python per step, write the loop and compile it.
-  (b) **Work the reference does that its caller does not need.** Input
-      validation it can skip, a copy it can overwrite in place, a conversion of
-      the result into Python objects that the checker never required."""
 
 PROMPT_STYLES = ("aligned", "hinted", "guided")
 
@@ -912,8 +928,9 @@ def mutation_prompt(
     if style not in PROMPT_STYLES:
         raise ValueError(f"style must be one of {PROMPT_STYLES}")
     packages = BARE_PACKAGES if style == "aligned" else HINTED_PACKAGES
+    tips = ACCELERATION_TIPS if style == "guided" else ""
     blocks = [
-        ALIGNED_SETTING.format(packages=packages),
+        ALIGNED_SETTING.format(packages=packages, tips=tips).replace("\n\n\n", "\n\n"),
         "**TASK DESCRIPTION:**\n" + suite.description,
         (f"Problems are generated by the task's own generator at n = {suite.n}, "
          f"and your output is checked by the task's own `is_solution`. Timing is "
@@ -921,8 +938,6 @@ def mutation_prompt(
          f"the problem set. {timeout:.0f} seconds of CPU for the whole set, "
          f"including any compilation."),
     ]
-    if style == "guided":
-        blocks.append(GUIDED_STRATEGY)
     blocks.append("**EVALUATION OF YOUR PREVIOUS CODE:**\n" + _eval_block(parent.metrics))
     for optional in (_invalid_examples(parent.metrics),
                      _timing_report(parent.metrics),

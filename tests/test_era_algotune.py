@@ -647,20 +647,33 @@ def test_the_prompt_is_upstreams_system_message_and_carries_upstreams_eval_block
     assert "WHERE THE LARGE WINS" not in text
 
 
-def test_the_guided_arm_is_the_only_one_that_names_the_levers(fixture_suite):
-    """What the strategy paragraph is worth has to be measurable, not assumed.
+def test_the_three_styles_are_nested_and_only_guided_names_the_levers(fixture_suite):
+    """Each style adds exactly one thing, and what each is worth is measured.
 
-    Without it the search sat at 1.2x on ode_stiff_vanderpol for ten rounds;
-    with it, 39.65x. That is a large enough effect that baking it into every
-    number silently would misattribute the result to the search.
+    Drawing from the root on ode_stiff_vanderpol, counting how often a draw
+    replaces the library call with a compiled loop: aligned 0/6, hinted 1/8,
+    guided 3/8. Over a whole 46-node tree those became 1.04x (hinted) and
+    39.65x (guided). An effect that large cannot be baked silently into every
+    number, so the arms stay separately runnable.
     """
     parent = support.Program("id", 0, None, "def solve(problem):\n    return 1\n",
                              "", {"speedup": 1.0, "problems": 2,
                                   "valid_problems": 2}, True)
-    aligned = algotune.mutation_prompt(parent, suite=fixture_suite, style="aligned")
-    guided = algotune.mutation_prompt(parent, suite=fixture_suite, style="guided")
-    assert "WHERE THE LARGE WINS" in guided and "WHERE THE LARGE WINS" not in aligned
-    assert len(guided) > len(aligned)
+    texts = {style: algotune.mutation_prompt(parent, suite=fixture_suite, style=style)
+             for style in algotune.PROMPT_STYLES}
+
+    # aligned: upstream's bare package list, nothing else.
+    assert "just-in-time compiler" not in texts["aligned"]
+    assert "Compile an interpreted loop" not in texts["aligned"]
+    # hinted: what the compilers are and how to call them -- not what to point
+    # them at.
+    assert "just-in-time compiler" in texts["hinted"]
+    assert "Compile an interpreted loop" not in texts["hinted"]
+    # guided: the techniques, in upstream's own TIPS slot.
+    assert "Compile an interpreted loop" in texts["guided"]
+    assert "**TIPS:**" in texts["guided"]
+
+    assert len(texts["aligned"]) < len(texts["hinted"]) < len(texts["guided"])
     with pytest.raises(ValueError):
         algotune.mutation_prompt(parent, suite=fixture_suite, style="nonsense")
 
