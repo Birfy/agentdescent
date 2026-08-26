@@ -832,6 +832,11 @@ the reference runtime for that instance. Strive to have your implementation run
 as fast as possible, while returning the same output as the reference function
 (for the same given input). Be creative and optimize your approach!
 
+**TIPS:**
+This harness evaluates a single module, so a `.pyx` file has nothing to build
+it. Reach Cython through `cython.inline("...", a=..., b=...)`, which compiles
+when your module is imported.
+
 **GOALS:**
 Your primary objective is to optimize the `solve` function to run as fast as
 possible, while returning the optimal solution. You will receive better scores

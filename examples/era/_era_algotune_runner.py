@@ -189,6 +189,23 @@ def measure(support, task: Any, entrypoint: Callable[[Any], Any],
     try:
         with contextlib.redirect_stdout(io.StringIO()), \
                 contextlib.redirect_stderr(io.StringIO()):
+            # The candidate gets the same free warm-up the reference got two
+            # statements ago, and it is not optional politeness.
+            #
+            # A `@numba.njit` function compiles on its first call. Without this
+            # the compile landed inside the first *timed* call, which is also
+            # the call the slow-check reads -- so an identical program scored
+            # 0.052x when it compiled inside `solve` and 0.947x when it compiled
+            # at import, an 18x swing that measures where the author put a line
+            # rather than how fast the program is. Worse, the search learns from
+            # it: a few of those and it concludes compiling makes things twenty
+            # times slower, and steers away from the one lever that wins here.
+            #
+            # AlgoTune's own rule is that compilation is not charged
+            # ("Compilation time of your init function will not count towards
+            # your function's runtime"). Honouring it must not depend on the
+            # model knowing to force compilation at import time.
+            entrypoint(copy.deepcopy(problem))
             first_started = time.perf_counter()
             output = entrypoint(copy.deepcopy(problem))
             first = time.perf_counter() - first_started

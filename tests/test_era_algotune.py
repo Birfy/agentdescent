@@ -531,6 +531,53 @@ def test_a_program_that_raises_is_a_scored_failure_not_a_crash(fixture_suite):
 
 
 @needs_sandbox
+def test_compilation_is_not_charged_wherever_the_author_put_it(fixture_suite):
+    """Two identical programs must not differ by where their JIT compiles.
+
+    A `@numba.njit` function compiles on its first call. When the first call was
+    also the first *timed* call -- and the call the slow-check read -- an
+    identical program measured 0.052x compiling inside `solve` and 0.947x
+    compiling at import. An 18x swing that reads where the author put a line, not
+    how fast the program is, and one the search learns from: a few of those and
+    it concludes compiling makes things twenty times slower and steers away from
+    the only lever that wins on this benchmark.
+
+    AlgoTune's rule is that compilation is not charged. Honouring it cannot
+    depend on the model knowing the trick, so the candidate gets the same untimed
+    warm-up the reference already got.
+
+    The fixture task runs in microseconds, so *any* compile exceeds ten times its
+    baseline -- which is exactly the regime the old code got wrong.
+    """
+    pytest.importorskip("numba")
+    lazy = ("import numpy as np\n"
+            "import numba\n"
+            "@numba.njit\n"
+            "def _k(a):\n"
+            "    s = 0.0\n"
+            "    for i in range(a.shape[0]):\n"
+            "        s += a[i]\n"
+            "    return s\n"
+            "def solve(problem):\n"
+            "    m = problem['matrix']\n"
+            "    _k(np.zeros(2))\n"
+            "    return {'norms': np.linalg.norm(m, axis=1)}\n")
+    warmed = lazy.replace("def solve(problem):",
+                          "_k(np.zeros(2))\n\ndef solve(problem):")
+
+    scored = {}
+    for label, code in (("lazy", lazy), ("warmed", warmed)):
+        valid, metrics, error = algotune.evaluate_source(
+            code, suite=fixture_suite, shards=(0,), timeout=120.0, repeats=3)
+        assert valid, f"{label}: {error}"
+        scored[label] = metrics["speedup"]
+
+    ratio = max(scored.values()) / min(scored.values())
+    assert ratio < 3.0, (
+        f"where the compile happens moved the score by {ratio:.1f}x: {scored}")
+
+
+@needs_sandbox
 def test_the_gate_rejects_before_any_process_is_started(fixture_suite, monkeypatch):
     def forbidden(*_args, **_kwargs):
         raise AssertionError("the gate let a rejected program reach the sandbox")
