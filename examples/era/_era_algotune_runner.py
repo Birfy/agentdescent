@@ -25,6 +25,7 @@ import contextlib
 import copy
 import io
 import json
+import math
 import os
 import resource
 import sys
@@ -97,6 +98,68 @@ def load_entrypoint(support, path: str) -> Callable[[Any], Any]:
     return entrypoint
 
 
+def _numeric_leaves(value: Any, out: List[float], budget: List[int]) -> None:
+    """Flatten whatever a task returns into floats, up to a budget."""
+    if budget[0] <= 0:
+        return
+    if isinstance(value, dict):
+        for key in sorted(value):
+            _numeric_leaves(value[key], out, budget)
+        return
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            _numeric_leaves(item, out, budget)
+        return
+    try:
+        import numpy as np
+        array = np.asarray(value, dtype=float).ravel()
+    except Exception:
+        return
+    take = array[: max(0, budget[0])]
+    budget[0] -= take.size
+    out.extend(float(x) for x in take)
+
+
+def _accuracy_note(reference: Any, candidate: Any, cap: int = 20_000) -> str:
+    """How far off the rejected answer was, when that can be said at all.
+
+    "is_solution rejected the output" is true and nearly useless: it cannot tell
+    a program that is structurally wrong from one whose fixed-step integrator is
+    a factor of three short on tolerance, and those need opposite next moves.
+    The reference output is already in hand -- it was produced while timing the
+    baseline and then thrown away -- so the distance is free to compute.
+
+    Deliberately generic: flatten both sides to numbers and report the largest
+    relative gap. A task whose answer is not numeric, or whose shapes disagree,
+    gets the shape mismatch instead, which is itself the more useful message.
+    Every failure path returns "" rather than raising: this runs inside the
+    evaluator, and a diagnostic that can break an evaluation is worse than none.
+    """
+    try:
+        left: List[float] = []
+        right: List[float] = []
+        _numeric_leaves(reference, left, [cap])
+        _numeric_leaves(candidate, right, [cap])
+        if not left or not right:
+            return ""
+        if len(left) != len(right):
+            return (f" (the reference has {len(left)} numbers, yours has "
+                    f"{len(right)} -- the shape or structure differs)")
+        import numpy as np
+        a = np.asarray(left)
+        b = np.asarray(right)
+        scale = np.maximum(np.abs(a), 1e-300)
+        rel = float(np.max(np.abs(a - b) / scale))
+        worst = int(np.argmax(np.abs(a - b) / scale))
+        if not math.isfinite(rel):
+            return " (your answer holds a non-finite value the reference does not)"
+        return (f" (largest relative difference from the reference {rel:.3e}, "
+                f"at element {worst} of {len(a)}: reference {a[worst]:.12g}, "
+                f"yours {b[worst]:.12g})")
+    except BaseException:
+        return ""
+
+
 def measure(support, task: Any, entrypoint: Callable[[Any], Any],
             problem: Any, *, repeats: int, slow_factor: float,
             deadline: float) -> Dict[str, Any]:
@@ -119,7 +182,7 @@ def measure(support, task: Any, entrypoint: Callable[[Any], Any],
         # charging that to whichever program happens to run first would be a
         # coin-flip worth several x on a millisecond-scale task.
         task.solve(copy.deepcopy(problem))
-        baseline, _reference, _runs = support.best_seconds(
+        baseline, reference, _runs = support.best_seconds(
             task.solve, problem, repeats=repeats, deadline=deadline)
     row["baseline_ms"] = baseline * 1000.0
 
@@ -154,7 +217,8 @@ def measure(support, task: Any, entrypoint: Callable[[Any], Any],
             # measurement.
             row["valid"] = bool(task.is_solution(copy.deepcopy(problem), output))
         if not row["valid"]:
-            row["error"] = "is_solution rejected the output"
+            row["error"] = ("is_solution rejected the output"
+                            + _accuracy_note(reference, output))
     except BaseException as exc:
         row["valid"] = False
         row["error"] = f"is_solution raised {type(exc).__name__}: {str(exc)[:200]}"

@@ -718,13 +718,32 @@ Please generate a NEW, FASTER Python function named `solve` that:
 1. Has the signature `solve(problem)` and returns the same thing the reference
    returns, in the same structure and dtype.
 2. Is a module-level function, not a method and not a class.
-3. Computes the same answer. Reordering work, picking a better algorithm, a
-   cheaper factorisation, a specialised LAPACK/BLAS driver, avoiding a copy, or
-   dropping work the task does not need are all in scope. Returning something
-   the checker happens to accept but that is not the answer is not.
-4. May do setup work at module level -- a precomputed table, a plan, a cached
-   workspace -- if that is what makes it fast. Module-level work is timed too,
-   but only once.
+3. Produces an answer the task's own `is_solution` accepts. **That checker is
+   the contract**, and any method meeting it is in scope: a different algorithm,
+   a different integration or quadrature scheme, a cheaper factorisation, a
+   specialised LAPACK/BLAS driver, a compiled kernel, or skipping work the
+   reference does that the answer does not need. What is out of scope is
+   returning something you know is not the answer -- constants, zeros, a result
+   cached from an earlier call, or output shaped to exploit a hole in the
+   checker.
+4. May do setup work at module level -- a precomputed table, a plan, a compiled
+   kernel, a cached workspace -- if that is what makes it fast. Module-level
+   work runs once, at import, and is not charged to your measured time.
+
+WHERE THE LARGE WINS ACTUALLY COME FROM. The reference is a library call, so
+beating it means finding what the library is paying for that this task does not
+need. Two things dominate, and both are worth checking before tuning flags:
+
+  (a) **An interpreted loop the library cannot vectorise.** A step-by-step
+      integrator whose right-hand side is a Python callback, a scan with a
+      carried dependency, an early-exit search. The interpreter, not the
+      arithmetic, is the cost. An `@numba.njit` kernel over the same recurrence
+      is routinely 100x or more here, and it is the single biggest lever
+      available to you. If you see `solve_ivp`, `quad`, or any routine that
+      calls back into Python per step, write the loop and compile it.
+  (b) **Work the reference does that its caller does not need.** Input
+      validation it can skip, a copy it can overwrite in place, a conversion of
+      the result into Python objects that the checker never required.
 
 Your code must look like this:
 ```python
