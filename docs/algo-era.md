@@ -1223,6 +1223,102 @@ That is the honest headline for this task. The 49.5% is still in the file above,
 and it is still true of the setting that produced it — but the setting was this
 port's, not the benchmark's.
 
+### Why the aligned run is 36.9% and not 94.6%
+
+The aligned run scored 41 of 111. Before reading that as the search's ceiling it
+is worth asking what the *setting's* ceiling is, and then what actually stopped
+the other 70. Four candidate causes, each measured rather than argued.
+
+**Not the budget.** Every one of the 70 failures spent its whole allowance:
+
+| | |
+|---|---|
+| failures that used all 24 expansions | **70 / 70** |
+| solves at 4 expansions / 7 / 10 / 13-15 / 16-18 / 19-21 / 22-24 | 12 / 8 / 5 / 3 / 3 / 3 / 1 |
+
+The per-round hazard decays 10.8% -> 8.1% -> 5.5% and then goes **flat near
+3.5%**. A search closing in on an answer does not have a flat hazard.
+
+**Not the answer format.** `python -m tools.srbench_reachability` rewrites each
+ground truth in the format the run had to answer in -- coefficients holed out as
+`params[i]`, exponents left literal -- and fits it with the grader's own single
+BFGS from all ones:
+
+| LSR-Transform, 111 problems | reaching Acc(0.1) = 1 |
+|---|---|
+| ground truth, constants intact | 111 |
+| **ground truth as `equation(..., params)`, grader's BFGS** | **105** |
+| the same, fitted from many restarts | 106 |
+
+The setting's ceiling is **105 of 111**. One problem is lost to the single start
+and five to the parameterisation; the remaining 64-problem gap is search.
+
+**Not overfitting.** No failed problem ever reached the digit cap on its own
+validation split -- median best gate score among failures is 0.555. The search
+did not pick a bad answer over a good one; it never generated a good one.
+
+**What actually happens: the hypothesis collapses, not the code.** Re-running a
+failure with every candidate's source kept shows what a plateau is made of. On
+`omega*(c - v)/c` -- relativistic Doppler to first order -- ten nodes carried
+**ten distinct `program_id`s** and only **two physical hypotheses**:
+
+| nodes | answer | score |
+|---|---|---|
+| 1, 3, 5, 9 | `omega*sqrt(1 - v**2/c**2)` | 0.363 |
+| 4, 7 | `params[0]*omega*sqrt(1 - beta**2) + params[1]` | 1.265 |
+| 0, 8 | the linear root, unchanged | 1.597 |
+
+Six of ten proposals are the Lorentz factor, which scores **worse than the
+linear baseline**, and `(c - v)/c` is never tried. The model is anchored by the
+variable names -- "relativistic angular frequency", "speed of light",
+"velocity" -- and re-samples the same prior every expansion, because the
+mutation prompt shows it one parent and one score and no record of what has
+already been proposed. Extended to 72 expansions the same problem builds a chain
+**23 deep** and never leaves 1.597.
+
+So the tree is not the problem: it accumulates when there is anything to
+accumulate. `d2/foc - d2/d1` at 72 expansions climbs 0.44 -> 1.13 -> 1.60 ->
+1.76 -> 2.27 -> 12.0 along a chain 9 deep, solving at node 30 -- past the
+original 25-node budget. Which regime a problem lands in is decided by sampling:
+across the sweep, 43 of the 70 failures end with the **unchanged linear root** as
+the best of 25 nodes, and structurally identical siblings split opposite ways
+(`E_n*h/(2*pi*B*Jz*mom)` solved at node 10; `E_n*h/(2*pi*B*Jz*g_)` failed at 25).
+
+Two measurements name the same quantity from opposite directions. Within one
+model, failing trees put **72-88%** of their nodes on a single score and winning
+trees **23-31%**. Across models, `deepseek-v4-flash` produces **9-13** distinct
+answers per tree against `glm-5.2`'s 3-6, and solves in three calls problems
+where `glm-5.2` spent 24 expansions without moving. The bottleneck is the
+diversity of *hypotheses*, not of programs, and not the budget.
+
+#### `--recall-attempts`, and why more diversity is not the same as more accuracy
+
+If the prompt's missing memory is the mechanism, giving it one should break the
+plateau. `--recall-attempts N` lists the N best-scoring structures the tree
+already holds, with their scores, in each per-problem mutation prompt; it is off
+by default, which is upstream's view. Measured as a paired A/B on problems the
+sweep failed, both arms re-run (the variance is large enough that a control
+re-run alone solves some of them, so the sweep's zero is not a baseline):
+
+| `deepseek-v4-flash`, 13 paired problems | `--recall-attempts 0` | `--recall-attempts 12` |
+|---|---|---|
+| solved | 3 | 3 |
+| beat its own root | 12 | 11 |
+| mean best score | 6.43 | 6.17 |
+| **distinct answers per tree** | 9.69 | **11.77** |
+| **largest identical-answer block** | 38% | **29%** |
+
+**The mechanism works and the accuracy does not move.** Diversity rises by a
+fifth; solves do not budge and the mean drops slightly. The per-problem rows say
+why: of the three problems that got worse, all three got *more* diverse --
+`ii.11.17_0_0` went 10.42 -> 0.002 with distinct answers 14 -> 20. Ranking the
+list by score, which is there precisely to keep a near-miss from being pushed
+away as hard as a dead end, is not enough to prevent it.
+
+The honest reading is that hypothesis diversity is a real and controllable
+bottleneck, and that raising it indiscriminately is not a fix: a memory has to
+push away only the branches that are actually exhausted.
+
 ### Against the paper's own tables
 
 Two of this port's three programs can be compared to the paper's numbers over
