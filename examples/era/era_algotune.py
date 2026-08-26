@@ -78,6 +78,7 @@ from examples.era._era_algotune import (
     framework_score,
     mutation_prompt,
     prepare_suite,
+    repair_prompt,
 )
 from examples.era._era_domain import Domain
 from examples.era._era_support import sandbox_backend, with_intact_replies
@@ -249,6 +250,16 @@ def build_parser() -> argparse.ArgumentParser:
                         help=("skip the line_profiler table in the mutation "
                               "prompt. It is upstream's `profile` command and "
                               "costs one extra traced call per evaluation"))
+    parser.add_argument("--repair-attempts", type=int, default=1,
+                        help=("draws allowed per expansion when the program "
+                              "fails: the failure is handed back with the error "
+                              "and the model asked to fix it. 1 is upstream ERA, "
+                              "where a failed program becomes a node scoring "
+                              "-inf that FlatPuct never selects again -- and on "
+                              "this benchmark the direction that wins is the one "
+                              "whose first attempt usually fails. Each retry "
+                              "costs one model call and one scoring-shard "
+                              "evaluation"))
     parser.add_argument("--repeats", type=int, default=REPEATS,
                         help=("timed runs per program per problem, after a "
                               "discarded warm-up. The metric is the ratio of the "
@@ -351,6 +362,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         f"/task, workers={args.workers}, c_puct={args.c_puct}, "
         f"temperature={args.temperature}"
     )
+    print(f"Repair   : up to {args.repair_attempts} draw(s) per expansion"
+          f"{' (upstream ERA: a failure is a -inf node)' if args.repair_attempts <= 1 else ''}")
     print(f"Prompt   : {args.prompt}"
           f"{'' if args.no_profile else ' + line profile (upstream `profile`)'}")
     print(f"Tasks    : {', '.join(tasks)}")
@@ -369,6 +382,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
 
     model_usage = Usage()
     damage: Dict[str, int] = {}
+    repairs: Dict[str, int] = {}
     complete = with_intact_replies(
         _make_completion(args, model_usage),
         attempts=max(1, args.reply_attempts), counter=damage)
@@ -426,6 +440,12 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                 usage=actor_usage,
                 eval_concurrency=args.eval_concurrency,
                 domain=domain,
+                repair_attempts=args.repair_attempts,
+                repair_prompt=(
+                    (lambda program, code, error, attempt, _s=suite:
+                     repair_prompt(program, code, error, attempt, suite=_s))
+                    if args.repair_attempts > 1 else None),
+                repair_counter=repairs,
                 verbose=True,
             )
         except Exception as exc:
@@ -477,6 +497,13 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         "tasks": entries,
         "failures": failures,
         "model_usage": _usage_dict(model_usage),
+        "repair": {
+            "attempts_allowed": args.repair_attempts,
+            "checked": repairs.get("drawn", 0),
+            "failed": repairs.get("failed", 0),
+            "repaired": repairs.get("repaired", 0),
+            "gave_up": repairs.get("gave_up", 0),
+        },
         "reply_damage": {
             "drawn": damage.get("drawn", 0),
             "damaged": damage.get("damaged", 0),

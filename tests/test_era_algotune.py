@@ -717,6 +717,100 @@ def test_the_profile_reaches_the_prompt_when_one_was_taken(fixture_suite):
     assert "Line-level profile" not in without
 
 
+def test_a_failed_draw_is_retried_with_its_error_and_a_working_one_is_not():
+    """The fix-it loop, without a model or a sandbox.
+
+    A `-inf` node is a permanent dead end: rank_score 0, never selected again,
+    and the direction it was exploring dies with it. On this benchmark that is
+    precisely the direction that wins -- a compiled kernel whose first attempt
+    misses the tolerance or fails to compile -- so the retry is what keeps the
+    route alive. Upstream ERA appends the failure and moves on, which is what
+    `repair_attempts=1` still does.
+    """
+    from examples.era import era_empirical_software as era
+
+    tree = era.EraTree(c_puct=1.0, candidate_limit=10, metric_key="speedup")
+    tree.seed(support.Program("root", 0, None, "def solve(problem):\n    return 1\n",
+                              "root", {"speedup": 1.0, "score": 1.0}, True), 1.0)
+
+    drawn = []
+    replies = iter(["```python\ndef solve(problem):\n    return 'bad'\n```",
+                    "```python\ndef solve(problem):\n    return 'bad2'\n```",
+                    "```python\ndef solve(problem):\n    return 'good'\n```"])
+
+    def complete(prompt):
+        drawn.append(prompt)
+        return next(replies)
+
+    def repair(code):
+        ok = "good" in code
+        return ok, {"speedup": 2.0 if ok else None}, "" if ok else "it raised TypeError"
+
+    counter = {}
+    propose = era.make_propose(
+        tree, complete, prompt_for=lambda program: "MUTATE",
+        repair=repair,
+        repair_prompt=lambda program, code, error, attempt: f"FIX {attempt}: {error}",
+        repair_attempts=4, repair_counter=counter)
+
+    payload = json.loads(propose("rendered", _task(), "", 0.0))
+    assert "good" in payload["code"]
+    assert len(drawn) == 3
+    assert drawn[0] == "MUTATE"
+    assert drawn[1].startswith("FIX 1:") and "TypeError" in drawn[1]
+    # Four attempts allowed, third draw works: draws 1-3 all still had a retry
+    # in hand so all three were checked; only the last of four would be skipped.
+    assert counter == {"drawn": 3, "failed": 2, "repaired": 1}
+
+
+def test_without_the_loop_a_failure_goes_forward_as_upstream_requires():
+    """`repair_attempts=1` is upstream ERA: one draw, and a failure is a node."""
+    from examples.era import era_empirical_software as era
+
+    tree = era.EraTree(c_puct=1.0, candidate_limit=10, metric_key="speedup")
+    tree.seed(support.Program("root", 0, None, "def solve(problem):\n    return 1\n",
+                              "root", {"speedup": 1.0, "score": 1.0}, True), 1.0)
+    drawn = []
+
+    def complete(prompt):
+        drawn.append(prompt)
+        return "```python\ndef solve(problem):\n    return 'bad'\n```"
+
+    def forbidden(_code):
+        raise AssertionError("repair ran when no loop was asked for")
+
+    propose = era.make_propose(tree, complete, prompt_for=lambda p: "MUTATE",
+                               repair=forbidden, repair_prompt=lambda *a: "FIX",
+                               repair_attempts=1)
+    payload = json.loads(propose("rendered", _task(), "", 0.0))
+    assert "bad" in payload["code"] and len(drawn) == 1
+
+
+def test_the_loop_gives_up_and_lets_the_failure_become_a_node():
+    """Out of attempts, the last draw goes forward. The loop buys retries, not
+    a guarantee -- a program that never works still becomes the `-inf` node."""
+    from examples.era import era_empirical_software as era
+
+    tree = era.EraTree(c_puct=1.0, candidate_limit=10, metric_key="speedup")
+    tree.seed(support.Program("root", 0, None, "def solve(problem):\n    return 1\n",
+                              "root", {"speedup": 1.0, "score": 1.0}, True), 1.0)
+    counter = {}
+    propose = era.make_propose(
+        tree, lambda prompt: "```python\ndef solve(problem):\n    return 'bad'\n```",
+        prompt_for=lambda p: "MUTATE",
+        repair=lambda code: (False, {}, "still broken"),
+        repair_prompt=lambda program, code, error, attempt: "FIX",
+        repair_attempts=3, repair_counter=counter)
+    payload = json.loads(propose("rendered", _task(), "", 0.0))
+    assert "bad" in payload["code"]
+    assert counter["gave_up"] == 1 and counter["failed"] == 2
+
+
+def _task():
+    from agentdescent.evolution import Task
+    return Task(id="shard-0", prompt="p", meta={"shard": 0})
+
+
 def test_the_slow_factor_matches_upstreams_per_instance_rule():
     """AlgoTune: "your function can run for at most 10x the reference runtime"."""
     assert algotune.SLOW_FACTOR == 10.0

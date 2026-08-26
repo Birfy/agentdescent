@@ -966,3 +966,47 @@ def mutation_prompt(
         "code, in a single fenced block. Do not read or reconstruct the task's "
         "reference implementation to call it; write the computation.")
     return "\n\n".join(blocks) + "\n"
+
+
+def repair_prompt(parent: Any, code: str, error: str, attempt: int,
+                  *, suite: Suite) -> str:
+    """Hand a failed draw back with the failure attached, and ask for a fix.
+
+    This is the message AlgoTuner's agent gets for free by being a conversation:
+    it edits, the harness answers, it edits again. A tree whose generator sees
+    one program and one number has no equivalent, so a failed expansion becomes
+    a node scoring `-inf` that nothing will ever select again -- and on this
+    benchmark the direction that wins is the same direction whose first attempt
+    usually fails to compile, misses the tolerance, or runs away. Retrying is
+    not politeness towards the model; it is the difference between exploring
+    that direction and abandoning it.
+
+    Deliberately short, and deliberately not a re-run of the whole mutation
+    prompt: the task, the contract and the tips have already been read once in
+    this exchange. What is new is the program that failed and why.
+    """
+    return f"""That program does not work. Here it is, and here is what happened:
+
+```python
+{code.rstrip()}
+```
+
+{error}
+
+Fix it. Keep the approach -- if it was going to be faster, it is still worth
+having; the problem is the defect, not the idea. Common causes, in the order
+they usually bite:
+
+  - a numba `@njit` function using something nopython mode does not support
+    (a Python list where an array is wanted, a closure over a changing value,
+    an unsupported numpy overload);
+  - a fixed-step method whose step is too large for the tolerance, or too small
+    and so never finishes;
+  - a result whose dtype, shape or container differs from what the reference
+    returns;
+  - an array modified in place that something later still needed.
+
+If the approach cannot be made to work, say so by returning a different one.
+Return ONLY the full contents of `solver.py`, in a single fenced block.
+Attempt {attempt + 1}.
+"""

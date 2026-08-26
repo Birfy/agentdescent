@@ -377,11 +377,34 @@ def make_propose(
     preview: str = "",
     candidate_timeout: float = 60.0,
     prompt_for: Optional[Callable[[Program], str]] = None,
+    repair: Optional[Callable[[str], Tuple[bool, Dict[str, Any], str]]] = None,
+    repair_prompt: Optional[Callable[[Program, str, str, int], str]] = None,
+    repair_attempts: int = 1,
+    repair_counter: Optional[Dict[str, int]] = None,
 ) -> Callable[[str, Task, str, float], Optional[str]]:
     """`PlaygroundGenerator.__call__`, behind the engine's actor API.
 
     ``prompt_for`` is the domain's mutation prompt; without one this is the
     Kaggle task's, which is what upstream ships.
+
+    ``repair`` turns a single draw into a **fix-it loop**, and is off unless a
+    task asks for it -- upstream appends a program that fails as a node scoring
+    `-inf` and moves on, which is the behaviour the other three tasks keep.
+
+    Why a task would want it: a `-inf` node is a permanent dead end. Its
+    rank_score is 0, `FlatPuct` never selects it again, and the direction it was
+    exploring dies with it -- even when the failure was a missing cast or a step
+    size chosen slightly too large. Measured on AlgoTune's ode_stiff_vanderpol,
+    the direction that wins is *also* the one whose first attempt usually fails
+    (a numba compile error, an accuracy shortfall, a runaway loop), so the search
+    was systematically discarding the only route to the large win. Retrying with
+    the error in hand is what AlgoTuner's agent does between edits, and it costs
+    an evaluation the aggregator would have paid for the failed node anyway --
+    paid on a worker, in parallel, instead of on the merger.
+
+    The check runs on a **scoring** shard. The held-back sets stay unseen: a
+    repair loop that read them would be optimising against the split that is
+    supposed to be the report.
     """
     write_prompt = prompt_for or (
         lambda program: mutation_prompt(
@@ -392,8 +415,32 @@ def make_propose(
         if selection is None:
             return None
         iteration, parent = selection
-        raw = complete(write_prompt(parent.program)).strip()
-        code, summary = extract_program(raw)
+        prompt = write_prompt(parent.program)
+        code, summary = "", ""
+        for attempt in range(max(1, repair_attempts)):
+            raw = complete(prompt).strip()
+            code, summary = extract_program(raw)
+            # The final draw is not checked: there is no retry left to spend on
+            # the answer, and the aggregator evaluates it moments later anyway.
+            last = attempt == max(1, repair_attempts) - 1
+            if repair is None or repair_prompt is None or not code or last:
+                if last and repair is not None and attempt and repair_counter is not None:
+                    repair_counter["gave_up"] = repair_counter.get("gave_up", 0) + 1
+                break
+            if repair_counter is not None:
+                repair_counter["drawn"] = repair_counter.get("drawn", 0) + 1
+            valid, _metrics, error = repair(code)
+            if valid:
+                if repair_counter is not None and attempt:
+                    repair_counter["repaired"] = repair_counter.get("repaired", 0) + 1
+                break
+            if repair_counter is not None:
+                repair_counter["failed"] = repair_counter.get("failed", 0) + 1
+            # A failure goes back with its error. If the retries run out, the
+            # last draw goes forward and becomes the `-inf` node upstream would
+            # have appended on the first one -- the loop buys attempts, it does
+            # not hide a failure.
+            prompt = repair_prompt(parent.program, code, error, attempt + 1)
         if not code:
             _EMPTY_PROPOSALS["n"] += 1
             if _EMPTY_PROPOSALS["n"] in (1, 5, 25):
@@ -802,6 +849,9 @@ def run_agentdescent_era(
     splits: Optional[Splits] = None,
     domain: Optional[Domain] = None,
     eval_concurrency: Optional[int] = None,
+    repair_attempts: int = 1,
+    repair_prompt: Optional[Callable[[Program, str, str, int], str]] = None,
+    repair_counter: Optional[Dict[str, int]] = None,
     verbose: bool = False,
 ) -> EraRun:
     """Run one fixed-expansion-budget serial, sync, or async experiment.
@@ -827,7 +877,15 @@ def run_agentdescent_era(
                    metric_key=domain.metric_key)
     strategy = EraStrategy(domain)
     run = make_run(evaluate=domain.evaluate)
-    propose = make_propose(tree, complete, prompt_for=domain.prompt)
+    # The repair loop checks a candidate on the *first scoring shard* -- never a
+    # held-back one, which has to stay unseen to be worth reporting.
+    repair = None
+    if repair_attempts > 1 and repair_prompt is not None:
+        repair = lambda code: domain.evaluate(code, (0,))  # noqa: E731
+    propose = make_propose(tree, complete, prompt_for=domain.prompt,
+                           repair=repair, repair_prompt=repair_prompt,
+                           repair_attempts=repair_attempts,
+                           repair_counter=repair_counter)
 
     def factory(ledger, verifier, audit, config, policy):
         aggregator = EraTreeAggregator(
