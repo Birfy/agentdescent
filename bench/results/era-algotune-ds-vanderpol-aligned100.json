@@ -1,0 +1,43 @@
+{
+  "experiment": "AlgoTune re-measurement on an aligned held-back split",
+  "instances_per_task": 100,
+  "test_shards": 4,
+  "repeats": 3,
+  "sources": [
+    "bench/results/era-algotune-ds-ode_stiff_vanderpol.json"
+  ],
+  "wall_seconds": 602.9202678409999,
+  "summary": {
+    "tasks": 1,
+    "geometric_mean_root": 0.9988065140722808,
+    "geometric_mean_best": 2785.4471620244044,
+    "improved": 1
+  },
+  "tasks": [
+    {
+      "task": "ode_stiff_vanderpol",
+      "source": "bench/results/era-algotune-ds-ode_stiff_vanderpol.json",
+      "instances": 100,
+      "root": {
+        "speedup": 0.9988065140722808,
+        "problems": 100,
+        "valid_problems": 100,
+        "baseline_ms": 374.5567049899983,
+        "candidate_ms": 375.34683409000155,
+        "valid": true,
+        "error": ""
+      },
+      "best": {
+        "speedup": 2785.447162024404,
+        "problems": 100,
+        "valid_problems": 100,
+        "baseline_ms": 372.03048022999906,
+        "candidate_ms": 0.1335812699988992,
+        "valid": true,
+        "error": ""
+      },
+      "gain": 2784.4483555103316
+    }
+  ],
+  "failures": []
+}
