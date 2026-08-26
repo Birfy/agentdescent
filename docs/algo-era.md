@@ -1168,7 +1168,7 @@ judge and measures it.
 
 Three more things fall out, and the third is the one worth arguing about:
 
-#### The root nodes are not the same strength, and it matters on LSR-Synth
+#### The root nodes are not the same strength, and on LSR-Synth that is the result
 
 The benchmark ships **no program**: its rows are an id, a description, the
 sample arrays, the variable names and a ground-truth string. Every method brings
@@ -1183,16 +1183,28 @@ def equation(x1, x2, ..., params):
 ```
 
 This port's root is sparse regression over a fixed library of thirty to sixty
-*nonlinear* basis functions. On LSR-Synth that gap is not incidental — it is
-most of the result. Those problems are ODE right-hand sides built as a known
-term plus a novel one, additive in exactly such a library, so the root node
-starts inside the function space the answer lives in. **"A seed program with no
-LLM in it beats LLM-SR on chemistry" should therefore be read as "a stronger
-starting point beats a weaker one", not as "this search is better."**
+*nonlinear* basis functions. Rather than argue about how much that is worth,
+both roots were run over every problem with **no LLM involved at any point**
+(`--seed-program library|linear`,
+[`bench/results/era-srbench-root-nodes.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-srbench-root-nodes.json)):
 
-The asymmetry does not carry to LSR-Transform, where the same seed scores 0.9%
-and is worth nothing: the 49.5% there was earned by the search, not handed to it
-by the root.
+| Acc(0.1), no LLM | LSR-Transform | chemistry | biology | physics | materials | LSR-Synth pooled |
+|---|---|---|---|---|---|---|
+| `library` root (this port's) | 0.9% | 80.6% | 54.2% | 18.2% | 48.0% | **48.1%** |
+| `linear` root (LLM-SR's) | 0.0% | 8.3% | 4.2% | 0.0% | 0.0% | **3.1%** |
+| median NMSE, LSR-Synth pooled | — | — | — | — | — | 8.6e-08 vs 0.091 |
+
+**On LSR-Synth the choice of root is worth 45 points of Acc(0.1) before a single
+model call.** Those problems are ODE right-hand sides built as a known term plus
+a novel one, additive in exactly such a library, so this port's root starts
+inside the function space the answer lives in. Every LSR-Synth number above with
+`library` under it is therefore mostly a statement about the starting point:
+"a seed program with no LLM in it beats LLM-SR on chemistry" means **a stronger
+start beats a weaker one**, not that this search is better.
+
+The asymmetry does not carry to LSR-Transform, where both roots are worthless —
+0.9% and 0.0% — so the 49.5% there was earned by the search rather than handed to
+it. That is also why the LSR-Transform result is the one worth quoting.
 
 **On LSR-Synth this protocol matches or beats the published state of the art on
 four of five columns of NMSE and two of four on Acc(0.1)** — at 0.11 LLM calls

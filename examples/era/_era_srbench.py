@@ -741,6 +741,60 @@ def discover(x, y, spec):
 
 INITIAL_SUMMARY = "sequentially thresholded least squares over a fixed library"
 
+#: The other root a run can start from: **LLM-SR's own starting point**, so that
+#: a comparison with the paper's numbers is not decided before the search runs.
+#:
+#: The benchmark ships no program. Every method brings its own, and LLM-SR's is a
+#: plain linear model in the raw inputs -- from `methods/llmsr/searcher.py`, the
+#: skeleton it hands its first prompt is
+#:
+#:     def equation(x1, x2, ..., params):
+#:         y = params[0]*x1 + params[1]*x2 + ... + params[n]
+#:
+#: transcribed here into this port's `discover` contract. It fits by least
+#: squares rather than by BFGS, which for a model linear in its parameters is the
+#: exact minimiser rather than an approximation to it -- so if this root differs
+#: from LLM-SR's at all, it differs by being slightly stronger.
+#:
+#: `INITIAL_PROGRAM` above is a much stronger start: sparse regression over
+#: thirty to sixty *nonlinear* basis functions. On LSR-Synth -- additive ODE
+#: right-hand sides -- that difference is most of the result rather than a
+#: detail, which is why both are selectable and why a run records which it used.
+LINEAR_INITIAL_PROGRAM = '''"""LLM-SR's starting point: a linear model in the raw inputs."""
+import numpy as np
+
+
+def discover(x, y, spec):
+    names = list(spec["input_vars"])
+    design = np.column_stack([x, np.ones(x.shape[0])])
+    usable = np.all(np.isfinite(design), axis=1) & np.isfinite(y)
+    if not usable.any():
+        return repr(0.0)
+    coefficients, _residuals, _rank, _sv = np.linalg.lstsq(
+        design[usable], y[usable], rcond=None)
+
+    parts = [f"({float(value)!r})*{name}"
+             for value, name in zip(coefficients[:-1], names)]
+    parts.append(repr(float(coefficients[-1])))
+    equation = " + ".join(parts)
+
+    try:
+        check = spec["evaluate"](equation, x[:32])
+        if not np.all(np.isfinite(check)):
+            raise ValueError("linear fit is not finite on its own training data")
+    except Exception:
+        equation = repr(float(np.mean(y)))
+    return equation
+'''
+
+LINEAR_INITIAL_SUMMARY = "LLM-SR's starting point: a fitted linear model"
+
+#: The roots a run may start from, by the name the command line uses.
+SEED_PROGRAMS = {
+    "library": (INITIAL_PROGRAM, INITIAL_SUMMARY),
+    "linear": (LINEAR_INITIAL_PROGRAM, LINEAR_INITIAL_SUMMARY),
+}
+
 
 # --------------------------------------------------------------------------
 # The evaluator

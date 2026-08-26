@@ -96,6 +96,7 @@ from examples.era._era_srbench import (
     GROUPS,
     INITIAL_PROGRAM,
     INITIAL_SUMMARY,
+    SEED_PROGRAMS,
     MIRROR_REPO,
     MIRROR_REVISION,
     PROBLEM_SECONDS,
@@ -163,17 +164,19 @@ def srbench_domain(
     candidate_timeout: float = 300.0,
     max_code_length: int = 20_000,
     problem_seconds: float = PROBLEM_SECONDS,
+    seed_program: str = "library",
 ) -> Domain:
     """This task, in the four terms the ERA search needs."""
     preview = suite_preview(suite)
+    root_code, root_summary = SEED_PROGRAMS[seed_program]
     return Domain(
         name=("LLM-SRBench scientific equation discovery, mean "
               "min(12, -log10(NMSE)) on held-out samples"),
         entrypoint="discover",
         metric_key="mean_digits",
         metric_better="higher",
-        initial_program=INITIAL_PROGRAM,
-        initial_summary=INITIAL_SUMMARY,
+        initial_program=root_code,
+        initial_summary=root_summary,
         evaluate=lambda code, shard_ids: evaluate_source(
             code, suite=suite, shards=shard_ids, timeout=candidate_timeout,
             problem_seconds=problem_seconds, max_length=max_code_length),
@@ -190,6 +193,7 @@ def srbench_domain(
             "benchmark": "LLM-SRBench",
             "paper": BENCHMARK_PAPER,
             "source": f"{MIRROR_REPO}@{MIRROR_REVISION[:12]}",
+            "seed_program": seed_program,
             "subsets": list(suite.subsets),
             "problems_per_subset": suite.counts(),
             "problems_total": len(suite.problems()),
@@ -214,6 +218,7 @@ def per_problem_domain(
     max_code_length: int = 20_000,
     problem_seconds: float = PROBLEM_SECONDS,
     train_points: int = 0,
+    seed_program: str = "library",
 ) -> Domain:
     """One LLM-SRBench problem, in the four terms the ERA search needs.
 
@@ -223,14 +228,15 @@ def per_problem_domain(
     OOD beside it where the category has one).
     """
     preview = problem_preview(problem, samples, train_points=train_points)
+    root_code, root_summary = SEED_PROGRAMS[seed_program]
     return Domain(
         name=(f"LLM-SRBench {problem.problem_id}: recover one equation, "
               f"min(12, -log10(NMSE)) on the benchmark's held-out samples"),
         entrypoint="discover",
         metric_key="mean_digits",
         metric_better="higher",
-        initial_program=INITIAL_PROGRAM,
-        initial_summary=INITIAL_SUMMARY,
+        initial_program=root_code,
+        initial_summary=root_summary,
         evaluate=lambda code, shard_ids: evaluate_source(
             code, suite=suite, shards=shard_ids, timeout=candidate_timeout,
             problem_seconds=problem_seconds, max_length=max_code_length),
@@ -247,6 +253,7 @@ def per_problem_domain(
             "paper": BENCHMARK_PAPER,
             "problem_id": problem.problem_id,
             "subset": problem.subset,
+            "seed_program": seed_program,
             "input_vars": list(problem.input_vars),
             "fit_rows": problem.train_rows,
             "validation_shards": suite.scoring_shards,
@@ -288,6 +295,13 @@ def build_parser() -> argparse.ArgumentParser:
         help=("--per-problem only: problems searched at once. Each one already "
               "runs --workers model calls in parallel, so this multiplies the "
               "load on the endpoint"))
+    parser.add_argument(
+        "--seed-program", default="library", choices=sorted(SEED_PROGRAMS),
+        help=("the root node the search starts from. `library` is sparse "
+              "regression over a fixed nonlinear basis; `linear` is LLM-SR's "
+              "own starting point, a fitted linear model in the raw inputs. On "
+              "LSR-Synth the choice is worth 45 points of Acc(0.1) before any "
+              "search runs, so a comparison with the paper has to name it"))
     parser.add_argument(
         "--resume", action="store_true",
         help=("--per-problem only: pick up an interrupted sweep from --output, "
@@ -418,6 +432,7 @@ def _budget_fingerprint(args: argparse.Namespace) -> Dict[str, Any]:
         "problem_seconds": args.problem_seconds,
         "candidate_timeout": args.candidate_timeout,
         "train_points": args.train_points,
+        "seed_program": args.seed_program,
         "model": args.model,
         "seed": args.seed,
     }
@@ -460,7 +475,8 @@ def _one_problem(args: argparse.Namespace, complete, problem: SrProblem,
         candidate_timeout=args.candidate_timeout,
         max_code_length=args.max_code_length,
         problem_seconds=args.problem_seconds,
-        train_points=args.train_points)
+        train_points=args.train_points,
+        seed_program=args.seed_program)
     run = run_agentdescent_era(
         complete,
         mode=mode,
@@ -714,6 +730,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         candidate_timeout=args.candidate_timeout,
         max_code_length=args.max_code_length,
         problem_seconds=args.problem_seconds,
+        seed_program=args.seed_program,
     )
     run = run_agentdescent_era(
         complete,

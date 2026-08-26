@@ -1,0 +1,101 @@
+{
+  "experiment": "ERA on AgentDescent -- LLM-SRBench, what each root node is worth before any LLM",
+  "why": "The benchmark ships no program, so every method brings its own starting point and a comparison with the paper's tables depends on which one. `library` is this port's root -- sparse regression over a fixed nonlinear basis. `linear` is LLM-SR's own starting point, a fitted linear model in the raw inputs (methods/llmsr/searcher.py), transcribed into this port's contract. No LLM is involved in any number below.",
+  "finding": "On LSR-Synth the root alone is worth 45 points of Acc(0.1) -- 48.1% against 3.1% -- so this port's LSR-Synth results are mostly the root rather than the search. On LSR-Transform both roots are worthless (0.9% against 0.0%), so the per-problem result there was earned by the search.",
+  "results": {
+    "lsr_synth::library": {
+      "pooled": {
+        "acc_0.1": 0.4806201550387597,
+        "median_nmse": 8.565516963182419e-08,
+        "mean_digits": 7.466916825782273,
+        "problems": 129,
+        "ood_acc_0.1": 0.5271317829457365
+      },
+      "by_subset": {
+        "lsr_synth_bio_pop_growth": {
+          "n": 24,
+          "acc": 54.166666666666664,
+          "median_nmse": 2.7195536679917516e-10
+        },
+        "lsr_synth_chem_react": {
+          "n": 36,
+          "acc": 80.55555555555556,
+          "median_nmse": 5.467353607997473e-10
+        },
+        "lsr_synth_matsci": {
+          "n": 25,
+          "acc": 48.0,
+          "median_nmse": 5.5506712370490176e-08
+        },
+        "lsr_synth_phys_osc": {
+          "n": 44,
+          "acc": 18.181818181818183,
+          "median_nmse": 3.9104541721188277e-05
+        }
+      }
+    },
+    "lsr_synth::linear": {
+      "pooled": {
+        "acc_0.1": 0.031007751937984496,
+        "median_nmse": 0.0911527052229687,
+        "mean_digits": 1.250891474707247,
+        "problems": 129,
+        "ood_acc_0.1": 0.07751937984496124
+      },
+      "by_subset": {
+        "lsr_synth_bio_pop_growth": {
+          "n": 24,
+          "acc": 4.166666666666667,
+          "median_nmse": 0.5990270313482845
+        },
+        "lsr_synth_chem_react": {
+          "n": 36,
+          "acc": 8.333333333333334,
+          "median_nmse": 0.024400441843545485
+        },
+        "lsr_synth_matsci": {
+          "n": 25,
+          "acc": 0.0,
+          "median_nmse": 0.13136712010841814
+        },
+        "lsr_synth_phys_osc": {
+          "n": 44,
+          "acc": 0.0,
+          "median_nmse": 0.06799848182685815
+        }
+      }
+    },
+    "lsr_transform::library": {
+      "pooled": {
+        "acc_0.1": 0.009009009009009009,
+        "median_nmse": 0.09409723222912629,
+        "mean_digits": 1.0649358482563716,
+        "problems": 111,
+        "ood_acc_0.1": null
+      },
+      "by_subset": {
+        "lsr_transform": {
+          "n": 111,
+          "acc": 0.9009009009009009,
+          "median_nmse": 0.09409723222912629
+        }
+      }
+    },
+    "lsr_transform::linear": {
+      "pooled": {
+        "acc_0.1": 0.0,
+        "median_nmse": 0.4240291566243658,
+        "mean_digits": 0.43786579278293536,
+        "problems": 111,
+        "ood_acc_0.1": null
+      },
+      "by_subset": {
+        "lsr_transform": {
+          "n": 111,
+          "acc": 0.0,
+          "median_nmse": 0.4240291566243658
+        }
+      }
+    }
+  }
+}
