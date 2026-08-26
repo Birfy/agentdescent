@@ -69,7 +69,12 @@ import numpy as np
 
 from agentdescent.dataloader import cache_path
 
-from examples.era._era_srbench_expr import DIGIT_CAP, TOLERANCE, aggregate
+from examples.era._era_srbench_expr import (
+    DIGIT_CAP,
+    MAX_NPARAMS,
+    TOLERANCE,
+    aggregate,
+)
 from examples.era._era_support import sandbox_wrapper, validate_source
 
 
@@ -789,11 +794,90 @@ def discover(x, y, spec):
 
 LINEAR_INITIAL_SUMMARY = "LLM-SR's starting point: a fitted linear model"
 
-#: The roots a run may start from, by the name the command line uses.
+#: The same two roots for ``--answer-format program``, where an answer is
+#: ``equation(..., params)`` source and the harness -- not the candidate -- fits
+#: the constants. `linear` here is upstream's skeleton verbatim, down to the
+#: `params[i]` indices; `library` picks its terms by the same thresholded fit as
+#: before but hands them back with the coefficients left open, capped at
+#: ``MAX_NPARAMS`` because upstream only fits ten.
+LINEAR_PROGRAM_ROOT = '''"""LLM-SR's starting point, as a program: a linear model in the raw inputs."""
+
+
+def discover(x, y, spec):
+    names = list(spec["input_vars"])
+    terms = " + ".join(f"params[{i}]*{name}" for i, name in enumerate(names))
+    signature = ", ".join(names)
+    return (f"def equation({signature}, params):\\n"
+            f"    return {terms} + params[{len(names)}]\\n")
+'''
+
+LIBRARY_PROGRAM_ROOT = '''"""Baseline as a program: thresholded least squares picks the terms, the harness fits them."""
+import numpy as np
+
+
+def _terms(x, names):
+    rows = x.shape[0]
+    columns = [(np.ones(rows), "1.0")]
+    for index, name in enumerate(names):
+        v = x[:, index]
+        columns.append((v, name))
+        columns.append((v * v, f"{name}**2"))
+        columns.append((v ** 3, f"{name}**3"))
+        columns.append((np.sin(v), f"np.sin({name})"))
+        columns.append((np.cos(v), f"np.cos({name})"))
+        if np.all(v > 1e-9):
+            columns.append((np.log(v), f"np.log({name})"))
+            columns.append((np.sqrt(v), f"np.sqrt({name})"))
+        if np.min(np.abs(v)) > 1e-6:
+            columns.append((1.0 / v, f"1.0/({name})"))
+        if np.max(np.abs(v)) < 30.0:
+            columns.append((np.exp(-v), f"np.exp(-({name}))"))
+    for i in range(len(names)):
+        for j in range(i + 1, len(names)):
+            columns.append((x[:, i] * x[:, j], f"{names[i]}*{names[j]}"))
+    return columns
+
+
+def discover(x, y, spec):
+    names = list(spec["input_vars"])
+    budget = int(spec.get("max_params", 10))
+    columns = _terms(x, names)
+    design = np.column_stack([values for values, _text in columns])
+    labels = [text for _values, text in columns]
+    finite = np.all(np.isfinite(design), axis=1) & np.isfinite(y)
+    design, target = design[finite], y[finite]
+    scale = np.maximum(np.abs(design).max(axis=0), 1e-12)
+    coefficients, _r, _k, _s = np.linalg.lstsq(design / scale, target, rcond=None)
+
+    # Only `budget` constants can be fitted, so hand back the strongest terms.
+    order = np.argsort(-np.abs(coefficients))[:budget]
+    chosen = [labels[i] for i in sorted(order)] or ["1.0"]
+    body = " + ".join(f"params[{i}]*({text})" for i, text in enumerate(chosen))
+    signature = ", ".join(names)
+    return ("import numpy as np\\n\\n\\n"
+            f"def equation({signature}, params):\\n"
+            f"    return {body}\\n")
+'''
+
+#: The roots a run may start from, by the name the command line uses, per format.
 SEED_PROGRAMS = {
     "library": (INITIAL_PROGRAM, INITIAL_SUMMARY),
     "linear": (LINEAR_INITIAL_PROGRAM, LINEAR_INITIAL_SUMMARY),
 }
+
+PROGRAM_SEED_PROGRAMS = {
+    "library": (LIBRARY_PROGRAM_ROOT,
+                "thresholded least squares picks the terms, the harness fits them"),
+    "linear": (LINEAR_PROGRAM_ROOT, "LLM-SR's starting point, verbatim"),
+}
+
+
+def seed_program(name: str, answer_format: str) -> Tuple[str, str]:
+    """The root program for a (root, answer format) pair."""
+    table = PROGRAM_SEED_PROGRAMS if answer_format == "program" else SEED_PROGRAMS
+    if name not in table:
+        raise ValueError(f"unknown seed program {name!r}")
+    return table[name]
 
 
 # --------------------------------------------------------------------------
@@ -843,6 +927,7 @@ def run_candidate(
     problem_seconds: float = PROBLEM_SECONDS,
     max_length: int = 20_000,
     nproc_limit: int = 64,
+    answer_format: str = "expression",
 ) -> Dict[str, Any]:
     """Execute one candidate against one shard and return the runner's payload."""
     valid, reason = validate_source(
@@ -873,6 +958,7 @@ def run_candidate(
                 "--samples", str(data),
                 "--problems", str(meta),
                 "--problem-seconds", str(problem_seconds),
+                "--answer-format", answer_format,
                 "--cpu-seconds", str(max(2, int(math.ceil(timeout)))),
                 "--nproc-limit", str(nproc_limit),
             ],
@@ -910,6 +996,7 @@ def evaluate_source(
     problem_seconds: float = PROBLEM_SECONDS,
     max_length: int = 20_000,
     worst_reported: int = 5,
+    answer_format: str = "expression",
 ) -> Tuple[bool, Dict[str, Any], str]:
     """Score a candidate over one or more shards, pooled over problems.
 
@@ -927,7 +1014,8 @@ def evaluate_source(
     for shard in shards:
         payload = run_candidate(
             code, suite=suite, shard=shard, timeout=timeout,
-            problem_seconds=problem_seconds, max_length=max_length)
+            problem_seconds=problem_seconds, max_length=max_length,
+            answer_format=answer_format)
         seconds += float(payload.get("seconds") or 0.0)
         if not payload.get("ok"):
             error = str(payload.get("error") or "candidate failed")
@@ -1040,6 +1128,36 @@ programmer. Your task is to write Python code that recovers the closed-form
 equation behind one scientific dataset. Return ONLY the python code."""
 
 
+def answer_contract(answer_format: str, variables: Sequence[str],
+                    functions: Sequence[str]) -> str:
+    """Contract clause (3) of a mutation prompt, per answer format.
+
+    The ``program`` wording is upstream's own shape -- a function body with
+    ``params[i]`` holes that the *harness* fits, which is what LLM-SR asks its
+    model for. The ``expression`` wording is this port's restricted grammar.
+    """
+    if answer_format == "program":
+        signature = ", ".join(list(variables) + ["params"])
+        return f"""3. Returns the **source of a Python function** as a string:
+
+       def equation({signature}):
+           # numpy is available as np; branch, loop and call it freely
+           return ...
+
+   Its arguments are 1-D float64 numpy arrays, one per input variable, in that
+   order. Leave every numeric constant as `params[i]` -- **you do not fit them**.
+   The harness fits `params` on the training rows with a single
+   `scipy.optimize.minimize(..., method='BFGS')` from all ones, exactly as the
+   benchmark does, and there are only {MAX_NPARAMS} of them: `params[0]` through
+   `params[{MAX_NPARAMS - 1}]`. An answer needing more constants than that cannot
+   be fitted, so a long interpolating sum is not available to you."""
+    allowed = ", ".join(functions)
+    return f"""3. Returns the equation as an expression in those variable names -- for example
+   `"1.7*P - 0.02*P**2 + sin(t)"`. It is parsed, not executed: numeric
+   constants, those names, `pi`, `e`, the operators + - * / **, and these
+   functions: {allowed}. Anything else is rejected and scores zero."""
+
+
 def per_problem_prompt(
     parent: Any,
     *,
@@ -1047,6 +1165,8 @@ def per_problem_prompt(
     timeout: float = 120.0,
     problem_seconds: float = PROBLEM_SECONDS,
     functions: Sequence[str] = (),
+    variables: Sequence[str] = (),
+    answer_format: str = "expression",
 ) -> str:
     """The mutation prompt for ``--per-problem``: one dataset, one equation.
 
@@ -1076,8 +1196,10 @@ def per_problem_prompt(
         note = f" It raised: {row['error']}." if row.get("error") else ""
         attempt = (f"The equation it returned was:\n  {equation or '(none)'}\n"
                    f"which scored {row['digits']} in {row['seconds']}s.{note}")
-    allowed = ", ".join(functions)
     imports = ", ".join(sorted(ALLOWED_IMPORTS))
+    contract = answer_contract(answer_format, variables, functions)
+    shape = ("a STRING holding `def equation(...)` source"
+             if answer_format == "program" else "a STRING holding the equation")
     return f"""{PER_PROBLEM_PREAMBLE}
 
 --- BEGIN PROMPT ---
@@ -1101,22 +1223,17 @@ Previous Solution Code:
 ```
 
 Please generate a NEW, IMPROVED Python function named `discover` that:
-1. Has the signature `discover(x, y, spec)` and returns a STRING.
+1. Has the signature `discover(x, y, spec)` and returns {shape}.
 2. `x` is a float64 numpy array of shape (n_samples, n_inputs) whose columns are
    `spec["input_vars"]` in order, and `y` is a float64 array of shape
-   (n_samples,). `spec` also holds `output_var`, `description`, `seconds` and
-   `evaluate`.
-3. Returns the equation as an expression in those variable names -- for example
-   `"1.7*P - 0.02*P**2 + sin(t)"`. It is parsed, not executed: numeric
-   constants, those names, `pi`, `e`, the operators + - * / **, and these
-   functions: {allowed}. Anything else is rejected and scores zero.
-4. **Proposes a structure and fits its constants to the data.** Think about what
-   equation the description implies -- a rate law, an oscillator, a growth model,
-   a rearranged physical identity -- write that form with free parameters, and
-   fit the parameters numerically (`scipy.optimize.least_squares` or
-   `curve_fit`). Then check it with
-   `spec["evaluate"](expression, x)`, which is the grader's own parser, and try
-   another form if it is poor. Keep the best.
+   (n_samples,). `spec` also holds `output_var`, `description`, `seconds`,
+   `answer_format`, `max_params` and `evaluate`.
+{contract}
+4. **Proposes a structure that the science points to.** A rate law, an
+   oscillator, a growth model, a rearranged physical identity -- write that form
+   and check it with `spec["evaluate"](answer, x)`, which is the grader's own
+   code and treats constants exactly the way the grader will. Try another form if
+   it is poor, and keep the best.
 5. Is allowed to be specific to THIS dataset. There is only one, and its
    description is above; a form chosen because it fits this science is the
    answer, not a shortcut.

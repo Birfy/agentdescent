@@ -505,6 +505,169 @@ def test_the_mirror_files_are_pinned_to_a_revision():
 
 
 # ---------------------------------------------------------------------------
+# The upstream-aligned answer format
+# ---------------------------------------------------------------------------
+
+
+_PROGRAM = ("import numpy as np\n\n\n"
+            "def equation(a, b, params):\n"
+            "    out = params[0]*a + params[1]*np.sin(b)\n"
+            "    if params[2] > 0:\n"
+            "        out = out + params[2]\n"
+            "    return out\n")
+
+
+def test_the_program_format_allows_what_upstream_allows():
+    """Branches, loops and numpy -- the restricted grammar is this port's own."""
+    assert expr.validate_program(_PROGRAM, ("a", "b")) is not None
+
+
+@pytest.mark.parametrize("source,reason", [
+    ("def equation(a, params):\n    return params[0]*a\n", "wrong arity"),
+    ("def equation(b, a, params):\n    return params[0]*a\n", "wrong order"),
+    ("def other(a, b, params):\n    return params[0]\n", "no entry point"),
+    ("import os\ndef equation(a, b, params):\n    return params[0]*a\n", "import"),
+    ("def equation(a, b, params):\n    return a.__class__\n", "dunder"),
+    ("def equation(a, b, params):\n    return eval('a')\n", "eval"),
+    ("", "empty"),
+])
+def test_the_program_gate_refuses_what_should_never_run(source, reason):
+    with pytest.raises(expr.ProgramError):
+        expr.validate_program(source, ("a", "b"))
+
+
+_SMOOTH_PROGRAM = ("import numpy as np\n\n\n"
+                   "def equation(a, b, params):\n"
+                   "    return params[0]*a + params[1]*np.sin(b) + params[2]\n")
+
+
+def test_the_harness_fits_the_constants_the_way_upstream_fits_them():
+    """One BFGS from all ones, over ten parameters -- `searcher.py` verbatim."""
+    rng = np.random.default_rng(0)
+    x = rng.uniform(1.0, 4.0, size=(500, 2))
+    y = 2.5 * x[:, 0] + 1.5 * np.sin(x[:, 1]) - 0.75
+    call = expr.compile_program(_SMOOTH_PROGRAM, ("a", "b"))
+    params = expr.fit_program(call, x, y)
+    assert params.shape == (expr.MAX_NPARAMS,)
+    assert params[:3] == pytest.approx([2.5, 1.5, -0.75], abs=1e-4)
+    assert expr.score_predictions(call(x, params), y)["nmse"] < 1e-9
+
+
+def test_branching_on_a_parameter_fits_badly_under_upstreams_optimiser():
+    """A property of the aligned fitter, recorded rather than tuned away.
+
+    The program format lets an answer branch on `params[i]`, and upstream fits
+    with one gradient-based BFGS. A branch makes the loss discontinuous in that
+    parameter, so the fit is poor -- the same program is recovered exactly when
+    the branch is removed. This is what alignment costs, and a candidate that
+    branches on its own constants is choosing it.
+    """
+    rng = np.random.default_rng(0)
+    x = rng.uniform(1.0, 4.0, size=(500, 2))
+    y = 2.5 * x[:, 0] + 1.5 * np.sin(x[:, 1]) - 0.75
+    branchy = expr.compile_program(_PROGRAM, ("a", "b"))
+    smooth = expr.compile_program(_SMOOTH_PROGRAM, ("a", "b"))
+    branchy_nmse = expr.score_predictions(
+        branchy(x, expr.fit_program(branchy, x, y)), y)["nmse"]
+    smooth_nmse = expr.score_predictions(
+        smooth(x, expr.fit_program(smooth, x, y)), y)["nmse"]
+    assert smooth_nmse < 1e-9 < branchy_nmse
+
+
+def test_ten_constants_is_a_real_ceiling_on_an_answer():
+    """Upstream's MAX_NPARAMS is what stops a long interpolating sum."""
+    source = ("def equation(a, b, params):\n"
+              "    return sum(params[i]*a**i for i in range(12))\n")
+    call = expr.compile_program(source, ("a", "b"))
+    x = np.ones((4, 2))
+    with pytest.raises(Exception):
+        call(x, np.ones(expr.MAX_NPARAMS))
+
+
+@needs_sandbox
+def test_a_program_answer_is_fitted_and_scored_end_to_end(tmp_path, monkeypatch):
+    monkeypatch.setattr(srbench, "cache_path",
+                        lambda subdir, name: str(tmp_path / name))
+    rng = np.random.default_rng(1)
+    train_x = rng.uniform(1.0, 5.0, size=(400, 2))
+    test_x = rng.uniform(1.0, 5.0, size=(80, 2))
+    truth = lambda m: 2.0 * m[:, 0] * np.sin(m[:, 1]) + 3.0  # noqa: E731
+    problem = srbench.SrProblem("fx", "fixture", ("a", "b"), "y", "Discover y.",
+                                "2*a*sin(b) + 3", 400, 80, 0)
+    suite = srbench.prepare_problem_suite(
+        problem, {"train_x": train_x, "train_y": truth(train_x),
+                  "test_x": test_x, "test_y": truth(test_x)}, seed=0, shards=4)
+    source = ("def discover(x, y, spec):\n"
+              "    return ('import numpy as np\\n\\n\\n'\n"
+              "            'def equation(a, b, params):\\n'\n"
+              "            '    return params[0]*a*np.sin(b) + params[1]\\n')\n")
+    valid, metrics, error = srbench.evaluate_source(
+        source, suite=suite, shards=suite.test_range(), timeout=90.0,
+        problem_seconds=20.0, answer_format="program")
+    assert valid, error
+    row = metrics["per_problem"][0]
+    assert row["digits"] == pytest.approx(expr.DIGIT_CAP)
+    assert row["acc"] == 1
+
+
+def test_the_linear_program_root_is_upstreams_skeleton():
+    """`params[0]*x1 + ... + params[n]`, which is what LLM-SR starts every problem from."""
+    code, _summary = srbench.seed_program("linear", "program")
+    namespace = {}
+    exec(compile(code, "<root>", "exec"), namespace)  # noqa: S102 - a fixture
+    emitted = namespace["discover"](np.zeros((4, 2)), np.zeros(4),
+                                    {"input_vars": ["a", "b"], "max_params": 10})
+    assert emitted.strip() == (
+        "def equation(a, b, params):\n    return params[0]*a + params[1]*b + params[2]")
+
+
+def test_both_roots_exist_in_both_formats():
+    for fmt in ("expression", "program"):
+        for root in ("library", "linear"):
+            code, summary = srbench.seed_program(root, fmt)
+            valid, why = _gate(code)
+            assert valid, f"{fmt}/{root}: {why}"
+            assert summary
+    with pytest.raises(ValueError):
+        srbench.seed_program("nonesuch", "program")
+
+
+# ---------------------------------------------------------------------------
+# Symbolic accuracy, the paper's third metric
+# ---------------------------------------------------------------------------
+
+
+def test_a_damaged_ground_truth_is_not_scorable_and_is_not_a_miss():
+    """Both defects are the published copy's, not any answer's."""
+    from tools import score_symbolic_accuracy as sa
+    assert not sa.scorable("-0.19*A(t)**2 + 0.19_z*A(t)**2", ["t", "A"])
+    assert not sa.scorable("F0*sin(t) - beta*sin(v(t))", ["x", "t", "v"])
+    assert sa.scorable("(-A + x1*y1 - x2*y2)/x3",
+                       ["A", "x1", "y1", "x2", "y2", "x3"])
+
+
+def test_a_program_answer_is_reduced_to_its_equation_before_judging():
+    from tools import score_symbolic_accuracy as sa
+    source = ("import numpy as np\n\n\ndef equation(a, b, params):\n"
+              "    return params[0]*a*np.sin(b) + params[1]\n")
+    assert sa.normalise(source, ["a", "b"]) == "params[0]*a*sin(b) + params[1]"
+    assert sa.normalise("0.3*P(t)**2", ["t", "P"]) == "0.3*P**2"
+
+
+def test_the_deterministic_check_only_ever_claims_equivalence():
+    """It accelerates the easy cases and hands everything else to the judge."""
+    pytest.importorskip("sympy")
+    from tools import score_symbolic_accuracy as sa
+    variables = ["q1", "q2", "F", "epsilon"]
+    # 1/(2*sqrt(pi)) and 1/sqrt(4*pi) are the same number, and it finds that.
+    assert sa.deterministic_verdict(
+        "-sqrt(q1*q2/(F*epsilon))/(2*sqrt(pi))",
+        "-sqrt((q1*q2)/(4*pi*epsilon*F))", variables) is True
+    # Structurally different, and it declines rather than scoring a miss.
+    assert sa.deterministic_verdict("q1*q2", "q1 + q2", variables) in (None, False)
+
+
+# ---------------------------------------------------------------------------
 # The per-problem protocol -- the benchmark's own
 # ---------------------------------------------------------------------------
 

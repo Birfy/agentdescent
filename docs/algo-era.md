@@ -292,26 +292,50 @@ rather than against memory of them.
 **Deviations, with the direction each one pushes.** Most make this harder than
 the benchmark's own setup; two do not, and those are the ones to watch.
 
+Two of the rows below were **closed** after this audit, and both are now flags
+rather than differences: `--answer-format program` accepts what upstream accepts
+and fits constants the way upstream fits them, and
+`python -m tools.score_symbolic_accuracy` scores the paper's third metric. The
+table records where each setting stands.
+
 | | Benchmark / LLM-SR | Here | Direction |
 |---|---|---|---|
-| what an answer may be | arbitrary Python in the `equation()` body — `np.where`, branches, loops | a restricted expression grammar | **harder here** |
+| what an answer may be | arbitrary Python in the `equation()` body — `np.where`, branches, loops | `--answer-format program`: **the same**. `expression` (the default): a restricted grammar | **aligned, or harder** |
+| who fits the constants | the harness, one `minimize(..., 'BFGS')` from `[1.0]*10` | `program`: **the same call**. `expression`: the candidate | **aligned, or easier** |
+| how many constants an answer may have | `MAX_NPARAMS = 10` | `program`: **the same cap**. `expression`: no cap | **aligned, or easier** |
 | what the search is selected on | MSE on the **full training set** (`searcher.py`) | NMSE on a 25% validation split carved out of train | **harder here** |
 | rows available to fit | all of train | 75% of train (the rest is the validation pool) | **harder here** |
 | LSR-Transform training rows | all 80 000 | `--train-points 4000` | **harder here** |
 | a non-finite prediction | dropped, the rest scored | fails the problem; both numbers reported | **harder here** |
 | budget per problem | 1 000 samples (~250 prompts) | 24 expansions (~16 model calls) | **harder here** |
-| **constant fitting** | one `scipy.optimize.minimize(..., 'BFGS')` from `[1.0]*10`, no restarts | the candidate fits its own, and may use least squares or multi-start | **easier here** |
-| **the root node** | a fitted linear model in the raw inputs | `library` (sparse regression over a nonlinear basis) or `linear` | **easier here** unless `--seed-program linear` |
+| **the root node** | a fitted linear model in the raw inputs | `--seed-program linear`: **the same skeleton, verbatim**. `library`: sparse regression over a nonlinear basis | **aligned, or easier** |
 | NMSE aggregation | the paper does not state mean or median | median, stated, with per-problem values in the result files | unknown |
-| symbolic accuracy | a GPT-4o judge, the paper's third metric | **not implemented** | **missing** |
+| symbolic accuracy | a GPT-4o judge, the paper's third metric | `tools/score_symbolic_accuracy.py`, **a different judge** | **aligned in method, not in judge** |
 
-The last three rows are the ones that decide how a number here should be read.
-The root is worth 45 points of Acc(0.1) on LSR-Synth and nothing on
-LSR-Transform, which is measured above. Constant fitting is a smaller edge in
-the same direction: upstream runs a single BFGS from all-ones over at most ten
-parameters, while a candidate here can solve a linear-in-parameters model
-exactly. And symbolic accuracy is the column this protocol would lose, which the
-answer-length evidence above says plainly.
+**The fully aligned setting is `--answer-format program --seed-program linear`**:
+upstream's skeleton as the root, upstream's answer format, upstream's ten
+constants, upstream's optimiser. Everything else about it is still harder than
+the benchmark's own setup — the selection split, the fitting rows, the budget —
+so a number from it is a floor rather than a like-for-like.
+
+The three columns that decide how any other number should be read: the root is
+worth 45 points of Acc(0.1) on LSR-Synth and nothing on LSR-Transform, measured
+above; `expression` format leaves both the constant count and the optimiser
+unbounded, which is what let a nine-term interpolating fit score 48%; and
+symbolic accuracy now has a scorer but not the paper's judge, so it is reported
+beside the paper's column rather than in it.
+
+#### The ten-constant cap is what closes the interpolation hole
+
+Aligning the answer format does not only change what is *allowed* — it changes
+what the strong root can do. In `expression` format the library root emits a
+nine-to-eleven term fit with a free coefficient on every term. In `program`
+format the same root has to hand its terms back with `params[i]` holes, and
+there are only ten, fitted once by a gradient-based BFGS from all ones. On a
+fixture where the truth is `2*a*sin(b) + 3`, the library root scores 0.88 digits
+in program format against a hand-written correct program's 12.0. Upstream's
+`MAX_NPARAMS = 10` is not decoration: it is the thing that stops an answer from
+interpolating its way past the metric.
 
 ### Deviations this task adds
 

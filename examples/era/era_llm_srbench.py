@@ -97,6 +97,7 @@ from examples.era._era_srbench import (
     INITIAL_PROGRAM,
     INITIAL_SUMMARY,
     SEED_PROGRAMS,
+    seed_program,
     MIRROR_REPO,
     MIRROR_REVISION,
     PROBLEM_SECONDS,
@@ -136,6 +137,11 @@ DEFAULT_OUTPUT = Path("era-srbench-result.json")
 EQUATION_FUNCTIONS = tuple(sorted(FUNCTIONS))
 
 
+def seed_program_for(name: str, answer_format: str):
+    """The root for a (root, answer-format) pair, imported here for the tripwire."""
+    return seed_program(name, answer_format)
+
+
 def _make_completion(args: argparse.Namespace, usage: Usage):
     """The sibling ports' completion wiring, calling this module's own import.
 
@@ -165,10 +171,11 @@ def srbench_domain(
     max_code_length: int = 20_000,
     problem_seconds: float = PROBLEM_SECONDS,
     seed_program: str = "library",
+    answer_format: str = "expression",
 ) -> Domain:
     """This task, in the four terms the ERA search needs."""
     preview = suite_preview(suite)
-    root_code, root_summary = SEED_PROGRAMS[seed_program]
+    root_code, root_summary = seed_program_for(seed_program, answer_format)
     return Domain(
         name=("LLM-SRBench scientific equation discovery, mean "
               "min(12, -log10(NMSE)) on held-out samples"),
@@ -179,7 +186,8 @@ def srbench_domain(
         initial_summary=root_summary,
         evaluate=lambda code, shard_ids: evaluate_source(
             code, suite=suite, shards=shard_ids, timeout=candidate_timeout,
-            problem_seconds=problem_seconds, max_length=max_code_length),
+            problem_seconds=problem_seconds, max_length=max_code_length,
+            answer_format=answer_format),
         reward=framework_score,
         prompt=lambda program: mutation_prompt(
             program, preview=preview, timeout=candidate_timeout,
@@ -194,6 +202,7 @@ def srbench_domain(
             "paper": BENCHMARK_PAPER,
             "source": f"{MIRROR_REPO}@{MIRROR_REVISION[:12]}",
             "seed_program": seed_program,
+            "answer_format": answer_format,
             "subsets": list(suite.subsets),
             "problems_per_subset": suite.counts(),
             "problems_total": len(suite.problems()),
@@ -219,6 +228,7 @@ def per_problem_domain(
     problem_seconds: float = PROBLEM_SECONDS,
     train_points: int = 0,
     seed_program: str = "library",
+    answer_format: str = "expression",
 ) -> Domain:
     """One LLM-SRBench problem, in the four terms the ERA search needs.
 
@@ -228,7 +238,7 @@ def per_problem_domain(
     OOD beside it where the category has one).
     """
     preview = problem_preview(problem, samples, train_points=train_points)
-    root_code, root_summary = SEED_PROGRAMS[seed_program]
+    root_code, root_summary = seed_program_for(seed_program, answer_format)
     return Domain(
         name=(f"LLM-SRBench {problem.problem_id}: recover one equation, "
               f"min(12, -log10(NMSE)) on the benchmark's held-out samples"),
@@ -239,11 +249,13 @@ def per_problem_domain(
         initial_summary=root_summary,
         evaluate=lambda code, shard_ids: evaluate_source(
             code, suite=suite, shards=shard_ids, timeout=candidate_timeout,
-            problem_seconds=problem_seconds, max_length=max_code_length),
+            problem_seconds=problem_seconds, max_length=max_code_length,
+            answer_format=answer_format),
         reward=framework_score,
         prompt=lambda program: per_problem_prompt(
             program, preview=preview, timeout=candidate_timeout,
-            problem_seconds=problem_seconds, functions=EQUATION_FUNCTIONS),
+            problem_seconds=problem_seconds, functions=EQUATION_FUNCTIONS,
+            variables=problem.input_vars, answer_format=answer_format),
         task_prompt=lambda index: (
             f"Recover the equation behind {problem.problem_id}, scored on "
             f"held-out slice {index} of its training data."),
@@ -254,6 +266,7 @@ def per_problem_domain(
             "problem_id": problem.problem_id,
             "subset": problem.subset,
             "seed_program": seed_program,
+            "answer_format": answer_format,
             "input_vars": list(problem.input_vars),
             "fit_rows": problem.train_rows,
             "validation_shards": suite.scoring_shards,
@@ -295,6 +308,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=("--per-problem only: problems searched at once. Each one already "
               "runs --workers model calls in parallel, so this multiplies the "
               "load on the endpoint"))
+    parser.add_argument(
+        "--answer-format", default="expression",
+        choices=("expression", "program"),
+        help=("what an answer may be. `expression` is a closed-form formula in a "
+              "restricted grammar -- this port's own tightening, and the only "
+              "format in which candidate code and held-out data are never both "
+              "live. `program` is the benchmark's: `equation(..., params)` "
+              "source, free to branch and call numpy, with its ten constants "
+              "fitted by the harness's own BFGS exactly as upstream fits them"))
     parser.add_argument(
         "--seed-program", default="library", choices=sorted(SEED_PROGRAMS),
         help=("the root node the search starts from. `library` is sparse "
@@ -433,6 +455,7 @@ def _budget_fingerprint(args: argparse.Namespace) -> Dict[str, Any]:
         "candidate_timeout": args.candidate_timeout,
         "train_points": args.train_points,
         "seed_program": args.seed_program,
+        "answer_format": args.answer_format,
         "model": args.model,
         "seed": args.seed,
     }
@@ -476,7 +499,8 @@ def _one_problem(args: argparse.Namespace, complete, problem: SrProblem,
         max_code_length=args.max_code_length,
         problem_seconds=args.problem_seconds,
         train_points=args.train_points,
-        seed_program=args.seed_program)
+        seed_program=args.seed_program,
+        answer_format=args.answer_format)
     run = run_agentdescent_era(
         complete,
         mode=mode,
@@ -731,6 +755,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         max_code_length=args.max_code_length,
         problem_seconds=args.problem_seconds,
         seed_program=args.seed_program,
+        answer_format=args.answer_format,
     )
     run = run_agentdescent_era(
         complete,

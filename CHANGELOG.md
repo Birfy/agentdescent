@@ -117,6 +117,28 @@ All notable changes to AgentDescent are documented here. The format follows
   `cos**2` — the same equations, through the identities the benchmark was built
   to reward.
 
+  **Two of the audit's deviations are now closed.** `--answer-format program`
+  is the benchmark's own answer format: `equation(..., params)` source, free to
+  branch and call numpy, with its constants left as `params[i]` and fitted by
+  the harness with the identical call upstream makes —
+  `minimize(loss, [1.0]*10, method='BFGS')`, one run, no restarts. That closes
+  the answer-format row and the constant-fitting row at once, and it brings
+  upstream's `MAX_NPARAMS = 10` with it, which is the thing that stops an answer
+  interpolating its way past the metric: in `expression` format the library root
+  emits an eleven-term fit with a free coefficient on each term, and in `program`
+  format it may hand back ten holes for one BFGS to fill. `--seed-program linear`
+  emits upstream's skeleton verbatim, so
+  `--answer-format program --seed-program linear` is the fully aligned setting.
+
+  `python -m tools.score_symbolic_accuracy RESULT.json` scores the paper's third
+  metric, which this port has been missing. It is a separate tool because it
+  needs the ground truth — which must never come near the search — and a model
+  call per problem. A sympy check settles the exact recoveries deterministically
+  and everything else goes to a judge. Two deviations stated in its output:
+  the judge is not GPT-4o, and the 80 problems whose published ground truth is
+  damaged are reported `not_scorable` rather than guessed at, leaving 49 of 129
+  LSR-Synth and all 111 LSR-Transform problems.
+
   **Alignment with the benchmark, checked against its code rather than from
   memory.** The problems, the splits, the column convention
   (`output_vars + input_vars == symbols`, matching upstream's

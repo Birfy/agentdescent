@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import ast
 import math
+import warnings
 from typing import Any, Callable, Dict, List, Sequence, Tuple
 
 import numpy as np
@@ -80,6 +81,145 @@ DIGIT_CAP = 12.0
 
 #: The paper's tolerance for Acc_tau.
 TOLERANCE = 0.1
+
+#: Upstream's cap on how many free constants an answer may carry
+#: (`methods/llmsr/searcher.py`: ``MAX_NPARAMS = 10``, and
+#: ``minimize(loss, [1.0]*MAX_NPARAMS, method='BFGS')``). It is not decoration:
+#: a candidate that wants to interpolate with a twenty-term basis cannot, because
+#: there are only ten constants to spend.
+MAX_NPARAMS = 10
+
+#: The function a program-format answer must define, with upstream's signature.
+PROGRAM_ENTRY = "equation"
+
+#: What a program-format answer may import. Upstream gates nothing at all -- it
+#: `exec`s whatever the model wrote -- so this is stricter, but only against
+#: accidents: the sandbox is the boundary either way, and nothing a
+#: symbolic-regression answer legitimately does needs more than these.
+PROGRAM_IMPORTS = {"numpy", "math"}
+
+_PROGRAM_FORBIDDEN = {"eval", "exec", "compile", "open", "input", "globals",
+                      "locals", "vars", "getattr", "setattr", "delattr"}
+
+
+class ProgramError(ValueError):
+    """The returned source is not a usable ``equation`` program."""
+
+
+def validate_program(source: Any, variables: Sequence[str],
+                     max_length: int = 8000) -> ast.Module:
+    """Parse a program-format answer and refuse what should never run.
+
+    This is the **upstream-aligned** answer format: a Python function body, free
+    to branch, loop and call numpy, with its constants left as ``params[i]`` for
+    the harness to fit. It is far more permissive than
+    :func:`validate_expression`, and deliberately so -- the restricted grammar is
+    this port's own tightening, and a comparison with the paper's numbers has to
+    allow what the paper allowed.
+
+    The cost is real and is stated rather than hidden: in this format the
+    candidate's own code runs at scoring time, on the held-out **inputs** (never
+    the targets). Expression format's guarantee -- that candidate code and
+    held-out data are never both live -- does not hold here. Upstream has the
+    same property; it calls `lambda_fn(X_id)` on exactly this kind of object.
+    """
+    if not isinstance(source, str):
+        raise ProgramError(
+            f"expected program source as a string, got {type(source).__name__}")
+    text = source.strip()
+    if not text:
+        raise ProgramError("empty program")
+    if len(text) > max_length:
+        raise ProgramError(f"program length {len(text)} exceeds {max_length}")
+    if "\x00" in text:
+        raise ProgramError("program contains a NUL byte")
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as exc:
+        raise ProgramError(f"SyntaxError: {exc.msg} at line {exc.lineno}") from None
+
+    entry = next((node for node in tree.body
+                  if isinstance(node, ast.FunctionDef)
+                  and node.name == PROGRAM_ENTRY), None)
+    if entry is None:
+        raise ProgramError(f"missing {PROGRAM_ENTRY} function")
+    names = [arg.arg for arg in entry.args.args]
+    expected = list(variables) + ["params"]
+    if names != expected:
+        raise ProgramError(
+            f"{PROGRAM_ENTRY} takes {names}, expected {expected}")
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[0] not in PROGRAM_IMPORTS:
+                    raise ProgramError(f"import {alias.name!r} is not allowed")
+        elif isinstance(node, ast.ImportFrom):
+            if not node.module or node.module.split(".")[0] not in PROGRAM_IMPORTS:
+                raise ProgramError(f"import from {node.module!r} is not allowed")
+        elif isinstance(node, ast.Attribute) and node.attr.startswith("__"):
+            raise ProgramError(f"dunder attribute {node.attr!r} is not allowed")
+        elif isinstance(node, ast.Name) and node.id in _PROGRAM_FORBIDDEN:
+            raise ProgramError(f"name {node.id!r} is not allowed")
+    return tree
+
+
+def compile_program(source: str, variables: Sequence[str]):
+    """Turn a validated program-format answer into ``f(columns, params)``."""
+    tree = validate_program(source, variables)
+    namespace: Dict[str, Any] = {"np": np, "numpy": np, "math": math}
+    code = compile(tree, "<equation>", "exec")
+    exec(code, namespace)  # noqa: S102 - the gate above and the sandbox around it
+    entry = namespace.get(PROGRAM_ENTRY)
+    if not callable(entry):
+        raise ProgramError(f"{PROGRAM_ENTRY} is not callable")
+
+    def call(x: np.ndarray, params: np.ndarray) -> np.ndarray:
+        columns = [np.asarray(x[:, i], dtype=np.float64)
+                   for i in range(len(variables))]
+        with np.errstate(all="ignore"):
+            value = np.asarray(entry(*columns, params), dtype=np.float64)
+        if value.ndim == 0:
+            value = np.full(x.shape[0], float(value))
+        if value.shape != (x.shape[0],):
+            raise ProgramError(
+                f"{PROGRAM_ENTRY} produced shape {value.shape}, "
+                f"expected ({x.shape[0]},)")
+        return value
+
+    return call
+
+
+def fit_program(call, x: np.ndarray, y: np.ndarray,
+                n_params: int = MAX_NPARAMS) -> np.ndarray:
+    """Fit an answer's constants the way upstream fits them, and no better.
+
+    Transcribed from `methods/llmsr/searcher.py`::
+
+        def loss(params):
+            y_pred = equation(*X, params)
+            return np.mean((y_pred - outputs) ** 2)
+        result = minimize(loss, [1.0]*MAX_NPARAMS, method='BFGS')
+
+    One BFGS run, from all ones, no restarts. Keeping that exactly is what makes
+    this format's numbers comparable: fitting harder here would beat the paper's
+    methods at constant recovery rather than at equation discovery.
+    """
+    from scipy.optimize import minimize  # lazy: only this format needs scipy
+
+    def loss(params: np.ndarray) -> float:
+        with np.errstate(all="ignore"):
+            try:
+                prediction = call(x, params)
+            except Exception:
+                return float(np.inf)
+            value = float(np.mean((prediction - y) ** 2))
+        return value if math.isfinite(value) else float(np.inf)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        result = minimize(loss, [1.0] * n_params, method="BFGS")
+    return np.asarray(result.x, dtype=np.float64)
 
 _ALLOWED_NODES = (
     ast.Expression,

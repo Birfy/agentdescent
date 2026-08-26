@@ -14,10 +14,15 @@ Two things differ from the sibling runners, and both come from what a
   every candidate here already depends on.
 * **The held-out samples are opened after ``discover`` returns.** The candidate
   is given the training arrays and nothing else; the test and OOD arrays are
-  read from the shard's ``.npz`` once its equation is in hand, and they are only
-  ever touched by ``_era_srbench_expr``, which interprets a validated AST rather
-  than running anything the candidate wrote. There is no point at which
-  candidate code and test data are both live.
+  read from the shard's ``.npz`` once its answer is in hand.
+
+  In ``--answer-format expression`` -- this port's own tightening -- that answer
+  is a formula, interpreted by a validated AST walker, so there is no point at
+  which candidate code and held-out data are both live. In
+  ``--answer-format program``, the benchmark's own format, the answer *is* code
+  and it runs on the held-out **inputs** (never the targets), exactly as
+  upstream's `lambda_fn(X_id)` does. That is the price of comparability and it
+  is stated rather than hidden; the sandbox is the boundary in both cases.
 
 The per-problem wall-clock is enforced here rather than trusted to the
 candidate, with ``SIGALRM``: a method that ignores its budget on one problem
@@ -46,6 +51,9 @@ import numpy as np
 #: candidate 80 000 samples, and a design matrix over a few hundred basis
 #: functions is an ordinary thing for it to build.
 ADDRESS_SPACE_BYTES = 2 * 1024 * 1024 * 1024
+
+#: Bound once the runner has loaded the scoring module by path.
+_EXPR = None
 
 
 def _load_module(path: str, name: str):
@@ -128,7 +136,7 @@ def load_entrypoint(path: str):
 
 
 def solve(entrypoint, expr_module, samples, problems: List[Dict[str, Any]], *,
-          seconds: float) -> List[Dict[str, Any]]:
+          seconds: float, answer_format: str = "expression") -> List[Dict[str, Any]]:
     """Run the candidate once per problem, and never let it take the shard down."""
     results: List[Dict[str, Any]] = []
     for position, problem in enumerate(problems):
@@ -136,20 +144,29 @@ def solve(entrypoint, expr_module, samples, problems: List[Dict[str, Any]], *,
         train_x = np.asarray(samples[f"p{position}_train_x"], dtype=np.float64)
         train_y = np.asarray(samples[f"p{position}_train_y"], dtype=np.float64)
 
-        def evaluate(expression, data, _variables=tuple(variables)):
-            """The scorer's own parser, handed to the candidate.
+        def evaluate(answer, data, _variables=tuple(variables),
+                     _train=(train_x, train_y)):
+            """The scorer's own code, handed to the candidate.
 
             A symbolic-regression method has to be able to evaluate the forms it
             is proposing, and the AST gate refuses ``eval``/``exec`` -- so
-            without this the only way to write one would be to build closures
-            that mirror the grammar and hope the mirror is exact. Handing over
-            the real evaluator removes that whole class of near-miss: what the
-            candidate scores a form with is the same code, with the same
-            grammar, that will score its final answer. Raises ``ExpressionError``
-            on anything that is not an equation, which is what the candidate
-            needs to hear.
+            without this the only way to write one would be to rebuild the
+            grader and hope the copy is exact. Handing over the real one removes
+            that whole class of near-miss: what the candidate scores a form with
+            is the same code that will score its final answer.
+
+            In ``expression`` format the answer is a formula and this parses it.
+            In ``program`` format it is ``equation(..., params)`` source, and
+            this compiles it and **fits its constants the way the grader will**
+            -- upstream's single BFGS from all ones -- so a candidate cannot
+            score its proposals under a better optimiser than the one that will
+            judge them.
             """
-            return expr_module.evaluate_expression(expression, list(_variables), data)
+            if answer_format == "program":
+                call = expr_module.compile_program(answer, list(_variables))
+                params = expr_module.fit_program(call, _train[0], _train[1])
+                return call(np.asarray(data, dtype=np.float64), params)
+            return expr_module.evaluate_expression(answer, list(_variables), data)
 
         spec = {
             "input_vars": list(variables),
@@ -158,6 +175,8 @@ def solve(entrypoint, expr_module, samples, problems: List[Dict[str, Any]], *,
             "seconds": seconds,
             "samples": int(train_x.shape[0]),
             "evaluate": evaluate,
+            "answer_format": answer_format,
+            "max_params": expr_module.MAX_NPARAMS,
         }
         started = time.monotonic()
         equation: Any = None
@@ -191,11 +210,11 @@ def solve(entrypoint, expr_module, samples, problems: List[Dict[str, Any]], *,
                 # and an unbounded step here would let one problem take the rest
                 # of the shard's budget.
                 with time_limit(seconds):
-                    row["id"] = _score(expr_module, equation, variables, samples,
-                                       position, "test")
+                    predict = _predictor(expr_module, answer_format, equation,
+                                         variables, train_x, train_y)
+                    row["id"] = _score(predict, samples, position, "test")
                     if f"p{position}_ood_x" in samples:
-                        row["ood"] = _score(expr_module, equation, variables,
-                                            samples, position, "ood")
+                        row["ood"] = _score(predict, samples, position, "ood")
             except BaseException as exc:
                 row["id"] = None
                 row["ood"] = None
@@ -207,12 +226,33 @@ def solve(entrypoint, expr_module, samples, problems: List[Dict[str, Any]], *,
     return results
 
 
-def _score(expr_module, equation: str, variables: List[str], samples,
-           position: int, split: str) -> Dict[str, Any]:
+def _predictor(expr_module, answer_format: str, answer: str,
+               variables: List[str], train_x: np.ndarray, train_y: np.ndarray):
+    """Turn an answer into `x -> prediction`, fitting constants where the format asks.
+
+    ``expression`` answers arrive with their constants already in them, so there
+    is nothing to fit. ``program`` answers arrive with ``params[i]`` holes, and
+    the harness fills them -- once, on the training rows, with upstream's BFGS --
+    before either held-out split is touched. Doing it once rather than per split
+    is not an optimisation: fitting separately on the OOD rows would be fitting
+    on held-out data.
+    """
+    if answer_format == "program":
+        call = expr_module.compile_program(answer, variables)
+        params = expr_module.fit_program(call, train_x, train_y)
+        return lambda x: call(x, params), params
+    module = expr_module
+    return (lambda x: module.evaluate_expression(answer, variables, x)), None
+
+
+def _score(predict, samples, position: int, split: str) -> Dict[str, Any]:
+    call, params = predict
     x = np.asarray(samples[f"p{position}_{split}_x"], dtype=np.float64)
     y = np.asarray(samples[f"p{position}_{split}_y"], dtype=np.float64)
-    prediction = expr_module.evaluate_expression(equation, variables, x)
-    return expr_module.score_predictions(prediction, y)
+    scored = _EXPR.score_predictions(call(x), y)
+    if params is not None:
+        scored["fitted_params"] = [float(v) for v in params]
+    return scored
 
 
 def main() -> int:
@@ -223,6 +263,8 @@ def main() -> int:
     parser.add_argument("--problems", required=True,
                         help="JSON file holding the shard's problem metadata")
     parser.add_argument("--problem-seconds", type=float, required=True)
+    parser.add_argument("--answer-format", default="expression",
+                        choices=("expression", "program"))
     parser.add_argument("--cpu-seconds", type=int, required=True)
     parser.add_argument("--nproc-limit", type=int, required=True)
     args = parser.parse_args()
@@ -234,6 +276,8 @@ def main() -> int:
             os.path.join(os.path.dirname(os.path.abspath(__file__)),
                          "_era_srbench_expr.py"),
             "era_srbench_expr")
+        global _EXPR
+        _EXPR = expr_module
         with open(args.problems, "r", encoding="utf-8") as handle:
             problems = json.load(handle)
         samples = np.load(args.samples)
@@ -243,7 +287,8 @@ def main() -> int:
         payload = {
             "ok": True,
             "results": solve(entrypoint, expr_module, samples, problems,
-                             seconds=args.problem_seconds),
+                             seconds=args.problem_seconds,
+                             answer_format=args.answer_format),
             "seconds": time.monotonic() - started,
             "limits_unavailable": unavailable,
         }
