@@ -494,7 +494,7 @@ def run_candidate(
         if not lines:
             tail = (completed.stderr or "").strip()[-300:]
             return {"ok": False,
-                    "error": f"no runner output (rc={completed.returncode}): {tail}",
+                    "error": _died(completed.returncode, tail, timeout),
                     "seconds": time.monotonic() - started}
         try:
             return json.loads(lines[-1])
@@ -502,6 +502,37 @@ def run_candidate(
             return {"ok": False,
                     "error": f"unparseable runner output: {lines[-1][:200]}",
                     "seconds": time.monotonic() - started}
+
+
+#: What the kernel did to a candidate that never printed anything, in words.
+#: A compiled fixed-step loop that picks its step badly does not fail, it runs
+#: away -- and until this existed the search was told "no runner output
+#: (rc=152)", which names the signal in the one encoding nothing reads. The
+#: distinction matters to the next prompt: a program killed for CPU should
+#: shrink its work, one killed for memory should stop allocating, and one that
+#: died some other way should be debugged.
+_SIGNALS = {
+    9: ("SIGKILL", "the sandbox killed it -- usually the memory limit"),
+    11: ("SIGSEGV", "it crashed in native code"),
+    24: ("SIGXCPU", "it exceeded the CPU limit"),
+    25: ("SIGXFSZ", "it tried to write a file larger than the limit"),
+}
+
+
+def _died(returncode: int, tail: str, timeout: float) -> str:
+    """Turn an exit status into something the next mutation prompt can act on."""
+    signal_number = -returncode if returncode < 0 else (
+        returncode - 128 if returncode > 128 else 0)
+    named = _SIGNALS.get(signal_number)
+    if named:
+        name, why = named
+        hint = ""
+        if signal_number == 24:
+            hint = (f" -- the whole problem set, including compiling, has "
+                    f"{timeout:.0f} CPU-seconds. A fixed-step method that "
+                    f"chose too small a step will do this")
+        return f"killed by {name}: {why}{hint}. {tail}".strip()
+    return f"no runner output (rc={returncode}): {tail}"
 
 
 def evaluate_source(
