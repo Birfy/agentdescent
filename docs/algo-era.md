@@ -1206,6 +1206,42 @@ The asymmetry does not carry to LSR-Transform, where both roots are worthless �
 0.9% and 0.0% — so the 49.5% there was earned by the search rather than handed to
 it. That is also why the LSR-Transform result is the one worth quoting.
 
+#### And the strong root is not discovering anything — it is interpolating
+
+The obvious next question is why a 2016 fitting method with no LLM in it scores
+48% on a benchmark built to defeat memorisation. It is not because the library
+contains the answers. Fitting the library's own basis to each ground truth's
+samples and asking whether the residual reaches the data's float32 floor — which
+it can only do if the truth lies in the library's span — gives:
+
+| | |
+|---|---|
+| evaluable LSR-Synth ground truths | 49 |
+| actually inside the library's span | **6** |
+| outside it | **43** |
+| yet the root scores | Acc(0.1) 48.1%, median NMSE 8.6e-08 |
+
+So on 43 of 49 problems the root **cannot express the answer** and scores near
+machine precision anyway. Two more numbers say the same thing: its answers run
+8–11 terms where the truths run 2, and its median NMSE goes from 8.6e-08
+in-domain to 2.2e-04 out of it — **2600× worse the moment the sampled region
+ends**.
+
+The mechanism is the benchmark's data rather than the method: LSR-Synth ships
+4 000 dense, effectively noiseless samples per problem and an in-domain test
+split, and a thirty-to-sixty term additive basis fitted by least squares
+approximates any smooth function on a densely sampled region to eight
+significant figures — whether or not the true form is in the basis.
+
+**That is a finding about LSR-Synth's data-fidelity columns, not only about this
+port.** Acc(0.1) and NMSE on that half of the benchmark substantially measure
+in-domain interpolation, and a classical fit that cannot write down a single one
+of 43 ground truths reaches 48% on them. It is exactly what the paper's third
+metric, symbolic accuracy, exists to catch — LLM-SR scores 52.77% Acc(0.1) on
+chemistry against 11.11% SA — and it is the metric this port does not implement.
+Every LSR-Synth number here should be read with that in view; the LSR-Transform
+numbers, where both roots score ~0 and answers come back at 2 terms, should not.
+
 **On LSR-Synth this protocol matches or beats the published state of the art on
 four of five columns of NMSE and two of four on Acc(0.1)** — at 0.11 LLM calls
 per problem, and on data fidelity only, with the symbolic-accuracy caveat above

@@ -97,5 +97,25 @@
         }
       }
     }
+  },
+  "span_check": {
+    "question": "Does the library root recover the ground truth, or interpolate it? Tested by least-squares fitting the library's own basis to each ground truth's samples and asking whether the residual reaches the float32 floor of the data (NMSE < 1e-12), which it can only do if the truth lies in the library's span.",
+    "evaluable_ground_truths": 49,
+    "in_the_library_span": 6,
+    "outside_it": 43,
+    "yet_scores": {
+      "acc_0.1": 0.4806,
+      "median_nmse": 8.57e-08
+    },
+    "in_domain_vs_ood_median_nmse": {
+      "id": 8.57e-08,
+      "ood": 0.000221,
+      "ratio": 2580
+    },
+    "answer_shape": {
+      "root_terms": "8-11",
+      "ground_truth_terms": 2
+    },
+    "reading": "It interpolates. LSR-Synth ships 4000 dense noiseless samples per problem and an in-domain test split, and a 30-60 term additive basis fitted by least squares approximates a smooth function on the sampled region to eight significant figures whether or not the true form is in the basis. Step outside that region and the median NMSE degrades by 2600x. So the Acc(0.1) and NMSE columns on LSR-Synth substantially measure in-domain interpolation, not equation discovery -- which is what the paper's symbolic-accuracy column exists to catch, and which this port does not measure."
   }
 }
