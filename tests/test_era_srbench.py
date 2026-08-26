@@ -654,6 +654,40 @@ def test_a_program_answer_is_reduced_to_its_equation_before_judging():
     assert sa.normalise("0.3*P(t)**2", ["t", "P"]) == "0.3*P**2"
 
 
+def test_fitted_constants_are_substituted_back_before_judging():
+    """A skeleton cannot be compared with a concrete equation; a filled one can.
+
+    Program-format answers come back with `params[i]` holes, and the values the
+    harness fitted into them are part of the answer. Both cases below are real
+    answers from an aligned run, and both are the ground truth with redundant
+    free constants -- which is what the model actually writes.
+    """
+    pytest.importorskip("sympy")
+    from tools import score_symbolic_accuracy as sa
+
+    variables = ["m", "m_0", "c"]
+    answer = ("def equation(m, m_0, c, params):\n"
+              "    return c * np.sqrt(1.0 - (m_0/m)**2) * params[0]\n")
+    filled = sa.normalise(answer, variables, fitted=[-0.9999999998] + [1.0] * 9)
+    assert "params[" not in filled
+    assert sa.deterministic_verdict("-c*sqrt(1 - m_0**2/m**2)", filled,
+                                    variables) is True
+    # Without the fitted values the hole becomes a free symbol and nothing can
+    # be shown, so the judge decides rather than the problem scoring a miss.
+    empty = sa.normalise(answer, variables)
+    assert "__p0" in empty
+    assert sa.deterministic_verdict("-c*sqrt(1 - m_0**2/m**2)", empty,
+                                    variables) is not False
+
+
+def test_numeric_equivalence_is_checked_away_from_where_anything_was_fitted():
+    """An answer that only agrees where it was fitted must not pass."""
+    pytest.importorskip("sympy")
+    from tools import score_symbolic_accuracy as sa
+    assert sa.numerically_equivalent("a*b", "b*a", ["a", "b"]) is True
+    assert sa.numerically_equivalent("a*b", "a + b", ["a", "b"]) is False
+
+
 def test_the_deterministic_check_only_ever_claims_equivalence():
     """It accelerates the easy cases and hands everything else to the judge."""
     pytest.importorskip("sympy")

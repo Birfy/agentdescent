@@ -80,13 +80,23 @@ Answer with exactly one word on the first line, EQUIVALENT or DIFFERENT, then on
 sentence of justification on the second line."""
 
 
-def normalise(text: str, variables: List[str]) -> str:
+def normalise(text: str, variables: List[str],
+              fitted: Optional[List[float]] = None) -> str:
     """Strip the notation the two sides do not share.
 
-    ``A(t)`` is sympy's function-call form for a state variable and the same
-    symbol is a plain column here; ``^`` is a power in one convention and xor in
-    the other; and a program-format answer arrives as source rather than as a
-    formula, so its ``return`` line is what carries the equation.
+    Four differences, none of them about the mathematics:
+
+    * ``A(t)`` is sympy's function-call form for a state variable and the same
+      symbol is a plain column here;
+    * ``^`` is a power in one convention and xor in the other;
+    * a program-format answer arrives as source, so its ``return`` line is what
+      carries the equation; and
+    * a program-format answer leaves its constants as ``params[i]`` holes.
+      **Those are substituted with the values the harness actually fitted**,
+      because a skeleton compared against a concrete ground truth can only be
+      guessed at, while `c*sqrt(1 - (m_0/m)**2)*(-1.0000)` against
+      `-c*sqrt(1 - m_0**2/m**2)` is a question arithmetic can answer. Without
+      fitted values the holes become free symbols and the judge decides.
     """
     text = text.strip()
     if "def equation" in text:
@@ -96,6 +106,14 @@ def normalise(text: str, variables: List[str]) -> str:
             text = returns[-1]
     for name in variables:
         text = text.replace(f"{name}(t)", name)
+
+    def hole(match: "re.Match[str]") -> str:
+        index = int(match.group(1))
+        if fitted is not None and index < len(fitted):
+            return f"({fitted[index]!r})"
+        return f"__p{index}"
+
+    text = re.sub(r"params\s*\[\s*(\d+)\s*\]", hole, text)
     return text.replace("^", "**").replace("np.", "").strip()
 
 
@@ -112,21 +130,74 @@ def _free_of_constants(expression: str, variables: List[str]):
     # A numeric literal, but not the digits inside an identifier such as `x1`.
     masked = re.sub(r"(?<![A-Za-z_0-9.])\d+\.?\d*(?:[eE][-+]?\d+)?", swap, expression)
     symbols = {name: sympy.Symbol(name, positive=True) for name in variables}
-    symbols.update({f"__c{i}": sympy.Symbol(f"__c{i}") for i in range(1, counter["n"] + 1)})
+    symbols.update({f"__c{i}": sympy.Symbol(f"__c{i}")
+                    for i in range(1, counter["n"] + 1)})
     return sympy.sympify(masked, locals=symbols), symbols
+
+
+def numerically_equivalent(truth: str, answer: str, variables: List[str],
+                           samples: int = 240, tolerance: float = 1e-6,
+                           seed: int = 0) -> Optional[bool]:
+    """Do the two expressions agree as *functions*, at points nobody fitted on?
+
+    Once a program-format answer has its fitted constants substituted back in,
+    both sides are concrete expressions, and two concrete expressions that agree
+    to eight digits at a few hundred scattered points are the same function.
+    That is mathematical equivalence, which is what the paper's metric is after,
+    and it settles the cases where the search recovered the equation outright.
+
+    Sampled over a wide positive range rather than over the training domain: an
+    answer that agrees only where it was fitted is exactly what this must not
+    accept. ``None`` when the comparison cannot be made -- an unparsable side, or
+    too few points where both are finite -- so the judge decides rather than the
+    problem scoring a miss.
+    """
+    try:
+        import numpy
+        import sympy
+        symbols = [sympy.Symbol(name, positive=True) for name in variables]
+        left = sympy.sympify(truth, locals=dict(zip(variables, symbols)))
+        right = sympy.sympify(answer, locals=dict(zip(variables, symbols)))
+        f_left = sympy.lambdify(symbols, left, "numpy")
+        f_right = sympy.lambdify(symbols, right, "numpy")
+    except Exception:
+        return None
+    rng = numpy.random.default_rng(seed)
+    columns = [rng.uniform(0.3, 3.0, size=samples) for _ in variables]
+    try:
+        with numpy.errstate(all="ignore"):
+            a = numpy.asarray(f_left(*columns), dtype=float) * numpy.ones(samples)
+            b = numpy.asarray(f_right(*columns), dtype=float) * numpy.ones(samples)
+    except Exception:
+        return None
+    usable = numpy.isfinite(a) & numpy.isfinite(b)
+    if usable.sum() < samples // 4:
+        return None
+    scale = numpy.maximum(numpy.abs(a[usable]), 1e-12)
+    return bool(numpy.max(numpy.abs(a[usable] - b[usable]) / scale) < tolerance)
 
 
 def deterministic_verdict(truth: str, answer: str,
                           variables: List[str]) -> Optional[bool]:
-    """``True``/``False`` where sympy can settle it, ``None`` where it cannot.
+    """``True`` where equivalence can be *shown*, ``None`` where it cannot.
 
-    A **conservative accelerator, not a second metric**. Only a positive result
-    is trusted: a difference that simplifies to zero proves equivalence, while
-    one that does not may still be equivalent -- masking each constant as its own
-    free symbol makes `sqrt(1 - c1*m_0**2/m**2)` and `sqrt(1 - (m_0/m)**2)`
-    structurally different even though a scientist reads them as the same
-    equation. Those go to the judge, which is why the paper uses one at all.
+    A **conservative accelerator, not a second metric**. Two routes, both of
+    which only ever return a positive:
+
+    * **symbolic** -- mask every numeric literal as its own free symbol and ask
+      sympy whether the difference, or the ratio, collapses. This catches
+      `1/(2*sqrt(pi))` against `1/sqrt(4*pi)`.
+    * **numeric** -- with the fitted constants substituted back in, check whether
+      the two agree as functions at a few hundred scattered points.
+
+    Anything neither route settles goes to the judge. That is not a gap in the
+    implementation: an answer with the right structure and the wrong constants is
+    equivalent under the paper's definition and cannot be shown so by either
+    route, which is why the paper uses a model at all.
     """
+    numeric = numerically_equivalent(truth, answer, variables)
+    if numeric is True:
+        return True
     try:
         import sympy
         left, _ = _free_of_constants(truth, variables)
@@ -134,7 +205,6 @@ def deterministic_verdict(truth: str, answer: str,
     except Exception:
         return None
     try:
-        # Structural equality first: cheap, and it catches the exact recoveries.
         if sympy.simplify(left - right) == 0:
             return True
         ratio = sympy.simplify(left / right)
@@ -226,7 +296,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             break
         variables = list(row.get("input_vars") or [])
         truth = normalise(row["gt_expression"], variables)
-        answer = normalise((row.get("best") or {}).get("equation") or "", variables)
+        answer = normalise((row.get("best") or {}).get("equation") or "", variables,
+                           fitted=row.get("fitted_params"))
         verdict: Dict[str, Any] = {
             "problem_id": row["problem_id"], "subset": row["subset"],
             "gt_expression": row["gt_expression"],

@@ -1046,6 +1046,13 @@ def evaluate_source(
                 "error": str(result.get("error") or ""),
                 "seconds": round(float(result.get("seconds") or 0.0), 2),
             }
+            # Program-format answers leave their constants as `params[i]` holes,
+            # so the values the harness fitted into them are part of the answer.
+            # Without them, symbolic accuracy has to compare a skeleton against a
+            # concrete equation and can only guess.
+            if scored and scored.get("fitted_params") is not None:
+                row["fitted_params"] = [round(float(v), 12)
+                                        for v in scored["fitted_params"]]
             if ood is not None:
                 row["ood_digits"] = round(float(ood["digits"]), 3)
                 row["ood_acc"] = int(ood["acc"])
