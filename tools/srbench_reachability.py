@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import warnings
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -54,6 +55,24 @@ from examples.era import _era_srbench_expr as ex
 #: hand the optimiser a sign or an identity to discover, which is not what the
 #: benchmark's `params` are for.
 STRUCTURAL = (0, 1, -1)
+
+
+def unwrap_ode_notation(gt_expression: str, variables: Sequence[str]) -> str:
+    """Rewrite `P(t)` as `P` for the variables a problem actually declares.
+
+    LSR-Synth targets are derivatives, and its ground truths keep the notation
+    of the ODE they came from: `P(t)` where the sampled column is named `P` and
+    `t` is a column of its own. The two are the same quantity, so the call is
+    unwrapped before anything tries to parse it.
+
+    Only the names in ``variables`` are unwrapped. A genuine function call --
+    `sin(t)`, `exp(-t)` -- is left exactly as it is, because `sin` is not a
+    column of the data and rewriting it would silently change the truth.
+    """
+    out = gt_expression
+    for name in sorted(variables, key=len, reverse=True):
+        out = re.sub(rf"\b{re.escape(name)}\s*\(\s*[A-Za-z_]\w*\s*\)", name, out)
+    return out
 
 
 def hole_coefficients(gt_expression: str, variables: Sequence[str],
@@ -71,7 +90,7 @@ def hole_coefficients(gt_expression: str, variables: Sequence[str],
     # sympy *functions*, and sympifying without binding them turns a variable
     # into a function object three lines later.
     local = {name: sp.Symbol(name) for name in variables}
-    expr = sp.sympify(gt_expression, locals=local)
+    expr = sp.sympify(unwrap_ode_notation(gt_expression, variables), locals=local)
 
     holes: Dict[Any, Any] = {}
     order: List[Any] = []
@@ -153,16 +172,16 @@ def measure(problem, samples, *, train_points: int, restarts: int,
     train_x = np.asarray(samples["train_x"], dtype=np.float64)[:train_points]
     train_y = np.asarray(samples["train_y"], dtype=np.float64)[:train_points]
 
+    plain = unwrap_ode_notation(problem.gt_expression, variables)
     try:
         row["expression_digits"] = round(
-            _digits(ex.evaluate_expression(problem.gt_expression, variables, test_x),
-                    test_y), 4)
+            _digits(ex.evaluate_expression(plain, variables, test_x), test_y), 4)
     except Exception as exc:
         row["expression_digits"] = None
         row["expression_error"] = f"{type(exc).__name__}: {exc}"[:160]
 
     try:
-        source, n_params = hole_coefficients(problem.gt_expression, variables)
+        source, n_params = hole_coefficients(plain, variables)
         row["params"] = n_params
         row["program"] = source
         call = ex.compile_program(source, variables)

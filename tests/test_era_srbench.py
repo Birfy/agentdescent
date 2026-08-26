@@ -1122,3 +1122,24 @@ def test_a_resume_refuses_to_fold_a_recall_run_into_one_without_it(tmp_path):
     on = port._budget_fingerprint(argparse.Namespace(recall_attempts=12, **base))
     assert off != on
     assert off["recall_attempts"] == 0 and on["recall_attempts"] == 12
+
+
+def test_reachability_unwraps_the_ode_notation_synth_truths_carry():
+    """`P(t)` and `P` are the same column; the parenthesis is the ODE's, not data."""
+    reach = _reach()
+    plain = reach.unwrap_ode_notation(
+        "0.95*(1 - P(t)/96.9)*P(t) + 0.95*P(t)**0.333", ["t", "P"])
+    assert "P(t)" not in plain
+    assert plain == "0.95*(1 - P/96.9)*P + 0.95*P**0.333"
+
+
+def test_reachability_leaves_real_function_calls_alone():
+    """`sin` is not a column of the data, so rewriting it would change the truth."""
+    reach = _reach()
+    plain = reach.unwrap_ode_notation("0.3*P(t)*exp(-0.05*t) + sin(t)", ["t", "P"])
+    assert plain == "0.3*P*exp(-0.05*t) + sin(t)"
+
+
+def test_reachability_unwraps_only_the_names_a_problem_declares():
+    reach = _reach()
+    assert reach.unwrap_ode_notation("f(t) + P(t)", ["t", "P"]) == "f(t) + P"
