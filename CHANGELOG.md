@@ -139,6 +139,17 @@ All notable changes to AgentDescent are documented here. The format follows
   damaged are reported `not_scorable` rather than guessed at, leaving 49 of 129
   LSR-Synth and all 111 LSR-Transform problems.
 
+  **Measured under the fully aligned setting**, all 111 LSR-Transform problems
+  (`bench/results/era-srbench-aligned-transform.json`): Acc(0.1) 0.0% → **36.9%**,
+  median NMSE 0.4243 → 0.1022, 34 problems solved to the 12-digit cap, 68 better
+  against **0 worse**. Against the looser setting this port ran first — its own
+  answer format and its own root — that is **49.5% → 36.9%**, so thirteen points
+  of Acc were the settings rather than the search, and the median NMSE moves four
+  orders of magnitude because upstream's ten-constant cap forbids the twelve-term
+  answers that reached 1e-06. The aligned number sits just under LLM-SR's 39.64%
+  and well under LaSR's 50.45%, at 18.5 model calls per problem against LLM-SR's
+  250 prompts.
+
   **Alignment with the benchmark, checked against its code rather than from
   memory.** The problems, the splits, the column convention
   (`output_vars + input_vars == symbols`, matching upstream's

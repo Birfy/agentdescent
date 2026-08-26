@@ -1173,6 +1173,43 @@ Both sweeps write their result file **after every problem**, so an interrupted
 run keeps what it has paid for and `--resume` picks it up; the budget is
 fingerprinted in the file and a resume under a different one is refused.
 
+### The fully aligned run, and what alignment costs
+
+`--answer-format program --seed-program linear` is upstream's answer format,
+upstream's starting skeleton, upstream's ten constants and upstream's single
+BFGS. Run over all 111 LSR-Transform problems at 24 expansions and 20 s each:
+
+| LSR-Transform, all 111 | `linear` root | after 24 expansions |
+|---|---|---|
+| Acc(0.1) | 0.0% | **36.9%** (41 of 111) |
+| median NMSE | 0.4243 | **0.1022** |
+| mean `min(12, -log10 NMSE)` | 0.438 | **4.805** |
+| problems at 6+ digits | 0 | **41** |
+| problems at the 12-digit cap | 0 | **34** |
+| paired per problem | — | 68 better, **0 worse**, 43 tied (p = 7e-21) |
+| cost | — | 2 058 calls (18.5/problem), 7.1M tokens, 3.2 h |
+
+Put beside the looser setting this port ran first, the alignment is expensive
+and the expense is the point:
+
+| LSR-Transform | Acc(0.1) | median NMSE |
+|---|---|---|
+| `expression` format, `library` root — this port's own loosest setting | 49.5% | 9.75e-06 |
+| **`program` format, `linear` root — fully aligned** | **36.9%** | **0.1022** |
+| LLM-SR (paper, best backbone) | 39.64% | 0.0091 |
+| LaSR (paper, best backbone) | 50.45% | 0.0011 |
+
+**Thirteen points of Acc(0.1) were the loose settings, not the search.** The
+aligned number lands just under LLM-SR and well under LaSR, at 18.5 model calls
+per problem against LLM-SR's 250 prompts. The median NMSE moves four orders of
+magnitude, and that gap is almost entirely the ten-constant cap: the answers
+that used to reach 1e-06 did it with a dozen free coefficients, and in upstream's
+format there are ten and one gradient-based fit to place them.
+
+That is the honest headline for this task. The 49.5% is still in the file above,
+and it is still true of the setting that produced it — but the setting was this
+port's, not the benchmark's.
+
 ### Against the paper's own tables
 
 Two of this port's three programs can be compared to the paper's numbers over

@@ -55,7 +55,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agentdescent.agents import Usage  # noqa: E402
+from agentdescent.agents import Usage, with_retries  # noqa: E402
 from examples._common import completion_for, confirm  # noqa: E402
 
 
@@ -253,6 +253,48 @@ def scorable(truth: str, variables: Optional[List[str]] = None) -> bool:
     return all(str(symbol) in known for symbol in expression.free_symbols)
 
 
+def _write(out: Path, args: argparse.Namespace, scored: List[Dict[str, Any]],
+           settled: int, asked: int, usage: Usage, problems_in_run: int,
+           remaining: int) -> Dict[str, Any]:
+    """Write the scored file as it stands, after every verdict.
+
+    A judge call can time out, and the first version of this tool wrote once at
+    the end -- so an `APITimeoutError` at problem 44 of 109 threw away
+    forty-three judgements that had already been paid for. Writing as it goes
+    also makes `--output` resumable: a rerun skips whatever is already in it.
+    """
+    by_subset: Dict[str, List[Dict[str, Any]]] = {}
+    for verdict in scored:
+        by_subset.setdefault(verdict["subset"], []).append(verdict)
+    summary = {
+        "judge_model": args.model,
+        "judge_is_not_gpt4o": ("The paper uses GPT-4o. A different judge is a "
+                               "different metric; this number sits beside the "
+                               "paper's rather than inside its table."),
+        "prompt_provenance": ("Written to the paper's §3 description -- compare "
+                              "symbolic form after removing parameters and "
+                              "constants -- because the appendix figure holding "
+                              "the original prompt is not in the arXiv HTML "
+                              "render."),
+        "status": "completed" if remaining == 0 else "partial",
+        "problems_in_run": problems_in_run,
+        "scored": len(scored),
+        "remaining": remaining,
+        "decided_by_sympy": settled,
+        "decided_by_judge": asked,
+        "symbolic_accuracy": (sum(1 for v in scored if v["equivalent"]) / len(scored)
+                              if scored else None),
+        "by_subset": {
+            name: {"n": len(group),
+                   "symbolic_accuracy": sum(1 for v in group if v["equivalent"]) / len(group)}
+            for name, group in sorted(by_subset.items())},
+        "judge_usage": {"calls": usage.calls, "tokens": usage.total_tokens},
+    }
+    out.write_text(json.dumps({"summary": summary, "verdicts": scored},
+                              indent=2, default=str) + "\n", encoding="utf-8")
+    return {"summary": summary}
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("result", type=Path, help="a --per-problem result file")
@@ -287,9 +329,25 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     usage = Usage()
-    complete = completion_for(args, usage=usage, max_tokens=args.max_tokens,
-                              timeout=args.timeout, temperature=args.temperature)
+    # Retried, because one judge call timing out must not cost a sweep of them.
+    # Measured need: an APITimeoutError at problem 44 of 109 lost every verdict
+    # before it, since the file was only written at the end.
+    complete = with_retries(
+        completion_for(args, usage=usage, max_tokens=args.max_tokens,
+                       timeout=args.timeout, temperature=args.temperature),
+        attempts=4)
+    out = args.output or args.result.with_name(args.result.stem + "-symbolic.json")
     scored: List[Dict[str, Any]] = []
+    if out.exists():
+        try:
+            stored = json.loads(out.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            stored = {}
+        if stored.get("summary", {}).get("judge_model") == args.model:
+            scored = list(stored.get("verdicts") or [])
+            done = {verdict["problem_id"] for verdict in scored}
+            candidates = [row for row in candidates if row["problem_id"] not in done]
+            print(f"Resuming : {len(done)} already judged, {len(candidates)} left")
     asked = settled = 0
     for index, row in enumerate(candidates):
         if args.limit and index >= args.limit:
@@ -316,40 +374,14 @@ def main(argv: Optional[List[str]] = None) -> int:
                 verdict.update(equivalent=equivalent, decided_by="judge",
                                judge_reply=reply)
         scored.append(verdict)
-        print(f"[{len(scored):3d}/{len(candidates)}] {row['problem_id']:34s} "
+        _write(out, args, scored, settled, asked, usage, len(rows), len(candidates))
+        print(f"[{len(scored):3d}/{len(scored) + len(candidates) - index - 1}] "
+              f"{row['problem_id']:34s} "
               f"{'EQUIVALENT' if verdict['equivalent'] else 'different':11s} "
               f"({verdict['decided_by']})", flush=True)
 
-    by_subset: Dict[str, List[Dict[str, Any]]] = {}
-    for verdict in scored:
-        by_subset.setdefault(verdict["subset"], []).append(verdict)
-    summary = {
-        "judge_model": args.model,
-        "judge_is_not_gpt4o": ("The paper uses GPT-4o. A different judge is a "
-                               "different metric; this number sits beside the "
-                               "paper's rather than inside its table."),
-        "prompt_provenance": ("Written to the paper's §3 description -- compare "
-                              "symbolic form after removing parameters and "
-                              "constants -- because the appendix figure holding "
-                              "the original prompt is not in the arXiv HTML "
-                              "render."),
-        "problems_in_run": len(rows),
-        "scorable": len(candidates),
-        "not_scorable": len(rows) - len(candidates),
-        "scored": len(scored),
-        "decided_by_sympy": settled,
-        "decided_by_judge": asked,
-        "symbolic_accuracy": (
-            sum(1 for v in scored if v["equivalent"]) / len(scored)) if scored else None,
-        "by_subset": {
-            name: {"n": len(group),
-                   "symbolic_accuracy": sum(1 for v in group if v["equivalent"]) / len(group)}
-            for name, group in sorted(by_subset.items())},
-        "judge_usage": {"calls": usage.calls, "tokens": usage.total_tokens},
-    }
-    out = args.output or args.result.with_name(args.result.stem + "-symbolic.json")
-    out.write_text(json.dumps({"summary": summary, "verdicts": scored},
-                              indent=2, default=str) + "\n", encoding="utf-8")
+    summary = _write(out, args, scored, settled, asked, usage,
+                     len(rows), 0)["summary"]
     accuracy = summary["symbolic_accuracy"]
     print(f"completed: SA = {100 * accuracy:.1f}% over {len(scored)} scorable problems "
           f"({settled} settled by sympy, {asked} by the judge), output={out}"
