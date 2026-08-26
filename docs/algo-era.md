@@ -1208,13 +1208,17 @@ and the expense is the point:
 | LSR-Transform | Acc(0.1) | median NMSE |
 |---|---|---|
 | `expression` format, `library` root — this port's own loosest setting | 49.5% | 9.75e-06 |
-| **`program` format, `linear` root — fully aligned** | **36.9%** | **0.1022** |
+| **`program` format, `linear` root — fully aligned, `glm-5.2`** | **36.9%** | **0.1022** |
 | LLM-SR (paper, best backbone) | 39.64% | 0.0091 |
 | LaSR (paper, best backbone) | 50.45% | 0.0011 |
+| **the same aligned setting, `deepseek-v4-flash`** | **56.8%** | **2.15e-08** |
 
 **Thirteen points of Acc(0.1) were the loose settings, not the search.** The
 aligned number lands just under LLM-SR and well under LaSR, at 18.5 model calls
-per problem against LLM-SR's 250 prompts. The median NMSE moves four orders of
+per problem against LLM-SR's 250 prompts. Holding every one of those settings
+fixed and changing only the model moves it to 56.8% at 16.5 calls per problem,
+which is measured below — so the aligned row is a statement about `glm-5.2` on
+this protocol, not about the protocol's ceiling. The median NMSE moves four orders of
 magnitude, and that gap is almost entirely the ten-constant cap: the answers
 that used to reach 1e-06 did it with a dozen free coefficients, and in upstream's
 format there are ten and one gradient-based fit to place them.
@@ -1318,6 +1322,47 @@ away as hard as a dead end, is not enough to prevent it.
 The honest reading is that hypothesis diversity is a real and controllable
 bottleneck, and that raising it indiscriminately is not a fix: a memory has to
 push away only the branches that are actually exhausted.
+
+### A second model on the same protocol, and what the gap is made of
+
+The diagnosis above says the bottleneck is hypothesis diversity rather than
+budget or format. If that is right, a model that proposes more distinct
+hypotheses per expansion should convert the same 24 expansions into more
+answers. `deepseek-v4-flash` was run over the identical 111 problems with every
+flag unchanged -- `--per-problem --answer-format program --seed-program linear
+--shards 6 --iterations 24 --workers 3 --seed 0` -- so only the model differs:
+
+| LSR-Transform, all 111 | Acc(0.1) | median NMSE | mean `min(12, -log10 NMSE)` | at the cap | spent all 24 expansions | calls/problem |
+|---|---|---|---|---|---|---|
+| `glm-5.2` | 36.9% | 0.102 | 4.805 | 34 | **76** | 18.5 |
+| **`deepseek-v4-flash`** | **56.8%** | **2.15e-08** | **6.850** | **52** | 62 | **16.5** |
+
+Paired over the same problems: **33 solved by `deepseek-v4-flash` alone, 11 by
+`glm-5.2` alone**, 67 tied (exact McNemar, p = 0.0013). Fewer calls per problem,
+a third of the wall-clock, and the weaker model is the one that more often
+*exhausts* its budget -- 76 problems against 62 -- which is what running out of
+hypotheses looks like from the outside.
+
+Where the twenty points come from is specific:
+
+| input variables | 2 | 3 | 4 | 5 | 6 | 8 |
+|---|---|---|---|---|---|---|
+| `deepseek-v4-flash` | 80% | 70% | **67%** | 62% | 32% | **0%** |
+| `glm-5.2` | 40% | 40% | **26%** | 67% | 27% | **0%** |
+| problems | 5 | 30 | 27 | 21 | 22 | 6 |
+
+The whole gap is the 3- and 4-variable bands. At five variables the weaker model
+is *ahead*; at six they are within noise of each other; at eight **both score
+zero on all six problems**. A better proposer moves the middle of the
+distribution and does nothing at all for the tail, which is the shape to expect
+if the tail is bounded by the search space rather than by the proposals.
+
+Removing the six problems the reachability sweep marks unreachable in this
+answer format puts `deepseek-v4-flash` at **60.0% of the 105 that are
+reachable**.
+
+Result file:
+[`bench/results/era-srbench-deepseek-transform.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-srbench-deepseek-transform.json).
 
 ### Against the paper's own tables
 
