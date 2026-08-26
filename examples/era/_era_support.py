@@ -130,6 +130,7 @@ def validate_source(
     entrypoint: str = "train_and_predict",
     allowed_imports: Optional[Set[str]] = None,
     literal_top_level: bool = True,
+    allow_top_level_calls: bool = False,
 ) -> Tuple[bool, str]:
     """Reject what the sandbox should never have to contain in the first place.
 
@@ -149,6 +150,14 @@ def validate_source(
     imports outside the set, no dunders, no ``exec``) is done elsewhere. The
     cost is bounded by the sandbox: module-level work runs under the same CPU
     limit as everything else the candidate does.
+
+    ``allow_top_level_calls=True`` admits a bare call as a statement, which is
+    how a JIT is warmed: ``_kernel(0.0, 0.0)`` after an ``@njit`` definition
+    forces compilation at import instead of inside the first timed call. It
+    grants no capability the flag above does not already grant -- ``TABLE =
+    build()`` is the same call with its result bound -- so refusing it was
+    friction rather than a boundary. Off by default all the same, because a port
+    that has no reason to compile has no reason to widen its gate.
     """
     allowed = ALLOWED_IMPORTS if allowed_imports is None else allowed_imports
     if not source.strip():
@@ -196,7 +205,8 @@ def validate_source(
         if isinstance(node, ast.Expr) and not (
             isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
         ):
-            return False, "only a module docstring may be a top-level expression"
+            if not (allow_top_level_calls and isinstance(node.value, ast.Call)):
+                return False, "only a module docstring may be a top-level expression"
         if literal_top_level and isinstance(node, (ast.Assign, ast.AnnAssign)):
             value = node.value
             if not isinstance(value, (ast.Constant, ast.Tuple, ast.List, ast.Dict, ast.Set)):
@@ -410,6 +420,7 @@ def sandbox_wrapper(
     runner_args: Sequence[str],
     *,
     scratch: Path,
+    extra_env: Optional[Dict[str, str]] = None,
 ) -> Tuple[List[str], Dict[str, str]]:
     """The isolation backend this platform has, plus the environment to run it in.
 
@@ -425,11 +436,20 @@ def sandbox_wrapper(
     checks against the kernel, and a copy would be a second thing to check.
     ``runner_args`` is everything after ``python -I``: the runner script and its
     arguments, which is the only part a task owns.
+
+    ``extra_env`` is the second thing a task owns, and it exists because the
+    profile is ``--clearenv``: with no ``HOME``, a library that caches to
+    ``~/.something`` resolves it to ``/root`` and dies on the read-only bind
+    rather than falling back. Cython's ``inline`` does exactly that. Scoped per
+    task rather than added to :data:`_THREAD_ENV`, so a task that needs a
+    compiler cache does not silently change the environment the other three were
+    measured in.
     """
     backend = sandbox_backend()
     env = dict(_THREAD_ENV)
     env["TMPDIR"] = str(scratch)
     env["PATH"] = "/usr/bin:/bin"
+    env.update(extra_env or {})
 
     if backend == "Bubblewrap":
         command = [

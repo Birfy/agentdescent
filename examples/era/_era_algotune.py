@@ -146,6 +146,20 @@ DEFAULT_TASKS: Tuple[str, ...] = (
 #: files import them; the rest is the numerical stack. As in the other three ERA
 #: tasks, the sandbox rather than this set is the isolation boundary -- scipy
 #: alone can spawn processes and read files.
+#:
+#: ``numba`` and ``cython`` are here because AlgoTune's own results say they have
+#: to be. Across upstream's 2076 published solutions the two are 21% of
+#: everything but **50% of the results at 100x or better** -- the reference on a
+#: task like ``ode_seirs`` pays a Python callback per derivative evaluation, and
+#: nothing written in NumPy can close that. An allowlist without them does not
+#: make the benchmark harder, it deletes the half of it where the large wins
+#: live, and a port that reported a geometric mean over what was left would be
+#: reporting a different benchmark under AlgoTune's name.
+#:
+#: Both compile *inside* the sandbox: numba through LLVM in-process, Cython by
+#: invoking ``gcc``, which the read-only bind of ``/`` makes reachable. The cost
+#: lands on the warm-up call, which is discarded -- the same treatment AlgoTune
+#: gives it, since its own solvers compile in ``Solver.__init__``.
 ALLOWED_IMPORTS = {
     # A compiler directive rather than a module, and two of the task files open
     # with it. Left out, `prepare_suite` succeeds, the tree is built, and the
@@ -164,8 +178,10 @@ ALLOWED_IMPORTS = {
     "functools",
     "heapq",
     "itertools",
+    "cython",
     "logging",
     "math",
+    "numba",
     "numpy",
     "operator",
     "random",
@@ -413,6 +429,11 @@ def run_candidate(
         # would reject exactly the candidates the task is looking for. The CPU
         # limit applies to module-level work like everything else.
         literal_top_level=False,
+        # And a bare call as a statement, because that is how a JIT is warmed:
+        # `_kernel(0.0, 0.0)` under an `@njit` def forces compilation at import,
+        # where it is free, instead of inside the first timed call, where it
+        # would be charged to the candidate.
+        allow_top_level_calls=True,
     )
     if not valid:
         return {"ok": False, "error": f"gate: {reason}", "seconds": 0.0}
@@ -447,6 +468,18 @@ def run_candidate(
                 "--address-space-mb", str(ADDRESS_SPACE_MB),
             ],
             scratch=root.resolve(),
+            # Every compiler cache pointed at the scratch bind. The profile is
+            # `--clearenv`, so without `HOME` Cython resolves its inline cache to
+            # `/root/.cython` and dies on the read-only bind -- which reads as
+            # "the candidate crashed" rather than "the sandbox gave it nowhere to
+            # write". Numba compiles in-process and needs none of this, until a
+            # candidate passes `cache=True`.
+            extra_env={
+                "HOME": str(root.resolve()),
+                "XDG_CACHE_HOME": str(root.resolve()),
+                "CYTHON_CACHE_DIR": str(root.resolve()),
+                "NUMBA_CACHE_DIR": str(root.resolve()),
+            },
         )
         started = time.monotonic()
         try:
@@ -705,8 +738,18 @@ def solve(problem):
 Provide the full, runnable code including imports.
 
 IMPORTANT CONSTRAINTS:
-1. You may use numpy, scipy and the standard library. No other package is
-   installed -- no numba, no torch, no cython, no C compiler.
+1. You may use numpy, scipy, **numba**, **cython** and the standard library.
+   Nothing else is installed -- no torch, no jax, no dace, no GPU.
+   - `numba.njit` compiles in-process. Compilation happens on the first call,
+     which is a discarded warm-up, so it is NOT charged to your time. Call your
+     jitted function once at module level to force it.
+   - `cython.inline("...C-like Python...", a=..., b=...)` compiles with gcc at
+     module level, which is also outside the timed region. Give it typed locals
+     and `boundscheck=False` to get anything out of it.
+   - Compiling is worth it exactly where NumPy cannot express the loop: a
+     step-by-step integrator whose right-hand side is a Python callback, a scan
+     with a carried dependency, an early-exit search. It is not worth it in front
+     of a BLAS or FFT call, which is already native code.
 2. ONE CPU THREAD. The sandbox pins every BLAS thread pool to 1, so a solution
    that "parallelises" will be measured on one core and will not be faster.
    Do not set any thread count.

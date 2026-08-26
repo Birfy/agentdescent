@@ -351,6 +351,61 @@ def test_every_runnable_reference_derives_and_passes_this_tasks_own_gate():
     assert not failures, "\n".join(failures)
 
 
+def test_the_gate_admits_a_jit_warm_up_and_the_other_era_tasks_still_refuse_one():
+    """Warming a JIT is a bare call at module level, and the gate refused it.
+
+    ``@njit`` compiles on first call. Without a module-level ``_kernel(0.0)`` that
+    first call is the first *timed* call, and the candidate is charged for the
+    compiler -- which on a task where numba is the whole point turns a 9000x
+    program into a slow one. The capability is not new: ``literal_top_level=False``
+    already admits ``TABLE = build()``, which is the same call with its result
+    bound. So this was friction, not a boundary.
+
+    Still off by default, and this asserts that: a port with no reason to compile
+    keeps the narrower gate.
+    """
+    source = ("import numba\n"
+              "@numba.njit\n"
+              "def _k(x):\n    return x + 1\n"
+              "_k(1.0)\n"
+              "def solve(problem):\n    return _k(problem)\n")
+    valid, reason = support.validate_source(
+        source, entrypoint="solve", allowed_imports=algotune.ALLOWED_IMPORTS,
+        literal_top_level=False, allow_top_level_calls=True)
+    assert valid, reason
+
+    valid, reason = support.validate_source(
+        source, entrypoint="solve", allowed_imports=algotune.ALLOWED_IMPORTS,
+        literal_top_level=False)
+    assert not valid and "top-level expression" in reason
+
+
+def test_the_compiled_toolchain_is_on_the_allowlist_and_the_prompt_says_so():
+    """AlgoTune's own results make these two load-bearing, not optional.
+
+    Across upstream's 2076 published solutions numba and Cython are 21% of
+    everything and **half of the results at 100x or better**: the reference on an
+    ODE task pays a Python callback per derivative evaluation, and nothing
+    written in NumPy closes that. A run without them is not a harder run, it is a
+    run over the half of the benchmark where the large wins are not.
+    """
+    assert {"numba", "cython"} <= algotune.ALLOWED_IMPORTS
+    text = algotune.mutation_prompt(
+        support.Program("i", 0, None, "def solve(p):\n    return p\n", "",
+                        {"speedup": 1.0}, True),
+        suite=_bare_suite())
+    assert "numba" in text and "cython" in text
+    assert "warm-up" in text
+
+
+def _bare_suite():
+    from pathlib import Path
+    return algotune.Suite(
+        task="svd", source_path=Path("."), description="d", initial_program="p",
+        n=1, published_n=1, target_time_ms=100, published_ms=1.0, problems=2,
+        scoring_shards=6, test_shards=3, seed=0)
+
+
 def test_a_precomputed_table_is_allowed_here_and_refused_by_the_tabular_gate():
     """Module-level setup is the point of the task, not a smell.
 
