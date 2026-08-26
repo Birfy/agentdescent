@@ -80,6 +80,58 @@ Answer with exactly one word on the first line, EQUIVALENT or DIFFERENT, then on
 sentence of justification on the second line."""
 
 
+def _return_expression(source: str) -> str:
+    """The equation a program computes, with its intermediate names inlined.
+
+    An answer is free to build its result in steps::
+
+        denom = params[0]*omega_0**2*x**2 + params[1]*omega**2*x**2 + params[2]
+        return params[3]*E_n / denom
+
+    Taking the last ``return`` line alone leaves ``params[3]*E_n / denom`` with
+    ``denom`` undefined, and a judge shown that reads it as a different equation
+    -- which is a defect in the scorer, not a wrong answer. Six of 111 answers in
+    the first aligned run were being marked down for it.
+    """
+    import ast as _ast
+    try:
+        tree = _ast.parse(source)
+    except SyntaxError:
+        lines = [line.strip()[len("return "):] for line in source.splitlines()
+                 if line.strip().startswith("return ")]
+        return lines[-1] if lines else source
+
+    function = next((node for node in _ast.walk(tree)
+                     if isinstance(node, _ast.FunctionDef)), None)
+    if function is None:
+        return source
+
+    bindings: Dict[str, _ast.expr] = {}
+    result: Optional[_ast.expr] = None
+    for statement in function.body:
+        if (isinstance(statement, _ast.Assign) and len(statement.targets) == 1
+                and isinstance(statement.targets[0], _ast.Name)):
+            bindings[statement.targets[0].id] = statement.value
+        elif isinstance(statement, _ast.Return) and statement.value is not None:
+            result = statement.value
+    if result is None:
+        return source
+
+    class Inline(_ast.NodeTransformer):
+        def visit_Name(self, node):  # noqa: N802 - ast's own casing
+            replacement = bindings.get(node.id)
+            return self.visit(_ast.parse(_ast.unparse(replacement),
+                                         mode="eval").body) if replacement else node
+
+    for _ in range(8):  # bounded: a chain of names, not a fixed point search
+        expanded = Inline().visit(_ast.parse(_ast.unparse(result), mode="eval").body)
+        text = _ast.unparse(expanded)
+        if text == _ast.unparse(result):
+            break
+        result = _ast.parse(text, mode="eval").body
+    return _ast.unparse(result)
+
+
 def normalise(text: str, variables: List[str],
               fitted: Optional[List[float]] = None) -> str:
     """Strip the notation the two sides do not share.
@@ -100,10 +152,7 @@ def normalise(text: str, variables: List[str],
     """
     text = text.strip()
     if "def equation" in text:
-        returns = [line.strip()[len("return "):]
-                   for line in text.splitlines() if line.strip().startswith("return ")]
-        if returns:
-            text = returns[-1]
+        text = _return_expression(text)
     for name in variables:
         text = text.replace(f"{name}(t)", name)
 

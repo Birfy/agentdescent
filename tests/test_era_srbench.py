@@ -652,9 +652,37 @@ def test_a_program_answer_is_reduced_to_its_equation_before_judging():
               "    return params[0]*a*np.sin(b) + params[1]\n")
     # With no fitted values the holes become free symbols, which is what makes
     # them comparable at all; with them they become the numbers that were fitted.
-    assert sa.normalise(source, ["a", "b"]) == "__p0*a*sin(b) + __p1"
-    assert sa.normalise(source, ["a", "b"], fitted=[2.5, -0.75]) == (
-        "(2.5)*a*sin(b) + (-0.75)")
+    # Compared without whitespace: the equation is reassembled by `ast.unparse`,
+    # which spaces operators out, and neither sympy nor the judge cares.
+    squash = lambda text: text.replace(" ", "")  # noqa: E731
+    assert squash(sa.normalise(source, ["a", "b"])) == "__p0*a*sin(b)+__p1"
+    assert squash(sa.normalise(source, ["a", "b"], fitted=[2.5, -0.75])) == (
+        "(2.5)*a*sin(b)+(-0.75)")
+
+
+def test_an_answer_built_in_steps_has_its_names_inlined_before_judging():
+    """Taking the last `return` alone leaves undefined names in the equation.
+
+    Six of 111 answers in the first aligned run computed their result in steps,
+    and a judge shown `params[3]*E_n / denom` with `denom` undefined reads it as
+    a different equation -- a defect in the scorer, not a wrong answer.
+    """
+    from tools import score_symbolic_accuracy as sa
+    source = ("def equation(E_n, omega, omega_0, x, params):\n"
+              "    denom = params[0]*omega_0**2*x**2 + params[1]*x**2\n"
+              "    return params[2]*E_n / denom\n")
+    inlined = sa.normalise(source, ["E_n", "omega", "omega_0", "x"])
+    assert "denom" not in inlined
+    assert "omega_0" in inlined and "__p0" in inlined and "__p2" in inlined
+
+    # Chains of names resolve too, not just one level.
+    chained = ("def equation(a, b, params):\n"
+               "    u = a / b\n"
+               "    v = params[0] * u\n"
+               "    return v + params[1]\n")
+    resolved = sa.normalise(chained, ["a", "b"]).replace(" ", "")
+    assert "u" not in resolved.replace("__p", "") .replace("a", "").replace("b", "")
+    assert "a/b" in resolved
     assert sa.normalise("0.3*P(t)**2", ["t", "P"]) == "0.3*P**2"
 
 
