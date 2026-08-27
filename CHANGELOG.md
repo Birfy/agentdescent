@@ -41,7 +41,6 @@ All notable changes to AgentDescent are documented here. The format follows
   waveguide dispersion returned as `c*sqrt(k**2 + (pi/d)**2)` where the dataset
   poses it with `d` multiplied out, relativistic Doppler, and the paramagnetic
   two-level partition as the two-exponential expansion of `2n*cosh(mu*B/kT)`.
-  `python -m tools.gen_srbench_report` builds a three-page report of these.
 
 - **`python -m tools.score_symbolic_accuracy` scores the paper's third metric.**
   Acc(0.1) and NMSE ask whether an answer *predicts* the held-out samples;

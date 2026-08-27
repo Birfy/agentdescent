@@ -1075,10 +1075,6 @@ parameter at all, Zeeman splitting solved for field, the driven oscillator solve
 for drive frequency, the particle-in-a-box ground state, and the Langevin
 dielectric in its `1/(1+x)` form.
 
-`python -m tools.gen_srbench_report` builds a three-page PDF of these from the
-result files. The PDF itself is not committed -- it is derived, and it would go
-stale the moment a run is re-scored.
-
 ### Why `glm-5.2` stops at 36.9%
 
 Measured rather than argued, because the answer decides what to spend on next.
