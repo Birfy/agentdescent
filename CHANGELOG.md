@@ -8,197 +8,49 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
-- **`--recall-attempts` gives an ERA per-problem search a memory of what it
-  already tried.** Upstream's mutation prompt shows one parent and one score,
-  and `--recall-attempts 0` — the default — keeps exactly that. Above zero the
-  prompt also lists the best N structures this problem has already scored,
-  ranked, with their scores and a repeat count for the ones proposed more than
-  once. The scores are the mechanism rather than decoration: a bare "already
-  tried" list pushes the model off a near-miss as hard as off a dead end, and
-  the near-misses on LLM-SRBench are real — one failure returned
-  `params[0]*(n - n_0)*kb*T/(p_d*cos(theta))` against a truth of
-  `T*kb*(n - n_0)/(n_0*p_d*cos(theta))`. `EraTree.select_parent` builds the
-  snapshot inside the lock that chooses the parent, so the two come from one
-  view of the tree, and the setting is part of the `--resume` fingerprint
-  because it changes what a number means.
-- **`python -m tools.srbench_reachability` measures what an LLM-SRBench answer
-  format puts out of reach**, by rewriting each ground truth in the format a run
-  had to answer in and scoring it exactly as the run's answers were scored. On
-  LSR-Transform the ceiling is 105 of 111 problems under the benchmark's own
-  single-BFGS fit.
 - **ERA runs LLM-SRBench — a benchmark this repository did not build.**
   `examples/era/era_llm_srbench.py` is a fourth task on the same flat-PUCT tree
   search, the same aggregator, the same sandbox and the same governance layer,
   behind the same `Domain` seam the integrals and 2F1 tasks use. What is new is
-  where the yardstick comes from: [LLM-SRBench](https://arxiv.org/abs/2504.10415)
-  (ICML 2025 Oral) is the 240 published scientific equation-discovery problems in
-  five subsets — 111 Feynman equations rearranged into unfamiliar forms, and 129
-  synthetic problems across chemistry, biology, physics and materials science
-  with out-of-distribution splits — with its own metrics and its own leaderboard
-  of LLM-based methods. The other two constructed tasks answer "is this search
-  any good?" against a bar this repository set; this one does not.
+  where the yardstick comes from:
+  [LLM-SRBench](https://arxiv.org/abs/2504.10415) (ICML 2025 Oral) is a
+  published set of scientific equation-discovery problems with its own metrics
+  and its own leaderboard of LLM-based methods. The other two constructed tasks
+  answer "is this search any good?" against a bar this repository set; this one
+  does not.
 
-  A candidate writes `discover(x, y, spec)` and returns a **closed-form equation
-  as a string**, parsed and never executed: numeric constants, the problem's own
-  variables, `pi`/`e`, `+ - * / **`, and a fixed list of elementary functions.
-  That is what keeps the task equation discovery rather than regression — a
-  nearest-neighbour table cannot be written in the grammar — and it is also the
-  boundary the held-out samples sit behind, since the candidate hands back a
-  formula rather than code that runs. Scoring is the paper's own `NMSE` and
-  `Acc_0.1`; the tree ranks on `min(12, -log10(NMSE))` averaged over the problem
-  set, because `Acc_0.1` is an indicator that is flat almost everywhere. The root
-  node is sequentially thresholded least squares over a fixed nonlinear library
-  — SINDy's fitting step without its domain-chosen library.
+  Scored on **LSR-Transform** — 111 Feynman equations rearranged so the closed
+  form being asked for is not one a model has memorised — under the benchmark's
+  own per-problem protocol, upstream's answer format, upstream's linear root and
+  upstream's single `BFGS` from all ones:
 
-  **The protocol is ERA's, not the benchmark's**, and every result file says so
-  under `comparability`: LLM-SRBench evaluates searchers that see one problem at
-  a time with the data in context, while here the model never sees a sample, it
-  writes one program, and that program is run sandboxed over every problem. Same
-  benchmark, splits and metrics; different experiment.
+  | LSR-Transform, all 111 | SA | Acc(0.1) | median NMSE | budget |
+  |---|---|---|---|---|
+  | LaSR (paper, best backbone) | 6.31% | 50.45% | 0.0011 | millions of GP mutations |
+  | LLM-SR (paper, best backbone) | 31.53% | 39.64% | 0.0091 | 250 prompts |
+  | here, `glm-5.2` | — | 36.9% | 0.102 | 18.5 calls |
+  | **here, `deepseek-v4-flash`** | **41.4%** | **56.8%** | **2.15e-08** | **16.5 calls** |
 
-  Three things are checked rather than assumed. The benchmark's own HuggingFace
-  release is **gated** — 401 without a token — so the task reads an ungated
-  re-upload pinned to a revision, and
-  `tests/test_era_srbench.py::test_the_published_equations_reproduce_the_published_samples`
-  re-evaluates every ground-truth expression that parses against the samples
-  shipped beside it. Two subsets' ground-truth *strings* are damaged in that copy
-  (36 chemistry expressions carry a mangled parameter; 44 physics expressions are
-  templates with unbound `F0`/`beta`/`omega0`), which the test asserts is still
-  true so the note cannot go stale silently; scoring never touches those strings.
-  And a non-finite prediction fails the problem here where upstream's
-  `compute_output_base_metrics` drops the point and scores the rest — a search
-  told otherwise learns to place poles — so both numbers are reported, `nmse`
-  under this rule and `nmse_upstream` under the paper's.
+  Five protocol settings here are stricter than the benchmark's own — 4 000
+  training rows against 80 000, selection on a 25% validation slice rather than
+  full-train MSE, and a non-finite prediction failing the whole problem where
+  upstream drops the point — so those are floors.
 
-  `--dataset` selects the category, `--problems` caps the count evenly across
-  subsets, `--problem-seconds` is enforced with `SIGALRM` inside the runner, and
-  `--train-points` caps the rows a candidate is handed. Reading the benchmark's
-  parquet needs `pyarrow`. Notes: `docs/algo-era.md`, `examples/era/README.md`.
+  What it recovered is the part worth reading: Bohr energy levels solved for the
+  principal quantum number, the Planck distribution solved for temperature,
+  waveguide dispersion returned as `c*sqrt(k**2 + (pi/d)**2)` where the dataset
+  poses it with `d` multiplied out, relativistic Doppler, and the paramagnetic
+  two-level partition as the two-exponential expansion of `2n*cosh(mu*B/kT)`.
+  `python -m tools.gen_srbench_report` builds a three-page report of these.
 
-  One count to be careful with: the released data holds **240** problems and the
-  paper says **239**. The gap is one physics problem — the paper's text gives
-  physics as 43 where the benchmark's own dataset card lists
-  `lsr_synth_phys_osc` at 44 — and the port follows the data, since the data is
-  what gets scored.
-
-  **Measured**, two runs of 12 expansions on `glm-5.2` covering all 240 problems
-  (`bench/results/era-srbench-synth.json`,
-  `bench/results/era-srbench-transform.json`). On the held-back LSR-Synth shards
-  the winner moves mean digits 7.225 → 8.439, median NMSE 2.85e-07 → 4.83e-11,
-  Acc(0.1) 50.0% → 59.4% and OOD Acc(0.1) 53.1% → 68.8%; paired over the same 32
-  problems that is 18 better against 5 worse, sign test p = 0.011. On
-  LSR-Transform it is 1.058 → 2.453 digits and 0.0% → 14.8% Acc(0.1), but 15
-  better against 9 worse — **p = 0.31**, so the mean moved and the evidence did
-  not, which is how it is reported.
-
-  Against the paper's Table 2, over the full categories
-  (`bench/results/era-srbench-fullset.json`): this protocol matches or beats the
-  published state of the art on **four of five** NMSE columns and two of four
-  Acc(0.1) columns of LSR-Synth — chemistry 83.3% Acc / 7.5e-13 NMSE against
-  LLM-SR's 66.66% / 4.1e-06, biology 79.2% / 7.8e-13 against 58.33% / 1.0e-06 —
-  and loses badly on LSR-Transform, 8.1% against LaSR's 50.45%. The budget
-  column is the point: LLM-SR's config gives **each problem** 1 000 samples,
-  where a whole run here is 14 model calls for 129 problems.
-
-  Those are the paper's two *data-fidelity* metrics. Its third, symbolic
-  accuracy, is not implemented here and this protocol should be assumed to lose
-  it outright: the ground truths are 1–2 terms and 33–104 characters, and what
-  comes back is a 9–11 term library fit. Reaching NMSE 1e-13 on an equation it
-  has interpolated rather than discovered is the honest description.
-
-  **`--per-problem` runs the benchmark's own protocol** — one independent search
-  per problem, scored on slices of that problem's training rows and reported on
-  its own held-out split — and it settles the LSR-Transform question. Same tree,
-  same seed program, same grammar, 6 expansions per problem, 5.26 model calls per
-  problem: Acc(0.1) **0.9% → 43.2%**, median NMSE 0.0941 → 0.00568, 41 of 111
-  problems solved to the 12-digit cap, 59 better against 1 worse
-  (`bench/results/era-srbench-per-problem-transform.json`). Against 8.1% under
-  the whole-category protocol, that is a five-fold move with only the protocol
-  changed — and it lands between LLM-SR (39.64%) and LaSR (50.45%) at about a
-  fiftieth of LLM-SR's per-problem budget.
-
-  **Three times that budget** — 24 expansions and 20 s per problem, 16.46 model
-  calls per problem — over the same 111 problems takes it to Acc(0.1) **49.5%**
-  (55 of 111) with a median NMSE of **9.75e-06**, 48 problems at the 12-digit
-  cap, and **75 better against 0 worse** (`...-transform-24x.json`). That is one
-  problem short of LaSR's 50.45%, ahead of LLM-SR's 39.64%, and two orders of
-  magnitude below LaSR's NMSE — at a fifteenth of LLM-SR's per-problem budget.
-  The interesting number is the NMSE: three times the budget moved Acc(0.1) by
-  six points and the median NMSE by 580x, because Acc is an indicator a problem
-  either clears or does not while NMSE says how right the typical answer is.
-
-  It also recovers equations rather than fitting them. Answers are median 3
-  terms where the whole-category protocol returned 9, and among the 41 exact
-  solutions are `-sqrt(q1*q2/(4*pi*epsilon*F))` for a ground truth written
-  `-sqrt(q1*q2/(F*epsilon))/(2*sqrt(pi))`, and
-  `x1*cos(t1-t2) - sqrt(x**2 - x1**2*sin(t1-t2)**2)` for one written with
-  `cos**2` — the same equations, through the identities the benchmark was built
-  to reward.
-
-  **Two of the audit's deviations are now closed.** `--answer-format program`
-  is the benchmark's own answer format: `equation(..., params)` source, free to
-  branch and call numpy, with its constants left as `params[i]` and fitted by
-  the harness with the identical call upstream makes —
-  `minimize(loss, [1.0]*10, method='BFGS')`, one run, no restarts. That closes
-  the answer-format row and the constant-fitting row at once, and it brings
-  upstream's `MAX_NPARAMS = 10` with it, which is the thing that stops an answer
-  interpolating its way past the metric: in `expression` format the library root
-  emits an eleven-term fit with a free coefficient on each term, and in `program`
-  format it may hand back ten holes for one BFGS to fill. `--seed-program linear`
-  emits upstream's skeleton verbatim, so
-  `--answer-format program --seed-program linear` is the fully aligned setting.
-
-  `python -m tools.score_symbolic_accuracy RESULT.json` scores the paper's third
-  metric, which this port has been missing. It is a separate tool because it
-  needs the ground truth — which must never come near the search — and a model
-  call per problem. A sympy check settles the exact recoveries deterministically
-  and everything else goes to a judge. Two deviations stated in its output:
-  the judge is not GPT-4o, and the 80 problems whose published ground truth is
-  damaged are reported `not_scorable` rather than guessed at, leaving 49 of 129
-  LSR-Synth and all 111 LSR-Transform problems.
-
-  **Measured under the fully aligned setting**, all 111 LSR-Transform problems
-  (`bench/results/era-srbench-aligned-transform.json`): Acc(0.1) 0.0% → **36.9%**,
-  median NMSE 0.4243 → 0.1022, 34 problems solved to the 12-digit cap, 68 better
-  against **0 worse**. Against the looser setting this port ran first — its own
-  answer format and its own root — that is **49.5% → 36.9%**, so thirteen points
-  of Acc were the settings rather than the search, and the median NMSE moves four
-  orders of magnitude because upstream's ten-constant cap forbids the twelve-term
-  answers that reached 1e-06. The aligned number sits just under LLM-SR's 39.64%
-  and well under LaSR's 50.45%, at 18.5 model calls per problem against LLM-SR's
-  250 prompts.
-
-  **Alignment with the benchmark, checked against its code rather than from
-  memory.** The problems, the splits, the column convention
-  (`output_vars + input_vars == symbols`, matching upstream's
-  `samples[:,0]`/`samples[:,1:]`), the NMSE (upstream's
-  `np.mean((y-y_hat)**2)/np.var(y)` is this port's `sum/sum` — the same
-  quantity) and the paper's `Acc_0.1` all line up. Most deviations make this
-  harder than the benchmark's own setup: a restricted answer grammar where
-  upstream allows arbitrary Python, selection on a held-out slice of train where
-  upstream selects on all of train, 75% of the rows to fit with, and a fraction
-  of the budget. Two go the other way and both are now stated wherever a number
-  is: the root node (worth 45 points on LSR-Synth, measured), and constant
-  fitting — upstream runs one BFGS from `[1.0]*10` with no restarts, while a
-  candidate here can solve a linear-in-parameters model exactly. Symbolic
-  accuracy remains unimplemented.
-
-  One caveat that cuts against the headline: the benchmark ships **no program**,
-  so every method brings its own starting point, and these are not equal. LLM-SR
-  starts each problem from a plain linear model in the raw inputs; this port's
-  root is sparse regression over thirty to sixty nonlinear basis functions. On
-  LSR-Synth — additive ODE right-hand sides — that root starts inside the
-  function space the answer lives in, so "a seed with no LLM in it beats LLM-SR
-  on chemistry" reads as "a stronger starting point beats a weaker one". On
-  LSR-Transform the same seed scores 0.9% and the asymmetry does not carry.
-
-  Two findings worth the run on their own. The seed program — sparse regression,
-  no LLM anywhere in it — already beats every published LLM method in the paper's
-  table on LSR-Synth chemistry and biology, which says something about the
-  benchmark's synthetic half rather than about this search. And neither winner
-  transfers: each is best on the category it was scored against and *worse than
-  the seed* on the other, which is the cost of one-program-for-a-distribution
-  stated in numbers.
+- **`python -m tools.score_symbolic_accuracy` scores the paper's third metric.**
+  Acc(0.1) and NMSE ask whether an answer *predicts* the held-out samples;
+  symbolic accuracy asks whether it **is the equation**, and that is the column
+  separating discovery from interpolation. It is a separate tool because it needs
+  the ground truth, which must never come near the search. A deterministic sympy
+  check runs before the judge and settles what it can, putting a floor under the
+  metric that depends on no model. The judge is whatever `--model` names and not
+  the paper's GPT-4o, which the output file states.
 
 ## [0.4.5] — 2026-08-19
 

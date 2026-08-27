@@ -135,7 +135,7 @@ def integrals_domain(
             eval_budget=eval_budget, problem_seconds=problem_seconds,
             max_length=max_code_length),
         reward=framework_score,
-        prompt=lambda program, recalled=(): mutation_prompt(
+        prompt=lambda program: mutation_prompt(
             program, preview=preview, timeout=candidate_timeout,
             eval_budget=eval_budget, problem_seconds=problem_seconds),
         task_prompt=lambda index: (

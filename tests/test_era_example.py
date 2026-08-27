@@ -175,7 +175,7 @@ def test_serial_tree_reproduces_upstream_futs():
         selection = tree.select_parent()
         if selection is None:
             break
-        _, parent, _ = selection
+        _, parent = selection
         program = generate(parent.program.code, parent.score)
         score = execute(program)
         tree.add_node(
@@ -512,85 +512,3 @@ def test_the_sandbox_blocks_the_writes_and_network_it_claims_to_block(tmp_path):
     assert payload["network"] != "allowed"
     assert not outside.exists()
     assert not os.path.exists(readonly)
-
-
-# ---------------------------------------------------------------------------
-# Recall: the snapshot the tree hands a mutation prompt
-# ---------------------------------------------------------------------------
-
-
-def _seeded_tree(scores, *, valid=None):
-    """A tree holding one node per score, so recall has something to rank."""
-    tree = port.EraTree(c_puct=1.0, metric_key="rmse")
-    tree.seed(support.Program("root", 0, None, "root", "", {"rmse": None}, True),
-              scores[0])
-    for index, score in enumerate(scores[1:], start=1):
-        ok = True if valid is None else valid[index]
-        tree.add_node(
-            support.Program(f"p{index}", 0, "root", f"p{index}", "",
-                            {"rmse": None, "n": index}, ok),
-            score, 0)
-    return tree
-
-
-def test_recall_is_off_by_default_which_is_upstreams_single_parent_view():
-    """`futs.search` shows a mutation one parent and one score. So does this."""
-    tree = _seeded_tree([0.0, 1.0, 2.0])
-    iteration, parent, recalled = tree.select_parent()
-    assert isinstance(iteration, int) and parent is not None
-    assert recalled == ()
-
-
-def test_recall_returns_the_best_nodes_first():
-    tree = _seeded_tree([0.0, 2.0, 1.0, 3.0])
-    _, _, recalled = tree.select_parent(2)
-    assert [score for _, score in recalled] == [3.0, 2.0]
-    assert [metrics["n"] for metrics, _ in recalled] == [3, 1]
-
-
-def test_recall_leaves_out_a_node_that_never_ran():
-    """A refused or crashed program has no structure worth telling the model about."""
-    tree = _seeded_tree([0.0, 1.0, 2.0], valid=[True, False, True])
-    _, _, recalled = tree.select_parent(8)
-    assert [score for _, score in recalled] == [2.0, 0.0]
-
-
-def test_recall_leaves_out_a_node_scored_minus_infinity():
-    tree = port.EraTree(c_puct=1.0, metric_key="rmse")
-    tree.seed(support.Program("root", 0, None, "root", "", {"rmse": None}, True), 0.5)
-    tree.add_node(support.Program("bad", 0, "root", "bad", "", {"rmse": None}, True),
-                  float("-inf"), 0)
-    _, _, recalled = tree.select_parent(8)
-    assert [score for _, score in recalled] == [0.5]
-
-
-def test_the_snapshot_comes_from_the_same_view_of_the_tree_as_the_parent():
-    """One lock, so a prompt can never call a node "already tried" too early.
-
-    The snapshot is built while the parent is chosen, which is why it is on
-    `select_parent` rather than a second reader a caller has to remember to
-    take at the right moment.
-    """
-    tree = _seeded_tree([0.0, 1.0])
-    _, _, before = tree.select_parent(8)
-    tree.add_node(support.Program("late", 0, "root", "late", "", {"rmse": None}, True),
-                  9.0, 0)
-    _, _, after = tree.select_parent(8)
-    assert len(before) == 2 and len(after) == 3
-    assert max(score for _, score in after) == 9.0
-
-
-def test_propose_hands_the_snapshot_to_the_domains_prompt():
-    """The wiring: what the tree collected has to reach the prompt that uses it."""
-    tree = _seeded_tree([0.0, 1.0, 2.0])
-    seen = {}
-
-    def prompt_for(program, recalled=()):
-        seen["recalled"] = recalled
-        return "write me a program"
-
-    reply = "```python\ndef discover(x, y, spec):\n    return '1.0'\n```"
-    propose = port.make_propose(tree, lambda prompt: reply,
-                                prompt_for=prompt_for, recall=2)
-    propose("", port.Task(id="t0", prompt="p"), "", 0.0)
-    assert [score for _, score in seen["recalled"]] == [2.0, 1.0]

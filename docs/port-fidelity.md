@@ -296,13 +296,6 @@ column of each section below says exactly where to look.
   [algo-era.md](algo-era.md) says so in a `!!! danger` block. Upstream also
   reports one RMSE over the same tail it optimised against; this port withholds
   `--test-shards` of that tail from the search.
-* **An opt-in departure, off by default**: `--recall-attempts N` on the
-  LLM-SRBench task lets a mutation prompt see the best `N` structures the tree
-  has already scored, ranked and with a repeat count. Upstream's
-  `PlaygroundGenerator` shows one parent and one score; `N = 0` — the default —
-  is that prompt byte for byte, and the tests pin the empty case. It is listed
-  here rather than left to a flag's help text because it changes what the search
-  is, not just how fast it runs.
 * **The one thing parallelism touched, and why it is not a semantics change**:
   upstream backpropagates a visit *after* `execute_fn` returns; this port
   reserves it at *selection*. With one proposal in flight nothing can observe

@@ -244,24 +244,7 @@ class EraTree:
         if node.parent_index is not None:
             self._backpropagate_locked(self.nodes[node.parent_index])
 
-    def select_parent(
-        self, recall: int = 0,
-    ) -> Optional[Tuple[int, Node, Tuple[Tuple[Dict[str, Any], float], ...]]]:
-        """Reserve an expansion, and optionally hand back what the tree already holds.
-
-        ``recall`` is the number of finished nodes to return alongside the
-        parent, best first. It is **off by default**, which is upstream's
-        `futs.search`: there a mutation sees one parent and one score and
-        nothing else. Turning it on is this port's own deviation, and the reason
-        it is built here rather than in the prompt is the lock -- the parent and
-        the snapshot come from one view of the tree, so a prompt can never say
-        "already tried" about a node that had not been added when its parent was
-        chosen.
-
-        What comes back is ``(metrics, score)`` pairs. The tree does not know
-        what an *answer* is -- that word belongs to the domain -- so rendering,
-        de-duplicating and counting them is the domain prompt's job.
-        """
+    def select_parent(self) -> Optional[Tuple[int, Node]]:
         with self._lock:
             if not self.nodes:
                 raise RuntimeError("the ERA tree has not been seeded")
@@ -282,17 +265,7 @@ class EraTree:
             ctx = SelectionContext(head=rows[0], candidates=rows, n_workers=1)
             chosen = self.nodes[self._policy.select(ctx, 1)[0].version]
             self._backpropagate_locked(chosen)
-            return iteration, chosen, self._recall_locked(recall)
-
-    def _recall_locked(self, recall: int) -> Tuple[Tuple[Dict[str, Any], float], ...]:
-        """The best `recall` finished nodes, best first. Caller holds the lock."""
-        if recall <= 0:
-            return ()
-        scored = [(node.program.metrics or {}, node.score) for node in self.nodes
-                  if node.program.valid and node.score is not None
-                  and math.isfinite(node.score)]
-        scored.sort(key=lambda pair: pair[1], reverse=True)
-        return tuple(scored[:recall])
+            return iteration, chosen
 
     def add_node(self, program: Program, score: float, parent_index: Optional[int]) -> Node:
         """Append an expansion. A failed program is a node too, scoring -inf."""
@@ -403,29 +376,23 @@ def make_propose(
     *,
     preview: str = "",
     candidate_timeout: float = 60.0,
-    prompt_for: Optional[Callable[..., str]] = None,
-    recall: int = 0,
+    prompt_for: Optional[Callable[[Program], str]] = None,
 ) -> Callable[[str, Task, str, float], Optional[str]]:
     """`PlaygroundGenerator.__call__`, behind the engine's actor API.
 
     ``prompt_for`` is the domain's mutation prompt; without one this is the
-    Kaggle task's, which is what upstream ships. It is called with the parent
-    program and the tree's recall snapshot; a domain that wants upstream's
-    single-parent view simply ignores the second argument.
-
-    ``recall`` is how many finished nodes that snapshot carries, and ``0`` --
-    the default -- makes it empty, which is upstream exactly.
+    Kaggle task's, which is what upstream ships.
     """
     write_prompt = prompt_for or (
-        lambda program, recalled=(): mutation_prompt(
+        lambda program: mutation_prompt(
             program, preview=preview, timeout=candidate_timeout))
 
     def propose(rendered: str, task: Task, output: str, reward: float) -> Optional[str]:
-        selection = tree.select_parent(recall)
+        selection = tree.select_parent()
         if selection is None:
             return None
-        iteration, parent, recalled = selection
-        raw = complete(write_prompt(parent.program, recalled)).strip()
+        iteration, parent = selection
+        raw = complete(write_prompt(parent.program)).strip()
         code, summary = extract_program(raw)
         if not code:
             _EMPTY_PROPOSALS["n"] += 1
@@ -789,7 +756,7 @@ def s3e1_domain(
             code, splits=splits, shards=shard_ids,
             timeout=candidate_timeout, max_length=max_code_length),
         reward=framework_score,
-        prompt=lambda program, recalled=(): mutation_prompt(
+        prompt=lambda program: mutation_prompt(
             program, preview=preview, timeout=candidate_timeout),
         task_prompt=lambda index: (
             f"Score the regression program on held-out shard {index}."),
@@ -835,7 +802,6 @@ def run_agentdescent_era(
     splits: Optional[Splits] = None,
     domain: Optional[Domain] = None,
     eval_concurrency: Optional[int] = None,
-    recall_attempts: int = 0,
     verbose: bool = False,
 ) -> EraRun:
     """Run one fixed-expansion-budget serial, sync, or async experiment.
@@ -861,8 +827,7 @@ def run_agentdescent_era(
                    metric_key=domain.metric_key)
     strategy = EraStrategy(domain)
     run = make_run(evaluate=domain.evaluate)
-    propose = make_propose(tree, complete, prompt_for=domain.prompt,
-                           recall=recall_attempts)
+    propose = make_propose(tree, complete, prompt_for=domain.prompt)
 
     def factory(ledger, verifier, audit, config, policy):
         aggregator = EraTreeAggregator(

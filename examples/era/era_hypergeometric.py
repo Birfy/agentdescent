@@ -128,7 +128,7 @@ def hypergeometric_domain(
             code, suite=suite, shards=shard_ids, timeout=candidate_timeout,
             shard_seconds=shard_seconds, max_length=max_code_length),
         reward=framework_score,
-        prompt=lambda program, recalled=(): mutation_prompt(
+        prompt=lambda program: mutation_prompt(
             program, preview=preview, timeout=candidate_timeout,
             shard_seconds=shard_seconds),
         task_prompt=lambda index: (

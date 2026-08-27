@@ -318,12 +318,11 @@ constants, upstream's optimiser. Everything else about it is still harder than
 the benchmark's own setup — the selection split, the fitting rows, the budget —
 so a number from it is a floor rather than a like-for-like.
 
-The three columns that decide how any other number should be read: the root is
-worth 45 points of Acc(0.1) on LSR-Synth and nothing on LSR-Transform, measured
-above; `expression` format leaves both the constant count and the optimiser
-unbounded, which is what let a nine-term interpolating fit score 48%; and
-symbolic accuracy now has a scorer but not the paper's judge, so it is reported
-beside the paper's column rather than in it.
+Two things decide how any other number here should be read. `expression` format
+leaves both the constant count and the optimiser unbounded, so a long
+interpolating fit can score well under it and a number from that setting is not
+comparable to the paper's; and symbolic accuracy now has a scorer but not the
+paper's judge, so it is reported beside the paper's column rather than in it.
 
 #### The ten-constant cap is what closes the interpolation hole
 
@@ -543,20 +542,6 @@ beside it, for in-domain and OOD alike.
 6. `score = mean digits` with no sign flip — FUTS maximises — and the engine's
    `[0, 1]` reward is `mean_digits / 12`, exactly order-preserving with what the
    tree ranks on.
-7. **`--recall-attempts N` lets a mutation prompt see what the tree already
-   tried, and it is off by default.** Upstream's `PlaygroundGenerator` shows a
-   mutation one parent and one score; with `N = 0` — the default — so does this,
-   byte for byte. Above zero the prompt carries the best `N` structures already
-   scored on this problem, ranked, with their scores and a repeat count. It
-   exists because the failure mode measured below is a search re-proposing one
-   structure until its budget runs out, and nothing in upstream's prompt tells
-   it that. LLM-SR's island model and experience buffer are the same idea
-   arranged differently, so this is a deviation from *FUTS*, not from the
-   benchmark's field. The snapshot is built inside `select_parent`'s own lock,
-   so a prompt can never call a node "already tried" that did not exist when its
-   parent was chosen — and because it changes what a number means, it is part of
-   the `--resume` fingerprint.
-
 ## Measured results — Playground S3E1
 
 ### The method
@@ -966,371 +951,29 @@ endpoint's measured knee bought **2.1×**.
 
 ## Measured results — LLM-SRBench
 
+Scoped to **LSR-Transform**: 111 Feynman equations rearranged so the closed form
+being asked for is not one a model has memorised. LSR-Synth is a run this port
+has not finished, and nothing about it is claimed here.
+
 ### The method
 
 | Setting | Value |
 |---|---|
-| Model | `glm-5.2`, Anthropic-shaped API (`--provider claude`), `--thinking disabled` |
-| Search | sync, 12 expansions, 3 workers, `c_puct=1.0`, `--staleness guarded`, `--seed 0` |
-| Data | every problem in the category — 129 (LSR-Synth) and 111 (LSR-Transform) |
-| Shards | 6 scored + 2 held back, dealt per domain; `held_out_frac=0.5`, so a node is gated on 3 shards |
-| Budget | 4 s per problem, 120 s per problem set, `--max-tokens 16000` |
-| LSR-Transform only | `--train-points 4000`, matching LSR-Synth's training size — it ships 80 000 |
+| Protocol | `--per-problem` — one independent search per problem, which is the benchmark's own |
+| Answer format | `--answer-format program`, upstream's: `equation(..., params)` source with ten `params[i]` holes |
+| Root | `--seed-program linear`, LLM-SR's own skeleton `params[0]*x1 + ... + params[n]`, transcribed |
+| Fitting | the harness, one `scipy.optimize.minimize(..., method='BFGS')` from `[1.0]*10` — verbatim upstream |
+| Search | sync, 24 expansions per problem, 3 workers, `c_puct=1.0`, `--staleness guarded`, `--seed 0` |
+| Data | all 111 problems; `--train-points 4000` of the 80 000 shipped; 25% of train carved out for gating |
+| Shards | 6 scored, `held_out_frac=0.5`; the benchmark's own `id_test` split is scored once at the end |
+| Budget | 20 s per problem, `--max-tokens 12000` |
 
-Two runs, one per category, so between them they cover **all 240 problems** —
-129 and 111, no cap, no overlap. Note what that does and does not mean: every
-problem was in a run, but each run scores its search against 6 shards and
-holds 2 back, so the before/after numbers below rest on the **59 held-back
-problems** (32 + 27) and the other 181 are what the search was gated on.
-Everything below is the **held-back** shards: problems no expansion was ever
-scored against. Files:
-[`bench/results/era-srbench-synth.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-srbench-synth.json)
-and
-[`bench/results/era-srbench-transform.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-srbench-transform.json),
-with the winning programs beside them.
+The answers never touch the test split, and the ground truth is read by nothing
+in the loop.
 
 ### The result
 
-| | LSR-Synth, 32 held-back problems | LSR-Transform, 27 held-back problems |
-|---|---|---|
-| mean `min(12, -log10 NMSE)` | **7.225 → 8.439** | **1.058 → 2.453** |
-| median NMSE | 2.85e-07 → **4.83e-11** | 0.1101 → 0.0974 |
-| Acc(0.1) | 50.0% → **59.4%** | 0.0% → **14.8%** |
-| OOD mean digits | 4.718 → **5.463** | no OOD split in this category |
-| OOD Acc(0.1) | 53.1% → **68.8%** | — |
-| problems at 6+ digits | 20/32 → 22/32 | 0/27 → 3/27 |
-| paired per problem | 18 better, 5 worse, 9 tied — sign test **p = 0.011** | 15 better, 9 worse, 3 tied — sign test p = 0.31 |
-| wall / model calls / tokens | 584 s / 14 / 76 230 | 570 s / 14 / 83 092 |
-| damaged replies redrawn | 2 of 14 | 2 of 14 |
-| expansions that scored zero | 2 of 12 | 4 of 12 |
-
-**The pooled means are the weaker half of that table.** Thirty-two problems put
-one problem at 3.1 points of Acc(0.1), so a 9-point move is three problems and
-proves very little on its own. The paired column is what carries the LSR-Synth
-result: the same 32 problems, the same splits, 18 improved against 5 that
-regressed, which a two-sided sign test puts at p = 0.011. On LSR-Transform the
-same test says **p = 0.31** — the mean nearly doubled and the median NMSE barely
-moved, which is the signature of a method that solved three more problems
-outright while losing ground on others. Reported as such rather than as a win.
-
-Per domain on LSR-Synth, with the caveat that a domain here is 6 to 12 problems
-and each one is worth 8 to 17 points of Acc:
-
-| Domain | Held-back | mean digits | Acc(0.1) |
-|---|---|---|---|
-| chemistry (reaction kinetics) | 8 | 8.97 → 11.03 | 87.5% → 87.5% |
-| biology (population growth) | 6 | 7.61 → 9.42 | 66.7% → 83.3% |
-| material science | 6 | 6.39 → 7.92 | 33.3% → 50.0% |
-| physics (nonlinear oscillators) | 12 | 6.29 → 6.48 | 25.0% → 33.3% |
-
-The gate agreed with the held-back set on direction and overstated the size:
-the winning node scored 8.726 on the three shards it was gated against versus
-8.439 on the two it never saw, against a root at 7.364 / 7.225. Four rounds,
-committing at rounds 1 and 3 (0.6137 → 0.6938 → 0.7272 held-out reward).
-
-### What the search actually found
-
-Both winners are recognisably the seed program with two things done to it, and
-neither is a new idea about symbolic regression:
-
-* **A wider library.** The seed offers `1, v, v², v³, sin, cos, log, √, 1/v,
-  e^-v` per variable plus pairwise products. The LSR-Synth winner adds `v⁴`,
-  `tanh`, `e^+v`, `sin(v_i)·v_j`, `cos(v_i)·v_j`, `v_i²v_j`, `v_iv_j²` and
-  triple products — which is what the four synthetic domains want, since their
-  ground truths are ODE right-hand sides that are *additive* in terms like
-  these.
-* **A validation split and an escalation schedule.** Both winners hold back a
-  quarter of the training samples, select on that rather than on the fit, and
-  try term sets in increasing size under a wall-clock check against
-  `spec["seconds"]`, keeping the best answer found so far. The LSR-Transform
-  winner is almost entirely this: constant, then linear, then a growing set with
-  `1/v`, `1/v²`, `√|v|`.
-
-Both call `spec["evaluate"]` on the assembled expression before returning it, so
-the answer is checked by the grader's own parser first. That idiom is in the
-seed program, which is where they got it.
-
-### Neither winner transfers to the other category
-
-The prompt asks for "one method that works across every domain above, not a
-dispatch on the problem id", and within a category that is what comes back. The
-categories are another matter. Each winner, run on the *other* run's held-back
-shards — problems it never saw, in a category it was never scored on:
-
-| Program | LSR-Synth (32 held back) | LSR-Transform (27 held back) |
-|---|---|---|
-| seed (STLSQ over a fixed library) | 7.225 digits, 50.0% Acc | 1.058 digits, 0.0% Acc |
-| LSR-Synth winner | **8.439**, 59.4% | 0.788, 0.0% |
-| LSR-Transform winner | 5.238, 37.5% | **2.453**, 14.8% |
-
-Each is best on its own category and **worse than the seed on the other**. Twelve
-expansions of program search against one category produce a method tuned to it:
-the LSR-Synth winner's wide additive library is dead weight on equations that are
-products and quotients, and the LSR-Transform winner's escalation schedule never
-reaches the terms the synthetic right-hand sides need inside four seconds. This
-is the honest cost of the protocol — one program for a whole distribution — and
-it is measurable here only because the benchmark ships two categories that
-differ in kind. `--dataset all` runs the search against both at once; that run
-has not been made.
-
-### One search for the whole benchmark, not one per problem
-
-The single most important number for reading the next table is the **LLM budget**,
-because the two protocols do not sit on the same axis at all.
-
-The paper's methods evolve **per problem**: each of the 240 problems gets its own
-search. From the benchmark's own configs (`configs/llmsr_gpt4omini.yaml` and
-friends) —
-
-| Method | LLM budget, per problem | For a 129-problem category |
-|---|---|---|
-| LLM-SR | 1 000 samples (`global_max_sample_num`), 4 per prompt → 250 prompts | ~32 000 prompts |
-| LaSR | 2 000 samples (`max_num_samples`), 25 iterations × 10 populations | ~258 000 samples |
-| Direct prompting | 5 samples in 1 prompt | 129 prompts |
-| **this port** | — | **12 expansions = 14 prompts, for the whole category** |
-
-So the run measured above spends **14 model calls to cover 129 problems** —
-about **0.11 calls per problem**, roughly 2 300× less LLM per problem than
-LLM-SR, and an order of magnitude less than *direct prompting does for a single
-problem*. There is one program, written without the model ever seeing a data
-point, and it is run over every problem in the benchmark. Each problem then gets
-four seconds of CPU and no network.
-
-That is not a better way to run LLM-SRBench. It is a different question — "can a
-model write one method that solves a whole scientific distribution?" rather than
-"can a model find this equation?" — and the numbers below are only interesting
-with the budget column attached.
-
-### The same benchmark under its own protocol (`--per-problem`)
-
-The section above says the LSR-Transform deficit is the protocol's rather than
-the search's. That is a testable claim, so it was tested: the same tree search,
-the same seed program, the same grammar and the same sandbox, run **once per
-problem** over all 111 LSR-Transform problems.
-
-| Setting | Value |
-|---|---|
-| Search | 6 expansions per problem, 3 workers, 6 validation shards from 25% of train |
-| Budget | 8 s per problem per expansion, `--train-points 4000`, `--problem-concurrency 2` |
-| Cost | 584 model calls for 111 problems — **5.26 per problem**, 1.62M tokens, 3 810 s wall |
-| Reported on | each problem's own benchmark test split, which no expansion is scored against |
-
-| LSR-Transform, all 111 problems | seed program | after 6 expansions |
-|---|---|---|
-| Acc(0.1) | 0.9% | **43.2%** |
-| median NMSE | 0.0941 | **0.00568** |
-| mean `min(12, -log10 NMSE)` | 1.074 | **5.391** |
-| problems at 6+ digits | 0 | **44** |
-| problems at the 12-digit cap | 0 | **41** |
-| paired per problem | — | 59 better, 1 worse, 51 tied, sign test **p = 1e-16** |
-
-Against the same category under the whole-category protocol — 8.1% Acc(0.1),
-0.0753 median NMSE — that is a **five-fold** move, and it is the protocol that
-moved rather than the search: identical tree, identical seed, identical grammar.
-
-**And it recovers equations, not just fits.** The answers are median 3 terms and
-126 characters against a ground truth of 1 term and 33; under the whole-category
-protocol they were 9 terms and 240+. Forty-one problems land on the 12-digit cap,
-and reading them shows why:
-
-| ground truth | what the search returned |
-|---|---|
-| `-sqrt(q1*q2/(F*epsilon))/(2*sqrt(pi))` | `-sqrt(q1*q2/(4*pi*epsilon*F))` |
-| `x1*cos(theta1 - theta2) - sqrt(x**2 + x1**2*cos(theta1 - theta2)**2 - x1**2)` | `x1*cos(theta1 - theta2) - sqrt(x**2 - x1**2*sin(theta1 - theta2)**2)` |
-| `(A + x2*y2 + x3*y3)/x1` | `0.999999995*(A/x1) + 0.999999986*(x2*y2/x1) + 1.000000024*(x3*y3/x1)` |
-| `-c*p*sqrt(1/(c**2*m_0**2 + p**2))` | `-0.99999999977*p/sqrt(m_0**2 + (p/c)**2)` |
-
-The first is the same expression, since `1/(2*sqrt(pi))` is `1/sqrt(4*pi)`. The
-second is the same expression through the Pythagorean identity — a rearrangement
-the benchmark was built to reward and that no library fit produces. These are the
-symbolic recoveries the whole-category protocol never once produced, and they are
-what the paper's symbolic-accuracy column is asking for. That column is still not
-measured here, but the answers are now the right shape to be asked about.
-
-Result file:
-[`bench/results/era-srbench-per-problem-transform.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-srbench-per-problem-transform.json).
-
-### What a bigger budget buys
-
-The run above spends 5.26 model calls per problem. Raising it to **24
-expansions and 20 s per problem** — about three times the calls and two and a
-half times the compute — was run over the same 111 problems, same seed, same
-splits, and nothing else changed:
-
-| LSR-Transform, all 111 problems | seed | 6 expansions, 8 s | **24 expansions, 20 s** |
-|---|---|---|---|
-| model calls per problem | 0 | 5.26 | **16.46** |
-| Acc(0.1) | 0.9% | 43.2% | **49.5%** (55 of 111) |
-| median NMSE | 0.0941 | 5.68e-03 | **9.75e-06** |
-| mean `min(12, -log10 NMSE)` | 1.074 | 5.391 | **6.271** |
-| problems at 6+ digits | 0 | 44 | **52** |
-| problems at the 12-digit cap | 0 | 41 | **48** |
-| paired against the seed | — | 59 better, 1 worse | **75 better, 0 worse** (p = 5e-23) |
-| median answer length | 9 terms | 3 terms, 126 chars | **2 terms, 98 chars** |
-| wall / tokens | — | 3 810 s / 1.6M | 8 801 s / 5.6M |
-
-Three times the budget buys **six points of Acc(0.1) and a 580-fold drop in
-median NMSE** — the second number being the more informative one, because
-Acc(0.1) is an indicator that a problem either clears or does not, while the
-median NMSE says the typical answer went from "roughly right" to "right to five
-decimal places". Seven more problems reach the 12-digit cap. Nothing regressed:
-75 problems improved on the seed and **zero** got worse.
-
-The answers also keep getting shorter — 9 terms under the whole-category
-protocol, 3 at the small per-problem budget, 2 here, against a ground truth of
-1. More search is not buying a longer fit; it is buying the right structure.
-
-Result file:
-[`bench/results/era-srbench-per-problem-transform-24x.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-srbench-per-problem-transform-24x.json).
-Both sweeps write their result file **after every problem**, so an interrupted
-run keeps what it has paid for and `--resume` picks it up; the budget is
-fingerprinted in the file and a resume under a different one is refused.
-
-### The fully aligned run, and what alignment costs
-
-`--answer-format program --seed-program linear` is upstream's answer format,
-upstream's starting skeleton, upstream's ten constants and upstream's single
-BFGS. Run over all 111 LSR-Transform problems at 24 expansions and 20 s each:
-
-| LSR-Transform, all 111 | `linear` root | after 24 expansions |
-|---|---|---|
-| Acc(0.1) | 0.0% | **36.9%** (41 of 111) |
-| median NMSE | 0.4243 | **0.1022** |
-| mean `min(12, -log10 NMSE)` | 0.438 | **4.805** |
-| problems at 6+ digits | 0 | **41** |
-| problems at the 12-digit cap | 0 | **34** |
-| paired per problem | — | 68 better, **0 worse**, 43 tied (p = 7e-21) |
-| cost | — | 2 058 calls (18.5/problem), 7.1M tokens, 3.2 h |
-
-Put beside the looser setting this port ran first, the alignment is expensive
-and the expense is the point:
-
-| LSR-Transform | Acc(0.1) | median NMSE |
-|---|---|---|
-| `expression` format, `library` root — this port's own loosest setting | 49.5% | 9.75e-06 |
-| **`program` format, `linear` root — fully aligned, `glm-5.2`** | **36.9%** | **0.1022** |
-| LLM-SR (paper, best backbone) | 39.64% | 0.0091 |
-| LaSR (paper, best backbone) | 50.45% | 0.0011 |
-| **the same aligned setting, `deepseek-v4-flash`** | **56.8%** | **2.15e-08** |
-
-**Thirteen points of Acc(0.1) were the loose settings, not the search.** The
-aligned number lands just under LLM-SR and well under LaSR, at 18.5 model calls
-per problem against LLM-SR's 250 prompts. Holding every one of those settings
-fixed and changing only the model moves it to 56.8% at 16.5 calls per problem,
-which is measured below — so the aligned row is a statement about `glm-5.2` on
-this protocol, not about the protocol's ceiling. The median NMSE moves four orders of
-magnitude, and that gap is almost entirely the ten-constant cap: the answers
-that used to reach 1e-06 did it with a dozen free coefficients, and in upstream's
-format there are ten and one gradient-based fit to place them.
-
-That is the honest headline for this task. The 49.5% is still in the file above,
-and it is still true of the setting that produced it — but the setting was this
-port's, not the benchmark's.
-
-### Why the aligned run is 36.9% and not 94.6%
-
-The aligned run scored 41 of 111. Before reading that as the search's ceiling it
-is worth asking what the *setting's* ceiling is, and then what actually stopped
-the other 70. Four candidate causes, each measured rather than argued.
-
-**Not the budget.** Every one of the 70 failures spent its whole allowance:
-
-| | |
-|---|---|
-| failures that used all 24 expansions | **70 / 70** |
-| solves at 4 expansions / 7 / 10 / 13-15 / 16-18 / 19-21 / 22-24 | 12 / 8 / 5 / 3 / 3 / 3 / 1 |
-
-The per-round hazard decays 10.8% -> 8.1% -> 5.5% and then goes **flat near
-3.5%**. A search closing in on an answer does not have a flat hazard.
-
-**Not the answer format.** `python -m tools.srbench_reachability` rewrites each
-ground truth in the format the run had to answer in -- coefficients holed out as
-`params[i]`, exponents left literal -- and fits it with the grader's own single
-BFGS from all ones:
-
-| LSR-Transform, 111 problems | reaching Acc(0.1) = 1 |
-|---|---|
-| ground truth, constants intact | 111 |
-| **ground truth as `equation(..., params)`, grader's BFGS** | **105** |
-| the same, fitted from many restarts | 106 |
-
-The setting's ceiling is **105 of 111**. One problem is lost to the single start
-and five to the parameterisation; the remaining 64-problem gap is search.
-
-**Not overfitting.** No failed problem ever reached the digit cap on its own
-validation split -- median best gate score among failures is 0.555. The search
-did not pick a bad answer over a good one; it never generated a good one.
-
-**What actually happens: the hypothesis collapses, not the code.** Re-running a
-failure with every candidate's source kept shows what a plateau is made of. On
-`omega*(c - v)/c` -- relativistic Doppler to first order -- ten nodes carried
-**ten distinct `program_id`s** and only **two physical hypotheses**:
-
-| nodes | answer | score |
-|---|---|---|
-| 1, 3, 5, 9 | `omega*sqrt(1 - v**2/c**2)` | 0.363 |
-| 4, 7 | `params[0]*omega*sqrt(1 - beta**2) + params[1]` | 1.265 |
-| 0, 8 | the linear root, unchanged | 1.597 |
-
-Six of ten proposals are the Lorentz factor, which scores **worse than the
-linear baseline**, and `(c - v)/c` is never tried. The model is anchored by the
-variable names -- "relativistic angular frequency", "speed of light",
-"velocity" -- and re-samples the same prior every expansion, because the
-mutation prompt shows it one parent and one score and no record of what has
-already been proposed. Extended to 72 expansions the same problem builds a chain
-**23 deep** and never leaves 1.597.
-
-So the tree is not the problem: it accumulates when there is anything to
-accumulate. `d2/foc - d2/d1` at 72 expansions climbs 0.44 -> 1.13 -> 1.60 ->
-1.76 -> 2.27 -> 12.0 along a chain 9 deep, solving at node 30 -- past the
-original 25-node budget. Which regime a problem lands in is decided by sampling:
-across the sweep, 43 of the 70 failures end with the **unchanged linear root** as
-the best of 25 nodes, and structurally identical siblings split opposite ways
-(`E_n*h/(2*pi*B*Jz*mom)` solved at node 10; `E_n*h/(2*pi*B*Jz*g_)` failed at 25).
-
-Two measurements name the same quantity from opposite directions. Within one
-model, failing trees put **72-88%** of their nodes on a single score and winning
-trees **23-31%**. Across models, `deepseek-v4-flash` produces **9-13** distinct
-answers per tree against `glm-5.2`'s 3-6, and solves in three calls problems
-where `glm-5.2` spent 24 expansions without moving. The bottleneck is the
-diversity of *hypotheses*, not of programs, and not the budget.
-
-#### `--recall-attempts`, and why more diversity is not the same as more accuracy
-
-If the prompt's missing memory is the mechanism, giving it one should break the
-plateau. `--recall-attempts N` lists the N best-scoring structures the tree
-already holds, with their scores, in each per-problem mutation prompt; it is off
-by default, which is upstream's view. Measured as a paired A/B on problems the
-sweep failed, both arms re-run (the variance is large enough that a control
-re-run alone solves some of them, so the sweep's zero is not a baseline):
-
-| `deepseek-v4-flash`, 13 paired problems | `--recall-attempts 0` | `--recall-attempts 12` |
-|---|---|---|
-| solved | 3 | 3 |
-| beat its own root | 12 | 11 |
-| mean best score | 6.43 | 6.17 |
-| **distinct answers per tree** | 9.69 | **11.77** |
-| **largest identical-answer block** | 38% | **29%** |
-
-**The mechanism works and the accuracy does not move.** Diversity rises by a
-fifth; solves do not budge and the mean drops slightly. The per-problem rows say
-why: of the three problems that got worse, all three got *more* diverse --
-`ii.11.17_0_0` went 10.42 -> 0.002 with distinct answers 14 -> 20. Ranking the
-list by score, which is there precisely to keep a near-miss from being pushed
-away as hard as a dead end, is not enough to prevent it.
-
-The honest reading is that hypothesis diversity is a real and controllable
-bottleneck, and that raising it indiscriminately is not a fix: a memory has to
-push away only the branches that are actually exhausted.
-
-### A second model on the same protocol, and what the gap is made of
-
-The diagnosis above says the bottleneck is hypothesis diversity rather than
-budget or format. If that is right, a model that proposes more distinct
-hypotheses per expansion should convert the same 24 expansions into more
-answers. `deepseek-v4-flash` was run over the identical 111 problems with every
-flag unchanged -- `--per-problem --answer-format program --seed-program linear
---shards 6 --iterations 24 --workers 3 --seed 0` -- so only the model differs:
+Two models, every flag identical, so only the model differs:
 
 | LSR-Transform, all 111 | Acc(0.1) | median NMSE | mean `min(12, -log10 NMSE)` | at the cap | spent all 24 expansions | calls/problem |
 |---|---|---|---|---|---|---|
@@ -1340,8 +983,7 @@ flag unchanged -- `--per-problem --answer-format program --seed-program linear
 Paired over the same problems: **33 solved by `deepseek-v4-flash` alone, 11 by
 `glm-5.2` alone**, 67 tied (exact McNemar, p = 0.0013). Fewer calls per problem,
 a third of the wall-clock, and the weaker model is the one that more often
-*exhausts* its budget -- 76 problems against 62 -- which is what running out of
-hypotheses looks like from the outside.
+*exhausts* its budget — 76 problems against 62.
 
 Where the twenty points come from is specific:
 
@@ -1352,237 +994,131 @@ Where the twenty points come from is specific:
 | problems | 5 | 30 | 27 | 21 | 22 | 6 |
 
 The whole gap is the 3- and 4-variable bands. At five variables the weaker model
-is *ahead*; at six they are within noise of each other; at eight **both score
-zero on all six problems**. A better proposer moves the middle of the
-distribution and does nothing at all for the tail, which is the shape to expect
-if the tail is bounded by the search space rather than by the proposals.
+is *ahead*; at six they are within noise; at eight **both score zero on all six
+problems**. A better proposer moves the middle of the distribution and does
+nothing for the tail.
 
-Removing the six problems the reachability sweep marks unreachable in this
-answer format puts `deepseek-v4-flash` at **60.0% of the 105 that are
-reachable**.
+Result files:
+[`era-srbench-deepseek-transform.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-srbench-deepseek-transform.json),
+[`era-srbench-aligned-transform.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-srbench-aligned-transform.json).
 
-Result file:
-[`bench/results/era-srbench-deepseek-transform.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-srbench-deepseek-transform.json).
+### Symbolic accuracy, the column that separates discovery from fitting
 
-### What LSR-Synth's own ceiling is, and why it can only be quoted for 49 problems
+`python -m tools.score_symbolic_accuracy` scores the paper's third metric: is the
+answer *the equation*, after removing parameters and constants. On the
+`deepseek-v4-flash` run, **46 of the 109 problems whose ground truth is intact**
+are judged equivalent — 41.4% on the paper's 111-problem denominator, of which
+11 are settled by sympy without any model being asked.
 
-The reachability sweep run over LSR-Synth splits the category into two halves
-that have to be read differently, and the split is not one this port chose:
+The cross-tabulation is the part worth keeping:
 
-| subset | problems | truth as published | as `equation(..., params)`, grader's BFGS | with restarts | truth unreadable |
-|---|---|---|---|---|---|
-| `bio_pop_growth` | 24 | 24 | **14 (58%)** | 21 | 0 |
-| `matsci` | 25 | 25 | **25 (100%)** | 25 | 0 |
-| `chem_react` | 36 | — | — | — | **36** |
-| `phys_osc` | 44 | — | — | — | **44** |
-
-**Where the truth is readable, the ceiling is subset-specific and it is not the
-data.** Every `bio_pop_growth` and `matsci` truth reproduces its own samples to
-the full 12 digits with its constants intact, so there is no noise floor
-anywhere here. Holed out as `params[i]` and fitted the way the grader fits,
-`matsci` loses nothing at all and `bio_pop_growth` loses ten of twenty-four —
-seven of them to the single BFGS start alone. The truths say why: a coefficient
-of 0.95 sitting beside a carrying capacity of 96.9 is not a place a single
-gradient descent from `[1.0]*10` arrives. That ceiling is the benchmark's own
-protocol and every method measured under it pays the same price, but it means a
-low `bio_pop_growth` score is half protocol and a low `matsci` score is all
-search.
-
-**The other 80 truths cannot be read at all, and the two subsets fail
-differently.** All 36 `chem_react` truths carry a mangled constant — a number
-with an identifier fused onto it, as in
-`0.18997742423620262*A(t)**2 + 0.18997742423620262_z*A(t)**2/(...)`, where the
-second coefficient's value is simply gone. All 44 `phys_osc` truths are symbolic
-templates whose parameters were never bound: `F0*sin(t) - omega0**2*x(t)**3 -
-...` against data whose only columns are `x`, `t` and `v`.
-
-Scoring those 80 problems is unaffected — the samples are intact and nothing in
-the run reads a ground truth — so their Acc(0.1) and NMSE are as real as any
-other. What cannot be said for them is how far from reachable they were, and
-that is the caveat to carry into any comparison with the paper's `chem_react`
-and `phys_osc` columns.
-
-Result file:
-[`bench/results/era-srbench-reachability-synth.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-srbench-reachability-synth.json).
-
-### Against the paper's own tables
-
-Two of this port's three programs can be compared to the paper's numbers over
-the **full** category, which is what the paper reports on:
-
-* the **seed program** is a fixed algorithm that never saw anything — no
-  selection, no contamination, directly comparable;
-* each **winner** was selected on 6 of that category's 8 shards, so its full-set
-  row is optimistic and is marked as such; its clean number is the held-back
-  column beside it.
-
-Acc(0.1), best published result per column across all four methods × three
-backbones in the paper's Table 2. Every row below this port's own is in
-[`bench/results/era-srbench-fullset.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-srbench-fullset.json):
-
-| Acc(0.1) ↑ | LSR-Transform (111) | chemistry (36) | biology (24) | physics (44) | materials (25) |
-|---|---|---|---|---|---|
-| Direct prompting, best backbone | 6.31% | 13.88% | 4.16% | 9.09% | 0.0% |
-| SGA, best backbone | 8.11% | 16.66% | 12.51% | 9.09% | 36.11% |
-| LaSR, best backbone | **50.45%** | 38.92% | 20.83% | 31.81% | 72.04% |
-| LLM-SR, best backbone | 39.64% | 66.66% | 58.33% | **36.36%** | **88.28%** |
-| **seed program here** (no LLM at all, full set) | 0.9% | 80.6% | 54.2% | 18.2% | 48.0% |
-| **whole-category winner here** (full set, selection-contaminated) | 8.1% | **83.3%** | **79.2%** | 34.1% | 52.0% |
-| whole-category winner here (held-back only, clean) | 14.8% | 87.5% | 83.3% | 33.3% | 50.0% |
-| **per-problem here**, 5.26 calls/problem | 43.2% | — | — | — | — |
-| **per-problem here**, 16.46 calls/problem | **49.5%** | — | — | — | — |
-
-Median NMSE, same rows (the paper does not state how it aggregates its NMSE
-column; median is used here, and the per-problem values are in the result files
-so either aggregation can be recomputed):
-
-| NMSE ↓ | LSR-Transform | chemistry | biology | physics | materials |
-|---|---|---|---|---|---|
-| best published (method, backbone) | 0.0011 (LaSR) | 4.12e-06 (LLM-SR) | 1.04e-06 (LLM-SR) | 7.62e-05 (LLM-SR) | 3.21e-09 (LLM-SR) |
-| seed program here (full set) | 0.0941 | 5.47e-10 | 2.72e-10 | 3.91e-05 | 5.55e-08 |
-| whole-category winner here (full set) | 0.0753 | **7.53e-13** | **7.78e-13** | **4.59e-06** | **1.22e-10** |
-| per-problem here, 16.46 calls/problem | **9.75e-06** | — | — | — | — |
-
-### The column this protocol does not contest
-
-The paper reports **three** metrics and the two tables above compare two of them.
-The third is **symbolic accuracy** — a GPT-4o judge asking whether the discovered
-equation is mathematically the same as the ground truth — and it is not
-implemented here, because it needs a judge model in the scoring loop that
-nothing else in this port requires.
-
-It is left out, but it is not left unsaid, because there is every reason to
-think this protocol scores near zero on it. Measured on the held-back answers:
-
-| | median terms | median characters |
+| | SA: not equivalent | SA: equivalent |
 |---|---|---|
-| ground truth, LSR-Synth | 2 (max 5) | 104 |
-| ground truth, LSR-Transform | 1 (max 2) | 33 |
-| this port's seed and winner | 9–11 | 240+ (truncated in the files) |
+| Acc(0.1) = 0 | 46 | **0** |
+| Acc(0.1) = 1 | 17 | 46 |
 
-The winner returns a nine-to-eleven-term library fit where the truth is
-`0.316*P*exp(-0.054*t) + 0.316*P**2/(9.87*P + 1)`. It reaches NMSE 1e-13 on that
-problem — and it has not discovered the equation, it has interpolated it. The
-published methods' symbolic accuracy is low in absolute terms (LLM-SR's best
-column is 31.53% on LSR-Transform, 11.11% on chemistry) but it is not zero, and
-that difference is the whole distance between fitting and discovery.
+Not one problem that failed Acc(0.1) was judged symbolically equivalent, so SA is
+a strict subset of the 63 numerical solves — and 17 of those solves are answers
+that predict the held-out samples without being the equation.
 
-So: on **data fidelity** this protocol is competitive with and often ahead of the
-state of the art on LSR-Synth. On **symbolic discovery** it does not compete, and
-a reader should assume it loses that column outright until someone implements the
-judge and measures it.
+**The judge is `deepseek-v4-flash`, not the paper's GPT-4o.** A different judge is
+a different metric; the scorer records that in its own output and the number
+belongs beside the paper's column rather than inside it. Verdicts:
+[`era-srbench-deepseek-transform-symbolic.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-srbench-deepseek-transform-symbolic.json).
 
-Three more things fall out, and the third is the one worth arguing about:
+### Against the paper's own table
 
-#### The root nodes are not the same strength, and on LSR-Synth that is the result
+Table 2's LSR-Transform block, each method at its best backbone (GPT-4o-mini):
 
-The benchmark ships **no program**: its rows are an id, a description, the
-sample arrays, the variable names and a ground-truth string. Every method brings
-its own starting point, and the two here are not comparable in strength.
+| Acc(0.1) ↑ / SA ↑ / NMSE ↓ | SA (%) | Acc(0.1) (%) | NMSE | budget per problem |
+|---|---|---|---|---|
+| Direct prompting | 7.21 | 6.31 | 0.2631 | ~250 prompts |
+| SGA | 9.91 | 8.11 | 0.2321 | ~250 prompts |
+| LaSR | 6.31 | **50.45** | **0.0011** | 25 x 10 x 550 x 33 GP mutations, LLM at `llm_weight = 0.001` |
+| LLM-SR | **31.53** | 39.64 | 0.0091 | 250 prompts (1 000 samples / 4 per prompt) |
+| **here, `deepseek-v4-flash`** | **41.4** | **56.8** | **2.15e-08** | **16.5 model calls** |
 
-LLM-SR starts each problem from a plain linear model in the raw inputs — from
-its own `methods/llmsr/searcher.py`:
+The budget column is not one quantity. LLM-SR's 250 is arithmetic from its config
+(`global_max_sample_num: 1000`, `samples_per_prompt: 4`); LaSR is a genetic
+program with the LLM wired in at a 0.001 mutation weight, so its search is
+millions of candidate evaluations and its call count is not a stated number.
+Only the LLM-SR row is a like-for-like call comparison.
 
-```python
-def equation(x1, x2, ..., params):
-    y = params[0]*x1 + params[1]*x2 + ... + params[n]
-```
+LaSR's own row is the sharpest statement of what SA measures: **50.45% Acc against
+6.31% SA** is a method that fits rather than derives.
 
-This port's root is sparse regression over a fixed library of thirty to sixty
-*nonlinear* basis functions. Rather than argue about how much that is worth,
-both roots were run over every problem with **no LLM involved at any point**
-(`--seed-program library|linear`,
-[`bench/results/era-srbench-root-nodes.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-srbench-root-nodes.json)):
+Five settings here are still stricter than the benchmark's own: 4 000 training
+rows against 80 000; selection on a 25% validation slice rather than full-train
+MSE; 75% of train available to fit; and a non-finite prediction failing the whole
+problem where upstream drops the point and scores the rest. The numbers above are
+a floor.
 
-| Acc(0.1), no LLM | LSR-Transform | chemistry | biology | physics | materials | LSR-Synth pooled |
-|---|---|---|---|---|---|---|
-| `library` root (this port's) | 0.9% | 80.6% | 54.2% | 18.2% | 48.0% | **48.1%** |
-| `linear` root (LLM-SR's) | 0.0% | 8.3% | 4.2% | 0.0% | 0.0% | **3.1%** |
-| median NMSE, LSR-Synth pooled | — | — | — | — | — | 8.6e-08 vs 0.091 |
+### What the search actually found
 
-**On LSR-Synth the choice of root is worth 45 points of Acc(0.1) before a single
-model call.** Those problems are ODE right-hand sides built as a known term plus
-a novel one, additive in exactly such a library, so this port's root starts
-inside the function space the answer lives in. Every LSR-Synth number above with
-`library` under it is therefore mostly a statement about the starting point:
-"a seed program with no LLM in it beats LLM-SR on chemistry" means **a stronger
-start beats a weaker one**, not that this search is better.
+Three answers where the model returned a rearrangement rather than a transcription:
 
-The asymmetry does not carry to LSR-Transform, where both roots are worthless —
-0.9% and 0.0% — so the 49.5% there was earned by the search rather than handed to
-it. That is also why the LSR-Transform result is the one worth quoting.
+| what it is | the truth, as the dataset poses it | what the search returned |
+|---|---|---|
+| Bohr energy levels, solved for the principal quantum number | `-sqrt(2)*q**2*sqrt(-m/E_n)/(4*eps*h)` | `sqrt(-m*q**4/(eps**2*h**2*E_n))` |
+| waveguide dispersion, solved for angular frequency | `c*sqrt(d**2*k**2 + pi**2)/d` | `c*sqrt(k**2 + (pi/d)**2)` |
+| relativistic momentum, solved for velocity | `-c*p*sqrt(1/(c**2*m_0**2 + p**2))` | `params[0]*p*c/sqrt(m_0**2*c**2 + p**2) + params[1]` |
 
-#### And the strong root is not discovering anything — it is interpolating
+The second one is the point of the benchmark in one line: the dataset poses the
+cutoff relation with `d` multiplied out, and the search hands back
+`omega = c*sqrt(k**2 + (pi/d)**2)` — the form a physicist writes.
 
-The obvious next question is why a 2016 fitting method with no LLM in it scores
-48% on a benchmark built to defeat memorisation. It is not because the library
-contains the answers. Fitting the library's own basis to each ground truth's
-samples and asking whether the residual reaches the data's float32 floor — which
-it can only do if the truth lies in the library's span — gives:
+Also recovered: the Planck distribution solved for temperature (nested `log`
+intact), relativistic Doppler as `omega*sqrt(1 - v**2/c**2)/(1 + v/c)`, the
+paramagnetic two-level partition as the two-exponential expansion of
+`2n*cosh(mu*B/kT)`, isothermal expansion solved for the final volume with no spare
+parameter at all, Zeeman splitting solved for field, the driven oscillator solved
+for drive frequency, the particle-in-a-box ground state, and the Langevin
+dielectric in its `1/(1+x)` form.
 
-| | |
-|---|---|
-| evaluable LSR-Synth ground truths | 49 |
-| actually inside the library's span | **6** |
-| outside it | **43** |
-| yet the root scores | Acc(0.1) 48.1%, median NMSE 8.6e-08 |
+`python -m tools.gen_srbench_report` builds
+[a three-page report](https://github.com/Birfy/agentdescent/blob/main/bench/reports/era-llm-srbench-transform.pdf)
+of these.
 
-So on 43 of 49 problems the root **cannot express the answer** and scores near
-machine precision anyway. Two more numbers say the same thing: its answers run
-8–11 terms where the truths run 2, and its median NMSE goes from 8.6e-08
-in-domain to 2.2e-04 out of it — **2600× worse the moment the sampled region
-ends**.
+### Why `glm-5.2` stops at 36.9%
 
-The mechanism is the benchmark's data rather than the method: LSR-Synth ships
-4 000 dense, effectively noiseless samples per problem and an in-domain test
-split, and a thirty-to-sixty term additive basis fitted by least squares
-approximates any smooth function on a densely sampled region to eight
-significant figures — whether or not the true form is in the basis.
+Measured rather than argued, because the answer decides what to spend on next.
 
-**That is a finding about LSR-Synth's data-fidelity columns, not only about this
-port.** Acc(0.1) and NMSE on that half of the benchmark substantially measure
-in-domain interpolation, and a classical fit that cannot write down a single one
-of 43 ground truths reaches 48% on them. It is exactly what the paper's third
-metric, symbolic accuracy, exists to catch — LLM-SR scores 52.77% Acc(0.1) on
-chemistry against 11.11% SA — and it is the metric this port does not implement.
-Every LSR-Synth number here should be read with that in view; the LSR-Transform
-numbers, where both roots score ~0 and answers come back at 2 terms, should not.
+**Not the budget.** Every one of the 70 failures spent all 24 expansions. The
+per-round hazard decays 10.8% → 8.1% → 5.5% and then goes **flat near 3.5%** —
+not the shape of a search closing in.
 
-**On LSR-Synth this protocol matches or beats the published state of the art on
-four of five columns of NMSE and two of four on Acc(0.1)** — at 0.11 LLM calls
-per problem, and on data fidelity only, with the symbolic-accuracy caveat above
-attached. Chemistry and biology are ahead of every published method on both
-metrics; physics is level on Acc and an order of magnitude better on NMSE.
+**Not overfitting.** No failed problem ever reached the digit cap on its own
+validation split; the median best gate score among failures is 0.555. The search
+did not pick a bad answer over a good one, it never generated a good one.
 
-**And a plain sparse-regression baseline gets most of the way there on its own.**
-The seed program contains no LLM anywhere, and it scores 80.6% on chemistry
-against LLM-SR's 66.66% and a median NMSE four orders of magnitude below it.
-That is a fact about the benchmark rather than about this search: LSR-Synth
-problems are ODE right-hand sides built as *a known term plus a novel term*,
-which is the exact shape sequentially thresholded least squares was designed
-for, and the published methods are working under a per-problem sample budget
-that a direct least-squares fit does not have. Anyone quoting LSR-Synth numbers
-should have that row in view.
+**The hypothesis collapses while the code does not.** Re-running
+`omega*(c - v)/c` with every candidate's source kept gives ten nodes carrying
+**ten distinct `program_id`s and two physical hypotheses**:
 
-**Materials science is where the two metrics disagree, and it is instructive.**
-The winner's median NMSE there (1.22e-10) is better than LLM-SR's (3.21e-09),
-while its Acc(0.1) (52.0%) is far worse than LLM-SR's (88.28%). Acc(0.1) is an
-indicator on the *worst* relative error over 500 test points, so an equation that
-is excellent in L2 and blows up relatively at a single near-zero target scores
-0 — and a library-fit equation does that where a structurally correct one does
-not. The two columns are measuring different virtues, and this protocol has the
-first without the second.
+| nodes | answer | score |
+|---|---|---|
+| 1, 3, 5, 9 | `omega*sqrt(1 - v**2/c**2)` | 0.363 |
+| 4, 7 | `params[0]*omega*sqrt(1 - beta**2) + params[1]` | 1.265 |
+| 0, 8 | the linear root, unchanged | 1.597 |
 
-**On LSR-Transform the whole-category protocol loses, and the protocol is why.**
-The seed scores 0.9%, twelve expansions take it to 8.1% (14.8% on the held-back
-shards), against LaSR's 50.45%. Those problems are Feynman equations rearranged
-into products, quotients and nested roots — forms no linear-in-a-library method
-can express at all, where proposing a *structure* from the variable names is the
-entire task. Switching to the benchmark's own protocol closes it: **49.5%**, one
-problem short of LaSR's 50.45% (55 against 56 of 111) and ahead of LLM-SR's
-39.64%, with a median NMSE two orders of magnitude below LaSR's — at 16.46 model
-calls per problem against LLM-SR's 250 prompts. The gap was the protocol's and
-the budget's, not the tree search's, and it was tested rather than asserted.
+Six of ten proposals are the Lorentz factor, which scores **worse than the linear
+baseline**, and `(c - v)/c` is never tried. The mutation prompt shows one parent
+and one score and no record of what has already been proposed, so the model
+re-samples the same prior every expansion. Extended to 72 expansions the same
+problem builds a chain **23 deep** and never leaves 1.597.
+
+The tree itself is fine: `d2/foc - d2/d1` at 72 expansions climbs 0.44 → 1.13 →
+1.60 → 1.76 → 2.27 → 12.0 along a chain 9 deep, solving at node 30 — past the
+original 25-node budget. Which regime a problem lands in is decided by sampling:
+43 of the 70 failures end with the **unchanged linear root** as the best of 25
+nodes, and structurally identical siblings split opposite ways
+(`E_n*h/(2*pi*B*Jz*mom)` solved at node 10; `E_n*h/(2*pi*B*Jz*g_)` failed at 25).
+
+Two measurements name the same quantity from opposite directions. Within one
+model, failing trees put **72–88%** of their nodes on a single score and winning
+trees **23–31%**. Across models, `deepseek-v4-flash` produces **9–13** distinct
+answers per tree against `glm-5.2`'s 3–6. The bottleneck is the diversity of
+*hypotheses*, not of programs, and not the budget.
 
 ## Run it
 
