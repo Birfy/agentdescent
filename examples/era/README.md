@@ -95,12 +95,16 @@ OR-Tools, networkx, torch, faiss, python-sat, sklearn or dace — a dependency
 list this repository does not carry — or their reference does not lift out of its
 class; `lqr` clears both filters and is still excluded, because its own
 `is_solution` calls `float()` on a 1×1 array, which NumPy has refused since 1.25.
-cvxpy *is* carried, which is what buys the eight convex-programming tasks —
+cvxpy and jax *are* carried. cvxpy buys the eight convex-programming tasks —
 the set EvoMem ([arXiv:2608.10795](https://arxiv.org/abs/2608.10795)) selected,
 and so the only tasks where this port and a published evolutionary method have
 run the same problems. Its solver backends have to land in `dist-packages`
 rather than the user site or the sandbox cannot see them (`qp` wants OSQP, which
-wants jinja2; `power_control` wants ECOS).
+wants jinja2; `power_control` wants ECOS). jax is here for the same reason numba
+and cython are: it is pinned in AlgoTune's own `requirements.txt`, 54 of
+upstream's 2595 published solvers import it, and it is how OpenEvolve's published
+AlgoTune example reaches 321x on `polynomial_real` — so an allowlist without it
+would be measuring the allowlist.
 `--list-tasks` prints the runnable set; `--tasks all` runs it.
 
 Problem sizes are **upstream's published ones**, read from AlgoTune's own

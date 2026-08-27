@@ -240,6 +240,20 @@ ALLOWED_IMPORTS = {
     "heapq",
     "itertools",
     "cython",
+    # `jax==0.5.3` is in AlgoTune's own requirements.txt, and 54 of upstream's
+    # 2595 published solvers import it -- nine of them on
+    # `fft_cmplx_scipy_fftpack` alone. Leaving it out does not make the benchmark
+    # harder, it makes it a different one, which is the argument that put numba
+    # and cython here. It is also how OpenEvolve's published AlgoTune example
+    # reaches 321x on `polynomial_real`, so a comparison against that number
+    # without it would be measuring the allowlist.
+    #
+    # Checked inside the sandbox under the limits the runner really sets
+    # (4 GB address space, 64 processes, --unshare-net, --clearenv): jax imports
+    # in 0.4s, a jitted 1500x1500 SVD compiles and runs in 0.67s, and
+    # `jnp.roots(400)` takes 0.37s. XLA does not need the network and does not
+    # blow the address space.
+    "jax",
     "logging",
     "math",
     "numba",
@@ -870,7 +884,8 @@ PACKAGES = """ - numpy
  - scipy
  - numba
  - cython
- - cvxpy"""
+ - cvxpy
+ - jax"""
 
 #: Upstream's `AlgoTuner/messages/initial_system_message.txt`, verbatim except
 #: where this port's contract genuinely differs. Two things differ and both are
