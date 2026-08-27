@@ -23,8 +23,17 @@ median. It costs nothing: 109 model calls against 101, 1179s against 1109s.
 
 But three seeds an arm is three seeds an arm, and the base arm itself spans
 0.983x to 126.506x on this task. A rank test over the six prior-vs-base runs
-gives **p=0.10** — suggestive, and nothing more. The real evidence is one level
-down.
+gives **p=0.10** — suggestive, and nothing more.
+
+Worse, the arm-level comparison is confounded. `base` ran at the default
+`c_puct=1.0`; the other three ran at 2.5, because a squared prior needs a wide
+enough exploration term to bite on. So "prior vs base" is really "prior at 2.5
+vs uniform at 1.0", and there is no uniform-prior-at-2.5 control in this design.
+The nearest thing is `both` against `repair` — same `c_puct`, same repair loop,
+prior the only difference — which goes 19.5x against 7.0x, in the same direction
+and just as underpowered. The missing control is queued.
+
+The evidence that does not depend on any of this is one level down.
 
 ## The rating is predictive, and it steers
 
@@ -92,6 +101,10 @@ Keep `--prior-exponent`. Leave `--repair-regressions` off, which is its default.
 
 One task, on the task whose run-to-run spread is the widest we have measured.
 The node-level result (n=250, p=2e-13) is solid and is about the rating itself;
-the arm-level result (n=3, p=0.10) is a hypothesis. Whether a model prior helps
-on tasks where *every* direction is mediocre — where the useful signal would be
-"none of these are worth 10" rather than "this one is" — is untested.
+the arm-level result (n=3, p=0.10, and `c_puct` confounded with the prior) is a
+hypothesis.
+
+Whether a model prior helps on tasks where *every* direction is mediocre — where
+the useful signal would be "none of these are worth 10" rather than "this one
+is" — is untested. The eight OpenEvolve tasks, where the aligned run reached a
+harmonic mean of 1.443x, are exactly that population.
