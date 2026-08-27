@@ -1,0 +1,1031 @@
+{
+  "experiment": "ERA on AgentDescent -- AlgoTune, one tree per task",
+  "status": "completed",
+  "completed_at": "2026-08-27T08:36:56+00:00",
+  "upstream_commit": "dff9914c10800c7a031c9e8c3d4d1c8cd1b38906",
+  "benchmark": "AlgoTune (arXiv:2507.15887), oripress/AlgoTune",
+  "config": {
+    "provider": "claude",
+    "model": "deepseek-v4-flash-ga-260731",
+    "seed": 0,
+    "asynchronous": false,
+    "async_ratio": 1,
+    "max_seconds": 1800.0,
+    "pipelined_gate": false,
+    "gate_workers": 2,
+    "dry_run": false,
+    "serial": false,
+    "budget_rollouts": null,
+    "val_cap": null,
+    "eval_concurrency": null,
+    "reflective_merge": false,
+    "eval_cache": "",
+    "no_thinking": false,
+    "tasks": "eigenvectors_complex",
+    "list_tasks": false,
+    "staleness": "guarded",
+    "iterations": 45,
+    "workers": 3,
+    "shards": 6,
+    "test_shards": 3,
+    "problems": 2,
+    "test_problems": 0,
+    "packages": "bare",
+    "no_profile": false,
+    "repair_attempts": 4,
+    "repeats": 3,
+    "size_scale": 1.0,
+    "held_out_frac": 0.5,
+    "c_puct": 1.0,
+    "candidate_timeout": 300.0,
+    "problem_seconds": 60.0,
+    "max_code_length": 20000,
+    "max_tokens": 8000,
+    "temperature": 0.7,
+    "thinking": "disabled",
+    "api_timeout": 180.0,
+    "reply_attempts": 4,
+    "shutdown_grace": 120.0,
+    "quality_target": null
+  },
+  "summary": {
+    "tasks_run": 1,
+    "tasks_failed": 0,
+    "tasks_improved": 1,
+    "geometric_mean_baseline_speedup": 0.9939180055837511,
+    "geometric_mean_best_speedup": 1.0167849618759057,
+    "wall_seconds": 1040.1599495629998
+  },
+  "tasks": [
+    {
+      "task": "eigenvectors_complex",
+      "status": "completed",
+      "held_out_baseline_speedup": 0.9939180055837511,
+      "held_out_best_speedup": 1.0167849618759057,
+      "speedup_gain": 0.022866956292154628,
+      "nodes": 46,
+      "wall_seconds": 1011.6567241360026,
+      "best_program": "import numpy as np\nfrom scipy.linalg import eig as scipy_eig\n\ndef solve(problem):\n    # Convert to numpy array without copying if possible\n    A = np.asarray(problem, dtype=float)\n    \n    # Use scipy's eig with finite check disabled for speed\n    eigenvalues, eigenvectors = scipy_eig(A, check_finite=False)\n    \n    # Sort descending by real, then descending by imaginary\n    order = np.lexsort((-eigenvalues.imag, -eigenvalues.real))\n    eigenvalues_sorted = eigenvalues[order]\n    eigenvectors_sorted = eigenvectors[:, order]\n    \n    # Normalize columns\n    norms = np.linalg.norm(eigenvectors_sorted, axis=0)\n    norms[norms < 1e-12] = 1.0\n    eigenvectors_sorted /= norms\n    \n    # Return transposed as list of lists\n    return eigenvectors_sorted.T.tolist()",
+      "observation": {
+        "mode": "sync",
+        "wall_seconds": 1011.6567241360026,
+        "baseline": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "1408409429a00396",
+          "iteration": 0,
+          "change_summary": "AlgoTune reference implementation for eigenvectors_complex",
+          "score": 0.993413424931089,
+          "speedup": 0.993413424931089,
+          "num_visits": 45,
+          "valid": true,
+          "error": "",
+          "code_chars": 1092
+        },
+        "best": {
+          "index": 42,
+          "parent_index": 33,
+          "program_id": "368dfb735b8411f7",
+          "iteration": 41,
+          "change_summary": "",
+          "score": 1.045646839761911,
+          "speedup": 1.045646839761911,
+          "num_visits": 4,
+          "valid": true,
+          "error": "",
+          "code_chars": 766
+        },
+        "data": {
+          "task": "eigenvectors_complex",
+          "n": 463,
+          "published_n": 463,
+          "published_target_time_ms": 100,
+          "published_baseline_ms": 101.06844466666666,
+          "problems_per_shard": 2,
+          "problems_per_test_shard": 2,
+          "reported_instances": 6,
+          "scoring_shards": 6,
+          "test_shards": 3,
+          "timed_repeats": 3,
+          "line_profile": true,
+          "packages": "bare",
+          "seed": 0
+        },
+        "framework": {
+          "baseline_reward": 0.4983479154432958,
+          "final_reward": 0.49604292437653213,
+          "quality_gain": -0.002304991066763684,
+          "stop_reason": "rounds",
+          "error": null,
+          "outcomes": {
+            "committed": 5,
+            "tree-updated": 10
+          },
+          "rollouts": 45,
+          "rollout_seconds": 221.54258489608765,
+          "eval_seconds": 74.99845671653748,
+          "stale_considered": 45,
+          "stale_discarded": 0,
+          "stale_rate": 0.0,
+          "retired_workers": 0,
+          "history": [
+            {
+              "round": 0,
+              "held_out_reward": 0.5056210443318686,
+              "elapsed_s": 71.79060792922974,
+              "rollouts": 3,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 1,
+              "held_out_reward": 0.4979113543908294,
+              "elapsed_s": 138.6170153617859,
+              "rollouts": 6,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 2,
+              "held_out_reward": 0.5036875394657544,
+              "elapsed_s": 202.06130647659302,
+              "rollouts": 9,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 3,
+              "held_out_reward": 0.5036875394657544,
+              "elapsed_s": 274.2701873779297,
+              "rollouts": 12,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 4,
+              "held_out_reward": 0.5036875394657544,
+              "elapsed_s": 329.49997568130493,
+              "rollouts": 15,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 5,
+              "held_out_reward": 0.5036875394657544,
+              "elapsed_s": 417.04967522621155,
+              "rollouts": 18,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 6,
+              "held_out_reward": 0.5036875394657544,
+              "elapsed_s": 477.3395826816559,
+              "rollouts": 21,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 7,
+              "held_out_reward": 0.5036875394657544,
+              "elapsed_s": 535.994900226593,
+              "rollouts": 24,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 8,
+              "held_out_reward": 0.500082474829367,
+              "elapsed_s": 606.9842114448547,
+              "rollouts": 27,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 9,
+              "held_out_reward": 0.500082474829367,
+              "elapsed_s": 679.3722121715546,
+              "rollouts": 30,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 10,
+              "held_out_reward": 0.500082474829367,
+              "elapsed_s": 743.3176374435425,
+              "rollouts": 33,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 11,
+              "held_out_reward": 0.500082474829367,
+              "elapsed_s": 807.5250606536865,
+              "rollouts": 36,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 12,
+              "held_out_reward": 0.500082474829367,
+              "elapsed_s": 867.6810834407806,
+              "rollouts": 39,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 13,
+              "held_out_reward": 0.49604292437653213,
+              "elapsed_s": 936.8217971324921,
+              "rollouts": 42,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 14,
+              "held_out_reward": 0.49604292437653213,
+              "elapsed_s": 997.6656694412231,
+              "rollouts": 45,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            }
+          ]
+        },
+        "actor_usage": {
+          "calls": 105,
+          "failures": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "model_seconds": 866.638248
+        },
+        "tree": {
+          "nodes": 46,
+          "valid_nodes": 45,
+          "max_depth": 9,
+          "root_visits": 45,
+          "c_puct": 1.0,
+          "tree": [
+            {
+              "index": 0,
+              "parent_index": null,
+              "program_id": "1408409429a00396",
+              "iteration": 0,
+              "change_summary": "AlgoTune reference implementation for eigenvectors_complex",
+              "score": 0.993413424931089,
+              "speedup": 0.993413424931089,
+              "num_visits": 45,
+              "valid": true,
+              "error": "",
+              "code_chars": 1092
+            },
+            {
+              "index": 1,
+              "parent_index": 0,
+              "program_id": "19591978e92d03f0",
+              "iteration": 2,
+              "change_summary": "",
+              "score": 1.0004222391935025,
+              "speedup": 1.0004222391935025,
+              "num_visits": 43,
+              "valid": true,
+              "error": "",
+              "code_chars": 925
+            },
+            {
+              "index": 2,
+              "parent_index": 0,
+              "program_id": "a8a29a4d1215f812",
+              "iteration": 1,
+              "change_summary": "",
+              "score": 0.9999905039994315,
+              "speedup": 0.9999905039994315,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1034
+            },
+            {
+              "index": 3,
+              "parent_index": 0,
+              "program_id": "366689d9a6dc2cf5",
+              "iteration": 3,
+              "change_summary": "",
+              "score": 0.9914726774925037,
+              "speedup": 0.9914726774925037,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 715
+            },
+            {
+              "index": 4,
+              "parent_index": 1,
+              "program_id": "3ab91c641fe11ef9",
+              "iteration": 5,
+              "change_summary": "",
+              "score": 0.9868780978121364,
+              "speedup": 0.9868780978121364,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 744
+            },
+            {
+              "index": 5,
+              "parent_index": 1,
+              "program_id": "4a42d54810cb9764",
+              "iteration": 6,
+              "change_summary": "",
+              "score": 0.9769264149243345,
+              "speedup": 0.9769264149243345,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 598
+            },
+            {
+              "index": 6,
+              "parent_index": 1,
+              "program_id": "82c08337e654bd01",
+              "iteration": 4,
+              "change_summary": "",
+              "score": 1.0166475659046512,
+              "speedup": 1.0166475659046512,
+              "num_visits": 40,
+              "valid": true,
+              "error": "",
+              "code_chars": 784
+            },
+            {
+              "index": 7,
+              "parent_index": 6,
+              "program_id": "f59ff1e64047b0f5",
+              "iteration": 7,
+              "change_summary": "",
+              "score": 0.9977257203072881,
+              "speedup": 0.9977257203072881,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 731
+            },
+            {
+              "index": 8,
+              "parent_index": 6,
+              "program_id": "c803553d011661e7",
+              "iteration": 9,
+              "change_summary": "",
+              "score": 1.0214637155171835,
+              "speedup": 1.0214637155171835,
+              "num_visits": 36,
+              "valid": true,
+              "error": "",
+              "code_chars": 692
+            },
+            {
+              "index": 9,
+              "parent_index": 6,
+              "program_id": "13e13e2a01f4833e",
+              "iteration": 8,
+              "change_summary": "",
+              "score": 1.0012060236125773,
+              "speedup": 1.0012060236125773,
+              "num_visits": 2,
+              "valid": true,
+              "error": "",
+              "code_chars": 726
+            },
+            {
+              "index": 10,
+              "parent_index": 8,
+              "program_id": "c803553d011661e7",
+              "iteration": 11,
+              "change_summary": "",
+              "score": 0.99505657001303,
+              "speedup": 0.99505657001303,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 692
+            },
+            {
+              "index": 11,
+              "parent_index": 8,
+              "program_id": "1444b9c4838fa6c4",
+              "iteration": 10,
+              "change_summary": "",
+              "score": 0.9954568069997536,
+              "speedup": 0.9954568069997536,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 627
+            },
+            {
+              "index": 12,
+              "parent_index": 8,
+              "program_id": "d305fb86c0b79193",
+              "iteration": 12,
+              "change_summary": "",
+              "score": 0.8291724222209319,
+              "speedup": 0.8291724222209319,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 874
+            },
+            {
+              "index": 13,
+              "parent_index": 8,
+              "program_id": "311b977ea91d45c3",
+              "iteration": 15,
+              "change_summary": "",
+              "score": 1.006441692469887,
+              "speedup": 1.006441692469887,
+              "num_visits": 6,
+              "valid": true,
+              "error": "",
+              "code_chars": 627
+            },
+            {
+              "index": 14,
+              "parent_index": 8,
+              "program_id": "c803553d011661e7",
+              "iteration": 13,
+              "change_summary": "",
+              "score": 0.9988436300634199,
+              "speedup": 0.9988436300634199,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 692
+            },
+            {
+              "index": 15,
+              "parent_index": 9,
+              "program_id": "0a67d42607b301cf",
+              "iteration": 14,
+              "change_summary": "",
+              "score": 1.0040761340317015,
+              "speedup": 1.0040761340317015,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 604
+            },
+            {
+              "index": 16,
+              "parent_index": 13,
+              "program_id": "ab60f78f1b8b8916",
+              "iteration": 16,
+              "change_summary": "",
+              "score": 1.0123900488055841,
+              "speedup": 1.0123900488055841,
+              "num_visits": 5,
+              "valid": true,
+              "error": "",
+              "code_chars": 582
+            },
+            {
+              "index": 17,
+              "parent_index": 8,
+              "program_id": "ef06935c01f9880f",
+              "iteration": 17,
+              "change_summary": "",
+              "score": 0.9967691454410362,
+              "speedup": 0.9967691454410362,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 745
+            },
+            {
+              "index": 18,
+              "parent_index": 8,
+              "program_id": "1b8827047b5b4321",
+              "iteration": 18,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output",
+              "code_chars": 1062
+            },
+            {
+              "index": 19,
+              "parent_index": 8,
+              "program_id": "198f44bd1a9e4675",
+              "iteration": 21,
+              "change_summary": "",
+              "score": 0.9994802758437689,
+              "speedup": 0.9994802758437689,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 833
+            },
+            {
+              "index": 20,
+              "parent_index": 16,
+              "program_id": "f212d6cff3a9d9b1",
+              "iteration": 19,
+              "change_summary": "",
+              "score": 0.9966361262088387,
+              "speedup": 0.9966361262088387,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 626
+            },
+            {
+              "index": 21,
+              "parent_index": 16,
+              "program_id": "ab60f78f1b8b8916",
+              "iteration": 20,
+              "change_summary": "",
+              "score": 1.0067766563570386,
+              "speedup": 1.0067766563570386,
+              "num_visits": 3,
+              "valid": true,
+              "error": "",
+              "code_chars": 582
+            },
+            {
+              "index": 22,
+              "parent_index": 21,
+              "program_id": "3bae06cd9eb1dc12",
+              "iteration": 22,
+              "change_summary": "",
+              "score": 1.0116551760638977,
+              "speedup": 1.0116551760638977,
+              "num_visits": 2,
+              "valid": true,
+              "error": "",
+              "code_chars": 591
+            },
+            {
+              "index": 23,
+              "parent_index": 8,
+              "program_id": "c803553d011661e7",
+              "iteration": 24,
+              "change_summary": "",
+              "score": 0.9986604212688648,
+              "speedup": 0.9986604212688648,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 692
+            },
+            {
+              "index": 24,
+              "parent_index": 8,
+              "program_id": "b1729a4aa81cd831",
+              "iteration": 23,
+              "change_summary": "",
+              "score": 1.011703528229012,
+              "speedup": 1.011703528229012,
+              "num_visits": 20,
+              "valid": true,
+              "error": "",
+              "code_chars": 707
+            },
+            {
+              "index": 25,
+              "parent_index": 8,
+              "program_id": "c803553d011661e7",
+              "iteration": 27,
+              "change_summary": "",
+              "score": 0.993585324931069,
+              "speedup": 0.993585324931069,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 692
+            },
+            {
+              "index": 26,
+              "parent_index": 24,
+              "program_id": "28f34988f0d61dea",
+              "iteration": 25,
+              "change_summary": "",
+              "score": 1.0382147795144951,
+              "speedup": 1.0382147795144951,
+              "num_visits": 19,
+              "valid": true,
+              "error": "",
+              "code_chars": 719
+            },
+            {
+              "index": 27,
+              "parent_index": 22,
+              "program_id": "070b3d5e86930fb7",
+              "iteration": 26,
+              "change_summary": "",
+              "score": 0.9970962815650984,
+              "speedup": 0.9970962815650984,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 590
+            },
+            {
+              "index": 28,
+              "parent_index": 26,
+              "program_id": "378b5dee9eff365b",
+              "iteration": 30,
+              "change_summary": "",
+              "score": 1.0165200798994791,
+              "speedup": 1.0165200798994791,
+              "num_visits": 8,
+              "valid": true,
+              "error": "",
+              "code_chars": 557
+            },
+            {
+              "index": 29,
+              "parent_index": 26,
+              "program_id": "9eba7bfd548191a9",
+              "iteration": 28,
+              "change_summary": "",
+              "score": 0.986730559888092,
+              "speedup": 0.986730559888092,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 660
+            },
+            {
+              "index": 30,
+              "parent_index": 26,
+              "program_id": "fabec42aaed07dc9",
+              "iteration": 29,
+              "change_summary": "",
+              "score": 1.0125594827199753,
+              "speedup": 1.0125594827199753,
+              "num_visits": 2,
+              "valid": true,
+              "error": "",
+              "code_chars": 626
+            },
+            {
+              "index": 31,
+              "parent_index": 30,
+              "program_id": "fabec42aaed07dc9",
+              "iteration": 32,
+              "change_summary": "",
+              "score": 0.9811209922535152,
+              "speedup": 0.9811209922535152,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 626
+            },
+            {
+              "index": 32,
+              "parent_index": 28,
+              "program_id": "378b5dee9eff365b",
+              "iteration": 31,
+              "change_summary": "",
+              "score": 1.0172900900989228,
+              "speedup": 1.0172900900989228,
+              "num_visits": 7,
+              "valid": true,
+              "error": "",
+              "code_chars": 557
+            },
+            {
+              "index": 33,
+              "parent_index": 26,
+              "program_id": "368dfb735b8411f7",
+              "iteration": 33,
+              "change_summary": "",
+              "score": 1.0286668948126036,
+              "speedup": 1.0286668948126036,
+              "num_visits": 7,
+              "valid": true,
+              "error": "",
+              "code_chars": 766
+            },
+            {
+              "index": 34,
+              "parent_index": 33,
+              "program_id": "ddbf3c36b9dde9d5",
+              "iteration": 34,
+              "change_summary": "",
+              "score": 0.9948013319482101,
+              "speedup": 0.9948013319482101,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 608
+            },
+            {
+              "index": 35,
+              "parent_index": 32,
+              "program_id": "edfd879b771d91d6",
+              "iteration": 35,
+              "change_summary": "",
+              "score": 1.029835462976999,
+              "speedup": 1.029835462976999,
+              "num_visits": 6,
+              "valid": true,
+              "error": "",
+              "code_chars": 613
+            },
+            {
+              "index": 36,
+              "parent_index": 33,
+              "program_id": "368dfb735b8411f7",
+              "iteration": 36,
+              "change_summary": "",
+              "score": 0.9968337949164607,
+              "speedup": 0.9968337949164607,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 766
+            },
+            {
+              "index": 37,
+              "parent_index": 35,
+              "program_id": "edfd879b771d91d6",
+              "iteration": 38,
+              "change_summary": "",
+              "score": 1.0072756445167446,
+              "speedup": 1.0072756445167446,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 613
+            },
+            {
+              "index": 38,
+              "parent_index": 35,
+              "program_id": "adc4e878950411e0",
+              "iteration": 37,
+              "change_summary": "",
+              "score": 0.9931335075602328,
+              "speedup": 0.9931335075602328,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 536
+            },
+            {
+              "index": 39,
+              "parent_index": 35,
+              "program_id": "edfd879b771d91d6",
+              "iteration": 39,
+              "change_summary": "",
+              "score": 0.9716745285096297,
+              "speedup": 0.9716745285096297,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 613
+            },
+            {
+              "index": 40,
+              "parent_index": 35,
+              "program_id": "33e8f00b9938713e",
+              "iteration": 42,
+              "change_summary": "",
+              "score": 0.9959126310940324,
+              "speedup": 0.9959126310940324,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 692
+            },
+            {
+              "index": 41,
+              "parent_index": 35,
+              "program_id": "edfd879b771d91d6",
+              "iteration": 40,
+              "change_summary": "",
+              "score": 1.008815282002831,
+              "speedup": 1.008815282002831,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 613
+            },
+            {
+              "index": 42,
+              "parent_index": 33,
+              "program_id": "368dfb735b8411f7",
+              "iteration": 41,
+              "change_summary": "",
+              "score": 1.045646839761911,
+              "speedup": 1.045646839761911,
+              "num_visits": 4,
+              "valid": true,
+              "error": "",
+              "code_chars": 766
+            },
+            {
+              "index": 43,
+              "parent_index": 42,
+              "program_id": "368dfb735b8411f7",
+              "iteration": 45,
+              "change_summary": "",
+              "score": 1.016570114314677,
+              "speedup": 1.016570114314677,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 766
+            },
+            {
+              "index": 44,
+              "parent_index": 42,
+              "program_id": "368dfb735b8411f7",
+              "iteration": 44,
+              "change_summary": "",
+              "score": 1.0264954959386934,
+              "speedup": 1.0264954959386934,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 766
+            },
+            {
+              "index": 45,
+              "parent_index": 42,
+              "program_id": "032c22c79b1400bd",
+              "iteration": 43,
+              "change_summary": "",
+              "score": 1.0162276422903227,
+              "speedup": 1.0162276422903227,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 595
+            }
+          ]
+        },
+        "test": {
+          "baseline": {
+            "speedup": 0.9939180055837511,
+            "score": 0.9939180055837511,
+            "valid_problems": 6,
+            "problems": 6,
+            "baseline_ms": 206.54692233316987,
+            "candidate_ms": 208.05283216759562,
+            "slowest": [
+              {
+                "seed": 18,
+                "shard": 8,
+                "baseline_ms": 204.7608,
+                "candidate_ms": 219.562,
+                "speedup": 0.9326,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 14,
+                "shard": 6,
+                "baseline_ms": 196.2599,
+                "candidate_ms": 203.8524,
+                "speedup": 0.9628,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 17,
+                "shard": 8,
+                "baseline_ms": 199.7052,
+                "candidate_ms": 202.1563,
+                "speedup": 0.9879,
+                "valid": true,
+                "error": ""
+              }
+            ],
+            "profile": "    12                                           \n    15                                                   \"\"\"\n    16         1          0.0      0.0      0.0      A = problem\n    17         1        198.2    198.2     93.7      eigenvalues, eigenvectors = np.linalg.eig(A)\n    18         1          0.2      0.2      0.1      pairs = list(zip(eigenvalues, eigenvectors.T))\n    19         1          0.6      0.6      0.3      pairs.sort(key=lambda pair: (-pair[0].real, -pair[0].imag))\n    20         1          0.0      0.0      0.0      sorted_evecs = []\n    21       464          0.2      0.0      0.1      for eigval, vec in pairs:\n    22       463          1.9      0.0      0.9          vec_arr = np.array(vec, dtype=complex)\n    23       463          3.4      0.0      1.6          norm = np.linalg.norm(vec_arr)\n    24       463          0.1      0.0      0.1          if norm > 1e-12:\n    25       463          1.9      0.0      0.9              vec_arr = vec_arr / norm\n    26       463          5.0      0.0      2.4          sorted_evecs.append(vec_arr.tolist())\n    27         1          0.0      0.0      0.0      return sorted_evecs",
+            "seconds": 13.592585646008956,
+            "limits_unavailable": [],
+            "error": ""
+          },
+          "best": {
+            "speedup": 1.0167849618759057,
+            "score": 1.0167849618759057,
+            "valid_problems": 6,
+            "problems": 6,
+            "baseline_ms": 212.56599966606396,
+            "candidate_ms": 209.6098369996374,
+            "slowest": [
+              {
+                "seed": 18,
+                "shard": 8,
+                "baseline_ms": 210.6163,
+                "candidate_ms": 227.0346,
+                "speedup": 0.9277,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 16,
+                "shard": 7,
+                "baseline_ms": 213.7178,
+                "candidate_ms": 219.3786,
+                "speedup": 0.9742,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 17,
+                "shard": 8,
+                "baseline_ms": 218.0282,
+                "candidate_ms": 217.1225,
+                "speedup": 1.0042,
+                "valid": true,
+                "error": ""
+              }
+            ],
+            "profile": "==============================================================\n     4                                           def solve(problem):\n     6         1          0.0      0.0      0.0      A = np.asarray(problem, dtype=float)\n     9         1        194.1    194.1     96.9      eigenvalues, eigenvectors = scipy_eig(A, check_finite=False)\n    12         1          0.1      0.1      0.0      order = np.lexsort((-eigenvalues.imag, -eigenvalues.real))\n    13         1          0.0      0.0      0.0      eigenvalues_sorted = eigenvalues[order]\n    14         1          0.7      0.7      0.3      eigenvectors_sorted = eigenvectors[:, order]\n    17         1          1.3      1.3      0.7      norms = np.linalg.norm(eigenvectors_sorted, axis=0)\n    18         1          0.0      0.0      0.0      norms[norms < 1e-12] = 1.0\n    19         1          1.3      1.3      0.6      eigenvectors_sorted /= norms\n    22         1          2.8      2.8      1.4      return eigenvectors_sorted.T.tolist()",
+            "seconds": 14.372100830994896,
+            "limits_unavailable": [],
+            "error": ""
+          },
+          "speedup_gain": 0.022866956292154628
+        }
+      },
+      "actor_usage": {
+        "calls": 105,
+        "failures": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "model_seconds": 866.638248
+      }
+    }
+  ],
+  "failures": [],
+  "model_usage": {
+    "calls": 61,
+    "failures": 0,
+    "prompt_tokens": 88306,
+    "completion_tokens": 15399,
+    "total_tokens": 103705,
+    "model_seconds": 327.946265
+  },
+  "repair": {
+    "attempts_allowed": 4,
+    "checked": 48,
+    "failed": 4,
+    "repaired": 1,
+    "gave_up": 1
+  },
+  "reply_damage": {
+    "drawn": 61,
+    "damaged": 12,
+    "attempts_allowed": 4
+  }
+}
