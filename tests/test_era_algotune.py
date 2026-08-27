@@ -1182,3 +1182,22 @@ def test_a_rating_survives_the_whole_path_from_reply_to_node():
     bare = _json.dumps({"code": "def solve(p):\n    return p\n",
                         "iteration": 2, "parent_index": 0})
     assert strategy.to_diff({}, bare, "w", 0, "era_program").ops["promise"] == ""
+
+
+def test_the_result_file_reports_every_repair_counter():
+    """A hand-listed subset drops the counter that matters and reads as a zero.
+
+    The `repair` block used to name four keys, so `slower` -- candidates that
+    ran and were worse than their parent, the entire point of
+    `--repair-regressions` -- never reached the file. An arm that was firing
+    read as an arm that never fired, and I reported it as one.
+    """
+    import argparse
+    import inspect
+    source = inspect.getsource(port.main)
+    assert '"repair": {' in source
+    block = source[source.index('"repair": {'):]
+    block = block[:block.index("},")]
+    assert "sorted(repairs.items())" in block, (
+        "the repair block lists keys by hand again; a new counter will vanish")
+    assert "regressions_retried" in block

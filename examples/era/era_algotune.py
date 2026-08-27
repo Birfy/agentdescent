@@ -531,12 +531,16 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         "tasks": entries,
         "failures": failures,
         "model_usage": _usage_dict(model_usage),
+        # Every counter the loop keeps, not a hand-listed subset. The listed
+        # version silently dropped `slower` -- the count of candidates that ran
+        # and were worse than their parent, which is the whole point of
+        # `--repair-regressions` -- so an arm that was working read as an arm
+        # that never fired.
         "repair": {
             "attempts_allowed": args.repair_attempts,
+            "regressions_retried": args.repair_regressions,
             "checked": repairs.get("drawn", 0),
-            "failed": repairs.get("failed", 0),
-            "repaired": repairs.get("repaired", 0),
-            "gave_up": repairs.get("gave_up", 0),
+            **{k: v for k, v in sorted(repairs.items()) if k != "drawn"},
         },
         "reply_damage": {
             "drawn": damage.get("drawn", 0),
