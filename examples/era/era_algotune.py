@@ -70,7 +70,6 @@ from examples.era._algotune_tasks import UPSTREAM_COMMIT
 from examples.era._era_algotune import (
     DEFAULT_TASKS,
     PROBLEM_SECONDS,
-    PROMPT_STYLES,
     REPEATS,
     TASKS,
     Suite,
@@ -135,7 +134,6 @@ def algotune_domain(
     max_code_length: int = 20_000,
     repeats: int = REPEATS,
     problem_seconds: float = PROBLEM_SECONDS,
-    prompt_style: str = "aligned",
     profile: bool = True,
 ) -> Domain:
     """One AlgoTune task, in the four terms the ERA search needs."""
@@ -153,7 +151,7 @@ def algotune_domain(
         reward=framework_score,
         prompt=lambda program: mutation_prompt(
             program, suite=suite, timeout=candidate_timeout, repeats=repeats,
-            style=prompt_style),
+            ),
         task_prompt=lambda index: (
             f"Time the {suite.task} program against the reference on held-out "
             f"problem set {index}."),
@@ -170,7 +168,6 @@ def algotune_domain(
             "scoring_shards": suite.scoring_shards,
             "test_shards": suite.test_shards,
             "timed_repeats": repeats,
-            "prompt_style": prompt_style,
             "line_profile": profile,
             "seed": suite.seed,
         },
@@ -249,13 +246,6 @@ def build_parser() -> argparse.ArgumentParser:
                               "cheap way to make the *reported* figure precise. "
                               "AlgoTune reports over 100 test instances, and "
                               "--test-shards 2 --test-problems 50 matches that"))
-    parser.add_argument("--prompt", default="aligned", choices=PROMPT_STYLES,
-                        help=("`aligned` reproduces AlgoTune's own system "
-                              "message, which says nothing about how to make "
-                              "code fast; `guided` adds this port's paragraph "
-                              "naming where the large wins come from. The "
-                              "difference between the two arms is what that "
-                              "paragraph is worth"))
     parser.add_argument("--no-profile", action="store_true",
                         help=("skip the line_profiler table in the mutation "
                               "prompt. It is upstream's `profile` command and "
@@ -374,7 +364,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     )
     print(f"Repair   : up to {args.repair_attempts} draw(s) per expansion"
           f"{' (upstream ERA: a failure is a -inf node)' if args.repair_attempts <= 1 else ''}")
-    print(f"Prompt   : {args.prompt}"
+    print("Prompt   : AlgoTuner's own system message, naming no technique"
           f"{'' if args.no_profile else ' + line profile (upstream `profile`)'}")
     print(f"Tasks    : {', '.join(tasks)}")
     artifact = EvolvingArtifact(ARTIFACT_ID, blast_radius=0.6)
@@ -427,7 +417,6 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             max_code_length=args.max_code_length,
             repeats=args.repeats,
             problem_seconds=args.problem_seconds,
-            prompt_style=args.prompt,
             profile=not args.no_profile,
         )
         try:

@@ -1,11 +1,26 @@
-"""Re-measure finished AlgoTune programs on a split the size AlgoTune reports on.
+"""Re-measure finished AlgoTune programs the way AlgoTune measures them.
 
-A speedup measured over six problems and a speedup measured over a hundred are
-not the same quantity, however carefully each is taken. AlgoTune's published
-``final_speedup`` is over its 100-instance test split (``dataset.test_size``);
-:mod:`examples.era.era_algotune` defaults to a handful, because during a search
-every problem in the held-back sets is paid for on top of every rollout and
-every gate evaluation. So the run stays cheap and the *comparison* is made here.
+This is where the port's reported numbers are made comparable with upstream's,
+and it is deliberately a separate step from the search. The split between the
+two is: **the search's own measurement only has to rank candidates, the reported
+one has to match AlgoTune.** So the defaults here are upstream's own config
+(``AlgoTuner/config/config.yaml``) rather than the search's:
+
+===================  ================================  ======================
+knob                 upstream                          here
+===================  ================================  ======================
+instances            ``dataset.test_size: 100``        ``--instances 100``
+timed runs           ``benchmark.eval_runs: 10``       ``--repeats 10``
+per-instance time    minimum of those runs             minimum
+per-instance score   ``baseline_ms / solver_ms``       same
+task score           arithmetic mean over instances    same
+one invalid answer   whole task scores nothing         same
+warm-up              the previous instance             the previous instance
+===================  ================================  ======================
+
+Running that inside the search is not affordable -- at ten runs over a hundred
+instances a single gate decision is minutes -- so the run stays cheap and the
+comparison is made here, on the programs it produced.
 
 This re-runs no search. A finished run's result file already carries, per task,
 the root program and the best program the tree found; this scores those two on a
@@ -64,8 +79,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help=("held-back sets to split --instances across. Each set "
                               "is one sandboxed process, so this bounds how long a "
                               "single process runs"))
-    parser.add_argument("--repeats", type=int, default=3,
-                        help="timed runs per program per problem, after a warm-up")
+    parser.add_argument("--repeats", type=int, default=10,
+                        help=("timed runs per program per problem, after a warm-up. "
+                              "10 is upstream's `benchmark.eval_runs`, the count it "
+                              "scores with; the search itself runs fewer because it "
+                              "pays this on every rollout and only needs to rank"))
     parser.add_argument("--candidate-timeout", type=float, default=600.0,
                         help=("wall-clock for one held-back set. Larger than the "
                               "search's, because a set here is fifty problems "

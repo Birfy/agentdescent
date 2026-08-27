@@ -531,6 +531,39 @@ def test_a_program_that_raises_is_a_scored_failure_not_a_crash(fixture_suite):
 
 
 @needs_sandbox
+def test_a_solver_that_caches_on_its_input_wins_nothing(fixture_suite):
+    """The warm-up runs on a different instance, so a cache cannot be primed.
+
+    Upstream picks `warmup_idx = (idx - 1) % problem_count` -- the previous
+    record in the dataset -- and logs an error if warm-up and timed problem ever
+    coincide. This port warmed on a deepcopy of the timed problem, which is a
+    hole as much as a deviation: a solver that memoises on the input answers the
+    timed call out of a dictionary, in nanoseconds, and is indistinguishable
+    from one that is genuinely fast.
+
+    The program here is that solver, written as plainly as possible. It has to
+    come out at about 1x, not at a thousand.
+    """
+    pytest.importorskip("numpy")
+    suite = dataclasses.replace(fixture_suite, problems=3)
+    code = (
+        "import numpy as np\n"
+        "_CACHE = {}\n"
+        "def solve(problem):\n"
+        "    key = problem['matrix'].tobytes()\n"
+        "    hit = _CACHE.get(key)\n"
+        "    if hit is None:\n"
+        "        hit = np.sqrt((problem['matrix'] * problem['matrix']).sum(axis=1))\n"
+        "        _CACHE[key] = hit\n"
+        "    return {'norms': hit}\n")
+    valid, metrics, error = algotune.evaluate_source(
+        code, suite=suite, shards=(0,), timeout=120.0, repeats=3)
+    assert valid, error
+    assert metrics["speedup"] < 20.0, (
+        f"the cache was primed on the timed problem: {metrics['speedup']}x")
+
+
+@needs_sandbox
 def test_compilation_is_not_charged_wherever_the_author_put_it(fixture_suite):
     """Two identical programs must not differ by where their JIT compiles.
 
@@ -647,35 +680,36 @@ def test_the_prompt_is_upstreams_system_message_and_carries_upstreams_eval_block
     assert "WHERE THE LARGE WINS" not in text
 
 
-def test_the_three_styles_are_nested_and_only_guided_names_the_levers(fixture_suite):
-    """Each style adds exactly one thing, and what each is worth is measured.
+def test_the_prompt_names_no_acceleration_technique(fixture_suite):
+    """Upstream's system message says nothing about how to make code fast.
 
-    Drawing from the root on ode_stiff_vanderpol, counting how often a draw
-    replaces the library call with a compiled loop: aligned 0/6, hinted 1/8,
-    guided 3/8. Over a whole 46-node tree those became 1.04x (hinted) and
-    39.65x (guided). An effect that large cannot be baked silently into every
-    number, so the arms stay separately runnable.
+    This is the property the whole comparison rests on, and it is the one that
+    decays quietly. A block naming four techniques used to live here and it
+    worked -- against the evidence rather than at the top of the prompt it took
+    draws reaching for a compiler from 0/8 to 3/8, and on ode_stiff_vanderpol it
+    produced 2785x against an upstream field topping out at 2062x. That is
+    exactly why it cannot come back without being noticed: a search told which
+    levers to pull is not measuring what an agent that had to find them measured,
+    and the number would still be reported under AlgoTune's name.
+
+    The package list may name numba and cython, because upstream's does -- it
+    substitutes one bare bullet per installed extra. What it may not do is
+    explain them or say when to reach for one.
     """
     parent = support.Program("id", 0, None, "def solve(problem):\n    return 1\n",
                              "", {"speedup": 1.0, "problems": 2,
                                   "valid_problems": 2}, True)
-    texts = {style: algotune.mutation_prompt(parent, suite=fixture_suite, style=style)
-             for style in algotune.PROMPT_STYLES}
+    text = algotune.mutation_prompt(parent, suite=fixture_suite)
 
-    # aligned: upstream's bare package list, nothing else.
-    assert "just-in-time compiler" not in texts["aligned"]
-    assert "Compile an interpreted loop" not in texts["aligned"]
-    # hinted: what the compilers are and how to call them -- not what to point
-    # them at.
-    assert "just-in-time compiler" in texts["hinted"]
-    assert "Compile an interpreted loop" not in texts["hinted"]
-    # guided: the techniques, in upstream's own TIPS slot.
-    assert "Compile an interpreted loop" in texts["guided"]
-    assert "**TIPS:**" in texts["guided"]
+    for banned in ("just-in-time compiler", "Compile an interpreted loop",
+                   "Skip work the answer does not need", "Do less arithmetic",
+                   "Pick the specialised routine", "routinely buys 100x"):
+        assert banned not in text, f"the prompt names a technique: {banned!r}"
 
-    assert len(texts["aligned"]) < len(texts["hinted"]) < len(texts["guided"])
-    with pytest.raises(ValueError):
-        algotune.mutation_prompt(parent, suite=fixture_suite, style="nonsense")
+    # The bare list itself is upstream's, and stays.
+    assert " - numba\n" in text and " - cython\n" in text
+    assert "**TIPS:**" in text          # upstream has one; it is not about speed
+    assert "Be creative and optimize your approach!" in text
 
 
 def test_a_rejected_answer_reaches_the_prompt_as_upstreams_invalid_example(

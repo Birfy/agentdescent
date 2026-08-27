@@ -12,7 +12,7 @@ AgentDescent engine, running **four** tasks on one search.
 | Dataset (faithful) | Kaggle Playground Series S3E1 — the upstream `implementation/playground_s3e1.py` task |
 | Second task | *Numerical solution of integrals* — named in the paper's abstract; upstream released no implementation, so the nine-family suite is constructed here |
 | Third task | Gauss hypergeometric `2F1` in double precision — not in the paper at all; 3000 points against a 25-digit mpmath reference, baseline `scipy.special.hyp2f1` |
-| Fourth task | [AlgoTune](https://github.com/oripress/AlgoTune) ([arXiv:2507.15887](https://arxiv.org/abs/2507.15887)) — 72 of its 154 tasks, scored in **speedup** over the task's own reference implementation, **one tree per task** |
+| Fourth task | [AlgoTune](https://github.com/oripress/AlgoTune) ([arXiv:2507.15887](https://arxiv.org/abs/2507.15887)) — 80 of its 154 tasks, scored in **speedup** over the task's own reference implementation, **one tree per task** |
 | `evolve()` plug-ins | `strategy` + `aggregator_factory=` FUTS tree, `selection.FlatPuct` |
 
 ## Run
@@ -90,11 +90,17 @@ spaces: a factorisation trick found for `qr_factorization` is not a node in
 `ode_stiff_vanderpol`'s tree and could not be selected there. Across tasks the
 run reports the **geometric** mean, which is the mean a set of ratios has.
 
-72 of AlgoTune's 154 tasks are runnable here. The other 82 need one of cvxpy,
+80 of AlgoTune's 154 tasks are runnable here. The other 74 need one of
 OR-Tools, networkx, torch, faiss, python-sat, sklearn or dace — a dependency
 list this repository does not carry — or their reference does not lift out of its
 class; `lqr` clears both filters and is still excluded, because its own
 `is_solution` calls `float()` on a 1×1 array, which NumPy has refused since 1.25.
+cvxpy *is* carried, which is what buys the eight convex-programming tasks —
+the set EvoMem ([arXiv:2608.10795](https://arxiv.org/abs/2608.10795)) selected,
+and so the only tasks where this port and a published evolutionary method have
+run the same problems. Its solver backends have to land in `dist-packages`
+rather than the user site or the sandbox cannot see them (`qp` wants OSQP, which
+wants jinja2; `power_control` wants ECOS).
 `--list-tasks` prints the runnable set; `--tasks all` runs it.
 
 Problem sizes are **upstream's published ones**, read from AlgoTune's own

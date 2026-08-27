@@ -161,8 +161,8 @@ def _accuracy_note(reference: Any, candidate: Any, cap: int = 20_000) -> str:
 
 
 def measure(support, task: Any, entrypoint: Callable[[Any], Any],
-            problem: Any, *, repeats: int, slow_factor: float,
-            deadline: float) -> Dict[str, Any]:
+            problem: Any, *, warmup_problem: Any, repeats: int,
+            slow_factor: float, deadline: float) -> Dict[str, Any]:
     """Time the reference, then the candidate, then check the candidate's answer.
 
     A candidate failure is *this problem's* failure, not the program's: it comes
@@ -170,6 +170,14 @@ def measure(support, task: Any, entrypoint: Callable[[Any], Any],
     still runs. Only a program that could not be imported, or that has no
     ``solve``, loses everything -- the same line the sibling runners draw
     between "the program is broken" and "the program is wrong".
+
+    ``warmup_problem`` is a *different instance* of the same task, which is
+    upstream's rule: ``warmup_idx = (idx - 1) % problem_count`` in
+    ``AlgoTuner/utils/evaluator/main.py`` picks the previous record in the
+    dataset, and its worker logs an error if the two ever coincide. Warming on a
+    copy of the timed problem, which is what this did before, hands a free hit to
+    any solver that memoises on the input -- and a solver that returns a cached
+    answer in nanoseconds is indistinguishable from one that is genuinely fast.
     """
     row: Dict[str, Any] = {
         "baseline_ms": None, "candidate_ms": None, "valid": False,
@@ -181,7 +189,7 @@ def measure(support, task: Any, entrypoint: Callable[[Any], Any],
         # lazily imported submodules, a BLAS handshake and a cold allocator, and
         # charging that to whichever program happens to run first would be a
         # coin-flip worth several x on a millisecond-scale task.
-        task.solve(copy.deepcopy(problem))
+        task.solve(copy.deepcopy(warmup_problem))
         baseline, reference, _runs = support.best_seconds(
             task.solve, problem, repeats=repeats, deadline=deadline)
     row["baseline_ms"] = baseline * 1000.0
@@ -205,7 +213,11 @@ def measure(support, task: Any, entrypoint: Callable[[Any], Any],
             # ("Compilation time of your init function will not count towards
             # your function's runtime"). Honouring it must not depend on the
             # model knowing to force compilation at import time.
-            entrypoint(copy.deepcopy(problem))
+            #
+            # On the *warm-up* problem, for the reason above it: a candidate
+            # warmed on the problem it is about to be timed on can answer the
+            # timed call out of a dictionary.
+            entrypoint(copy.deepcopy(warmup_problem))
             first_started = time.perf_counter()
             output = entrypoint(copy.deepcopy(problem))
             first = time.perf_counter() - first_started
@@ -299,19 +311,33 @@ def profile(entrypoint: Callable[[Any], Any], problem: Any, *,
 
 def evaluate(support, task: Any, entrypoint: Callable[[Any], Any],
              spec: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """One row per problem in the shard, in the order the seeds were drawn."""
+    """One row per problem in the shard, in the order the seeds were drawn.
+
+    The shard's problems are generated up front so each can be timed against the
+    *previous* one as its warm-up, which is upstream's ``warmup_idx = (idx - 1) %
+    problem_count``. Generating inside the loop and warming on a copy of the
+    timed problem, as this did before, is both a deviation and a hole: a solver
+    that caches on its input gets the timed call for free.
+    """
     results: List[Dict[str, Any]] = []
     n = int(spec["n"])
     repeats = int(spec.get("repeats") or 3)
     slow_factor = float(spec.get("slow_factor") or 10.0)
     seconds = float(spec.get("problem_seconds") or 60.0)
     want_profile = bool(spec.get("profile"))
-    for seed in spec["seeds"]:
+    seeds = [int(seed) for seed in spec["seeds"]]
+    with contextlib.redirect_stdout(io.StringIO()), \
+            contextlib.redirect_stderr(io.StringIO()):
+        problems = [task.generate_problem(n, random_seed=seed) for seed in seeds]
+    for index, seed in enumerate(seeds):
         started = time.monotonic()
-        with contextlib.redirect_stdout(io.StringIO()), \
-                contextlib.redirect_stderr(io.StringIO()):
-            problem = task.generate_problem(n, random_seed=int(seed))
-        row = measure(support, task, entrypoint, problem, repeats=repeats,
+        problem = problems[index]
+        # Upstream's rule exactly. With a single-problem shard there is no
+        # previous instance to reach for, so it degenerates to the timed one --
+        # upstream's own fallback when `warmup_problem_instance is None`.
+        warmup_problem = problems[(index - 1) % len(problems)]
+        row = measure(support, task, entrypoint, problem,
+                      warmup_problem=warmup_problem, repeats=repeats,
                       slow_factor=slow_factor,
                       deadline=time.monotonic() + seconds)
         row["seed"] = int(seed)

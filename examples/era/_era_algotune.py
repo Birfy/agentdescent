@@ -27,12 +27,30 @@ about the library, not about the benchmark.
 
 What is faithful, and what is not
 ---------------------------------
-Faithful to AlgoTune: the task files, their ``generate_problem`` /
-``solve`` / ``is_solution`` triple, the published problem size per task (``n``
-at a 100 ms reference time, read from upstream's own ``reports/generation.json``),
-``speedup = baseline_time / solver_time`` per problem from the **minimum** of
-repeated runs, the mean over problems, and the rule that a task whose solutions
-are not all valid has no speedup at all.
+Faithful to AlgoTune, checked against its own sources rather than its paper:
+
+* the task files and their ``generate_problem`` / ``solve`` / ``is_solution``
+  triple, and the published problem size per task (``n`` at a 100 ms reference
+  time, read from upstream's ``reports/generation.json``);
+* ``speedup = baseline_time / solver_time`` per instance, taken from the
+  **minimum** of repeated runs (``main.py`` scores ``min_time_ms``);
+* the **arithmetic mean** of the per-instance speedups as the task's score
+  (``result_aggregator.py``), and the rule that a task whose solutions are not
+  all valid has no speedup at all;
+* the per-instance **10x** cut-off and the 60 s reference timeout
+  (``benchmark.baseline_timeout``);
+* the warm-up runs on the **previous instance**, not on the timed one
+  (``warmup_idx = (idx - 1) % problem_count``). That is a correctness property
+  as much as a fidelity one: warming on the timed problem hands a free hit to
+  any solver that memoises on its input.
+* the prompt is ``AlgoTuner/messages/initial_system_message.txt``, which names
+  no acceleration technique. Neither does this.
+
+**Where the measurement is made is a deliberate split.** Upstream scores with
+``benchmark.eval_runs: 10`` over ``dataset.test_size: 100``; running that inside
+a search would make one gate decision take minutes, so the search measures
+cheaply -- it only has to *rank* candidates -- and the reported number is
+re-taken at upstream's settings by :mod:`tools.algotune_rescore`.
 
 Not faithful, and deliberately:
 
@@ -43,9 +61,17 @@ Not faithful, and deliberately:
   100 test instances per task as a HuggingFace dataset; this draws its problems
   from the same ``generate_problem`` at the same ``n``, seeded per shard, because
   a shard has to be a *disjoint* draw for the held-back split to mean anything.
+* **One rewrite per node, not a ~100-turn command loop.** Upstream's agent gets
+  ``edit`` / ``eval`` / ``profile`` / ``revert`` and a $1 budget. A flat tree
+  search has no conversation to run those in, so what its prompt can carry is
+  the *state* those commands would have produced, not the commands.
 * **Timing is per evaluation, not calibrated once.** The reference is re-timed
-  in the same sandboxed process, moments before the candidate, on the same
-  problem. That doubles the work and removes the machine from the ratio.
+  in the same sandboxed process, moments before the candidate. That doubles the
+  work and removes the machine from the ratio.
+* **Search hyper-parameters follow ERA, not AlgoTuner.** Upstream runs every
+  model at ``temperature: 0.0``, which is right for one conversation and wrong
+  for a tree: at zero, every draw from a given parent is the same draw and the
+  search has nothing to explore with.
 """
 
 from __future__ import annotations
@@ -79,46 +105,65 @@ DESCRIPTION_URL = _RAW + "/AlgoTuneTasks/{task}/description.txt"
 #: would make two runs of this port incomparable.
 SIZES_URL = _RAW + "/reports/generation.json"
 
-#: The 72 AlgoTune tasks this port can run, and why it is 72 rather than 154.
+#: The 80 AlgoTune tasks this port can run, and why it is 80 rather than 154.
 #:
 #: Two filters, both mechanical and both checked by
 #: ``tests/test_era_algotune.py`` rather than asserted here:
 #:
-#: 1. **The reference must import only numpy, scipy and the standard library.**
-#:    AlgoTune's dependency list is 30 packages deep -- cvxpy, OR-Tools,
-#:    networkx, torch, faiss, python-sat, dace. 81 tasks need one of them, and a
-#:    port that silently skipped them at runtime would report a speedup over a
-#:    benchmark it had quietly halved. They are named as excluded instead.
+#: 1. **The reference must import only what this port installs**: numpy, scipy,
+#:    the standard library, and cvxpy. AlgoTune's dependency list is 30 packages
+#:    deep -- OR-Tools, networkx, torch, faiss, python-sat, dace -- and 73 tasks
+#:    still need one of those. A port that silently skipped them at runtime would
+#:    report a speedup over a benchmark it had quietly halved, so they are named
+#:    as excluded instead.
 #: 2. **The reference must lift out of its class** (see
 #:    :func:`~examples.era._algotune_tasks.derive_seed_program`), so the root
 #:    node is a program rather than a bound method.
 #:
-#: ``lqr`` passes both and is still absent: its own ``is_solution`` does
+#: Eight of these names are AlgoTune's convex-programming tasks --
+#: ``chebyshev_center``, ``feedback_controller_design``, ``kalman_filter``,
+#: ``lp_box``, ``lyapunov_stability``, ``markowitz``, ``power_control``, ``qp``
+#: -- and they are here because cvxpy is. They are also, minus ``lqr``, the set EvoMem
+#: (`arXiv:2608.10795 <https://arxiv.org/abs/2608.10795>`_) selected, which makes
+#: them the only tasks where this port and a published evolutionary method have
+#: run the same problems. cvxpy needs its solver backends reachable *inside* the
+#: sandbox: ``qp`` wants OSQP, which wants ``jinja2``, and ``power_control``
+#: wants ECOS. Installed into the user site rather than ``dist-packages`` they
+#: are invisible across the bind and the reference fails with "the solver OSQP is
+#: not installed", which reads as a broken task rather than a missing bind.
+#:
+#: ``lqr`` passes both filters and is still absent: its own ``is_solution`` does
 #: ``float(xt.T @ Q @ xt + ...)`` on a 1x1 array, which NumPy has refused since
 #: 1.25, so on any current NumPy the *reference implementation* is invalid by the
 #: task's own oracle. That is upstream's defect, not this port's, and scoring a
 #: search against an oracle that rejects its own baseline would measure nothing.
+#: Verified again after cvxpy went in, in case the import was the only problem:
+#: it is not, the checker still raises ``TypeError: only 0-dimensional arrays``.
 TASKS: Tuple[str, ...] = (
-    "affine_transform_2d", "cholesky_factorization", "convex_hull",
-    "convolve2d_full_fill", "convolve_1d", "correlate2d_full_fill",
-    "correlate_1d", "cumulative_simpson_1d", "cumulative_simpson_multid",
-    "dct_type_I_scipy_fftpack", "delaunay", "dijkstra_from_indices",
-    "dst_type_II_scipy_fftpack", "eigenvalues_complex", "eigenvalues_real",
-    "eigenvectors_complex", "eigenvectors_real", "elementwise_integration",
-    "fft_cmplx_scipy_fftpack", "fft_convolution", "fft_real_scipy_fftpack",
+    "affine_transform_2d", "chebyshev_center", "cholesky_factorization",
+    "convex_hull", "convolve2d_full_fill", "convolve_1d",
+    "correlate2d_full_fill", "correlate_1d", "cumulative_simpson_1d",
+    "cumulative_simpson_multid", "dct_type_I_scipy_fftpack", "delaunay",
+    "dijkstra_from_indices", "dst_type_II_scipy_fftpack",
+    "eigenvalues_complex", "eigenvalues_real", "eigenvectors_complex",
+    "eigenvectors_real", "elementwise_integration",
+    "feedback_controller_design", "fft_cmplx_scipy_fftpack",
+    "fft_convolution", "fft_real_scipy_fftpack",
     "generalized_eigenvalues_complex", "generalized_eigenvalues_real",
     "generalized_eigenvectors_complex", "generalized_eigenvectors_real",
-    "graph_laplacian", "ks_test_2samp", "l0_pruning", "l1_pruning",
-    "least_squares", "linear_system_solver", "lti_simulation",
-    "lu_factorization", "matrix_exponential", "matrix_multiplication",
+    "graph_laplacian", "kalman_filter", "ks_test_2samp", "l0_pruning",
+    "l1_pruning", "least_squares", "linear_system_solver", "lp_box",
+    "lti_simulation", "lu_factorization", "lyapunov_stability",
+    "markowitz", "matrix_exponential", "matrix_multiplication",
     "matrix_sqrt", "min_weight_assignment", "ode_brusselator",
     "ode_fitzhughnagumo", "ode_hires", "ode_hodgkinhuxley",
     "ode_lorenz96_nonchaotic", "ode_lotkavolterra", "ode_nbodyproblem",
     "ode_seirs", "ode_stiff_robertson", "ode_stiff_vanderpol", "odr",
-    "outer_product", "pde_burgers1d", "pde_heat1d", "procrustes",
-    "psd_cone_projection", "qr_factorization", "qz_factorization",
-    "rbf_interpolation", "rotate_2d", "shift_2d", "shortest_path_dijkstra",
-    "sparse_eigenvectors_complex", "sparse_lowest_eigenvalues_posdef",
+    "outer_product", "pde_burgers1d", "pde_heat1d", "power_control",
+    "procrustes", "psd_cone_projection", "qp", "qr_factorization",
+    "qz_factorization", "rbf_interpolation", "rotate_2d", "shift_2d",
+    "shortest_path_dijkstra", "sparse_eigenvectors_complex",
+    "sparse_lowest_eigenvalues_posdef",
     "sparse_lowest_eigenvectors_posdef", "stable_matching", "svd",
     "sylvester_solver", "toeplitz_solver", "two_eigenvalues_around_0",
     "unit_simplex_projection", "upfirdn1d", "voronoi_diagram",
@@ -173,6 +218,13 @@ ALLOWED_IMPORTS = {
     "cmath",
     "collections",
     "copy",
+    # Nine of AlgoTune's convex-programming tasks -- and every task EvoMem
+    # selected -- have a reference that is a cvxpy model. Without it those tasks
+    # are not merely unrunnable, they are unspeakable: the reference does not
+    # import, so `prepare_suite` fails before a tree exists. It buys eight tasks
+    # here and it is the only entry in this set that is not either numpy/scipy
+    # or something upstream's own task files import.
+    "cvxpy",
     "dataclasses",
     "enum",
     "functools",
@@ -790,83 +842,42 @@ def _profile_block(metrics: Dict[str, Any]) -> str:
             "milliseconds):\n" + text)
 
 
-#: Upstream's `AlgoTuner/messages/initial_system_message.txt`, adapted only where
-#: this port's contract genuinely differs -- a module-level `solve(problem)`
-#: rather than a `Solver` class, and one rewrite per turn rather than an `edit`
-#: command loop. Everything else is upstream's wording, including the 10x rule,
-#: the note that setup cost is not charged, and "Be creative".
-#:
-#: **It says nothing about how to make code fast.** That is the point of the
-#: alignment: upstream's agent is told the setting and the rules and left to it,
-#: so a number measured against a prompt that also named the levers is not
-#: comparable with upstream's. :data:`GUIDED_STRATEGY` is that prompt, kept
-#: behind ``--prompt guided`` so the difference can be measured rather than
-#: argued about.
-#: The package list, twice. Upstream injects a bare list of names and stops, and
-#: that is what ``aligned`` reproduces -- but a bare name assumes the reader
-#: already knows numba is a compiler and what calling it looks like. Upstream's
-#: agent can afford that assumption: it runs ~100 turns and can try things. One
-#: rewrite per node cannot, so ``hinted`` labels what the two accelerators *are*
-#: and how they are invoked, and says nothing about when to reach for them or
-#: what to point them at. Measured need: under the bare list the model reached
-#: for a compiler in **0 of 6** draws, with the profile in front of it showing a
-#: single line taking 100% of the time.
-BARE_PACKAGES = """ - numpy
+#: The package list, in upstream's own shape. `base_interface.py` substitutes the
+#: ` - placeholder` line in its system message with one ` - {name}` bullet per
+#: installed extra and stops there -- no gloss on what any of them is or when to
+#: reach for it. This reproduces that, which means a bare name has to carry the
+#: whole hint, exactly as it does upstream.
+PACKAGES = """ - numpy
  - scipy
  - numba
- - cython"""
+ - cython
+ - cvxpy"""
 
-HINTED_PACKAGES = """ - numpy
- - scipy
- - numba -- a just-in-time compiler. `@numba.njit` on a function compiles it to
-   native code, and the compile happens on the first call.
- - cython -- an ahead-of-time compiler. `cython.inline("<C-like Python>", a=...)`
-   compiles a snippet and returns the compiled callable.
-
-Compiling is what you reach for when the cost is an interpreted loop that NumPy
-cannot express as array operations. It buys nothing in front of a call that is
-already native code."""
-
-#: The acceleration techniques, in upstream's own TIPS slot -- which is where
-#: its system message puts mechanical guidance (its one entry explains how a
-#: `.pyx` edit gets compiled). The four classes are not invented: they are what
-#: upstream's own 2076 published solutions actually do, read off the corpus.
-#: Compiling an interpreted loop is 40% of every result at 100x or better;
-#: skipping work the caller does not need is the whole of `lu_factorization` at
-#: 35x, where the reference serialises three matrices into Python lists and the
-#: winner returns the arrays; picking the specialised routine is
-#: `eigvals_only=True` on `eigenvalues_real` at 2.5x; doing less arithmetic is
-#: `wasserstein_dist` at 8x, a general two-sample routine replaced by the 1-D
-#: closed form.
+#: Upstream's `AlgoTuner/messages/initial_system_message.txt`, verbatim except
+#: where this port's contract genuinely differs. Two things differ and both are
+#: structural rather than editorial:
 #:
-#: Only ``--prompt guided`` carries them. Upstream's agent is told none of this
-#: and reaches for numba on 24% of tasks anyway, over ~100 turns of watching its
-#: own edits fail -- so these tips are this port's substitute for a depth it does
-#: not have, and a number measured with them is not comparable with upstream's
-#: without saying so.
-ACCELERATION_TIPS = """Things that make numerical Python faster here, roughly in order of how much they usually buy:
-
-  1. **Compile an interpreted loop.** `@numba.njit` on a function whose cost is
-     a Python-level loop -- a step-by-step integrator, a scan with a carried
-     dependency, an early-exit search -- routinely buys 100x or more. The usual
-     place this applies is a library routine that calls back into Python once
-     per step: `solve_ivp`, `quad`, `root` and friends with a Python callable.
-     Write the loop yourself and compile it.
-  2. **Skip work the answer does not need.** Validation the caller can vouch for
-     (`check_finite=False`), a copy that can be overwritten in place
-     (`overwrite_a=True`), a conversion of the result into Python objects that
-     nothing downstream required.
-  3. **Pick the specialised routine.** `eigh` rather than `eig` for a symmetric
-     matrix, `eigvals_only=True` when the vectors go unused, a LAPACK driver
-     chosen for the shape (`gesdd`, `evd`), a sparse routine for a sparse input.
-  4. **Do less arithmetic.** A cheaper factorisation, a closed form in place of
-     a general solver, an identity that cancels a term, a better exponent."""
-
-ALIGNED_SETTING = """SETTING:
+#: 1. **A module-level `solve(problem)` rather than a `Solver` class.** ERA's
+#:    contract is one function per program and its gate checks for one.
+#: 2. **One rewrite per turn rather than the `edit`/`eval`/`revert` command
+#:    loop.** A flat tree search has no conversation to run commands in, so the
+#:    command block, the budget messaging and the linter/`.pyx` notes that only
+#:    describe that loop are dropped rather than paraphrased.
+#:
+#: Everything else is upstream's wording: the 10x rule, "Compilation time of your
+#: init function will not count towards your function's runtime", "Be creative
+#: and optimize your approach!", and the GOALS paragraph.
+#:
+#: **It says nothing about how to make code fast, and that is the point.**
+#: Upstream's agent is told the setting and the rules and left to it -- it
+#: reaches for numba on 24% of tasks with no encouragement at all, over ~100
+#: turns of watching its own edits fail. An earlier version of this file carried
+#: a block naming four acceleration techniques, and a number measured against
+#: that prompt is not comparable with upstream's. It is gone.
+SETTING = """SETTING:
 You're an autonomous programmer tasked with solving a specific problem. You are
 to write a single Python function, and you will be evaluated based on the
 best-performing piece of code you produce.
-
 Apart from the default Python packages, you have access to the following
 additional packages:
 {packages}
@@ -879,8 +890,8 @@ def solve(problem):
     ...
 ```
 
-IMPORTANT: Work your code does at import time -- building a table, compiling a
-kernel -- will not count towards your function's runtime.
+IMPORTANT: Compilation time of your init function will not count towards your
+function's runtime.
 
 This `solve` function will be the entrypoint called by the evaluation harness.
 Strive to align your implementation as closely as possible with the desired
@@ -890,17 +901,14 @@ as fast as possible, while returning the same output as the reference function
 (for the same given input). Be creative and optimize your approach!
 
 **TIPS:**
-This harness evaluates a single module, so a `.pyx` file has nothing to build
-it. Reach Cython through `cython.inline("...", a=..., b=...)`, which compiles
-when your module is imported.
+Do not put an if __name__ == "__main__": block in your code, as it will not be
+ran (only the solve function will).
 
 **GOALS:**
-Your primary objective is to optimize the `solve` function to run as fast as
-possible, while returning the optimal solution. You will receive better scores
-the quicker your solution runs, and you will be penalized for exceeding the time
-limit or returning non-optimal solutions."""
-
-PROMPT_STYLES = ("aligned", "hinted", "guided")
+Your primary objective is to optimize the `solve` function to run as as fast as
+possible, while returning the optimal solution.
+You will receive better scores the quicker your solution runs, and you will be
+penalized for exceeding the time limit or returning non-optimal solutions."""
 
 
 def mutation_prompt(
@@ -909,7 +917,6 @@ def mutation_prompt(
     suite: Suite,
     timeout: float = 300.0,
     repeats: int = REPEATS,
-    style: str = "aligned",
 ) -> str:
     """One rewrite of the parent program, in AlgoTuner's own framing.
 
@@ -919,15 +926,16 @@ def mutation_prompt(
     is the closest a one-rewrite-per-node search can get to that loop without
     becoming a different algorithm.
 
-    ``style="guided"`` adds :data:`GUIDED_STRATEGY`; ``"aligned"`` does not, and
-    is the default, because a number measured under extra guidance is not
-    comparable with upstream's.
+    It names no acceleration technique, because upstream names none. There was a
+    ``--prompt guided`` here that did, and it worked -- placed against the
+    evidence rather than at the top of the prompt it took draws that reached for
+    a compiler from 0/8 to 3/8, and on ``ode_stiff_vanderpol`` it is what
+    produced 2785x. It is still gone: a search told which levers to pull is not
+    measuring the same thing as an agent that had to find them, and this port
+    exists to be compared with upstream.
     """
-    if style not in PROMPT_STYLES:
-        raise ValueError(f"style must be one of {PROMPT_STYLES}")
-    packages = BARE_PACKAGES if style == "aligned" else HINTED_PACKAGES
     blocks = [
-        ALIGNED_SETTING.format(packages=packages),
+        SETTING.format(packages=PACKAGES),
         "**TASK DESCRIPTION:**\n" + suite.description,
         (f"Problems are generated by the task's own generator at n = {suite.n}, "
          f"and your output is checked by the task's own `is_solution`. Timing is "
@@ -935,23 +943,6 @@ def mutation_prompt(
          f"the problem set. {timeout:.0f} seconds of CPU for the whole set, "
          f"including any compilation."),
     ]
-    # Immediately before the evidence, never at the top of the prompt. Measured,
-    # eight draws per arm, counting how often a draw replaces the library call
-    # with a compiled loop:
-    #
-    #   at the top of the prompt, flat wording          0/8
-    #   at the top, with the priority language restored 1/8
-    #   here, flat wording                              3/8
-    #   here, with the priority language restored       3/8
-    #
-    # Position is the whole effect and the wording is worth nothing on top of
-    # it. Two thousand characters earlier, before the task description, the same
-    # four techniques read as preamble; sitting against "here is your code, here
-    # is where its time went" they read as advice about that code. It also
-    # settles a thing I had wrong: the four techniques were not diluting each
-    # other -- four of them here score exactly what two of them here scored.
-    if style == "guided":
-        blocks.append(ACCELERATION_TIPS)
     blocks.append("**EVALUATION OF YOUR PREVIOUS CODE:**\n" + _eval_block(parent.metrics))
     for optional in (_invalid_examples(parent.metrics),
                      _timing_report(parent.metrics),

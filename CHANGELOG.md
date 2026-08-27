@@ -12,7 +12,7 @@ All notable changes to AgentDescent are documented here. The format follows
   `examples/era/era_algotune.py` runs the *same* flat-PUCT search, aggregator,
   sandbox and governance layer as the other three ERA entry points over
   [AlgoTune](https://github.com/oripress/AlgoTune)
-  ([arXiv:2507.15887](https://arxiv.org/abs/2507.15887)) — 72 of its 154 tasks,
+  ([arXiv:2507.15887](https://arxiv.org/abs/2507.15887)) — 80 of its 154 tasks,
   **one tree per task**, with the task's own reference implementation as the root
   node and its own `is_solution` as the correctness oracle.
 
@@ -34,8 +34,8 @@ All notable changes to AgentDescent are documented here. The format follows
   measured once on the host and reused would make the score move when the
   machine got busy rather than when the program got faster.
 
-  72 rather than 154 because the other 82 need a dependency this repository does
-  not carry (cvxpy, OR-Tools, networkx, torch, faiss, python-sat, …) or their
+  80 rather than 154 because the other 74 need a dependency this repository does
+  not carry (OR-Tools, networkx, torch, faiss, python-sat, …) or their
   reference does not lift out of its class. `lqr` clears both filters and is
   still excluded, and the reason is upstream's: its own `is_solution` calls
   `float()` on a 1×1 array, which NumPy has refused since 1.25, so the reference
