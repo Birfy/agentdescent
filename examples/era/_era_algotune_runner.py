@@ -130,10 +130,26 @@ def _accuracy_note(reference: Any, candidate: Any, cap: int = 20_000) -> str:
     baseline and then thrown away -- so the distance is free to compute.
 
     Deliberately generic: flatten both sides to numbers and report the largest
-    relative gap. A task whose answer is not numeric, or whose shapes disagree,
-    gets the shape mismatch instead, which is itself the more useful message.
-    Every failure path returns "" rather than raising: this runs inside the
-    evaluator, and a diagnostic that can break an evaluation is worse than none.
+    gap. A task whose answer is not numeric, or whose shapes disagree, gets the
+    shape mismatch instead, which is itself the more useful message. Every
+    failure path returns "" rather than raising: this runs inside the evaluator,
+    and a diagnostic that can break an evaluation is worse than none.
+
+    The gap is measured the way ``numpy.allclose`` measures it -- against
+    ``atol + rtol * |reference|`` -- and *not* as a bare relative error. A bare
+    one divides by the reference element, so wherever the answer is legitimately
+    near zero it reports a number with no meaning. On ``kalman_filter`` it said
+    "largest relative difference 5.033e+23, at element 2095 of 3197: reference
+    1.19584887991e-23, yours 6.01848096735": the reference there is zero to
+    within floating point, the candidate produced 6, and the honest way to say
+    that is "off by 6", not "off by twenty-three orders of magnitude". Solution
+    vectors full of near-zero entries -- a Kalman noise estimate, a sparse
+    multiplier, anything with an active set -- are exactly where this fires, and
+    the number it produced both overstated the error and hid where it was.
+
+    The tolerances are ``numpy.allclose``'s defaults rather than the task's own,
+    which this cannot see from here; the point is a sane scale, not a verdict.
+    The verdict already came from ``is_solution``.
     """
     try:
         left: List[float] = []
@@ -148,14 +164,21 @@ def _accuracy_note(reference: Any, candidate: Any, cap: int = 20_000) -> str:
         import numpy as np
         a = np.asarray(left)
         b = np.asarray(right)
-        scale = np.maximum(np.abs(a), 1e-300)
-        rel = float(np.max(np.abs(a - b) / scale))
-        worst = int(np.argmax(np.abs(a - b) / scale))
-        if not math.isfinite(rel):
+        gap = np.abs(a - b)
+        if not np.all(np.isfinite(b)):
             return " (your answer holds a non-finite value the reference does not)"
-        return (f" (largest relative difference from the reference {rel:.3e}, "
-                f"at element {worst} of {len(a)}: reference {a[worst]:.12g}, "
-                f"yours {b[worst]:.12g})")
+        # allclose's own yardstick: how many times the tolerance the gap is.
+        tolerance = 1e-8 + 1e-5 * np.abs(a)
+        worst = int(np.argmax(gap / tolerance))
+        over = float(gap[worst] / tolerance[worst])
+        absolute = float(gap[worst])
+        relative = (absolute / abs(float(a[worst]))
+                    if a[worst] != 0.0 else float("inf"))
+        note = (f" (worst element {worst} of {len(a)}: reference "
+                f"{a[worst]:.12g}, yours {b[worst]:.12g} -- off by {absolute:.3e}")
+        if math.isfinite(relative):
+            note += f", a relative {relative:.3e}"
+        return note + f", {over:.3g}x the tolerance allclose would allow)"
     except BaseException:
         return ""
 

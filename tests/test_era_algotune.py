@@ -530,6 +530,62 @@ def test_a_program_that_raises_is_a_scored_failure_not_a_crash(fixture_suite):
     assert "RuntimeError" in error
 
 
+def _runner_module():
+    """The sandbox runner, imported on the host so its helpers can be tested.
+
+    It is written to be loadable by path from inside the sandbox, so importing
+    it here costs nothing and needs no sandbox.
+    """
+    import importlib.util
+    import sys
+    path = algotune.RUNNER
+    spec = importlib.util.spec_from_file_location("_algotune_runner_under_test",
+                                                  str(path))
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    except SystemExit:  # its __main__ guard, if it ever grows one
+        pass
+    return module
+
+
+def test_the_rejection_note_measures_against_a_tolerance_not_a_bare_ratio():
+    """A near-zero reference must not produce a number with no meaning.
+
+    This is a real defect this file did not catch. The note divided by the
+    reference element, so on `kalman_filter` -- whose solution vectors are full
+    of legitimately near-zero entries -- it told the model "largest relative
+    difference 5.033e+23, at element 2095 of 3197: reference 1.19584887991e-23,
+    yours 6.01848096735". The reference there is zero to within floating point
+    and the candidate produced 6. "Off by 6" is the fact; "off by twenty-three
+    orders of magnitude" is an artefact of the denominator, and it both
+    overstates the error and hides what it is.
+
+    The tolerance multiple is the part that has to be right: it is what
+    separates "tighten the step" from "this is structurally wrong", and those
+    need opposite next moves.
+    """
+    pytest.importorskip("numpy")
+    note = _runner_module()._accuracy_note
+
+    near_zero = note([1.0, 2.0, 1.19584887991e-23], [1.0, 2.0, 6.01848096735])
+    assert "off by 6.018e+00" in near_zero, near_zero
+    assert "5.033e+23" not in near_zero.split("a relative")[0], (
+        f"the meaningless ratio leads the note again: {near_zero}")
+
+    # Ten times over tolerance reads as ten times over, not as a catastrophe.
+    close = note([1.0, 100.0], [1.0, 100.01])
+    assert "10x the tolerance" in close, close
+
+    # A structural miss still reads as one.
+    far = note([1.15341132656, -1.24798805191], [-1.81837003711, -1.24798805191])
+    assert "2.57e+05x the tolerance" in far, far
+
+    # And the shapes-differ path is untouched, because it is the better message.
+    assert "the shape or structure differs" in note([1.0, 2.0, 3.0], [1.0, 2.0])
+
+
 @needs_sandbox
 def test_a_solver_that_caches_on_its_input_wins_nothing(fixture_suite):
     """The warm-up runs on a different instance, so a cache cannot be primed.
