@@ -75,6 +75,7 @@ from examples.era._era_algotune import (
     Suite,
     evaluate_source,
     framework_score,
+    PACKAGE_STYLES,
     mutation_prompt,
     prepare_suite,
     repair_prompt,
@@ -135,6 +136,7 @@ def algotune_domain(
     repeats: int = REPEATS,
     problem_seconds: float = PROBLEM_SECONDS,
     profile: bool = True,
+    packages: str = "bare",
 ) -> Domain:
     """One AlgoTune task, in the four terms the ERA search needs."""
     return Domain(
@@ -151,7 +153,7 @@ def algotune_domain(
         reward=framework_score,
         prompt=lambda program: mutation_prompt(
             program, suite=suite, timeout=candidate_timeout, repeats=repeats,
-            ),
+            packages=packages),
         task_prompt=lambda index: (
             f"Time the {suite.task} program against the reference on held-out "
             f"problem set {index}."),
@@ -169,6 +171,7 @@ def algotune_domain(
             "test_shards": suite.test_shards,
             "timed_repeats": repeats,
             "line_profile": profile,
+            "packages": packages,
             "seed": suite.seed,
         },
     )
@@ -246,6 +249,12 @@ def build_parser() -> argparse.ArgumentParser:
                               "cheap way to make the *reported* figure precise. "
                               "AlgoTune reports over 100 test instances, and "
                               "--test-shards 2 --test-problems 50 matches that"))
+    parser.add_argument("--packages", default="bare", choices=PACKAGE_STYLES,
+                        help=("`bare` is AlgoTuner's own list of package names "
+                              "and nothing else, which is the default because it "
+                              "is what upstream ships. `labelled` says what each "
+                              "library is and how it is invoked -- not when to "
+                              "reach for one -- and is a recorded deviation"))
     parser.add_argument("--no-profile", action="store_true",
                         help=("skip the line_profiler table in the mutation "
                               "prompt. It is upstream's `profile` command and "
@@ -364,7 +373,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     )
     print(f"Repair   : up to {args.repair_attempts} draw(s) per expansion"
           f"{' (upstream ERA: a failure is a -inf node)' if args.repair_attempts <= 1 else ''}")
-    print("Prompt   : AlgoTuner's own system message, naming no technique"
+    print(f"Prompt   : AlgoTuner's own system message, naming no technique"
+          f"{'' if args.packages == 'bare' else ', packages labelled (deviation)'}"
           f"{'' if args.no_profile else ' + line profile (upstream `profile`)'}")
     print(f"Tasks    : {', '.join(tasks)}")
     artifact = EvolvingArtifact(ARTIFACT_ID, blast_radius=0.6)
@@ -418,6 +428,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             repeats=args.repeats,
             problem_seconds=args.problem_seconds,
             profile=not args.no_profile,
+            packages=args.packages,
         )
         try:
             run = run_agentdescent_era(
