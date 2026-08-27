@@ -1,0 +1,1030 @@
+{
+  "experiment": "ERA on AgentDescent -- AlgoTune, one tree per task",
+  "status": "completed",
+  "completed_at": "2026-08-27T11:39:36+00:00",
+  "upstream_commit": "dff9914c10800c7a031c9e8c3d4d1c8cd1b38906",
+  "benchmark": "AlgoTune (arXiv:2507.15887), oripress/AlgoTune",
+  "config": {
+    "provider": "claude",
+    "model": "deepseek-v4-flash-ga-260731",
+    "seed": 0,
+    "asynchronous": false,
+    "async_ratio": 1,
+    "max_seconds": 1800.0,
+    "pipelined_gate": false,
+    "gate_workers": 2,
+    "dry_run": false,
+    "serial": false,
+    "budget_rollouts": null,
+    "val_cap": null,
+    "eval_concurrency": null,
+    "reflective_merge": false,
+    "eval_cache": "",
+    "no_thinking": false,
+    "tasks": "fft_convolution",
+    "list_tasks": false,
+    "staleness": "guarded",
+    "iterations": 45,
+    "workers": 3,
+    "shards": 6,
+    "test_shards": 3,
+    "problems": 2,
+    "test_problems": 0,
+    "packages": "bare",
+    "no_profile": false,
+    "repair_attempts": 4,
+    "repeats": 3,
+    "size_scale": 1.0,
+    "held_out_frac": 0.5,
+    "c_puct": 1.0,
+    "candidate_timeout": 300.0,
+    "problem_seconds": 60.0,
+    "max_code_length": 20000,
+    "max_tokens": 8000,
+    "temperature": 0.7,
+    "thinking": "disabled",
+    "api_timeout": 180.0,
+    "reply_attempts": 4,
+    "shutdown_grace": 120.0,
+    "quality_target": null
+  },
+  "summary": {
+    "tasks_run": 1,
+    "tasks_failed": 0,
+    "tasks_improved": 0,
+    "geometric_mean_baseline_speedup": 0.986454639681884,
+    "geometric_mean_best_speedup": 0.9683806971611099,
+    "wall_seconds": 10959.314348247004
+  },
+  "tasks": [
+    {
+      "task": "fft_convolution",
+      "status": "completed",
+      "held_out_baseline_speedup": 0.986454639681884,
+      "held_out_best_speedup": 0.9683806971611099,
+      "speedup_gain": -0.0180739425207741,
+      "nodes": 46,
+      "wall_seconds": 10861.554909107996,
+      "best_program": "import logging\nimport random\nfrom enum import Enum\nfrom typing import Any\nimport numpy as np\nfrom scipy import signal\n\ndef solve(problem: dict[str, Any]) -> dict[str, list]:\n    \"\"\"\n        Solve the convolution problem using the Fast Fourier Transform approach.\n\n        Uses scipy.signal.fftconvolve to compute the convolution of signals x and y.\n\n        :param problem: A dictionary representing the convolution problem.\n        :return: A dictionary with key:\n                 \"convolution\": a list representing the convolution result.\n        \"\"\"\n    signal_x = np.array(problem['signal_x'])\n    signal_y = np.array(problem['signal_y'])\n    mode = problem.get('mode', 'full')\n    convolution_result = signal.fftconvolve(signal_x, signal_y, mode=mode)\n    solution = {'convolution': convolution_result}\n    return solution\n",
+      "observation": {
+        "mode": "sync",
+        "wall_seconds": 10861.554909107996,
+        "baseline": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "0e312342caacdbaa",
+          "iteration": 0,
+          "change_summary": "AlgoTune reference implementation for fft_convolution",
+          "score": 0.9977918767261604,
+          "speedup": 0.9977918767261604,
+          "num_visits": 45,
+          "valid": true,
+          "error": "",
+          "code_chars": 828
+        },
+        "best": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "0e312342caacdbaa",
+          "iteration": 0,
+          "change_summary": "AlgoTune reference implementation for fft_convolution",
+          "score": 0.9977918767261604,
+          "speedup": 0.9977918767261604,
+          "num_visits": 45,
+          "valid": true,
+          "error": "",
+          "code_chars": 828
+        },
+        "data": {
+          "task": "fft_convolution",
+          "n": 542069,
+          "published_n": 542069,
+          "published_target_time_ms": 100,
+          "published_baseline_ms": 107.88633648333332,
+          "problems_per_shard": 2,
+          "problems_per_test_shard": 2,
+          "reported_instances": 6,
+          "scoring_shards": 6,
+          "test_shards": 3,
+          "timed_repeats": 3,
+          "line_profile": true,
+          "packages": "bare",
+          "seed": 0
+        },
+        "framework": {
+          "baseline_reward": 0.49944735903184817,
+          "final_reward": 0.5054594810369156,
+          "quality_gain": 0.006012122005067455,
+          "stop_reason": "rounds",
+          "error": null,
+          "outcomes": {
+            "no-valid-candidates": 15
+          },
+          "rollouts": 45,
+          "rollout_seconds": 743.2306447029114,
+          "eval_seconds": 58.540059328079224,
+          "stale_considered": 45,
+          "stale_discarded": 0,
+          "stale_rate": 0.0,
+          "retired_workers": 0,
+          "history": [
+            {
+              "round": 0,
+              "held_out_reward": 0.5054594810369156,
+              "elapsed_s": 302.74393129348755,
+              "rollouts": 3,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            },
+            {
+              "round": 1,
+              "held_out_reward": 0.5054594810369156,
+              "elapsed_s": 560.2557089328766,
+              "rollouts": 6,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            },
+            {
+              "round": 2,
+              "held_out_reward": 0.5054594810369156,
+              "elapsed_s": 1113.7133176326752,
+              "rollouts": 9,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            },
+            {
+              "round": 3,
+              "held_out_reward": 0.5054594810369156,
+              "elapsed_s": 1656.1270732879639,
+              "rollouts": 12,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            },
+            {
+              "round": 4,
+              "held_out_reward": 0.5054594810369156,
+              "elapsed_s": 2437.50550699234,
+              "rollouts": 15,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            },
+            {
+              "round": 5,
+              "held_out_reward": 0.5054594810369156,
+              "elapsed_s": 3518.33127784729,
+              "rollouts": 18,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            },
+            {
+              "round": 6,
+              "held_out_reward": 0.5054594810369156,
+              "elapsed_s": 4319.26779294014,
+              "rollouts": 21,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            },
+            {
+              "round": 7,
+              "held_out_reward": 0.5054594810369156,
+              "elapsed_s": 5361.782917261124,
+              "rollouts": 24,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            },
+            {
+              "round": 8,
+              "held_out_reward": 0.5054594810369156,
+              "elapsed_s": 5904.323766469955,
+              "rollouts": 27,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            },
+            {
+              "round": 9,
+              "held_out_reward": 0.5054594810369156,
+              "elapsed_s": 6730.161014795303,
+              "rollouts": 30,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            },
+            {
+              "round": 10,
+              "held_out_reward": 0.5054594810369156,
+              "elapsed_s": 7283.530260562897,
+              "rollouts": 33,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            },
+            {
+              "round": 11,
+              "held_out_reward": 0.5054594810369156,
+              "elapsed_s": 8083.835726737976,
+              "rollouts": 36,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            },
+            {
+              "round": 12,
+              "held_out_reward": 0.5054594810369156,
+              "elapsed_s": 9195.647863864899,
+              "rollouts": 39,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            },
+            {
+              "round": 13,
+              "held_out_reward": 0.5054594810369156,
+              "elapsed_s": 10028.700177907944,
+              "rollouts": 42,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            },
+            {
+              "round": 14,
+              "held_out_reward": 0.5054594810369156,
+              "elapsed_s": 10805.116543293,
+              "rollouts": 45,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            }
+          ]
+        },
+        "actor_usage": {
+          "calls": 93,
+          "failures": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "model_seconds": 10248.379169
+        },
+        "tree": {
+          "nodes": 46,
+          "valid_nodes": 1,
+          "max_depth": 13,
+          "root_visits": 45,
+          "c_puct": 1.0,
+          "tree": [
+            {
+              "index": 0,
+              "parent_index": null,
+              "program_id": "0e312342caacdbaa",
+              "iteration": 0,
+              "change_summary": "AlgoTune reference implementation for fft_convolution",
+              "score": 0.9977918767261604,
+              "speedup": 0.9977918767261604,
+              "num_visits": 45,
+              "valid": true,
+              "error": "",
+              "code_chars": 828
+            },
+            {
+              "index": 1,
+              "parent_index": 0,
+              "program_id": "ffb7be0adbcf3ee1",
+              "iteration": 2,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "1/6 problems were not solved correctly: is_solution rejected the output (worst element 7399 of 20000: reference -0.000361429795327, yours -38.3179682582 -- off by 3.832e+01, a relative 1.060e+05, 2.81e+09x the tolerance allclose would allow)",
+              "code_chars": 1317
+            },
+            {
+              "index": 2,
+              "parent_index": 0,
+              "program_id": "11e03be48ed22865",
+              "iteration": 3,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "3/6 problems were not solved correctly: is_solution rejected the output (worst element 7399 of 20000: reference -0.000361429795327, yours 8.81782248636 -- off by 8.818e+00, a relative 2.440e+04, 6.48e+08x the tolerance allclose would allow)",
+              "code_chars": 1605
+            },
+            {
+              "index": 3,
+              "parent_index": 0,
+              "program_id": "654f93d6256f5be6",
+              "iteration": 1,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "1/6 problems were not solved correctly: is_solution rejected the output (worst element 7399 of 20000: reference -0.000361429795327, yours -38.3179682582 -- off by 3.832e+01, a relative 1.060e+05, 2.81e+09x the tolerance allclose would allow)",
+              "code_chars": 1884
+            },
+            {
+              "index": 4,
+              "parent_index": 0,
+              "program_id": "e89a85b67da1be6f",
+              "iteration": 5,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "1/6 problems were not solved correctly: is_solution rejected the output (worst element 7399 of 20000: reference -0.000361429795327, yours -38.3179682582 -- off by 3.832e+01, a relative 1.060e+05, 2.81e+09x the tolerance allclose would allow)",
+              "code_chars": 1864
+            },
+            {
+              "index": 5,
+              "parent_index": 0,
+              "program_id": "a3b37181cea7fac3",
+              "iteration": 4,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "1/6 problems were not solved correctly: is_solution rejected the output (worst element 7399 of 20000: reference -0.000361429795327, yours -38.3179682582 -- off by 3.832e+01, a relative 1.060e+05, 2.81e+09x the tolerance allclose would allow)",
+              "code_chars": 2217
+            },
+            {
+              "index": 6,
+              "parent_index": 0,
+              "program_id": "025113da7587e816",
+              "iteration": 6,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 2,
+              "valid": false,
+              "error": "3/6 problems were not solved correctly: is_solution rejected the output (worst element 7399 of 20000: reference -0.000361429795327, yours 8.81782248636 -- off by 8.818e+00, a relative 2.440e+04, 6.48e+08x the tolerance allclose would allow)",
+              "code_chars": 2252
+            },
+            {
+              "index": 7,
+              "parent_index": 6,
+              "program_id": "cdbc33bca805e0b1",
+              "iteration": 7,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 13856 of 20000: reference 0.0460616097507, yours 0.0460616097511 -- off by 4.706e-13, a relative 1.022e-11, 1e-06x the tolerance allclose would allow)",
+              "code_chars": 4284
+            },
+            {
+              "index": 8,
+              "parent_index": 0,
+              "program_id": "d4eafb8f2087645e",
+              "iteration": 8,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "2/6 problems were not solved correctly: is_solution rejected the output (worst element 7399 of 20000: reference -0.000361429795327, yours -38.3179682582 -- off by 3.832e+01, a relative 1.060e+05, 2.81e+09x the tolerance allclose would allow)",
+              "code_chars": 1331
+            },
+            {
+              "index": 9,
+              "parent_index": 0,
+              "program_id": "4b4f01bf3bce21b9",
+              "iteration": 9,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 36,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 13856 of 20000: reference 0.0460616097507, yours 0.0460616097511 -- off by 4.706e-13, a relative 1.022e-11, 1e-06x the tolerance allclose would allow)",
+              "code_chars": 1464
+            },
+            {
+              "index": 10,
+              "parent_index": 0,
+              "program_id": "d91d8eb18cc531fc",
+              "iteration": 11,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "4/6 problems were not solved correctly: is_solution rejected the output (worst element 18991 of 20000: reference 0.000640391776652, yours 0.0189797480109 -- off by 1.834e-02, a relative 2.864e+01, 1.12e+06x the tolerance allclose would allow)",
+              "code_chars": 1734
+            },
+            {
+              "index": 11,
+              "parent_index": 9,
+              "program_id": "8569536dffc38825",
+              "iteration": 10,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 4,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 0 of 20000: reference 4.94877005201, yours 4.94877005201 -- off by 0.000e+00, a relative 0.000e+00, 0x the tolerance allclose would allow)",
+              "code_chars": 514
+            },
+            {
+              "index": 12,
+              "parent_index": 9,
+              "program_id": "5905ca7fe9574381",
+              "iteration": 12,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 31,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 0 of 20000: reference 4.94877005201, yours 4.94877005201 -- off by 0.000e+00, a relative 0.000e+00, 0x the tolerance allclose would allow)",
+              "code_chars": 528
+            },
+            {
+              "index": 13,
+              "parent_index": 12,
+              "program_id": "37e3ac3dd7c65a13",
+              "iteration": 14,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "killed by SIGXCPU: it exceeded the CPU limit -- the whole problem set, including compiling, has 300 CPU-seconds. A fixed-step method that chose too small a step will do this.",
+              "code_chars": 924
+            },
+            {
+              "index": 14,
+              "parent_index": 11,
+              "program_id": "027fac3caa860c93",
+              "iteration": 15,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 3,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 0 of 20000: reference 4.94877005201, yours 4.94877005201 -- off by 0.000e+00, a relative 0.000e+00, 0x the tolerance allclose would allow)",
+              "code_chars": 608
+            },
+            {
+              "index": 15,
+              "parent_index": 12,
+              "program_id": "ea5034516aa672c9",
+              "iteration": 13,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 29,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 13856 of 20000: reference 0.0460616097507, yours 0.0460616097511 -- off by 4.706e-13, a relative 1.022e-11, 1e-06x the tolerance allclose would allow)",
+              "code_chars": 1682
+            },
+            {
+              "index": 16,
+              "parent_index": 15,
+              "program_id": "dd9688561a74a43c",
+              "iteration": 16,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "killed by SIGXCPU: it exceeded the CPU limit -- the whole problem set, including compiling, has 300 CPU-seconds. A fixed-step method that chose too small a step will do this.",
+              "code_chars": 395
+            },
+            {
+              "index": 17,
+              "parent_index": 14,
+              "program_id": "b3c823865ef0b518",
+              "iteration": 17,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 2,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 13856 of 20000: reference 0.0460616097507, yours 0.0460616098 -- off by 4.932e-11, a relative 1.071e-09, 0.000105x the tolerance allclose would allow)",
+              "code_chars": 1303
+            },
+            {
+              "index": 18,
+              "parent_index": 15,
+              "program_id": "577e3386c3c4d94c",
+              "iteration": 18,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 27,
+              "valid": false,
+              "error": "killed by SIGXCPU: it exceeded the CPU limit -- the whole problem set, including compiling, has 300 CPU-seconds. A fixed-step method that chose too small a step will do this.",
+              "code_chars": 1306
+            },
+            {
+              "index": 19,
+              "parent_index": 17,
+              "program_id": "d7d6a76fc4c38098",
+              "iteration": 20,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 0 of 20000: reference 4.94877005201, yours 4.94877005201 -- off by 0.000e+00, a relative 0.000e+00, 0x the tolerance allclose would allow)",
+              "code_chars": 987
+            },
+            {
+              "index": 20,
+              "parent_index": 18,
+              "program_id": "52b983f61dae58b0",
+              "iteration": 21,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 15,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 13856 of 20000: reference 0.0460616097507, yours 0.0460616097511 -- off by 4.706e-13, a relative 1.022e-11, 1e-06x the tolerance allclose would allow)",
+              "code_chars": 1647
+            },
+            {
+              "index": 21,
+              "parent_index": 18,
+              "program_id": "6e6a9e1eeef99dfc",
+              "iteration": 19,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 11,
+              "valid": false,
+              "error": "killed by SIGXCPU: it exceeded the CPU limit -- the whole problem set, including compiling, has 300 CPU-seconds. A fixed-step method that chose too small a step will do this.",
+              "code_chars": 1091
+            },
+            {
+              "index": 22,
+              "parent_index": 21,
+              "program_id": "08155896da72ee83",
+              "iteration": 22,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "killed by SIGXCPU: it exceeded the CPU limit -- the whole problem set, including compiling, has 300 CPU-seconds. A fixed-step method that chose too small a step will do this.",
+              "code_chars": 1076
+            },
+            {
+              "index": 23,
+              "parent_index": 20,
+              "program_id": "27569ae501e7dc5c",
+              "iteration": 23,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 14,
+              "valid": false,
+              "error": "killed by SIGXCPU: it exceeded the CPU limit -- the whole problem set, including compiling, has 300 CPU-seconds. A fixed-step method that chose too small a step will do this.",
+              "code_chars": 1144
+            },
+            {
+              "index": 24,
+              "parent_index": 21,
+              "program_id": "4e8cb1f7e602b4f0",
+              "iteration": 24,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 9,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 7229 of 20000: reference 0.0767978346487, yours 0.076797834648 -- off by 6.638e-13, a relative 8.644e-12, 8.53e-07x the tolerance allclose would allow)",
+              "code_chars": 1359
+            },
+            {
+              "index": 25,
+              "parent_index": 24,
+              "program_id": "370a35e0b205d99a",
+              "iteration": 27,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 0 of 20000: reference 4.94877005201, yours 4.94877005201 -- off by 0.000e+00, a relative 0.000e+00, 0x the tolerance allclose would allow)",
+              "code_chars": 1200
+            },
+            {
+              "index": 26,
+              "parent_index": 24,
+              "program_id": "d11514b3e68a986b",
+              "iteration": 25,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 7,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 13856 of 20000: reference 0.0460616097507, yours 0.0460616097511 -- off by 4.706e-13, a relative 1.022e-11, 1e-06x the tolerance allclose would allow)",
+              "code_chars": 1393
+            },
+            {
+              "index": 27,
+              "parent_index": 23,
+              "program_id": "709a90b3d3145e28",
+              "iteration": 26,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 13,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 8241 of 20000: reference -0.0404081320701, yours -0.0404081320695 -- off by 5.292e-13, a relative 1.310e-11, 1.28e-06x the tolerance allclose would allow)",
+              "code_chars": 1626
+            },
+            {
+              "index": 28,
+              "parent_index": 27,
+              "program_id": "faa5fe4644d03d7e",
+              "iteration": 30,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 6,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 0 of 20000: reference 4.94877005201, yours 4.94877005201 -- off by 0.000e+00, a relative 0.000e+00, 0x the tolerance allclose would allow)",
+              "code_chars": 1622
+            },
+            {
+              "index": 29,
+              "parent_index": 27,
+              "program_id": "01accadd9ce77d95",
+              "iteration": 28,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 6,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 8241 of 20000: reference -0.0404081320701, yours -0.0404081320695 -- off by 5.759e-13, a relative 1.425e-11, 1.39e-06x the tolerance allclose would allow)",
+              "code_chars": 2194
+            },
+            {
+              "index": 30,
+              "parent_index": 26,
+              "program_id": "46d27d31878c23d9",
+              "iteration": 29,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 6,
+              "valid": false,
+              "error": "killed by SIGXCPU: it exceeded the CPU limit -- the whole problem set, including compiling, has 300 CPU-seconds. A fixed-step method that chose too small a step will do this.",
+              "code_chars": 1091
+            },
+            {
+              "index": 31,
+              "parent_index": 29,
+              "program_id": "cb0d01aaa29d61ab",
+              "iteration": 32,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 5,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 13856 of 20000: reference 0.0460616097507, yours 0.0460616097511 -- off by 4.706e-13, a relative 1.022e-11, 1e-06x the tolerance allclose would allow)",
+              "code_chars": 1765
+            },
+            {
+              "index": 32,
+              "parent_index": 30,
+              "program_id": "018f263c0ccaab91",
+              "iteration": 31,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 5,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 13856 of 20000: reference 0.0460616097507, yours 0.0460616097511 -- off by 4.706e-13, a relative 1.022e-11, 1e-06x the tolerance allclose would allow)",
+              "code_chars": 1959
+            },
+            {
+              "index": 33,
+              "parent_index": 28,
+              "program_id": "9df346c38e10596a",
+              "iteration": 33,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 5,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 13856 of 20000: reference 0.0460616097507, yours 0.0460616097511 -- off by 4.706e-13, a relative 1.022e-11, 1e-06x the tolerance allclose would allow)",
+              "code_chars": 1916
+            },
+            {
+              "index": 34,
+              "parent_index": 32,
+              "program_id": "acbb1169de8edd93",
+              "iteration": 35,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 4,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 0 of 20000: reference 4.94877005201, yours 4.94877005201 -- off by 0.000e+00, a relative 0.000e+00, 0x the tolerance allclose would allow)",
+              "code_chars": 376
+            },
+            {
+              "index": 35,
+              "parent_index": 33,
+              "program_id": "62995585958e2129",
+              "iteration": 34,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 4,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 8241 of 20000: reference -0.0404081320701, yours -0.0404081320695 -- off by 5.292e-13, a relative 1.310e-11, 1.28e-06x the tolerance allclose would allow)",
+              "code_chars": 1705
+            },
+            {
+              "index": 36,
+              "parent_index": 31,
+              "program_id": "f4830d18ac3d31a6",
+              "iteration": 36,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 4,
+              "valid": false,
+              "error": "killed by SIGXCPU: it exceeded the CPU limit -- the whole problem set, including compiling, has 300 CPU-seconds. A fixed-step method that chose too small a step will do this.",
+              "code_chars": 1041
+            },
+            {
+              "index": 37,
+              "parent_index": 34,
+              "program_id": "3d82d4c41bf5e2a5",
+              "iteration": 39,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 3,
+              "valid": false,
+              "error": "killed by SIGXCPU: it exceeded the CPU limit -- the whole problem set, including compiling, has 300 CPU-seconds. A fixed-step method that chose too small a step will do this.",
+              "code_chars": 480
+            },
+            {
+              "index": 38,
+              "parent_index": 36,
+              "program_id": "ae5c8c69344b18d7",
+              "iteration": 37,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 3,
+              "valid": false,
+              "error": "killed by SIGXCPU: it exceeded the CPU limit -- the whole problem set, including compiling, has 300 CPU-seconds. A fixed-step method that chose too small a step will do this.",
+              "code_chars": 2310
+            },
+            {
+              "index": 39,
+              "parent_index": 35,
+              "program_id": "01cad4f88f9817e8",
+              "iteration": 38,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 3,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 0 of 20000: reference 4.94877005201, yours 4.94877005201 -- off by 0.000e+00, a relative 0.000e+00, 0x the tolerance allclose would allow)",
+              "code_chars": 1882
+            },
+            {
+              "index": 40,
+              "parent_index": 39,
+              "program_id": "6302315c9c52ed0b",
+              "iteration": 40,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 2,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 8241 of 20000: reference -0.0404081320701, yours -0.0404081320695 -- off by 5.292e-13, a relative 1.310e-11, 1.28e-06x the tolerance allclose would allow)",
+              "code_chars": 1986
+            },
+            {
+              "index": 41,
+              "parent_index": 37,
+              "program_id": "5391838aed05b4c2",
+              "iteration": 42,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 2,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 13856 of 20000: reference 0.0460616097507, yours 0.0460616097511 -- off by 4.706e-13, a relative 1.022e-11, 1e-06x the tolerance allclose would allow)",
+              "code_chars": 1160
+            },
+            {
+              "index": 42,
+              "parent_index": 38,
+              "program_id": "45b41d80aa7fe18f",
+              "iteration": 41,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 2,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 13856 of 20000: reference 0.0460616097507, yours 0.0460616097511 -- off by 4.706e-13, a relative 1.022e-11, 1e-06x the tolerance allclose would allow)",
+              "code_chars": 1387
+            },
+            {
+              "index": 43,
+              "parent_index": 40,
+              "program_id": "373933fc1686e6d9",
+              "iteration": 45,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "killed by SIGXCPU: it exceeded the CPU limit -- the whole problem set, including compiling, has 300 CPU-seconds. A fixed-step method that chose too small a step will do this.",
+              "code_chars": 1378
+            },
+            {
+              "index": 44,
+              "parent_index": 42,
+              "program_id": "30430bd905b46f51",
+              "iteration": 43,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 0 of 20000: reference 4.94877005201, yours 4.94877005201 -- off by 0.000e+00, a relative 0.000e+00, 0x the tolerance allclose would allow)",
+              "code_chars": 1409
+            },
+            {
+              "index": 45,
+              "parent_index": 41,
+              "program_id": "ee8094ebc5b055ba",
+              "iteration": 44,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 0 of 20000: reference 4.94877005201, yours 4.94877005201 -- off by 0.000e+00, a relative 0.000e+00, 0x the tolerance allclose would allow)",
+              "code_chars": 824
+            }
+          ]
+        },
+        "test": {
+          "baseline": {
+            "speedup": 0.986454639681884,
+            "score": 0.986454639681884,
+            "valid_problems": 6,
+            "problems": 6,
+            "baseline_ms": 249.8685096676733,
+            "candidate_ms": 253.93264099693624,
+            "slowest": [
+              {
+                "seed": 13,
+                "shard": 6,
+                "baseline_ms": 295.5916,
+                "candidate_ms": 310.5392,
+                "speedup": 0.9519,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 16,
+                "shard": 7,
+                "baseline_ms": 324.7905,
+                "candidate_ms": 338.0334,
+                "speedup": 0.9608,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 14,
+                "shard": 6,
+                "baseline_ms": 202.13,
+                "candidate_ms": 207.5748,
+                "speedup": 0.9738,
+                "valid": true,
+                "error": ""
+              }
+            ],
+            "profile": "    13                                           \n    17                                                   \"\"\"\n    18         1         36.8     36.8     12.0      signal_x = np.array(problem['signal_x'])\n    19         1         37.6     37.6     12.2      signal_y = np.array(problem['signal_y'])\n    20         1          0.0      0.0      0.0      mode = problem.get('mode', 'full')\n    21         1        232.3    232.3     75.8      convolution_result = signal.fftconvolve(signal_x, signal_y, mode=mode)\n    22         1          0.0      0.0      0.0      solution = {'convolution': convolution_result}\n    23         1          0.0      0.0      0.0      return solution",
+            "seconds": 48.94696756299527,
+            "limits_unavailable": [],
+            "error": ""
+          },
+          "best": {
+            "speedup": 0.9683806971611099,
+            "score": 0.9683806971611099,
+            "valid_problems": 6,
+            "problems": 6,
+            "baseline_ms": 235.2236281670533,
+            "candidate_ms": 244.7070213323362,
+            "slowest": [
+              {
+                "seed": 18,
+                "shard": 8,
+                "baseline_ms": 177.5069,
+                "candidate_ms": 208.4824,
+                "speedup": 0.8514,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 13,
+                "shard": 6,
+                "baseline_ms": 255.1527,
+                "candidate_ms": 280.7425,
+                "speedup": 0.9088,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 16,
+                "shard": 7,
+                "baseline_ms": 301.1068,
+                "candidate_ms": 325.5044,
+                "speedup": 0.925,
+                "valid": true,
+                "error": ""
+              }
+            ],
+            "profile": "    13                                           \n    17                                                   \"\"\"\n    18         1         35.0     35.0     12.3      signal_x = np.array(problem['signal_x'])\n    19         1         35.9     35.9     12.6      signal_y = np.array(problem['signal_y'])\n    20         1          0.0      0.0      0.0      mode = problem.get('mode', 'full')\n    21         1        213.6    213.6     75.1      convolution_result = signal.fftconvolve(signal_x, signal_y, mode=mode)\n    22         1          0.0      0.0      0.0      solution = {'convolution': convolution_result}\n    23         1          0.0      0.0      0.0      return solution",
+            "seconds": 47.59753221700521,
+            "limits_unavailable": [],
+            "error": ""
+          },
+          "speedup_gain": -0.0180739425207741
+        }
+      },
+      "actor_usage": {
+        "calls": 93,
+        "failures": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "model_seconds": 10248.379169
+      }
+    }
+  ],
+  "failures": [],
+  "model_usage": {
+    "calls": 182,
+    "failures": 0,
+    "prompt_tokens": 162333,
+    "completion_tokens": 139258,
+    "total_tokens": 301591,
+    "model_seconds": 1438.073589
+  },
+  "repair": {
+    "attempts_allowed": 4,
+    "checked": 130,
+    "failed": 127,
+    "repaired": 1,
+    "gave_up": 42
+  },
+  "reply_damage": {
+    "drawn": 182,
+    "damaged": 10,
+    "attempts_allowed": 4
+  }
+}
