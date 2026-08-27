@@ -1,0 +1,1029 @@
+{
+  "experiment": "ERA on AgentDescent -- AlgoTune, one tree per task",
+  "status": "completed",
+  "completed_at": "2026-08-27T02:25:16+00:00",
+  "upstream_commit": "dff9914c10800c7a031c9e8c3d4d1c8cd1b38906",
+  "benchmark": "AlgoTune (arXiv:2507.15887), oripress/AlgoTune",
+  "config": {
+    "provider": "claude",
+    "model": "deepseek-v4-flash-ga-260731",
+    "seed": 0,
+    "asynchronous": false,
+    "async_ratio": 1,
+    "max_seconds": 1800.0,
+    "pipelined_gate": false,
+    "gate_workers": 2,
+    "dry_run": false,
+    "serial": false,
+    "budget_rollouts": null,
+    "val_cap": null,
+    "eval_concurrency": null,
+    "reflective_merge": false,
+    "eval_cache": "",
+    "no_thinking": false,
+    "tasks": "power_control",
+    "list_tasks": false,
+    "staleness": "guarded",
+    "iterations": 45,
+    "workers": 3,
+    "shards": 6,
+    "test_shards": 3,
+    "problems": 2,
+    "test_problems": 0,
+    "no_profile": false,
+    "repair_attempts": 4,
+    "repeats": 3,
+    "size_scale": 1.0,
+    "held_out_frac": 0.5,
+    "c_puct": 1.0,
+    "candidate_timeout": 300.0,
+    "problem_seconds": 60.0,
+    "max_code_length": 20000,
+    "max_tokens": 8000,
+    "temperature": 0.7,
+    "thinking": "disabled",
+    "api_timeout": 180.0,
+    "reply_attempts": 4,
+    "shutdown_grace": 120.0,
+    "quality_target": null
+  },
+  "summary": {
+    "tasks_run": 1,
+    "tasks_failed": 0,
+    "tasks_improved": 1,
+    "geometric_mean_baseline_speedup": 1.0399553496974439,
+    "geometric_mean_best_speedup": 494.4376210341033,
+    "wall_seconds": 922.0480969589989
+  },
+  "tasks": [
+    {
+      "task": "power_control",
+      "status": "completed",
+      "held_out_baseline_speedup": 1.0399553496974439,
+      "held_out_best_speedup": 494.43762103410353,
+      "speedup_gain": 493.3976656844061,
+      "nodes": 46,
+      "wall_seconds": 880.8249964549996,
+      "best_program": "import numpy as np\nimport numba\nfrom typing import Any\n\n@numba.njit(cache=True, fastmath=True)\ndef _power_control(G, sigma, P_min, P_max, S_min, max_iter=200, tol=1e-14):\n    n = G.shape[0]\n    diag_G = np.diag(G).copy()\n    off_diag = G.copy()\n    for i in range(n):\n        off_diag[i, i] = 0.0\n\n    scale = S_min / diag_G\n    P = P_min.copy()\n\n    for _ in range(max_iter):\n        interference = off_diag @ P\n        required = scale * (sigma + interference)\n        new_P = np.clip(required, P_min, P_max)\n        if np.abs(new_P - P).max() < tol:\n            P = new_P\n            break\n        P = new_P\n\n    return P\n\ndef solve(problem: dict[str, Any]) -> dict[str, Any]:\n    G = np.asarray(problem['G'], dtype=np.float64)\n    sigma = np.asarray(problem['σ'], dtype=np.float64)\n    P_min = np.asarray(problem['P_min'], dtype=np.float64)\n    P_max = np.asarray(problem['P_max'], dtype=np.float64)\n    S_min = float(problem['S_min'])\n\n    P = _power_control(G, sigma, P_min, P_max, S_min)\n\n    return {'P': P.tolist(), 'objective': float(np.sum(P))}",
+      "observation": {
+        "mode": "sync",
+        "wall_seconds": 880.8249964549996,
+        "baseline": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "fad9d270497fe989",
+          "iteration": 0,
+          "change_summary": "AlgoTune reference implementation for power_control",
+          "score": 1.003291618999021,
+          "speedup": 1.003291618999021,
+          "num_visits": 45,
+          "valid": true,
+          "error": "",
+          "code_chars": 866
+        },
+        "best": {
+          "index": 45,
+          "parent_index": 42,
+          "program_id": "1f40b16d8ba2f8c3",
+          "iteration": 43,
+          "change_summary": "",
+          "score": 517.1268657867637,
+          "speedup": 517.1268657867637,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 1055
+        },
+        "data": {
+          "task": "power_control",
+          "n": 98,
+          "published_n": 98,
+          "published_target_time_ms": 100,
+          "published_baseline_ms": 102.39538344999998,
+          "problems_per_shard": 2,
+          "problems_per_test_shard": 2,
+          "reported_instances": 6,
+          "scoring_shards": 6,
+          "test_shards": 3,
+          "timed_repeats": 3,
+          "line_profile": true,
+          "seed": 0
+        },
+        "framework": {
+          "baseline_reward": 0.5008215526306314,
+          "final_reward": 0.998048835600052,
+          "quality_gain": 0.49722728296942054,
+          "stop_reason": "rounds",
+          "error": null,
+          "outcomes": {
+            "committed": 9,
+            "tree-updated": 6
+          },
+          "rollouts": 45,
+          "rollout_seconds": 197.93494772911072,
+          "eval_seconds": 128.9210011959076,
+          "stale_considered": 45,
+          "stale_discarded": 0,
+          "stale_rate": 0.0,
+          "retired_workers": 0,
+          "history": [
+            {
+              "round": 0,
+              "held_out_reward": 0.9496436904319473,
+              "elapsed_s": 65.40311598777771,
+              "rollouts": 3,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 1,
+              "held_out_reward": 0.9625944814504693,
+              "elapsed_s": 112.6342921257019,
+              "rollouts": 6,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 2,
+              "held_out_reward": 0.9625944814504693,
+              "elapsed_s": 157.62271523475647,
+              "rollouts": 9,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 3,
+              "held_out_reward": 0.9977382104700173,
+              "elapsed_s": 206.2815752029419,
+              "rollouts": 12,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 4,
+              "held_out_reward": 0.9977382104700173,
+              "elapsed_s": 250.5228669643402,
+              "rollouts": 15,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 5,
+              "held_out_reward": 0.9977251784829018,
+              "elapsed_s": 300.28868794441223,
+              "rollouts": 18,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 6,
+              "held_out_reward": 0.9978265908650489,
+              "elapsed_s": 349.66130900382996,
+              "rollouts": 21,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 7,
+              "held_out_reward": 0.9978265908650489,
+              "elapsed_s": 392.910564661026,
+              "rollouts": 24,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 8,
+              "held_out_reward": 0.9978265908650489,
+              "elapsed_s": 460.5797107219696,
+              "rollouts": 27,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 9,
+              "held_out_reward": 0.9979126498882929,
+              "elapsed_s": 507.0964195728302,
+              "rollouts": 30,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 10,
+              "held_out_reward": 0.9979126498882929,
+              "elapsed_s": 554.8966794013977,
+              "rollouts": 33,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 11,
+              "held_out_reward": 0.9979973756887285,
+              "elapsed_s": 615.1867108345032,
+              "rollouts": 36,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 12,
+              "held_out_reward": 0.9979502481765353,
+              "elapsed_s": 705.7246325016022,
+              "rollouts": 39,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 13,
+              "held_out_reward": 0.998048835600052,
+              "elapsed_s": 791.1801142692566,
+              "rollouts": 42,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 14,
+              "held_out_reward": 0.998048835600052,
+              "elapsed_s": 863.0641205310822,
+              "rollouts": 45,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            }
+          ]
+        },
+        "actor_usage": {
+          "calls": 117,
+          "failures": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "model_seconds": 835.619819
+        },
+        "tree": {
+          "nodes": 46,
+          "valid_nodes": 45,
+          "max_depth": 12,
+          "root_visits": 45,
+          "c_puct": 1.0,
+          "tree": [
+            {
+              "index": 0,
+              "parent_index": null,
+              "program_id": "fad9d270497fe989",
+              "iteration": 0,
+              "change_summary": "AlgoTune reference implementation for power_control",
+              "score": 1.003291618999021,
+              "speedup": 1.003291618999021,
+              "num_visits": 45,
+              "valid": true,
+              "error": "",
+              "code_chars": 866
+            },
+            {
+              "index": 1,
+              "parent_index": 0,
+              "program_id": "10a0dd29eaea382f",
+              "iteration": 2,
+              "change_summary": "",
+              "score": 18.993587334172883,
+              "speedup": 18.993587334172883,
+              "num_visits": 43,
+              "valid": true,
+              "error": "",
+              "code_chars": 1147
+            },
+            {
+              "index": 2,
+              "parent_index": 0,
+              "program_id": "7c53ebadbea211d8",
+              "iteration": 3,
+              "change_summary": "",
+              "score": 17.842401661789197,
+              "speedup": 17.842401661789197,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1287
+            },
+            {
+              "index": 3,
+              "parent_index": 0,
+              "program_id": "7c58e60948fca613",
+              "iteration": 1,
+              "change_summary": "",
+              "score": 18.05334205770246,
+              "speedup": 18.05334205770246,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1777
+            },
+            {
+              "index": 4,
+              "parent_index": 1,
+              "program_id": "18ecb302a1c693bc",
+              "iteration": 4,
+              "change_summary": "",
+              "score": 26.424682095732205,
+              "speedup": 26.424682095732205,
+              "num_visits": 40,
+              "valid": true,
+              "error": "",
+              "code_chars": 1042
+            },
+            {
+              "index": 5,
+              "parent_index": 1,
+              "program_id": "0c8a68262a2aa769",
+              "iteration": 5,
+              "change_summary": "",
+              "score": 24.907417991612178,
+              "speedup": 24.907417991612178,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1270
+            },
+            {
+              "index": 6,
+              "parent_index": 1,
+              "program_id": "3d24de6074051461",
+              "iteration": 6,
+              "change_summary": "",
+              "score": 24.964635513625414,
+              "speedup": 24.964635513625414,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 997
+            },
+            {
+              "index": 7,
+              "parent_index": 4,
+              "program_id": "44a2b24352d738d5",
+              "iteration": 9,
+              "change_summary": "",
+              "score": 23.81275608736708,
+              "speedup": 23.81275608736708,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 946
+            },
+            {
+              "index": 8,
+              "parent_index": 4,
+              "program_id": "1a98231bc0390917",
+              "iteration": 7,
+              "change_summary": "",
+              "score": 25.950549531482753,
+              "speedup": 25.950549531482753,
+              "num_visits": 2,
+              "valid": true,
+              "error": "",
+              "code_chars": 961
+            },
+            {
+              "index": 9,
+              "parent_index": 4,
+              "program_id": "6352f37cd60776f8",
+              "iteration": 8,
+              "change_summary": "",
+              "score": 24.494800002045206,
+              "speedup": 24.494800002045206,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 929
+            },
+            {
+              "index": 10,
+              "parent_index": 8,
+              "program_id": "25a42c3ab64602d0",
+              "iteration": 10,
+              "change_summary": "",
+              "score": 20.51473745727561,
+              "speedup": 20.51473745727561,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 875
+            },
+            {
+              "index": 11,
+              "parent_index": 4,
+              "program_id": "dcd21a357b1202f3",
+              "iteration": 12,
+              "change_summary": "",
+              "score": 408.8099561013103,
+              "speedup": 408.8099561013103,
+              "num_visits": 32,
+              "valid": true,
+              "error": "",
+              "code_chars": 2109
+            },
+            {
+              "index": 12,
+              "parent_index": 4,
+              "program_id": "1f1882c39c4d9163",
+              "iteration": 11,
+              "change_summary": "",
+              "score": 366.37643577372586,
+              "speedup": 366.37643577372586,
+              "num_visits": 3,
+              "valid": true,
+              "error": "",
+              "code_chars": 1204
+            },
+            {
+              "index": 13,
+              "parent_index": 11,
+              "program_id": "77b946c3e1fe1481",
+              "iteration": 13,
+              "change_summary": "",
+              "score": 18.007599729224893,
+              "speedup": 18.007599729224893,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1501
+            },
+            {
+              "index": 14,
+              "parent_index": 11,
+              "program_id": "d192f5d53212c011",
+              "iteration": 15,
+              "change_summary": "",
+              "score": 18.28091767356716,
+              "speedup": 18.28091767356716,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 996
+            },
+            {
+              "index": 15,
+              "parent_index": 12,
+              "program_id": "9bb858367d2ece51",
+              "iteration": 14,
+              "change_summary": "",
+              "score": 387.69325733812155,
+              "speedup": 387.69325733812155,
+              "num_visits": 2,
+              "valid": true,
+              "error": "",
+              "code_chars": 817
+            },
+            {
+              "index": 16,
+              "parent_index": 11,
+              "program_id": "d9c7ecddd43ea539",
+              "iteration": 17,
+              "change_summary": "",
+              "score": 416.9790336993583,
+              "speedup": 416.9790336993583,
+              "num_visits": 2,
+              "valid": true,
+              "error": "",
+              "code_chars": 1539
+            },
+            {
+              "index": 17,
+              "parent_index": 11,
+              "program_id": "b2b87dc8f42fd945",
+              "iteration": 18,
+              "change_summary": "",
+              "score": 422.08529526987303,
+              "speedup": 422.08529526987303,
+              "num_visits": 27,
+              "valid": true,
+              "error": "",
+              "code_chars": 1499
+            },
+            {
+              "index": 18,
+              "parent_index": 15,
+              "program_id": "d55423c26c18bab4",
+              "iteration": 16,
+              "change_summary": "",
+              "score": 18.020990072468965,
+              "speedup": 18.020990072468965,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1277
+            },
+            {
+              "index": 19,
+              "parent_index": 16,
+              "program_id": "75dea3e926ae06e1",
+              "iteration": 20,
+              "change_summary": "",
+              "score": 403.84031623526744,
+              "speedup": 403.84031623526744,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1363
+            },
+            {
+              "index": 20,
+              "parent_index": 17,
+              "program_id": "f7da55637ecf47b6",
+              "iteration": 21,
+              "change_summary": "",
+              "score": 454.7801272850438,
+              "speedup": 454.7801272850438,
+              "num_visits": 25,
+              "valid": true,
+              "error": "",
+              "code_chars": 828
+            },
+            {
+              "index": 21,
+              "parent_index": 17,
+              "program_id": "71761ad143d1e743",
+              "iteration": 19,
+              "change_summary": "",
+              "score": 18.367811384785572,
+              "speedup": 18.367811384785572,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1198
+            },
+            {
+              "index": 22,
+              "parent_index": 20,
+              "program_id": "f7da55637ecf47b6",
+              "iteration": 23,
+              "change_summary": "",
+              "score": 442.21361797867735,
+              "speedup": 442.21361797867735,
+              "num_visits": 17,
+              "valid": true,
+              "error": "",
+              "code_chars": 828
+            },
+            {
+              "index": 23,
+              "parent_index": 20,
+              "program_id": "f7da55637ecf47b6",
+              "iteration": 24,
+              "change_summary": "",
+              "score": 454.7212020376505,
+              "speedup": 454.7212020376505,
+              "num_visits": 6,
+              "valid": true,
+              "error": "",
+              "code_chars": 828
+            },
+            {
+              "index": 24,
+              "parent_index": 20,
+              "program_id": "c331936224d95e7d",
+              "iteration": 22,
+              "change_summary": "",
+              "score": 303.53888140236705,
+              "speedup": 303.53888140236705,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 734
+            },
+            {
+              "index": 25,
+              "parent_index": 23,
+              "program_id": "230d8ee654554897",
+              "iteration": 25,
+              "change_summary": "",
+              "score": 290.58507538848977,
+              "speedup": 290.58507538848977,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1915
+            },
+            {
+              "index": 26,
+              "parent_index": 22,
+              "program_id": "10bc3a2e9a2c1429",
+              "iteration": 26,
+              "change_summary": "",
+              "score": 307.8226797806005,
+              "speedup": 307.8226797806005,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1408
+            },
+            {
+              "index": 27,
+              "parent_index": 23,
+              "program_id": "2e2a502435c63048",
+              "iteration": 27,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (largest relative difference from the reference 1.197e+02, at element 49 of 99: reference 0.0527214684358, yours 6.36505873127)",
+              "code_chars": 1039
+            },
+            {
+              "index": 28,
+              "parent_index": 23,
+              "program_id": "f7da55637ecf47b6",
+              "iteration": 30,
+              "change_summary": "",
+              "score": 453.4926074136444,
+              "speedup": 453.4926074136444,
+              "num_visits": 2,
+              "valid": true,
+              "error": "",
+              "code_chars": 828
+            },
+            {
+              "index": 29,
+              "parent_index": 22,
+              "program_id": "81dbae452e5ed529",
+              "iteration": 29,
+              "change_summary": "",
+              "score": 467.8533013861015,
+              "speedup": 467.8533013861015,
+              "num_visits": 15,
+              "valid": true,
+              "error": "",
+              "code_chars": 912
+            },
+            {
+              "index": 30,
+              "parent_index": 23,
+              "program_id": "cb3bb845ac260d35",
+              "iteration": 28,
+              "change_summary": "",
+              "score": 166.4736390187416,
+              "speedup": 166.4736390187416,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 981
+            },
+            {
+              "index": 31,
+              "parent_index": 29,
+              "program_id": "81dbae452e5ed529",
+              "iteration": 31,
+              "change_summary": "",
+              "score": 466.0741980344476,
+              "speedup": 466.0741980344476,
+              "num_visits": 13,
+              "valid": true,
+              "error": "",
+              "code_chars": 912
+            },
+            {
+              "index": 32,
+              "parent_index": 28,
+              "program_id": "7ed4926ae977c7d8",
+              "iteration": 33,
+              "change_summary": "",
+              "score": 438.54238979645606,
+              "speedup": 438.54238979645606,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1081
+            },
+            {
+              "index": 33,
+              "parent_index": 29,
+              "program_id": "534d65f94193a71d",
+              "iteration": 32,
+              "change_summary": "",
+              "score": 26.81854550635484,
+              "speedup": 26.81854550635484,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1719
+            },
+            {
+              "index": 34,
+              "parent_index": 31,
+              "program_id": "0cb507f9ddccd9e9",
+              "iteration": 34,
+              "change_summary": "",
+              "score": 446.36310853005665,
+              "speedup": 446.36310853005665,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1307
+            },
+            {
+              "index": 35,
+              "parent_index": 31,
+              "program_id": "3f59a08395d0382d",
+              "iteration": 36,
+              "change_summary": "",
+              "score": 290.7837941893803,
+              "speedup": 290.7837941893803,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1790
+            },
+            {
+              "index": 36,
+              "parent_index": 31,
+              "program_id": "8363d72e25e7e8db",
+              "iteration": 35,
+              "change_summary": "",
+              "score": 499.69167604091353,
+              "speedup": 499.69167604091353,
+              "num_visits": 10,
+              "valid": true,
+              "error": "",
+              "code_chars": 1077
+            },
+            {
+              "index": 37,
+              "parent_index": 36,
+              "program_id": "beb75a5908f28ac8",
+              "iteration": 38,
+              "change_summary": "",
+              "score": 493.90249891178337,
+              "speedup": 493.90249891178337,
+              "num_visits": 2,
+              "valid": true,
+              "error": "",
+              "code_chars": 1309
+            },
+            {
+              "index": 38,
+              "parent_index": 36,
+              "program_id": "9a47c64730b4338a",
+              "iteration": 37,
+              "change_summary": "",
+              "score": 494.06036836785785,
+              "speedup": 494.06036836785785,
+              "num_visits": 2,
+              "valid": true,
+              "error": "",
+              "code_chars": 1159
+            },
+            {
+              "index": 39,
+              "parent_index": 36,
+              "program_id": "9a8d43115651aec9",
+              "iteration": 39,
+              "change_summary": "",
+              "score": 501.58990105486833,
+              "speedup": 501.58990105486833,
+              "num_visits": 5,
+              "valid": true,
+              "error": "",
+              "code_chars": 1075
+            },
+            {
+              "index": 40,
+              "parent_index": 38,
+              "program_id": "aa1d88f0351e6a5e",
+              "iteration": 41,
+              "change_summary": "",
+              "score": 436.86352772993956,
+              "speedup": 436.86352772993956,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1007
+            },
+            {
+              "index": 41,
+              "parent_index": 39,
+              "program_id": "1f40b16d8ba2f8c3",
+              "iteration": 42,
+              "change_summary": "",
+              "score": 491.5766307427957,
+              "speedup": 491.5766307427957,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1055
+            },
+            {
+              "index": 42,
+              "parent_index": 39,
+              "program_id": "1f40b16d8ba2f8c3",
+              "iteration": 40,
+              "change_summary": "",
+              "score": 511.03160840066533,
+              "speedup": 511.03160840066533,
+              "num_visits": 3,
+              "valid": true,
+              "error": "",
+              "code_chars": 1055
+            },
+            {
+              "index": 43,
+              "parent_index": 42,
+              "program_id": "25faacd20f75f5e2",
+              "iteration": 44,
+              "change_summary": "",
+              "score": 305.75196808708904,
+              "speedup": 305.75196808708904,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1281
+            },
+            {
+              "index": 44,
+              "parent_index": 37,
+              "program_id": "29e7b8f1b173d191",
+              "iteration": 45,
+              "change_summary": "",
+              "score": 488.3413930544055,
+              "speedup": 488.3413930544055,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1317
+            },
+            {
+              "index": 45,
+              "parent_index": 42,
+              "program_id": "1f40b16d8ba2f8c3",
+              "iteration": 43,
+              "change_summary": "",
+              "score": 517.1268657867637,
+              "speedup": 517.1268657867637,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1055
+            }
+          ]
+        },
+        "test": {
+          "baseline": {
+            "speedup": 1.0399553496974439,
+            "score": 1.0399553496974439,
+            "valid_problems": 6,
+            "problems": 6,
+            "baseline_ms": 203.65926816702995,
+            "candidate_ms": 195.88250300027235,
+            "slowest": [
+              {
+                "seed": 13,
+                "shard": 6,
+                "baseline_ms": 189.97,
+                "candidate_ms": 193.0856,
+                "speedup": 0.9839,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 15,
+                "shard": 7,
+                "baseline_ms": 203.9446,
+                "candidate_ms": 206.2262,
+                "speedup": 0.9889,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 18,
+                "shard": 8,
+                "baseline_ms": 190.6625,
+                "candidate_ms": 192.7876,
+                "speedup": 0.989,
+                "valid": true,
+                "error": ""
+              }
+            ],
+            "profile": "Line #      Hits         Time  Per Hit   % Time  Line Contents\n==============================================================\n     6         1          0.4      0.4      0.1      G = np.asarray(problem['G'], float)\n     7         1          0.0      0.0      0.0      σ = np.asarray(problem['σ'], float)\n     8         1          0.0      0.0      0.0      P_min = np.asarray(problem['P_min'], float)\n     9         1          0.0      0.0      0.0      P_max = np.asarray(problem['P_max'], float)\n    10         1          0.0      0.0      0.0      S_min = float(problem['S_min'])\n    11         1          0.0      0.0      0.0      n = G.shape[0]\n    12         1          0.1      0.1      0.0      P = cp.Variable(n, nonneg=True)\n    13         1          1.0      1.0      0.2      constraints = [P >= P_min, P <= P_max]\n    14        99          0.0      0.0      0.0      for i in range(n):\n    15        98         49.7      0.5      8.5          interf = σ[i] + cp.sum(cp.multiply(G[i], P)) - G[i, i] * P[i]\n    16        98         39.5      0.4      6.8          constraints.append(G[i, i] * P[i] >= S_min * interf)\n    17         1          3.3      3.3      0.6      prob = cp.Problem(cp.Minimize(cp.sum(P)), constraints)\n    18         1        488.3    488.3     83.9      prob.solve(solver=cp.ECOS)\n    19         1          0.0      0.0      0.0      if prob.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):\n    21         1          0.0      0.0      0.0      return {'P': P.value.tolist(), 'objective': float(prob.value)}",
+            "seconds": 17.2335321190003,
+            "limits_unavailable": [],
+            "error": ""
+          },
+          "best": {
+            "speedup": 494.43762103410353,
+            "score": 494.43762103410353,
+            "valid_problems": 6,
+            "problems": 6,
+            "baseline_ms": 194.12904149976384,
+            "candidate_ms": 0.39302099958149483,
+            "slowest": [
+              {
+                "seed": 15,
+                "shard": 7,
+                "baseline_ms": 185.6427,
+                "candidate_ms": 0.3974,
+                "speedup": 467.1878,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 17,
+                "shard": 8,
+                "baseline_ms": 195.3881,
+                "candidate_ms": 0.4137,
+                "speedup": 472.293,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 14,
+                "shard": 6,
+                "baseline_ms": 199.5896,
+                "candidate_ms": 0.3981,
+                "speedup": 501.3189,
+                "valid": true,
+                "error": ""
+              }
+            ],
+            "profile": "Line #      Hits         Time  Per Hit   % Time  Line Contents\n==============================================================\n    28         1          0.4      0.4     68.7      G = np.asarray(problem['G'], dtype=np.float64)\n    29         1          0.0      0.0      1.8      sigma = np.asarray(problem['σ'], dtype=np.float64)\n    30         1          0.0      0.0      0.9      P_min = np.asarray(problem['P_min'], dtype=np.float64)\n    31         1          0.0      0.0      1.0      P_max = np.asarray(problem['P_max'], dtype=np.float64)\n    32         1          0.0      0.0      0.1      S_min = float(problem['S_min'])\n    34         1          0.1      0.1     13.7      P = _power_control(G, sigma, P_min, P_max, S_min)\n    36         1          0.1      0.1     13.8      return {'P': P.tolist(), 'objective': float(np.sum(P))}",
+            "seconds": 21.51564553099888,
+            "limits_unavailable": [],
+            "error": ""
+          },
+          "speedup_gain": 493.3976656844061
+        }
+      },
+      "actor_usage": {
+        "calls": 117,
+        "failures": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "model_seconds": 835.619819
+      }
+    }
+  ],
+  "failures": [],
+  "model_usage": {
+    "calls": 52,
+    "failures": 0,
+    "prompt_tokens": 92218,
+    "completion_tokens": 28853,
+    "total_tokens": 121071,
+    "model_seconds": 316.952179
+  },
+  "repair": {
+    "attempts_allowed": 4,
+    "checked": 47,
+    "failed": 3,
+    "repaired": 0,
+    "gave_up": 1
+  },
+  "reply_damage": {
+    "drawn": 52,
+    "damaged": 4,
+    "attempts_allowed": 4
+  }
+}
