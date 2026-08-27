@@ -51,9 +51,9 @@ def law(title, meaning, truth, found, note=None):
     """One recovered law: what it is, the rearranged truth, what the search returned."""
     rows = [[Paragraph(f"<b>{title}</b>", H2)],
             [Paragraph(meaning, SMALL)],
-            [Paragraph(f'<font name="CN" size="8">重排后的真值</font>'
+            [Paragraph(f'<font name="CN" size="8">隐藏的真值</font>'
                        f'&nbsp;&nbsp;{truth}', EQMUTED)],
-            [Paragraph(f'<font name="CN" size="8">搜索给出的答案</font>'
+            [Paragraph(f'<font name="CN" size="8">从数据得出</font>'
                        f'&nbsp;&nbsp;{found}', EQ)]]
     if note:
         rows.append([Paragraph(note, SMALL)])
@@ -68,22 +68,26 @@ def law(title, meaning, truth, found, note=None):
     return KeepTogether([t, Spacer(1, 5)])
 
 story = []
-story += [Paragraph("树搜索从数据中发现科学定律", TITLE),
+story += [Paragraph("从观测数据中发现物理规律", TITLE),
           Paragraph("ERA flat-PUCT 程序搜索在 LLM-SRBench / LSR-Transform 上的结果", SUB),
-          Paragraph("111 道重排后的费曼方程 &nbsp;·&nbsp; 每题 24 次程序改写 &nbsp;·&nbsp; "
-                    "16.5 次模型调用 &nbsp;·&nbsp; deepseek-v4-flash", DEK)]
+          Paragraph("输入只有采样点，没有方程 &nbsp;·&nbsp; 111 道题 &nbsp;·&nbsp; "
+                    "每题 24 次程序改写、16.5 次模型调用 &nbsp;·&nbsp; deepseek-v4-flash", DEK)]
 story += rule(6, 10)
 
 # ---------------------------------------------------------------- 一
 story += [Paragraph("一、数据集在问什么", H1),
-          Paragraph("LLM-SRBench 的 LSR-Transform 子集取自费曼物理讲义的 111 个方程，"
-                    "然后<b>换未知量重排</b>。库仑定律 F = q1·q2/(4·pi·eps·r^2) 人人会背，"
-                    "但这里给的是 F、q1、q2、eps 的采样数据，要求解出 <b>r</b>：", BODY),
+          Paragraph("<b>输入是一张纯数字表：4000 行采样点，每行是若干自变量的取值和一个观测量。"
+                    "没有方程，没有提示，真值从头到尾不出现在任何环节。</b>"
+                    "要求输出的是一段程序，它写出的方程要能解释这些数字。", BODY),
+          Paragraph("题目取自费曼物理讲义的 111 个方程，且都<b>换未知量重排</b>过。"
+                    "库仑定律 F = q1·q2/(4·pi·eps·r^2) 人人会背，但这里给的是 F、q1、q2、eps 四列观测值，"
+                    "要求解出 <b>r</b>：", BODY),
           Paragraph("&nbsp;&nbsp;&nbsp;&nbsp;r = -sqrt(q1*q2/(F*eps)) / (2*sqrt(pi))", EQ),
           Spacer(1, 6),
           Paragraph("这个形式不出现在任何教科书里。模型见过原式、见不到重排后的版本，"
-                    "所以无法检索，只能<b>从 4000 个采样点里把函数形式推出来</b>，"
-                    "再由优化器填常数。这就是该数据集的设计目的：把「记住方程」和「发现方程」分开。", BODY)]
+                    "所以无法靠检索作答，只能<b>从那 4000 个采样点里把函数形式定出来</b>，"
+                    "再由优化器填常数。这就是该数据集的设计目的：把「记住方程」和"
+                    "「从观测数据里把方程找出来」分开。", BODY)]
 
 # ---------------------------------------------------------------- 二
 story += [Paragraph("二、方法", H1),
@@ -131,18 +135,19 @@ story += [t, Spacer(1, 7),
                     "而不是把定律推出来。这一栏正是「拟合」与「发现」的分界。", BODY)]
 
 # ---------------------------------------------------------------- 四
-story += [Paragraph("四、被重新发现的物理定律", H1),
-          Paragraph("下面每一条，左侧是数据集给出的<b>重排后</b>形式，右侧是搜索返回的答案。"
-                    "答案中的 params[i] 由评测方拟合，模型只负责结构。", BODY)]
+story += [Paragraph("四、从观测数据中找出的物理定律", H1),
+          Paragraph("下面每一条，上行是<b>搜索从未见过的</b>真值（数据集重排后的形式），"
+                    "下行是搜索仅凭那张数字表返回的答案。"
+                    "答案中的 params[i] 由评测方拟合，模型只负责给出结构。", BODY)]
 
 story += [law("玻尔能级 —— 反解主量子数",
-              "从氢原子能级数据反推主量子数 n",
+              "由氢原子能级的观测值反推主量子数 n",
               "-sqrt(2)*q^2*sqrt(-m/E_n)/(4*eps*h)",
               "sqrt(-m*q^4/(eps^2*h^2*E_n))",
               "模型把 q^2 与 1/(eps*h) 全部收进根号 —— 代数等价，且比真值形式更紧凑。")]
 
 story += [law("普朗克 / 玻色-爱因斯坦分布 —— 反解温度",
-              "从黑体辐射谱反推系统温度",
+              "由黑体辐射谱的观测值反推系统温度",
               "h*omega/(2*pi*kb*log(1 + h*omega/(2*pi*E_n)))",
               "params[0]*h*omega/(kb*log(1 + params[1]*h*omega/E_n)) + params[2]",
               "嵌套 log 的结构完整写对，包括分母上 log 内的 1 + x 形式。")]
@@ -155,7 +160,7 @@ story += [law("波导色散 —— 反解角频率",
               "omega = c*sqrt(k^2 + (pi/d)^2)。真值那个形式反而是被人为搅乱过的。")]
 
 story += [law("相对论多普勒效应 —— 反解静止频率",
-              "从观测到的相对论频移反推光源静止频率",
+              "由观测到的相对论频移反推光源静止频率",
               "c*omega*sqrt(1 - v^2/c^2)/(c + v)",
               "params[0]*omega*sqrt(1 - params[1]*v^2/c^2)/(1 + params[2]*v/c)",
               "分子的时间膨胀因子 sqrt(1-beta^2) 与分母的传播延迟 1+beta，两项都在正确位置。")]
@@ -216,7 +221,7 @@ OUT = "/home/user/agentdescent/bench/reports/era-llm-srbench-transform.pdf"
 doc = BaseDocTemplate(OUT, pagesize=A4,
                       leftMargin=22*mm, rightMargin=22*mm,
                       topMargin=18*mm, bottomMargin=20*mm,
-                      title="树搜索从数据中发现科学定律 — LSR-Transform",
+                      title="从观测数据中发现物理规律 — LSR-Transform",
                       author="AgentDescent / ERA")
 frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="f")
 doc.addPageTemplates([PageTemplate(id="all", frames=[frame], onPage=decorate)])
