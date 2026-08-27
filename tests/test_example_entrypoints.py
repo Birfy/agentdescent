@@ -1,10 +1,15 @@
 """The command-line contract shared by the eight faithful algorithm ports.
 
-Ten entry points, because ERA ships three tasks on one search: the Kaggle
-regression upstream bundles, the paper's *numerical solution of integrals*, and
-double-precision evaluation of the Gauss hypergeometric function. The contract
-is per entry point -- it is about the command line a user types -- so all three
-are rows here, and none of them adds an algorithm to the fidelity table.
+Eleven entry points, because ERA ships four tasks on one search: the Kaggle
+regression upstream bundles, the paper's *numerical solution of integrals*,
+double-precision evaluation of the Gauss hypergeometric function, and equation
+discovery on LLM-SRBench. The contract is per entry point -- it is about the
+command line a user types -- so all four are rows here, and none of them adds an
+algorithm to the fidelity table.
+
+Ten of the eleven where numpy is absent: the LLM-SRBench task's scoring module
+maps its grammar's function names onto numpy's, so its entry point cannot be
+imported without it, and this repository treats numpy as optional.
 """
 
 from __future__ import annotations
@@ -24,6 +29,11 @@ from examples.dgm import dgm_self_improve as dgm
 from examples.era import era_empirical_software as era
 from examples.era import era_hard_integrals as era_integrals
 from examples.era import era_hypergeometric as era_hyp2f1
+
+try:                                    # numpy is optional for this repo
+    from examples.era import era_llm_srbench as era_srbench
+except ImportError:                     # ...and the LLM-SRBench task needs it
+    era_srbench = None
 from examples.evoskill import evoskill_skill_discovery as evoskill
 from examples.gepa import gepa_prompt_evolution as gepa
 from examples.openevolve import openevolve_program_evolution as openevolve
@@ -87,6 +97,18 @@ PORTS = (
     Port(era_hyp2f1, "iterations", "glm-5.2", 1800.0, "load_suite",
          provider="openai", async_ratio=1, budget_is_iterations=True),
 )
+
+# ERA's fourth task, equation discovery on LLM-SRBench. Same deviations again,
+# and a loader that downloads a benchmark, so `prepare_suite` is the boundary a
+# dry-run must not cross. It is appended rather than declared inline because its
+# scoring module maps this task's function names onto numpy's, so importing the
+# entry point at all needs numpy -- which this repository treats as optional and
+# a bare CI job does not install.
+if era_srbench is not None:
+    PORTS += (
+        Port(era_srbench, "iterations", "glm-5.2", 1800.0, "prepare_suite",
+             provider="openai", async_ratio=1, budget_is_iterations=True),
+    )
 
 PORT_IDS = tuple(port.module.__name__.rsplit(".", 1)[-1] for port in PORTS)
 
@@ -350,6 +372,12 @@ def test_ports_table_covers_every_standardised_entrypoint():
         and "add_standard_args" in path.read_text()
     }
     listed = {port.module.__name__.rsplit(".", 1)[-1] for port in PORTS}
+    if era_srbench is None:
+        # numpy is optional in this repository and the LLM-SRBench entry point
+        # cannot be imported without it, so its row is absent -- for that reason
+        # and no other. Named here rather than filtered by a rule, so a port that
+        # goes missing for any *different* reason still fails this assertion.
+        on_disk.discard("era_llm_srbench")
     assert on_disk == listed
     assert len(on_disk) > 1, "the walk found nothing to check"
 

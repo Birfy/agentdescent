@@ -1,0 +1,996 @@
+{
+  "summary": {
+    "judge_model": "deepseek-v4-flash",
+    "judge_is_not_gpt4o": "The paper uses GPT-4o. A different judge is a different metric; this number sits beside the paper's rather than inside its table.",
+    "prompt_provenance": "Written to the paper's \u00a73 description -- compare symbolic form after removing parameters and constants -- because the appendix figure holding the original prompt is not in the arXiv HTML render.",
+    "status": "completed",
+    "problems_in_run": 111,
+    "scored": 109,
+    "remaining": 0,
+    "decided_by_sympy": 11,
+    "decided_by_judge": 98,
+    "symbolic_accuracy": 0.42201834862385323,
+    "by_subset": {
+      "lsr_transform": {
+        "n": 109,
+        "symbolic_accuracy": 0.42201834862385323
+      }
+    },
+    "judge_usage": {
+      "calls": 98,
+      "tokens": 91595
+    }
+  },
+  "verdicts": [
+    {
+      "problem_id": "lsr_transform_i.10.7_1_0",
+      "subset": "lsr_transform",
+      "gt_expression": "-c*sqrt(1 - m_0**2/m**2)",
+      "answer": "__p0 * c * sqrt(1 - clip(m_0 / m, 0, 1 - 1e-12) ** __p1)",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered expression includes a clip function that changes its behavior for negative or near-1 values of m_0/m, so it does not have the same functional structure as the unrestricted square-root expression."
+    },
+    {
+      "problem_id": "lsr_transform_i.11.19_0_0",
+      "subset": "lsr_transform",
+      "gt_expression": "(A + x2*y2 + x3*y3)/y1",
+      "answer": "__p0 * A + __p1 * x2 + __p2 * x3 + __p3 * y1 + __p4 * y2 + __p5 * y3 + __p6",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe ground truth involves products and division by y1, while the discovered expression is a purely linear sum of the variables with no multiplicative or rational structure."
+    },
+    {
+      "problem_id": "lsr_transform_i.11.19_1_0",
+      "subset": "lsr_transform",
+      "gt_expression": "(-A + x1*y1 - x3*y3)/y2",
+      "answer": "__p0 * A + __p1 * x1 + __p2 * x3 + __p3 * y1 + __p4 * y2 + __p5 * y3 + __p6",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered equation is a linear sum of individual variables plus a constant, while the ground-truth equation contains products and division by y2, giving a different functional structure."
+    },
+    {
+      "problem_id": "lsr_transform_i.11.19_2_0",
+      "subset": "lsr_transform",
+      "gt_expression": "(-A + x1*y1 - x2*y2)/y3",
+      "answer": "__p0 * A + __p1 * x1 + __p2 * x2 + __p3 * y1 + __p4 * y2 + __p5 * y3 + __p6",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered equation is a linear combination of the individual variables, while the ground truth contains products and division by y3, so their functional structures differ."
+    },
+    {
+      "problem_id": "lsr_transform_i.11.19_3_0",
+      "subset": "lsr_transform",
+      "gt_expression": "(A + x2*y2 + x3*y3)/x1",
+      "answer": "__p0 * A + __p1 * x1 + __p2 * x2 + __p3 * x3 + __p4 * y2 + __p5 * y3 + __p6",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered equation is a linear combination of single variables and a constant, while the ground-truth equation divides A, x2*y2, and x3*y3 by x1, so they have different functional structure."
+    },
+    {
+      "problem_id": "lsr_transform_i.11.19_4_0",
+      "subset": "lsr_transform",
+      "gt_expression": "(-A + x1*y1 - x3*y3)/x2",
+      "answer": "__p0 * A + __p1 * x1 + __p2 * x2 + __p3 * x3 + __p4 * y1 + __p5 * y3 + __p6",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe ground truth contains products x1*y1 and x3*y3 divided by x2, while the discovered equation is only a linear combination of variables plus a constant."
+    },
+    {
+      "problem_id": "lsr_transform_i.11.19_5_0",
+      "subset": "lsr_transform",
+      "gt_expression": "(-A + x1*y1 - x2*y2)/x3",
+      "answer": "__p0 * A + __p1 * x1 + __p2 * x2 + __p3 * x3 + __p4 * y1 + __p5 * y2 + __p6",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe ground truth involves products of variables divided by x3, while the discovered expression is only a linear combination of individual variables plus a constant."
+    },
+    {
+      "problem_id": "lsr_transform_i.12.2_3_0",
+      "subset": "lsr_transform",
+      "gt_expression": "-sqrt(q1*q2/(F*epsilon))/(2*sqrt(pi))",
+      "answer": "-sqrt(__p0 * q1 * q2 / (epsilon * F))",
+      "equivalent": true,
+      "decided_by": "sympy"
+    },
+    {
+      "problem_id": "lsr_transform_i.12.4_2_0",
+      "subset": "lsr_transform",
+      "gt_expression": "-sqrt(q1/(Ef*epsilon))/(2*sqrt(pi))",
+      "answer": "__p0 * sqrt(q1 / (epsilon * Ef))",
+      "equivalent": true,
+      "decided_by": "sympy"
+    },
+    {
+      "problem_id": "lsr_transform_i.13.12_3_0",
+      "subset": "lsr_transform",
+      "gt_expression": "G*m1*m2*r1/(G*m1*m2 + U*r1)",
+      "answer": "__p0 * U + __p1 * m1 + __p2 * m2 + __p3 * r1 + __p4 * G + __p5",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe ground truth is a rational function with variables in numerator and denominator, while the discovered expression is a linear polynomial in the variables, so they have different functional structure."
+    },
+    {
+      "problem_id": "lsr_transform_i.15.1_1_0",
+      "subset": "lsr_transform",
+      "gt_expression": "-c*p*sqrt(1/(c**2*m_0**2 + p**2))",
+      "answer": "__p0 * p * c / sqrt(m_0 ** 2 * c ** 2 + p ** 2) + __p1",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\nThe discovered expression has the same functional form, up to an overall multiplicative constant and an additive constant, both of which are ignored."
+    },
+    {
+      "problem_id": "lsr_transform_i.15.3t_0_0",
+      "subset": "lsr_transform",
+      "gt_expression": "c**2*(t - t1*sqrt((c**2 - u**2)/c**2))/u",
+      "answer": "__p0 * (c ** 2 / u) * t1 - __p1 * (c ** 2 / u) * t + __p2 * c * t + __p3 * c * t1 + __p4 * u * t1 + __p5",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered expression is a linear combination of monomial terms in c, u, t, and t1, while the ground truth contains a non-rational factor sqrt(c^2 - u^2) multiplying t1, which cannot be produced by those terms."
+    },
+    {
+      "problem_id": "lsr_transform_i.24.6_0_0",
+      "subset": "lsr_transform",
+      "gt_expression": "4*E_n/(x**2*(omega**2 + omega_0**2))",
+      "answer": "__p0 * (E_n - __p1 * omega_0) / ((omega ** 2 + __p2 * omega_0 ** 2) * x ** 2)",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\nChoosing __p0=4, __p1=0, and __p2=1 makes the discovered expression exactly match the ground-truth equation."
+    },
+    {
+      "problem_id": "lsr_transform_i.24.6_1_1",
+      "subset": "lsr_transform",
+      "gt_expression": "sqrt(4*E_n/m - omega_0**2*x**2)/x",
+      "answer": "__p0 * E_n ** __p1 * m ** __p2 * omega_0 ** __p3 * x ** __p4 + __p5",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe ground-truth has a square root of a difference of terms divided by x, while the discovered expression is a monomial times powers plus a constant, so they cannot be transformed into each other by choosing constants."
+    },
+    {
+      "problem_id": "lsr_transform_i.24.6_2_1",
+      "subset": "lsr_transform",
+      "gt_expression": "sqrt(4*E_n/m - omega**2*x**2)/x",
+      "answer": "__p0 * sqrt(E_n / (m * x ** 2)) + __p1 * omega + __p2",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\nThe ground-truth has E_n and omega inside a single square root, while the discovered expression separates sqrt(E_n/(m x^2)) and omega into additive terms."
+    },
+    {
+      "problem_id": "lsr_transform_i.24.6_3_1",
+      "subset": "lsr_transform",
+      "gt_expression": "2*sqrt(E_n/(m*(omega**2 + omega_0**2)))",
+      "answer": "__p0 * sqrt(E_n) / (sqrt(m) * omega_0 * sqrt((1 - (omega / omega_0) ** 2) ** 2 + __p1 ** 2 * (omega / omega_0) ** 2 + __p2 ** 2))",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered expression contains a quartic term in omega/omega_0 inside the square root, while the ground truth depends on omega only through omega^2 + omega_0^2, so their functional forms cannot be matched by choosing constants."
+    },
+    {
+      "problem_id": "lsr_transform_i.27.6_2_0",
+      "subset": "lsr_transform",
+      "gt_expression": "d2/foc - d2/d1",
+      "answer": "(__p0 + __p1 / foc + __p2 / d1 + __p3 / d2 + __p4 / (d1 * d2)) / (__p5 + __p6 / foc + __p7 / d1 + __p8 / d2 + __p9 / (d1 * d2))",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\nBy choosing constants so the numerator is 1/foc - 1/d1 and the denominator is 1/d2, the discovered expression simplifies to d2/foc - d2/d1."
+    },
+    {
+      "problem_id": "lsr_transform_i.29.16_0_0",
+      "subset": "lsr_transform",
+      "gt_expression": "x2*cos(theta1 - theta2) - sqrt(x**2 + x2**2*cos(theta1 - theta2)**2 - x2**2)",
+      "answer": "__p0*x + __p1*x2*cos(theta1-theta2) + __p2*x2*sin(theta1-theta2) + __p3*sqrt(maximum(0, x**2 - x2**2*sin(theta1-theta2)**2)) +",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\nThe discovered expression includes extra functional terms in x and x2*sin(theta1-theta2) and uses sqrt(maximum(0, ...)) instead of the original square-root form, so it cannot be reduced to the ground-truth equation by constants and algebra alone."
+    },
+    {
+      "problem_id": "lsr_transform_i.29.16_1_0",
+      "subset": "lsr_transform",
+      "gt_expression": "x1*cos(theta1 - theta2) - sqrt(x**2 + x1**2*cos(theta1 - theta2)**2 - x1**2)",
+      "answer": "def equation(x, x1, theta1, theta2, params):\n    dtheta = theta2 - theta1\n    cosd = cos(dtheta)\n    sind = sin(dtheta)\n    inside = x**2 - (x1*sind)**2\n    inside = maximum(inside, 0)\n    sqrt_term = sqrt(inside)\n    candidate",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered expression includes a `maximum(inside, 0)` clamp before the square root, which changes its domain and behavior compared to the ground-truth expression."
+    },
+    {
+      "problem_id": "lsr_transform_i.30.3_0_0",
+      "subset": "lsr_transform",
+      "gt_expression": "2*Int*sin(theta/2)**2/(1 - cos(n*theta))",
+      "answer": "__p0 * Int + __p1 * theta + __p2 * n + __p3",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered equation is a linear combination of the variables, while the ground truth has a nonlinear trigonometric rational structure involving Int, theta, and n."
+    },
+    {
+      "problem_id": "lsr_transform_i.32.17_2_0",
+      "subset": "lsr_transform",
+      "gt_expression": "sqrt(3)*sqrt(Pwr/(c*epsilon))*(-omega**2 + omega_0**2)/(2*sqrt(pi)*omega**2*r)",
+      "answer": "__p0 * sqrt(Pwr * (omega_0 ** 2 - omega ** 2) ** 2 / (epsilon * c * r ** 2 * omega ** 4)) + __p1",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered expression contains an absolute value from the square root of a squared term, while the ground-truth expression has a signed linear factor `(omega_0^2 - omega^2)`, so their functional dependence on omega differs."
+    },
+    {
+      "problem_id": "lsr_transform_i.32.17_3_0",
+      "subset": "lsr_transform",
+      "gt_expression": "sqrt(3)*sqrt(Pwr/(c*epsilon))*(-omega**2 + omega_0**2)/(2*sqrt(pi)*Ef*omega**2)",
+      "answer": "def equation(Pwr, epsilon, c, Ef, omega, omega_0, params):\n    A = __p0\n    a = __p1\n    b = __p2\n    d = __p3\n    e = __p4\n    f = __p5\n    g = __p6\n    alpha = __p7\n    \n    diff = omega_0**2 - omeg",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\nUp to ignored fitted constants, the discovered expression matches the ground-truth functional dependence on Pwr, epsilon, c, Ef, omega, and omega_0."
+    },
+    {
+      "problem_id": "lsr_transform_i.32.17_4_3",
+      "subset": "lsr_transform",
+      "gt_expression": "sqrt(2*sqrt(3)*sqrt(pi)*Ef*omega_0**2*r*sqrt(Pwr*c*epsilon)/(4*pi*Ef**2*c*epsilon*r**2 - 3*Pwr) - 3*Pwr*omega_0**2/(4*pi*Ef**2*c*epsilon*r**2 - 3*Pwr))",
+      "answer": "__p0 * Pwr + __p1 * epsilon + __p2 * c + __p3 * Ef + __p4 * r + __p5 * omega_0 + __p6",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered equation is a linear combination of the variables, while the ground-truth equation has a square root with products, powers, and a denominator involving the variables."
+    },
+    {
+      "problem_id": "lsr_transform_i.32.17_5_3",
+      "subset": "lsr_transform",
+      "gt_expression": "sqrt(3)*sqrt(2*sqrt(3)*sqrt(pi)*Ef*omega**2*r*sqrt(Pwr*c*epsilon)/Pwr + 3*omega**2)/3",
+      "answer": "__p0 * Pwr ** __p1 * epsilon ** __p2 * c ** __p3 * Ef ** __p4 * r ** __p5 * omega ** __p6",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe ground-truth equation involves a square root of a sum of terms with different variable dependencies, while the discovered equation is a pure monomial product of powers."
+    },
+    {
+      "problem_id": "lsr_transform_i.32.5_0_1",
+      "subset": "lsr_transform",
+      "gt_expression": "sqrt(6)*sqrt(pi)*sqrt(Pwr*c**3*epsilon)/a",
+      "answer": "sqrt(__p0 * epsilon * c ** 3 * Pwr) / a",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\nBoth expressions have the same functional form: a constant times Pwr*c^3*epsilon under a square root, divided by a."
+    },
+    {
+      "problem_id": "lsr_transform_i.32.5_1_1",
+      "subset": "lsr_transform",
+      "gt_expression": "sqrt(6)*sqrt(pi)*sqrt(Pwr*c**3*epsilon)/q",
+      "answer": "__p0 * power(Pwr, __p1) * power(q, __p2) * power(epsilon, __p3) * power(c, __p4)",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\nThe discovered expression is a monomial in the same variables, and choosing p1=1/2, p2=-1, p3=1/2, p4=3/2 reproduces the ground-truth's functional form after ignoring constants."
+    },
+    {
+      "problem_id": "lsr_transform_i.34.14_2_0",
+      "subset": "lsr_transform",
+      "gt_expression": "c*omega*sqrt(1 - v**2/c**2)/(c + v)",
+      "answer": "__p0 * omega * sqrt(1 - __p1 * v ** 2 / c ** 2) / (1 + __p2 * v / c)",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\nChoosing __p0=1, __p1=1, and __p2=1 transforms the discovered expression into the ground-truth equation using standard algebraic simplification."
+    },
+    {
+      "problem_id": "lsr_transform_i.34.1_2_0",
+      "subset": "lsr_transform",
+      "gt_expression": "omega*(c - v)/c",
+      "answer": "__p0 * omega * (1 - __p1 * (v / c) ** __p2) ** __p3",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\n\nChoosing __p0=1, __p1=1, __p2=1, and __p3=1 gives omega*(1 - v/c), which equals omega*(c - v)/c."
+    },
+    {
+      "problem_id": "lsr_transform_i.37.4_0_1",
+      "subset": "lsr_transform",
+      "gt_expression": "2*I2*cos(delta)**2 + I2 + Int + 2*sqrt(I2*(I2*cos(delta)**2 + I2 + Int))*cos(delta)",
+      "answer": "maximum(",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered expression is incomplete and does not contain the same functional structure or variables as the ground-truth equation."
+    },
+    {
+      "problem_id": "lsr_transform_i.37.4_1_1",
+      "subset": "lsr_transform",
+      "gt_expression": "2*I1*cos(delta)**2 + I1 - Int + 2*sqrt(I1*(I1*cos(delta)**2 + I1 - Int))*cos(delta)",
+      "answer": "def equation(Int, I1, delta, params):\n    import numpy as np\n    s1 = sqrt(I1)\n    cos_d = cos(delta)\n    sin2_d = sin(delta)**2\n    inside = Int - __p1 * I1 * sin2_d\n    inside = maximum(inside, 1e-10)\n    s2 = __p0 *",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\nThe ground-truth expression has a sqrt term involving I1*(I1*cos(delta)^2 + I1 - Int), while the discovered form uses inside = Int - p1*I1*sin(delta)^2, so the functional structure differs."
+    },
+    {
+      "problem_id": "lsr_transform_i.40.1_4_0",
+      "subset": "lsr_transform",
+      "gt_expression": "T*kb*log(n_0/n)/(m*x)",
+      "answer": "__p0 * (kb * T / (m * x)) * log(n / n_0) + __p1",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\n\nThe expressions have the same functional structure, with the sign difference between log(n_0/n) and log(n/n_0) absorbable by the fitted constant, and the additive constant ignored."
+    },
+    {
+      "problem_id": "lsr_transform_i.43.43_0_0",
+      "subset": "lsr_transform",
+      "gt_expression": "1 + kb*v/(A*kappa)",
+      "answer": "__p0 + __p1 * power(kappa, __p2) * power(kb, __p3) * power(A, __p4) * power(v, __p5)",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\nBy choosing p0=1, p1=1, p2=-1, p3=1, p4=-1, p5=1, the discovered power-law form becomes 1 + kb*v/(A*kappa)."
+    },
+    {
+      "problem_id": "lsr_transform_i.44.4_2_0",
+      "subset": "lsr_transform",
+      "gt_expression": "E_n/(kb*n*log(V2/V1))",
+      "answer": "__p0 * E_n / (n * kb * log(V2 / V1))",
+      "equivalent": true,
+      "decided_by": "sympy"
+    },
+    {
+      "problem_id": "lsr_transform_i.44.4_4_0",
+      "subset": "lsr_transform",
+      "gt_expression": "V1*exp(E_n/(T*kb*n))",
+      "answer": "V1 * exp(E_n / (n * kb * T))",
+      "equivalent": true,
+      "decided_by": "sympy"
+    },
+    {
+      "problem_id": "lsr_transform_i.48.2_1_0",
+      "subset": "lsr_transform",
+      "gt_expression": "-c*sqrt(1 - c**4*m**2/E_n**2)",
+      "answer": "-c * sqrt(1 - (m * c ** 2 / (__p0 * E_n)) ** __p1) + __p2",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\nBy choosing the fitted parameters as p0=1, p1=2, and p2=0, the discovered expression reduces exactly to the ground-truth expression."
+    },
+    {
+      "problem_id": "lsr_transform_i.50.26_0_0",
+      "subset": "lsr_transform",
+      "gt_expression": "x/(alpha*cos(omega*t)**2 + cos(omega*t))",
+      "answer": "__p0 * x * exp(__p1 * alpha * omega * t) + __p2 * x",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered equation has an exponential dependence on alpha*omega*t, while the ground-truth equation involves only algebraic and trigonometric functions of omega*t, so their functional structures are different."
+    },
+    {
+      "problem_id": "lsr_transform_i.50.26_3_0",
+      "subset": "lsr_transform",
+      "gt_expression": "(x/cos(omega*t) - x1)/(x1*cos(omega*t))",
+      "answer": "__p0 * x + __p1 * x1 + __p2 * omega + __p3 * t + __p4",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe ground-truth equation contains trigonometric functions and division by x1 and cos(omega*t), while the discovered expression is only a linear combination of x, x1, omega, t, so their functional structures are different."
+    },
+    {
+      "problem_id": "lsr_transform_ii.11.17_0_0",
+      "subset": "lsr_transform",
+      "gt_expression": "T*kb*n/(Ef*p_d*cos(theta) + T*kb)",
+      "answer": "n / (1 + __p0 * (p_d * Ef * cos(theta) / (kb * T)))",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\n\nThe discovered expression reduces to the ground truth by setting the fitted constant __p0 to 1 and using algebra."
+    },
+    {
+      "problem_id": "lsr_transform_ii.11.17_2_0",
+      "subset": "lsr_transform",
+      "gt_expression": "Ef*n_0*p_d*cos(theta)/(kb*(n - n_0))",
+      "answer": "__p0 * (n - n_0) * Ef * p_d * cos(theta) / (kb * n * n_0) + __p1 * p_d ** 2 + __p2",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered expression includes extra terms and has a different functional dependence on n (involving (n - n_0)/(n n_0) instead of n_0/(n - n_0))."
+    },
+    {
+      "problem_id": "lsr_transform_ii.11.17_4_0",
+      "subset": "lsr_transform",
+      "gt_expression": "T*kb*(n - n_0)/(Ef*n_0*cos(theta))",
+      "answer": "(__p0 + __p1 * theta + __p2 * theta ** 2) * (n - n_0) * Ef * cos(theta) / (kb * T)",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered expression has a polynomial dependence on theta and places Ef and cos(theta) in the numerator with kb*T in the denominator, while the ground truth has n_0 and cos(theta) in the denominator, so their functional structures are not equivalent."
+    },
+    {
+      "problem_id": "lsr_transform_ii.11.17_5_0",
+      "subset": "lsr_transform",
+      "gt_expression": "T*kb*(n - n_0)/(n_0*p_d*cos(theta))",
+      "answer": "__p0 * (n - n_0) * kb * T * p_d * cos(theta) + __p1 * (n - n_0) * kb * T * p_d * cos(theta) / (1 + __p2 * cos(theta) ** 2) + __p3",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered expression has a different functional structure with multiple additive terms and different dependencies on p_d and cos(theta) than the single-term ground truth."
+    },
+    {
+      "problem_id": "lsr_transform_ii.11.20_1_1",
+      "subset": "lsr_transform",
+      "gt_expression": "sqrt(3)*sqrt(Pol*T*kb/(Ef*n_rho))",
+      "answer": "__p0 * sqrt(Pol * kb * T / (n_rho * Ef)) + __p1",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\n\nThe discovered expression is the same function of the variables with only fitted constants, which are ignored, so it matches the ground-truth structure."
+    },
+    {
+      "problem_id": "lsr_transform_ii.11.27_0_0",
+      "subset": "lsr_transform",
+      "gt_expression": "3*Pol/(alpha*(3*Ef*epsilon + Pol))",
+      "answer": "__p0 * Pol ** __p1 / (alpha ** __p2 * epsilon ** __p3 * Ef ** __p4) + __p5 * Pol + __p6 * alpha + __p7 * epsilon",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe ground-truth equation is a single rational expression with a denominator that combines Ef*epsilon and Pol, while the discovered equation is a sum of separate monomial and linear terms, so their functional structures differ."
+    },
+    {
+      "problem_id": "lsr_transform_ii.11.27_1_0",
+      "subset": "lsr_transform",
+      "gt_expression": "3*Pol/(n*(3*Ef*epsilon + Pol))",
+      "answer": "__p0 * Pol ** __p1 * epsilon ** __p2 / (n ** __p3 * Ef ** __p4) + __p5",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered expression is a monomial in the variables plus a constant, while the ground truth has a denominator involving a sum of variable terms, so their functional structures differ."
+    },
+    {
+      "problem_id": "lsr_transform_ii.11.27_3_0",
+      "subset": "lsr_transform",
+      "gt_expression": "-Pol/(3*epsilon) + Pol/(alpha*epsilon*n)",
+      "answer": "__p0 * Pol / (n * alpha) + __p1 * Pol / epsilon + __p2 * Pol / (n * alpha * epsilon)",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\nThe discovered equation contains an extra term proportional to Pol/(n*alpha), which is not present in the ground-truth expression, giving it a different functional structure."
+    },
+    {
+      "problem_id": "lsr_transform_ii.11.28_0_0",
+      "subset": "lsr_transform",
+      "gt_expression": "3*(theta - 1)/(alpha*(theta - 4))",
+      "answer": "__p0 * log(alpha) / alpha ** __p1 * (theta - 1) / (1 + __p2 * (theta - 1)) + __p3 * log(alpha) / alpha ** __p1 + __p4",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered equation contains logarithmic terms in alpha and an additive constant that cannot be eliminated to reproduce the alpha/(theta-4) functional structure of the ground truth."
+    },
+    {
+      "problem_id": "lsr_transform_ii.11.3_0_0",
+      "subset": "lsr_transform",
+      "gt_expression": "m*x*(-omega**2 + omega_0**2)/Ef",
+      "answer": "__p0 * Ef ** __p1 * x ** __p2 / (m ** __p3 * (omega_0 ** 2 - omega ** 2) ** __p4)",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\nChoosing fitted parameters as __p1=-1, __p2=1, __p3=-1, __p4=-1 gives the ground-truth expression, and the factor is the same via algebra."
+    },
+    {
+      "problem_id": "lsr_transform_ii.11.3_2_0",
+      "subset": "lsr_transform",
+      "gt_expression": "-Ef*q/(x*(omega**2 - omega_0**2))",
+      "answer": "__p0 * (q * Ef) / (x * (omega_0 ** 2 - omega ** 2)) + __p1",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\n\nIgnoring constants, the discovered expression simplifies to \\(-Ef q/(x(\\omega^2-\\omega_0^2))\\), identical to the ground truth."
+    },
+    {
+      "problem_id": "lsr_transform_ii.11.3_3_1",
+      "subset": "lsr_transform",
+      "gt_expression": "sqrt(Ef*q/(m*x) + omega**2)",
+      "answer": "__p0 * sqrt(q * Ef / (m * x)) + __p1",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe ground-truth equation has omega inside the square root, while the discovered equation is a linear combination of sqrt(q*Ef/(m*x)) and a constant with no omega dependence."
+    },
+    {
+      "problem_id": "lsr_transform_ii.11.3_4_1",
+      "subset": "lsr_transform",
+      "gt_expression": "sqrt(-Ef*q/(m*x) + omega_0**2)",
+      "answer": "sqrt(omega_0 ** 2 - __p0 * (q * Ef) / (m * x))",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\n\nThe discovered equation has the same functional form as the ground truth, with the fitted constant __p0 set to 1."
+    },
+    {
+      "problem_id": "lsr_transform_ii.13.23_1_0",
+      "subset": "lsr_transform",
+      "gt_expression": "-c*sqrt(1 - rho_c_0**2/rho_c**2)",
+      "answer": "-c * sqrt(1 - (rho_c_0 / rho_c) ** 2) + __p0",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\nThe discovered equation matches the ground truth after ignoring the fitted additive constant __p0."
+    },
+    {
+      "problem_id": "lsr_transform_ii.13.34_1_0",
+      "subset": "lsr_transform",
+      "gt_expression": "-c*j*sqrt(1/(c**2*rho_c_0**2 + j**2))",
+      "answer": "-__p0 * c * j / sqrt(j ** 2 + (rho_c_0 * c) ** 2)",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\nThe discovered expression is the same function as the ground truth, with an overall fitted constant and the denominator rewritten identically."
+    },
+    {
+      "problem_id": "lsr_transform_ii.15.4_1_0",
+      "subset": "lsr_transform",
+      "gt_expression": "-E_n/(mom*cos(theta))",
+      "answer": "__p0 * E_n * mom ** 2 * cos(theta) ** 2 + __p1 * mom * sin(theta) + __p2 * E_n * mom * theta",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered expression has polynomial/trigonometric product terms and extra functions of theta and mom, while the ground truth is a single rational term with inverse dependence on mom and cos(theta)."
+    },
+    {
+      "problem_id": "lsr_transform_ii.15.5_0_0",
+      "subset": "lsr_transform",
+      "gt_expression": "-E_n/(Ef*cos(theta))",
+      "answer": "__p0 * E_n * Ef * cos(theta) / (1 + __p1 * cos(theta) + __p2 * cos(theta) ** 2)",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe ground truth depends inversely on Ef and as sec(theta), while the discovered expression is proportional to Ef and has a polynomial in cos(theta) in the denominator, giving different functional structure."
+    },
+    {
+      "problem_id": "lsr_transform_ii.15.5_1_0",
+      "subset": "lsr_transform",
+      "gt_expression": "-E_n/(p_d*cos(theta))",
+      "answer": "__p0 * p_d * E_n * cos(theta) / (__p1 + __p2 * p_d * cos(theta))",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered equation has an additive constant in the denominator and simplifies to a different functional dependence on p_d*cos(theta), so it cannot match the ground truth form."
+    },
+    {
+      "problem_id": "lsr_transform_ii.21.32_2_0",
+      "subset": "lsr_transform",
+      "gt_expression": "c*q/(4*pi*Volt*epsilon*(c - v))",
+      "answer": "__p0 * q / (epsilon * Volt * sqrt(1 - __p1 * (v / c) ** __p2))",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe ground-truth has a rational dependence c/(c - v), while the discovered expression has a square-root dependence on a power of v/c, so their functional forms cannot be matched by choosing constants."
+    },
+    {
+      "problem_id": "lsr_transform_ii.21.32_3_0",
+      "subset": "lsr_transform",
+      "gt_expression": "c - c*q/(4*pi*Volt*epsilon*r)",
+      "answer": "__p0 * sqrt(q * Volt / (epsilon * r)) + __p1 * (q / (epsilon * r)) + __p2 * c + __p3",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\nGround truth contains c times q/(Volt*epsilon*r), while discovered includes sqrt(q*Volt/(epsilon*r)) and q/(epsilon*r) terms, so the functional structure differs."
+    },
+    {
+      "problem_id": "lsr_transform_ii.24.17_0_1",
+      "subset": "lsr_transform",
+      "gt_expression": "c*sqrt(d**2*k**2 + pi**2)/d",
+      "answer": "c * sqrt(k ** 2 + (pi / d) ** 2)",
+      "equivalent": true,
+      "decided_by": "sympy"
+    },
+    {
+      "problem_id": "lsr_transform_ii.24.17_1_1",
+      "subset": "lsr_transform",
+      "gt_expression": "d*omega*sqrt(1/(d**2*k**2 + pi**2))",
+      "answer": "omega / sqrt(k ** 2 + (3.141592653589793 / d) ** 2)",
+      "equivalent": true,
+      "decided_by": "sympy"
+    },
+    {
+      "problem_id": "lsr_transform_ii.24.17_2_1",
+      "subset": "lsr_transform",
+      "gt_expression": "pi*c*sqrt(-1/((c*k - omega)*(c*k + omega)))",
+      "answer": "(__p0*pi*c/sqrt(maximum(abs(denom), 1e-10)) +",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered expression uses an absolute value and a maximum/floor term, whereas the ground-truth expression is a square root of a negative reciprocal product without such piecewise real-valued structure."
+    },
+    {
+      "problem_id": "lsr_transform_ii.27.16_2_0",
+      "subset": "lsr_transform",
+      "gt_expression": "-sqrt(flux/(c*epsilon))",
+      "answer": "__p0 * sqrt(flux / (epsilon * c)) + __p1",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\n\nChoosing __p0 = -1 and __p1 = 0, and using commutativity of multiplication, gives exactly the ground-truth expression."
+    },
+    {
+      "problem_id": "lsr_transform_ii.27.18_1_0",
+      "subset": "lsr_transform",
+      "gt_expression": "-sqrt(E_den/epsilon)",
+      "answer": "-sqrt(__p0 * E_den / epsilon)",
+      "equivalent": true,
+      "decided_by": "sympy"
+    },
+    {
+      "problem_id": "lsr_transform_ii.3.24_1_0",
+      "subset": "lsr_transform",
+      "gt_expression": "-sqrt(Pwr/flux)/(2*sqrt(pi))",
+      "answer": "__p0 * sqrt(Pwr / flux)",
+      "equivalent": true,
+      "decided_by": "sympy"
+    },
+    {
+      "problem_id": "lsr_transform_ii.34.29a_2_0",
+      "subset": "lsr_transform",
+      "gt_expression": "h*q/(4*pi*mom)",
+      "answer": "__p0 * power(mom, __p1) * power(q, __p2) * power(h, __p3)",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\nBy choosing the fitted constants as __p0 = 1/(4*pi), __p1 = -1, __p2 = 1, and __p3 = 1, the discovered expression becomes exactly the ground-truth monomial."
+    },
+    {
+      "problem_id": "lsr_transform_ii.34.29b_0_0",
+      "subset": "lsr_transform",
+      "gt_expression": "E_n*h/(2*pi*B*Jz*mom)",
+      "answer": "__p0 * E_n + __p1 * h + __p2 * Jz + __p3 * mom + __p4 * B + __p5",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\nThe discovered equation is a sum of separate linear terms, while the ground-truth equation is a single product/quotient of all variables, so their functional structures are not equivalent."
+    },
+    {
+      "problem_id": "lsr_transform_ii.34.29b_2_0",
+      "subset": "lsr_transform",
+      "gt_expression": "E_n*h/(2*pi*B*g_*mom)",
+      "answer": "__p0 * (E_n * h) / (g_ * mom * B) + __p1",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\n\nBoth expressions have the same functional dependence on the variables: E_n times h divided by the product of g_, mom, and B, with constants and fitted parameters ignored."
+    },
+    {
+      "problem_id": "lsr_transform_ii.34.29b_3_0",
+      "subset": "lsr_transform",
+      "gt_expression": "E_n*h/(2*pi*B*Jz*g_)",
+      "answer": "__p0 * power(g_, __p1) * power(Jz, __p2) * power(E_n, __p3) / (power(h, __p4) * power(B, __p5))",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\nBy choosing the fitted exponents appropriately (g_^-1, Jz^-1, E_n^1, h^-1, B^-1) and absorbing 2\u03c0 into the prefactor, the discovered power-law expression matches the ground-truth equation."
+    },
+    {
+      "problem_id": "lsr_transform_ii.34.29b_4_0",
+      "subset": "lsr_transform",
+      "gt_expression": "E_n*h/(2*pi*Jz*g_*mom)",
+      "answer": "__p0 * E_n * h / (g_ * mom * Jz)",
+      "equivalent": true,
+      "decided_by": "sympy"
+    },
+    {
+      "problem_id": "lsr_transform_ii.34.2_1_0",
+      "subset": "lsr_transform",
+      "gt_expression": "2*mom/(q*r)",
+      "answer": "mom / (__p0 * q * r ** __p1 + __p2)",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered expression has an extra additive constant term in the denominator, while the ground-truth denominator is a single monomial in q and r."
+    },
+    {
+      "problem_id": "lsr_transform_ii.35.18_0_0",
+      "subset": "lsr_transform",
+      "gt_expression": "n*exp(B*mom/(T*kb)) + n*exp(-B*mom/(T*kb))",
+      "answer": "__p0 * n * exp(__p1 * (mom * B / (kb * T))) + __p2 * n * exp(-__p3 * (mom * B / (kb * T)))",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\nThe discovered expression has the same two-term structure with coefficients and constant multipliers inside exponentials that can be chosen to match the ground truth."
+    },
+    {
+      "problem_id": "lsr_transform_ii.35.18_2_1",
+      "subset": "lsr_transform",
+      "gt_expression": "B*mom/(kb*log((n_0 + sqrt(-4*n**2 + n_0**2))/(2*n)))",
+      "answer": "(__p0 * mom * B / kb + __p1 * n) / (1 + __p2 * n / n_0 + __p3 * (mom * B / (kb * n_0))) + __p4",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered expression is a rational function of mom*B/kb and n, whereas the ground-truth equation contains mom*B/kb divided by a logarithm of n and n_0, so they have different functional structure."
+    },
+    {
+      "problem_id": "lsr_transform_ii.35.18_3_1",
+      "subset": "lsr_transform",
+      "gt_expression": "T*kb*log((n_0 + sqrt(-4*n**2 + n_0**2))/(2*n))/B",
+      "answer": "__p0 * n ** __p1 * n_0 ** __p2 * kb ** __p3 * T ** __p4 * B ** __p5",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered expression is a monomial power law, while the ground-truth equation contains a logarithm of a square-root expression, so their functional structures differ."
+    },
+    {
+      "problem_id": "lsr_transform_ii.35.18_4_1",
+      "subset": "lsr_transform",
+      "gt_expression": "T*kb*log((n_0 + sqrt(-4*n**2 + n_0**2))/(2*n))/mom",
+      "answer": "__p0 * (kb * T / mom) ** __p1 * log(__p2 * n_0 / n + __p3) + __p4",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered expression has a logarithm of a linear function of n_0/n plus a constant, whereas the ground truth contains a logarithm of an expression with a square root depending on n and n_0."
+    },
+    {
+      "problem_id": "lsr_transform_ii.35.21_2_1",
+      "subset": "lsr_transform",
+      "gt_expression": "T*kb*log(sqrt(-(M + mom*n_rho)/(M - mom*n_rho)))/mom",
+      "answer": "__p0 * (kb * T",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered expression only involves kb*T, while the ground truth depends on M, n_rho, and mom through a logarithmic function."
+    },
+    {
+      "problem_id": "lsr_transform_ii.36.38_0_0",
+      "subset": "lsr_transform",
+      "gt_expression": "T*c**2*epsilon*f*kb/(H*c**2*epsilon - M*alpha)",
+      "answer": "__p0 * alpha * epsilon * (H + M) * (kb * T) * f / c + __p1 * alpha * epsilon * (H + M) / c",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered expression is linear in H and M with a factor (H+M), while the ground-truth equation has H and M in a denominator, so their functional structure differs."
+    },
+    {
+      "problem_id": "lsr_transform_ii.36.38_1_0",
+      "subset": "lsr_transform",
+      "gt_expression": "M*alpha/(c**2*epsilon) + T*f*kb/mom",
+      "answer": "__p0 * M ** __p1 * f ** __p2 * mom ** __p3 * kb ** __p4 * T ** __p5 / (alpha ** __p6 * epsilon ** __p7 * c ** __p8)",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe ground truth is a sum of two distinct terms, while the discovered expression is a single product of powers, so their functional structures cannot match."
+    },
+    {
+      "problem_id": "lsr_transform_ii.36.38_3_0",
+      "subset": "lsr_transform",
+      "gt_expression": "mom*(H*c**2*epsilon - M*alpha)/(c**2*epsilon*f*kb)",
+      "answer": "__p0 * f + __p1 * mom + __p2 * H + __p3 * kb + __p4 * alpha + __p5 * epsilon + __p6 * c + __p7 * M + __p8 * f ** 2 + __p9 * mom ** 2",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe ground truth is a rational expression with products and divisions among variables, while the discovered equation is a polynomial sum of individual variable terms and squares, so they have different functional structure."
+    },
+    {
+      "problem_id": "lsr_transform_ii.36.38_4_0",
+      "subset": "lsr_transform",
+      "gt_expression": "c**2*epsilon*(H*mom - T*f*kb)/(M*mom)",
+      "answer": "__p0 * f + __p1 * mom + __p2 * H + __p3 * kb + __p4 * T + __p5 * epsilon + __p6 * c + __p7 * M + __p8",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe ground truth has multiplicative and rational dependence among variables, while the discovered expression is a simple additive linear combination of the variables."
+    },
+    {
+      "problem_id": "lsr_transform_ii.36.38_5_0",
+      "subset": "lsr_transform",
+      "gt_expression": "M*alpha*mom/(c**2*(H*mom - T*f*kb))",
+      "answer": "__p0 * (alpha * T / kb) + __p1 * (M * H / mom) + __p2 * f ** 2 + __p3 * (M * H / mom) ** 2 + __p4 * (alpha * T / kb) * (M * H / mom) + __p5 * (alpha * T / kb) ** 2 + __p6 * (M * H / mom) ** 3 + __p7",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe ground-truth is a single rational function of the variables, while the discovered expression is a polynomial with different variable combinations and powers that cannot be reduced to that rational form by redefining constants."
+    },
+    {
+      "problem_id": "lsr_transform_ii.36.38_7_0",
+      "subset": "lsr_transform",
+      "gt_expression": "c**2*epsilon*(H*mom - T*f*kb)/(alpha*mom)",
+      "answer": "__p0 * f + __p1 * mom + __p2 * H + __p3 * kb + __p4 * T + __p5 * alpha + __p6 * epsilon + __p7 * c + __p8",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\nThe discovered equation is a linear sum of individual variables, while the ground-truth equation contains products, a squared variable, and a ratio involving multiple variables."
+    },
+    {
+      "problem_id": "lsr_transform_ii.37.1_0_0",
+      "subset": "lsr_transform",
+      "gt_expression": "E_n/(B*(chi + 1))",
+      "answer": "__p0 * E_n ** __p1 * B ** __p2 * chi ** __p3",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\nThe ground-truth equation has a denominator term (chi + 1), while the discovered expression is a monomial involving only powers of E_n, B, and chi, so they have different functional structure."
+    },
+    {
+      "problem_id": "lsr_transform_ii.37.1_1_0",
+      "subset": "lsr_transform",
+      "gt_expression": "E_n/(mom*(chi + 1))",
+      "answer": "__p0 * E_n / (mom * (1 + chi))",
+      "equivalent": true,
+      "decided_by": "sympy"
+    },
+    {
+      "problem_id": "lsr_transform_ii.37.1_2_0",
+      "subset": "lsr_transform",
+      "gt_expression": "-1 + E_n/(B*mom)",
+      "answer": "__p0 * mom ** 2 / (E_n + __p1) + __p2 * B ** 2 + __p3 * B * E_n + __p4 * mom * B + __p5 * E_n + __p6 * mom + __p7 * B + __p8",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered expression has polynomial terms and a rational term in E_n and mom only, while the ground truth contains E_n divided by the product B*mom, which cannot be produced by algebraic rearrangement."
+    },
+    {
+      "problem_id": "lsr_transform_ii.6.15a_1_0",
+      "subset": "lsr_transform",
+      "gt_expression": "4*pi*Ef*epsilon*r**5/(3*z*sqrt(x**2 + y**2))",
+      "answer": "__p0 * epsilon * Ef * r**3 / (__p1 + __p2*zr**2 + __p3*xr**2 + __p4*yr**2 + __p5*xr*yr + __p6*xr*zr + params",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered expression has a polynomial denominator in xr, yr, zr, while the ground-truth equation has a denominator of z times sqrt(x^2 + y^2), giving different functional structure."
+    },
+    {
+      "problem_id": "lsr_transform_ii.6.15a_2_0",
+      "subset": "lsr_transform",
+      "gt_expression": "2**(3/5)*3**(1/5)*(p_d*z*sqrt(x**2 + y**2)/(Ef*epsilon))**(1/5)/(2*pi**(1/5))",
+      "answer": "__p0 * (p_d / (4 * pi * epsilon * Ef)) ** __p1 * (x ** 2 + y ** 2) ** __p2 * (z ** 2) ** __p3 + __p4",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\nBy choosing the fitted parameters as p1=1/5, p2=1/10, p3=1/10 and ignoring constants, the discovered expression matches the functional form of the ground truth."
+    },
+    {
+      "problem_id": "lsr_transform_ii.6.15a_3_1",
+      "subset": "lsr_transform",
+      "gt_expression": "sqrt(16*pi**2*Ef**2*epsilon**2*r**10/(p_d**2*z**2) - 9*y**2)/3",
+      "answer": "__p0 * Ef * epsilon * r ** 5 / (p_d * (__p1 * y + __p2 * z + __p3 * r ** 2)) + __p4",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe ground-truth equation involves a square root of a difference of terms, while the discovered equation is a rational function with an additive constant, so their functional structures cannot match."
+    },
+    {
+      "problem_id": "lsr_transform_ii.6.15a_4_1",
+      "subset": "lsr_transform",
+      "gt_expression": "sqrt(16*pi**2*Ef**2*epsilon**2*r**10/(p_d**2*z**2) - 9*x**2)/3",
+      "answer": "__p0 * epsilon * Ef * r ** 5.0004 / (p_d * z ** 1.0 * x ** 0.0)",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe ground-truth equation has a square-root structure with an x\u00b2 term inside, whereas the discovered expression is a simple monomial with no x dependence."
+    },
+    {
+      "problem_id": "lsr_transform_ii.6.15a_5_0",
+      "subset": "lsr_transform",
+      "gt_expression": "4*pi*Ef*epsilon*r**5/(3*p_d*sqrt(x**2 + y**2))",
+      "answer": "def equation(Ef, epsilon, p_d, r, x, y, params):\n    import numpy as np\n    with errstate(divide='ignore', invalid='ignore'):\n        term1 = power(Ef * epsilon / p_d, __p1)\n        term2 = power(r, __p2)\n        term3 =",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\nThe discovered equation is incomplete and lacks the denominator involving sqrt(x^2 + y^2), so it does not have the same functional dependence on x and y."
+    },
+    {
+      "problem_id": "lsr_transform_ii.6.15b_1_0",
+      "subset": "lsr_transform",
+      "gt_expression": "8*pi*Ef*epsilon*r**3/(3*sin(2*theta))",
+      "answer": "__p0 * epsilon * r ** 3 * Ef / (cos(theta) * sin(theta))",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT  \nBoth expressions have the same functional dependence on Ef, epsilon, r, and theta, differing only by a constant factor and the identity sin(2\u03b8)=2sin\u03b8cos\u03b8."
+    },
+    {
+      "problem_id": "lsr_transform_ii.6.15b_3_0",
+      "subset": "lsr_transform",
+      "gt_expression": "6**(1/3)*(p_d*sin(theta)*cos(theta)/(Ef*epsilon))**(1/3)/(2*pi**(1/3))",
+      "answer": "__p0 * (p_d / (epsilon * abs(Ef))) ** __p1 * (1 + __p2 * cos(theta) ** 2) ** __p3 + __p4",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered equation has a different functional structure, involving |Ef| and a term (1 + cos\u00b2\u03b8)^p3, whereas the ground truth depends on Ef and (sin\u03b8 cos\u03b8)^(1/3)."
+    },
+    {
+      "problem_id": "lsr_transform_ii.8.31_1_0",
+      "subset": "lsr_transform",
+      "gt_expression": "-sqrt(2)*sqrt(E_den/epsilon)",
+      "answer": "-1 * __p0 * sqrt(E_den / epsilon) + __p1",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\nAfter ignoring all numeric constants and fitted parameters, both expressions reduce to the same functional form sqrt(E_den/epsilon)."
+    },
+    {
+      "problem_id": "lsr_transform_iii.10.19_1_1",
+      "subset": "lsr_transform",
+      "gt_expression": "sqrt(-By**2 - Bz**2 + E_n**2/mom**2)",
+      "answer": "sqrt(maximum((E_n / mom) ** 2 - By ** 2 - Bz ** 2, 0))",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered equation uses a maximum function that clamps negative values to zero, while the ground-truth expression does not have that piecewise structure."
+    },
+    {
+      "problem_id": "lsr_transform_iii.10.19_2_1",
+      "subset": "lsr_transform",
+      "gt_expression": "sqrt(-Bx**2 - Bz**2 + E_n**2/mom**2)",
+      "answer": "__p0 * sqrt((E_n / mom) ** 2 - Bx ** 2 - Bz ** 2) + __p1",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\nThe discovered expression has the same functional form, just scaled by a constant and offset by a constant, with the identical argument inside the square root."
+    },
+    {
+      "problem_id": "lsr_transform_iii.10.19_3_1",
+      "subset": "lsr_transform",
+      "gt_expression": "sqrt(-Bx**2 - By**2 + E_n**2/mom**2)",
+      "answer": "sqrt(maximum((E_n / mom) ** 2 - Bx ** 2 - By ** 2, 0))",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\nThe discovered expression includes a maximum with 0, introducing piecewise clamping behavior not present in the ground-truth expression."
+    },
+    {
+      "problem_id": "lsr_transform_iii.12.43_0_0",
+      "subset": "lsr_transform",
+      "gt_expression": "2*pi*L/h",
+      "answer": "__p0 * (L / h) + __p1 * L + __p2",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered expression contains additional terms proportional to L and a constant, so it has a different functional structure from L/h."
+    },
+    {
+      "problem_id": "lsr_transform_iii.13.18_0_0",
+      "subset": "lsr_transform",
+      "gt_expression": "h*v/(4*pi*d**2*k)",
+      "answer": "__p0 * (h * v / d) * k ** __p1 * d ** __p2",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\n\nChoosing the fitted parameters as __p0 = 1/(4\u03c0), __p1 = -1, and __p2 = -1 gives the ground-truth expression up to a constant factor."
+    },
+    {
+      "problem_id": "lsr_transform_iii.13.18_1_1",
+      "subset": "lsr_transform",
+      "gt_expression": "sqrt(h*v/(E_n*k))/(2*sqrt(pi))",
+      "answer": "__p0 * power(h * v / (E_n * k), __p1)",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\n\nThe discovered expression has the same functional dependence on the variables, with fitted constants absorbing the numeric prefactor and exponent."
+    },
+    {
+      "problem_id": "lsr_transform_iii.15.12_0_0",
+      "subset": "lsr_transform",
+      "gt_expression": "-E_n/(2*cos(d*k) - 2)",
+      "answer": "__p0 * E_n + __p1 * k + __p2 * d + __p3",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered expression is a linear combination of E_n, k, and d, while the ground truth has a nonlinear dependence on the product d*k through a cosine term."
+    },
+    {
+      "problem_id": "lsr_transform_iii.15.14_1_0",
+      "subset": "lsr_transform",
+      "gt_expression": "h**2/(8*pi**2*d**2*m)",
+      "answer": "__p0 * h ** 2 / (m * d ** 2) + __p1",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\nChoosing the fitted parameters as __p1 = 0 and __p0 = 1/(8\u03c0^2) makes the discovered expression identical to the ground truth, with constants ignored."
+    },
+    {
+      "problem_id": "lsr_transform_iii.15.27_1_0",
+      "subset": "lsr_transform",
+      "gt_expression": "2*pi*alpha/(d*k)",
+      "answer": "__p0 * power(k, __p1) * power(alpha, __p2) * power(d, __p3)",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\nThe discovered expression is a general power-law product of the same variables, so choosing its parameters as -1, 1, -1 and the prefactor as 2\u03c0 reproduces the ground-truth equation."
+    },
+    {
+      "problem_id": "lsr_transform_iii.15.27_2_0",
+      "subset": "lsr_transform",
+      "gt_expression": "2*pi*alpha/(k*n)",
+      "answer": "__p0 * (k / alpha) ** __p1 * n ** __p2",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\n\nBy choosing the fitted parameters as p0=2*pi, p1=-1, and p2=-1, the discovered expression simplifies exactly to the ground-truth form alpha/(k*n)."
+    },
+    {
+      "problem_id": "lsr_transform_iii.17.37_0_0",
+      "subset": "lsr_transform",
+      "gt_expression": "f/(alpha*cos(theta) + 1)",
+      "answer": "__p0 * f * theta / (alpha * cos(theta)) + __p1 * alpha + __p2",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered expression has a theta multiplied by f in the numerator and separate alpha/constant terms, so it cannot be algebraically transformed into f/(alpha*cos(theta)+1)."
+    },
+    {
+      "problem_id": "lsr_transform_iii.19.51_1_0",
+      "subset": "lsr_transform",
+      "gt_expression": "-2**(3/4)*(-E_n*epsilon**2*h**2*n**2/m)**(1/4)",
+      "answer": "-__p0 * (abs(E_n) * epsilon ** 2 * h ** 2 * n ** 2 / m) ** 0.25",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe ground-truth expression contains (-E_n)^(1/4), while the discovered expression uses abs(E_n)^(1/4), which are different functional structures in the variable E_n."
+    },
+    {
+      "problem_id": "lsr_transform_iii.19.51_3_0",
+      "subset": "lsr_transform",
+      "gt_expression": "-sqrt(2)*q**2*sqrt(-m/E_n)/(4*epsilon*h)",
+      "answer": "__p0 * sqrt(-m * q ** 4 / (epsilon ** 2 * h ** 2 * E_n))",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT  \nAfter ignoring numeric constants and fitted parameters, both reduce to the same functional form involving q^2 * sqrt(-m/E_n) / (epsilon * h)."
+    },
+    {
+      "problem_id": "lsr_transform_iii.21.20_2_0",
+      "subset": "lsr_transform",
+      "gt_expression": "-j*m/(q*rho_c_0)",
+      "answer": "__p0 * j * m / (rho_c_0 * q)",
+      "equivalent": true,
+      "decided_by": "sympy"
+    },
+    {
+      "problem_id": "lsr_transform_iii.21.20_3_0",
+      "subset": "lsr_transform",
+      "gt_expression": "-A_vec*q*rho_c_0/j",
+      "answer": "__p0 * rho_c_0 ** __p1 * q ** __p2 * A_vec ** __p3 / (-j) ** __p4",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\n\nBy choosing the fitted parameters appropriately (all exponents equal to 1 and the prefactor adjusted) and using the sign from dividing by -j, the discovered expression simplifies to -A_vec*q*rho_c_0/j."
+    },
+    {
+      "problem_id": "lsr_transform_iii.4.33_3_0",
+      "subset": "lsr_transform",
+      "gt_expression": "h*omega/(2*pi*kb*log(1 + h*omega/(2*pi*E_n)))",
+      "answer": "__p0 * h * omega / (kb * log(1 + __p1 * h * omega / E_n)) + __p2",
+      "equivalent": true,
+      "decided_by": "judge",
+      "judge_reply": "EQUIVALENT\nThe discovered equation has the same functional dependence on h, omega, kb, and E_n, with numeric constants and fitted parameters absorbed or ignored."
+    },
+    {
+      "problem_id": "lsr_transform_iii.9.52_0_0",
+      "subset": "lsr_transform",
+      "gt_expression": "h*prob*t*(omega - omega_0)**2/(4*pi*Ef*(1 - cos(t*(omega - omega_0))))",
+      "answer": "__p0 * h * sqrt(prob) * Omega_R / (Ef *",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\n\nThe discovered expression contains sqrt(prob), while the ground truth is linear in prob, so the functional dependence on variables differs."
+    },
+    {
+      "problem_id": "lsr_transform_iii.9.52_1_0",
+      "subset": "lsr_transform",
+      "gt_expression": "h*prob*t*(omega - omega_0)**2/(4*pi*p_d*(1 - cos(t*(omega - omega_0))))",
+      "answer": "__p0 * h * sqrt(prob) / (p_d * t) * (1 + __p1 * ((omega - omega_0) * t) ** 2 / (1 + __p2 * prob))",
+      "equivalent": false,
+      "decided_by": "judge",
+      "judge_reply": "DIFFERENT\nThe ground truth has linear prob and a trigonometric denominator involving 1 - cos(t*(omega - omega_0)), while the discovered expression contains sqrt(prob), an inverse t term, and an additive rational structure with no trigonometric function, so they have different functional forms."
+    }
+  ]
+}

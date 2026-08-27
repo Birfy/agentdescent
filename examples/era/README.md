@@ -1,7 +1,7 @@
 # ERA — empirical-software search (Flat UCB tree search)
 
 Faithful port of Google Research's released ERA implementation onto the
-AgentDescent engine, running **three** tasks on one search.
+AgentDescent engine, running **four** tasks on one search.
 
 | | |
 |---|---|
@@ -12,6 +12,7 @@ AgentDescent engine, running **three** tasks on one search.
 | Dataset (faithful) | Kaggle Playground Series S3E1 — the upstream `implementation/playground_s3e1.py` task |
 | Second task | *Numerical solution of integrals* — named in the paper's abstract; upstream released no implementation, so the nine-family suite is constructed here |
 | Third task | Gauss hypergeometric `2F1` in double precision — not in the paper at all; 3000 points against a 25-digit mpmath reference, baseline `scipy.special.hyp2f1` |
+| Fourth task | **LLM-SRBench** (arXiv:2504.10415, ICML 2025) — the 240 scientific equation-discovery problems the benchmark released (its paper says 239), someone else's benchmark and someone else's metrics |
 | `evolve()` plug-ins | `strategy` + `aggregator_factory=` FUTS tree, `selection.FlatPuct` |
 
 ## Run
@@ -20,14 +21,16 @@ AgentDescent engine, running **three** tasks on one search.
 python -m examples.era.era_empirical_software --dry-run   # Kaggle S3E1, RMSE
 python -m examples.era.era_hard_integrals --dry-run       # hard integrals, correct digits
 python -m examples.era.era_hypergeometric --dry-run       # 2F1 vs a 25-digit reference
+python -m examples.era.era_llm_srbench --dry-run          # LLM-SRBench equation discovery
+python -m examples.era.era_llm_srbench --dry-run --per-problem   # ... its own per-problem protocol
 ```
 
 `--dry-run` prints the configuration and returns with **zero network access
 and no API key**.
 
-## The three tasks
+## The four tasks
 
-All three entry points run the *same* flat-PUCT tree search, the same aggregator, the
+All four entry points run the *same* flat-PUCT tree search, the same aggregator, the
 same sandbox and the same governance layer. What differs is a
 [`Domain`](_era_domain.py): the seed program, the sandboxed evaluator, the
 mutation prompt, and the name of the metric.
@@ -67,6 +70,41 @@ deviation of 3.20, so an 80-point gate could not separate a half-digit gain from
 noise. `mpmath`, `decimal` and `fractions` are off this
 task's allowlist — the deliverable is a float64 routine.
 
+**`era_llm_srbench.py` — LLM-SRBench.** The only one of the four scored on a
+benchmark somebody else built, published and reported numbers for:
+[LLM-SRBench](https://arxiv.org/abs/2504.10415) (ICML 2025 Oral), 240 scientific
+equation-discovery problems in five subsets — 111 Feynman equations rearranged
+into unfamiliar forms, and 129 synthetic problems in chemistry, biology, physics
+and materials science, each with an out-of-distribution split. A candidate writes
+`discover(x, y, spec)` and returns a **closed-form equation as a string**, which
+is parsed and never executed: numeric constants, the problem's own variables,
+`pi`/`e`, the four operators, powers and a fixed list of elementary functions.
+That is what keeps it equation discovery — a nearest-neighbour table cannot be
+written down as an equation — and it is also what keeps the held-out samples out
+of reach, since the candidate hands back a formula rather than code that runs.
+Scoring is the benchmark's own NMSE and Acc(0.1); the tree ranks on
+`min(12, -log10(NMSE))` averaged over the problem set, because Acc(0.1) is an
+indicator that is flat almost everywhere. The root node is sequentially
+thresholded least squares over a fixed nonlinear library — SINDy's fitting step
+without its domain-chosen library.
+
+**The protocol is ERA's, not the benchmark's**, and that is the one thing to keep
+straight when putting a number from here beside the paper's tables. LLM-SRBench
+evaluates searchers that evolve **per problem** — LLM-SR's own config gives each
+problem 1 000 samples — while here the model never sees a sample, writes **one**
+program, and that program is run sandboxed over every problem in the benchmark:
+14 model calls for a 129-problem category, about 0.11 per problem. Same
+benchmark, same splits, same metrics, different experiment — said in the result
+file, in the module docstring, and in
+[`docs/algo-era.md`](../../docs/algo-era.md), which also puts the two side by
+side with the budget column attached.
+
+The samples come from an **ungated mirror** (`pkuHaowei/llm-srbench`), because the
+benchmark's own release is gated and returns 401 without a HuggingFace token. The
+mirror is checked rather than trusted: `tests/test_era_srbench.py` re-evaluates
+every ground-truth expression that is evaluable as published against the samples
+shipped beside it.
+
 ## What is in here
 
 - [`era_empirical_software.py`](era_empirical_software.py) — the runnable port, and the search every task shares
@@ -82,10 +120,15 @@ task's allowlist — the deliverable is a float64 routine.
 - [`_era_hyp2f1_runner.py`](_era_hyp2f1_runner.py) — the sandbox-side runner (2F1)
 - [`data/hyp2f1_stress.json`](data/hyp2f1_stress.json) — the committed stress set and its references,
   produced by [`tools/gen_hyp2f1_stress.py`](../../tools/gen_hyp2f1_stress.py)
+- [`era_llm_srbench.py`](era_llm_srbench.py) — the LLM-SRBench entry point
+- [`_era_srbench.py`](_era_srbench.py) — download, shards, sandboxed evaluator, prompt (LLM-SRBench)
+- [`_era_srbench_expr.py`](_era_srbench_expr.py) — the answer grammar and the benchmark's metrics
+- [`_era_srbench_runner.py`](_era_srbench_runner.py) — the sandbox-side runner (LLM-SRBench)
 - Port notes, upstream trace, and every recorded deviation: [`docs/algo-era.md`](../../docs/algo-era.md)
 - Offline tests: [`tests/test_era_example.py`](../../tests/test_era_example.py),
   [`tests/test_era_integrals.py`](../../tests/test_era_integrals.py),
-  [`tests/test_era_hyp2f1.py`](../../tests/test_era_hyp2f1.py)
+  [`tests/test_era_hyp2f1.py`](../../tests/test_era_hyp2f1.py),
+  [`tests/test_era_srbench.py`](../../tests/test_era_srbench.py)
 
 ## When the channel damages a reply
 
@@ -110,7 +153,7 @@ run on a host with neither. Because the benchmark requires `pandas`, `numpy`
 and `scikit-learn`, the AST gate here is far weaker than the OpenEvolve port's,
 so the sandbox rather than the gate is the boundary;
 `test_the_sandbox_blocks_the_writes_and_network_it_claims_to_block` checks that
-against the kernel rather than by reading the profile back. All three tasks run
+against the kernel rather than by reading the profile back. All four tasks run
 under the same profile — `sandbox_wrapper` — rather than under a copy of it.
 
 All ports share one command-line contract (`--provider/--model/--seed/--async/--async-ratio/--max-seconds/--dry-run/--yes`),
