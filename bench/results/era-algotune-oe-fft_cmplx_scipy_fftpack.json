@@ -1,0 +1,1031 @@
+{
+  "experiment": "ERA on AgentDescent -- AlgoTune, one tree per task",
+  "status": "completed",
+  "completed_at": "2026-08-27T08:13:35+00:00",
+  "upstream_commit": "dff9914c10800c7a031c9e8c3d4d1c8cd1b38906",
+  "benchmark": "AlgoTune (arXiv:2507.15887), oripress/AlgoTune",
+  "config": {
+    "provider": "claude",
+    "model": "deepseek-v4-flash-ga-260731",
+    "seed": 0,
+    "asynchronous": false,
+    "async_ratio": 1,
+    "max_seconds": 1800.0,
+    "pipelined_gate": false,
+    "gate_workers": 2,
+    "dry_run": false,
+    "serial": false,
+    "budget_rollouts": null,
+    "val_cap": null,
+    "eval_concurrency": null,
+    "reflective_merge": false,
+    "eval_cache": "",
+    "no_thinking": false,
+    "tasks": "fft_cmplx_scipy_fftpack",
+    "list_tasks": false,
+    "staleness": "guarded",
+    "iterations": 45,
+    "workers": 3,
+    "shards": 6,
+    "test_shards": 3,
+    "problems": 2,
+    "test_problems": 0,
+    "packages": "bare",
+    "no_profile": false,
+    "repair_attempts": 4,
+    "repeats": 3,
+    "size_scale": 1.0,
+    "held_out_frac": 0.5,
+    "c_puct": 1.0,
+    "candidate_timeout": 300.0,
+    "problem_seconds": 60.0,
+    "max_code_length": 20000,
+    "max_tokens": 8000,
+    "temperature": 0.7,
+    "thinking": "disabled",
+    "api_timeout": 180.0,
+    "reply_attempts": 4,
+    "shutdown_grace": 120.0,
+    "quality_target": null
+  },
+  "summary": {
+    "tasks_run": 1,
+    "tasks_failed": 0,
+    "tasks_improved": 1,
+    "geometric_mean_baseline_speedup": 1.0030310231627555,
+    "geometric_mean_best_speedup": 4.426399711411457,
+    "wall_seconds": 1303.8973822090047
+  },
+  "tasks": [
+    {
+      "task": "fft_cmplx_scipy_fftpack",
+      "status": "completed",
+      "held_out_baseline_speedup": 1.0030310231627555,
+      "held_out_best_speedup": 4.426399711411457,
+      "speedup_gain": 3.4233686882487016,
+      "nodes": 46,
+      "wall_seconds": 1271.6596309659944,
+      "best_program": "import numpy as np\nfrom scipy.fft import fftn\n\ndef solve(problem):\n    # Ensure contiguous complex128 array\n    if isinstance(problem, np.ndarray) and problem.dtype == np.complex128 and problem.flags['C_CONTIGUOUS']:\n        arr = problem\n    else:\n        arr = np.ascontiguousarray(problem, dtype=np.complex128)\n    return fftn(arr, workers=-1, overwrite_x=True)",
+      "observation": {
+        "mode": "sync",
+        "wall_seconds": 1271.6596309659944,
+        "baseline": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "b6bd4dc1d2d05c5c",
+          "iteration": 0,
+          "change_summary": "AlgoTune reference implementation for fft_cmplx_scipy_fftpack",
+          "score": 1.0170225385620653,
+          "speedup": 1.0170225385620653,
+          "num_visits": 45,
+          "valid": true,
+          "error": "",
+          "code_chars": 252
+        },
+        "best": {
+          "index": 29,
+          "parent_index": 19,
+          "program_id": "5c9aff507394ea7d",
+          "iteration": 29,
+          "change_summary": "",
+          "score": 4.811528944569004,
+          "speedup": 4.811528944569004,
+          "num_visits": 14,
+          "valid": true,
+          "error": "",
+          "code_chars": 364
+        },
+        "data": {
+          "task": "fft_cmplx_scipy_fftpack",
+          "n": 1860,
+          "published_n": 1860,
+          "published_target_time_ms": 100,
+          "published_baseline_ms": 82.85629061666667,
+          "problems_per_shard": 2,
+          "problems_per_test_shard": 2,
+          "reported_instances": 6,
+          "scoring_shards": 6,
+          "test_shards": 3,
+          "timed_repeats": 3,
+          "line_profile": true,
+          "packages": "bare",
+          "seed": 0
+        },
+        "framework": {
+          "baseline_reward": 0.5042197194718014,
+          "final_reward": 0.7131591621034489,
+          "quality_gain": 0.20893944263164743,
+          "stop_reason": "rounds",
+          "error": null,
+          "outcomes": {
+            "tree-updated": 12,
+            "committed": 3
+          },
+          "rollouts": 45,
+          "rollout_seconds": 305.2841856479645,
+          "eval_seconds": 83.032963514328,
+          "stale_considered": 45,
+          "stale_discarded": 0,
+          "stale_rate": 0.0,
+          "retired_workers": 0,
+          "history": [
+            {
+              "round": 0,
+              "held_out_reward": 0.5017909556271917,
+              "elapsed_s": 97.3187484741211,
+              "rollouts": 3,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 1,
+              "held_out_reward": 0.5017909556271917,
+              "elapsed_s": 180.5683400630951,
+              "rollouts": 6,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 2,
+              "held_out_reward": 0.5924322075480472,
+              "elapsed_s": 271.471066236496,
+              "rollouts": 9,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 3,
+              "held_out_reward": 0.5924322075480472,
+              "elapsed_s": 377.1596128940582,
+              "rollouts": 12,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 4,
+              "held_out_reward": 0.6994169106840894,
+              "elapsed_s": 451.0084602832794,
+              "rollouts": 15,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 5,
+              "held_out_reward": 0.6994169106840894,
+              "elapsed_s": 514.4254815578461,
+              "rollouts": 18,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 6,
+              "held_out_reward": 0.6994169106840894,
+              "elapsed_s": 591.8627316951752,
+              "rollouts": 21,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 7,
+              "held_out_reward": 0.6994169106840894,
+              "elapsed_s": 660.7666466236115,
+              "rollouts": 24,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 8,
+              "held_out_reward": 0.6994169106840894,
+              "elapsed_s": 753.7011482715607,
+              "rollouts": 27,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 9,
+              "held_out_reward": 0.7131591621034489,
+              "elapsed_s": 828.2885162830353,
+              "rollouts": 30,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 10,
+              "held_out_reward": 0.7131591621034489,
+              "elapsed_s": 897.4819011688232,
+              "rollouts": 33,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 11,
+              "held_out_reward": 0.7131591621034489,
+              "elapsed_s": 1003.7052936553955,
+              "rollouts": 36,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 12,
+              "held_out_reward": 0.7131591621034489,
+              "elapsed_s": 1075.3169133663177,
+              "rollouts": 39,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 13,
+              "held_out_reward": 0.7131591621034489,
+              "elapsed_s": 1173.3926646709442,
+              "rollouts": 42,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 14,
+              "held_out_reward": 0.7131591621034489,
+              "elapsed_s": 1252.7123684883118,
+              "rollouts": 45,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            }
+          ]
+        },
+        "actor_usage": {
+          "calls": 102,
+          "failures": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "model_seconds": 1116.528008
+        },
+        "tree": {
+          "nodes": 46,
+          "valid_nodes": 45,
+          "max_depth": 6,
+          "root_visits": 45,
+          "c_puct": 1.0,
+          "tree": [
+            {
+              "index": 0,
+              "parent_index": null,
+              "program_id": "b6bd4dc1d2d05c5c",
+              "iteration": 0,
+              "change_summary": "AlgoTune reference implementation for fft_cmplx_scipy_fftpack",
+              "score": 1.0170225385620653,
+              "speedup": 1.0170225385620653,
+              "num_visits": 45,
+              "valid": true,
+              "error": "",
+              "code_chars": 252
+            },
+            {
+              "index": 1,
+              "parent_index": 0,
+              "program_id": "f675448810be66c0",
+              "iteration": 1,
+              "change_summary": "",
+              "score": 0.8902155823463346,
+              "speedup": 0.8902155823463346,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 242
+            },
+            {
+              "index": 2,
+              "parent_index": 0,
+              "program_id": "926b37f7040fc5d5",
+              "iteration": 2,
+              "change_summary": "",
+              "score": 0.9357724245960877,
+              "speedup": 0.9357724245960877,
+              "num_visits": 3,
+              "valid": true,
+              "error": "",
+              "code_chars": 196
+            },
+            {
+              "index": 3,
+              "parent_index": 0,
+              "program_id": "5cf3740343815f05",
+              "iteration": 3,
+              "change_summary": "",
+              "score": 0.9230486942287247,
+              "speedup": 0.9230486942287247,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 220
+            },
+            {
+              "index": 4,
+              "parent_index": 0,
+              "program_id": "2d9e43812f39b67d",
+              "iteration": 6,
+              "change_summary": "",
+              "score": 0.8968964985014695,
+              "speedup": 0.8968964985014695,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 124
+            },
+            {
+              "index": 5,
+              "parent_index": 0,
+              "program_id": "2d9e43812f39b67d",
+              "iteration": 5,
+              "change_summary": "",
+              "score": 0.90731742485838,
+              "speedup": 0.90731742485838,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 124
+            },
+            {
+              "index": 6,
+              "parent_index": 0,
+              "program_id": "3e7e8b01189ae0d0",
+              "iteration": 4,
+              "change_summary": "",
+              "score": 0.915822471750318,
+              "speedup": 0.915822471750318,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 155
+            },
+            {
+              "index": 7,
+              "parent_index": 0,
+              "program_id": "190209a56da5ed77",
+              "iteration": 9,
+              "change_summary": "",
+              "score": 2.3406251755978222,
+              "speedup": 2.3406251755978222,
+              "num_visits": 36,
+              "valid": true,
+              "error": "",
+              "code_chars": 227
+            },
+            {
+              "index": 8,
+              "parent_index": 0,
+              "program_id": "669b73182ced2091",
+              "iteration": 8,
+              "change_summary": "",
+              "score": 0.8773094748262024,
+              "speedup": 0.8773094748262024,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 330
+            },
+            {
+              "index": 9,
+              "parent_index": 2,
+              "program_id": "39b6b133224ac164",
+              "iteration": 7,
+              "change_summary": "",
+              "score": 1.0457436439790202,
+              "speedup": 1.0457436439790202,
+              "num_visits": 2,
+              "valid": true,
+              "error": "",
+              "code_chars": 91
+            },
+            {
+              "index": 10,
+              "parent_index": 7,
+              "program_id": "83d27a8483df59e8",
+              "iteration": 11,
+              "change_summary": "",
+              "score": 0.840157704252296,
+              "speedup": 0.840157704252296,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 118
+            },
+            {
+              "index": 11,
+              "parent_index": 9,
+              "program_id": "4c8d4b0763933e72",
+              "iteration": 12,
+              "change_summary": "",
+              "score": 0.870741939296399,
+              "speedup": 0.870741939296399,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 71
+            },
+            {
+              "index": 12,
+              "parent_index": 7,
+              "program_id": "4d4b94b4760fa4fc",
+              "iteration": 10,
+              "change_summary": "",
+              "score": 0.907124549956832,
+              "speedup": 0.907124549956832,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1338
+            },
+            {
+              "index": 13,
+              "parent_index": 7,
+              "program_id": "c3c8a21c427b6a40",
+              "iteration": 13,
+              "change_summary": "",
+              "score": 4.578419275418298,
+              "speedup": 4.578419275418298,
+              "num_visits": 29,
+              "valid": true,
+              "error": "",
+              "code_chars": 373
+            },
+            {
+              "index": 14,
+              "parent_index": 7,
+              "program_id": "ca9bf33c40e10474",
+              "iteration": 15,
+              "change_summary": "",
+              "score": 2.729962556783614,
+              "speedup": 2.729962556783614,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 255
+            },
+            {
+              "index": 15,
+              "parent_index": 7,
+              "program_id": "c7fe1dbb7a8822db",
+              "iteration": 14,
+              "change_summary": "",
+              "score": 4.087335639663014,
+              "speedup": 4.087335639663014,
+              "num_visits": 3,
+              "valid": true,
+              "error": "",
+              "code_chars": 247
+            },
+            {
+              "index": 16,
+              "parent_index": 13,
+              "program_id": "c3c8a21c427b6a40",
+              "iteration": 18,
+              "change_summary": "",
+              "score": 4.3767177553701515,
+              "speedup": 4.3767177553701515,
+              "num_visits": 22,
+              "valid": true,
+              "error": "",
+              "code_chars": 373
+            },
+            {
+              "index": 17,
+              "parent_index": 13,
+              "program_id": "c3c8a21c427b6a40",
+              "iteration": 16,
+              "change_summary": "",
+              "score": 4.075335898091914,
+              "speedup": 4.075335898091914,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 373
+            },
+            {
+              "index": 18,
+              "parent_index": 15,
+              "program_id": "6cd21a1d70b4ec47",
+              "iteration": 17,
+              "change_summary": "",
+              "score": 4.394360685031432,
+              "speedup": 4.394360685031432,
+              "num_visits": 2,
+              "valid": true,
+              "error": "",
+              "code_chars": 178
+            },
+            {
+              "index": 19,
+              "parent_index": 16,
+              "program_id": "c3c8a21c427b6a40",
+              "iteration": 21,
+              "change_summary": "",
+              "score": 4.651240280055144,
+              "speedup": 4.651240280055144,
+              "num_visits": 21,
+              "valid": true,
+              "error": "",
+              "code_chars": 373
+            },
+            {
+              "index": 20,
+              "parent_index": 13,
+              "program_id": "e35f71923393e8b2",
+              "iteration": 20,
+              "change_summary": "",
+              "score": 4.598557843803165,
+              "speedup": 4.598557843803165,
+              "num_visits": 5,
+              "valid": true,
+              "error": "",
+              "code_chars": 375
+            },
+            {
+              "index": 21,
+              "parent_index": 18,
+              "program_id": "ef72f6c4783bab4a",
+              "iteration": 19,
+              "change_summary": "",
+              "score": 0.8127675858951342,
+              "speedup": 0.8127675858951342,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 128
+            },
+            {
+              "index": 22,
+              "parent_index": 19,
+              "program_id": "a32ac8dfd38dbfb1",
+              "iteration": 24,
+              "change_summary": "",
+              "score": 4.318544328546364,
+              "speedup": 4.318544328546364,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 537
+            },
+            {
+              "index": 23,
+              "parent_index": 19,
+              "program_id": "c3c8a21c427b6a40",
+              "iteration": 22,
+              "change_summary": "",
+              "score": 4.438521682779799,
+              "speedup": 4.438521682779799,
+              "num_visits": 2,
+              "valid": true,
+              "error": "",
+              "code_chars": 373
+            },
+            {
+              "index": 24,
+              "parent_index": 20,
+              "program_id": "bb1919419d7f472a",
+              "iteration": 23,
+              "change_summary": "",
+              "score": 4.246748059901868,
+              "speedup": 4.246748059901868,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 431
+            },
+            {
+              "index": 25,
+              "parent_index": 19,
+              "program_id": "55bdf5b6c1a831e5",
+              "iteration": 25,
+              "change_summary": "",
+              "score": 4.200949430589726,
+              "speedup": 4.200949430589726,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 808
+            },
+            {
+              "index": 26,
+              "parent_index": 19,
+              "program_id": "ef72f6c4783bab4a",
+              "iteration": 27,
+              "change_summary": "",
+              "score": 0.8645746245915894,
+              "speedup": 0.8645746245915894,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 128
+            },
+            {
+              "index": 27,
+              "parent_index": 20,
+              "program_id": "f7a39371a06bff20",
+              "iteration": 26,
+              "change_summary": "",
+              "score": 4.529204690813294,
+              "speedup": 4.529204690813294,
+              "num_visits": 3,
+              "valid": true,
+              "error": "",
+              "code_chars": 1529
+            },
+            {
+              "index": 28,
+              "parent_index": 27,
+              "program_id": "b0bde498cc1d7e3d",
+              "iteration": 28,
+              "change_summary": "",
+              "score": 4.50511980932902,
+              "speedup": 4.50511980932902,
+              "num_visits": 2,
+              "valid": true,
+              "error": "",
+              "code_chars": 474
+            },
+            {
+              "index": 29,
+              "parent_index": 19,
+              "program_id": "5c9aff507394ea7d",
+              "iteration": 29,
+              "change_summary": "",
+              "score": 4.811528944569004,
+              "speedup": 4.811528944569004,
+              "num_visits": 14,
+              "valid": true,
+              "error": "",
+              "code_chars": 364
+            },
+            {
+              "index": 30,
+              "parent_index": 19,
+              "program_id": "290ba051d378ae1e",
+              "iteration": 30,
+              "change_summary": "",
+              "score": 1.2544559257134698,
+              "speedup": 1.2544559257134698,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 457
+            },
+            {
+              "index": 31,
+              "parent_index": 29,
+              "program_id": "5c9aff507394ea7d",
+              "iteration": 31,
+              "change_summary": "",
+              "score": 3.6720858721430307,
+              "speedup": 3.6720858721430307,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 364
+            },
+            {
+              "index": 32,
+              "parent_index": 29,
+              "program_id": "b0a8b275ce52fd70",
+              "iteration": 32,
+              "change_summary": "",
+              "score": 3.205118189201203,
+              "speedup": 3.205118189201203,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 370
+            },
+            {
+              "index": 33,
+              "parent_index": 29,
+              "program_id": "ccf2aa4419d6fe21",
+              "iteration": 33,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "TypeError: fftn() got an unexpected keyword argument 'workers'",
+              "code_chars": 1097
+            },
+            {
+              "index": 34,
+              "parent_index": 29,
+              "program_id": "d828c262b1bbed29",
+              "iteration": 36,
+              "change_summary": "",
+              "score": 1.2864110276314444,
+              "speedup": 1.2864110276314444,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 517
+            },
+            {
+              "index": 35,
+              "parent_index": 29,
+              "program_id": "3afccd6ee17b2708",
+              "iteration": 35,
+              "change_summary": "",
+              "score": 0.882777459420582,
+              "speedup": 0.882777459420582,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 386
+            },
+            {
+              "index": 36,
+              "parent_index": 29,
+              "program_id": "faa561a209f90187",
+              "iteration": 34,
+              "change_summary": "",
+              "score": 0.8843508312191086,
+              "speedup": 0.8843508312191086,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 511
+            },
+            {
+              "index": 37,
+              "parent_index": 29,
+              "program_id": "8ad1aea645bc74ae",
+              "iteration": 38,
+              "change_summary": "",
+              "score": 2.82299398449919,
+              "speedup": 2.82299398449919,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 619
+            },
+            {
+              "index": 38,
+              "parent_index": 28,
+              "program_id": "b0bde498cc1d7e3d",
+              "iteration": 39,
+              "change_summary": "",
+              "score": 3.020617143475862,
+              "speedup": 3.020617143475862,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 474
+            },
+            {
+              "index": 39,
+              "parent_index": 29,
+              "program_id": "82683e79cb885a1e",
+              "iteration": 37,
+              "change_summary": "",
+              "score": 3.0189397636657933,
+              "speedup": 3.0189397636657933,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 167
+            },
+            {
+              "index": 40,
+              "parent_index": 29,
+              "program_id": "de32dd83bc66aa29",
+              "iteration": 42,
+              "change_summary": "",
+              "score": 0.857386808785594,
+              "speedup": 0.857386808785594,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 206
+            },
+            {
+              "index": 41,
+              "parent_index": 29,
+              "program_id": "583ea6001762f384",
+              "iteration": 41,
+              "change_summary": "",
+              "score": 0.888377903742143,
+              "speedup": 0.888377903742143,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 415
+            },
+            {
+              "index": 42,
+              "parent_index": 29,
+              "program_id": "cb56fe360f684ab1",
+              "iteration": 40,
+              "change_summary": "",
+              "score": 0.8545434200158195,
+              "speedup": 0.8545434200158195,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 269
+            },
+            {
+              "index": 43,
+              "parent_index": 29,
+              "program_id": "3fb032ebbd88aee9",
+              "iteration": 43,
+              "change_summary": "",
+              "score": 3.193603324852998,
+              "speedup": 3.193603324852998,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 308
+            },
+            {
+              "index": 44,
+              "parent_index": 23,
+              "program_id": "4c066ccd781ebca5",
+              "iteration": 44,
+              "change_summary": "",
+              "score": 1.2934838045484895,
+              "speedup": 1.2934838045484895,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 419
+            },
+            {
+              "index": 45,
+              "parent_index": 29,
+              "program_id": "ea4e35f1dadfa2fd",
+              "iteration": 45,
+              "change_summary": "",
+              "score": 0.9343211672689797,
+              "speedup": 0.9343211672689797,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 386
+            }
+          ]
+        },
+        "test": {
+          "baseline": {
+            "speedup": 1.0030310231627555,
+            "score": 1.0030310231627555,
+            "valid_problems": 6,
+            "problems": 6,
+            "baseline_ms": 174.41419166789274,
+            "candidate_ms": 173.928811999455,
+            "slowest": [
+              {
+                "seed": 17,
+                "shard": 8,
+                "baseline_ms": 175.199,
+                "candidate_ms": 180.3907,
+                "speedup": 0.9712,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 15,
+                "shard": 7,
+                "baseline_ms": 171.8769,
+                "candidate_ms": 172.7339,
+                "speedup": 0.995,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 16,
+                "shard": 7,
+                "baseline_ms": 174.8019,
+                "candidate_ms": 173.7851,
+                "speedup": 1.0059,
+                "valid": true,
+                "error": ""
+              }
+            ],
+            "profile": "     7                                               \"\"\"\n     9                                                   \"\"\"\n    10         1        172.9    172.9    100.0      return fftpack.fftn(problem)",
+            "seconds": 15.378069372003665,
+            "limits_unavailable": [],
+            "error": ""
+          },
+          "best": {
+            "speedup": 4.426399711411457,
+            "score": 4.426399711411457,
+            "valid_problems": 6,
+            "problems": 6,
+            "baseline_ms": 185.0175394999193,
+            "candidate_ms": 42.054414334415924,
+            "slowest": [
+              {
+                "seed": 14,
+                "shard": 6,
+                "baseline_ms": 180.4069,
+                "candidate_ms": 46.3569,
+                "speedup": 3.8917,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 15,
+                "shard": 7,
+                "baseline_ms": 183.2287,
+                "candidate_ms": 46.1237,
+                "speedup": 3.9725,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 18,
+                "shard": 8,
+                "baseline_ms": 170.759,
+                "candidate_ms": 40.3568,
+                "speedup": 4.2312,
+                "valid": true,
+                "error": ""
+              }
+            ],
+            "profile": "==============================================================\n     4                                           def solve(problem):\n     6         1          0.0      0.0      0.0      if isinstance(problem, np.ndarray) and problem.dtype == np.complex128 and problem.flags['C_CONTIGUOUS']:\n     7         1          0.0      0.0      0.0          arr = problem\n    10         1         39.5     39.5    100.0      return fftn(arr, workers=-1, overwrite_x=True)",
+            "seconds": 16.20526377799979,
+            "limits_unavailable": [],
+            "error": ""
+          },
+          "speedup_gain": 3.4233686882487016
+        }
+      },
+      "actor_usage": {
+        "calls": 102,
+        "failures": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "model_seconds": 1116.528008
+      }
+    }
+  ],
+  "failures": [],
+  "model_usage": {
+    "calls": 60,
+    "failures": 0,
+    "prompt_tokens": 58421,
+    "completion_tokens": 18661,
+    "total_tokens": 77082,
+    "model_seconds": 350.202058
+  },
+  "repair": {
+    "attempts_allowed": 4,
+    "checked": 58,
+    "failed": 14,
+    "repaired": 9,
+    "gave_up": 1
+  },
+  "reply_damage": {
+    "drawn": 60,
+    "damaged": 1,
+    "attempts_allowed": 4
+  }
+}

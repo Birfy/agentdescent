@@ -1,0 +1,1031 @@
+{
+  "experiment": "ERA on AgentDescent -- AlgoTune, one tree per task",
+  "status": "completed",
+  "completed_at": "2026-08-27T08:19:36+00:00",
+  "upstream_commit": "dff9914c10800c7a031c9e8c3d4d1c8cd1b38906",
+  "benchmark": "AlgoTune (arXiv:2507.15887), oripress/AlgoTune",
+  "config": {
+    "provider": "claude",
+    "model": "deepseek-v4-flash-ga-260731",
+    "seed": 0,
+    "asynchronous": false,
+    "async_ratio": 1,
+    "max_seconds": 1800.0,
+    "pipelined_gate": false,
+    "gate_workers": 2,
+    "dry_run": false,
+    "serial": false,
+    "budget_rollouts": null,
+    "val_cap": null,
+    "eval_concurrency": null,
+    "reflective_merge": false,
+    "eval_cache": "",
+    "no_thinking": false,
+    "tasks": "psd_cone_projection",
+    "list_tasks": false,
+    "staleness": "guarded",
+    "iterations": 45,
+    "workers": 3,
+    "shards": 6,
+    "test_shards": 3,
+    "problems": 2,
+    "test_problems": 0,
+    "packages": "bare",
+    "no_profile": false,
+    "repair_attempts": 4,
+    "repeats": 3,
+    "size_scale": 1.0,
+    "held_out_frac": 0.5,
+    "c_puct": 1.0,
+    "candidate_timeout": 300.0,
+    "problem_seconds": 60.0,
+    "max_code_length": 20000,
+    "max_tokens": 8000,
+    "temperature": 0.7,
+    "thinking": "disabled",
+    "api_timeout": 180.0,
+    "reply_attempts": 4,
+    "shutdown_grace": 120.0,
+    "quality_target": null
+  },
+  "summary": {
+    "tasks_run": 1,
+    "tasks_failed": 0,
+    "tasks_improved": 1,
+    "geometric_mean_baseline_speedup": 1.0422279497747686,
+    "geometric_mean_best_speedup": 4.748591942075962,
+    "wall_seconds": 360.26508835300046
+  },
+  "tasks": [
+    {
+      "task": "psd_cone_projection",
+      "status": "completed",
+      "held_out_baseline_speedup": 1.0422279497747686,
+      "held_out_best_speedup": 4.748591942075962,
+      "speedup_gain": 3.7063639923011937,
+      "nodes": 46,
+      "wall_seconds": 349.97266814099567,
+      "best_program": "import numpy as np\nfrom typing import Any\n\ndef solve(problem: dict[str, np.ndarray]) -> dict[str, Any]:\n    A = np.asarray(problem['A'])\n    eigvals, eigvecs = np.linalg.eigh(A)\n    # Only keep positive eigenvalues\n    pos = eigvals > 0\n    if not np.any(pos):\n        return {'X': np.zeros_like(A)}\n    eigvals_pos = eigvals[pos]\n    eigvecs_pos = eigvecs[:, pos]\n    X = (eigvecs_pos * eigvals_pos) @ eigvecs_pos.T\n    return {'X': X}",
+      "observation": {
+        "mode": "sync",
+        "wall_seconds": 349.97266814099567,
+        "baseline": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "72f56cf179fdba67",
+          "iteration": 0,
+          "change_summary": "AlgoTune reference implementation for psd_cone_projection",
+          "score": 1.0240516264937451,
+          "speedup": 1.0240516264937451,
+          "num_visits": 45,
+          "valid": true,
+          "error": "",
+          "code_chars": 631
+        },
+        "best": {
+          "index": 32,
+          "parent_index": 15,
+          "program_id": "abe6be3354100d1b",
+          "iteration": 32,
+          "change_summary": "",
+          "score": 4.821193480775861,
+          "speedup": 4.821193480775861,
+          "num_visits": 11,
+          "valid": true,
+          "error": "",
+          "code_chars": 436
+        },
+        "data": {
+          "task": "psd_cone_projection",
+          "n": 349,
+          "published_n": 349,
+          "published_target_time_ms": 100,
+          "published_baseline_ms": 101.8934363,
+          "problems_per_shard": 2,
+          "problems_per_test_shard": 2,
+          "reported_instances": 6,
+          "scoring_shards": 6,
+          "test_shards": 3,
+          "timed_repeats": 3,
+          "line_profile": true,
+          "packages": "bare",
+          "seed": 0
+        },
+        "framework": {
+          "baseline_reward": 0.5059414557857425,
+          "final_reward": 0.8229154042908277,
+          "quality_gain": 0.3169739485050852,
+          "stop_reason": "rounds",
+          "error": null,
+          "outcomes": {
+            "committed": 4,
+            "tree-updated": 11
+          },
+          "rollouts": 45,
+          "rollout_seconds": 65.54317784309387,
+          "eval_seconds": 12.754051446914673,
+          "stale_considered": 45,
+          "stale_discarded": 0,
+          "stale_rate": 0.0,
+          "retired_workers": 0,
+          "history": [
+            {
+              "round": 0,
+              "held_out_reward": 0.8174068123990131,
+              "elapsed_s": 23.771085500717163,
+              "rollouts": 3,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 1,
+              "held_out_reward": 0.8174068123990131,
+              "elapsed_s": 44.70728635787964,
+              "rollouts": 6,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 2,
+              "held_out_reward": 0.8176242930072478,
+              "elapsed_s": 70.25043225288391,
+              "rollouts": 9,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 3,
+              "held_out_reward": 0.8176242930072478,
+              "elapsed_s": 93.01572299003601,
+              "rollouts": 12,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 4,
+              "held_out_reward": 0.8174068123990131,
+              "elapsed_s": 115.8218400478363,
+              "rollouts": 15,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 5,
+              "held_out_reward": 0.8174068123990131,
+              "elapsed_s": 136.50944995880127,
+              "rollouts": 18,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 6,
+              "held_out_reward": 0.8174068123990131,
+              "elapsed_s": 157.77024006843567,
+              "rollouts": 21,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 7,
+              "held_out_reward": 0.8174068123990131,
+              "elapsed_s": 179.0427508354187,
+              "rollouts": 24,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 8,
+              "held_out_reward": 0.8174068123990131,
+              "elapsed_s": 201.26497220993042,
+              "rollouts": 27,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 9,
+              "held_out_reward": 0.8174068123990131,
+              "elapsed_s": 222.22998642921448,
+              "rollouts": 30,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 10,
+              "held_out_reward": 0.8229154042908277,
+              "elapsed_s": 253.84316492080688,
+              "rollouts": 33,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 11,
+              "held_out_reward": 0.8229154042908277,
+              "elapsed_s": 277.36524534225464,
+              "rollouts": 36,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 12,
+              "held_out_reward": 0.8229154042908277,
+              "elapsed_s": 298.24784207344055,
+              "rollouts": 39,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 13,
+              "held_out_reward": 0.8229154042908277,
+              "elapsed_s": 321.17488050460815,
+              "rollouts": 42,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 14,
+              "held_out_reward": 0.8229154042908277,
+              "elapsed_s": 343.84015250205994,
+              "rollouts": 45,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            }
+          ]
+        },
+        "actor_usage": {
+          "calls": 99,
+          "failures": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "model_seconds": 388.539423
+        },
+        "tree": {
+          "nodes": 46,
+          "valid_nodes": 46,
+          "max_depth": 7,
+          "root_visits": 45,
+          "c_puct": 1.0,
+          "tree": [
+            {
+              "index": 0,
+              "parent_index": null,
+              "program_id": "72f56cf179fdba67",
+              "iteration": 0,
+              "change_summary": "AlgoTune reference implementation for psd_cone_projection",
+              "score": 1.0240516264937451,
+              "speedup": 1.0240516264937451,
+              "num_visits": 45,
+              "valid": true,
+              "error": "",
+              "code_chars": 631
+            },
+            {
+              "index": 1,
+              "parent_index": 0,
+              "program_id": "162743ae1bc60adb",
+              "iteration": 2,
+              "change_summary": "",
+              "score": 4.617721390058201,
+              "speedup": 4.617721390058201,
+              "num_visits": 43,
+              "valid": true,
+              "error": "",
+              "code_chars": 274
+            },
+            {
+              "index": 2,
+              "parent_index": 0,
+              "program_id": "162743ae1bc60adb",
+              "iteration": 1,
+              "change_summary": "",
+              "score": 4.386389559171191,
+              "speedup": 4.386389559171191,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 274
+            },
+            {
+              "index": 3,
+              "parent_index": 0,
+              "program_id": "162743ae1bc60adb",
+              "iteration": 3,
+              "change_summary": "",
+              "score": 4.3384023287728,
+              "speedup": 4.3384023287728,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 274
+            },
+            {
+              "index": 4,
+              "parent_index": 1,
+              "program_id": "4144340f9cf672d1",
+              "iteration": 6,
+              "change_summary": "",
+              "score": 3.901078367839974,
+              "speedup": 3.901078367839974,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 502
+            },
+            {
+              "index": 5,
+              "parent_index": 1,
+              "program_id": "cff85b53768db5df",
+              "iteration": 4,
+              "change_summary": "",
+              "score": 4.018977372604775,
+              "speedup": 4.018977372604775,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 311
+            },
+            {
+              "index": 6,
+              "parent_index": 1,
+              "program_id": "162743ae1bc60adb",
+              "iteration": 5,
+              "change_summary": "",
+              "score": 4.56492252521068,
+              "speedup": 4.56492252521068,
+              "num_visits": 2,
+              "valid": true,
+              "error": "",
+              "code_chars": 274
+            },
+            {
+              "index": 7,
+              "parent_index": 6,
+              "program_id": "162743ae1bc60adb",
+              "iteration": 8,
+              "change_summary": "",
+              "score": 4.511020196360248,
+              "speedup": 4.511020196360248,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 274
+            },
+            {
+              "index": 8,
+              "parent_index": 1,
+              "program_id": "04f8d59b4707fbfd",
+              "iteration": 7,
+              "change_summary": "",
+              "score": 4.6265378804080415,
+              "speedup": 4.6265378804080415,
+              "num_visits": 37,
+              "valid": true,
+              "error": "",
+              "code_chars": 309
+            },
+            {
+              "index": 9,
+              "parent_index": 1,
+              "program_id": "260ebeee78bc5eda",
+              "iteration": 9,
+              "change_summary": "",
+              "score": 4.002560773197353,
+              "speedup": 4.002560773197353,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 294
+            },
+            {
+              "index": 10,
+              "parent_index": 8,
+              "program_id": "2e91f73352bee3cb",
+              "iteration": 10,
+              "change_summary": "",
+              "score": 4.577513425696647,
+              "speedup": 4.577513425696647,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 330
+            },
+            {
+              "index": 11,
+              "parent_index": 8,
+              "program_id": "162743ae1bc60adb",
+              "iteration": 12,
+              "change_summary": "",
+              "score": 4.604911147638201,
+              "speedup": 4.604911147638201,
+              "num_visits": 14,
+              "valid": true,
+              "error": "",
+              "code_chars": 274
+            },
+            {
+              "index": 12,
+              "parent_index": 8,
+              "program_id": "eaf497b986ec097b",
+              "iteration": 11,
+              "change_summary": "Solver for the given problem using eigenvalue decomposition with clipping.",
+              "score": 4.599095927859122,
+              "speedup": 4.599095927859122,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 416
+            },
+            {
+              "index": 13,
+              "parent_index": 11,
+              "program_id": "162743ae1bc60adb",
+              "iteration": 15,
+              "change_summary": "",
+              "score": 4.693601176379537,
+              "speedup": 4.693601176379537,
+              "num_visits": 13,
+              "valid": true,
+              "error": "",
+              "code_chars": 274
+            },
+            {
+              "index": 14,
+              "parent_index": 8,
+              "program_id": "69ca938abd8e96ba",
+              "iteration": 14,
+              "change_summary": "",
+              "score": 4.578451020943235,
+              "speedup": 4.578451020943235,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 393
+            },
+            {
+              "index": 15,
+              "parent_index": 8,
+              "program_id": "31d8843dcabda0d2",
+              "iteration": 13,
+              "change_summary": "",
+              "score": 4.667995856452124,
+              "speedup": 4.667995856452124,
+              "num_visits": 19,
+              "valid": true,
+              "error": "",
+              "code_chars": 341
+            },
+            {
+              "index": 16,
+              "parent_index": 15,
+              "program_id": "162743ae1bc60adb",
+              "iteration": 17,
+              "change_summary": "",
+              "score": 4.652732965450353,
+              "speedup": 4.652732965450353,
+              "num_visits": 6,
+              "valid": true,
+              "error": "",
+              "code_chars": 274
+            },
+            {
+              "index": 17,
+              "parent_index": 13,
+              "program_id": "ae5d4fc45246696c",
+              "iteration": 16,
+              "change_summary": "",
+              "score": 4.573072359307033,
+              "speedup": 4.573072359307033,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 329
+            },
+            {
+              "index": 18,
+              "parent_index": 13,
+              "program_id": "1e253f025cbe6f68",
+              "iteration": 18,
+              "change_summary": "",
+              "score": 4.524774835546041,
+              "speedup": 4.524774835546041,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 349
+            },
+            {
+              "index": 19,
+              "parent_index": 16,
+              "program_id": "11d57bc453c7a2ee",
+              "iteration": 20,
+              "change_summary": "",
+              "score": 4.327748990827072,
+              "speedup": 4.327748990827072,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 501
+            },
+            {
+              "index": 20,
+              "parent_index": 13,
+              "program_id": "b4b8c32f590911c6",
+              "iteration": 19,
+              "change_summary": "",
+              "score": 3.9209648119049967,
+              "speedup": 3.9209648119049967,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 308
+            },
+            {
+              "index": 21,
+              "parent_index": 13,
+              "program_id": "dd9bf28d2820a878",
+              "iteration": 21,
+              "change_summary": "",
+              "score": 3.9140340141692547,
+              "speedup": 3.9140340141692547,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 363
+            },
+            {
+              "index": 22,
+              "parent_index": 15,
+              "program_id": "e0aa5338c04c56b4",
+              "iteration": 24,
+              "change_summary": "",
+              "score": 4.584918282297248,
+              "speedup": 4.584918282297248,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 326
+            },
+            {
+              "index": 23,
+              "parent_index": 13,
+              "program_id": "7dc555c7eef443e1",
+              "iteration": 22,
+              "change_summary": "",
+              "score": 4.550673173532272,
+              "speedup": 4.550673173532272,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 361
+            },
+            {
+              "index": 24,
+              "parent_index": 13,
+              "program_id": "0af0567f282211fc",
+              "iteration": 23,
+              "change_summary": "",
+              "score": 4.002868739738536,
+              "speedup": 4.002868739738536,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 317
+            },
+            {
+              "index": 25,
+              "parent_index": 13,
+              "program_id": "b8af122a4bd13d16",
+              "iteration": 27,
+              "change_summary": "",
+              "score": 4.507035865857283,
+              "speedup": 4.507035865857283,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 268
+            },
+            {
+              "index": 26,
+              "parent_index": 16,
+              "program_id": "162743ae1bc60adb",
+              "iteration": 25,
+              "change_summary": "",
+              "score": 4.590120989912515,
+              "speedup": 4.590120989912515,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 274
+            },
+            {
+              "index": 27,
+              "parent_index": 13,
+              "program_id": "3e30329a7612c33b",
+              "iteration": 26,
+              "change_summary": "",
+              "score": 4.0170237560534074,
+              "speedup": 4.0170237560534074,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 568
+            },
+            {
+              "index": 28,
+              "parent_index": 13,
+              "program_id": "162743ae1bc60adb",
+              "iteration": 29,
+              "change_summary": "",
+              "score": 4.600223025069338,
+              "speedup": 4.600223025069338,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 274
+            },
+            {
+              "index": 29,
+              "parent_index": 13,
+              "program_id": "973c244fc9272b5e",
+              "iteration": 30,
+              "change_summary": "",
+              "score": 4.576522270190776,
+              "speedup": 4.576522270190776,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 357
+            },
+            {
+              "index": 30,
+              "parent_index": 13,
+              "program_id": "69b5cb83397427fe",
+              "iteration": 28,
+              "change_summary": "",
+              "score": 4.61996305177524,
+              "speedup": 4.61996305177524,
+              "num_visits": 2,
+              "valid": true,
+              "error": "",
+              "code_chars": 287
+            },
+            {
+              "index": 31,
+              "parent_index": 16,
+              "program_id": "162743ae1bc60adb",
+              "iteration": 33,
+              "change_summary": "",
+              "score": 4.688490603648073,
+              "speedup": 4.688490603648073,
+              "num_visits": 3,
+              "valid": true,
+              "error": "",
+              "code_chars": 274
+            },
+            {
+              "index": 32,
+              "parent_index": 15,
+              "program_id": "abe6be3354100d1b",
+              "iteration": 32,
+              "change_summary": "",
+              "score": 4.821193480775861,
+              "speedup": 4.821193480775861,
+              "num_visits": 11,
+              "valid": true,
+              "error": "",
+              "code_chars": 436
+            },
+            {
+              "index": 33,
+              "parent_index": 30,
+              "program_id": "3cb006a29a5d73f5",
+              "iteration": 31,
+              "change_summary": "",
+              "score": 4.543969076594071,
+              "speedup": 4.543969076594071,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 292
+            },
+            {
+              "index": 34,
+              "parent_index": 32,
+              "program_id": "9b3dd8a503ebaf0a",
+              "iteration": 34,
+              "change_summary": "",
+              "score": 4.660685132569772,
+              "speedup": 4.660685132569772,
+              "num_visits": 6,
+              "valid": true,
+              "error": "",
+              "code_chars": 399
+            },
+            {
+              "index": 35,
+              "parent_index": 32,
+              "program_id": "663e20132288bdc2",
+              "iteration": 36,
+              "change_summary": "",
+              "score": 4.5088056318175616,
+              "speedup": 4.5088056318175616,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 375
+            },
+            {
+              "index": 36,
+              "parent_index": 31,
+              "program_id": "a2a982f1754540e1",
+              "iteration": 35,
+              "change_summary": "",
+              "score": 4.533830570989078,
+              "speedup": 4.533830570989078,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 797
+            },
+            {
+              "index": 37,
+              "parent_index": 34,
+              "program_id": "9b3dd8a503ebaf0a",
+              "iteration": 39,
+              "change_summary": "",
+              "score": 4.79471846041973,
+              "speedup": 4.79471846041973,
+              "num_visits": 5,
+              "valid": true,
+              "error": "",
+              "code_chars": 399
+            },
+            {
+              "index": 38,
+              "parent_index": 32,
+              "program_id": "622164368f85da5e",
+              "iteration": 37,
+              "change_summary": "",
+              "score": 4.140694265489515,
+              "speedup": 4.140694265489515,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 433
+            },
+            {
+              "index": 39,
+              "parent_index": 32,
+              "program_id": "a3c3aef987854dcd",
+              "iteration": 38,
+              "change_summary": "",
+              "score": 4.686479589709594,
+              "speedup": 4.686479589709594,
+              "num_visits": 2,
+              "valid": true,
+              "error": "",
+              "code_chars": 778
+            },
+            {
+              "index": 40,
+              "parent_index": 37,
+              "program_id": "e69096d56107c597",
+              "iteration": 40,
+              "change_summary": "",
+              "score": 4.64451154722612,
+              "speedup": 4.64451154722612,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 385
+            },
+            {
+              "index": 41,
+              "parent_index": 39,
+              "program_id": "46000aeb8e7e23b9",
+              "iteration": 42,
+              "change_summary": "",
+              "score": 4.105226952908924,
+              "speedup": 4.105226952908924,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 546
+            },
+            {
+              "index": 42,
+              "parent_index": 37,
+              "program_id": "4b72bd891a766686",
+              "iteration": 41,
+              "change_summary": "",
+              "score": 4.5959886780238755,
+              "speedup": 4.5959886780238755,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 664
+            },
+            {
+              "index": 43,
+              "parent_index": 37,
+              "program_id": "66ce17bf7f9e45ae",
+              "iteration": 44,
+              "change_summary": "",
+              "score": 4.5111624431345705,
+              "speedup": 4.5111624431345705,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 378
+            },
+            {
+              "index": 44,
+              "parent_index": 31,
+              "program_id": "162743ae1bc60adb",
+              "iteration": 45,
+              "change_summary": "",
+              "score": 4.619606576725182,
+              "speedup": 4.619606576725182,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 274
+            },
+            {
+              "index": 45,
+              "parent_index": 37,
+              "program_id": "361edabe084b8b0a",
+              "iteration": 43,
+              "change_summary": "",
+              "score": 4.806264850697453,
+              "speedup": 4.806264850697453,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 503
+            }
+          ]
+        },
+        "test": {
+          "baseline": {
+            "speedup": 1.0422279497747686,
+            "score": 1.0422279497747686,
+            "valid_problems": 6,
+            "problems": 6,
+            "baseline_ms": 85.30412349864491,
+            "candidate_ms": 81.92890200007241,
+            "slowest": [
+              {
+                "seed": 16,
+                "shard": 7,
+                "baseline_ms": 83.9395,
+                "candidate_ms": 85.2971,
+                "speedup": 0.9841,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 14,
+                "shard": 6,
+                "baseline_ms": 82.7103,
+                "candidate_ms": 82.9941,
+                "speedup": 0.9966,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 15,
+                "shard": 7,
+                "baseline_ms": 84.1913,
+                "candidate_ms": 82.0785,
+                "speedup": 1.0257,
+                "valid": true,
+                "error": ""
+              }
+            ],
+            "profile": "    13                                                   Returns:\n    16                                                   \"\"\"\n    17         1          0.3      0.3      0.3      A = np.array(problem['A'])\n    18         1         75.5     75.5     93.9      eigvals, eigvecs = np.linalg.eig(A)\n    19         1          0.0      0.0      0.0      eigvals = np.maximum(eigvals, 0)\n    20         1          4.6      4.6      5.8      X = eigvecs @ np.diag(eigvals) @ eigvecs.T\n    21         1          0.0      0.0      0.0      return {'X': X}",
+            "seconds": 5.999108493000676,
+            "limits_unavailable": [],
+            "error": ""
+          },
+          "best": {
+            "speedup": 4.748591942075962,
+            "score": 4.748591942075962,
+            "valid_problems": 6,
+            "problems": 6,
+            "baseline_ms": 83.4251771690712,
+            "candidate_ms": 17.576077335737256,
+            "slowest": [
+              {
+                "seed": 17,
+                "shard": 8,
+                "baseline_ms": 83.6772,
+                "candidate_ms": 18.3511,
+                "speedup": 4.5598,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 14,
+                "shard": 6,
+                "baseline_ms": 82.8961,
+                "candidate_ms": 17.9647,
+                "speedup": 4.6144,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 13,
+                "shard": 6,
+                "baseline_ms": 80.466,
+                "candidate_ms": 17.049,
+                "speedup": 4.7197,
+                "valid": true,
+                "error": ""
+              }
+            ],
+            "profile": "Line #      Hits         Time  Per Hit   % Time  Line Contents\n==============================================================\n     5         1          0.0      0.0      0.0      A = np.asarray(problem['A'])\n     6         1         16.0     16.0     91.9      eigvals, eigvecs = np.linalg.eigh(A)\n     8         1          0.0      0.0      0.2      pos = eigvals > 0\n     9         1          0.1      0.1      0.4      if not np.any(pos):\n    11         1          0.0      0.0      0.0      eigvals_pos = eigvals[pos]\n    12         1          0.2      0.2      1.0      eigvecs_pos = eigvecs[:, pos]\n    13         1          1.1      1.1      6.3      X = (eigvecs_pos * eigvals_pos) @ eigvecs_pos.T\n    14         1          0.0      0.0      0.0      return {'X': X}",
+            "seconds": 3.8231169620048604,
+            "limits_unavailable": [],
+            "error": ""
+          },
+          "speedup_gain": 3.7063639923011937
+        }
+      },
+      "actor_usage": {
+        "calls": 99,
+        "failures": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "model_seconds": 388.539423
+      }
+    }
+  ],
+  "failures": [],
+  "model_usage": {
+    "calls": 48,
+    "failures": 0,
+    "prompt_tokens": 62901,
+    "completion_tokens": 9673,
+    "total_tokens": 72574,
+    "model_seconds": 240.399598
+  },
+  "repair": {
+    "attempts_allowed": 4,
+    "checked": 48,
+    "failed": 3,
+    "repaired": 3,
+    "gave_up": 0
+  },
+  "reply_damage": {
+    "drawn": 48,
+    "damaged": 0,
+    "attempts_allowed": 4
+  }
+}
