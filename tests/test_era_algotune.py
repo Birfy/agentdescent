@@ -20,7 +20,6 @@ import json
 import math
 import os
 import textwrap
-from unittest import mock
 
 import pytest
 
@@ -600,63 +599,13 @@ def test_the_candidate_is_timed_against_a_reference_measured_beside_it(fixture_s
     """
     pytest.importorskip("numpy")
     payload = algotune.run_candidate(
-        fixture_suite.initial_program, suite=fixture_suite, shards=(0,),
+        fixture_suite.initial_program, suite=fixture_suite, shard=0,
         timeout=60.0, repeats=2)
     assert payload["ok"], payload.get("error")
     row = payload["results"][0]
     assert row["baseline_ms"] > 0.0 and row["candidate_ms"] > 0.0
     assert row["valid"] is True
     assert row["seed"] in fixture_suite.seeds(0)
-
-
-@needs_sandbox
-def test_every_shard_is_scored_by_one_process(fixture_suite):
-    """Several shards, one sandbox invocation, and each row keeps its shard.
-
-    The batching exists so a compiled candidate compiles once for a gate
-    decision instead of once per held-back shard. If it ever went back to a
-    process per shard the run would still be correct and would silently cost
-    several minutes a decision on a task whose compile is slow, which is the
-    kind of regression nothing else here would catch.
-    """
-    pytest.importorskip("numpy")
-    calls = []
-    real = algotune.subprocess.run
-
-    def counting_run(command, **kwargs):
-        calls.append(command)
-        return real(command, **kwargs)
-
-    shards = (0, 1, 2)
-    with mock.patch.object(algotune.subprocess, "run", counting_run):
-        valid, metrics, error = algotune.evaluate_source(
-            fixture_suite.initial_program, suite=fixture_suite, shards=shards,
-            timeout=60.0, repeats=2)
-
-    assert valid, error
-    assert len(calls) == 1, f"{len(calls)} processes for {len(shards)} shards"
-    expected = sum(fixture_suite.size(shard) for shard in shards)
-    assert metrics["problems"] == expected
-    assert [row["shard"] for row in metrics["slowest"]] != []
-    assert {row["shard"] for row in metrics["slowest"]} <= set(shards)
-
-
-@needs_sandbox
-def test_batching_shards_does_not_move_the_seeds_they_are_scored_on(fixture_suite):
-    """Batched or not, a shard is scored on exactly the seeds it owns.
-
-    The rows come back in one flat list now, and the shard each belongs to is
-    recovered from the order the spec was written in. An off-by-one there would
-    mislabel every row without changing any number, so it would survive every
-    other check in this file.
-    """
-    pytest.importorskip("numpy")
-    valid, metrics, error = algotune.evaluate_source(
-        fixture_suite.initial_program, suite=fixture_suite, shards=(0, 1),
-        timeout=60.0, repeats=2)
-    assert valid, error
-    for row in metrics["slowest"]:
-        assert row["seed"] in fixture_suite.seeds(row["shard"]), row
 
 
 # ---------------------------------------------------------------------------

@@ -416,7 +416,7 @@ def run_candidate(
     code: str,
     *,
     suite: Suite,
-    shards: Sequence[int],
+    shard: int,
     timeout: float,
     repeats: int = REPEATS,
     problem_seconds: float = PROBLEM_SECONDS,
@@ -424,27 +424,7 @@ def run_candidate(
     nproc_limit: int = 64,
     want_profile: bool = False,
 ) -> Dict[str, Any]:
-    """Execute one candidate against every shard, in a single sandboxed process.
-
-    All the shards at once rather than one process each, because a compiled
-    candidate pays its compile per *process*: the gate scores one program on
-    three held-back shards, and three processes compile that program three times
-    for one decision. On a task where the compile runs to minutes -- Lorenz-96
-    was two, against a six-second reference -- that is most of the wall clock.
-
-    Nothing measured changes. The runner already loops over whatever seeds the
-    spec hands it and returns a row per problem, timing each one against a
-    reference measured beside it; the shard boundary never entered the
-    arithmetic, since :func:`evaluate_source` pools every row and takes one mean.
-    Batching also keeps the alternative honest: the cheap fix is to share a numba
-    cache directory between the processes, and that means a writable directory
-    two evaluations of the same program both hold -- which is exactly how a
-    candidate memoises its answers to disk and gets timed on the second read.
-    One process shares nothing.
-
-    The CPU limit is per process, so it scales with the shards; the profile is
-    still taken once, on the first problem that produces one.
-    """
+    """Execute one candidate against one shard and return the runner's payload."""
     valid, reason = validate_source(
         code,
         max_length,
@@ -475,30 +455,22 @@ def run_candidate(
         task_file = root / "algotune_task.py"
         task_file.write_bytes(suite.source_path.read_bytes())
         spec = root / "spec.json"
-        seeds: List[int] = []
-        for shard in shards:
-            seeds.extend(int(seed) for seed in suite.seeds(shard))
         spec.write_text(json.dumps({
             "task": suite.task,
             "n": suite.n,
-            "seeds": seeds,
+            "seeds": list(suite.seeds(shard)),
             "repeats": int(repeats),
             "problem_seconds": float(problem_seconds),
             "slow_factor": SLOW_FACTOR,
             "profile": bool(want_profile),
         }), encoding="utf-8")
-        # `timeout` is the allowance for one shard, and the process now carries
-        # all of them, so both limits scale with the count. Scaling it rather
-        # than reusing the single-shard number is what keeps a batched
-        # evaluation from killing programs a per-shard run would have allowed.
-        budget = timeout * max(1, len(tuple(shards)))
         command, env = sandbox_wrapper(
             [
                 str(RUNNER),
                 str(candidate),
                 "--task-source", str(task_file),
                 "--spec", str(spec),
-                "--cpu-seconds", str(max(2, int(math.ceil(budget)))),
+                "--cpu-seconds", str(max(2, int(math.ceil(timeout)))),
                 "--nproc-limit", str(nproc_limit),
                 "--address-space-mb", str(ADDRESS_SPACE_MB),
             ],
@@ -520,10 +492,10 @@ def run_candidate(
         try:
             completed = subprocess.run(
                 command, capture_output=True, text=True,
-                timeout=budget + 10.0, env=env, cwd=scratch)
+                timeout=timeout + 10.0, env=env, cwd=scratch)
         except subprocess.TimeoutExpired:
             return {"ok": False,
-                    "error": f"timeout after {budget + 10.0:.0f}s",
+                    "error": f"timeout after {timeout + 10.0:.0f}s",
                     "seconds": time.monotonic() - started}
         lines = [line for line in completed.stdout.splitlines() if line.strip()]
         if not lines:
@@ -605,51 +577,48 @@ def evaluate_source(
     detail: List[Dict[str, Any]] = []
 
     profile_text = ""
-    # One process for every shard. The runner returns a row per seed in the
-    # order the spec listed them, and the spec lists them shard by shard, so the
-    # shard each row belongs to is read back off the same walk that built it.
-    ordered = tuple(shards)
-    owners = [shard for shard in ordered for _ in range(suite.size(shard))]
-    payload = run_candidate(
-        code, suite=suite, shards=ordered, timeout=timeout, repeats=repeats,
-        problem_seconds=problem_seconds, max_length=max_length,
-        # Profiled once per evaluation. Every problem would produce the same
-        # table for the same code at a real cost.
-        want_profile=want_profile)
-    seconds += float(payload.get("seconds") or 0.0)
-    if not payload.get("ok"):
-        error = str(payload.get("error") or "candidate failed")
-        metrics = _zero_metrics(error)
-        metrics["seconds"] = seconds
-        return False, metrics, error
-    results = payload.get("results") or []
-    if len(results) != len(owners):
-        error = f"runner returned {len(results)} results for {len(owners)} problems"
-        return False, _zero_metrics(error), error
-    unavailable = payload.get("limits_unavailable") or unavailable
-    for shard, result in zip(owners, results):
-        profile_text = profile_text or str(result.get("profile") or "")
-        scored += 1
-        baseline_ms = float(result.get("baseline_ms") or 0.0)
-        candidate_ms = result.get("candidate_ms")
-        row = {
-            "seed": int(result.get("seed") or 0),
-            "shard": shard,
-            "baseline_ms": round(baseline_ms, 4),
-            "candidate_ms": (round(float(candidate_ms), 4)
-                             if candidate_ms is not None else None),
-            "speedup": None,
-            "valid": bool(result.get("valid")),
-            "error": str(result.get("error") or ""),
-        }
-        if row["valid"] and candidate_ms is not None and float(candidate_ms) > 0:
-            speedup = baseline_ms / float(candidate_ms)
-            row["speedup"] = round(speedup, 4)
-            speedups.append(speedup)
-            baseline_total += baseline_ms
-            candidate_total += float(candidate_ms)
-            valid_problems += 1
-        detail.append(row)
+    for index, shard in enumerate(shards):
+        payload = run_candidate(
+            code, suite=suite, shard=shard, timeout=timeout, repeats=repeats,
+            problem_seconds=problem_seconds, max_length=max_length,
+            # Profiled once per evaluation, on the first shard. Every shard would
+            # produce the same table for the same code at a real cost.
+            want_profile=want_profile and index == 0)
+        seconds += float(payload.get("seconds") or 0.0)
+        if not payload.get("ok"):
+            error = str(payload.get("error") or "candidate failed")
+            metrics = _zero_metrics(error)
+            metrics["seconds"] = seconds
+            return False, metrics, error
+        results = payload.get("results") or []
+        expected = suite.size(shard)
+        if len(results) != expected:
+            error = f"runner returned {len(results)} results for {expected} problems"
+            return False, _zero_metrics(error), error
+        unavailable = payload.get("limits_unavailable") or unavailable
+        for result in results:
+            profile_text = profile_text or str(result.get("profile") or "")
+            scored += 1
+            baseline_ms = float(result.get("baseline_ms") or 0.0)
+            candidate_ms = result.get("candidate_ms")
+            row = {
+                "seed": int(result.get("seed") or 0),
+                "shard": shard,
+                "baseline_ms": round(baseline_ms, 4),
+                "candidate_ms": (round(float(candidate_ms), 4)
+                                 if candidate_ms is not None else None),
+                "speedup": None,
+                "valid": bool(result.get("valid")),
+                "error": str(result.get("error") or ""),
+            }
+            if row["valid"] and candidate_ms is not None and float(candidate_ms) > 0:
+                speedup = baseline_ms / float(candidate_ms)
+                row["speedup"] = round(speedup, 4)
+                speedups.append(speedup)
+                baseline_total += baseline_ms
+                candidate_total += float(candidate_ms)
+                valid_problems += 1
+            detail.append(row)
 
     if not scored:
         return False, _zero_metrics("no problems scored"), "no problems scored"
