@@ -25,13 +25,21 @@ But three seeds an arm is three seeds an arm, and the base arm itself spans
 0.983x to 126.506x on this task. A rank test over the six prior-vs-base runs
 gives **p=0.10** — suggestive, and nothing more.
 
-Worse, the arm-level comparison is confounded. `base` ran at the default
-`c_puct=1.0`; the other three ran at 2.5, because a squared prior needs a wide
-enough exploration term to bite on. So "prior vs base" is really "prior at 2.5
-vs uniform at 1.0", and there is no uniform-prior-at-2.5 control in this design.
-The nearest thing is `both` against `repair` — same `c_puct`, same repair loop,
-prior the only difference — which goes 19.5x against 7.0x, in the same direction
-and just as underpowered. The missing control is queued.
+The arm-level comparison was also confounded: `base` ran at the default
+`c_puct=1.0` and the other three at 2.5, because a squared prior needs a wide
+enough exploration term to bite on. Three seeds of uniform-prior-at-2.5 settle
+it:
+
+| arm | seeds | geo mean |
+|---|---|---:|
+| base — c_puct 1.0, uniform | 0.983 / 1.008 / 126.506 | 5.005x |
+| **cpuct — c_puct 2.5, uniform** | **1.004 / 1.006 / 1.007** | **1.006x** |
+| prior — c_puct 2.5, prior² | 44.121 / 192.321 / 962.345 | 201.373x |
+
+Widening the exploration term on its own buys nothing — all three control seeds
+sit flat at 1.00x, and against `base` the permutation test gives p=0.80. Against
+that control every prior seed beats every control seed, **p=0.050**, the floor a
+3-vs-3 rank test can reach. What wins is the prior, not the constant.
 
 The evidence that does not depend on any of this is one level down.
 
@@ -104,7 +112,20 @@ The node-level result (n=250, p=2e-13) is solid and is about the rating itself;
 the arm-level result (n=3, p=0.10, and `c_puct` confounded with the prior) is a
 hypothesis.
 
-Whether a model prior helps on tasks where *every* direction is mediocre — where
-the useful signal would be "none of these are worth 10" rather than "this one
-is" — is untested. The eight OpenEvolve tasks, where the aligned run reached a
-harmonic mean of 1.443x, are exactly that population.
+And on other tasks it mostly does nothing. Five of the eight OpenEvolve pairs
+are in (base and prior, one seed each, same settings):
+
+| task | base | prior | ratio |
+|---|---:|---:|---:|
+| convolve2d_full_fill | 103.983x | 101.918x | 0.98x |
+| eigenvectors_complex | 1.008x | 1.007x | 1.00x |
+| fft_cmplx_scipy_fftpack | 5.020x | 5.019x | 1.00x |
+| psd_cone_projection | 3.873x | 3.995x | 1.03x |
+| polynomial_real | 1.012x | 540.172x | 534x |
+
+Four of the five move by less than 3%. The prior is not a general accelerator:
+it does not raise a ceiling already reached (convolve2d at 104x) and it does not
+rescue a task where nothing works (eigenvectors_complex, 1.0x either way). It
+pays exactly where it was built to pay — a large win present in the draw
+distribution that plain ranking abandons, which so far is one task in five.
+Three pairs remain to run.
