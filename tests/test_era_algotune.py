@@ -556,39 +556,41 @@ def _runner_module():
     return module
 
 
-def test_labelling_the_packages_says_what_they_are_and_not_what_to_do(fixture_suite):
-    """`--packages labelled` may name a library; it may not name a technique.
+def test_inviting_the_packages_adds_a_sentence_and_not_a_technique(fixture_suite):
+    """`--packages invited` adds one sentence. It may not add a second thing.
 
-    This is the narrow half of a thing that was deleted. `ACCELERATION_TIPS`
-    told the model which levers win and where to point them, it was worth 3/8
-    draws reaching for a compiler against 0/8, and it made the number
-    incomparable with upstream's. Labelling is allowed to close a different gap:
-    upstream's agent can discover that numba is a compiler by spending a turn on
-    it, and one rewrite per node has no turn to spend.
+    Two heavier versions were measured and both are gone. `ACCELERATION_TIPS`
+    named four techniques next to the parent's profile -- worth 3/8 draws
+    reaching for a compiler against 0/8, and 2785x on ode_stiff_vanderpol -- and
+    it made the number incomparable with upstream's, whose agent is told none of
+    it. A middle version that glossed each library ("numba, a just-in-time
+    compiler") bought nothing at all: 0/8 against the bare list's 1/8 on
+    polynomial_real, where upstream's field splits into 70x-138x with numba and
+    about 1.0x without.
 
-    Measured, and worth recording next to the code: on `polynomial_real`, where
-    upstream's field splits into 70x-138x with numba and 1.0x without, the label
-    bought nothing -- 0 of 8 draws reached for a compiler against 1 of 8 under
-    the bare list. The flag stays because the arm should be runnable, not
-    because it works.
+    What is left is an invitation, not advice: the packages are there, you may
+    try them. The test exists because the difference between those three is one
+    edit, and only the first of them is honest to report under AlgoTune's name.
     """
     parent = support.Program("id", 0, None, "def solve(problem):\n    return 1\n",
                              "", {"speedup": 1.0, "problems": 2,
                                   "valid_problems": 2}, True)
     bare = algotune.mutation_prompt(parent, suite=fixture_suite, packages="bare")
-    labelled = algotune.mutation_prompt(parent, suite=fixture_suite, packages="labelled")
+    invited = algotune.mutation_prompt(parent, suite=fixture_suite, packages="invited")
 
-    assert "just-in-time compiler" not in bare
-    assert "just-in-time compiler" in labelled
-    assert "tracing JIT" in labelled                      # jax, said to be one
-    assert len(bare) < len(labelled)
+    assert "free to use any of these" in invited
+    assert "free to use any of these" not in bare
+    # One sentence, not a gloss on each library.
+    assert len(invited) - len(bare) < 120, "the invitation grew into a paragraph"
 
-    # Neither arm may name a technique or say when to reach for one.
-    for text, arm in ((bare, "bare"), (labelled, "labelled")):
-        for banned in ("Compile an interpreted loop", "Skip work the answer",
+    # Neither arm may say what a library is, name a technique, or say when to
+    # reach for one.
+    for text, arm in ((bare, "bare"), (invited, "invited")):
+        for banned in ("just-in-time compiler", "tracing JIT", "ahead-of-time",
+                       "Compile an interpreted loop", "Skip work the answer",
                        "Do less arithmetic", "Pick the specialised routine",
-                       "routinely buys 100x", "reach for"):
-            assert banned not in text, f"{arm} names a technique: {banned!r}"
+                       "routinely buys 100x"):
+            assert banned not in text, f"{arm} says too much: {banned!r}"
 
     with pytest.raises(ValueError):
         algotune.mutation_prompt(parent, suite=fixture_suite, packages="nonsense")

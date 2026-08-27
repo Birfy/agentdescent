@@ -252,9 +252,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--packages", default="bare", choices=PACKAGE_STYLES,
                         help=("`bare` is AlgoTuner's own list of package names "
                               "and nothing else, which is the default because it "
-                              "is what upstream ships. `labelled` says what each "
-                              "library is and how it is invoked -- not when to "
-                              "reach for one -- and is a recorded deviation"))
+                              "is what upstream ships. `invited` adds one "
+                              "sentence saying the packages may be used -- not "
+                              "what any of them is, nor when to use one -- and "
+                              "is a recorded deviation"))
     parser.add_argument("--no-profile", action="store_true",
                         help=("skip the line_profiler table in the mutation "
                               "prompt. It is upstream's `profile` command and "
@@ -374,7 +375,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     print(f"Repair   : up to {args.repair_attempts} draw(s) per expansion"
           f"{' (upstream ERA: a failure is a -inf node)' if args.repair_attempts <= 1 else ''}")
     print(f"Prompt   : AlgoTuner's own system message, naming no technique"
-          f"{'' if args.packages == 'bare' else ', packages labelled (deviation)'}"
+          f"{'' if args.packages == 'bare' else ', packages invited (deviation)'}"
           f"{'' if args.no_profile else ' + line profile (upstream `profile`)'}")
     print(f"Tasks    : {', '.join(tasks)}")
     artifact = EvolvingArtifact(ARTIFACT_ID, blast_radius=0.6)
