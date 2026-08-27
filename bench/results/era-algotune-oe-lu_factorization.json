@@ -1,0 +1,1032 @@
+{
+  "experiment": "ERA on AgentDescent -- AlgoTune, one tree per task",
+  "status": "completed",
+  "completed_at": "2026-08-27T14:31:29+00:00",
+  "upstream_commit": "dff9914c10800c7a031c9e8c3d4d1c8cd1b38906",
+  "benchmark": "AlgoTune (arXiv:2507.15887), oripress/AlgoTune",
+  "config": {
+    "provider": "claude",
+    "model": "deepseek-v4-flash-ga-260731",
+    "seed": 0,
+    "asynchronous": false,
+    "async_ratio": 1,
+    "max_seconds": 1800.0,
+    "pipelined_gate": false,
+    "gate_workers": 2,
+    "dry_run": false,
+    "serial": false,
+    "budget_rollouts": null,
+    "val_cap": null,
+    "eval_concurrency": null,
+    "reflective_merge": false,
+    "eval_cache": "",
+    "no_thinking": false,
+    "tasks": "lu_factorization",
+    "list_tasks": false,
+    "staleness": "guarded",
+    "iterations": 45,
+    "workers": 3,
+    "shards": 6,
+    "test_shards": 3,
+    "problems": 2,
+    "test_problems": 0,
+    "packages": "bare",
+    "no_profile": false,
+    "repair_attempts": 4,
+    "repeats": 3,
+    "size_scale": 1.0,
+    "held_out_frac": 0.5,
+    "c_puct": 1.0,
+    "candidate_timeout": 300.0,
+    "problem_seconds": 60.0,
+    "max_code_length": 20000,
+    "max_tokens": 8000,
+    "temperature": 0.7,
+    "thinking": "disabled",
+    "api_timeout": 180.0,
+    "reply_attempts": 4,
+    "shutdown_grace": 120.0,
+    "quality_target": null
+  },
+  "summary": {
+    "tasks_run": 1,
+    "tasks_failed": 0,
+    "tasks_improved": 0,
+    "geometric_mean_baseline_speedup": 0.9282245140398232,
+    "geometric_mean_best_speedup": 0.924569552998828,
+    "wall_seconds": 2873.069309335
+  },
+  "tasks": [
+    {
+      "task": "lu_factorization",
+      "status": "completed",
+      "held_out_baseline_speedup": 0.9282245140398232,
+      "held_out_best_speedup": 0.924569552998828,
+      "speedup_gain": -0.003654961040995164,
+      "nodes": 46,
+      "wall_seconds": 2844.733858648,
+      "best_program": "import numpy as np\n\ndef solve(problem):\n    A = np.asarray(problem['matrix'], dtype=np.float64)\n    n = A.shape[0]\n    \n    # Use scipy's lu for reliable partial pivoting\n    from scipy.linalg import lu\n    P, L, U = lu(A, check_finite=False)\n    \n    return {'LU': {'P': P.tolist(), 'L': L.tolist(), 'U': U.tolist()}}",
+      "observation": {
+        "mode": "sync",
+        "wall_seconds": 2844.733858648,
+        "baseline": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "e70357ee4dd6f895",
+          "iteration": 0,
+          "change_summary": "AlgoTune reference implementation for lu_factorization",
+          "score": 0.9375912546354761,
+          "speedup": 0.9375912546354761,
+          "num_visits": 45,
+          "valid": true,
+          "error": "",
+          "code_chars": 803
+        },
+        "best": {
+          "index": 31,
+          "parent_index": 2,
+          "program_id": "d3fb335b6742aa54",
+          "iteration": 32,
+          "change_summary": "",
+          "score": 0.9659724278908315,
+          "speedup": 0.9659724278908315,
+          "num_visits": 13,
+          "valid": true,
+          "error": "",
+          "code_chars": 318
+        },
+        "data": {
+          "task": "lu_factorization",
+          "n": 1104,
+          "published_n": 1104,
+          "published_target_time_ms": 100,
+          "published_baseline_ms": 113.37682351666665,
+          "problems_per_shard": 2,
+          "problems_per_test_shard": 2,
+          "reported_instances": 6,
+          "scoring_shards": 6,
+          "test_shards": 3,
+          "timed_repeats": 3,
+          "line_profile": true,
+          "packages": "bare",
+          "seed": 0
+        },
+        "framework": {
+          "baseline_reward": 0.48389527584437175,
+          "final_reward": 0.480161284486554,
+          "quality_gain": -0.0037339913578177675,
+          "stop_reason": "rounds",
+          "error": null,
+          "outcomes": {
+            "committed": 2,
+            "tree-updated": 11,
+            "no-valid-candidates": 2
+          },
+          "rollouts": 45,
+          "rollout_seconds": 250.39551377296448,
+          "eval_seconds": 32.756760358810425,
+          "stale_considered": 45,
+          "stale_discarded": 0,
+          "stale_rate": 0.0,
+          "retired_workers": 0,
+          "history": [
+            {
+              "round": 0,
+              "held_out_reward": 0.4703528961290351,
+              "elapsed_s": 184.62896537780762,
+              "rollouts": 3,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 1,
+              "held_out_reward": 0.4703528961290351,
+              "elapsed_s": 322.03518629074097,
+              "rollouts": 6,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 2,
+              "held_out_reward": 0.4703528961290351,
+              "elapsed_s": 496.07256293296814,
+              "rollouts": 9,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 3,
+              "held_out_reward": 0.4703528961290351,
+              "elapsed_s": 682.6687967777252,
+              "rollouts": 12,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            },
+            {
+              "round": 4,
+              "held_out_reward": 0.4703528961290351,
+              "elapsed_s": 1063.107183933258,
+              "rollouts": 15,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 5,
+              "held_out_reward": 0.4703528961290351,
+              "elapsed_s": 1214.2380378246307,
+              "rollouts": 18,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 6,
+              "held_out_reward": 0.4703528961290351,
+              "elapsed_s": 1642.655564069748,
+              "rollouts": 21,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 7,
+              "held_out_reward": 0.4703528961290351,
+              "elapsed_s": 1754.0184926986694,
+              "rollouts": 24,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 8,
+              "held_out_reward": 0.4703528961290351,
+              "elapsed_s": 1905.8879642486572,
+              "rollouts": 27,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 9,
+              "held_out_reward": 0.4703528961290351,
+              "elapsed_s": 2091.724765777588,
+              "rollouts": 30,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            },
+            {
+              "round": 10,
+              "held_out_reward": 0.480161284486554,
+              "elapsed_s": 2186.51514172554,
+              "rollouts": 33,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 11,
+              "held_out_reward": 0.480161284486554,
+              "elapsed_s": 2317.6350286006927,
+              "rollouts": 36,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 12,
+              "held_out_reward": 0.480161284486554,
+              "elapsed_s": 2477.607441186905,
+              "rollouts": 39,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 13,
+              "held_out_reward": 0.480161284486554,
+              "elapsed_s": 2670.1548371315002,
+              "rollouts": 42,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 14,
+              "held_out_reward": 0.480161284486554,
+              "elapsed_s": 2824.439947605133,
+              "rollouts": 45,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            }
+          ]
+        },
+        "actor_usage": {
+          "calls": 96,
+          "failures": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "model_seconds": 2573.453143
+        },
+        "tree": {
+          "nodes": 46,
+          "valid_nodes": 25,
+          "max_depth": 5,
+          "root_visits": 45,
+          "c_puct": 1.0,
+          "tree": [
+            {
+              "index": 0,
+              "parent_index": null,
+              "program_id": "e70357ee4dd6f895",
+              "iteration": 0,
+              "change_summary": "AlgoTune reference implementation for lu_factorization",
+              "score": 0.9375912546354761,
+              "speedup": 0.9375912546354761,
+              "num_visits": 45,
+              "valid": true,
+              "error": "",
+              "code_chars": 803
+            },
+            {
+              "index": 1,
+              "parent_index": 0,
+              "program_id": "997363e6c9199708",
+              "iteration": 2,
+              "change_summary": "",
+              "score": 0.9098043904524937,
+              "speedup": 0.9098043904524937,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 214
+            },
+            {
+              "index": 2,
+              "parent_index": 0,
+              "program_id": "03058fc6f0d71d16",
+              "iteration": 3,
+              "change_summary": "",
+              "score": 0.9445184010821358,
+              "speedup": 0.9445184010821358,
+              "num_visits": 43,
+              "valid": true,
+              "error": "",
+              "code_chars": 229
+            },
+            {
+              "index": 3,
+              "parent_index": 0,
+              "program_id": "9b47ccef3603e591",
+              "iteration": 1,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 17678 of 20000: reference -0.00454730061786, yours -0.00454730061786 -- off by 6.332e-17, a relative 1.392e-14, 1.14e-09x the tolerance allclose would allow)",
+              "code_chars": 2263
+            },
+            {
+              "index": 4,
+              "parent_index": 2,
+              "program_id": "2cb2a0c86035bac7",
+              "iteration": 4,
+              "change_summary": "",
+              "score": 0.9271438390940622,
+              "speedup": 0.9271438390940622,
+              "num_visits": 3,
+              "valid": true,
+              "error": "",
+              "code_chars": 209
+            },
+            {
+              "index": 5,
+              "parent_index": 2,
+              "program_id": "22f8aa947953b5ce",
+              "iteration": 5,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 17678 of 20000: reference -0.00454730061786, yours -0.00454730061786 -- off by 6.332e-17, a relative 1.392e-14, 1.14e-09x the tolerance allclose would allow)",
+              "code_chars": 1271
+            },
+            {
+              "index": 6,
+              "parent_index": 2,
+              "program_id": "779b560c18bc2c31",
+              "iteration": 6,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 17678 of 20000: reference -0.00454730061786, yours -0.00454730061786 -- off by 6.332e-17, a relative 1.392e-14, 1.14e-09x the tolerance allclose would allow)",
+              "code_chars": 1571
+            },
+            {
+              "index": 7,
+              "parent_index": 2,
+              "program_id": "fe15c067dae4a5bf",
+              "iteration": 7,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 0 of 20000: reference 1, yours 1 -- off by 0.000e+00, a relative 0.000e+00, 0x the tolerance allclose would allow)",
+              "code_chars": 790
+            },
+            {
+              "index": 8,
+              "parent_index": 2,
+              "program_id": "ae9e946471c9c2e3",
+              "iteration": 8,
+              "change_summary": "",
+              "score": 0.1191909673621853,
+              "speedup": 0.1191909673621853,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 951
+            },
+            {
+              "index": 9,
+              "parent_index": 2,
+              "program_id": "2760b6b93cc9b3d5",
+              "iteration": 9,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 17678 of 20000: reference -0.00454730061786, yours -0.00454730061786 -- off by 6.332e-17, a relative 1.392e-14, 1.14e-09x the tolerance allclose would allow)",
+              "code_chars": 1005
+            },
+            {
+              "index": 10,
+              "parent_index": 2,
+              "program_id": "8c4ef9047af21823",
+              "iteration": 11,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 0 of 20000: reference 1, yours 0 -- off by 1.000e+00, a relative 1.000e+00, 9.99e+04x the tolerance allclose would allow)",
+              "code_chars": 1087
+            },
+            {
+              "index": 11,
+              "parent_index": 2,
+              "program_id": "e0d977ff158c40bc",
+              "iteration": 10,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 17678 of 20000: reference -0.00454730061786, yours -0.00454730061786 -- off by 6.332e-17, a relative 1.392e-14, 1.14e-09x the tolerance allclose would allow)",
+              "code_chars": 1197
+            },
+            {
+              "index": 12,
+              "parent_index": 2,
+              "program_id": "916abdf17bd309da",
+              "iteration": 12,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "gate: missing solve function",
+              "code_chars": 617
+            },
+            {
+              "index": 13,
+              "parent_index": 2,
+              "program_id": "d638c201abe00116",
+              "iteration": 15,
+              "change_summary": "",
+              "score": 0.9255765158352184,
+              "speedup": 0.9255765158352184,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 279
+            },
+            {
+              "index": 14,
+              "parent_index": 2,
+              "program_id": "15d2f3beceef4ce3",
+              "iteration": 14,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 0 of 20000: reference 1, yours 1 -- off by 0.000e+00, a relative 0.000e+00, 0x the tolerance allclose would allow)",
+              "code_chars": 769
+            },
+            {
+              "index": 15,
+              "parent_index": 4,
+              "program_id": "74649e3b9cc9d2d4",
+              "iteration": 13,
+              "change_summary": "",
+              "score": 0.9293060498132357,
+              "speedup": 0.9293060498132357,
+              "num_visits": 2,
+              "valid": true,
+              "error": "",
+              "code_chars": 1473
+            },
+            {
+              "index": 16,
+              "parent_index": 2,
+              "program_id": "2cb2a0c86035bac7",
+              "iteration": 18,
+              "change_summary": "",
+              "score": 0.9355821632797173,
+              "speedup": 0.9355821632797173,
+              "num_visits": 3,
+              "valid": true,
+              "error": "",
+              "code_chars": 209
+            },
+            {
+              "index": 17,
+              "parent_index": 15,
+              "program_id": "ab86a504b5218c2d",
+              "iteration": 16,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 0 of 20000: reference 1, yours 1 -- off by 0.000e+00, a relative 0.000e+00, 0x the tolerance allclose would allow)",
+              "code_chars": 672
+            },
+            {
+              "index": 18,
+              "parent_index": 2,
+              "program_id": "625b9912126dad00",
+              "iteration": 17,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 17678 of 20000: reference -0.00454730061786, yours -0.00454730061786 -- off by 6.332e-17, a relative 1.392e-14, 1.14e-09x the tolerance allclose would allow)",
+              "code_chars": 1392
+            },
+            {
+              "index": 19,
+              "parent_index": 2,
+              "program_id": "733f853fc241e23a",
+              "iteration": 20,
+              "change_summary": "",
+              "score": 0.9387442841684575,
+              "speedup": 0.9387442841684575,
+              "num_visits": 7,
+              "valid": true,
+              "error": "",
+              "code_chars": 276
+            },
+            {
+              "index": 20,
+              "parent_index": 16,
+              "program_id": "2021262a6463507a",
+              "iteration": 19,
+              "change_summary": "",
+              "score": 0.3056683428282762,
+              "speedup": 0.3056683428282762,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1492
+            },
+            {
+              "index": 21,
+              "parent_index": 16,
+              "program_id": "09f83705618276c0",
+              "iteration": 21,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "killed by SIGXCPU: it exceeded the CPU limit -- the whole problem set, including compiling, has 300 CPU-seconds. A fixed-step method that chose too small a step will do this.",
+              "code_chars": 1102
+            },
+            {
+              "index": 22,
+              "parent_index": 19,
+              "program_id": "8dd3e9c60402e136",
+              "iteration": 22,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 0 of 20000: reference 1, yours 1 -- off by 0.000e+00, a relative 0.000e+00, 0x the tolerance allclose would allow)",
+              "code_chars": 646
+            },
+            {
+              "index": 23,
+              "parent_index": 19,
+              "program_id": "a358b0a36989d807",
+              "iteration": 23,
+              "change_summary": "",
+              "score": 0.7999295908312735,
+              "speedup": 0.7999295908312735,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 987
+            },
+            {
+              "index": 24,
+              "parent_index": 19,
+              "program_id": "7de698a00bc6d916",
+              "iteration": 24,
+              "change_summary": "",
+              "score": 0.8947658608965406,
+              "speedup": 0.8947658608965406,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 297
+            },
+            {
+              "index": 25,
+              "parent_index": 2,
+              "program_id": "b38b353d885c40f2",
+              "iteration": 27,
+              "change_summary": "",
+              "score": 0.9107535548779002,
+              "speedup": 0.9107535548779002,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 247
+            },
+            {
+              "index": 26,
+              "parent_index": 19,
+              "program_id": "fb25b34568cf368b",
+              "iteration": 25,
+              "change_summary": "",
+              "score": 0.9013808661338555,
+              "speedup": 0.9013808661338555,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1047
+            },
+            {
+              "index": 27,
+              "parent_index": 19,
+              "program_id": "8323bce5db28c45c",
+              "iteration": 26,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 17678 of 20000: reference -0.00454730061786, yours -0.00454730061786 -- off by 6.332e-17, a relative 1.392e-14, 1.14e-09x the tolerance allclose would allow)",
+              "code_chars": 875
+            },
+            {
+              "index": 28,
+              "parent_index": 2,
+              "program_id": "42ac4bac1657ddfc",
+              "iteration": 28,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 17678 of 20000: reference -0.00454730061786, yours -0.00454730061786 -- off by 6.332e-17, a relative 1.392e-14, 1.14e-09x the tolerance allclose would allow)",
+              "code_chars": 1354
+            },
+            {
+              "index": 29,
+              "parent_index": 2,
+              "program_id": "00f9b79de7eeae29",
+              "iteration": 30,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 17678 of 20000: reference -0.00454730061786, yours -0.00454730061786 -- off by 6.332e-17, a relative 1.392e-14, 1.14e-09x the tolerance allclose would allow)",
+              "code_chars": 955
+            },
+            {
+              "index": 30,
+              "parent_index": 2,
+              "program_id": "effa9599247bcd52",
+              "iteration": 29,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: AttributeError: module 'numpy.linalg' has no attribute 'lu'",
+              "code_chars": 191
+            },
+            {
+              "index": 31,
+              "parent_index": 2,
+              "program_id": "d3fb335b6742aa54",
+              "iteration": 32,
+              "change_summary": "",
+              "score": 0.9659724278908315,
+              "speedup": 0.9659724278908315,
+              "num_visits": 13,
+              "valid": true,
+              "error": "",
+              "code_chars": 318
+            },
+            {
+              "index": 32,
+              "parent_index": 19,
+              "program_id": "2cb2a0c86035bac7",
+              "iteration": 31,
+              "change_summary": "",
+              "score": 0.9113597672948663,
+              "speedup": 0.9113597672948663,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 209
+            },
+            {
+              "index": 33,
+              "parent_index": 2,
+              "program_id": "014b9a036f0f55aa",
+              "iteration": 33,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 0 of 20000: reference 1, yours 1 -- off by 0.000e+00, a relative 0.000e+00, 0x the tolerance allclose would allow)",
+              "code_chars": 892
+            },
+            {
+              "index": 34,
+              "parent_index": 31,
+              "program_id": "f66ee09e4c7cd34b",
+              "iteration": 35,
+              "change_summary": "",
+              "score": 0.9210023877442426,
+              "speedup": 0.9210023877442426,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 308
+            },
+            {
+              "index": 35,
+              "parent_index": 31,
+              "program_id": "997363e6c9199708",
+              "iteration": 34,
+              "change_summary": "",
+              "score": 0.8927452092877818,
+              "speedup": 0.8927452092877818,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 214
+            },
+            {
+              "index": 36,
+              "parent_index": 31,
+              "program_id": "c89a3c3d1369698d",
+              "iteration": 36,
+              "change_summary": "",
+              "score": 0.1204965417737805,
+              "speedup": 0.1204965417737805,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1432
+            },
+            {
+              "index": 37,
+              "parent_index": 31,
+              "program_id": "36234cbdb6b96ad7",
+              "iteration": 38,
+              "change_summary": "",
+              "score": 0.9549192318695422,
+              "speedup": 0.9549192318695422,
+              "num_visits": 5,
+              "valid": true,
+              "error": "",
+              "code_chars": 322
+            },
+            {
+              "index": 38,
+              "parent_index": 31,
+              "program_id": "d3be76b2c1711b4d",
+              "iteration": 37,
+              "change_summary": "",
+              "score": 0.9528539086048191,
+              "speedup": 0.9528539086048191,
+              "num_visits": 3,
+              "valid": true,
+              "error": "",
+              "code_chars": 234
+            },
+            {
+              "index": 39,
+              "parent_index": 31,
+              "program_id": "9e2622bdab4eacbb",
+              "iteration": 39,
+              "change_summary": "",
+              "score": 0.11796099987607561,
+              "speedup": 0.11796099987607561,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1398
+            },
+            {
+              "index": 40,
+              "parent_index": 37,
+              "program_id": "f5ca02b6b7a694c3",
+              "iteration": 40,
+              "change_summary": "",
+              "score": 0.9395118498406941,
+              "speedup": 0.9395118498406941,
+              "num_visits": 2,
+              "valid": true,
+              "error": "",
+              "code_chars": 269
+            },
+            {
+              "index": 41,
+              "parent_index": 37,
+              "program_id": "0060ec2b44e23730",
+              "iteration": 42,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 17678 of 20000: reference -0.00454730061786, yours -0.00454730061786 -- off by 6.332e-17, a relative 1.392e-14, 1.14e-09x the tolerance allclose would allow)",
+              "code_chars": 1458
+            },
+            {
+              "index": 42,
+              "parent_index": 38,
+              "program_id": "f548dc573c1cd5fe",
+              "iteration": 41,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 873 of 20000: reference 0, yours 1 -- off by 1.000e+00, 1e+08x the tolerance allclose would allow)",
+              "code_chars": 955
+            },
+            {
+              "index": 43,
+              "parent_index": 40,
+              "program_id": "f5ca02b6b7a694c3",
+              "iteration": 45,
+              "change_summary": "",
+              "score": 0.9508466268231374,
+              "speedup": 0.9508466268231374,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 269
+            },
+            {
+              "index": 44,
+              "parent_index": 37,
+              "program_id": "ffe32b39fef4e0c3",
+              "iteration": 43,
+              "change_summary": "",
+              "score": 0.22919462052821124,
+              "speedup": 0.22919462052821124,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1448
+            },
+            {
+              "index": 45,
+              "parent_index": 38,
+              "program_id": "b737c4d42a829b04",
+              "iteration": 44,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 17678 of 20000: reference -0.00454730061786, yours -0.00454730061786 -- off by 6.332e-17, a relative 1.392e-14, 1.14e-09x the tolerance allclose would allow)",
+              "code_chars": 714
+            }
+          ]
+        },
+        "test": {
+          "baseline": {
+            "speedup": 0.9282245140398232,
+            "score": 0.9282245140398232,
+            "valid_problems": 6,
+            "problems": 6,
+            "baseline_ms": 153.12253099993237,
+            "candidate_ms": 165.01694183322493,
+            "slowest": [
+              {
+                "seed": 14,
+                "shard": 6,
+                "baseline_ms": 137.6596,
+                "candidate_ms": 168.9754,
+                "speedup": 0.8147,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 18,
+                "shard": 8,
+                "baseline_ms": 149.162,
+                "candidate_ms": 161.0653,
+                "speedup": 0.9261,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 17,
+                "shard": 8,
+                "baseline_ms": 153.8497,
+                "candidate_ms": 163.6496,
+                "speedup": 0.9401,
+                "valid": true,
+                "error": ""
+              }
+            ],
+            "profile": "    11                                           \n    17                                                   \"\"\"\n    18         1          0.0      0.0      0.0      A = problem['matrix']\n    19         1         34.7     34.7     21.4      P, L, U = lu(A)\n    20         1        127.2    127.2     78.6      solution = {'LU': {'P': P.tolist(), 'L': L.tolist(), 'U': U.tolist()}}\n    21         1          0.0      0.0      0.0      return solution",
+            "seconds": 13.90295531799984,
+            "limits_unavailable": [],
+            "error": ""
+          },
+          "best": {
+            "speedup": 0.924569552998828,
+            "score": 0.924569552998828,
+            "valid_problems": 6,
+            "problems": 6,
+            "baseline_ms": 147.41939866659473,
+            "candidate_ms": 159.66167733336079,
+            "slowest": [
+              {
+                "seed": 14,
+                "shard": 6,
+                "baseline_ms": 129.3048,
+                "candidate_ms": 159.894,
+                "speedup": 0.8087,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 18,
+                "shard": 8,
+                "baseline_ms": 143.3201,
+                "candidate_ms": 164.5403,
+                "speedup": 0.871,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 15,
+                "shard": 7,
+                "baseline_ms": 142.9548,
+                "candidate_ms": 162.1489,
+                "speedup": 0.8816,
+                "valid": true,
+                "error": ""
+              }
+            ],
+            "profile": "==============================================================\n     3                                           def solve(problem):\n     4         1          0.0      0.0      0.0      A = np.asarray(problem['matrix'], dtype=np.float64)\n     5         1          0.0      0.0      0.0      n = A.shape[0]\n     8         1          0.0      0.0      0.0      from scipy.linalg import lu\n     9         1         31.5     31.5     20.3      P, L, U = lu(A, check_finite=False)\n    11         1        124.1    124.1     79.7      return {'LU': {'P': P.tolist(), 'L': L.tolist(), 'U': U.tolist()}}",
+            "seconds": 13.89282575200059,
+            "limits_unavailable": [],
+            "error": ""
+          },
+          "speedup_gain": -0.003654961040995164
+        }
+      },
+      "actor_usage": {
+        "calls": 96,
+        "failures": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "model_seconds": 2573.453143
+      }
+    }
+  ],
+  "failures": [],
+  "model_usage": {
+    "calls": 137,
+    "failures": 0,
+    "prompt_tokens": 105808,
+    "completion_tokens": 89863,
+    "total_tokens": 195671,
+    "model_seconds": 957.962312
+  },
+  "repair": {
+    "attempts_allowed": 4,
+    "checked": 110,
+    "failed": 91,
+    "repaired": 12,
+    "gave_up": 26
+  },
+  "reply_damage": {
+    "drawn": 137,
+    "damaged": 1,
+    "attempts_allowed": 4
+  }
+}
