@@ -1,5 +1,14 @@
 # -*- coding: utf-8 -*-
-"""Build the LSR-Transform report: tree search rediscovering physical law from data."""
+"""Build the LSR-Transform report: finding physical law in observational data.
+
+    python -m tools.gen_srbench_report
+
+Reads nothing but the committed result files and writes
+`bench/reports/era-llm-srbench-transform.pdf`. Needs `reportlab` and a CJK
+font; the WenQuanYi Zen Hei path below is Debian's.
+"""
+from pathlib import Path
+
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.pagesizes import A4
@@ -220,7 +229,11 @@ def decorate(canvas, doc):
     canvas.drawRightString(188*mm, 12*mm, str(doc.page))
     canvas.restoreState()
 
-OUT = "/home/user/agentdescent/bench/reports/era-llm-srbench-transform.pdf"
+# The PDF is derived from the result files and is not committed: it would go
+# stale the moment a run is re-scored. Built on demand, next to them.
+REPO = Path(__file__).resolve().parent.parent
+OUT = str(REPO / "bench" / "reports" / "era-llm-srbench-transform.pdf")
+Path(OUT).parent.mkdir(parents=True, exist_ok=True)
 doc = BaseDocTemplate(OUT, pagesize=A4,
                       leftMargin=22*mm, rightMargin=22*mm,
                       topMargin=18*mm, bottomMargin=20*mm,

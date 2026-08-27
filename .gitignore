@@ -11,3 +11,4 @@ venv/
 .DS_Store
 *.log
 site/
+bench/reports/
