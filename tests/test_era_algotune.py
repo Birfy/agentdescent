@@ -267,9 +267,15 @@ def test_a_wider_reported_split_leaves_the_search_seeing_the_same_problems(tmp_p
 
 
 def test_a_task_outside_the_runnable_set_is_refused_by_name():
+    """A name this port cannot score must fail loudly, not run and mislead.
+
+    `aes_gcm_encryption` is a real AlgoTune task that this port deliberately
+    does not carry -- its reference wants `os.urandom`, and `os` is out because
+    the gate's forbidden-name check cannot tell `os.urandom` from `os.system`.
+    """
     with pytest.raises(ValueError) as excinfo:
-        algotune.prepare_suite("max_common_subgraph")
-    assert "max_common_subgraph" in str(excinfo.value)
+        algotune.prepare_suite("aes_gcm_encryption")
+    assert "aes_gcm_encryption" in str(excinfo.value)
 
 
 def test_every_runnable_task_name_is_unique_and_sorted():

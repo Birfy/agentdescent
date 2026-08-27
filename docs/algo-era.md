@@ -988,7 +988,7 @@ different programs rather than measurements of the same one.
 import annotations`, which was not on the import allowlist, so the root node was
 refused by the gate and the task died with "the initial ERA program failed to
 run". Fixed, and the gap that let it through is closed by a sweep that derives
-and gates all 82 references
+and gates all 147 references
 (`AGENTDESCENT_ALGOTUNE_NETWORK=1 pytest tests/test_era_algotune.py`). Its
 re-run is the row above, and it is a negative result: 1.05x → 1.01x, no
 improvement that survived the held-back sets.

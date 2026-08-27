@@ -105,69 +105,103 @@ DESCRIPTION_URL = _RAW + "/AlgoTuneTasks/{task}/description.txt"
 #: would make two runs of this port incomparable.
 SIZES_URL = _RAW + "/reports/generation.json"
 
-#: The 82 AlgoTune tasks this port can run, and why it is 82 rather than 154.
+#: The 147 AlgoTune tasks this port can run, and why it is 147 rather than 154.
 #:
-#: Two filters, both mechanical and both checked by
+#: This list used to be 72, and the gap was never the benchmark -- it was this
+#: port's dependency set. AlgoTune pins its own 156 packages in
+#: ``requirements.txt``; installing the ones its *references* actually need, and
+#: allowing what its own 2595 published solvers actually import, takes the
+#: runnable set from 72 to 147. What each one was the sole blocker for, measured
+#: rather than guessed: ortools 13 tasks, networkx 9, sklearn 8, pysat 2, sympy
+#: 2, POT 2, faiss 2, mpmath 1, hdbscan 1.
+#:
+#: Two filters remain, both mechanical and both checked by
 #: ``tests/test_era_algotune.py`` rather than asserted here:
 #:
-#: 1. **The reference must import only what this port installs**: numpy, scipy,
-#:    the standard library, and cvxpy. AlgoTune's dependency list is 30 packages
-#:    deep -- OR-Tools, networkx, torch, faiss, python-sat, dace -- and 71 tasks
-#:    still need one of those. A port that silently skipped them at runtime would
-#:    report a speedup over a benchmark it had quietly halved, so they are named
-#:    as excluded instead.
+#: 1. **The reference must import only what this port installs and allows.**
 #: 2. **The reference must lift out of its class** (see
 #:    :func:`~examples.era._algotune_tasks.derive_seed_program`), so the root
 #:    node is a program rather than a bound method.
 #:
-#: Eight of these names are AlgoTune's convex-programming tasks --
-#: ``chebyshev_center``, ``feedback_controller_design``, ``kalman_filter``,
-#: ``lp_box``, ``lyapunov_stability``, ``markowitz``, ``power_control``, ``qp``
-#: -- and they are here because cvxpy is. They are also, minus ``lqr``, the set EvoMem
-#: (`arXiv:2608.10795 <https://arxiv.org/abs/2608.10795>`_) selected, which makes
-#: them the only tasks where this port and a published evolutionary method have
-#: run the same problems. cvxpy needs its solver backends reachable *inside* the
-#: sandbox: ``qp`` wants OSQP, which wants ``jinja2``, and ``power_control``
-#: wants ECOS. Installed into the user site rather than ``dist-packages`` they
-#: are invisible across the bind and the reference fails with "the solver OSQP is
-#: not installed", which reads as a broken task rather than a missing bind.
+#: Of the seven that are out: ``aes_gcm_encryption`` and ``chacha_encryption``
+#: want ``os.urandom`` (see :data:`NOT_ALLOWED_ON_PURPOSE`), two do not lift out
+#: of their class, ``lqr`` is in :data:`RUNTIME_EXCLUDED`, and two more still
+#: need a package this port does not carry.
 #:
-#: ``lqr`` passes both filters and is still absent: its own ``is_solution`` does
-#: ``float(xt.T @ Q @ xt + ...)`` on a 1x1 array, which NumPy has refused since
-#: 1.25, so on any current NumPy the *reference implementation* is invalid by the
-#: task's own oracle. That is upstream's defect, not this port's, and scoring a
-#: search against an oracle that rejects its own baseline would measure nothing.
-#: Verified again after cvxpy went in, in case the import was the only problem:
-#: it is not, the checker still raises ``TypeError: only 0-dimensional arrays``.
+#: Every dependency here has to be reachable *inside* the sandbox, which means
+#: ``dist-packages`` rather than the user site. Three separate packages hit that
+#: trap -- OSQP wants ``jinja2``, OR-Tools wants ``dateutil``, and ``jinja2``
+#: itself had been installed into ``~/.local`` -- and each failed with a message
+#: about the solver rather than about the bind, which reads as a broken task.
+#:
+#: Tasks that clear both mechanical filters and still cannot be scored, kept
+#: here rather than quietly missing from :data:`TASKS` so a rebuild of that list
+#: cannot silently re-admit them. It has happened: regenerating TASKS from
+#: "derives and passes the gate" put ``lqr`` straight back, because what is
+#: wrong with ``lqr`` only shows up when its checker runs.
+RUNTIME_EXCLUDED: Tuple[str, ...] = (
+    # Its own `is_solution` does `float(xt.T @ Q @ xt + ...)` on a 1x1 array,
+    # which NumPy has refused since 1.25 -- so on any current NumPy the
+    # *reference implementation* is invalid by the task's own oracle. Upstream's
+    # defect, not this port's, and scoring a search against an oracle that
+    # rejects its own baseline would measure nothing. Re-checked after cvxpy
+    # went in, in case the import had been the only problem: it is not.
+    "lqr",
+)
+
 TASKS: Tuple[str, ...] = (
-    "affine_transform_2d", "chebyshev_center", "cholesky_factorization",
-    "convex_hull", "convolve2d_full_fill", "convolve_1d",
-    "correlate2d_full_fill", "correlate_1d", "cumulative_simpson_1d",
-    "cumulative_simpson_multid", "dct_type_I_scipy_fftpack", "delaunay",
-    "dijkstra_from_indices", "dst_type_II_scipy_fftpack",
-    "eigenvalues_complex", "eigenvalues_real", "eigenvectors_complex",
-    "eigenvectors_real", "elementwise_integration",
-    "feedback_controller_design", "fft_cmplx_scipy_fftpack",
-    "fft_convolution", "fft_real_scipy_fftpack",
-    "generalized_eigenvalues_complex", "generalized_eigenvalues_real",
-    "generalized_eigenvectors_complex", "generalized_eigenvectors_real",
-    "graph_laplacian", "kalman_filter", "ks_test_2samp", "l0_pruning",
-    "l1_pruning", "least_squares", "linear_system_solver", "lp_box",
-    "lti_simulation", "lu_factorization", "lyapunov_stability",
-    "markowitz", "matrix_exponential", "matrix_multiplication",
-    "matrix_sqrt", "min_weight_assignment", "ode_brusselator",
-    "ode_fitzhughnagumo", "ode_hires", "ode_hodgkinhuxley",
-    "ode_lorenz96_nonchaotic", "ode_lotkavolterra", "ode_nbodyproblem",
-    "ode_seirs", "ode_stiff_robertson", "ode_stiff_vanderpol", "odr",
-    "outer_product", "pde_burgers1d", "pde_heat1d", "polynomial_real",
+    "affine_transform_2d", "aircraft_wing_design", "articulation_points",
+    "base64_encoding", "battery_scheduling", "btsp",
+    "capacitated_facility_location", "channel_capacity",
+    "chebyshev_center", "cholesky_factorization", "clustering_outliers",
+    "communicability", "convex_hull", "convolve2d_full_fill",
+    "convolve_1d", "correlate2d_full_fill", "correlate_1d",
+    "count_connected_components", "count_riemann_zeta_zeros",
+    "cumulative_simpson_1d", "cumulative_simpson_multid",
+    "cvar_projection", "cyclic_independent_set", "delaunay",
+    "dijkstra_from_indices", "discrete_log",
+    "dynamic_assortment_planning", "earth_movers_distance",
+    "edge_expansion", "eigenvalues_complex", "eigenvalues_real",
+    "eigenvectors_complex", "eigenvectors_real",
+    "elementwise_integration", "feedback_controller_design",
+    "fft_cmplx_scipy_fftpack", "fft_convolution",
+    "fft_real_scipy_fftpack", "firls", "generalized_eigenvalues_complex",
+    "generalized_eigenvalues_real", "generalized_eigenvectors_complex",
+    "generalized_eigenvectors_real", "graph_coloring_assign",
+    "graph_global_efficiency", "graph_isomorphism", "graph_laplacian",
+    "group_lasso", "gzip_compression", "integer_factorization",
+    "job_shop_scheduling", "kalman_filter", "kd_tree",
+    "kernel_density_estimation", "kmeans", "ks_test_2samp", "l0_pruning",
+    "l1_pruning", "lasso", "least_squares", "linear_system_solver",
+    "lp_box", "lp_centering", "lp_mdp", "lti_simulation",
+    "lu_factorization", "lyapunov_stability", "markowitz",
+    "matrix_completion", "matrix_exponential",
+    "matrix_exponential_sparse", "matrix_multiplication", "matrix_sqrt",
+    "max_clique_cpsat", "max_common_subgraph", "max_flow_min_cost",
+    "max_independent_set_cpsat", "max_weighted_independent_set",
+    "min_dominating_set", "min_weight_assignment",
+    "minimum_spanning_tree", "minimum_volume_ellipsoid",
+    "multi_dim_knapsack", "nmf", "ode_brusselator", "ode_fitzhughnagumo",
+    "ode_hires", "ode_hodgkinhuxley", "ode_lorenz96_nonchaotic",
+    "ode_lotkavolterra", "ode_nbodyproblem", "ode_seirs",
+    "ode_stiff_robertson", "ode_stiff_vanderpol", "odr",
+    "optimal_advertising", "outer_product", "pagerank", "pca",
+    "pde_burgers1d", "pde_heat1d", "polynomial_mixed", "polynomial_real",
     "power_control", "procrustes", "psd_cone_projection", "qp",
-    "qr_factorization", "qz_factorization", "rbf_interpolation",
-    "rotate_2d", "shift_2d", "shortest_path_dijkstra",
-    "sparse_eigenvectors_complex", "sparse_lowest_eigenvalues_posdef",
-    "sparse_lowest_eigenvectors_posdef", "stable_matching", "svd",
-    "sylvester_solver", "toeplitz_solver", "two_eigenvalues_around_0",
-    "unit_simplex_projection", "upfirdn1d", "vectorized_newton",
-    "voronoi_diagram", "wasserstein_dist", "zoom_2d",
+    "qr_factorization", "quantile_regression", "queens_with_obstacles",
+    "queuing", "qz_factorization", "randomized_svd", "rbf_interpolation",
+    "robust_kalman_filter", "robust_linear_program",
+    "rocket_landing_optimization", "rotate_2d", "set_cover",
+    "set_cover_conflicts", "sha256_hashing", "shift_2d",
+    "shortest_path_dijkstra", "sinkhorn", "sparse_eigenvectors_complex",
+    "sparse_lowest_eigenvalues_posdef",
+    "sparse_lowest_eigenvectors_posdef", "sparse_pca",
+    "spectral_clustering", "stable_matching", "svd", "svm",
+    "sylvester_solver", "tensor_completion_3d", "toeplitz_solver", "tsp",
+    "two_eigenvalues_around_0", "unit_simplex_projection", "upfirdn1d",
+    "vector_quantization", "vectorized_newton", "vehicle_routing",
+    "vertex_cover", "voronoi_diagram", "wasserstein_dist",
+    "water_filling", "zoom_2d",
 )
 
 #: What ``--tasks`` selects when nothing is named: eight tasks spanning the
@@ -271,7 +305,64 @@ ALLOWED_IMPORTS = {
     "threadpoolctl",
     "typing",
     "warnings",
+    # ---------------------------------------------------------------------
+    # The rest of AlgoTune's own dependency list, read off `requirements.txt`
+    # and ranked by what it unlocks rather than guessed at. Each of these is
+    # the *sole* blocker for tasks this port could otherwise not name:
+    #
+    #   ortools        13 tasks    networkx        9 tasks
+    #   sklearn         8 tasks    pysat           2 tasks
+    #   sympy           2 tasks    ot (POT)        2 tasks
+    #   faiss           2 tasks    mpmath          1 task
+    #
+    # and they are what upstream's own solvers reach for: 182 of its 2595
+    # published solutions import ortools, 81 sklearn, 46 networkx, 50 faiss.
+    # Every one verified to import *and solve* inside the sandbox under the
+    # runner's real limits -- OR-Tools needed `dateutil` in `dist-packages`
+    # rather than the user site, the same trap OSQP hit with `jinja2`.
+    "faiss",
+    "hdbscan",
+    "mpmath",
+    "networkx",
+    "ortools",
+    "ot",
+    "pysat",
+    "sklearn",
+    "sympy",
+    # cvxpy's solver backends, so a candidate can call one directly instead of
+    # paying for cvxpy's modelling layer -- which is exactly the move this
+    # benchmark rewards, and which 58 of upstream's solvers make.
+    "ecos",
+    "highspy",
+    "osqp",
+    # Used by upstream's crypto and hashing tasks and already installed here.
+    "cryptography",
+    # Stdlib upstream's own solvers import, free and previously just missing.
+    # `ast` is here because a reference parses source with it, and parsing is
+    # not executing -- `compile`, `eval` and `exec` are forbidden names and stay
+    # forbidden.
+    "ast",
+    "base64",
+    "gzip",
+    "hashlib",
+    "hmac",
+    "json",
+    "time",
+    "zlib",
 }
+
+#: Deliberately *not* allowed, though upstream's references use them.
+#:
+#: ``os`` and ``sys``. Two crypto tasks -- ``aes_gcm_encryption`` and
+#: ``chacha_encryption`` -- call ``os.urandom`` to make a key, and that is all
+#: they want. But the gate's forbidden-name check is by *name* (``eval``,
+#: ``exec``, ``getattr``), so it cannot see ``os.system`` or ``os.popen``:
+#: allowing the module to get ``urandom`` allows shelling out with it. The
+#: sandbox is the real boundary and would hold, but the gate exists so that the
+#: common accidents fail in-process with a readable message, and widening it for
+#: two tasks whose speedup is hardware-bound anyway is a bad trade. ``torch`` is
+#: absent for a different reason: it is the sole blocker for nothing.
+NOT_ALLOWED_ON_PURPOSE = ("os", "sys", "torch")
 
 #: Timed runs per program per problem, after one warm-up run that is discarded.
 #: Three, because the metric is a *ratio of minima* and the minimum of three

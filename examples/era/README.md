@@ -12,7 +12,7 @@ AgentDescent engine, running **four** tasks on one search.
 | Dataset (faithful) | Kaggle Playground Series S3E1 — the upstream `implementation/playground_s3e1.py` task |
 | Second task | *Numerical solution of integrals* — named in the paper's abstract; upstream released no implementation, so the nine-family suite is constructed here |
 | Third task | Gauss hypergeometric `2F1` in double precision — not in the paper at all; 3000 points against a 25-digit mpmath reference, baseline `scipy.special.hyp2f1` |
-| Fourth task | [AlgoTune](https://github.com/oripress/AlgoTune) ([arXiv:2507.15887](https://arxiv.org/abs/2507.15887)) — 82 of its 154 tasks, scored in **speedup** over the task's own reference implementation, **one tree per task** |
+| Fourth task | [AlgoTune](https://github.com/oripress/AlgoTune) ([arXiv:2507.15887](https://arxiv.org/abs/2507.15887)) — 147 of its 154 tasks, scored in **speedup** over the task's own reference implementation, **one tree per task** |
 | `evolve()` plug-ins | `strategy` + `aggregator_factory=` FUTS tree, `selection.FlatPuct` |
 
 ## Run
@@ -90,21 +90,26 @@ spaces: a factorisation trick found for `qr_factorization` is not a node in
 `ode_stiff_vanderpol`'s tree and could not be selected there. Across tasks the
 run reports the **geometric** mean, which is the mean a set of ratios has.
 
-82 of AlgoTune's 154 tasks are runnable here. The other 72 need one of
-OR-Tools, networkx, torch, faiss, python-sat, sklearn or dace — a dependency
-list this repository does not carry — or their reference does not lift out of its
-class; `lqr` clears both filters and is still excluded, because its own
-`is_solution` calls `float()` on a 1×1 array, which NumPy has refused since 1.25.
-cvxpy and jax *are* carried. cvxpy buys the eight convex-programming tasks —
-the set EvoMem ([arXiv:2608.10795](https://arxiv.org/abs/2608.10795)) selected,
-and so the only tasks where this port and a published evolutionary method have
-run the same problems. Its solver backends have to land in `dist-packages`
-rather than the user site or the sandbox cannot see them (`qp` wants OSQP, which
-wants jinja2; `power_control` wants ECOS). jax is here for the same reason numba
-and cython are: it is pinned in AlgoTune's own `requirements.txt`, 54 of
-upstream's 2595 published solvers import it, and it is how OpenEvolve's published
-AlgoTune example reaches 321x on `polynomial_real` — so an allowlist without it
-would be measuring the allowlist.
+147 of AlgoTune's 154 tasks are runnable here, and the seven that are not are
+named rather than silently skipped: `aes_gcm_encryption` and `chacha_encryption`
+want `os.urandom` (and `os` is out, because the gate's forbidden-name check
+cannot tell `os.urandom` from `os.system`), two references do not lift out of
+their class, `lqr`'s own `is_solution` calls `float()` on a 1×1 array which
+NumPy has refused since 1.25, and two need a package this repository does not
+carry.
+
+This used to be 72, and the gap was never the benchmark — it was this port's
+dependency set. AlgoTune pins its own 156 packages; installing the ones its
+*references* need and allowing what its own 2595 published solvers *import*
+takes it to 147. Carried here: numpy, scipy, cvxpy (+ECOS/OSQP/HiGHS), jax, numba, cython, scikit-learn, networkx, OR-Tools, SymPy, mpmath, POT, PySAT, faiss, hdbscan, cryptography.
+Each was ranked by what it alone unlocks, measured rather than guessed —
+OR-Tools 13 tasks, networkx 9, scikit-learn 8, PySAT 2, SymPy 2, POT 2,
+faiss 2, mpmath 1, hdbscan 1 — and each verified to import *and solve* inside
+the sandbox. They have to land in `dist-packages` rather than the user site or
+the bind cannot see them; OSQP (via jinja2), OR-Tools (via dateutil) and
+jinja2 itself each hit that, and each failed with a message about the solver
+rather than about the bind.
+
 `--list-tasks` prints the runnable set; `--tasks all` runs it.
 
 Problem sizes are **upstream's published ones**, read from AlgoTune's own
