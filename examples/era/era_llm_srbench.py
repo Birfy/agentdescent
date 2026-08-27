@@ -78,8 +78,6 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-import numpy as np
-
 from agentdescent.agents import Usage
 from agentdescent.evolution import EvolvingArtifact
 from agentdescent.governance import classify
