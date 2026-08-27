@@ -1010,6 +1010,27 @@ You are free to use any of these -- reach for whichever one fits."""
 #: ``bare`` is upstream's own list and the default; ``invited`` adds the line.
 PACKAGE_STYLES = ("bare", "invited")
 
+#: Appended when a model prior is wanted, and nothing else changes with it.
+#:
+#: The question is deliberately about the *approach after tuning* rather than
+#: about this draft. Asked the other way the rating collapses into the score the
+#: evaluator already produces, and the whole point of a prior here is to
+#: separate "slow today, right idea" from "fine today, finished". Measured on
+#: ``polynomial_real``, 30 draws: an approach that left the reference's framing
+#: rated 7.07 on average against 4.09 for one that stayed inside it, and the two
+#: numba draws rated 8.00. Ratings arrived on 25 of the 30.
+PROMISE_REQUEST = """
+
+After the code block, on its own final line, write exactly:
+
+PROMISE: <n>
+
+where <n> is 1 to 10: how much faster than the reference you expect this
+*approach* to become after further tuning -- not how fast this first version is.
+1 means the approach is a dead end even if polished. 10 means it should reach
+two orders of magnitude once tuned."""
+
+
 #: Upstream's `AlgoTuner/messages/initial_system_message.txt`, verbatim except
 #: where this port's contract genuinely differs. Two things differ and both are
 #: structural rather than editorial:
@@ -1075,6 +1096,7 @@ def mutation_prompt(
     timeout: float = 300.0,
     repeats: int = REPEATS,
     packages: str = "bare",
+    ask_promise: bool = False,
 ) -> str:
     """One rewrite of the parent program, in AlgoTuner's own framing.
 
@@ -1120,7 +1142,8 @@ def mutation_prompt(
         "defining `solve(problem)`, with its imports. Return ONLY the python "
         "code, in a single fenced block. Do not read or reconstruct the task's "
         "reference implementation to call it; write the computation.")
-    return "\n\n".join(blocks) + "\n"
+    text = "\n\n".join(blocks) + "\n"
+    return text + PROMISE_REQUEST + "\n" if ask_promise else text
 
 
 def repair_prompt(parent: Any, code: str, error: str, attempt: int,

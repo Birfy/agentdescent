@@ -1046,3 +1046,99 @@ def test_the_domain_reports_its_own_metric_under_its_own_name(fixture_suite):
     assert domain.gain(1.0, 3.0) == pytest.approx(2.0)
     assert domain.data_summary["published_n"] == 474
     assert domain.test_shards == fixture_suite.test_range()
+
+
+def test_the_model_prior_aims_the_exploration_term_rather_than_widening_it():
+    """`P(s,a)` must lift a promising node and push a dead-end one down.
+
+    Upstream ERA leaves the prior slot uniform at `1/N`, which spreads the
+    exploration budget evenly over a tree that is mostly dead ends. Measured on
+    AlgoTune's polynomial_real: at c_puct=1.0 in a 46-node tree the exploration
+    term is worth 5.6 rank positions out of 45, and a first-draft Newton solver
+    -- slower than LAPACK, and the only route to upstream's 138x -- sits past
+    30th. It needs 25 positions and cannot get them.
+
+    Raising c_puct alone reaches it and lifts every dead end with it. The prior
+    is what makes the reach selective, and squaring is what makes the
+    separation large enough to matter: rated 8 against a mean of 5.5 a node gets
+    2.12x the term, rated 2 it gets 0.13x.
+    """
+    from agentdescent.selection import Candidate, FlatPuct
+
+    rows = [Candidate(artifact_id="a", version=i, score=float(-i), prior=prior)
+            for i, prior in enumerate([5.5] * 20 + [8.0, 2.0])]
+    uniform = FlatPuct(c_puct=1.0, prior_exponent=0.0)._priors(rows)
+    aimed = FlatPuct(c_puct=1.0, prior_exponent=2.0)._priors(rows)
+
+    assert len(set(round(p, 12) for p in uniform)) == 1, "upstream's prior is uniform"
+    assert abs(sum(aimed) - 1.0) < 1e-9, "priors must normalise, or c_puct changes meaning"
+    promising, dead_end, typical = aimed[20], aimed[21], aimed[0]
+    assert promising > typical > dead_end
+    assert promising / typical > 2.0, (promising, typical)
+    assert dead_end / typical < 0.2, (dead_end, typical)
+
+
+def test_an_unrated_candidate_is_not_barred_from_selection():
+    """No rating means no opinion, not a rating of zero.
+
+    A prior of zero would make the absence of a number the reason a direction
+    is never explored, which is worse than the uniform prior it replaced. On
+    polynomial_real 5 of 30 replies carried no rating.
+    """
+    from agentdescent.selection import Candidate, FlatPuct
+
+    rows = [Candidate(artifact_id="a", version=0, score=1.0, prior=8.0),
+            Candidate(artifact_id="a", version=1, score=1.0, prior=2.0),
+            Candidate(artifact_id="a", version=2, score=1.0, prior=None)]
+    priors = FlatPuct(c_puct=1.0, prior_exponent=2.0)._priors(rows)
+    assert priors[2] > 0.0
+    assert priors[0] > priors[2] > priors[1], priors
+
+    # And with nobody rated at all it degenerates to upstream exactly.
+    bare = [Candidate(artifact_id="a", version=i, score=1.0) for i in range(4)]
+    assert FlatPuct(c_puct=1.0, prior_exponent=2.0)._priors(bare) == [0.25] * 4
+
+
+def test_the_promise_line_is_read_and_a_missing_one_is_not_a_zero():
+    from examples.era.era_empirical_software import _read_promise
+
+    assert _read_promise("```python\ncode\n```\n\nPROMISE: 8") == 8.0
+    assert _read_promise("PROMISE:  3.5\n") == 3.5
+    assert _read_promise("promise: 7") == 7.0            # case-insensitive
+    assert _read_promise("no rating here") is None
+    assert _read_promise("PROMISE: 0") is None           # zero would bar it
+    assert _read_promise("PROMISE: banana") is None
+
+
+def test_a_slower_than_parent_candidate_is_retried_only_when_asked():
+    """The regression retry is off by default, because it changes the loop.
+
+    With it off the repair loop rescues programs that failed, which is upstream
+    ERA plus a retry. With it on the loop also keeps working on one that runs
+    and is slower -- the case a flat tree cannot recover, since such a node
+    ranks last and is never selected again.
+    """
+    from examples.era.era_empirical_software import _is_regression
+
+    slower = {"speedup": 0.5}
+    faster = {"speedup": 2.0}
+    assert _is_regression(slower, 1.0, "higher", True) is True
+    assert _is_regression(slower, 1.0, "higher", False) is False   # off by default
+    assert _is_regression(faster, 1.0, "higher", True) is False
+    # a metric where lower wins reverses, and an unmeasurable one never fires
+    assert _is_regression({"rmse": 2.0}, 1.0, "lower", True) is True
+    assert _is_regression({"rmse": 0.5}, 1.0, "lower", True) is False
+    assert _is_regression({}, 1.0, "higher", True) is False
+    assert _is_regression(slower, None, "higher", True) is False
+
+
+def test_asking_for_a_rating_changes_only_the_tail_of_the_prompt(fixture_suite):
+    parent = support.Program("id", 0, None, "def solve(problem):\n    return 1\n",
+                             "", {"speedup": 1.0, "problems": 2,
+                                  "valid_problems": 2}, True)
+    plain = algotune.mutation_prompt(parent, suite=fixture_suite)
+    asked = algotune.mutation_prompt(parent, suite=fixture_suite, ask_promise=True)
+    assert asked.startswith(plain.rstrip("\n"))
+    assert "PROMISE:" in asked and "PROMISE:" not in plain
+    # it asks about the approach after tuning, not about this draft
+    assert "after further tuning" in asked

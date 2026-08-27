@@ -137,6 +137,7 @@ def algotune_domain(
     problem_seconds: float = PROBLEM_SECONDS,
     profile: bool = True,
     packages: str = "bare",
+    ask_promise: bool = False,
 ) -> Domain:
     """One AlgoTune task, in the four terms the ERA search needs."""
     return Domain(
@@ -153,7 +154,7 @@ def algotune_domain(
         reward=framework_score,
         prompt=lambda program: mutation_prompt(
             program, suite=suite, timeout=candidate_timeout, repeats=repeats,
-            packages=packages),
+            packages=packages, ask_promise=ask_promise),
         task_prompt=lambda index: (
             f"Time the {suite.task} program against the reference on held-out "
             f"problem set {index}."),
@@ -172,6 +173,7 @@ def algotune_domain(
             "timed_repeats": repeats,
             "line_profile": profile,
             "packages": packages,
+            "model_prior": ask_promise,
             "seed": suite.seed,
         },
     )
@@ -256,6 +258,20 @@ def build_parser() -> argparse.ArgumentParser:
                               "sentence saying the packages may be used -- not "
                               "what any of them is, nor when to use one -- and "
                               "is a recorded deviation"))
+    parser.add_argument("--prior-exponent", type=float, default=0.0,
+                        help=("weight on the model's own rating of a direction "
+                              "in the PUCT prior -- AlphaZero's P(s,a), which "
+                              "upstream ERA leaves uniform at 1/N. 0 is "
+                              "upstream and the default; 2 weights by the "
+                              "square, which aims the exploration budget "
+                              "rather than merely widening it. Above 0 the "
+                              "prompt asks for the rating, at no extra call"))
+    parser.add_argument("--repair-regressions", action="store_true",
+                        help=("also retry a candidate that runs but is slower "
+                              "than its parent, not only one that failed. "
+                              "Without it the first draft of a winning "
+                              "direction gets one attempt at being fast, then "
+                              "ranks last forever"))
     parser.add_argument("--no-profile", action="store_true",
                         help=("skip the line_profiler table in the mutation "
                               "prompt. It is upstream's `profile` command and "
@@ -373,7 +389,11 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         f"temperature={args.temperature}"
     )
     print(f"Repair   : up to {args.repair_attempts} draw(s) per expansion"
+          f"{', also on a slower-than-parent result' if args.repair_regressions else ''}"
           f"{' (upstream ERA: a failure is a -inf node)' if args.repair_attempts <= 1 else ''}")
+    if args.prior_exponent > 0.0:
+        print(f"Prior    : the model's own rating in P(s,a), exponent "
+              f"{args.prior_exponent} (upstream ERA: uniform 1/N)")
     print(f"Prompt   : AlgoTuner's own system message, naming no technique"
           f"{'' if args.packages == 'bare' else ', packages invited (deviation)'}"
           f"{'' if args.no_profile else ' + line profile (upstream `profile`)'}")
@@ -430,6 +450,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             problem_seconds=args.problem_seconds,
             profile=not args.no_profile,
             packages=args.packages,
+            ask_promise=args.prior_exponent > 0.0,
         )
         try:
             run = run_agentdescent_era(
@@ -441,6 +462,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                 test_shards=args.test_shards,
                 held_out_frac=args.held_out_frac,
                 c_puct=args.c_puct,
+                prior_exponent=args.prior_exponent,
                 candidate_timeout=args.candidate_timeout,
                 max_code_length=args.max_code_length,
                 async_ratio=args.async_ratio,
@@ -452,6 +474,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                 eval_concurrency=args.eval_concurrency,
                 domain=domain,
                 repair_attempts=args.repair_attempts,
+                repair_regressions=args.repair_regressions,
                 repair_prompt=(
                     (lambda program, code, error, attempt, _s=suite:
                      repair_prompt(program, code, error, attempt, suite=_s))
