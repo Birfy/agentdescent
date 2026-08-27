@@ -550,6 +550,58 @@ def _runner_module():
     return module
 
 
+def test_an_optional_import_guard_survives_derivation_and_the_gate():
+    """`try: from x import y / except: y = None` must reach the root node intact.
+
+    This is the third time upstream's own reference has failed this port's gate
+    and taken a task silently out of the runnable set: first `__future__` was
+    missing from the allowlist, then `contextlib` and `numbers`, and then the
+    derivation dropped module-level `ast.Try` outright. Dropping it does not
+    drop a feature -- it leaves the *name* unbound, so the reference raises
+    NameError from whatever used it, which reads as a broken task.
+
+    Both halves are checked because they failed separately: the derivation kept
+    the statement and the gate then refused it.
+    """
+    source = textwrap.dedent('''
+        import numpy as np
+
+        from AlgoTuneTasks.base import register_task, Task
+
+        try:
+            from threadpoolctl import threadpool_limits
+        except Exception:
+            threadpool_limits = None
+
+        def _limit():
+            return 1 if threadpool_limits is None else 2
+
+        @register_task("guarded")
+        class Guarded(Task):
+            def solve(self, problem):
+                return _limit()
+    ''')
+    derived = derive_seed_program(source)
+    assert "threadpool_limits = None" in derived, derived
+    assert "from threadpoolctl import threadpool_limits" in derived
+
+    valid, reason = support.validate_source(
+        derived, entrypoint="solve", allowed_imports=algotune.ALLOWED_IMPORTS,
+        literal_top_level=False, allow_top_level_calls=True,
+        allow_top_level_try=True)
+    assert valid, reason
+
+    # The guard is not a hole: the allowlist walks the whole tree, so an import
+    # inside the block is refused exactly as one outside it would be.
+    smuggled = derived.replace("from threadpoolctl import threadpool_limits",
+                               "from subprocess import run")
+    valid, reason = support.validate_source(
+        smuggled, entrypoint="solve", allowed_imports=algotune.ALLOWED_IMPORTS,
+        literal_top_level=False, allow_top_level_calls=True,
+        allow_top_level_try=True)
+    assert not valid and "subprocess" in reason, reason
+
+
 def test_the_rejection_note_measures_against_a_tolerance_not_a_bare_ratio():
     """A near-zero reference must not produce a number with no meaning.
 

@@ -105,14 +105,14 @@ DESCRIPTION_URL = _RAW + "/AlgoTuneTasks/{task}/description.txt"
 #: would make two runs of this port incomparable.
 SIZES_URL = _RAW + "/reports/generation.json"
 
-#: The 80 AlgoTune tasks this port can run, and why it is 80 rather than 154.
+#: The 82 AlgoTune tasks this port can run, and why it is 82 rather than 154.
 #:
 #: Two filters, both mechanical and both checked by
 #: ``tests/test_era_algotune.py`` rather than asserted here:
 #:
 #: 1. **The reference must import only what this port installs**: numpy, scipy,
 #:    the standard library, and cvxpy. AlgoTune's dependency list is 30 packages
-#:    deep -- OR-Tools, networkx, torch, faiss, python-sat, dace -- and 73 tasks
+#:    deep -- OR-Tools, networkx, torch, faiss, python-sat, dace -- and 71 tasks
 #:    still need one of those. A port that silently skipped them at runtime would
 #:    report a speedup over a benchmark it had quietly halved, so they are named
 #:    as excluded instead.
@@ -159,15 +159,15 @@ TASKS: Tuple[str, ...] = (
     "ode_fitzhughnagumo", "ode_hires", "ode_hodgkinhuxley",
     "ode_lorenz96_nonchaotic", "ode_lotkavolterra", "ode_nbodyproblem",
     "ode_seirs", "ode_stiff_robertson", "ode_stiff_vanderpol", "odr",
-    "outer_product", "pde_burgers1d", "pde_heat1d", "power_control",
-    "procrustes", "psd_cone_projection", "qp", "qr_factorization",
-    "qz_factorization", "rbf_interpolation", "rotate_2d", "shift_2d",
-    "shortest_path_dijkstra", "sparse_eigenvectors_complex",
-    "sparse_lowest_eigenvalues_posdef",
+    "outer_product", "pde_burgers1d", "pde_heat1d", "polynomial_real",
+    "power_control", "procrustes", "psd_cone_projection", "qp",
+    "qr_factorization", "qz_factorization", "rbf_interpolation",
+    "rotate_2d", "shift_2d", "shortest_path_dijkstra",
+    "sparse_eigenvectors_complex", "sparse_lowest_eigenvalues_posdef",
     "sparse_lowest_eigenvectors_posdef", "stable_matching", "svd",
     "sylvester_solver", "toeplitz_solver", "two_eigenvalues_around_0",
-    "unit_simplex_projection", "upfirdn1d", "voronoi_diagram",
-    "wasserstein_dist", "zoom_2d",
+    "unit_simplex_projection", "upfirdn1d", "vectorized_newton",
+    "voronoi_diagram", "wasserstein_dist", "zoom_2d",
 )
 
 #: What ``--tasks`` selects when nothing is named: eight tasks spanning the
@@ -217,6 +217,15 @@ ALLOWED_IMPORTS = {
     "bisect",
     "cmath",
     "collections",
+    # Two more stdlib modules upstream's task files import, found the same way
+    # `__future__` was and costing the same thing: the reference does not pass
+    # the gate, so the root node is refused and the task vanishes from the
+    # runnable set without anything saying why. `contextlib` blocks
+    # `polynomial_real`, `numbers` blocks `vectorized_newton`. A sweep of all
+    # 154 task files for imports the allowlist rejects now says these were the
+    # last two that plain stdlib was hiding.
+    "contextlib",
+    "numbers",
     "copy",
     # Nine of AlgoTune's convex-programming tasks -- and every task EvoMem
     # selected -- have a reference that is a cvxpy model. Without it those tasks
@@ -240,6 +249,12 @@ ALLOWED_IMPORTS = {
     "scipy",
     "statistics",
     "string",
+    # `polynomial_real`'s reference limits BLAS threads around its own root-find,
+    # which is the one thing standing between this port and all eight tasks
+    # OpenEvolve's published AlgoTune example runs. A pure-Python package on
+    # AlgoTune's own dependency list, and it has to reach `dist-packages` rather
+    # than the user site or the sandbox bind cannot see it.
+    "threadpoolctl",
     "typing",
     "warnings",
 }
@@ -492,6 +507,10 @@ def run_candidate(
         # where it is free, instead of inside the first timed call, where it
         # would be charged to the candidate.
         allow_top_level_calls=True,
+        # And `try: from x import y / except: y = None`, which is how an optional
+        # dependency is bound and how `polynomial_real`'s own reference binds
+        # `threadpool_limits`. Refused, the reference does not pass its own gate.
+        allow_top_level_try=True,
     )
     if not valid:
         return {"ok": False, "error": f"gate: {reason}", "seconds": 0.0}

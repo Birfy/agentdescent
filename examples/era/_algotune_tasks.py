@@ -233,6 +233,16 @@ def _module_header(tree: ast.Module) -> List[ast.stmt]:
             header.append(node)
         elif isinstance(node, (ast.FunctionDef, ast.Assign, ast.AnnAssign)):
             header.append(node)
+        elif isinstance(node, ast.Try):
+            # A module-level `try: from x import y / except: y = None` is how an
+            # optional dependency gets bound, and dropping it does not drop a
+            # feature -- it leaves the *name* unbound, so the derived reference
+            # raises NameError from whatever used it. `polynomial_real` binds
+            # `threadpool_limits` this way and died on exactly that, which reads
+            # as a broken task rather than a derivation that threw a statement
+            # away. Kept whole: it is upstream's code, and rewriting the fallback
+            # would be guessing at what upstream meant.
+            header.append(node)
     return header
 
 

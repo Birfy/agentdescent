@@ -131,6 +131,7 @@ def validate_source(
     allowed_imports: Optional[Set[str]] = None,
     literal_top_level: bool = True,
     allow_top_level_calls: bool = False,
+    allow_top_level_try: bool = False,
 ) -> Tuple[bool, str]:
     """Reject what the sandbox should never have to contain in the first place.
 
@@ -199,6 +200,14 @@ def validate_source(
         ast.Assign,
         ast.AnnAssign,
     )
+    if allow_top_level_try:
+        # `try: from x import y / except ImportError: y = None` -- how an
+        # optional dependency is bound, and how two of AlgoTune's own task files
+        # bind theirs. Refusing it does not keep anything out: the import
+        # allowlist, the dunder check and the forbidden-name check all run over
+        # `ast.walk`, so a statement inside the block is gated exactly as one
+        # outside it. What refusing it did was reject upstream's own reference.
+        allowed_top_level = allowed_top_level + (ast.Try,)
     for node in tree.body:
         if not isinstance(node, allowed_top_level):
             return False, f"top-level {type(node).__name__} is not allowed"
