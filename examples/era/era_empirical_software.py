@@ -345,7 +345,12 @@ class EraStrategy:
         return state.get("code", self._seed_program)
 
     def keys(self) -> Sequence[str]:
-        return ("code", "program_id", "change_summary", "parent_id", "parent_index")
+        # `promise` is the model's own rating of the direction, carried so the
+        # aggregator can hand it to `FlatPuct` as `P(s,a)`. It is metadata about
+        # the proposal rather than part of the program, and is empty unless
+        # `--prior-exponent` asked for it.
+        return ("code", "program_id", "change_summary", "parent_id",
+                "parent_index", "promise")
 
     def to_diff(
         self,
@@ -379,6 +384,7 @@ class EraStrategy:
                 "parent_id": str(payload.get("parent_id") or ""),
                 "parent_index": str(parent_index),
                 "iteration": str(iteration),
+                "promise": str(payload.get("promise") or ""),
             },
             author=author,
         )

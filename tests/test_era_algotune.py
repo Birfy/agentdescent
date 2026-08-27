@@ -1142,3 +1142,43 @@ def test_asking_for_a_rating_changes_only_the_tail_of_the_prompt(fixture_suite):
     assert "PROMISE:" in asked and "PROMISE:" not in plain
     # it asks about the approach after tuning, not about this draft
     assert "after further tuning" in asked
+
+
+def test_a_rating_survives_the_whole_path_from_reply_to_node():
+    """The end-to-end path, because every link of it was already tested and the
+    chain still broke.
+
+    `make_propose` parsed the rating and wrote it into its JSON, and `to_diff`
+    built its ops dict field by field and silently dropped it -- so a 2x2
+    ablation ran a whole arm with `--prior-exponent 2` and every node unrated,
+    which reads in the result file as the mechanism doing nothing rather than
+    as the mechanism never firing. The unit tests all passed.
+    """
+    import json as _json
+    from examples.era.era_empirical_software import EraStrategy, EraTree, _read_promise
+
+    reply = "```python\ndef solve(p):\n    return p\n```\n\nPROMISE: 8"
+    assert _read_promise(reply) == 8.0
+
+    strategy = EraStrategy()
+    assert "promise" in strategy.keys()
+    proposal = _json.dumps({"code": "def solve(p):\n    return p\n",
+                            "change_summary": "", "iteration": 1,
+                            "parent_index": 0, "parent_id": "r",
+                            "promise": repr(_read_promise(reply))})
+    ops = strategy.to_diff({}, proposal, "w", 0, "era_program").ops
+    assert ops["promise"] == "8.0", ops
+
+    # ...and reaches the node, where FlatPuct reads it as the prior.
+    tree = EraTree(prior_exponent=2.0, metric_key="speedup")
+    root = tree.seed(support.Program("r", 0, None, "x", "", {"speedup": 1.0}, True), 1.0)
+    node = tree.add_node(
+        support.Program("c", 1, "r", "y", "", {"speedup": 0.5}, True), 0.5,
+        root.index, promise=float(ops["promise"]))
+    assert node.promise == 8.0
+    assert node.summary()["promise"] == 8.0
+
+    # An unrated proposal reaches the node as None, not as 0.0.
+    bare = _json.dumps({"code": "def solve(p):\n    return p\n",
+                        "iteration": 2, "parent_index": 0})
+    assert strategy.to_diff({}, bare, "w", 0, "era_program").ops["promise"] == ""
