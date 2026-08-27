@@ -60,23 +60,53 @@ accepted.
 
 ## What this is
 
-A structural property of flat tree search on this task, not a knob:
+Not the gate, which was my first answer and was wrong. The slow candidates do
+become nodes: 15 of this tree's 46 sit below 1.0x, down to 0.009x. The tree
+keeps them. It never *selects* them again — every node below 1.0x has
+`num_visits == 1`, the visit it got when it was created.
 
-> the path to the win runs through a node that looks like a regression, and
-> the acceptance gate exists to reject regressions.
+The reason is arithmetic. FUTS ranks rather than scores:
 
-FUTS never selects a rejected node again, so the 25% of draws that find the
-direction each die alone. AlgoTuner's ~100-turn loop crosses this because it can
-keep editing the same slow program without needing each edit to be an
-improvement — `edit`, `eval`, `edit` again — and OpenEvolve's island model keeps
-a population rather than a single accepted lineage.
+```
+puct = rank/(N-1) + c_puct * (1/N) * sqrt(total_visits) / (1 + visits)
+```
 
-It also explains the shape of the whole eight-task set. Where the win is a
+At the end of this run — N=46, ~132 total visits, `c_puct=1.0` — one rank
+position is worth `1/45 = 0.0222`, and an unvisited node's exploration term is
+`0.1249`. **The exploration term is worth 5.6 rank positions out of 45.** A
+first-draft Newton at 0.26x–0.94x ranks somewhere past 30th in a tree with 27
+nodes at or above 1.0x, and needs to jump 25. It cannot.
+
+So the precise statement is not "the tree does not explore worse nodes" — it
+does:
+
+> FUTS explores nodes that regressed *relative to their parent* but remain
+> *absolutely* competitive. It does not explore absolute regressions.
+
+`ode_stiff_vanderpol` is the clean illustration of the first half. Node 38 fell
+to 1054.98x from its parent's 2797.13x — a relative collapse — and still ranked
+near the top of a tree whose root was 1.0x, so it drew 5 visits, and the winning
+2878x node descends from it two steps later. A relative fall of 2.6x survived; an
+absolute fall below the root does not.
+
+That also puts a number on the knob nobody has turned. Reaching a node 25 places
+down needs `c_puct ~= 4.4`, against the `1.0` every run in this repo has used
+(upstream ERA's own default). The cost is not small — at that setting the root
+and every weak node compete with the leader for expansions, and the search
+spends much of its budget off the good lineage — and it is untested in both
+directions. It is the one variable in this whole ablation that was never varied.
+
+AlgoTuner crosses this because it has no ranking at all: it edits whatever it
+last had, so a slow Newton stays under the cursor until it is fast. OpenEvolve
+keeps a population rather than a single accepted lineage.
+
+It also explains the shape of the eight-task set. Where the win is a
 substitution a numerical programmer recognises on sight — convolution in Fourier
 space (111.9x here), a cheaper transform (4.43x), a projection written directly
 instead of through a convex solver (4.75x) — the *first* attempt is already
-faster, so it is accepted and the tree builds on it. Where the win has to be
-tuned into existence, the first attempt is slower and the search never starts.
+faster, so it ranks near the top immediately and the tree builds on it. Where the
+win has to be tuned into existence, the first attempt ranks near the bottom and
+is never selected again.
 
 ## What it is not
 
