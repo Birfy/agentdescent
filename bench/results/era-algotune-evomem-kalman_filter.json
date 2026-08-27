@@ -1,0 +1,1029 @@
+{
+  "experiment": "ERA on AgentDescent -- AlgoTune, one tree per task",
+  "status": "completed",
+  "completed_at": "2026-08-27T04:23:09+00:00",
+  "upstream_commit": "dff9914c10800c7a031c9e8c3d4d1c8cd1b38906",
+  "benchmark": "AlgoTune (arXiv:2507.15887), oripress/AlgoTune",
+  "config": {
+    "provider": "claude",
+    "model": "deepseek-v4-flash-ga-260731",
+    "seed": 0,
+    "asynchronous": false,
+    "async_ratio": 1,
+    "max_seconds": 1800.0,
+    "pipelined_gate": false,
+    "gate_workers": 2,
+    "dry_run": false,
+    "serial": false,
+    "budget_rollouts": null,
+    "val_cap": null,
+    "eval_concurrency": null,
+    "reflective_merge": false,
+    "eval_cache": "",
+    "no_thinking": false,
+    "tasks": "kalman_filter",
+    "list_tasks": false,
+    "staleness": "guarded",
+    "iterations": 45,
+    "workers": 3,
+    "shards": 6,
+    "test_shards": 3,
+    "problems": 2,
+    "test_problems": 0,
+    "no_profile": false,
+    "repair_attempts": 4,
+    "repeats": 3,
+    "size_scale": 1.0,
+    "held_out_frac": 0.5,
+    "c_puct": 1.0,
+    "candidate_timeout": 300.0,
+    "problem_seconds": 60.0,
+    "max_code_length": 20000,
+    "max_tokens": 8000,
+    "temperature": 0.7,
+    "thinking": "disabled",
+    "api_timeout": 180.0,
+    "reply_attempts": 4,
+    "shutdown_grace": 120.0,
+    "quality_target": null
+  },
+  "summary": {
+    "tasks_run": 1,
+    "tasks_failed": 0,
+    "tasks_improved": 1,
+    "geometric_mean_baseline_speedup": 0.9913939815017087,
+    "geometric_mean_best_speedup": 22.680797110689777,
+    "wall_seconds": 2054.786573649002
+  },
+  "tasks": [
+    {
+      "task": "kalman_filter",
+      "status": "completed",
+      "held_out_baseline_speedup": 0.9913939815017087,
+      "held_out_best_speedup": 22.680797110689777,
+      "speedup_gain": 21.68940312918807,
+      "nodes": 46,
+      "wall_seconds": 2031.8987707710003,
+      "best_program": "import numpy as np\n\ndef solve(problem: dict) -> dict:\n    A = np.asarray(problem[\"A\"], dtype=float)\n    B = np.asarray(problem[\"B\"], dtype=float)\n    C = np.asarray(problem[\"C\"], dtype=float)\n    y = np.asarray(problem[\"y\"], dtype=float)\n    x0 = np.asarray(problem[\"x_initial\"], dtype=float)\n    tau = float(problem[\"tau\"])\n\n    N, m = y.shape\n    n = A.shape[0]\n    p = B.shape[1]\n\n    Q = B @ B.T\n    R = np.eye(m) / tau\n\n    C_T = C.T\n    A_T = A.T\n    I_n = np.eye(n)\n    I_m = np.eye(m)\n\n    # Forward pass: Kalman filter\n    x_filt = np.zeros((N + 1, n))\n    P_filt = np.zeros((N + 1, n, n))\n\n    x_prior = x0.copy()\n    P_prior = np.zeros((n, n))\n\n    for t in range(N):\n        # S = C P C^T + R\n        S = C @ P_prior @ C_T + R\n        # Solve for K efficiently\n        K = np.linalg.solve(S.T, (P_prior @ C_T).T).T  # K = P C^T S^{-1}\n        innovation = y[t] - C @ x_prior\n        x_post = x_prior + K @ innovation\n        P_post = P_prior - K @ S @ K.T\n        P_post = (P_post + P_post.T) / 2\n\n        x_filt[t] = x_post\n        P_filt[t] = P_post\n\n        x_prior = A @ x_post\n        P_prior = A @ P_post @ A_T + Q\n\n    x_filt[N] = x_prior\n    P_filt[N] = P_prior\n\n    # Backward RTS smoother\n    x_smooth = np.zeros((N + 1, n))\n    x_smooth[N] = x_filt[N]\n\n    for t in range(N - 1, -1, -1):\n        P_pred = A @ P_filt[t] @ A_T + Q\n        # G = P_filt A^T P_pred^{-1}\n        G = np.linalg.solve(P_pred.T, (P_filt[t] @ A_T).T).T\n        x_smooth[t] = x_filt[t] + G @ (x_smooth[t + 1] - A @ x_filt[t])\n\n    # Noise estimates\n    B_pinv = np.linalg.pinv(B)\n    diff = x_smooth[1:] - (A @ x_smooth[:-1].T).T\n    w_hat = (B_pinv @ diff.T).T\n    v_hat = y - (C @ x_smooth[:-1].T).T\n\n    return {\n        \"x_hat\": x_smooth.tolist(),\n        \"w_hat\": w_hat.tolist(),\n        \"v_hat\": v_hat.tolist(),\n    }",
+      "observation": {
+        "mode": "sync",
+        "wall_seconds": 2031.8987707710003,
+        "baseline": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "d5e9b5279dffd39d",
+          "iteration": 0,
+          "change_summary": "AlgoTune reference implementation for kalman_filter",
+          "score": 0.9959775938752435,
+          "speedup": 0.9959775938752435,
+          "num_visits": 45,
+          "valid": true,
+          "error": "",
+          "code_chars": 1329
+        },
+        "best": {
+          "index": 43,
+          "parent_index": 41,
+          "program_id": "1eded700e1aa474a",
+          "iteration": 45,
+          "change_summary": "",
+          "score": 23.50573328570071,
+          "speedup": 23.50573328570071,
+          "num_visits": 1,
+          "valid": true,
+          "error": "",
+          "code_chars": 1819
+        },
+        "data": {
+          "task": "kalman_filter",
+          "n": 23,
+          "published_n": 23,
+          "published_target_time_ms": 100,
+          "published_baseline_ms": 100.16192445,
+          "problems_per_shard": 2,
+          "problems_per_test_shard": 2,
+          "reported_instances": 6,
+          "scoring_shards": 6,
+          "test_shards": 3,
+          "timed_repeats": 3,
+          "line_profile": true,
+          "seed": 0
+        },
+        "framework": {
+          "baseline_reward": 0.498992371924139,
+          "final_reward": 0.9597046417957085,
+          "quality_gain": 0.4607122698715695,
+          "stop_reason": "rounds",
+          "error": null,
+          "outcomes": {
+            "no-valid-candidates": 11,
+            "committed": 4
+          },
+          "rollouts": 45,
+          "rollout_seconds": 211.2352352142334,
+          "eval_seconds": 53.92423725128174,
+          "stale_considered": 45,
+          "stale_discarded": 0,
+          "stale_rate": 0.0,
+          "retired_workers": 0,
+          "history": [
+            {
+              "round": 0,
+              "held_out_reward": 0.49196203306128367,
+              "elapsed_s": 432.05137157440186,
+              "rollouts": 3,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            },
+            {
+              "round": 1,
+              "held_out_reward": 0.49196203306128367,
+              "elapsed_s": 550.2189791202545,
+              "rollouts": 6,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            },
+            {
+              "round": 2,
+              "held_out_reward": 0.49196203306128367,
+              "elapsed_s": 664.2836902141571,
+              "rollouts": 9,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            },
+            {
+              "round": 3,
+              "held_out_reward": 0.49196203306128367,
+              "elapsed_s": 763.4686241149902,
+              "rollouts": 12,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            },
+            {
+              "round": 4,
+              "held_out_reward": 0.49196203306128367,
+              "elapsed_s": 855.9678456783295,
+              "rollouts": 15,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            },
+            {
+              "round": 5,
+              "held_out_reward": 0.49196203306128367,
+              "elapsed_s": 999.4513595104218,
+              "rollouts": 18,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            },
+            {
+              "round": 6,
+              "held_out_reward": 0.49196203306128367,
+              "elapsed_s": 1083.7212436199188,
+              "rollouts": 21,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            },
+            {
+              "round": 7,
+              "held_out_reward": 0.49196203306128367,
+              "elapsed_s": 1212.1910655498505,
+              "rollouts": 24,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            },
+            {
+              "round": 8,
+              "held_out_reward": 0.49196203306128367,
+              "elapsed_s": 1332.170137643814,
+              "rollouts": 27,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            },
+            {
+              "round": 9,
+              "held_out_reward": 0.49196203306128367,
+              "elapsed_s": 1493.0477077960968,
+              "rollouts": 30,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            },
+            {
+              "round": 10,
+              "held_out_reward": 0.49196203306128367,
+              "elapsed_s": 1619.984203338623,
+              "rollouts": 33,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "no-valid-candidates": 1
+              }
+            },
+            {
+              "round": 11,
+              "held_out_reward": 0.9236842621841707,
+              "elapsed_s": 1808.086673259735,
+              "rollouts": 36,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 12,
+              "held_out_reward": 0.9377693863424191,
+              "elapsed_s": 1885.8513720035553,
+              "rollouts": 39,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 13,
+              "held_out_reward": 0.9490528101766816,
+              "elapsed_s": 1971.5132248401642,
+              "rollouts": 42,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 14,
+              "held_out_reward": 0.9597046417957085,
+              "elapsed_s": 2017.3568999767303,
+              "rollouts": 45,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            }
+          ]
+        },
+        "actor_usage": {
+          "calls": 105,
+          "failures": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "model_seconds": 2761.273892
+        },
+        "tree": {
+          "nodes": 46,
+          "valid_nodes": 9,
+          "max_depth": 12,
+          "root_visits": 45,
+          "c_puct": 1.0,
+          "tree": [
+            {
+              "index": 0,
+              "parent_index": null,
+              "program_id": "d5e9b5279dffd39d",
+              "iteration": 0,
+              "change_summary": "AlgoTune reference implementation for kalman_filter",
+              "score": 0.9959775938752435,
+              "speedup": 0.9959775938752435,
+              "num_visits": 45,
+              "valid": true,
+              "error": "",
+              "code_chars": 1329
+            },
+            {
+              "index": 1,
+              "parent_index": 0,
+              "program_id": "244fbf3dda8e94f1",
+              "iteration": 1,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 550 of 3197: reference 0.000419388065284, yours -13.0920549917 -- off by 1.309e+01, a relative 3.122e+04, 9.22e+08x the tolerance allclose would allow)",
+              "code_chars": 3421
+            },
+            {
+              "index": 2,
+              "parent_index": 0,
+              "program_id": "a1abd3f7338dff81",
+              "iteration": 2,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: ValueError: operands could not be broadcast together with shapes (0,0) (23,23) (0,0) ",
+              "code_chars": 2355
+            },
+            {
+              "index": 3,
+              "parent_index": 0,
+              "program_id": "281e1e100aef5974",
+              "iteration": 3,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 1073 of 3197: reference 0.00245012360636, yours 0.541530851278 -- off by 5.391e-01, a relative 2.200e+02, 1.56e+07x the tolerance allclose would allow)",
+              "code_chars": 4148
+            },
+            {
+              "index": 4,
+              "parent_index": 0,
+              "program_id": "8a39cedaa8ff031e",
+              "iteration": 5,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 550 of 3197: reference 0.000419388065284, yours -13.0920552277 -- off by 1.309e+01, a relative 3.122e+04, 9.22e+08x the tolerance allclose would allow)",
+              "code_chars": 3589
+            },
+            {
+              "index": 5,
+              "parent_index": 0,
+              "program_id": "f036135288b027cd",
+              "iteration": 6,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 550 of 3197: reference 0.000419388065284, yours -13.0920552277 -- off by 1.309e+01, a relative 3.122e+04, 9.22e+08x the tolerance allclose would allow)",
+              "code_chars": 2739
+            },
+            {
+              "index": 6,
+              "parent_index": 0,
+              "program_id": "462198833576d2be",
+              "iteration": 4,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 7,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: ValueError: matmul: Input operand 1 has a mismatch in its core dimension 0, with gufunc signature (n?,k),(k,m?)->(n?,m?) (size 46 is different from 23)",
+              "code_chars": 3142
+            },
+            {
+              "index": 7,
+              "parent_index": 0,
+              "program_id": "a6dd3f4557ae12f4",
+              "iteration": 9,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 2927 of 3197: reference -0.00100551065789, yours -1.09145189298 -- off by 1.090e+00, a relative 1.084e+03, 5.44e+07x the tolerance allclose would allow)",
+              "code_chars": 3553
+            },
+            {
+              "index": 8,
+              "parent_index": 0,
+              "program_id": "c6183f60b89ffba7",
+              "iteration": 8,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 550 of 3197: reference 0.000419388065284, yours -13.0920552278 -- off by 1.309e+01, a relative 3.122e+04, 9.22e+08x the tolerance allclose would allow)",
+              "code_chars": 2830
+            },
+            {
+              "index": 9,
+              "parent_index": 6,
+              "program_id": "c90acc3c289286ae",
+              "iteration": 7,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 6,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 306 of 3197: reference 2.00774555057e-05, yours 20.5348061709 -- off by 2.053e+01, a relative 1.023e+06, 2.01e+09x the tolerance allclose would allow)",
+              "code_chars": 2275
+            },
+            {
+              "index": 10,
+              "parent_index": 9,
+              "program_id": "9a3783d98e9e599c",
+              "iteration": 11,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 306 of 3197: reference 2.00774555057e-05, yours -7.0476183202 -- off by 7.048e+00, a relative 3.510e+05, 6.91e+08x the tolerance allclose would allow)",
+              "code_chars": 3244
+            },
+            {
+              "index": 11,
+              "parent_index": 0,
+              "program_id": "3491da0dee272ec7",
+              "iteration": 12,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 31,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 1093 of 3197: reference 0.000248336398687, yours -45476.2593321 -- off by 4.548e+04, a relative 1.831e+08, 3.64e+12x the tolerance allclose would allow)",
+              "code_chars": 2287
+            },
+            {
+              "index": 12,
+              "parent_index": 9,
+              "program_id": "422d0e15028e908f",
+              "iteration": 10,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 4,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 550 of 3197: reference 0.000419388065284, yours -13.0920552278 -- off by 1.309e+01, a relative 3.122e+04, 9.22e+08x the tolerance allclose would allow)",
+              "code_chars": 3127
+            },
+            {
+              "index": 13,
+              "parent_index": 12,
+              "program_id": "6a3f452786b27bf8",
+              "iteration": 14,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 2142 of 3197: reference -0.311008344155, yours 69872.9353796 -- off by 6.987e+04, a relative 2.247e+05, 2.24e+10x the tolerance allclose would allow)",
+              "code_chars": 3750
+            },
+            {
+              "index": 14,
+              "parent_index": 12,
+              "program_id": "19d19faee41bddee",
+              "iteration": 13,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 2,
+              "valid": false,
+              "error": "unparseable runner output:  ** On entry to DGEMV  parameter number  2 had an illegal value",
+              "code_chars": 4256
+            },
+            {
+              "index": 15,
+              "parent_index": 11,
+              "program_id": "7ad889f88d221f88",
+              "iteration": 15,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 30,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: IndexError: index 47 is out of bounds for axis 0 with size 47",
+              "code_chars": 2634
+            },
+            {
+              "index": 16,
+              "parent_index": 14,
+              "program_id": "e38ac6ed5055c8cb",
+              "iteration": 17,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 550 of 3197: reference 0.000419388065284, yours -13.021249878 -- off by 1.302e+01, a relative 3.105e+04, 9.17e+08x the tolerance allclose would allow)",
+              "code_chars": 3138
+            },
+            {
+              "index": 17,
+              "parent_index": 15,
+              "program_id": "01e6f990c4be18de",
+              "iteration": 18,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 9,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 40 of 3197: reference 0.000284294268526, yours 0.315094568344 -- off by 3.148e-01, a relative 1.107e+03, 2.45e+07x the tolerance allclose would allow)",
+              "code_chars": 2456
+            },
+            {
+              "index": 18,
+              "parent_index": 15,
+              "program_id": "7976af3496788f47",
+              "iteration": 16,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 20,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 2109 of 3197: reference 2.99535396919e-22, yours -225.103799734 -- off by 2.251e+02, a relative 7.515e+23, 2.25e+10x the tolerance allclose would allow)",
+              "code_chars": 2922
+            },
+            {
+              "index": 19,
+              "parent_index": 18,
+              "program_id": "c2d9c8a1ca50a6c0",
+              "iteration": 19,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 2109 of 3197: reference 2.99535396919e-22, yours 225.103799732 -- off by 2.251e+02, a relative 7.515e+23, 2.25e+10x the tolerance allclose would allow)",
+              "code_chars": 2910
+            },
+            {
+              "index": 20,
+              "parent_index": 17,
+              "program_id": "122659f26471ce83",
+              "iteration": 20,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 8,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 550 of 3197: reference 0.000419388065284, yours -13.0920552277 -- off by 1.309e+01, a relative 3.122e+04, 9.22e+08x the tolerance allclose would allow)",
+              "code_chars": 2452
+            },
+            {
+              "index": 21,
+              "parent_index": 18,
+              "program_id": "9f4820ef21769760",
+              "iteration": 21,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 18,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 550 of 3197: reference 0.000419388065284, yours -13.0920552276 -- off by 1.309e+01, a relative 3.122e+04, 9.22e+08x the tolerance allclose would allow)",
+              "code_chars": 2806
+            },
+            {
+              "index": 22,
+              "parent_index": 21,
+              "program_id": "bafa383e99375515",
+              "iteration": 22,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 550 of 3197: reference 0.000419388065284, yours -12.1669485308 -- off by 1.217e+01, a relative 2.901e+04, 8.57e+08x the tolerance allclose would allow)",
+              "code_chars": 2594
+            },
+            {
+              "index": 23,
+              "parent_index": 21,
+              "program_id": "d17d97f06fb64138",
+              "iteration": 24,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 16,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 858 of 3197: reference 0.00150321159427, yours -34.1111852121 -- off by 3.411e+01, a relative 2.269e+04, 1.36e+09x the tolerance allclose would allow)",
+              "code_chars": 2152
+            },
+            {
+              "index": 24,
+              "parent_index": 20,
+              "program_id": "ece744018efe83e6",
+              "iteration": 23,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 7,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 40 of 3197: reference 0.000284294268526, yours 15.4024841378 -- off by 1.540e+01, a relative 5.418e+04, 1.2e+09x the tolerance allclose would allow)",
+              "code_chars": 2488
+            },
+            {
+              "index": 25,
+              "parent_index": 24,
+              "program_id": "111a0fdfd4ea1f14",
+              "iteration": 25,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 2927 of 3197: reference -0.00100551065789, yours -1.09145189303 -- off by 1.090e+00, a relative 1.084e+03, 5.44e+07x the tolerance allclose would allow)",
+              "code_chars": 1659
+            },
+            {
+              "index": 26,
+              "parent_index": 24,
+              "program_id": "f6deb1514df1d452",
+              "iteration": 27,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 5,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 40 of 3197: reference 0.000284294268526, yours 15.4024833588 -- off by 1.540e+01, a relative 5.418e+04, 1.2e+09x the tolerance allclose would allow)",
+              "code_chars": 2320
+            },
+            {
+              "index": 27,
+              "parent_index": 23,
+              "program_id": "b406b853d9eeda09",
+              "iteration": 26,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 15,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 306 of 3197: reference 2.00774555057e-05, yours 21.1429549771 -- off by 2.114e+01, a relative 1.053e+06, 2.07e+09x the tolerance allclose would allow)",
+              "code_chars": 3226
+            },
+            {
+              "index": 28,
+              "parent_index": 27,
+              "program_id": "1cf7bd6e567ff19a",
+              "iteration": 30,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 945 of 3197: reference 0.000387449942894, yours -16.64652974 -- off by 1.665e+01, a relative 4.297e+04, 1.2e+09x the tolerance allclose would allow)",
+              "code_chars": 2907
+            },
+            {
+              "index": 29,
+              "parent_index": 26,
+              "program_id": "a3aba7ebd4ef9a7a",
+              "iteration": 29,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 4,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 550 of 3197: reference 0.000419388065284, yours -13.0920552277 -- off by 1.309e+01, a relative 3.122e+04, 9.22e+08x the tolerance allclose would allow)",
+              "code_chars": 2677
+            },
+            {
+              "index": 30,
+              "parent_index": 27,
+              "program_id": "79e2b7301ef7540c",
+              "iteration": 28,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 13,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 2113 of 3197: reference -3.4662422477e-22, yours 2247.86000869 -- off by 2.248e+03, a relative 6.485e+24, 2.25e+11x the tolerance allclose would allow)",
+              "code_chars": 3663
+            },
+            {
+              "index": 31,
+              "parent_index": 30,
+              "program_id": "a8fc4dd53f8f2810",
+              "iteration": 33,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 2,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 2113 of 3197: reference -3.4662422477e-22, yours 2247.86000869 -- off by 2.248e+03, a relative 6.485e+24, 2.25e+11x the tolerance allclose would allow)",
+              "code_chars": 2805
+            },
+            {
+              "index": 32,
+              "parent_index": 30,
+              "program_id": "67393e0521e48061",
+              "iteration": 31,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 10,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 306 of 3197: reference 2.00774555057e-05, yours 10.4632673638 -- off by 1.046e+01, a relative 5.211e+05, 1.03e+09x the tolerance allclose would allow)",
+              "code_chars": 1712
+            },
+            {
+              "index": 33,
+              "parent_index": 29,
+              "program_id": "bb449601e5019758",
+              "iteration": 32,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 3,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 550 of 3197: reference 0.000419388065284, yours -13.0920552277 -- off by 1.309e+01, a relative 3.122e+04, 9.22e+08x the tolerance allclose would allow)",
+              "code_chars": 2894
+            },
+            {
+              "index": 34,
+              "parent_index": 33,
+              "program_id": "0223e419a9ee62d2",
+              "iteration": 34,
+              "change_summary": "",
+              "score": 0.980760144384308,
+              "speedup": 0.980760144384308,
+              "num_visits": 2,
+              "valid": true,
+              "error": "",
+              "code_chars": 1013
+            },
+            {
+              "index": 35,
+              "parent_index": 32,
+              "program_id": "abdab38489837ace",
+              "iteration": 35,
+              "change_summary": "",
+              "score": 11.84822663789361,
+              "speedup": 11.84822663789361,
+              "num_visits": 9,
+              "valid": true,
+              "error": "",
+              "code_chars": 1823
+            },
+            {
+              "index": 36,
+              "parent_index": 31,
+              "program_id": "3eaedadd6ac8d4da",
+              "iteration": 36,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 2927 of 3197: reference -0.00100551065789, yours -1.09145189298 -- off by 1.090e+00, a relative 1.084e+03, 5.44e+07x the tolerance allclose would allow)",
+              "code_chars": 3891
+            },
+            {
+              "index": 37,
+              "parent_index": 35,
+              "program_id": "76f469a324ce64a9",
+              "iteration": 39,
+              "change_summary": "",
+              "score": 14.854338723241213,
+              "speedup": 14.854338723241213,
+              "num_visits": 7,
+              "valid": true,
+              "error": "",
+              "code_chars": 2391
+            },
+            {
+              "index": 38,
+              "parent_index": 35,
+              "program_id": "9c4057ba867c5824",
+              "iteration": 37,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (worst element 306 of 3197: reference 2.00774555057e-05, yours 14.0953098914 -- off by 1.410e+01, a relative 7.020e+05, 1.38e+09x the tolerance allclose would allow)",
+              "code_chars": 3136
+            },
+            {
+              "index": 39,
+              "parent_index": 34,
+              "program_id": "5d9eb9015b90b367",
+              "iteration": 38,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: ValueError: matmul: Input operand 1 has a mismatch in its core dimension 0, with gufunc signature (n?,k),(k,m?)->(n?,m?) (size 46 is different from 23)",
+              "code_chars": 2476
+            },
+            {
+              "index": 40,
+              "parent_index": 37,
+              "program_id": "c1df744b14870288",
+              "iteration": 40,
+              "change_summary": "",
+              "score": 14.156922570245392,
+              "speedup": 14.156922570245392,
+              "num_visits": 2,
+              "valid": true,
+              "error": "",
+              "code_chars": 1855
+            },
+            {
+              "index": 41,
+              "parent_index": 37,
+              "program_id": "d51e24a2a3d2a3d4",
+              "iteration": 42,
+              "change_summary": "",
+              "score": 19.43103224824699,
+              "speedup": 19.43103224824699,
+              "num_visits": 3,
+              "valid": true,
+              "error": "",
+              "code_chars": 2023
+            },
+            {
+              "index": 42,
+              "parent_index": 37,
+              "program_id": "3cc6384fcc09251f",
+              "iteration": 41,
+              "change_summary": "",
+              "score": null,
+              "speedup": null,
+              "num_visits": 1,
+              "valid": false,
+              "error": "6/6 problems were not solved correctly: is_solution rejected the output (your answer holds a non-finite value the reference does not)",
+              "code_chars": 2712
+            },
+            {
+              "index": 43,
+              "parent_index": 41,
+              "program_id": "1eded700e1aa474a",
+              "iteration": 45,
+              "change_summary": "",
+              "score": 23.50573328570071,
+              "speedup": 23.50573328570071,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1819
+            },
+            {
+              "index": 44,
+              "parent_index": 40,
+              "program_id": "cf5a090797f9598c",
+              "iteration": 44,
+              "change_summary": "",
+              "score": 14.194322162370314,
+              "speedup": 14.194322162370314,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 1979
+            },
+            {
+              "index": 45,
+              "parent_index": 41,
+              "program_id": "f690f057384ed112",
+              "iteration": 43,
+              "change_summary": "",
+              "score": 14.23136737896592,
+              "speedup": 14.23136737896592,
+              "num_visits": 1,
+              "valid": true,
+              "error": "",
+              "code_chars": 2164
+            }
+          ]
+        },
+        "test": {
+          "baseline": {
+            "speedup": 0.9913939815017087,
+            "score": 0.9913939815017087,
+            "valid_problems": 6,
+            "problems": 6,
+            "baseline_ms": 160.5521651666398,
+            "candidate_ms": 162.16328400029548,
+            "slowest": [
+              {
+                "seed": 14,
+                "shard": 6,
+                "baseline_ms": 158.4217,
+                "candidate_ms": 170.1925,
+                "speedup": 0.9308,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 15,
+                "shard": 7,
+                "baseline_ms": 164.9767,
+                "candidate_ms": 170.4609,
+                "speedup": 0.9678,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 16,
+                "shard": 7,
+                "baseline_ms": 165.5365,
+                "candidate_ms": 167.2422,
+                "speedup": 0.9898,
+                "valid": true,
+                "error": ""
+              }
+            ],
+            "profile": "Line #      Hits         Time  Per Hit   % Time  Line Contents\n==============================================================\n     6         1          0.0      0.0      0.0      A = np.array(problem['A'])\n     7         1          0.0      0.0      0.0      B = np.array(problem['B'])\n     8         1          0.0      0.0      0.0      C = np.array(problem['C'])\n     9         1          0.0      0.0      0.0      y = np.array(problem['y'])\n    10         1          0.0      0.0      0.0      x0 = np.array(problem['x_initial'])\n    11         1          0.0      0.0      0.0      tau = float(problem['tau'])\n    12         1          0.0      0.0      0.0      N, m = y.shape\n    13         1          0.0      0.0      0.0      n = A.shape[1]\n    14         1          0.0      0.0      0.0      p = B.shape[1]\n    15         1          0.1      0.1      0.0      x = cp.Variable((N + 1, n), name='x')\n    16         1          0.0      0.0      0.0      w = cp.Variable((N, p), name='w')\n    17         1          0.0      0.0      0.0      v = cp.Variable((N, m), name='v')\n    18         1          0.6      0.6      0.2      obj = cp.Minimize(cp.sum_squares(w) + tau * cp.sum_squares(v))\n    19         1          0.0      0.0      0.0      cons = []\n    20         1          0.4      0.4      0.1      cons.append(x[0] == x0)\n    21        47          0.0      0.0      0.0      for t in range(N):\n    22        46         25.7      0.6      7.8          cons.append(x[t + 1] == A @ x[t] + B @ w[t])\n    23        47          0.0      0.0      0.0      for t in range(N):\n    24        46         20.7      0.4      6.2          cons.append(y[t] == C @ x[t] + v[t])\n    25         1          1.7      1.7      0.5      prob = cp.Problem(obj, cons)\n    26         1          0.0      0.0      0.0      try:\n    27         1        282.0    282.0     85.1          prob.solve()\n    34         1          0.0      0.0      0.0      if prob.status not in {cp.OPTIMAL, cp.OPTIMAL_INACCURATE} or x.value is None:\n    37         1          0.1      0.1      0.0      return {'x_hat': x.value.tolist(), 'w_hat': w.value.tolist(), 'v_hat': v.value.tolist()}",
+            "seconds": 13.476907279000443,
+            "limits_unavailable": [],
+            "error": ""
+          },
+          "best": {
+            "speedup": 22.680797110689777,
+            "score": 22.680797110689777,
+            "valid_problems": 6,
+            "problems": 6,
+            "baseline_ms": 157.42260866682045,
+            "candidate_ms": 6.943840832415542,
+            "slowest": [
+              {
+                "seed": 16,
+                "shard": 7,
+                "baseline_ms": 156.6565,
+                "candidate_ms": 7.1514,
+                "speedup": 21.9058,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 15,
+                "shard": 7,
+                "baseline_ms": 155.0041,
+                "candidate_ms": 6.9978,
+                "speedup": 22.1503,
+                "valid": true,
+                "error": ""
+              },
+              {
+                "seed": 17,
+                "shard": 8,
+                "baseline_ms": 156.3015,
+                "candidate_ms": 6.9416,
+                "speedup": 22.5167,
+                "valid": true,
+                "error": ""
+              }
+            ],
+            "profile": "Line #      Hits         Time  Per Hit   % Time  Line Contents\n==============================================================\n     4         1          0.0      0.0      0.4      A = np.asarray(problem[\"A\"], dtype=float)\n     5         1          0.0      0.0      0.2      B = np.asarray(problem[\"B\"], dtype=float)\n     6         1          0.0      0.0      0.2      C = np.asarray(problem[\"C\"], dtype=float)\n     7         1          0.0      0.0      0.4      y = np.asarray(problem[\"y\"], dtype=float)\n     8         1          0.0      0.0      0.0      x0 = np.asarray(problem[\"x_initial\"], dtype=float)\n     9         1          0.0      0.0      0.0      tau = float(problem[\"tau\"])\n    11         1          0.0      0.0      0.0      N, m = y.shape\n    12         1          0.0      0.0      0.0      n = A.shape[0]\n    13         1          0.0      0.0      0.0      p = B.shape[1]\n    15         1          0.0      0.0      0.4      Q = B @ B.T\n    32        46          0.4      0.0      3.6          S = C @ P_prior @ C_T + R\n    34        46          2.9      0.1     29.7          K = np.linalg.solve(S.T, (P_prior @ C_T).T).T  # K = P C^T S^{-1}\n    35        46          0.2      0.0      2.5          innovation = y[t] - C @ x_prior\n    36        46          0.1      0.0      1.3          x_post = x_prior + K @ innovation\n    37        46          0.4      0.0      3.8          P_post = P_prior - K @ S @ K.T\n    38        46          0.4      0.0      3.8          P_post = (P_post + P_post.T) / 2\n    40        46          0.1      0.0      0.6          x_filt[t] = x_post\n    41        46          0.1      0.0      0.7          P_filt[t] = P_post\n    43        46          0.1      0.0      1.2          x_prior = A @ x_post\n    44        46          0.4      0.0      3.9          P_prior = A @ P_post @ A_T + Q\n    54        46          0.6      0.0      5.8          P_pred = A @ P_filt[t] @ A_T + Q\n    56        46          2.9      0.1     30.0          G = np.linalg.solve(P_pred.T, (P_filt[t] @ A_T).T).T\n    57        46          0.4      0.0      4.3          x_smooth[t] = x_filt[t] + G @ (x_smooth[t + 1] - A @ x_filt[t])\n    60         1          0.4      0.4      4.0      B_pinv = np.linalg.pinv(B)\n    68         1          0.1      0.1      0.7          \"v_hat\": v_hat.tolist(),",
+            "seconds": 8.15011166700424,
+            "limits_unavailable": [],
+            "error": ""
+          },
+          "speedup_gain": 21.68940312918807
+        }
+      },
+      "actor_usage": {
+        "calls": 105,
+        "failures": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "model_seconds": 2761.273892
+      }
+    }
+  ],
+  "failures": [],
+  "model_usage": {
+    "calls": 160,
+    "failures": 0,
+    "prompt_tokens": 260681,
+    "completion_tokens": 256644,
+    "total_tokens": 517325,
+    "model_seconds": 1626.406517
+  },
+  "repair": {
+    "attempts_allowed": 4,
+    "checked": 121,
+    "failed": 113,
+    "repaired": 2,
+    "gave_up": 37
+  },
+  "reply_damage": {
+    "drawn": 160,
+    "damaged": 2,
+    "attempts_allowed": 4
+  }
+}
