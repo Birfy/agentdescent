@@ -1286,3 +1286,39 @@ def test_the_cpu_limit_scales_with_the_cores_a_candidate_may_use():
     assert "THREAD_BUDGET_FACTOR" in source, (
         "--cpu-seconds no longer scales with the core count, so an honestly "
         "parallel candidate is killed for being parallel")
+
+
+def test_only_one_sandbox_is_timed_at_a_time():
+    """Concurrency has to change the wall clock and not the score.
+
+    This task's metric *is* a wall-clock ratio, and a candidate and its
+    reference do not respond to contention alike. Measured on `polynomial_real`
+    at the harness's own `--repeats 3`, the winning `@njit(parallel=True)`
+    solver against its `np.roots` reference, with N spinning processes beside
+    it: 834.4x at 0, **3.2x at 2**, 2.6x at 5. The single-threaded solver on the
+    same task holds at 535x / 539x / 457x, so it is the parallel candidate being
+    measured on a machine that is not there -- an OpenMP region that cannot get
+    its threads spins rather than runs.
+
+    With `--workers 3` the search runs three sandboxes, so without this lock a
+    parallel candidate's score is a lottery on whether its evaluation collided
+    with another. That is not a noisy measurement, it is a different one.
+    """
+    import inspect
+    import threading as _threading
+
+    assert isinstance(algotune._EVALUATION, type(_threading.Lock())), (
+        "the evaluation mutex is gone or is no longer a lock")
+
+    source = inspect.getsource(algotune.run_candidate)
+    assert "with _EVALUATION:" in source, (
+        "run_candidate no longer serialises the sandbox, so three workers time "
+        "three candidates against each other")
+    # It has to be around the timed run and not around the whole function, or it
+    # serialises the search rather than the measurement.
+    held = source[source.index("with _EVALUATION:"):]
+    held = held[:held.index("except subprocess.TimeoutExpired")]
+    assert "subprocess.run(" in held, "the lock no longer covers the timed run"
+    assert "validate_source" not in held and "write_text" not in held, (
+        "the lock now covers the gate or the file writes; that serialises work "
+        "that does not need exclusion")

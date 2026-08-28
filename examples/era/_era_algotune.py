@@ -81,6 +81,7 @@ import json
 import math
 import subprocess
 import tempfile
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -585,6 +586,35 @@ def _zero_metrics(error: str) -> Dict[str, Any]:
     }
 
 
+#: Only one sandbox at a time, however many workers the search is running.
+#:
+#: This task's metric *is* a wall-clock ratio, so anything that perturbs timing
+#: perturbs the score, and a candidate and its reference do not respond to
+#: contention alike. Measured on `polynomial_real` at the harness's own
+#: `--repeats 3`, with the winning `@njit(parallel=True)` Aberth solver and its
+#: `np.roots` reference, against N spinning processes:
+#:
+#:     load   reference   candidate   reported
+#:     0      117.6 ms      0.141 ms     834.4x
+#:     2      122.5 ms     38.555 ms       3.2x
+#:     5      165.2 ms     64.006 ms       2.6x
+#:
+#: A 260x collapse, because an OpenMP region that cannot get its threads spins
+#: rather than runs while the single-threaded reference barely notices. The
+#: single-threaded Durand-Kerner solver on the same task holds at 535x / 539x /
+#: 457x, so this is not noise in the harness -- it is the parallel candidate
+#: being measured on a machine that is not there.
+#:
+#: `--workers 1` would also fix it and costs three times the wall clock. This
+#: costs almost nothing instead: the sandbox is 27-34% of a rollout on the runs
+#: measured so far and the rest is waiting on the model, so three workers still
+#: overlap on the two thirds that is API latency.
+#:
+#: Scoped to this task deliberately. The other ERA entry points score accuracy,
+#: where contention costs wall clock and nothing else; here it costs the number.
+_EVALUATION = threading.Lock()
+
+
 def run_candidate(
     code: str,
     *,
@@ -672,9 +702,14 @@ def run_candidate(
         )
         started = time.monotonic()
         try:
-            completed = subprocess.run(
-                command, capture_output=True, text=True,
-                timeout=timeout + 10.0, env=env, cwd=scratch)
+            # Held across the run itself and nothing else: the gate, the file
+            # writes and the JSON parse around it are cheap and need no
+            # exclusion, and holding it over them would serialise the search
+            # rather than the measurement.
+            with _EVALUATION:
+                completed = subprocess.run(
+                    command, capture_output=True, text=True,
+                    timeout=timeout + 10.0, env=env, cwd=scratch)
         except subprocess.TimeoutExpired:
             return {"ok": False,
                     "error": f"timeout after {timeout + 10.0:.0f}s",
