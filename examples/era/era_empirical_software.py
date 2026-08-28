@@ -1068,12 +1068,21 @@ def build_parser() -> argparse.ArgumentParser:
     add_standard_args(parser, model_default="glm-5.2", max_seconds_default=1800.0,
                       eval_concurrency_default=None)
     parser.set_defaults(provider="openai", async_ratio=1)
-    parser.add_argument("--staleness", default="guarded",
+    # `full`: for an append-only tree the other two are not conservative, they
+    # are lossy -- they discard finished rollouts and put a regression filter on
+    # the survivors, for a rebase hazard that cannot occur when a card carries a
+    # whole program and lands at a `parent_index` the head cannot move. The
+    # measured cost, and why REBASE is the worse branch, is written out over
+    # `--staleness` in `examples/era/era_algotune.py`.
+    parser.add_argument("--staleness", default="full",
                         choices=["guarded", "reflective", "full"],
                         help=("what to do with an expansion proposed against a "
                               "head the merger has since moved. The tree is "
-                              "append-only, so `full` is the honest default for "
-                              "a comparison and `guarded` the conservative one"))
+                              "append-only and every card is re-executed before "
+                              "it becomes a node, so staleness has no referent "
+                              "here and `full` keeps the whole budget; `guarded` "
+                              "and `reflective` discard finished rollouts and "
+                              "re-impose a regression filter on the survivors"))
     parser.add_argument("--iterations", type=int, default=6,
                         help="FUTS expansions in total (upstream's num_iterations)")
     parser.add_argument("--workers", type=int, default=3)

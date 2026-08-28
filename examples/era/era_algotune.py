@@ -223,12 +223,48 @@ def build_parser() -> argparse.ArgumentParser:
                               f"{len(TASKS)} this port can run"))
     parser.add_argument("--list-tasks", action="store_true",
                         help="print the runnable task names and exit")
-    parser.add_argument("--staleness", default="guarded",
+    # `full`, because for a tree the other two are not conservative, they are
+    # lossy. A staleness budget assumes a card is a *patch against head*: propose
+    # two commits late and it may no longer apply, so `alpha` bounds how far the
+    # runtime will try to rebase. Neither half of that premise holds here. The
+    # card carries a whole program in `ops["code"]`, so there is nothing that can
+    # fail to apply. Its place in the tree is `parent_index` into `EraTree.nodes`,
+    # and `add_node` only appends -- an index computed against an older tree names
+    # the same parent and can never fall out of range, because the tree only
+    # grows. And the program is fully re-executed against the held-out shards
+    # before it can become a node, so no part of the card is taken on trust.
+    #
+    # What `guarded` does instead, measured on the 99-rollout `polynomial_real`
+    # run: 22 of 99 finished rollouts discarded -- a model call and a scoring pass
+    # each -- leaving 78 nodes where the budget paid for 100. Both of its branches
+    # are wrong here, and the second is the worse one:
+    #
+    #   eta > alpha       DISCARD. A finished rollout thrown away for a hazard
+    #                     that cannot occur in an append-only tree.
+    #   0 < eta <= alpha  REBASE, which in `async_evolve` is
+    #                     `head.evidence_eval(card) <= cand.evidence_eval(card)`
+    #                     -- the card is dropped unless it beats head on its own
+    #                     task. That is `--repair-regressions` under another name,
+    #                     the filter this port removed on the evidence that the
+    #                     winning lineage runs through nodes at 0.018x and 0.949x,
+    #                     and it costs an extra scored sandbox run per card to
+    #                     apply. It is not even reachable as documented on every
+    #                     domain: it is a no-op wherever cards carry no scorable
+    #                     trajectory, so it bites exactly the ports that do.
+    #
+    # `full` skips both. Every card is ingested, every rollout becomes a node, and
+    # the tree's own selection decides what is worth expanding -- which is the
+    # only thing that ever should have. `guarded` remains available for a run that
+    # wants the old behaviour, but it is a budget cut, not a safety margin.
+    parser.add_argument("--staleness", default="full",
                         choices=["guarded", "reflective", "full"],
                         help=("what to do with an expansion proposed against a "
                               "head the merger has since moved. The tree is "
-                              "append-only, so `full` is the honest default for "
-                              "a comparison and `guarded` the conservative one"))
+                              "append-only and every card is re-executed before "
+                              "it becomes a node, so staleness has no referent "
+                              "here and `full` keeps the whole budget; `guarded` "
+                              "and `reflective` discard finished rollouts and "
+                              "re-impose a regression filter on the survivors"))
     parser.add_argument("--iterations", type=int, default=6,
                         help=("FUTS expansions per task (upstream's "
                               "num_iterations). Each task gets its own tree"))

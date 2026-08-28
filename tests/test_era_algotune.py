@@ -1322,3 +1322,48 @@ def test_only_one_sandbox_is_timed_at_a_time():
     assert "validate_source" not in held and "write_text" not in held, (
         "the lock now covers the gate or the file writes; that serialises work "
         "that does not need exclusion")
+
+
+def test_a_finished_rollout_is_never_discarded_for_being_stale():
+    """The tree is append-only, so `stale` has nothing to refer to.
+
+    A staleness budget exists for artifacts where a card is a *patch against
+    head*: propose two commits late and the patch may not apply, so `alpha`
+    bounds how far the runtime will try to rebase. Neither half of that holds
+    for this port.
+
+    * The card carries a whole program in `ops["code"]`, not a patch, so there
+      is nothing that can fail to apply.
+    * Its place in the tree is `parent_index` into `EraTree.nodes`, and
+      `add_node` only ever appends -- so an index computed against an older
+      tree names the same parent, and can never fall out of range, because the
+      tree only grows.
+    * `EraTreeAggregator.step` re-executes the program against the held-out
+      shards before it becomes a node, so nothing is taken on trust.
+
+    Under `guarded` the 99-rollout `polynomial_real` run discarded 22 of 99
+    finished rollouts -- a model call and a scoring pass each -- and built 78
+    nodes where the budget paid for 100. Worse, `guarded`'s middle band is
+    `head.evidence_eval(card) <= cand.evidence_eval(card)`: the card is dropped
+    unless it beats head on its own task. That is the regression filter this
+    port removed on the evidence that the winning lineage runs through nodes at
+    0.018x and 0.949x, reintroduced by the scheduler rather than by a flag.
+    """
+    parser = port.build_parser()
+    args = parser.parse_args(["--tasks", "svd", "--yes"])
+    assert args.staleness == "full", (
+        "the default went back to a policy that discards finished rollouts; a "
+        "tree's nodes do not conflict, so nothing here is made safer by it")
+
+    from agentdescent.staleness import StaleAction, get_policy
+
+    policy = get_policy(args.staleness)
+    for eta in (0, 1, 5, 50):
+        assert policy.decide(eta, 0, False) is StaleAction.ACCEPT, (
+            f"a card {eta} versions behind head is still a valid child of the "
+            "parent it names; the default must not drop or re-verify it")
+
+    # And the two it replaces do both of the things the docstring says.
+    guarded = get_policy("guarded")
+    assert guarded.decide(6, 5, False) is StaleAction.DISCARD
+    assert guarded.decide(1, 5, False) is StaleAction.REBASE
