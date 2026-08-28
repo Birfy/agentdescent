@@ -2,10 +2,10 @@
 
 Eleven entry points, because ERA ships four tasks on one search: the Kaggle
 regression upstream bundles, the paper's *numerical solution of integrals*,
-double-precision evaluation of the Gauss hypergeometric function, and equation
-discovery on LLM-SRBench. The contract is per entry point -- it is about the
-command line a user types -- so all four are rows here, and none of them adds an
-algorithm to the fidelity table.
+double-precision evaluation of the Gauss hypergeometric function, equation
+discovery on LLM-SRBench, and the AlgoTune speedup benchmark. The contract is
+per entry point -- it is about the command line a user types -- so all five are
+rows here, and none of them adds an algorithm to the fidelity table.
 
 Ten of the eleven where numpy is absent: the LLM-SRBench task's scoring module
 maps its grammar's function names onto numpy's, so its entry point cannot be
@@ -26,6 +26,7 @@ import pytest
 from examples.ace import ace_context_evolution as ace
 from examples.adas import adas_meta_agent_search as adas
 from examples.dgm import dgm_self_improve as dgm
+from examples.era import era_algotune as era_algotune
 from examples.era import era_empirical_software as era
 from examples.era import era_hard_integrals as era_integrals
 from examples.era import era_hypergeometric as era_hyp2f1
@@ -95,6 +96,12 @@ PORTS = (
     # file rather than drawing or downloading, so `load_suite` is the boundary
     # a dry-run must not cross.
     Port(era_hyp2f1, "iterations", "glm-5.2", 1800.0, "load_suite",
+         provider="openai", async_ratio=1, budget_is_iterations=True),
+    # ERA's AlgoTune task: one tree per benchmark task, scored in speedup over
+    # the task's own reference implementation. Same deviations as its siblings;
+    # `--iterations` is per task, because each task is its own search, and
+    # `prepare_suite` is the boundary a dry-run must not cross.
+    Port(era_algotune, "iterations", "glm-5.2", 1800.0, "prepare_suite",
          provider="openai", async_ratio=1, budget_is_iterations=True),
 )
 

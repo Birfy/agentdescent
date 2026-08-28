@@ -254,7 +254,7 @@ that says exactly which kind of port they are.
 
 | | Algorithms |
 |---|---|
-| **Benchmark-faithful** | ACE (FiNER-139), GEPA (HotpotQA), EvoSkill (OfficeQA / FinQA), SkillOpt (SearchQA), ADAS (MGSM, GPQA), DGM (SWE-bench Verified ids, vendored bugs), OpenEvolve (function minimization), ERA (Kaggle Playground S3E1; the same search also runs the paper's integrals task and 2F1 against a 25-digit mpmath reference, both on suites constructed here, and LLM-SRBench, which is not) |
+| **Benchmark-faithful** | ACE (FiNER-139), GEPA (HotpotQA), EvoSkill (OfficeQA / FinQA), SkillOpt (SearchQA), ADAS (MGSM, GPQA), DGM (SWE-bench Verified ids, vendored bugs), OpenEvolve (function minimization), ERA (Kaggle Playground S3E1; the same search also runs the paper's integrals task and 2F1 against a 25-digit mpmath reference, both on suites constructed here) |
 | **Mechanism microports** | PromptBreeder, AFlow, Self-Refine (GSM8K), Reflexion (GSM-Hard) |
 | **Self-edit analogues** | SICA, Gödel Agent (GSM-Hard) |
 | **Environment analogues** | Voyager (crafting world), SkillWeaver (settings site) |
@@ -267,7 +267,7 @@ python -m examples.openevolve.openevolve_program_evolution --dry-run  # program 
 python -m examples.era.era_empirical_software --dry-run     # empirical-software tree search (ERA)
 python -m examples.era.era_hard_integrals --dry-run         # the same search on hard integrals (ERA)
 python -m examples.era.era_hypergeometric --dry-run         # ... and on 2F1, against a 25-digit reference (ERA)
-python -m examples.era.era_llm_srbench --dry-run            # ... and on LLM-SRBench equation discovery (ERA)
+python -m examples.era.era_algotune --dry-run               # ... and on AlgoTune, scored in speedup (ERA)
 ```
 
 Fidelity is to the **released code**, not just the paper (e.g. EvoSkill's frontier

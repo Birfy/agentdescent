@@ -8,48 +8,114 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
-- **ERA runs LLM-SRBench — a benchmark this repository did not build.**
-  `examples/era/era_llm_srbench.py` is a fourth task on the same flat-PUCT tree
-  search, the same aggregator, the same sandbox and the same governance layer,
-  behind the same `Domain` seam the integrals and 2F1 tasks use. What is new is
-  where the yardstick comes from:
-  [LLM-SRBench](https://arxiv.org/abs/2504.10415) (ICML 2025 Oral) is a
-  published set of scientific equation-discovery problems with its own metrics
-  and its own leaderboard of LLM-based methods. The other two constructed tasks
-  answer "is this search any good?" against a bar this repository set; this one
-  does not.
+- **A fourth ERA task: AlgoTune, scored in speedup rather than accuracy.**
+  `examples/era/era_algotune.py` runs the *same* flat-PUCT search, aggregator,
+  sandbox and governance layer as the other three ERA entry points over
+  [AlgoTune](https://github.com/oripress/AlgoTune)
+  ([arXiv:2507.15887](https://arxiv.org/abs/2507.15887)) — 147 of its 154 tasks,
+  **one tree per task**, with the task's own reference implementation as the root
+  node and its own `is_solution` as the correctness oracle.
 
-  Scored on **LSR-Transform** — 111 Feynman equations rearranged so the closed
-  form being asked for is not one a model has memorised — under the benchmark's
-  own per-problem protocol, upstream's answer format, upstream's linear root and
-  upstream's single `BFGS` from all ones:
+  Every ERA task so far optimised accuracy. This one holds accuracy fixed and
+  optimises time: a candidate is scored by how much faster than the reference it
+  is, and a solution the checker rejects scores nothing at all, however fast —
+  AlgoTune's own rule, and what keeps the benchmark about speed. The baseline is
+  not a strawman: it is `scipy.linalg.eig`, `scipy.integrate.solve_ivp`,
+  `scipy.signal.upfirdn`, `scipy.spatial.Delaunay`.
 
-  | LSR-Transform, all 111 | SA | Acc(0.1) | median NMSE | budget |
-  |---|---|---|---|---|
-  | LaSR (paper, best backbone) | 6.31% | 50.45% | 0.0011 | millions of GP mutations |
-  | LLM-SR (paper, best backbone) | 31.53% | 39.64% | 0.0091 | 250 prompts |
-  | here, `glm-5.2` | — | 36.9% | 0.102 | 18.5 calls |
-  | **here, `deepseek-v4-flash`** | **41.4%** | **56.8%** | **2.15e-08** | **16.5 calls** |
+  Three things make the number mean something. The root node *is* the reference,
+  lifted out of its `Task` class into a runnable program by an AST transform that
+  raises rather than guesses when it cannot (`_algotune_tasks.derive_seed_program`),
+  and a test checks the lifted program computes what the class computed. The
+  problem sizes are **upstream's published ones**, read from AlgoTune's own
+  `reports/generation.json`, so two runs are comparable without either
+  calibrating against its host. And the reference is re-timed inside the sandbox
+  beside the candidate, on the same problem, reference first — a baseline
+  measured once on the host and reused would make the score move when the
+  machine got busy rather than when the program got faster.
 
-  Five protocol settings here are stricter than the benchmark's own — 4 000
-  training rows against 80 000, selection on a 25% validation slice rather than
-  full-train MSE, and a non-finite prediction failing the whole problem where
-  upstream drops the point — so those are floors.
+  147 rather than 154 because two want `os.urandom`, two do not lift out of
+  their class, `lqr`'s own checker rejects its own baseline, and two need a
+  dependency this repository does not carry. It was 72 until AlgoTune's own
+  pinned dependency set went in (OR-Tools, networkx, scikit-learn, jax, SymPy,
+  POT, PySAT, faiss, mpmath, hdbscan, cryptography); the gap had never been the
+  benchmark, only this port's environment. Their
+  reference does not lift out of its class. `lqr` clears both filters and is
+  still excluded, and the reason is upstream's: its own `is_solution` calls
+  `float()` on a 1×1 array, which NumPy has refused since 1.25, so the reference
+  is invalid by the task's own oracle.
 
-  What it recovered is the part worth reading: Bohr energy levels solved for the
-  principal quantum number, the Planck distribution solved for temperature,
-  waveguide dispersion returned as `c*sqrt(k**2 + (pi/d)**2)` where the dataset
-  poses it with `d` multiplied out, relativistic Doppler, and the paramagnetic
-  two-level partition as the two-exponential expansion of `2n*cosh(mu*B/kT)`.
+  `python -m examples.era.era_algotune --list-tasks` prints the runnable set;
+  `--tasks all` runs it. Notes in [`docs/algo-era.md`](docs/algo-era.md), offline
+  tests in `tests/test_era_algotune.py`.
 
-- **`python -m tools.score_symbolic_accuracy` scores the paper's third metric.**
-  Acc(0.1) and NMSE ask whether an answer *predicts* the held-out samples;
-  symbolic accuracy asks whether it **is the equation**, and that is the column
-  separating discovery from interpolation. It is a separate tool because it needs
-  the ground truth, which must never come near the search. A deterministic sympy
-  check runs before the judge and settles what it can, putting a floor under the
-  metric that depends on no model. The judge is whatever `--model` names and not
-  the paper's GPT-4o, which the output file states.
+  **Measured** on the eight tasks AlphaEvolve, MetaEvolve and OpenEvolve all
+  publish, one run each against deepseek-v4-flash with 45 expansions per tree:
+  harmonic-mean held-back speedup **2.195x**, against AlphaEvolve's 1.392x and
+  MetaEvolve's 2.045x on the same eight, ahead on five of eight against each.
+  The largest are algorithm changes rather than flag-twiddling: 540.172x on
+  `polynomial_real` (a numba Aberth iteration for `np.roots`'s companion-matrix
+  eigenvalue solve), 5.019x on `fft_cmplx_scipy_fftpack`, 3.995x on
+  `psd_cone_projection` (`eigh` and a broadcast for `eig` and a materialised
+  `np.diag`). One is not: `lu_factorization`'s 4.464x skips the reference's
+  three `.tolist()` calls, which is legal and is 132.5 ms of its 183.2 ms, but
+  is not a better factorisation — discounting it gives 1.782x. Two tasks finish
+  *below* 1.0x on the held-back sets after improving on the sets they could see,
+  which is what the split is for. Table, caveats and the per-task comparison in
+  [`docs/algo-era.md`](docs/algo-era.md#measured-results--algotune) and
+  [`bench/results/era-algotune-model-prior.md`](bench/results/era-algotune-model-prior.md).
+
+- **A model prior in PUCT's `P(s,a)`, in place of ERA's uniform `1/N`.**
+  `--prior-exponent` (default `0.0`, which is upstream to the floating-point
+  bit) asks the mutation reply for a `PROMISE: <n>` line rating the *approach
+  after tuning* 1–10, and uses `p^k / Σp^k` as the prior. The question is
+  deliberately about the approach rather than this draft: asked the other way
+  the rating collapses into the score the evaluator already produces, and what a
+  prior is for here is separating "slow today, right idea" from "fine today,
+  finished". It is read out of the reply the port was already paying for, so it
+  costs no extra call, and a missing line takes the mean of the rated candidates
+  rather than zero.
+
+  It is predictive. Over 250 rated nodes, 60 of the 137 rated ≥8 reached 2x
+  against 3 of the 93 rated ≤6 — Fisher one-sided p=2.2e-13, 92.3% recall at
+  43.8% precision on a 26.0% base rate. Against *validity* it is worth nothing
+  (Spearman 0.046): the model can say how fast an idea would be if it worked,
+  not whether its own code runs, which is the right division of labour when the
+  sandbox already measures correctness. Visits follow it (Spearman 0.49) and
+  mean tree depth goes from 8.0 to 12.3.
+
+  On AlgoTune's eight most-published tasks it takes the harmonic mean from
+  1.440x to 2.195x, against AlphaEvolve's 1.392x and MetaEvolve's 2.045x on the
+  same eight. It is not a general accelerator: on tasks gated by `is_solution`
+  rather than by speed it aims the budget at the wall, leaving 3 valid nodes of
+  46 on `least_squares` against a uniform prior's 20, and half as many on
+  `affine_transform_2d` across three seeds. Per-task comparison and the caveats
+  in [`bench/results/era-algotune-model-prior.md`](bench/results/era-algotune-model-prior.md).
+
+### Fixed
+
+- **The AlgoTune sandbox pinned the reference's threads and not the
+  candidate's.** `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`,
+  `NUMEXPR_NUM_THREADS` and `VECLIB_MAXIMUM_THREADS` were all set to `1`, so the
+  reference's LAPACK calls ran on one core — but none of them reach numba, which
+  reads `NUMBA_NUM_THREADS` and defaults it to the core count. A candidate
+  compiled `@njit(parallel=True)` was therefore timed on every core against a
+  one-core reference.
+
+  Capping numba as well would have been the wrong repair: writing a parallel
+  implementation *is* an optimisation, and AlgoTune sets no thread policy at
+  all. So neither side is capped now, and `--cpu-seconds` is multiplied by the
+  core count, since `RLIMIT_CPU` sums CPU seconds over threads and would
+  otherwise kill a parallel candidate for using what it was given.
+
+- **A rejected answer could be told its numbers were correct.** The note
+  attached to an `is_solution` rejection flattens both sides before comparing,
+  so a solver returning the right values in the wrong container looked identical
+  to it. `affine_transform_2d` checks `proposed.shape != image.shape` before it
+  compares a value, so a flat list of the correct 20000 pixels was rejected and
+  the model was told "off by 0.000e+00, 0x the tolerance" — 13 of 29 rejections
+  in one run. The note now describes the container when it differs, and says so
+  explicitly when every number agrees and `is_solution` still refused.
 
 ## [0.4.5] — 2026-08-19
 

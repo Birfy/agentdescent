@@ -130,6 +130,8 @@ def validate_source(
     entrypoint: str = "train_and_predict",
     allowed_imports: Optional[Set[str]] = None,
     literal_top_level: bool = True,
+    allow_top_level_calls: bool = False,
+    allow_top_level_try: bool = False,
 ) -> Tuple[bool, str]:
     """Reject what the sandbox should never have to contain in the first place.
 
@@ -149,6 +151,14 @@ def validate_source(
     imports outside the set, no dunders, no ``exec``) is done elsewhere. The
     cost is bounded by the sandbox: module-level work runs under the same CPU
     limit as everything else the candidate does.
+
+    ``allow_top_level_calls=True`` admits a bare call as a statement, which is
+    how a JIT is warmed: ``_kernel(0.0, 0.0)`` after an ``@njit`` definition
+    forces compilation at import instead of inside the first timed call. It
+    grants no capability the flag above does not already grant -- ``TABLE =
+    build()`` is the same call with its result bound -- so refusing it was
+    friction rather than a boundary. Off by default all the same, because a port
+    that has no reason to compile has no reason to widen its gate.
     """
     allowed = ALLOWED_IMPORTS if allowed_imports is None else allowed_imports
     if not source.strip():
@@ -190,13 +200,22 @@ def validate_source(
         ast.Assign,
         ast.AnnAssign,
     )
+    if allow_top_level_try:
+        # `try: from x import y / except ImportError: y = None` -- how an
+        # optional dependency is bound, and how two of AlgoTune's own task files
+        # bind theirs. Refusing it does not keep anything out: the import
+        # allowlist, the dunder check and the forbidden-name check all run over
+        # `ast.walk`, so a statement inside the block is gated exactly as one
+        # outside it. What refusing it did was reject upstream's own reference.
+        allowed_top_level = allowed_top_level + (ast.Try,)
     for node in tree.body:
         if not isinstance(node, allowed_top_level):
             return False, f"top-level {type(node).__name__} is not allowed"
         if isinstance(node, ast.Expr) and not (
             isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
         ):
-            return False, "only a module docstring may be a top-level expression"
+            if not (allow_top_level_calls and isinstance(node.value, ast.Call)):
+                return False, "only a module docstring may be a top-level expression"
         if literal_top_level and isinstance(node, (ast.Assign, ast.AnnAssign)):
             value = node.value
             if not isinstance(value, (ast.Constant, ast.Tuple, ast.List, ast.Dict, ast.Set)):
@@ -346,15 +365,33 @@ _SEATBELT_PROFILE = """(version 1)
 #: of them: an OpenBLAS that helpfully starts eight threads burns a 60-second
 #: budget in eight wall-clock seconds, and the candidate is then killed for
 #: being fast. Upstream sets no thread policy and has no CPU limit to protect.
+#:
+#: The cap has to reach *both sides or neither*, and for a while it reached
+#: neither correctly. None of the variables below touch numba: a candidate
+#: compiled `@njit(parallel=True)` got `numba.get_num_threads() == os.cpu_count()`
+#: with `OMP_NUM_THREADS=1` set and the OpenMP layer selected, because numba
+#: reads its own `NUMBA_NUM_THREADS` and defaults it to the core count. The
+#: reference's LAPACK call was meanwhile pinned to one thread, so such a
+#: candidate was timed on four cores against a one-core reference -- worth 2.95x
+#: on `polynomial_real`'s Aberth winner.
+#:
+#: The first fix pinned numba too. That was wrong in the other direction:
+#: writing a parallel implementation *is* an optimisation, upstream permits it,
+#: and forbidding it invents a rule this benchmark does not have. So both sides
+#: are free instead, `RLIMIT_CPU` is scaled by the core count to stop a genuinely
+#: parallel candidate being killed for using what it was given, and the
+#: comparison stays symmetric: whatever cores the candidate can reach, the
+#: reference can reach too.
 _THREAD_ENV = {
-    "OMP_NUM_THREADS": "1",
-    "OPENBLAS_NUM_THREADS": "1",
-    "MKL_NUM_THREADS": "1",
-    "NUMEXPR_NUM_THREADS": "1",
-    "VECLIB_MAXIMUM_THREADS": "1",
     "JOBLIB_MULTIPROCESSING": "0",
     "PYTHONDONTWRITEBYTECODE": "1",
 }
+
+#: How much `RLIMIT_CPU` has to be multiplied by now that threads are not capped.
+#: `RLIMIT_CPU` is CPU-seconds summed over threads, so a wall-clock budget of `t`
+#: seconds has to become `t * cores` for a candidate using every core to survive
+#: it. This is a ceiling against a runaway, not a budget anyone should reach.
+THREAD_BUDGET_FACTOR = max(1, os.cpu_count() or 1)
 
 
 def sandbox_backend() -> Optional[str]:
@@ -410,6 +447,7 @@ def sandbox_wrapper(
     runner_args: Sequence[str],
     *,
     scratch: Path,
+    extra_env: Optional[Dict[str, str]] = None,
 ) -> Tuple[List[str], Dict[str, str]]:
     """The isolation backend this platform has, plus the environment to run it in.
 
@@ -425,11 +463,20 @@ def sandbox_wrapper(
     checks against the kernel, and a copy would be a second thing to check.
     ``runner_args`` is everything after ``python -I``: the runner script and its
     arguments, which is the only part a task owns.
+
+    ``extra_env`` is the second thing a task owns, and it exists because the
+    profile is ``--clearenv``: with no ``HOME``, a library that caches to
+    ``~/.something`` resolves it to ``/root`` and dies on the read-only bind
+    rather than falling back. Cython's ``inline`` does exactly that. Scoped per
+    task rather than added to :data:`_THREAD_ENV`, so a task that needs a
+    compiler cache does not silently change the environment the other three were
+    measured in.
     """
     backend = sandbox_backend()
     env = dict(_THREAD_ENV)
     env["TMPDIR"] = str(scratch)
     env["PATH"] = "/usr/bin:/bin"
+    env.update(extra_env or {})
 
     if backend == "Bubblewrap":
         command = [

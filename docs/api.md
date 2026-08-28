@@ -1223,7 +1223,8 @@ Candidate(
     score: Optional[float] = None,
     per_task: Mapping[str, float] = <factory>,
     selected: int = 0,
-    parent: Optional[int] = None
+    parent: Optional[int] = None,
+    prior: Optional[float] = None
 ) -> None
 ```
 
