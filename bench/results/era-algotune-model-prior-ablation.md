@@ -128,4 +128,42 @@ it does not raise a ceiling already reached (convolve2d at 104x) and it does not
 rescue a task where nothing works (eigenvectors_complex, 1.0x either way). It
 pays exactly where it was built to pay — a large win present in the draw
 distribution that plain ranking abandons, which so far is one task in five.
-Three pairs remain to run.
+
+## And it can aim the budget at a wall
+
+`least_squares` is the first task where the prior clearly *hurt*, and the
+mechanism is the one the node-level result already predicted.
+
+| | base | prior |
+|---|---:|---:|
+| valid nodes | 20/46 | **3/46** |
+| draws | 60 | 85 |
+| failed draws | 22 | 56 |
+| best on the scoring shards | 5.172x | 1.102x |
+| held-out | rejected | rejected |
+
+The ratings on that task, against validity:
+
+| promise | nodes | valid |
+|---|---:|---:|
+| 3–4 | 2 | 0 |
+| 6 | 6 | 1 |
+| 7 | 15 | 1 |
+| 8 | 17 | **0** |
+| 10 | 3 | **0** |
+
+Seventeen nodes rated 8 and three rated 10, and not one of the twenty produced a
+valid solution. The two valid rated nodes were the diffident ones. `is_solution`
+rejected 26 of the failures outright.
+
+This is Spearman(promise, validity) = 0.046 cashed out. The rating carries no
+correctness information, so on a task where the fast direction is also the wrong
+direction, aiming the exploration term by promise aims it at the wall — 56 failed
+draws against 20, and a tree with three valid nodes in it. A prior over `P(s,a)`
+can only be as good as the thing the model is confident about, and the model is
+confident about speed.
+
+Both arms lose the task anyway: the held-out set rejects each arm's winner. But
+the base arm at least found a 5.172x program to have rejected.
+
+Two pairs remain to run.
