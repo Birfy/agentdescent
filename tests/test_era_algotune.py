@@ -680,8 +680,48 @@ def test_the_rejection_note_measures_against_a_tolerance_not_a_bare_ratio():
     far = note([1.15341132656, -1.24798805191], [-1.81837003711, -1.24798805191])
     assert "2.57e+05x the tolerance" in far, far
 
-    # And the shapes-differ path is untouched, because it is the better message.
-    assert "the shape or structure differs" in note([1.0, 2.0, 3.0], [1.0, 2.0])
+    # And a shape miss still reads as one rather than as an accuracy miss.
+    mismatched = note([1.0, 2.0, 3.0], [1.0, 2.0])
+    assert "structure differs" in mismatched, mismatched
+    assert "tolerance" not in mismatched, mismatched
+
+
+def test_the_rejection_note_never_tells_a_rejected_answer_it_is_correct():
+    """Right numbers in the wrong box must not read as "0x the tolerance".
+
+    The second real defect this file did not catch, and the same shape as the
+    first: the note flattens both sides before comparing, so a solver returning
+    the correct values in the wrong container looked *identical* to it.
+    `affine_transform_2d`'s `is_solution` checks `proposed.shape != image.shape`
+    before it compares a single value, so a flat list of the correct 20000
+    pixels is rejected -- and the note said "worst element 0 of 20000: reference
+    0, yours 0 -- off by 0.000e+00, 0x the tolerance", which a model can only
+    read as "your answer is right, the harness is broken". 13 of 29 rejections
+    in one run of that task were of exactly this kind.
+
+    Two ways out, both needed: describe the container when it differs, and
+    refuse to report a passing tolerance multiple on an answer that was
+    rejected.
+    """
+    np = pytest.importorskip("numpy")
+    note = _runner_module()._accuracy_note
+
+    # Right values, wrong container: the note must name the structure.
+    flat = note({"image": np.zeros((2, 3))}, {"image": [0.0] * 6})
+    assert "the structure differs" in flat, flat
+    assert "array(2, 3)" in flat and "list[6" in flat, flat
+    assert "0x the tolerance" not in flat, flat
+
+    # Same numbers, same container, and is_solution still said no -- the note
+    # must send the model looking somewhere other than accuracy.
+    identical = note([1.0, 2.0, 3.0], [1.0, 2.0, 3.0])
+    assert "other than accuracy" in identical, identical
+    assert "off by" not in identical, identical
+
+    # A genuine miss is still reported as one, structure equal on both sides.
+    real = note([1.0, 2.0], [1.0, 2.5])
+    assert "the structure differs" not in real, real
+    assert "x the tolerance" in real, real
 
 
 @needs_sandbox

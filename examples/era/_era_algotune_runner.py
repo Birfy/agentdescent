@@ -120,6 +120,42 @@ def _numeric_leaves(value: Any, out: List[float], budget: List[int]) -> None:
     out.extend(float(x) for x in take)
 
 
+def _structure_of(value: Any, depth: int = 0) -> str:
+    """A compact description of the container an answer arrived in.
+
+    `_numeric_leaves` flattens, so on its own it cannot tell a wrong answer from
+    a right one in the wrong box -- and several tasks reject on exactly that.
+    `affine_transform_2d`'s `is_solution` checks `proposed.shape != image.shape`
+    before it compares any value, so a solver returning the correct 20000 pixels
+    as a flat list is rejected with every number identical. Measured on that
+    task, 13 of 29 rejections in one run were of that kind, and each was reported
+    to the model as "off by 0.000e+00, 0x the tolerance" -- a message that says
+    the answer is right.
+
+    Only the first element of a sequence is described, so this stays O(depth)
+    rather than O(size); a ragged container is described by its head, which is
+    enough to see that two structures differ.
+    """
+    if depth > 4:
+        return "..."
+    if isinstance(value, dict):
+        inner = ", ".join(f"{key}: {_structure_of(value[key], depth + 1)}"
+                          for key in sorted(value))
+        return "{" + inner + "}"
+    try:
+        import numpy as np
+        if isinstance(value, np.ndarray):
+            return f"array{tuple(value.shape)}"
+    except BaseException:
+        pass
+    if isinstance(value, (list, tuple)):
+        name = "list" if isinstance(value, list) else "tuple"
+        if not value:
+            return f"{name}[0]"
+        return f"{name}[{len(value)} x {_structure_of(value[0], depth + 1)}]"
+    return type(value).__name__
+
+
 def _accuracy_note(reference: Any, candidate: Any, cap: int = 20_000) -> str:
     """How far off the rejected answer was, when that can be said at all.
 
@@ -156,6 +192,16 @@ def _accuracy_note(reference: Any, candidate: Any, cap: int = 20_000) -> str:
         right: List[float] = []
         _numeric_leaves(reference, left, [cap])
         _numeric_leaves(candidate, right, [cap])
+        shape_note = ""
+        try:
+            here, there = _structure_of(reference), _structure_of(candidate)
+            if here != there:
+                shape_note = (f" (the reference came back as {here}, yours as "
+                              f"{there} -- the structure differs)")
+        except BaseException:
+            shape_note = ""
+        if shape_note:
+            return shape_note
         if not left or not right:
             return ""
         if len(left) != len(right):
@@ -171,6 +217,15 @@ def _accuracy_note(reference: Any, candidate: Any, cap: int = 20_000) -> str:
         tolerance = 1e-8 + 1e-5 * np.abs(a)
         worst = int(np.argmax(gap / tolerance))
         over = float(gap[worst] / tolerance[worst])
+        if over <= 1.0:
+            # Every number agrees, and `is_solution` still said no. Saying "0x
+            # the tolerance" here reads as "your answer is right", which is the
+            # one thing it is not; the model needs to look at dtype, ordering,
+            # a key it did not set, or a check the task makes beyond closeness.
+            return (" (every number matches the reference to within allclose, so"
+                    " is_solution rejected it for something other than accuracy"
+                    " -- check the dtype, the ordering, the keys you return, and"
+                    " any condition the task checks besides closeness)")
         absolute = float(gap[worst])
         relative = (absolute / abs(float(a[worst]))
                     if a[worst] != 0.0 else float("inf"))
