@@ -155,6 +155,52 @@ call into compiled code with no interpreted loop for numba to bite on.
 `era-algotune-when-a-compiler-pays.md` measures that across upstream's own 2595
 solvers.
 
+## Against their prompt, tuned and untuned
+
+OpenEvolve's report is staged, and each stage has a score, so their own numbers
+say what prompt engineering was worth to them:
+
+| | their prompt | score |
+|---|---|---:|
+| phase 1 | basic library mentions, no implementation details | 1.381x |
+| phase 3 | explicit implementation hints from their manual analysis | 1.886x |
+| phase 4 | final — names JAX "100x+ speedups" and interpolation orders 0–3 | **1.984x** |
+
+Tuning the prompt bought them **+43.7%**, 1.381x to 1.984x.
+
+Every number on this port's side uses AlgoTuner's own system message and names no
+technique at any point — the equivalent of their phase 1 throughout:
+
+| | this port | score |
+|---|---|---:|
+| aligned run | uniform `1/N` prior | 1.443x |
+| base arm | same, independent rollouts | 1.440x |
+| prior arm | the model's own rating in `P(s,a)` | **2.195x** |
+| prior arm | with `lu_factorization` discounted to 0.925x | 1.777x |
+
+The prior bought **+52.5%** raw, **+23.4%** discounted.
+
+| | vs their untuned 1.381x | vs their tuned 1.984x |
+|---|---:|---:|
+| base, no prior | +4.2% | −27.4% |
+| prior, discounted | +28.7% | −10.4% |
+| prior, raw | +58.9% | +10.6% |
+
+Two readings, and both are fair:
+
+* **The prior is worth about what their prompt tuning was worth.** +52.5% against
+  +43.7%, from two mechanisms that cost differently — theirs took a phase of
+  manual human analysis of what the optimisations should be, and the JAX hint
+  that came out of it is what carries their `polynomial_real`. The prior costs
+  one line in the prompt and 8 extra model calls a run.
+* **Discount the serialisation trick and it is not.** +23.4% against +43.7%, and
+  1.777x still sits below their 1.984x. A prompt that names the winning
+  technique is a strong intervention, and on this task set it is still ahead of
+  what steering the search buys.
+
+The comparison is not clean on their side either: phase 4 changed evaluator
+configuration as well as the prompt, so their +43.7% is not prompt alone.
+
 ## The honest summary
 
 Three numbers, and they say different things:
