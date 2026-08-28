@@ -51,6 +51,21 @@ All notable changes to AgentDescent are documented here. The format follows
   metric that depends on no model. The judge is whatever `--model` names and not
   the paper's GPT-4o, which the output file states.
 
+### Removed
+
+- **`main` no longer carries or advertises the paper.** The `paper/` directory
+  — LaTeX source, style file, bibliography and the 200 KB compiled PDF — is
+  gone from this branch, along with the README badge and the paper blurb that
+  linked to it. `main` is now the code, the docs and the measured results, and
+  nothing else. The write-up is kept on a separate branch with its history
+  intact; it is not referenced from here.
+
+  Nothing the code depends on moved. No test, workflow, `mkdocs.yml` entry or
+  packaging rule ever referenced `paper/`, and the per-result raw JSON stays
+  where it was, in `bench/results/`. The remaining mentions of "paper" in the
+  README and `CONTRIBUTING.md` are about the *ported algorithms'* papers, which
+  is a different thing.
+
 ## [0.4.5] — 2026-08-19
 
 ### Fixed

@@ -4,18 +4,12 @@
 > framework for self-evolving agents (skills, prompts, harnesses) where **diffs
 > are the gradients** and **the aggregator is the optimizer**.
 
-[![paper](https://img.shields.io/badge/paper-PDF-b31b1b)](https://github.com/Birfy/agentdescent/blob/main/paper/main.pdf)
 [![PyPI](https://img.shields.io/pypi/v/agentdescent)](https://pypi.org/project/agentdescent/)
 [![tests](https://github.com/Birfy/agentdescent/actions/workflows/tests.yml/badge.svg)](https://github.com/Birfy/agentdescent/actions/workflows/tests.yml)
 [![docs](https://img.shields.io/badge/docs-mkdocs--material-1f6feb)](https://birfy.github.io/agentdescent/)
 [![CI](https://github.com/Birfy/agentdescent/actions/workflows/docs.yml/badge.svg)](https://github.com/Birfy/agentdescent/actions/workflows/docs.yml)
 [![python](https://img.shields.io/badge/python-%E2%89%A53.9-1f6feb)](https://www.python.org/)
 [![license](https://img.shields.io/badge/license-MIT-3fb950)](https://github.com/Birfy/agentdescent/blob/main/LICENSE)
-
-📄 **Paper:** [*AgentDescent: Asynchronous Parallel Self-Evolution of LLM Agents by Merging
-Conflicting Edits*](paper/main.pdf) — the design, the closed-form condition under which
-merging can fire at all, and a live-model evaluation with every generating script named.
-Source and per-result raw data are in [`paper/`](paper/) and [`bench/results/`](bench/results/).
 
 AgentDescent puts the deep-learning **training stack** on top of agents. The
 "parameters" are a **library of evolvable artifacts** (skills, prompts, harness
