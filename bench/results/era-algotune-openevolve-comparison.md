@@ -1,7 +1,67 @@
 # Against OpenEvolve's eight AlgoTune tasks
 
 OpenEvolve's `examples/algotune` covers **eight** of AlgoTune's 154 tasks. This
-is where the port stands on the same eight, and what the model prior changed.
+started as a head-to-head on those eight and ended as something narrower: their
+scores are measured at problem sizes of their own choosing, so most of the
+comparison does not stand. What the model prior changed on this port's side is
+unaffected and is the part worth reading.
+
+## Read this first: six of the eight are not the same problem
+
+OpenEvolve's per-task `config.yaml` sets `algotune.data_size`, the `n` handed to
+`generate_problem`. AlgoTune calibrates that `n` per task so the reference takes
+about 100ms. OpenEvolve does not use AlgoTune's value:
+
+| task | AlgoTune's n | their n | ratio | their score |
+|---|---:|---:|---:|---:|
+| polynomial_real | 396 | 500 | 1x | 321.01x |
+| convolve2d_full_fill | 6 | 5 | 1x | 256.15x |
+| affine_transform_2d | 1123 | 100 | 11x | 3.22x |
+| psd_cone_projection | 349 | 35 | 10x | 1.94x |
+| eigenvectors_complex | 463 | 25 | 19x | 1.48x |
+| fft_cmplx_scipy_fftpack | 1860 | 95 | 20x | 2.20x |
+| lu_factorization | 1104 | 25 | 44x | 1.19x |
+| fft_convolution | 542069 | 125 | **4337x** | 1.38x |
+
+The two tasks they run at AlgoTune's size are exactly the two where they score in
+the hundreds. The six they shrink by 10x to 4337x are exactly the six where they
+score 1.19x to 3.22x — at those sizes the reference runs in microseconds and
+fixed Python overhead dominates, so there is no asymptotic win left to find.
+
+**So `1.984x` and this port's `1.443x` / `2.195x` are not measurements of the
+same thing, and the aggregate comparison below is retired.** Everything on this
+side runs at AlgoTune's calibrated sizes, which is what makes it comparable to
+upstream's own leaderboard; their aggregate is not comparable to either.
+
+Two consequences worth stating, because both correct claims made earlier in this
+file:
+
+* **`psd_cone_projection` is the control.** Both systems evolved the same program
+  — `eigh`, `np.maximum(..., out=...)`, `(eigvecs * eigvals) @ eigvecs.T`,
+  return the array. They report 1.94x at n=35; this port measures 3.995x at
+  n=349. Identical code, a factor of two in reported speedup, purely from size.
+* **The `lu_factorization` serialisation win was never available to them.** At
+  n=25 the three `.tolist()` calls move 1875 floats; at n=1104 they move 3.65
+  million and are 68% of the reference's runtime. Their solution keeps the
+  `.tolist()` and scores 1.19x, but that is not a miss — at their size there was
+  nothing there. The earlier reading, that they searched the same ground and
+  missed it, was wrong.
+
+What survives is the per-task comparison on the two size-matched tasks:
+
+| task | n (ours / theirs) | this port | OpenEvolve |
+|---|---|---:|---:|
+| polynomial_real | 396 / 500 | **540.172x** | 321.01x |
+| convolve2d_full_fill | 6 / 5 | 101.918x | **256.15x** |
+
+One each. `polynomial_real` is the stronger of the two for this port: their `n`
+is larger, so their number is not helped by a smaller problem, and they reached
+321.01x after being told "JAX — JIT compilation ... can provide 100x+ speedups"
+while this port names no technique. Their `convolve2d_full_fill` wins on a
+`float32` conversion — their prompt also names dtype as a thing to tune.
+
+The rest of this file is kept for the per-task detail and for the base-vs-prior
+comparison, which is internal to this port and unaffected.
 
 ## Their headline is 1.984x, and it is not the mean of their own table
 
