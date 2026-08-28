@@ -15,8 +15,9 @@
 | **Example** | [`examples/era/era_empirical_software.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/era_empirical_software.py) |
 | **Domain** | Kaggle Playground Series S3E1 (synthetic California housing), RMSE — upstream's own bundled task |
 | **Second task** | [`examples/era/era_hard_integrals.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/era_hard_integrals.py) — the paper's *numerical solution of integrals*, scored in correct significant digits |
-| **Third task** | [`examples/era/era_hypergeometric.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/era_hypergeometric.py) — `2F1` in double precision, scored against a 25-digit mpmath reference |
-| **Fourth task** | [`examples/era/era_algotune.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/era_algotune.py) — [AlgoTune](https://github.com/oripress/AlgoTune) ([arXiv:2507.15887](https://arxiv.org/abs/2507.15887)), scored in **speedup** over each task's own reference, one tree per task |
+| **Third task** | [`examples/era/era_hypergeometric.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/era_hypergeometric.py) — `2F1` in double precision, against a 25-digit mpmath reference |
+| **Fourth task** | [`examples/era/era_llm_srbench.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/era_llm_srbench.py) — [LLM-SRBench](https://arxiv.org/abs/2504.10415) equation discovery, on the benchmark's own metrics |
+| **Fifth task** | [`examples/era/era_algotune.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/era_algotune.py) — [AlgoTune](https://github.com/oripress/AlgoTune) ([arXiv:2507.15887](https://arxiv.org/abs/2507.15887)), scored in **speedup** over each task's own reference, one tree per task |
 | **Layer** | L1 program (`blast_radius=0.6`, AST-gated and sandbox-isolated) |
 | **Fidelity** | `benchmark_faithful` — [what the classes mean](port-fidelity.md) |
 
@@ -263,6 +264,79 @@ interval and the digit count but not the family. Problems are shuffled within a
 shard, so position is not family either. Together those are what keep the task
 "write a quadrature rule" rather than "write a dispatch table".
 
+### Alignment with the benchmark, item by item
+
+Checked against the benchmark's own code (`bench/pipelines.py`,
+`bench/datamodules.py`, `methods/llmsr/searcher.py`) and against the paper's §3,
+rather than against memory of them.
+
+**Aligned.**
+
+* **The problems** are all 240 as released, with the paper-versus-data count
+  discrepancy recorded above rather than smoothed over.
+* **The splits** are the published ones — `train` / `id_test` / `ood_test`,
+  taken verbatim — and no expansion is ever scored against a test split.
+* **The column convention.** Upstream reads `samples[:, 0]` as the output and
+  `samples[:, 1:]` as the inputs in `symbols[1:]` order. The mirror splits these
+  into named arrays, and `output_vars + input_vars == symbols` holds on every
+  subset checked, so the variable a name refers to is the variable upstream
+  means. The ground-truth reproduction test is the second, independent check on
+  the same thing.
+* **NMSE** is upstream's number. It computes `np.mean((y - ŷ)**2) / np.var(y)`;
+  this computes `Σ(ŷ-y)² / Σ(y-ȳ)²`. Those are the same quantity.
+* **Acc(0.1)** is the paper's `1(max_i |(ŷ_i - y_i)/y_i| ≤ 0.1)`. Upstream's
+  released code does not compute it at all — its pipeline logs mse, nmse, r2,
+  kendall-tau and mape — so the paper's formula is the only source, and it is
+  transcribed rather than reinvented.
+* **The ground truth** is never read by the search or by scoring.
+
+**Deviations, with the direction each one pushes.** Most make this harder than
+the benchmark's own setup; two do not, and those are the ones to watch.
+
+Two of the rows below were **closed** after this audit, and both are now flags
+rather than differences: `--answer-format program` accepts what upstream accepts
+and fits constants the way upstream fits them, and
+`python -m tools.score_symbolic_accuracy` scores the paper's third metric. The
+table records where each setting stands.
+
+| | Benchmark / LLM-SR | Here | Direction |
+|---|---|---|---|
+| what an answer may be | arbitrary Python in the `equation()` body — `np.where`, branches, loops | `--answer-format program`: **the same**. `expression` (the default): a restricted grammar | **aligned, or harder** |
+| who fits the constants | the harness, one `minimize(..., 'BFGS')` from `[1.0]*10` | `program`: **the same call**. `expression`: the candidate | **aligned, or easier** |
+| how many constants an answer may have | `MAX_NPARAMS = 10` | `program`: **the same cap**. `expression`: no cap | **aligned, or easier** |
+| what the search is selected on | MSE on the **full training set** (`searcher.py`) | NMSE on a 25% validation split carved out of train | **harder here** |
+| rows available to fit | all of train | 75% of train (the rest is the validation pool) | **harder here** |
+| LSR-Transform training rows | all 80 000 | `--train-points 4000` | **harder here** |
+| a non-finite prediction | dropped, the rest scored | fails the problem; both numbers reported | **harder here** |
+| budget per problem | 1 000 samples (~250 prompts) | 24 expansions (~16 model calls) | **harder here** |
+| **the root node** | a fitted linear model in the raw inputs | `--seed-program linear`: **the same skeleton, verbatim**. `library`: sparse regression over a nonlinear basis | **aligned, or easier** |
+| NMSE aggregation | the paper does not state mean or median | median, stated, with per-problem values in the result files | unknown |
+| symbolic accuracy | a GPT-4o judge, the paper's third metric | `tools/score_symbolic_accuracy.py`, **a different judge** | **aligned in method, not in judge** |
+
+**The fully aligned setting is `--answer-format program --seed-program linear`**:
+upstream's skeleton as the root, upstream's answer format, upstream's ten
+constants, upstream's optimiser. Everything else about it is still harder than
+the benchmark's own setup — the selection split, the fitting rows, the budget —
+so a number from it is a floor rather than a like-for-like.
+
+Two things decide how any other number here should be read. `expression` format
+leaves both the constant count and the optimiser unbounded, so a long
+interpolating fit can score well under it and a number from that setting is not
+comparable to the paper's; and symbolic accuracy now has a scorer but not the
+paper's judge, so it is reported beside the paper's column rather than in it.
+
+#### The ten-constant cap is what closes the interpolation hole
+
+Aligning the answer format does not only change what is *allowed* — it changes
+what the strong root can do. In `expression` format the library root emits a
+nine-to-eleven term fit with a free coefficient on every term. In `program`
+format the same root has to hand its terms back with `params[i]` holes, and
+there are only ten, fitted once by a gradient-based BFGS from all ones. On a
+fixture where the truth is `2*a*sin(b) + 3`, the library root scores 0.88 digits
+in program format against a hand-written correct program's 12.0. Upstream's
+`MAX_NPARAMS = 10` is not decoration: it is the thing that stops an answer from
+interpolating its way past the metric.
+
 ### Deviations this task adds
 
 1. **The gate is loosened in one place and narrowed in another.**
@@ -343,9 +417,136 @@ is not *is* the expert answer here; the search's job is to find where the line
 falls and what to do on the far side of it, from `(a, b, c, z)` alone, with no
 sight of the answer.
 
-## The fourth task — AlgoTune, and the other axis
+## The fourth task — LLM-SRBench, and a benchmark this repository did not build
 
-The three tasks above optimise **accuracy**: lower RMSE, more correct digits.
+The three tasks above are scored against a Kaggle split, against arithmetic, and
+against an arbitrary-precision reference. Two of the three run on suites
+constructed *here*, which is stated wherever they are reported and is the
+standing objection to both: the people who built the task also set the bar.
+
+[`examples/era/era_llm_srbench.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/era_llm_srbench.py)
+answers that objection directly. It runs
+**[LLM-SRBench](https://arxiv.org/abs/2504.10415)** (ICML 2025 Oral) — a
+published benchmark for scientific equation discovery, built by other people,
+with its own metrics and its own leaderboard of LLM-based methods. Nothing about
+the problems, the splits, the tolerance or the metric definitions is this
+repository's choice.
+
+| | |
+|---|---|
+| Problems | 240 in five subsets: `lsr_transform` (111 Feynman equations rearranged into unfamiliar forms) and `lsr_synth` (chemistry 36, biology 24, physics 44, materials 25) — the paper's abstract says **239**, see below |
+| Samples | LSR-Synth: 4 000 train / 500 in-domain test / 500 **out-of-distribution** test. LSR-Transform: 80 000 / 20 000, no OOD split |
+| Metrics | The paper's own: `NMSE = Σ(ŷ−y)² / Σ(y−ȳ)²`, and `Acc_τ = 1(max_i \|(ŷ_i−y_i)/y_i\| ≤ τ)` with τ = 0.1 |
+| Baseline node | Sequentially thresholded least squares over a fixed nonlinear library — SINDy's fitting step (Brunton et al., 2016) without its domain-chosen library |
+
+The **240 is the released data's count, and the paper says 239.** The gap is one
+physics problem: the paper's text reads "111 problems in the first category
+(LSR-Transform), and 128 problems in the second category (LSR-Synth), spanning
+… chemistry (36), biology (24), physics (43), and material science (25)", while
+the benchmark's own gated HuggingFace dataset card lists `lsr_synth_phys_osc` at
+44 — and the ungated mirror agrees with the card. This port follows the data,
+because the data is what gets scored: dropping a problem to make the abstract's
+arithmetic work would be reporting a benchmark nobody published.
+`test_the_released_data_holds_240_problems_where_the_paper_says_239` pins it so
+it stays a recorded fact rather than something quietly "fixed" later.
+
+### What the candidate is asked for
+
+```python
+def discover(x, y, spec):   # x: (n, d) float64, y: (n,) float64
+    ...                     # -> a closed-form equation, as a string
+```
+
+`spec` carries the column names, the output name, the benchmark's own
+one-paragraph description of the science, the per-problem time budget, and
+`spec["evaluate"]` — the grader's parser, so a method can score the forms it is
+proposing with the same code that will score its answer.
+
+The **answer is a string that is parsed, never executed**. The grammar admits
+numeric constants, the problem's variables, `pi`/`e`, `+ - * / **`, and a fixed
+list of elementary functions; it refuses comparisons, indexing, attribute access
+and every name outside that list. Two things follow, and both are load-bearing:
+
+* **It stays equation discovery.** A gradient-boosted regressor or a
+  nearest-neighbour table would win on in-domain test points and has discovered
+  nothing. Neither can be written down in this grammar. Nor can a piecewise
+  answer with enough branches, which is why `where` and the comparison operators
+  are absent rather than merely undocumented.
+* **The held-out samples stay out of reach.** The candidate is handed the
+  training arrays and nothing else; the test and OOD arrays are opened *after*
+  `discover` returns, and only ever by an interpreter walking an AST that has
+  already been validated. There is no moment at which candidate code and
+  held-out data are both live.
+
+### Why the score means something
+
+**The benchmark is somebody else's, and so is the yardstick.** `Acc_0.1` and
+NMSE are the paper's definitions, transcribed from §3 and checked in
+`tests/test_era_srbench.py`. The paper reports both per domain for LLM-SR, LaSR,
+SGA and direct prompting across three model backbones, so a number from here has
+somewhere to sit — with the caveat in the next paragraph attached to it.
+
+**The protocol is ERA's, not the benchmark's.** LLM-SRBench evaluates searchers
+that see *one problem at a time*, with the data in the model's context and a
+per-problem sample budget. Here the model never sees a data point: it writes one
+program, and that program is run sandboxed against every problem in the set.
+Same benchmark, same splits, same metrics, **different experiment** — which is
+recorded in every result file under `comparability`, in the module docstring, and
+here. The two are not interchangeable, and a table that put them in the same
+column without the note would be misleading.
+
+**The data is checked, not trusted.** The benchmark's own HuggingFace release
+(`nnheui/llm-srbench`) is gated and returns 401 without a token, so this task
+reads an ungated re-upload (`pkuHaowei/llm-srbench`), pinned to a revision.
+`tests/test_era_srbench.py::test_the_published_equations_reproduce_the_published_samples`
+re-evaluates every ground-truth expression that parses against the samples
+shipped beside it and requires NMSE < 1e-6 — which is what ties the mirror to the
+published benchmark. Two subsets' ground-truth *strings* are damaged in that copy
+(36 chemistry expressions carry a mangled parameter, `0.189…_z`; 44 physics
+expressions are templates whose `F0`/`beta`/`omega0` have no values), so they are
+excluded from that check and the test asserts they are still broken — a mirror
+that quietly fixed them should make the note stale, not silently pass. Scoring
+never touches those strings: it is numeric throughout.
+
+**The tree ranks on `min(12, -log10(NMSE))`, averaged over the problem set.**
+`Acc_0.1` is an indicator per problem — flat almost everywhere, so a search
+cannot descend it — and raw NMSE spans twelve orders of magnitude, so a mean of
+it is whichever problem failed worst. The cap is the precision of the published
+samples themselves, which are stored as float32: a ground-truth expression
+re-evaluated on them lands at NMSE ≈ 1e-13. Both benchmark metrics are reported
+beside it, for in-domain and OOD alike.
+
+### Deviations this task adds
+
+1. **A non-finite prediction fails the problem here; upstream drops the point.**
+   `bench/pipelines.py` computes NMSE over `~isnan(y_pred)`, so an equation with
+   a pole inside the test range is scored on the points either side of it. This
+   port counts a non-finite prediction as a failed problem, because a search told
+   otherwise learns to place poles. Both numbers are reported —
+   `nmse` under this rule, `nmse_upstream` under the paper's — so a result here
+   can still be laid beside a result there.
+2. **The candidate is handed an evaluator.** `spec["evaluate"]` exists because
+   the AST gate refuses `eval`, and a symbolic-regression method that cannot
+   evaluate its own candidate forms would have to re-implement the grammar and
+   hope its copy matched. A near-miss there shows up as a good method scoring
+   zero, which is a defect in the harness rather than a fact about the method.
+3. **The per-problem budget is enforced with `SIGALRM` in the runner**, not
+   trusted to the candidate. Without it one method that fails to return on one
+   problem costs every remaining problem in the shard its score.
+4. **The runner imports numpy**, unlike its two siblings, which are standard
+   library only: the candidate is handed float64 arrays and its answer is scored
+   against more of them.
+5. **Shards are dealt per domain**, not by shuffling the pooled list: every
+   shard holds each of the four domains to within one problem. A draw that
+   handed one shard no physics at all is otherwise perfectly ordinary at these
+   sizes, and a node's score would then depend on which shards the verifier drew.
+6. `score = mean digits` with no sign flip — FUTS maximises — and the engine's
+   `[0, 1]` reward is `mean_digits / 12`, exactly order-preserving with what the
+   tree ranks on.
+## The fifth task — AlgoTune, and the other axis
+
+The four tasks above optimise **accuracy**: lower RMSE, more correct digits, a
+closer equation.
 [`examples/era/era_algotune.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/era_algotune.py)
 optimises **speed**, and holds accuracy fixed while doing it.
 
@@ -871,6 +1072,172 @@ endpoint's measured knee bought **2.1×**.
     top-K node programs**, so gate-versus-test correlation can be measured
     directly rather than inferred from whichever program happened to win.
 
+## Measured results — LLM-SRBench
+
+Scoped to **LSR-Transform**: 111 Feynman equations rearranged so the closed form
+being asked for is not one a model has memorised. LSR-Synth is a run this port
+has not finished, and nothing about it is claimed here.
+
+### The method
+
+| Setting | Value |
+|---|---|
+| Protocol | `--per-problem` — one independent search per problem, which is the benchmark's own |
+| Answer format | `--answer-format program`, upstream's: `equation(..., params)` source with ten `params[i]` holes |
+| Root | `--seed-program linear`, LLM-SR's own skeleton `params[0]*x1 + ... + params[n]`, transcribed |
+| Fitting | the harness, one `scipy.optimize.minimize(..., method='BFGS')` from `[1.0]*10` — verbatim upstream |
+| Search | sync, 24 expansions per problem, 3 workers, `c_puct=1.0`, `--staleness guarded`, `--seed 0` |
+| Data | all 111 problems; `--train-points 4000` of the 80 000 shipped; 25% of train carved out for gating |
+| Shards | 6 scored, `held_out_frac=0.5`; the benchmark's own `id_test` split is scored once at the end |
+| Budget | 20 s per problem, `--max-tokens 12000` |
+
+The answers never touch the test split, and the ground truth is read by nothing
+in the loop.
+
+### The result
+
+Two models, every flag identical, so only the model differs:
+
+| LSR-Transform, all 111 | Acc(0.1) | median NMSE | mean `min(12, -log10 NMSE)` | at the cap | spent all 24 expansions | calls/problem |
+|---|---|---|---|---|---|---|
+| `glm-5.2` | 36.9% | 0.102 | 4.805 | 34 | **76** | 18.5 |
+| **`deepseek-v4-flash`** | **56.8%** | **2.15e-08** | **6.850** | **52** | 62 | **16.5** |
+
+Paired over the same problems: **33 solved by `deepseek-v4-flash` alone, 11 by
+`glm-5.2` alone**, 67 tied (exact McNemar, p = 0.0013). Fewer calls per problem,
+a third of the wall-clock, and the weaker model is the one that more often
+*exhausts* its budget — 76 problems against 62.
+
+Where the twenty points come from is specific:
+
+| input variables | 2 | 3 | 4 | 5 | 6 | 8 |
+|---|---|---|---|---|---|---|
+| `deepseek-v4-flash` | 80% | 70% | **67%** | 62% | 32% | **0%** |
+| `glm-5.2` | 40% | 40% | **26%** | 67% | 27% | **0%** |
+| problems | 5 | 30 | 27 | 21 | 22 | 6 |
+
+The whole gap is the 3- and 4-variable bands. At five variables the weaker model
+is *ahead*; at six they are within noise; at eight **both score zero on all six
+problems**. A better proposer moves the middle of the distribution and does
+nothing for the tail.
+
+Result files:
+[`era-srbench-deepseek-transform.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-srbench-deepseek-transform.json),
+[`era-srbench-aligned-transform.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-srbench-aligned-transform.json).
+
+### Symbolic accuracy, the column that separates discovery from fitting
+
+`python -m tools.score_symbolic_accuracy` scores the paper's third metric: is the
+answer *the equation*, after removing parameters and constants. On the
+`deepseek-v4-flash` run, **46 of the 109 problems whose ground truth is intact**
+are judged equivalent — 41.4% on the paper's 111-problem denominator, of which
+11 are settled by sympy without any model being asked.
+
+The cross-tabulation is the part worth keeping:
+
+| | SA: not equivalent | SA: equivalent |
+|---|---|---|
+| Acc(0.1) = 0 | 46 | **0** |
+| Acc(0.1) = 1 | 17 | 46 |
+
+Not one problem that failed Acc(0.1) was judged symbolically equivalent, so SA is
+a strict subset of the 63 numerical solves — and 17 of those solves are answers
+that predict the held-out samples without being the equation.
+
+**The judge is `deepseek-v4-flash`, not the paper's GPT-4o.** A different judge is
+a different metric; the scorer records that in its own output and the number
+belongs beside the paper's column rather than inside it. Verdicts:
+[`era-srbench-deepseek-transform-symbolic.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-srbench-deepseek-transform-symbolic.json).
+
+### Against the paper's own table
+
+Table 2's LSR-Transform block, each method at its best backbone (GPT-4o-mini):
+
+| Acc(0.1) ↑ / SA ↑ / NMSE ↓ | SA (%) | Acc(0.1) (%) | NMSE | budget per problem |
+|---|---|---|---|---|
+| Direct prompting | 7.21 | 6.31 | 0.2631 | ~250 prompts |
+| SGA | 9.91 | 8.11 | 0.2321 | ~250 prompts |
+| LaSR | 6.31 | **50.45** | **0.0011** | 25 x 10 x 550 x 33 GP mutations, LLM at `llm_weight = 0.001` |
+| LLM-SR | **31.53** | 39.64 | 0.0091 | 250 prompts (1 000 samples / 4 per prompt) |
+| **here, `deepseek-v4-flash`** | **41.4** | **56.8** | **2.15e-08** | **16.5 model calls** |
+
+The budget column is not one quantity. LLM-SR's 250 is arithmetic from its config
+(`global_max_sample_num: 1000`, `samples_per_prompt: 4`); LaSR is a genetic
+program with the LLM wired in at a 0.001 mutation weight, so its search is
+millions of candidate evaluations and its call count is not a stated number.
+Only the LLM-SR row is a like-for-like call comparison.
+
+LaSR's own row is the sharpest statement of what SA measures: **50.45% Acc against
+6.31% SA** is a method that fits rather than derives.
+
+Five settings here are still stricter than the benchmark's own: 4 000 training
+rows against 80 000; selection on a 25% validation slice rather than full-train
+MSE; 75% of train available to fit; and a non-finite prediction failing the whole
+problem where upstream drops the point and scores the rest. The numbers above are
+a floor.
+
+### What the search actually found
+
+Three answers where the model returned a rearrangement rather than a transcription:
+
+| what it is | the truth, as the dataset poses it | what the search returned |
+|---|---|---|
+| Bohr energy levels, solved for the principal quantum number | `-sqrt(2)*q**2*sqrt(-m/E_n)/(4*eps*h)` | `sqrt(-m*q**4/(eps**2*h**2*E_n))` |
+| waveguide dispersion, solved for angular frequency | `c*sqrt(d**2*k**2 + pi**2)/d` | `c*sqrt(k**2 + (pi/d)**2)` |
+| relativistic momentum, solved for velocity | `-c*p*sqrt(1/(c**2*m_0**2 + p**2))` | `params[0]*p*c/sqrt(m_0**2*c**2 + p**2) + params[1]` |
+
+The second one is the point of the benchmark in one line: the dataset poses the
+cutoff relation with `d` multiplied out, and the search hands back
+`omega = c*sqrt(k**2 + (pi/d)**2)` — the form a physicist writes.
+
+Also recovered: the Planck distribution solved for temperature (nested `log`
+intact), relativistic Doppler as `omega*sqrt(1 - v**2/c**2)/(1 + v/c)`, the
+paramagnetic two-level partition as the two-exponential expansion of
+`2n*cosh(mu*B/kT)`, isothermal expansion solved for the final volume with no spare
+parameter at all, Zeeman splitting solved for field, the driven oscillator solved
+for drive frequency, the particle-in-a-box ground state, and the Langevin
+dielectric in its `1/(1+x)` form.
+
+### Why `glm-5.2` stops at 36.9%
+
+Measured rather than argued, because the answer decides what to spend on next.
+
+**Not the budget.** Every one of the 70 failures spent all 24 expansions. The
+per-round hazard decays 10.8% → 8.1% → 5.5% and then goes **flat near 3.5%** —
+not the shape of a search closing in.
+
+**Not overfitting.** No failed problem ever reached the digit cap on its own
+validation split; the median best gate score among failures is 0.555. The search
+did not pick a bad answer over a good one, it never generated a good one.
+
+**The hypothesis collapses while the code does not.** Re-running
+`omega*(c - v)/c` with every candidate's source kept gives ten nodes carrying
+**ten distinct `program_id`s and two physical hypotheses**:
+
+| nodes | answer | score |
+|---|---|---|
+| 1, 3, 5, 9 | `omega*sqrt(1 - v**2/c**2)` | 0.363 |
+| 4, 7 | `params[0]*omega*sqrt(1 - beta**2) + params[1]` | 1.265 |
+| 0, 8 | the linear root, unchanged | 1.597 |
+
+Six of ten proposals are the Lorentz factor, which scores **worse than the linear
+baseline**, and `(c - v)/c` is never tried. The mutation prompt shows one parent
+and one score and no record of what has already been proposed, so the model
+re-samples the same prior every expansion. Extended to 72 expansions the same
+problem builds a chain **23 deep** and never leaves 1.597.
+
+The tree itself is fine: `d2/foc - d2/d1` at 72 expansions climbs 0.44 → 1.13 →
+1.60 → 1.76 → 2.27 → 12.0 along a chain 9 deep, solving at node 30 — past the
+original 25-node budget. Which regime a problem lands in is decided by sampling:
+43 of the 70 failures end with the **unchanged linear root** as the best of 25
+nodes, and structurally identical siblings split opposite ways
+(`E_n*h/(2*pi*B*Jz*mom)` solved at node 10; `E_n*h/(2*pi*B*Jz*g_)` failed at 25).
+
+Two measurements name the same quantity from opposite directions. Within one
+model, failing trees put **72–88%** of their nodes on a single score and winning
+trees **23–31%**. Across models, `deepseek-v4-flash` produces **9–13** distinct
+answers per tree against `glm-5.2`'s 3–6. The bottleneck is the diversity of
+*hypotheses*, not of programs, and not the budget.
 ## Measured results — AlgoTune
 
 ### The method
@@ -911,7 +1278,7 @@ prior is what moves it.
 
 Three caveats travel with that aggregate, and the per-task write-up carries
 them in full:
-[`bench/results/era-algotune-model-prior.md`](../bench/results/era-algotune-model-prior.md).
+[`bench/results/era-algotune-model-prior.md`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-algotune-model-prior.md).
 
 * **`lu_factorization`'s 4.464x is the reference's serialisation, not a faster
   factorisation** — it returns numpy arrays where the reference returns three
@@ -940,8 +1307,9 @@ them in full:
   `scipy.fftpack.fftn`. The reference returns its array directly, so there is no
   serialisation to skip here.
 
-Raw data: the eight `bench/results/era-algotune-prior-*.json` files and the
-winning program beside each.
+Raw data: the eight
+[`bench/results/era-algotune-prior-*.json`](https://github.com/Birfy/agentdescent/tree/main/bench/results)
+files and the winning program beside each.
 
 ## Run it
 
@@ -978,6 +1346,41 @@ python -m examples.era.era_hard_integrals --provider claude --model glm-5.2 \
     --eval-budget 200000 --problem-seconds 5
 ```
 
+LLM-SRBench takes the same flags, plus `--dataset`, `--problems`,
+`--problem-seconds` and `--train-points`:
+
+```bash
+python -m examples.era.era_llm_srbench --dry-run
+
+python -m examples.era.era_llm_srbench --provider claude --model glm-5.2 \
+    --yes --iterations 12 --workers 3 --shards 6 --test-shards 2 \
+    --problem-seconds 4 --candidate-timeout 120 --max-tokens 16000
+```
+
+`--dataset lsr_synth` (the default) runs the 129 synthetic problems, the only
+ones with an OOD split; `--dataset lsr_transform` runs the 111 rearranged Feynman
+equations; `--dataset all` runs both. `--problems N` caps the count evenly across
+subsets — a difficulty and cost knob, so a capped run is not comparable to an
+uncapped one, and every run records exactly which problems it used. Reading the
+benchmark's parquet needs `pyarrow`.
+
+`--per-problem` switches to **the benchmark's own protocol**: one independent
+search per problem, rather than one program for the whole category.
+
+```bash
+python -m examples.era.era_llm_srbench --provider claude --model glm-5.2 \
+    --per-problem --dataset lsr_transform --shards 6 --iterations 6 \
+    --workers 3 --problem-concurrency 2 --problem-seconds 8 --yes
+```
+
+There, `--iterations` is expansions *per problem*, `--shards` is how many slices
+of that problem's validation pool the search is gated on, and
+`--problem-concurrency` trades endpoint load for wall-clock. Note that rollout
+tasks are `shards * (1 - held_out_frac)` and a round proposes one expansion per
+task, so `--shards 4 --workers 3` leaves a worker idle.
+
+Offline tests: `tests/test_era_example.py`, `tests/test_era_integrals.py`,
+`tests/test_era_hyp2f1.py`, `tests/test_era_srbench.py`.
 AlgoTune takes the same flags, plus `--tasks`, `--problems`, `--repeats` and
 `--size-scale`. `--iterations` is **per task**, since each task is its own tree:
 

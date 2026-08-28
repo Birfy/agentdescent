@@ -6,8 +6,52 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.6] — 2026-08-28
+
 ### Added
 
+- **ERA runs LLM-SRBench — a benchmark this repository did not build.**
+  `examples/era/era_llm_srbench.py` is a fourth task on the same flat-PUCT tree
+  search, the same aggregator, the same sandbox and the same governance layer,
+  behind the same `Domain` seam the integrals and 2F1 tasks use. What is new is
+  where the yardstick comes from:
+  [LLM-SRBench](https://arxiv.org/abs/2504.10415) (ICML 2025 Oral) is a
+  published set of scientific equation-discovery problems with its own metrics
+  and its own leaderboard of LLM-based methods. The other two constructed tasks
+  answer "is this search any good?" against a bar this repository set; this one
+  does not.
+
+  Scored on **LSR-Transform** — 111 Feynman equations rearranged so the closed
+  form being asked for is not one a model has memorised — under the benchmark's
+  own per-problem protocol, upstream's answer format, upstream's linear root and
+  upstream's single `BFGS` from all ones:
+
+  | LSR-Transform, all 111 | SA | Acc(0.1) | median NMSE | budget |
+  |---|---|---|---|---|
+  | LaSR (paper, best backbone) | 6.31% | 50.45% | 0.0011 | millions of GP mutations |
+  | LLM-SR (paper, best backbone) | 31.53% | 39.64% | 0.0091 | 250 prompts |
+  | here, `glm-5.2` | — | 36.9% | 0.102 | 18.5 calls |
+  | **here, `deepseek-v4-flash`** | **41.4%** | **56.8%** | **2.15e-08** | **16.5 calls** |
+
+  Five protocol settings here are stricter than the benchmark's own — 4 000
+  training rows against 80 000, selection on a 25% validation slice rather than
+  full-train MSE, and a non-finite prediction failing the whole problem where
+  upstream drops the point — so those are floors.
+
+  What it recovered is the part worth reading: Bohr energy levels solved for the
+  principal quantum number, the Planck distribution solved for temperature,
+  waveguide dispersion returned as `c*sqrt(k**2 + (pi/d)**2)` where the dataset
+  poses it with `d` multiplied out, relativistic Doppler, and the paramagnetic
+  two-level partition as the two-exponential expansion of `2n*cosh(mu*B/kT)`.
+
+- **`python -m tools.score_symbolic_accuracy` scores the paper's third metric.**
+  Acc(0.1) and NMSE ask whether an answer *predicts* the held-out samples;
+  symbolic accuracy asks whether it **is the equation**, and that is the column
+  separating discovery from interpolation. It is a separate tool because it needs
+  the ground truth, which must never come near the search. A deterministic sympy
+  check runs before the judge and settles what it can, putting a floor under the
+  metric that depends on no model. The judge is whatever `--model` names and not
+  the paper's GPT-4o, which the output file states.
 - **A fourth ERA task: AlgoTune, scored in speedup rather than accuracy.**
   `examples/era/era_algotune.py` runs the *same* flat-PUCT search, aggregator,
   sandbox and governance layer as the other three ERA entry points over
@@ -2907,7 +2951,8 @@ First public release on PyPI as **`agentdescent`**.
   discrete-space `Aggregator`, staleness policies, DP/TP/PP parallelism, layered
   governance, and the provider-agnostic `agentdescent.agents` completion layer.
 
-[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.4.5...HEAD
+[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.4.6...HEAD
+[0.4.6]: https://github.com/Birfy/agentdescent/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/Birfy/agentdescent/compare/v0.4.2...v0.4.5
 [0.4.2]: https://github.com/Birfy/agentdescent/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/Birfy/agentdescent/compare/v0.4.0...v0.4.1
