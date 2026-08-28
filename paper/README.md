@@ -1,5 +1,11 @@
 # AgentDescent paper
 
+**This directory lives on the `paper` branch only.** `main` carries the code,
+the docs and `bench/results/`; the LaTeX source and the compiled PDF are kept
+here so that a paper revision never touches the released code and a code
+release never re-compiles the paper. To pick up code changes, merge `main` into
+this branch — the two never touch the same files.
+
 LaTeX source for the AgentDescent paper. All figures are TikZ / pgfplots and
 compile from source — no external image files.
 
