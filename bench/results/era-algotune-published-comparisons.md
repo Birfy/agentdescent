@@ -1,5 +1,17 @@
 # Other published AlgoTune numbers, and what compares
 
+> **Correction (numba was unpinned).** Numbers from a candidate compiled
+> `@njit(parallel=True)` were inflated: the sandbox pinned OpenMP, OpenBLAS, MKL,
+> NumExpr and vecLib to one thread but not `NUMBA_NUM_THREADS`, so such a
+> candidate ran on four cores against a one-core reference. Three
+> `polynomial_real` winners were affected and are re-measured single-threaded:
+> 962.345x -> 342.7x, 280.332x -> 84.8x, 192.321x -> 113.2x. The best
+> `polynomial_real` result is now **540.172x**, the Durand-Kerner run, which uses
+> no parallelism and re-measures at 540.7x. `ode_stiff_vanderpol` is unaffected
+> (identical timing at one and four threads). Fixed in `_era_support.py`, with a
+> test.
+
+
 Published as a page: https://claude.ai/code/artifact/2fe924b7-09e0-432e-8fc4-58d5128dfa24
 
 ## AlphaEvolve and MetaEvolve (arXiv:2607.21971)
@@ -13,7 +25,7 @@ its table gives 2.267x against a published 1.984x.
 |---|---:|---:|---:|---:|---:|
 | `convolve2d_full_fill` | 111.915 | 111.915 | 291.338 | 78.128 | 256.15 |
 | `affine_transform_2d` | 1.004 | 1.004 | 1.072 | 6.945 | 3.22 |
-| `polynomial_real` | 0.996 | 962.345 | 1.014 | 2.457 | 321.01 |
+| `polynomial_real` | 0.996 | 540.172 | 1.014 | 2.457 | 321.01 |
 | `psd_cone_projection` | 4.749 | 4.749 | 1.795 | 1.914 | 1.94 |
 | `fft_cmplx_scipy_fftpack` | 4.426 | 5.020 | 1.228 | 1.558 | 2.20 |
 | `eigenvectors_complex` | 1.017 | 1.017 | 1.432 | 1.474 | 1.48 |

@@ -1,5 +1,17 @@
 # Every AlgoTune result from this port
 
+> **Correction (numba was unpinned).** Numbers from a candidate compiled
+> `@njit(parallel=True)` were inflated: the sandbox pinned OpenMP, OpenBLAS, MKL,
+> NumExpr and vecLib to one thread but not `NUMBA_NUM_THREADS`, so such a
+> candidate ran on four cores against a one-core reference. Three
+> `polynomial_real` winners were affected and are re-measured single-threaded:
+> 962.345x -> 342.7x, 280.332x -> 84.8x, 192.321x -> 113.2x. The best
+> `polynomial_real` result is now **540.172x**, the Durand-Kerner run, which uses
+> no parallelism and re-measures at 540.7x. `ode_stiff_vanderpol` is unaffected
+> (identical timing at one and four threads). Fixed in `_era_support.py`, with a
+> test.
+
+
 Generated from the run files in this directory, against AlgoTune's own
 `reports/agent_summary.json` (18 models) and OpenEvolve's `examples/algotune`.
 
@@ -10,7 +22,7 @@ Published as a page: https://claude.ai/code/artifact/2fe924b7-09e0-432e-8fc4-58d
 | task | n | aligned run | with prior | our best | upstream best | upstream median | OpenEvolve |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | `ode_stiff_vanderpol` | 2 | 3005.310 | -- | ** 3005.310** | 2062.527 (o4-mini) | 35.971 | -- |
-| `polynomial_real` | 396 | 0.996 | 962.345 | ** 962.345** | 138.469 (glm-4.5) | 1.009 | 321.01 |
+| `polynomial_real` | 396 | 0.996 | 540.172 | ** 540.172** | 138.469 (glm-4.5) | 1.009 | 321.01 |
 | `power_control` | 98 | 297.579 | -- | 297.579 | 838.784 (gemini-3.1-pro-preview) | 299.653 | -- |
 | `convolve2d_full_fill` | 6 | 111.915 | 101.918 | 111.915 | 205.513 (claude-sonnet-4-5-20250929) | 144.938 | 256.15 |
 | `kalman_filter` | 23 | 22.681 | -- | 22.681 | 85.801 (gemini-3.1-pro-preview) | 12.848 | -- |

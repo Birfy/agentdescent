@@ -365,12 +365,22 @@ _SEATBELT_PROFILE = """(version 1)
 #: of them: an OpenBLAS that helpfully starts eight threads burns a 60-second
 #: budget in eight wall-clock seconds, and the candidate is then killed for
 #: being fast. Upstream sets no thread policy and has no CPU limit to protect.
+#:
+#: `NUMBA_NUM_THREADS` is here because the others do not reach numba. A
+#: candidate compiled with `@njit(parallel=True)` gets `numba.get_num_threads()
+#: == os.cpu_count()` with `OMP_NUM_THREADS=1` set and the OpenMP layer
+#: selected -- numba reads its own variable and defaults it to the core count.
+#: The reference is meanwhile pinned to one BLAS thread, so such a candidate was
+#: being timed on four cores against a one-core reference. Measured on
+#: `polynomial_real`'s Aberth winner: 0.1118 ms at four threads against 0.3296
+#: ms at one, a 2.95x inflation of a number reported as 962x.
 _THREAD_ENV = {
     "OMP_NUM_THREADS": "1",
     "OPENBLAS_NUM_THREADS": "1",
     "MKL_NUM_THREADS": "1",
     "NUMEXPR_NUM_THREADS": "1",
     "VECLIB_MAXIMUM_THREADS": "1",
+    "NUMBA_NUM_THREADS": "1",
     "JOBLIB_MULTIPROCESSING": "0",
     "PYTHONDONTWRITEBYTECODE": "1",
 }

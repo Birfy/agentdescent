@@ -1,5 +1,17 @@
 # A model prior in `P(s,a)` works; refusing regressions does not
 
+> **Correction (numba was unpinned).** Numbers from a candidate compiled
+> `@njit(parallel=True)` were inflated: the sandbox pinned OpenMP, OpenBLAS, MKL,
+> NumExpr and vecLib to one thread but not `NUMBA_NUM_THREADS`, so such a
+> candidate ran on four cores against a one-core reference. Three
+> `polynomial_real` winners were affected and are re-measured single-threaded:
+> 962.345x -> 342.7x, 280.332x -> 84.8x, 192.321x -> 113.2x. The best
+> `polynomial_real` result is now **540.172x**, the Durand-Kerner run, which uses
+> no parallelism and re-measures at 540.7x. `ode_stiff_vanderpol` is unaffected
+> (identical timing at one and four threads). Fixed in `_era_support.py`, with a
+> test.
+
+
 Two mechanisms, added in `04c9a79`, tested 2×2 across three seeds on
 `polynomial_real` — 45 rollouts, 3 workers, deepseek-v4-flash, everything else
 at the aligned-upstream defaults.
@@ -14,12 +26,12 @@ at the aligned-upstream defaults.
 | arm | geo mean | median | min | max | calls | wall |
 |---|---:|---:|---:|---:|---:|---:|
 | base | 5.005x | 1.008x | 0.983x | 126.506x | 101 | 1109s |
-| prior | **201.372x** | **192.321x** | **44.121x** | 962.345x | 109 | 1179s |
-| repair | 6.999x | 1.204x | 1.016x | 280.332x | 107 | 1132s |
+| prior | **119.619x** | **113.200x** | **44.121x** | 342.700x | 109 | 1179s |
+| repair | 4.699x | 1.204x | 1.016x | 84.800x | 107 | 1132s |
 | both | 19.543x | 79.400x | 1.008x | 93.251x | 101 | 1268s |
 
 The prior arm is the only one whose *worst* seed (44.121x) beats the base arm's
-median. It costs nothing: 109 model calls against 101, 1179s against 1109s.
+median. (Three of these seeds are re-measured: see the correction below.) It costs nothing: 109 model calls against 101, 1179s against 1109s.
 
 But three seeds an arm is three seeds an arm, and the base arm itself spans
 0.983x to 126.506x on this task. A rank test over the six prior-vs-base runs
@@ -34,7 +46,7 @@ it:
 |---|---|---:|
 | base — c_puct 1.0, uniform | 0.983 / 1.008 / 126.506 | 5.005x |
 | **cpuct — c_puct 2.5, uniform** | **1.004 / 1.006 / 1.007** | **1.006x** |
-| prior — c_puct 2.5, prior² | 44.121 / 192.321 / 962.345 | 201.373x |
+| prior — c_puct 2.5, prior² | 44.121 / 113.200 / 342.700 | 119.619x |
 
 Widening the exploration term on its own buys nothing — all three control seeds
 sit flat at 1.00x, and against `base` the permutation test gives p=0.80. Against
@@ -86,14 +98,14 @@ Tracing each run's winner back to the root:
 
 | run | best | steps | steps that made things worse |
 |---|---:|---:|---:|
-| prior-s0 | 192.32x | 11 | 4 |
-| prior-s2 | 962.35x | 7 | 0 |
-| repair-s2 | 280.33x | 14 | 3 |
+| prior-s0 | 113.20x | 11 | 4 |
+| prior-s2 | 342.70x | 7 | 0 |
+| repair-s2 | 84.80x | 14 | 3 |
 | base-s1 | 126.51x | 10 | 3 |
 | both-s1 | 93.25x | 8 | 3 |
 
 **9 of the 12 winning lineages pass through at least one step that made things
-worse.** `prior-s0`'s 192x descends from a node measured at **0.01x** — a
+worse.** `prior-s0`'s 113x descends from a node measured at **0.01x** — a
 hundred times slower than the reference. `both-s1`'s 93x descends from two nodes
 that produced no valid solution at all.
 
@@ -101,7 +113,7 @@ That is exactly what `--repair-regressions` throws away. Its cost is visible in
 the counters: `gave_up` rises from ~5 slots per run to ~24, because the loop
 burns its four attempts refusing slower children and comes back with nothing.
 Valid nodes in the tree fall from 41 to 33. And `both` (19.5x) is *worse* than
-`prior` alone (201.4x) — the repair loop eats what the prior buys.
+`prior` alone (119.6x) — the repair loop eats what the prior buys.
 
 Keep `--prior-exponent`. Leave `--repair-regressions` off, which is its default.
 
