@@ -155,6 +155,39 @@ call into compiled code with no interpreted loop for numba to bite on.
 `era-algotune-when-a-compiler-pays.md` measures that across upstream's own 2595
 solvers.
 
+## Without the serialisation win
+
+It appears once. Three of the eight references serialise their answer, and only
+one of them was exploited:
+
+| reference | returns | our winner |
+|---|---|---|
+| `polynomial_real` | `computed_roots.tolist()` | also `.tolist()` — 396 roots, nothing taken |
+| `eigenvectors_complex` | a list of lists | 1.007x, nothing found either way |
+| `lu_factorization` | three 1104x1104 `.tolist()` | returns the arrays — **this is the one** |
+| the other five | raw arrays and dicts | no serialisation to skip |
+
+So `polynomial_real`'s 540.172x pays exactly the same conversion the reference
+pays, and the five tasks whose references return raw objects offer nothing to
+exploit. Removing it from the comparison two ways:
+
+| | this port | OpenEvolve |
+|---|---:|---:|
+| **A.** eight tasks, `lu_factorization` put back at what a non-trick solver got (0.925–0.936x) | 1.777–1.782x | 1.984x published |
+| **B.** seven tasks, `lu_factorization` dropped on both sides | 2.046x | 2.193x* |
+
+\* their published 1.984x with `lu_factorization`'s 1.19x contribution removed
+from the harmonic sum. Dropping their weakest task raises their score too, which
+is why B is the fairer of the two.
+
+**Without it, this port is 7–10% behind OpenEvolve, not 10.6% ahead.** The two
+methods agree: −6.7% on B, −10.4% on A.
+
+The prior is still most of what moved the port, though. On the seven-task set it
+takes the base arm from 1.559x to 2.046x, **+31.2%**, on a prompt that names no
+technique against theirs that names JAX and interpolation order. What it does
+not do is close the gap.
+
 ## Against their prompt, tuned and untuned
 
 OpenEvolve's report is staged, and each stage has a score, so their own numbers
