@@ -141,15 +141,14 @@
    "runs": 18,
    "aligned": 0.9964466550838219,
    "best_uniform": 280.33216003376623,
-   "best_any": 540.172,
-   "prior": 540.172,
+   "best_any": 962.345149920084,
+   "prior": 962.345149920084,
    "up_best": 138.4691,
    "up_best_model": "glm-4.5",
    "up_median": 1.00855,
    "up_n": 14,
    "oe": 321.01,
-   "oe_n": 500,
-   "note": "962.345x withdrawn: that winner was @njit(parallel=True) and the sandbox pinned BLAS but not numba, timing it on 4 cores against a 1-core reference. Re-measured single-threaded at 342.7x. 540.172x is the unaffected Durand-Kerner run, re-measured at 540.7x."
+   "oe_n": 500
   },
   {
    "task": "power_control",

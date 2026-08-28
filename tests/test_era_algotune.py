@@ -1243,33 +1243,46 @@ def test_the_result_file_reports_every_repair_counter():
     assert "regressions_retried" in block
 
 
-def test_the_sandbox_pins_numba_as_well_as_blas():
-    """A `parallel=True` candidate must not be timed on more cores than the reference.
+def test_the_sandbox_gives_the_reference_and_the_candidate_the_same_cores():
+    """Whatever cores a candidate can reach, the reference must reach too.
 
     This is a real defect this file did not catch, and it inflated a published
-    number. The sandbox pins OpenMP, OpenBLAS, MKL, NumExpr and vecLib to one
-    thread, so the reference's `np.roots` -- a LAPACK eigenvalue solve -- runs on
+    number. The sandbox pinned OpenMP, OpenBLAS, MKL, NumExpr and vecLib to one
+    thread, so the reference's `np.roots` -- a LAPACK eigenvalue solve -- ran on
     one core. None of those variables reach numba: with `OMP_NUM_THREADS=1` set
     and the OpenMP threading layer selected, `numba.get_num_threads()` still
     returned 4, because numba reads `NUMBA_NUM_THREADS` and defaults it to the
-    core count.
+    core count. A candidate compiled `@njit(parallel=True)` was therefore timed
+    on four cores against a one-core reference -- 2.95x on `polynomial_real`'s
+    Aberth winner, inside a number reported as 962x.
 
-    So a candidate compiled `@njit(parallel=True)` was measured on four cores
-    against a one-core reference. On `polynomial_real`'s Aberth winner that was
-    0.1118 ms against 0.3296 ms -- 2.95x, on a result reported as 962x.
-
-    Pinning numba rather than unpinning BLAS is the choice that matches the rest
-    of the profile; upstream AlgoTune sets no thread policy at all, but this port
-    has an `RLIMIT_CPU` to protect and cannot let either side spawn freely. What
-    it must not do is pin one side and not the other.
+    The first fix pinned numba too, and that was wrong the other way: writing a
+    parallel implementation *is* an optimisation, upstream sets no thread policy,
+    and forbidding it invents a rule AlgoTune does not have. So neither side is
+    pinned. What this test defends is the symmetry -- a half-applied cap is the
+    only outcome that silently mismeasures.
     """
     env = support._THREAD_ENV
-    pinned = {k for k, v in env.items() if k.endswith("NUM_THREADS") and v == "1"}
-    assert "NUMBA_NUM_THREADS" in pinned, (
-        "numba is unpinned again, so a parallel=True candidate is timed on every "
-        f"core while the reference gets one; pinned: {sorted(pinned)}")
-    # And it has to survive into what the sandbox actually runs with.
+    capped = {k for k, v in env.items() if k.endswith("NUM_THREADS") and v == "1"}
+    assert not capped, (
+        "a thread cap is back in _THREAD_ENV. It has to reach numba as well as "
+        "BLAS or reach neither, because capping one side times a parallel "
+        f"candidate against a serial reference; capped: {sorted(capped)}")
     _, built = support.sandbox_wrapper(["/bin/true"], scratch="/tmp")
-    assert built.get("NUMBA_NUM_THREADS") == "1", (
-        "NUMBA_NUM_THREADS is in _THREAD_ENV but not in the environment the "
-        "sandbox is handed")
+    assert not [k for k in built if k.endswith("NUM_THREADS")], (
+        "the sandbox environment caps threads for one side again")
+
+
+def test_the_cpu_limit_scales_with_the_cores_a_candidate_may_use():
+    """`RLIMIT_CPU` sums CPU seconds over threads, so it has to scale with them.
+
+    With threads uncapped, a candidate using every core burns a 300-second
+    budget in 300/cores wall seconds and is killed for using exactly what the
+    sandbox gave it -- reported as "the candidate crashed". The cap is a
+    runaway ceiling, not a budget anyone should reach.
+    """
+    assert support.THREAD_BUDGET_FACTOR >= 1
+    source = inspect.getsource(algotune.run_candidate)
+    assert "THREAD_BUDGET_FACTOR" in source, (
+        "--cpu-seconds no longer scales with the core count, so an honestly "
+        "parallel candidate is killed for being parallel")

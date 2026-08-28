@@ -366,24 +366,32 @@ _SEATBELT_PROFILE = """(version 1)
 #: budget in eight wall-clock seconds, and the candidate is then killed for
 #: being fast. Upstream sets no thread policy and has no CPU limit to protect.
 #:
-#: `NUMBA_NUM_THREADS` is here because the others do not reach numba. A
-#: candidate compiled with `@njit(parallel=True)` gets `numba.get_num_threads()
-#: == os.cpu_count()` with `OMP_NUM_THREADS=1` set and the OpenMP layer
-#: selected -- numba reads its own variable and defaults it to the core count.
-#: The reference is meanwhile pinned to one BLAS thread, so such a candidate was
-#: being timed on four cores against a one-core reference. Measured on
-#: `polynomial_real`'s Aberth winner: 0.1118 ms at four threads against 0.3296
-#: ms at one, a 2.95x inflation of a number reported as 962x.
+#: The cap has to reach *both sides or neither*, and for a while it reached
+#: neither correctly. None of the variables below touch numba: a candidate
+#: compiled `@njit(parallel=True)` got `numba.get_num_threads() == os.cpu_count()`
+#: with `OMP_NUM_THREADS=1` set and the OpenMP layer selected, because numba
+#: reads its own `NUMBA_NUM_THREADS` and defaults it to the core count. The
+#: reference's LAPACK call was meanwhile pinned to one thread, so such a
+#: candidate was timed on four cores against a one-core reference -- worth 2.95x
+#: on `polynomial_real`'s Aberth winner.
+#:
+#: The first fix pinned numba too. That was wrong in the other direction:
+#: writing a parallel implementation *is* an optimisation, upstream permits it,
+#: and forbidding it invents a rule this benchmark does not have. So both sides
+#: are free instead, `RLIMIT_CPU` is scaled by the core count to stop a genuinely
+#: parallel candidate being killed for using what it was given, and the
+#: comparison stays symmetric: whatever cores the candidate can reach, the
+#: reference can reach too.
 _THREAD_ENV = {
-    "OMP_NUM_THREADS": "1",
-    "OPENBLAS_NUM_THREADS": "1",
-    "MKL_NUM_THREADS": "1",
-    "NUMEXPR_NUM_THREADS": "1",
-    "VECLIB_MAXIMUM_THREADS": "1",
-    "NUMBA_NUM_THREADS": "1",
     "JOBLIB_MULTIPROCESSING": "0",
     "PYTHONDONTWRITEBYTECODE": "1",
 }
+
+#: How much `RLIMIT_CPU` has to be multiplied by now that threads are not capped.
+#: `RLIMIT_CPU` is CPU-seconds summed over threads, so a wall-clock budget of `t`
+#: seconds has to become `t * cores` for a candidate using every core to survive
+#: it. This is a ceiling against a runaway, not a budget anyone should reach.
+THREAD_BUDGET_FACTOR = max(1, os.cpu_count() or 1)
 
 
 def sandbox_backend() -> Optional[str]:

@@ -89,7 +89,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from agentdescent.dataloader import cache_path, fetch_text
 
 from examples.era._algotune_tasks import UPSTREAM_COMMIT, derive_seed_program
-from examples.era._era_support import sandbox_wrapper, validate_source
+from examples.era._era_support import (
+    THREAD_BUDGET_FACTOR, sandbox_wrapper, validate_source)
 
 
 RUNNER = Path(__file__).with_name("_era_algotune_runner.py")
@@ -646,7 +647,12 @@ def run_candidate(
                 str(candidate),
                 "--task-source", str(task_file),
                 "--spec", str(spec),
-                "--cpu-seconds", str(max(2, int(math.ceil(timeout)))),
+                # Scaled by the core count: `RLIMIT_CPU` sums CPU seconds over
+                # threads, and threads are no longer capped, so a candidate that
+                # legitimately uses every core would otherwise be killed for
+                # using what it was given.
+                "--cpu-seconds",
+                str(max(2, int(math.ceil(timeout)) * THREAD_BUDGET_FACTOR)),
                 "--nproc-limit", str(nproc_limit),
                 "--address-space-mb", str(ADDRESS_SPACE_MB),
             ],

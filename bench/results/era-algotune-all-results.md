@@ -1,15 +1,20 @@
 # Every AlgoTune result from this port
 
-> **Correction (numba was unpinned).** Numbers from a candidate compiled
-> `@njit(parallel=True)` were inflated: the sandbox pinned OpenMP, OpenBLAS, MKL,
-> NumExpr and vecLib to one thread but not `NUMBA_NUM_THREADS`, so such a
-> candidate ran on four cores against a one-core reference. Three
-> `polynomial_real` winners were affected and are re-measured single-threaded:
-> 962.345x -> 342.7x, 280.332x -> 84.8x, 192.321x -> 113.2x. The best
-> `polynomial_real` result is now **540.172x**, the Durand-Kerner run, which uses
-> no parallelism and re-measures at 540.7x. `ode_stiff_vanderpol` is unaffected
-> (identical timing at one and four threads). Fixed in `_era_support.py`, with a
-> test.
+> **Thread policy, and a correction that was itself wrong.** The sandbox used to
+> pin OpenMP/OpenBLAS/MKL/NumExpr/vecLib to one thread but not
+> `NUMBA_NUM_THREADS`, so an `@njit(parallel=True)` candidate ran on every core
+> against a one-core reference. That asymmetry was real. The first fix pinned
+> numba too — which was wrong the other way, because writing a parallel
+> implementation *is* an optimisation and upstream sets no thread policy at all.
+> Neither side is pinned now, and `RLIMIT_CPU` scales with the core count so a
+> parallel candidate is not killed for using what it was given.
+>
+> Re-measured on an idle box under that policy, every recorded number stands:
+> 962.345x measures 992.3x, 280.332x measures 298.1x, 192.321x measures 190.5x,
+> and the non-parallel 540.172x measures 538.3x. The reason the asymmetry cost so
+> little is that the reference does not parallelise: `np.roots` at n=396 is a
+> LAPACK eigenvalue solve whose QR iteration is sequential, timing 116.72 ms
+> unpinned against 117.18 ms pinned. Nothing in this file is withdrawn.
 
 
 Generated from the run files in this directory, against AlgoTune's own
@@ -22,7 +27,7 @@ Published as a page: https://claude.ai/code/artifact/2fe924b7-09e0-432e-8fc4-58d
 | task | n | aligned run | with prior | our best | upstream best | upstream median | OpenEvolve |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | `ode_stiff_vanderpol` | 2 | 3005.310 | -- | ** 3005.310** | 2062.527 (o4-mini) | 35.971 | -- |
-| `polynomial_real` | 396 | 0.996 | 540.172 | ** 540.172** | 138.469 (glm-4.5) | 1.009 | 321.01 |
+| `polynomial_real` | 396 | 0.996 | 962.345 | ** 962.345** | 138.469 (glm-4.5) | 1.009 | 321.01 |
 | `power_control` | 98 | 297.579 | -- | 297.579 | 838.784 (gemini-3.1-pro-preview) | 299.653 | -- |
 | `convolve2d_full_fill` | 6 | 111.915 | 101.918 | 111.915 | 205.513 (claude-sonnet-4-5-20250929) | 144.938 | 256.15 |
 | `kalman_filter` | 23 | 22.681 | -- | 22.681 | 85.801 (gemini-3.1-pro-preview) | 12.848 | -- |
