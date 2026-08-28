@@ -1243,6 +1243,16 @@ def test_the_sandbox_gives_the_reference_and_the_candidate_the_same_cores():
         "a thread cap is back in _THREAD_ENV. It has to reach numba as well as "
         "BLAS or reach neither, because capping one side times a parallel "
         f"candidate against a serial reference; capped: {sorted(capped)}")
+
+
+@needs_sandbox
+def test_the_environment_the_sandbox_is_handed_caps_no_threads():
+    """The same rule, checked on what `sandbox_wrapper` actually builds.
+
+    Separate from the test above because it needs an isolation backend and that
+    one does not: the policy is worth defending on every host, and a CI runner
+    without Bubblewrap should still fail if someone puts the cap back.
+    """
     _, built = support.sandbox_wrapper(["/bin/true"], scratch="/tmp")
     assert not [k for k in built if k.endswith("NUM_THREADS")], (
         "the sandbox environment caps threads for one side again")
