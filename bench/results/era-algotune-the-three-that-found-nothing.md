@@ -60,8 +60,42 @@ are not wrong -- they are measured somewhere else. The size curve says where:
 
 All three land in the n~50 band. `era-algotune-openevolve-comparison.md`
 demonstrated this size mismatch for OpenEvolve from its published
-`algotune.data_size`; for AlphaEvolve and MetaEvolve, which state no sizes, this
-file says it can now be concluded from the physics of the task instead.
+`algotune.data_size`. For AlphaEvolve and MetaEvolve, which state no sizes, the
+conclusion has to come from the task instead -- and the first version of this
+argument was not strong enough to carry it, because a ratio measured on one
+machine can move on another. Two checks close that gap.
+
+**More cores do not raise the ceiling.** `np.linalg.eig` barely threads: dgeev's
+QR iteration is sequential, and only the Hessenberg reduction reaches BLAS3.
+Same matrix, same box, `OMP_NUM_THREADS` varied:
+
+| threads | reference | `eig` | share | Python tail | ceiling |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 125.58 ms | 116.81 ms | 93% | 8.36 ms | 1.075x |
+| 2 | 127.04 ms | 115.02 ms | 91% | 8.29 ms | 1.105x |
+| 4 | 122.76 ms | 110.54 ms | 90% | 8.30 ms | 1.110x |
+
+Four times the cores buys the eigensolver 5.7%. To reach a 1.43x ceiling the
+Python tail would have to be 5.7x larger *relative to* the eigensolve -- 0.43 of
+it rather than the 0.075 measured here -- and no core count does that.
+
+**AlgoTune's own calibration closes the rest.** The protocol picks `n` so the
+reference takes ~100 ms *on the machine you run it on*. A faster LAPACK
+therefore does not raise the ceiling; it raises `n`. And the eigensolve's share
+of the reference is already at its plateau by n=100:
+
+| n | `eig` share of reference | ceiling |
+|---:|---:|---:|
+| 20 | 53% | 1.889x |
+| 50 | 71% | 1.410x |
+| 100 | 91% | 1.102x |
+| 200 | 91% | 1.098x |
+| 463 | 91% | 1.103x |
+
+So on *any* machine that follows the calibration, the ~100 ms point lands at an
+`n` where the ceiling is about 1.10x. Reporting 1.43x-1.48x requires running at
+an `n` below ~100, which is well under the calibrated size rather than a
+property of the hardware.
 
 ## `fft_convolution` (n=542069, mode `same`): about 1.10x, and it is not in the FFT
 
