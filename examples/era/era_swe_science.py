@@ -444,6 +444,22 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                   f"{row.get('title', '')}")
         return 0
 
+    if args.regrade:
+        # Ahead of the run plan, because none of it applies: a regrade spends no
+        # agent session and reads the patches a finished run already produced.
+        print("Algorithm: ERA Flat UCB tree search (FUTS) on AgentDescent")
+        print(f"Benchmark: SWE-bench Science, {RELEASE_REPO}@{RELEASE_REVISION[:12]}")
+        print(f"Evaluator: the release's own task-bundle grader in its own pinned "
+              f"verifier image, {docker_backend() or 'NO DOCKER DAEMON'}")
+        if args.dry_run:
+            print("[dry-run] no release file, image, container, or agent was "
+                  "accessed.")
+            return 0
+        if docker_backend() is None:
+            raise SystemExit("regrading runs the release's grader in its own "
+                             "image, and this host has no Docker daemon.")
+        return regrade(args)
+
     mode = "async" if args.asynchronous else ("serial" if args.serial else "sync")
     backend = docker_backend()
     print("Algorithm: ERA Flat UCB tree search (FUTS) on AgentDescent")
@@ -480,8 +496,6 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             "host has no Docker daemon. There is no offline substitute: the "
             "task's dependencies, its public fixtures and its held-out tests "
             "all live in those images.")
-    if args.regrade:
-        return regrade(args)
     if args.shards < 4:
         raise SystemExit(
             f"--shards {args.shards} is too few: a shard is one rollout task, "
