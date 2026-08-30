@@ -593,6 +593,122 @@ def test_the_agent_mutation_diffs_a_workspace_even_when_the_agent_raises(monkeyp
     assert "agent failed" in summary or "agent failed" in reply
 
 
+def _git_repo(root):
+    """A checkout shaped like the one the environment image ships."""
+    import subprocess
+    (root / "source").mkdir(parents=True)
+    (root / "source" / "s.py").write_text("value = 1\n", encoding="utf-8")
+    (root / "reproduce.py").write_text("print('ok')\n", encoding="utf-8")
+    for args in (["init", "-b", "main"], ["config", "user.email", "t@example.invalid"],
+                 ["config", "user.name", "t"], ["add", "-A"],
+                 ["commit", "-m", "baseline"]):
+        subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+    return root
+
+
+def test_the_workspace_diff_is_the_artifact_the_release_collects(tmp_path):
+    """`git add -A && git diff --cached --binary <root commit>` -- including
+    files the agent added, which is why the prompt tells it to clean up after
+    itself."""
+    work = _git_repo(tmp_path / "work")
+    space = swe.Workspace(make_suite(), tmp_path, work, tmp_path / "bin", "")
+    assert space.diff() == "", "an untouched checkout is the empty patch"
+    (work / "source" / "s.py").write_text("value = 2\n", encoding="utf-8")
+    (work / "scratch.py").write_text("print('debug')\n", encoding="utf-8")
+    patch = space.diff()
+    assert "-value = 1" in patch and "+value = 2" in patch
+    assert "scratch.py" in patch, "an untracked file is part of model.patch"
+
+
+def test_a_workspace_round_trips_a_patch_through_apply_and_diff(tmp_path):
+    work = _git_repo(tmp_path / "work")
+    space = swe.Workspace(make_suite(), tmp_path, work, tmp_path / "bin", "")
+    (work / "source" / "s.py").write_text("value = 2\n", encoding="utf-8")
+    patch = space.diff()
+
+    fresh = _git_repo(tmp_path / "fresh")
+    other = swe.Workspace(make_suite(), tmp_path / "other", fresh,
+                          tmp_path / "bin", "")
+    (tmp_path / "other").mkdir()
+    other.apply(patch)
+    assert (fresh / "source" / "s.py").read_text() == "value = 2\n"
+    assert other.diff() == patch, "a node's patch has to survive being a parent"
+
+
+def test_a_checkout_with_two_root_commits_is_refused(tmp_path):
+    """The release's own hook refuses it, because the baseline it diffs against
+    would be ambiguous and the artifact would be a different patch."""
+    import subprocess
+    work = _git_repo(tmp_path / "work")
+    subprocess.run(["git", "checkout", "--orphan", "second"], cwd=work, check=True,
+                   capture_output=True)
+    subprocess.run(["git", "commit", "-m", "another root", "--allow-empty"],
+                   cwd=work, check=True, capture_output=True)
+    subprocess.run(["git", "checkout", "main"], cwd=work, check=True,
+                   capture_output=True)
+    subprocess.run(["git", "merge", "second", "--allow-unrelated-histories",
+                    "-m", "merge"], cwd=work, check=True, capture_output=True)
+    space = swe.Workspace(make_suite(), tmp_path, work, tmp_path / "bin", "")
+    with pytest.raises(swe.BenchmarkError):
+        space.diff()
+
+
+def test_the_completion_control_arm_applies_the_diff_it_was_given(monkeypatch,
+                                                                  tmp_path):
+    """The arm exists to be beaten, but it has to actually run: a control that
+    never applied anything would make the agent look good for free."""
+    work = _git_repo(tmp_path / "work")
+    space = swe.Workspace(make_suite(), tmp_path, work, tmp_path / "bin", "")
+    (work / "source" / "s.py").write_text("value = 2\n", encoding="utf-8")
+    proposed = space.diff()
+    (work / "source" / "s.py").write_text("value = 1\n", encoding="utf-8")
+
+    import contextlib
+
+    @contextlib.contextmanager
+    def fake_open(_suite, patch="", **_kwargs):
+        yield space
+
+    monkeypatch.setattr(swe, "open_workspace", fake_open)
+    seen = {}
+
+    def complete(prompt):
+        seen["prompt"] = prompt
+        return "Here is the fix.\n```diff\n" + proposed + "\n```\n"
+
+    counter = {}
+    mutate = swe.make_completion_mutation(make_suite(), complete, counter=counter)
+    program = Program("p", 0, None, "", "", {}, True, "")
+    reply = mutate(swe.envelope(program, suite=make_suite(), agent_timeout=60))
+    patch, _ = swe.extract_patch(reply)
+    assert "+value = 2" in patch
+    assert "## The repository" in seen["prompt"], "the model gets the file list"
+    assert "source/s.py" in seen["prompt"]
+    assert counter == {"sessions": 1}
+
+
+def test_the_control_arm_records_a_diff_that_would_not_apply(monkeypatch, tmp_path):
+    work = _git_repo(tmp_path / "work")
+    space = swe.Workspace(make_suite(), tmp_path, work, tmp_path / "bin", "")
+
+    import contextlib
+
+    @contextlib.contextmanager
+    def fake_open(_suite, patch="", **_kwargs):
+        yield space
+
+    monkeypatch.setattr(swe, "open_workspace", fake_open)
+    counter = {}
+    mutate = swe.make_completion_mutation(
+        make_suite(),
+        lambda prompt: "```diff\ndiff --git a/absent b/absent\n@@ -1 +1 @@\n-a\n+b\n```",
+        counter=counter)
+    program = Program("p", 0, None, "", "", {}, True, "")
+    reply = mutate(swe.envelope(program, suite=make_suite(), agent_timeout=60))
+    assert swe.extract_patch(reply)[0] == "", "nothing was applied, so nothing changed"
+    assert counter.get("unapplied") == 1
+
+
 # ---------------------------------------------------------------------------
 # The command line
 # ---------------------------------------------------------------------------
