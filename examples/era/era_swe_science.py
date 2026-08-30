@@ -74,6 +74,7 @@ Run
 from __future__ import annotations
 
 import argparse
+import json
 import shlex
 import time
 from pathlib import Path
@@ -284,6 +285,12 @@ def build_parser() -> argparse.ArgumentParser:
                         help="do not delete an expansion's checkout afterwards")
     parser.add_argument("--no-pull", action="store_true",
                         help="fail rather than fetch a pinned image that is missing")
+    parser.add_argument("--regrade", type=Path, default=None,
+                        help=("re-run the release's grader over the patches a "
+                              "finished result file already holds, and write "
+                              "the new numbers back beside the old ones. No "
+                              "agent, no search -- grading is a pure function "
+                              "of the patch"))
     # The control arm's knobs. They move nothing unless --agent completion.
     parser.add_argument("--max-tokens", type=int, default=16000)
     parser.add_argument("--temperature", type=float, default=0.7)
@@ -333,8 +340,86 @@ def _task_payload(suite: Suite, domain: Domain, run: Any,
         "nodes": len(run.tree.nodes),
         "wall_seconds": run.wall_seconds,
         "best_patch_chars": len(run.tree.best().program.code),
+        # The artifact itself, so the result file is self-contained: `--regrade`
+        # reads it back, and a reader can see what was actually submitted rather
+        # than a character count.
+        "best_patch": run.tree.best().program.code,
         "observation": run.summary(quality_target),
     }
+
+
+def regrade(args: argparse.Namespace) -> int:
+    """Re-run the release's grader over a finished run's saved patches.
+
+    Grading is a pure function of `(patch, task)`, so a run whose *grading* step
+    was wrong does not have to be paid for twice. It was wrong once, and the
+    fix is what this exists for: `grade()` used to run the grader baked into the
+    verifier image, and some of those images carry a stale one that collects
+    nothing and scores every submission 0.
+
+    The previous numbers are kept beside the new ones under `regraded`, because
+    a result file that quietly changed its own answer is worse than one that
+    was wrong.
+    """
+    path = Path(args.regrade)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    config = payload.get("config", {})
+    manifest = load_manifest(release=args.release)
+    entries = payload.get("tasks", [])
+    print(f"Regrade  : {len(entries)} task(s) in {path}, with the release's own "
+          f"bundle grader")
+    for index, entry in enumerate(entries, start=1):
+        task_id = entry["task_id"]
+        suite = prepare_suite(
+            task_id, manifest=manifest,
+            shards=int(config.get("shards", args.shards)),
+            test_shards=int(config.get("test_shards", args.test_shards)),
+            held_back_frac=float(config.get("held_back_frac", args.held_back_frac)),
+            seed=int(config.get("seed", args.seed)), release=args.release,
+            pull=not args.no_pull)
+        patch = entry.get("best_patch")
+        if patch is None:
+            sidecar = path.with_name(f"{path.stem}-task{task_id}-best.patch")
+            patch = sidecar.read_text(encoding="utf-8") if sidecar.is_file() else ""
+            entry["best_patch"] = patch
+        baseline_grade = grade("", suite=suite, timeout=args.verifier_timeout,
+                               release=args.release)
+        best_grade = (baseline_grade if not patch.strip() else
+                      grade(patch, suite=suite, timeout=args.verifier_timeout,
+                            release=args.release))
+        entry["regraded"] = {
+            "previous_reward_baseline": entry.get("benchmark_reward_baseline"),
+            "previous_reward_best": entry.get("benchmark_reward_best"),
+            "previous_grade_baseline": entry.get("benchmark_grade_baseline"),
+            "previous_grade_best": entry.get("benchmark_grade_best"),
+        }
+        entry["benchmark_grade_baseline"] = baseline_grade
+        entry["benchmark_grade_best"] = best_grade
+        entry["benchmark_reward_baseline"] = int(baseline_grade.get("reward", 0) or 0)
+        entry["benchmark_reward_best"] = int(best_grade.get("reward", 0) or 0)
+        print(f"[{index}/{len(entries)}] {task_id}: reward "
+              f"{entry['regraded']['previous_reward_best']} -> "
+              f"{entry['benchmark_reward_best']} "
+              f"(private {best_grade.get('private', {}).get('passed')}"
+              f"/{best_grade.get('private', {}).get('collected')})", flush=True)
+    resolved = sum(entry["benchmark_reward_best"] for entry in entries)
+    baseline = sum(entry["benchmark_reward_baseline"] for entry in entries)
+    payload.setdefault("summary", {}).update({
+        "resolved_baseline": baseline,
+        "resolved_best": resolved,
+        "resolve_rate": (resolved / len(entries)) if entries else None,
+    })
+    payload["regraded_at"] = _utc_now()
+    payload["regraded_reason"] = (
+        "the run's own grading step ran the grader baked into each verifier "
+        "image; some of those are stale (task 034's collects nothing and scores "
+        "every submission 0). Re-run with the release's own task-bundle grader, "
+        "which is what its tests/docker-compose.yaml mounts. The search itself "
+        "is untouched -- grading is a pure function of the patch.")
+    _write_json(path, payload)
+    print(f"\nregraded : resolved {baseline} -> {resolved} of {len(entries)}, "
+          f"output={path}")
+    return 0
 
 
 def main(argv: Optional[Iterable[str]] = None) -> int:
@@ -395,6 +480,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             "host has no Docker daemon. There is no offline substitute: the "
             "task's dependencies, its public fixtures and its held-out tests "
             "all live in those images.")
+    if args.regrade:
+        return regrade(args)
     if args.shards < 4:
         raise SystemExit(
             f"--shards {args.shards} is too few: a shard is one rollout task, "

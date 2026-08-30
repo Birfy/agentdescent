@@ -28,6 +28,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import pathlib
 import re
 
 import pytest
@@ -284,6 +285,56 @@ def test_the_warnings_summary_is_dropped_from_what_a_child_is_shown():
 def test_a_pytest_run_with_no_sections_keeps_its_output():
     assert swe.pytest_failures("boom") == "boom"
     assert swe.pytest_failures("") == ""
+
+
+def test_grade_runs_the_bundle_grader_and_not_the_image_s(monkeypatch):
+    """The release mounts its own grader over the image's, and it means it:
+    some published verifier images carry a stale grader that collects nothing
+    and would report a floor of zero as a result."""
+    seen = {}
+
+    def fake_release_file(relative, release=None, timeout=120.0):
+        seen["relative"] = relative
+        return "print('the bundle grader')\n"
+
+    class FakeProc:
+        returncode = 0
+        stderr = ""
+        stdout = '{"reward": 1, "private": {"collected": 3, "passed": 3}}'
+
+    def fake_docker(args, **_kwargs):
+        seen["args"] = list(args)
+        mount = [a for a in args if a.endswith(":/era")][0]
+        seen["grader"] = (pathlib.Path(mount.split(":/era")[0])
+                          / "grader.py").read_text(encoding="utf-8")
+        return FakeProc()
+
+    monkeypatch.setattr(swe, "_release_file", fake_release_file)
+    monkeypatch.setattr(swe, "_docker", fake_docker)
+    result = swe.grade("", suite=make_suite())
+    assert result["reward"] == 1
+    assert seen["relative"] == "tasks/task_001/tests/grader.py"
+    assert seen["grader"] == "print('the bundle grader')\n"
+    assert "python /era/grader.py" in " ".join(seen["args"])
+    assert "/tests/grader.py" not in " ".join(seen["args"])
+
+
+@needs_docker
+@needs_release
+def test_the_bundle_grader_is_the_one_that_runs():
+    """Task 034 is the case that makes this necessary: its verifier image runs
+    pytest on `/tests/private_tests/test_task_034.py`, which does not exist
+    beside the `test_stochastic_orientation.py` that does -- so the image's
+    grader collects nothing, exits 4, and scores every submission 0."""
+    bundle = swe._release_file("tasks/task_034/tests/grader.py", release=None,
+                               timeout=120)
+    assert '"/tests/private_tests",' in bundle
+    manifest = swe.load_manifest()
+    suite = swe.prepare_suite("034", manifest=manifest, shards=4, test_shards=2,
+                              held_back_frac=0.0, seed=0)
+    graded = swe.grade("", suite=suite)
+    assert graded["private"]["collected"] == len(suite.tests) > 0, (
+        "the grader that ran collected nothing, so it was the image's")
 
 
 # ---------------------------------------------------------------------------

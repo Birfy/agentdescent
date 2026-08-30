@@ -667,22 +667,38 @@ def _metrics_from(payload: Dict[str, Any], selection: Sequence[str], public: boo
     return True, metrics, ""
 
 
-def grade(patch: str, *, suite: Suite, timeout: float = RELEASE_VERIFIER_TIMEOUT
-          ) -> Dict[str, Any]:
+def grade(patch: str, *, suite: Suite, timeout: float = RELEASE_VERIFIER_TIMEOUT,
+          release: Optional[Path] = None) -> Dict[str, Any]:
     """The release's own grader, unmodified, over the whole private suite.
 
     This is the number that belongs beside a SWE-bench Science result:
-    ``/tests/grader.py`` as published, its binary reward, its counts. The search
-    never sees it -- it is read once per task for the root patch and once for
-    the best node.
+    ``tasks/task_NNN/tests/grader.py`` as published, its binary reward, its
+    counts. The search never sees it -- it is read once per task for the root
+    patch and once for the best node.
+
+    **The grader comes from the task bundle, not from the image.** The release
+    mounts it: `tests/docker-compose.yaml` binds `./grader.py` over
+    `/tests/grader.py`, and `tests/Dockerfile` copies it in with the comment
+    "Keep the runtime entrypoint in sync with the task bundle." That is not
+    ceremony. Some published verifier images carry a *stale* grader -- task
+    034's runs pytest on `/tests/private_tests/test_task_034.py`, a file that
+    does not exist beside the `test_stochastic_orientation.py` that does, so it
+    collects nothing, exits 4 and scores every submission 0 however correct.
+    Running the image's copy would have reported a floor of zero as a result.
+    `tests/test_era_swe_science.py::test_the_bundle_grader_is_the_one_that_runs`
+    pins the mount against that task.
     """
     job = Path(tempfile.mkdtemp(prefix="era-swe-grade-"))
     try:
         (job / "model.patch").write_text(_normalise_patch(patch), encoding="utf-8")
+        (job / "grader.py").write_text(
+            _release_file(f"tasks/task_{suite.task_id}/tests/grader.py",
+                          release=release, timeout=120.0),
+            encoding="utf-8")
         script = (
             f'set -e; cd {suite.workdir}; '
             'if [ -s /era/model.patch ]; then git apply --binary -p1 /era/model.patch; fi; '
-            'python /tests/grader.py'
+            'python /era/grader.py'
         )
         proc = _docker(
             ["run", "--rm", "--network", "none", "--platform", "linux/amd64",
