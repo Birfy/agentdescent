@@ -1452,11 +1452,15 @@ domains and all six inside the release's unrestricted 96 — one flat-PUCT tree
 each, **4 expansions per tree**, 2 workers, `c_puct = 1.0`, uniform prior,
 `--held-back-frac 0.25`, seed 0, synchronous mode.
 
-The mutation operator is the **Claude Code CLI** (`claude -p`, version 2.1.251)
-at `--agent-timeout 1200`, with no `--model`, so each session runs whatever
-model that CLI defaults to. That is a reproducibility gap and it is the reason
-`agent_sessions.version` is now recorded; a run meant to be repeated should pass
-`--model`.
+The mutation operator is the **Claude Code CLI** (`claude -p
+--permission-mode acceptEdits --allowedTools "Bash Edit Write Read Glob Grep
+TodoWrite"`, version 2.1.251, prompt over stdin) at `--agent-timeout 1200`. The
+run passed no `--model`, so each session took that CLI's default: **`claude-sonnet-5`**
+in all 37 sessions across the three arms, read back afterwards from the CLI's
+own transcripts (`~/.claude/projects/*/`) rather than from the result file,
+which is why `agent_sessions.version` and `agent_sessions.model` are recorded
+now. A run meant to be repeated should pass `--model`; these three predate the
+field and carry it only here.
 
 Everything else is the release as published: both pinned images per task pulled
 by digest, the agent's container on `--network none`, and the reward read from
