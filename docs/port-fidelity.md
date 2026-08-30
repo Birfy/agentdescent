@@ -312,18 +312,31 @@ column of each section below says exactly where to look.
   + `futs.compute_pucts` + the `argmax`. The tree bookkeeping (parent chain,
   backpropagation) stays on the aggregator's archive, the same division
   OpenEvolve uses for `EpsilonGreedy` and its islands.
-* **Three further tasks on the same search**: `era_hard_integrals.py` runs the
+* **Five further tasks on the same search**: `era_hard_integrals.py` runs the
   paper's *numerical solution of integrals* — named in the abstract, with no
   released implementation to port — `era_hypergeometric.py` runs
   double-precision evaluation of `2F1`, which the paper does not name at all,
   `era_llm_srbench.py` runs
-  [LLM-SRBench](https://arxiv.org/abs/2504.10415) equation discovery, and
+  [LLM-SRBench](https://arxiv.org/abs/2504.10415) equation discovery,
   `era_algotune.py` runs the AlgoTune speedup benchmark, one tree per benchmark
-  task. All go through the identical tree, aggregator and sandbox, behind a
-  `Domain` that carries only the seed program, the evaluator, the prompt and the
-  metric name. They are **entry points, not further algorithms**: nothing in this
-  section changes for them, and the fidelity class above is a statement about
-  FUTS, which all five tasks run unmodified.
+  task, and `era_swe_science.py` runs
+  [SWE-bench Science](https://huggingface.co/datasets/OpenMOSS-Team/SWE-bench-Science),
+  also one tree per task. All go through the identical tree and aggregator
+  behind a `Domain` that carries only the seed program, the evaluator, the
+  prompt and the metric name. They are **entry points, not further algorithms**:
+  nothing in this section changes for them, and the fidelity class above is a
+  statement about FUTS, which all six tasks run unmodified.
+
+  SWE-bench Science moves two things the others share, and both are consequences
+  of what its candidate *is* rather than choices about the search. Its node is a
+  **patch to a repository**, so a mutation is a coding-agent session in a
+  checkout rather than a model call that rewrites a file — upstream's shape
+  (the parent program goes to the mutation, whatever comes back becomes a node,
+  a failure included) is unchanged. And its evaluator is the benchmark's **own
+  pinned verifier image** rather than this repository's Bubblewrap profile,
+  because the held-out tests, the dependencies and the public fixtures are only
+  distributed inside those images; the port refuses to run where no Docker
+  daemon answers rather than substituting something weaker.
 
   Two of them are this port's construction — the integrand families and the 2F1
   stress set are not upstream's, since upstream released none — so they are

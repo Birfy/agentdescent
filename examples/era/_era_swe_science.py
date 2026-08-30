@@ -67,7 +67,6 @@ import re
 import shutil
 import subprocess
 import tempfile
-import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -576,8 +575,7 @@ def _failure_report(payload: Dict[str, Any]) -> str:
 def evaluate_patch(patch: str, *, suite: Suite, shards: Sequence[int],
                    timeout: float = RELEASE_VERIFIER_TIMEOUT,
                    public: bool = True, max_patch_bytes: int = 400_000,
-                   cache: Optional[Dict[str, Any]] = None,
-                   cache_lock: Optional[threading.Lock] = None
+                   cache: Optional[Dict[str, Any]] = None
                    ) -> Tuple[bool, Dict[str, Any], str]:
     """Score one candidate patch on the tests those shards name.
 
@@ -592,8 +590,10 @@ def evaluate_patch(patch: str, *, suite: Suite, shards: Sequence[int],
     selection = suite.tests_for(shards)
     key = (suite.verifier_image, patch_id(patch), tuple(sorted(selection)), bool(public))
     if cache is not None:
-        with (cache_lock or threading.Lock()):
-            hit = cache.get(key)
+        # No lock: a dict get/set is atomic under the GIL, evaluations are
+        # deterministic, and the worst a race can cost is one container run
+        # that two threads both paid for.
+        hit = cache.get(key)
         if hit is not None:
             valid, metrics, error = hit
             return valid, dict(metrics), error
@@ -620,8 +620,7 @@ def evaluate_patch(patch: str, *, suite: Suite, shards: Sequence[int],
             result = _metrics_from(payload, selection, public,
                                    round(time.monotonic() - started, 3))
     if cache is not None:
-        with (cache_lock or threading.Lock()):
-            cache[key] = (result[0], dict(result[1]), result[2])
+        cache[key] = (result[0], dict(result[1]), result[2])
     return result
 
 
@@ -688,7 +687,7 @@ def grade(patch: str, *, suite: Suite, timeout: float = RELEASE_VERIFIER_TIMEOUT
         proc = _docker(
             ["run", "--rm", "--network", "none", "--platform", "linux/amd64",
              "-v", f"{job}:/era", "-w", suite.workdir, suite.verifier_image,
-             "bash", "-lc", script],
+             "sh", "-lc", script],
             timeout=timeout + 300, check=False)
         text = (proc.stdout or "").strip().splitlines()
         for line in reversed(text):
@@ -762,7 +761,6 @@ class Workspace:
 
     def diff(self) -> str:
         """``model.patch``: the artifact the release's own hook collects."""
-        self._git("config", "--global", "--add", "safe.directory", str(self.work))
         baseline = self.baseline()
         self._git("add", "-A")
         return self._git("diff", "--cached", "--binary", baseline)
@@ -776,8 +774,13 @@ class Workspace:
         self._git("apply", "--binary", "-p1", str(target))
 
     def _git(self, *args: str) -> str:
-        proc = subprocess.run(["git", *args], cwd=self.work, capture_output=True,
-                              text=True, timeout=600)
+        # `-c` rather than `git config --global`: the release's own hook marks
+        # the checkout safe inside a throwaway container, and doing the same on
+        # the host would write to the user's real gitconfig for a directory
+        # that is deleted when the expansion ends.
+        proc = subprocess.run(
+            ["git", "-c", f"safe.directory={self.work}", *args],
+            cwd=self.work, capture_output=True, text=True, timeout=600)
         if proc.returncode != 0:
             raise BenchmarkError(
                 f"git {args[0]} failed in the workspace: "
