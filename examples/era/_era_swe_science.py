@@ -158,6 +158,25 @@ def _docker(args: Sequence[str], *, timeout: float = 600.0,
     return proc
 
 
+def agent_version(command: Sequence[str]) -> str:
+    """``<agent> --version``, or "" -- recorded so a result file is reproducible.
+
+    A result that says "claude -p" and nothing else cannot be repeated: the CLI
+    carries its own model, and `--model` is optional here precisely because it
+    does. This is the cheapest thing that pins *something*, and an agent with no
+    ``--version`` costs one failed subprocess and an empty field.
+    """
+    if not command:
+        return ""
+    try:
+        proc = subprocess.run([command[0], "--version"], capture_output=True,
+                              text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return (proc.stdout or proc.stderr or "").strip().splitlines()[0][:200] \
+        if proc.returncode == 0 else ""
+
+
 def image_present(ref: str) -> bool:
     proc = _docker(["image", "inspect", ref], timeout=120, check=False)
     return proc.returncode == 0

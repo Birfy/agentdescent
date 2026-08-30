@@ -211,6 +211,16 @@ attempts and the best node is kept. Same tasks, same pinned images, same grader,
 different experiment — said in the result file, in the module docstring, and in
 [`docs/algo-era.md`](../../docs/algo-era.md).
 
+Measured, the six `--tasks default` tasks against the Claude Code CLI at 4
+expansions per tree: **6 of 6 resolved by the release's own grader, from 0 of
+6**, and every held-back test passes on every task. But **every winning node
+came from round 0** — one agent session solves these tasks and the tree spends
+three more confirming it, so the table measures the agent under this harness
+rather than the search. At a shorter session budget, where a single session
+cannot finish, the tree does not recover what the budget takes away either. Full
+table, the two defects in the published release this had to route around, and
+the caveats: [`docs/algo-era.md`](../../docs/algo-era.md#measured-results--swe-bench-science).
+
 This is the one task that needs **Docker** rather than the shared sandbox: the
 benchmark is distributed as 238 pinned `linux/amd64` images (about 1.6 GB per
 task) and there is no offline substitute — the dependencies, the public fixtures

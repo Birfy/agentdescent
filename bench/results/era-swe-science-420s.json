@@ -1,0 +1,1048 @@
+{
+  "experiment": "ERA on AgentDescent -- SWE-bench Science, one tree per task",
+  "status": "completed",
+  "completed_at": "2026-08-30T18:38:30+00:00",
+  "upstream_commit": "b836730b5c000526af95116b1d0e2c60c8cf0a10",
+  "benchmark": "SWE-bench Science (OpenMOSS-Team/SWE-bench-Science@d8bdbcb4ecb2b565686382459c815d2b6291fd31)",
+  "protocol": "ERA's, not the benchmark's: the leaderboard gives an agent one attempt per task with no verifier feedback, while this scores a tree of agent sessions against the visible part of each private suite and keeps the best node. `benchmark_reward_*` is the release's own grader over the whole private suite; the search never reads it.",
+  "config": {
+    "provider": "claude",
+    "model": null,
+    "seed": 0,
+    "asynchronous": false,
+    "async_ratio": 1,
+    "max_seconds": 1800.0,
+    "pipelined_gate": false,
+    "gate_workers": 2,
+    "dry_run": false,
+    "serial": false,
+    "budget_rollouts": null,
+    "val_cap": null,
+    "eval_concurrency": null,
+    "reflective_merge": false,
+    "eval_cache": "",
+    "no_thinking": false,
+    "tasks": "001,034,045",
+    "list_tasks": false,
+    "allow_restricted_licenses": false,
+    "release": null,
+    "agent": "claude-code",
+    "agent_command": "",
+    "agent_timeout": 420.0,
+    "staleness": "guarded",
+    "iterations": 4,
+    "workers": 1,
+    "shards": 4,
+    "test_shards": 2,
+    "held_back_frac": 0.25,
+    "no_public": false,
+    "held_out_frac": 0.5,
+    "c_puct": 1.0,
+    "prior_exponent": 0.0,
+    "verifier_timeout": 1800.0,
+    "max_patch_bytes": 400000,
+    "workspace_root": "/tmp/claude-0/-home-user-agentdescent/02a9c808-7ec2-5eb1-9055-691e73d63a11/scratchpad/run4",
+    "keep_workspaces": false,
+    "no_pull": false,
+    "regrade": null,
+    "max_tokens": 16000,
+    "temperature": 0.7,
+    "thinking": "default",
+    "api_timeout": 600.0,
+    "shutdown_grace": 120.0,
+    "quality_target": null
+  },
+  "summary": {
+    "tasks_run": 3,
+    "tasks_failed": 0,
+    "tasks_improved_on_held_back": 2,
+    "resolved_baseline": 0,
+    "resolved_best": 1,
+    "resolve_rate": 0.3333333333333333,
+    "wall_seconds": 4728.901108943
+  },
+  "tasks": [
+    {
+      "task_id": "001",
+      "title": "Repair an inconsistent transition-state rotor workflow",
+      "domain": "computational-reaction-chemistry",
+      "status": "completed",
+      "benchmark_reward_baseline": 0,
+      "benchmark_reward_best": 0,
+      "benchmark_grade_baseline": {
+        "private": {
+          "collected": 3,
+          "failed": 2,
+          "passed": 1,
+          "return_code": 1
+        },
+        "public": {
+          "collected": 1,
+          "passed": 1,
+          "return_code": 0
+        },
+        "reward": 0,
+        "task_id": "task_001"
+      },
+      "benchmark_grade_best": {
+        "private": {
+          "collected": 3,
+          "failed": 2,
+          "passed": 1,
+          "return_code": 1
+        },
+        "public": {
+          "collected": 1,
+          "passed": 1,
+          "return_code": 0
+        },
+        "reward": 0,
+        "task_id": "task_001"
+      },
+      "held_back_tests": 1,
+      "held_back_pass_rate_baseline": 0.5,
+      "held_back_pass_rate_best": 0.5,
+      "held_back_gain": 0.0,
+      "visible_pass_rate_baseline": 0.6666666666666666,
+      "visible_pass_rate_best": 0.6666666666666666,
+      "nodes": 5,
+      "wall_seconds": 1734.9538307109997,
+      "best_patch_chars": 0,
+      "best_patch": "",
+      "observation": {
+        "mode": "sync",
+        "wall_seconds": 1734.9538307109997,
+        "baseline": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "e3b0c44298fc1c14",
+          "iteration": 0,
+          "change_summary": "the unmodified baseline repository (empty patch)",
+          "score": 0.6666666666666666,
+          "pass_rate": 0.6666666666666666,
+          "num_visits": 4,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 0
+        },
+        "best": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "e3b0c44298fc1c14",
+          "iteration": 0,
+          "change_summary": "the unmodified baseline repository (empty patch)",
+          "score": 0.6666666666666666,
+          "pass_rate": 0.6666666666666666,
+          "num_visits": 4,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 0
+        },
+        "data": {
+          "task_id": "001",
+          "title": "Repair an inconsistent transition-state rotor workflow",
+          "domain": "computational-reaction-chemistry",
+          "language": "python",
+          "repository": "https://github.com/Auto-Mech/autochem",
+          "base_commit": "cbe1a0c1102b8125608841eb8ac536cfe3b09671",
+          "source_license": "MIT",
+          "license_gate": "none",
+          "environment_image": "docker.io/kevinxulearning/swe-bench-science-environment-python-task-001:v0.1.0@sha256:0b6b41e556cd862f10e9e8c489e9b539eda27d277718e0504de440048c62d3c7",
+          "verifier_image": "docker.io/kevinxulearning/swe-bench-science-verifier-python-task-001:v0.1.0@sha256:7af68a1c44876615b0f961abd18e7fb656dae5f117820a35ff8e1d10faa430b0",
+          "private_tests": 3,
+          "visible_tests": 2,
+          "held_back_tests": 1,
+          "scoring_shards": 4,
+          "held_back_shards": 2,
+          "shard_rule": "replicate",
+          "seed": 0
+        },
+        "framework": {
+          "baseline_reward": 0.6666666666666666,
+          "final_reward": 0.6666666666666666,
+          "quality_gain": 0.0,
+          "stop_reason": "rounds",
+          "error": null,
+          "outcomes": {
+            "tree-updated": 4
+          },
+          "rollouts": 4,
+          "rollout_seconds": 0.0004208087921142578,
+          "eval_seconds": 0.0002980232238769531,
+          "stale_considered": 4,
+          "stale_discarded": 0,
+          "stale_rate": 0.0,
+          "retired_workers": 0,
+          "history": [
+            {
+              "round": 0,
+              "held_out_reward": 0.6666666666666666,
+              "elapsed_s": 431.50923776626587,
+              "rollouts": 1,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 1,
+              "held_out_reward": 0.6666666666666666,
+              "elapsed_s": 862.5802037715912,
+              "rollouts": 2,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 2,
+              "held_out_reward": 0.6666666666666666,
+              "elapsed_s": 1293.800157546997,
+              "rollouts": 3,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 3,
+              "held_out_reward": 0.6666666666666666,
+              "elapsed_s": 1724.4946286678314,
+              "rollouts": 4,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            }
+          ]
+        },
+        "actor_usage": {
+          "calls": 10,
+          "failures": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "model_seconds": 1682.826538
+        },
+        "tree": {
+          "nodes": 5,
+          "valid_nodes": 5,
+          "max_depth": 4,
+          "root_visits": 4,
+          "c_puct": 1.0,
+          "tree": [
+            {
+              "index": 0,
+              "parent_index": null,
+              "program_id": "e3b0c44298fc1c14",
+              "iteration": 0,
+              "change_summary": "the unmodified baseline repository (empty patch)",
+              "score": 0.6666666666666666,
+              "pass_rate": 0.6666666666666666,
+              "num_visits": 4,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 0
+            },
+            {
+              "index": 1,
+              "parent_index": 0,
+              "program_id": "b5262663eec2ccb9",
+              "iteration": 1,
+              "change_summary": "",
+              "score": 0.6666666666666666,
+              "pass_rate": 0.6666666666666666,
+              "num_visits": 4,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 3935
+            },
+            {
+              "index": 2,
+              "parent_index": 1,
+              "program_id": "4b733991199f60b2",
+              "iteration": 2,
+              "change_summary": "",
+              "score": 0.6666666666666666,
+              "pass_rate": 0.6666666666666666,
+              "num_visits": 3,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 11593
+            },
+            {
+              "index": 3,
+              "parent_index": 2,
+              "program_id": "0704f1fc6a4c4c20",
+              "iteration": 3,
+              "change_summary": "",
+              "score": 0.6666666666666666,
+              "pass_rate": 0.6666666666666666,
+              "num_visits": 2,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 14887
+            },
+            {
+              "index": 4,
+              "parent_index": 3,
+              "program_id": "971c6ea6a9b2bd92",
+              "iteration": 4,
+              "change_summary": "",
+              "score": 0.6666666666666666,
+              "pass_rate": 0.6666666666666666,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 8016
+            }
+          ]
+        },
+        "test": {
+          "baseline": {
+            "score": 0.5,
+            "pass_rate": 0.5,
+            "passed": 0,
+            "collected": 1,
+            "public": 1,
+            "checks": 2,
+            "subset_resolved": 0,
+            "seconds": 9.418,
+            "error": "",
+            "report": "visible private checks:\n=================================== FAILURES ===================================\n_______ test_relabelled_out_of_line_transition_state_has_consistent_caps _______\n\n    def test_relabelled_out_of_line_transition_state_has_consistent_caps():\n        gra = _sn2_graph()\n        segments = _segment_sets(gra)\n>       assert segments == [frozenset({3, 40, 120})]\nE       assert [frozenset({3, 40, 99})] == [frozenset({3, 40, 120})]\nE         \nE         At index 0 diff: frozenset({40, 99, 3}) != frozenset({40, 3, 120})\nE         Use -v to get more diff\n\n/tests/private_tests/test_transition_state_symmetry.py:118: AssertionError\n=========================== short test summary info ============================\nFAILED ../../tests/private_tests/test_transition_state_symmetry.py::test_relabelled_out_of_line_transition_state_has_consistent_caps\n1 failed, 20 warnings in 3.53s"
+          },
+          "best": {
+            "score": 0.5,
+            "pass_rate": 0.5,
+            "passed": 0,
+            "collected": 1,
+            "public": 1,
+            "checks": 2,
+            "subset_resolved": 0,
+            "seconds": 9.418,
+            "error": "",
+            "report": "visible private checks:\n=================================== FAILURES ===================================\n_______ test_relabelled_out_of_line_transition_state_has_consistent_caps _______\n\n    def test_relabelled_out_of_line_transition_state_has_consistent_caps():\n        gra = _sn2_graph()\n        segments = _segment_sets(gra)\n>       assert segments == [frozenset({3, 40, 120})]\nE       assert [frozenset({3, 40, 99})] == [frozenset({3, 40, 120})]\nE         \nE         At index 0 diff: frozenset({40, 99, 3}) != frozenset({40, 3, 120})\nE         Use -v to get more diff\n\n/tests/private_tests/test_transition_state_symmetry.py:118: AssertionError\n=========================== short test summary info ============================\nFAILED ../../tests/private_tests/test_transition_state_symmetry.py::test_relabelled_out_of_line_transition_state_has_consistent_caps\n1 failed, 20 warnings in 3.53s"
+          },
+          "pass_rate_gain": 0.0
+        }
+      },
+      "actor_usage": {
+        "calls": 10,
+        "failures": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "model_seconds": 1682.826538
+      },
+      "regraded": {
+        "previous_reward_baseline": 0,
+        "previous_reward_best": 0,
+        "previous_grade_baseline": {
+          "private": {
+            "collected": 3,
+            "failed": 2,
+            "passed": 1,
+            "return_code": 1
+          },
+          "public": {
+            "collected": 1,
+            "passed": 1,
+            "return_code": 0
+          },
+          "reward": 0,
+          "task_id": "task_001"
+        },
+        "previous_grade_best": {
+          "private": {
+            "collected": 3,
+            "failed": 2,
+            "passed": 1,
+            "return_code": 1
+          },
+          "public": {
+            "collected": 1,
+            "passed": 1,
+            "return_code": 0
+          },
+          "reward": 0,
+          "task_id": "task_001"
+        }
+      }
+    },
+    {
+      "task_id": "034",
+      "title": "Repair an inconsistent stochastic trajectory calculation",
+      "domain": "stochastic-numerical-analysis",
+      "status": "completed",
+      "benchmark_reward_baseline": 0,
+      "benchmark_reward_best": 0,
+      "benchmark_grade_baseline": {
+        "private": {
+          "collected": 8,
+          "failed": 7,
+          "passed": 1,
+          "return_code": 1
+        },
+        "public": {
+          "collected": 1,
+          "passed": 1,
+          "return_code": 0
+        },
+        "reward": 0,
+        "task_id": "task_034"
+      },
+      "benchmark_grade_best": {
+        "private": {
+          "collected": 8,
+          "failed": 4,
+          "passed": 4,
+          "return_code": 1
+        },
+        "public": {
+          "collected": 1,
+          "passed": 1,
+          "return_code": 0
+        },
+        "reward": 0,
+        "task_id": "task_034"
+      },
+      "held_back_tests": 2,
+      "held_back_pass_rate_baseline": 0.3333333333333333,
+      "held_back_pass_rate_best": 0.6666666666666666,
+      "held_back_gain": 0.3333333333333333,
+      "visible_pass_rate_baseline": 0.2857142857142857,
+      "visible_pass_rate_best": 0.5714285714285714,
+      "nodes": 5,
+      "wall_seconds": 1959.8517911119998,
+      "best_patch_chars": 3397,
+      "best_patch": "diff --git a/scratch_check.py b/scratch_check.py\nnew file mode 100644\nindex 0000000..77871d0\n--- /dev/null\n+++ b/scratch_check.py\n@@ -0,0 +1,46 @@\n+import sys\n+sys.path.insert(0, \"source\")\n+import jax\n+jax.config.update(\"jax_enable_x64\", True)\n+import jax.numpy as jnp\n+import jax.random as jr\n+import numpy as np\n+import diffrax as dfx\n+\n+\n+def solve(t0, t1, dt0, key, solver, levy_area):\n+    control = dfx.VirtualBrownianTree(\n+        t0=min(t0, t1), t1=max(t0, t1), tol=abs(dt0) / 2,\n+        shape=(), key=key, levy_area=levy_area,\n+    )\n+    drift = lambda t, y, args: jnp.sin(y)\n+    diffusion = lambda t, y, args: jnp.array(0.5)\n+    terms = dfx.MultiTerm(dfx.ODETerm(drift), dfx.ControlTerm(diffusion, control))\n+    sol = dfx.diffeqsolve(\n+        terms, solver, t0=t0, t1=t1, dt0=jnp.copysign(dt0, t1 - t0),\n+        y0=jnp.array(1.0), stepsize_controller=dfx.ConstantStepSize(),\n+        max_steps=2**18,\n+    )\n+    return sol.ys[-1]\n+\n+\n+def empirical_strong_order(t0, t1, seed, solver_cls, levy_area):\n+    key = jr.key(seed)\n+    keys = jr.split(key, 64)\n+    base_dt = abs(t1 - t0) / 512\n+    # reference: fine SRK solve\n+    ref = jax.vmap(lambda k: solve(t0, t1, base_dt / 8, k, solver_cls(), levy_area))(keys)\n+    errs = []\n+    for mult in [1, 2, 4]:\n+        approx = jax.vmap(lambda k: solve(t0, t1, base_dt * mult, k, solver_cls(), levy_area))(keys)\n+        err = jnp.mean(jnp.abs(approx - ref))\n+        errs.append(float(err))\n+    errs = np.array(errs)\n+    steps = np.array([base_dt, base_dt * 2, base_dt * 4])\n+    slope, _ = np.polyfit(np.log(steps), np.log(errs), 1)\n+    return slope, errs\n+\n+\n+for (t0, t1, label) in [(0.0, 1.0, \"forward\"), (1.15, 0.15, \"reverse\")]:\n+    slope, errs = empirical_strong_order(t0, t1, 12347, dfx.SlowRK, dfx.SpaceTimeLevyArea)\n+    print(label, \"SlowRK slope=\", slope, errs)\ndiff --git a/source/diffrax/_term.py b/source/diffrax/_term.py\nindex 9b0c031..2c4a6fa 100644\n--- a/source/diffrax/_term.py\n+++ b/source/diffrax/_term.py\n@@ -17,6 +17,7 @@ from jaxtyping import Array, ArrayLike, PyTree, Shaped\n from ._brownian import AbstractBrownianPath\n from ._custom_types import (\n     AbstractBrownianIncrement,\n+    AbstractSpaceTimeLevyArea,\n     Args,\n     Control,\n     IntScalarLike,\n@@ -742,7 +743,17 @@ class WrapTerm(AbstractTerm[_VF, _Control]):\n     def contr(self, t0: RealScalarLike, t1: RealScalarLike, **kwargs) -> _Control:\n         _t0 = jnp.where(self.direction == 1, t0, -t1)\n         _t1 = jnp.where(self.direction == 1, t1, -t0)\n-        return (self.direction * self.term.contr(_t0, _t1, **kwargs) ** ω).ω\n+        control = self.term.contr(_t0, _t1, **kwargs)\n+        out = (self.direction * control**ω).ω\n+        if isinstance(control, AbstractSpaceTimeLevyArea):\n+            # Unlike the Brownian increment `W` (and the space-time-time Lévy\n+            # area `K`, if present), the space-time Lévy area `H` is invariant\n+            # under the time reversal used to run a solve backward in time: it\n+            # is defined via a Brownian bridge that is symmetric under swapping\n+            # the roles of the interval's start and end, so it must not be\n+            # flipped along with the direction of time.\n+            out = eqx.tree_at(lambda c: c.H, out, control.H)\n+        return out\n \n     def prod(self, vf: _VF, control: _Control) -> Y:\n         with jax.numpy_dtype_promotion(\"standard\"):",
+      "observation": {
+        "mode": "sync",
+        "wall_seconds": 1959.8517911119998,
+        "baseline": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "e3b0c44298fc1c14",
+          "iteration": 0,
+          "change_summary": "the unmodified baseline repository (empty patch)",
+          "score": 0.2857142857142857,
+          "pass_rate": 0.2857142857142857,
+          "num_visits": 4,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 0
+        },
+        "best": {
+          "index": 1,
+          "parent_index": 0,
+          "program_id": "c08ec7ff25adf6d4",
+          "iteration": 1,
+          "change_summary": "",
+          "score": 0.5714285714285714,
+          "pass_rate": 0.5714285714285714,
+          "num_visits": 4,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 3397
+        },
+        "data": {
+          "task_id": "034",
+          "title": "Repair an inconsistent stochastic trajectory calculation",
+          "domain": "stochastic-numerical-analysis",
+          "language": "python",
+          "repository": "https://github.com/patrick-kidger/diffrax",
+          "base_commit": "56d78e1acbdc9c1493caef17a34777931430f3bf",
+          "source_license": "Apache-2.0",
+          "license_gate": "none",
+          "environment_image": "docker.io/kevinxulearning/swe-bench-science-environment-python-task-034:v0.1.1@sha256:fa45aacfb4bbf402fbd7597ca767d61065cf767a35e9c457f708bb024e46a29f",
+          "verifier_image": "docker.io/kevinxulearning/swe-bench-science-verifier-python-task-034:v0.1.1@sha256:05bcfc247e7ddf648bb2c176a6a51e0044fe3e262fb1520291c13384074fdaa7",
+          "private_tests": 8,
+          "visible_tests": 6,
+          "held_back_tests": 2,
+          "scoring_shards": 4,
+          "held_back_shards": 2,
+          "shard_rule": "replicate",
+          "seed": 0
+        },
+        "framework": {
+          "baseline_reward": 0.2857142857142857,
+          "final_reward": 0.5714285714285714,
+          "quality_gain": 0.2857142857142857,
+          "stop_reason": "rounds",
+          "error": null,
+          "outcomes": {
+            "committed": 1,
+            "tree-updated": 3
+          },
+          "rollouts": 4,
+          "rollout_seconds": 0.0003833770751953125,
+          "eval_seconds": 0.0003437995910644531,
+          "stale_considered": 4,
+          "stale_discarded": 0,
+          "stale_rate": 0.0,
+          "retired_workers": 0,
+          "history": [
+            {
+              "round": 0,
+              "held_out_reward": 0.5714285714285714,
+              "elapsed_s": 472.09867811203003,
+              "rollouts": 1,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 1,
+              "held_out_reward": 0.5714285714285714,
+              "elapsed_s": 943.1242816448212,
+              "rollouts": 2,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 2,
+              "held_out_reward": 0.5714285714285714,
+              "elapsed_s": 1425.6390109062195,
+              "rollouts": 3,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 3,
+              "held_out_reward": 0.5714285714285714,
+              "elapsed_s": 1905.9688317775726,
+              "rollouts": 4,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            }
+          ]
+        },
+        "actor_usage": {
+          "calls": 10,
+          "failures": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "model_seconds": 1682.242826
+        },
+        "tree": {
+          "nodes": 5,
+          "valid_nodes": 5,
+          "max_depth": 4,
+          "root_visits": 4,
+          "c_puct": 1.0,
+          "tree": [
+            {
+              "index": 0,
+              "parent_index": null,
+              "program_id": "e3b0c44298fc1c14",
+              "iteration": 0,
+              "change_summary": "the unmodified baseline repository (empty patch)",
+              "score": 0.2857142857142857,
+              "pass_rate": 0.2857142857142857,
+              "num_visits": 4,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 0
+            },
+            {
+              "index": 1,
+              "parent_index": 0,
+              "program_id": "c08ec7ff25adf6d4",
+              "iteration": 1,
+              "change_summary": "",
+              "score": 0.5714285714285714,
+              "pass_rate": 0.5714285714285714,
+              "num_visits": 4,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 3397
+            },
+            {
+              "index": 2,
+              "parent_index": 1,
+              "program_id": "f484d852ef0ab9df",
+              "iteration": 2,
+              "change_summary": "",
+              "score": 0.5714285714285714,
+              "pass_rate": 0.5714285714285714,
+              "num_visits": 3,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 12489
+            },
+            {
+              "index": 3,
+              "parent_index": 2,
+              "program_id": "e025b69f20cc193b",
+              "iteration": 3,
+              "change_summary": "",
+              "score": 0.5714285714285714,
+              "pass_rate": 0.5714285714285714,
+              "num_visits": 2,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 16281
+            },
+            {
+              "index": 4,
+              "parent_index": 3,
+              "program_id": "5ae649dfc26538ed",
+              "iteration": 4,
+              "change_summary": "",
+              "score": 0.5714285714285714,
+              "pass_rate": 0.5714285714285714,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 26908
+            }
+          ]
+        },
+        "test": {
+          "baseline": {
+            "score": 0.3333333333333333,
+            "pass_rate": 0.3333333333333333,
+            "passed": 0,
+            "collected": 2,
+            "public": 1,
+            "checks": 3,
+            "subset_resolved": 0,
+            "seconds": 24.087,
+            "error": "",
+            "report": "visible private checks:\n, 3037, 1.25, 0.15, 0.05),\n            (\"general\", \"SPaRK\", 4051, 1.25, 0.15, 0.05),\n        ],\n    )\n    def test_reverse_oriented_solvers_reach_the_independent_path_limit(\n        model_name: str,\n        solver_name: str,\n        seed: int,\n        t0: float,\n        t1: float,\n        tolerance: float,\n    ) -> None:\n        error = independent_limit_error(\n            model_name,\n            solver_name,\n            seed=seed,\n            t0=t0,\n            t1=t1,\n            candidate_step=2**-7,\n            reference_step=2**-10,\n        )\n>       assert error < tolerance\nE       assert 1.1407909204213587 < 0.08\n\n/tests/private_tests/test_stochastic_orientation.py:292: AssertionError\n_ test_reverse_oriented_high_order_methods_retain_strong_convergence[oscillator-SlowRK-7021-1.0-0.0] _\n\nmodel_name = 'oscillator', solver_name = 'SlowRK', seed = 7021, t0 = 1.0\nt1 = 0.0\n\n    @pytest.mark.parametrize(\n        (\"model_name\", \"solver_name\", \"seed\", \"t0\", \"t1\"),\n        [\n            (\"oscillator\", \"SlowRK\", 7021, 1.0, 0.0),\n            (\"time_additive\", \"SRA1\", 8191, 1.15, 0.15),\n            (\"commutative\", \"SlowRK\", 12347, 1.15, 0.15),\n        ],\n    )\n    def test_reverse_oriented_high_order_methods_retain_strong_convergence(\n        model_name: str,\n        solver_name: str,\n        seed: int,\n        t0: float,\n        t1: float,\n    ) -> None:\n        slope, errors = empirical_strong_order(\n            model_name,\n            solver_name,\n            seed=seed,\n            t0=t0,\n            t1=t1,\n        )\n        assert np.all(np.isfinite(np.asarray(errors)))\n>       assert slope > 1.35, (slope, errors)\nE       AssertionError: (1.0865628912953849, [0.05683779889976725, 0.030710213332323433, 0.011984198284883497, 0.006317837607275986])\nE       assert 1.0865628912953849 > 1.35\n\n/tests/private_tests/test_stochastic_orientation.py:318: AssertionError\n-------------------- generated xml file: /tmp/era-junit.xml --------------------\n=========================== short test summary info ============================\nFAILED ../../tests/private_tests/test_stochastic_orientation.py::test_reverse_oriented_solvers_reach_the_independent_path_limit[time_additive-SPaRK-2029-1.25-0.15-0.08]\nFAILED ../../tests/private_tests/test_stochastic_orientation.py::test_reverse_oriented_high_order_methods_retain_strong_convergence[oscillator-SlowRK-7021-1.0-0.0]\n2 failed in 18.50s"
+          },
+          "best": {
+            "score": 0.6666666666666666,
+            "pass_rate": 0.6666666666666666,
+            "passed": 1,
+            "collected": 2,
+            "public": 1,
+            "checks": 3,
+            "subset_resolved": 0,
+            "seconds": 23.951,
+            "error": "",
+            "report": "visible private checks:\n=================================== FAILURES ===================================\n_ test_reverse_oriented_solvers_reach_the_independent_path_limit[time_additive-SPaRK-2029-1.25-0.15-0.08] _\n\nmodel_name = 'time_additive', solver_name = 'SPaRK', seed = 2029, t0 = 1.25\nt1 = 0.15, tolerance = 0.08\n\n    @pytest.mark.parametrize(\n        (\"model_name\", \"solver_name\", \"seed\", \"t0\", \"t1\", \"tolerance\"),\n        [\n            (\"oscillator\", \"SRA1\", 1399, 1.25, 0.15, 0.10),\n            (\"time_additive\", \"SPaRK\", 2029, 1.25, 0.15, 0.08),\n            (\"commutative\", \"GeneralShARK\", 3037, 1.25, 0.15, 0.05),\n            (\"general\", \"SPaRK\", 4051, 1.25, 0.15, 0.05),\n        ],\n    )\n    def test_reverse_oriented_solvers_reach_the_independent_path_limit(\n        model_name: str,\n        solver_name: str,\n        seed: int,\n        t0: float,\n        t1: float,\n        tolerance: float,\n    ) -> None:\n        error = independent_limit_error(\n            model_name,\n            solver_name,\n            seed=seed,\n            t0=t0,\n            t1=t1,\n            candidate_step=2**-7,\n            reference_step=2**-10,\n        )\n>       assert error < tolerance\nE       assert 1.1411576177020002 < 0.08\n\n/tests/private_tests/test_stochastic_orientation.py:292: AssertionError\n-------------------- generated xml file: /tmp/era-junit.xml --------------------\n=========================== short test summary info ============================\nFAILED ../../tests/private_tests/test_stochastic_orientation.py::test_reverse_oriented_solvers_reach_the_independent_path_limit[time_additive-SPaRK-2029-1.25-0.15-0.08]\n1 failed, 1 passed in 18.44s"
+          },
+          "pass_rate_gain": 0.3333333333333333
+        }
+      },
+      "actor_usage": {
+        "calls": 10,
+        "failures": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "model_seconds": 1682.242826
+      },
+      "regraded": {
+        "previous_reward_baseline": 0,
+        "previous_reward_best": 0,
+        "previous_grade_baseline": {
+          "private": {
+            "collected": 8,
+            "failed": 7,
+            "passed": 1,
+            "return_code": 1
+          },
+          "public": {
+            "collected": 1,
+            "passed": 1,
+            "return_code": 0
+          },
+          "reward": 0,
+          "task_id": "task_034"
+        },
+        "previous_grade_best": {
+          "private": {
+            "collected": 8,
+            "failed": 4,
+            "passed": 4,
+            "return_code": 1
+          },
+          "public": {
+            "collected": 1,
+            "passed": 1,
+            "return_code": 0
+          },
+          "reward": 0,
+          "task_id": "task_034"
+        }
+      }
+    },
+    {
+      "task_id": "045",
+      "title": "Repair inconsistent finite-volume operations on a connected multi-face grid",
+      "domain": "computational-oceanography-finite-volume-grids",
+      "status": "completed",
+      "benchmark_reward_baseline": 0,
+      "benchmark_reward_best": 1,
+      "benchmark_grade_baseline": {
+        "private": {
+          "collected": 16,
+          "failed": 2,
+          "passed": 14,
+          "return_code": 1
+        },
+        "public": {
+          "collected": 1,
+          "passed": 0,
+          "return_code": 1
+        },
+        "reward": 0,
+        "task_id": "task_045"
+      },
+      "benchmark_grade_best": {
+        "private": {
+          "collected": 16,
+          "failed": 0,
+          "passed": 16,
+          "return_code": 0
+        },
+        "public": {
+          "collected": 1,
+          "passed": 1,
+          "return_code": 0
+        },
+        "reward": 1,
+        "task_id": "task_045"
+      },
+      "held_back_tests": 4,
+      "held_back_pass_rate_baseline": 0.6,
+      "held_back_pass_rate_best": 1.0,
+      "held_back_gain": 0.4,
+      "visible_pass_rate_baseline": 0.7142857142857143,
+      "visible_pass_rate_best": 1.0,
+      "nodes": 5,
+      "wall_seconds": 802.5271284179998,
+      "best_patch_chars": 2048,
+      "best_patch": "diff --git a/source/xgcm/padding.py b/source/xgcm/padding.py\nindex c3dc5b2..482b2e9 100644\n--- a/source/xgcm/padding.py\n+++ b/source/xgcm/padding.py\n@@ -54,7 +54,12 @@ def _get_all_connection_axes(connections, facedim):\n     all_axes = []\n     for c in connections[facedim].values():\n         all_axes.extend(list(c.keys()))\n-    return list(set(all_axes))\n+    # Deduplicate while preserving a deterministic (first-seen) order. Using a\n+    # plain `set()` here would order the axis names by their hash, which\n+    # varies across processes/PYTHONHASHSEED and can change the order in\n+    # which axes are padded below, leading to a non-deterministic dimension\n+    # order in the returned array.\n+    return list(dict.fromkeys(all_axes))\n \n \n def _strip_all_coords(obj: xr.DataArray):\n@@ -105,7 +110,9 @@ def _pad_face_connections(\n     # Detect all the axes we have to deal with during padding\n     # all the axes defined in the connections + the axes of the padding width should give all axes we need to iterate over\n     pad_axes = list(\n-        set(_get_all_connection_axes(connections, facedim) + list(padding_width.keys()))\n+        dict.fromkeys(\n+            _get_all_connection_axes(connections, facedim) + list(padding_width.keys())\n+        )\n     )\n \n     padding_width = {axname: padding_width.get(axname, (0, 0)) for axname in pad_axes}\n@@ -314,10 +321,17 @@ def _pad_face_connections(\n             da = da.isel({dim: slice(start, stop)})\n         return da\n \n-    return _trim_expanded_padding_width(\n+    da_trimmed = _trim_expanded_padding_width(\n         da_padded, grid, padding_width, max_padding_width\n     )\n \n+    # The order in which axes are padded above only affects the order in\n+    # which dimensions get rebuilt via xr.concat, not the values. Restore the\n+    # dimension order of the original input so that connected-face padding is\n+    # geometrically consistent (and deterministic) regardless of axis\n+    # iteration order.\n+    return da_trimmed.transpose(*da.dims)\n+\n \n def _pad_basic(\n     da: xr.DataArray,",
+      "observation": {
+        "mode": "sync",
+        "wall_seconds": 802.5271284179998,
+        "baseline": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "e3b0c44298fc1c14",
+          "iteration": 0,
+          "change_summary": "the unmodified baseline repository (empty patch)",
+          "score": 0.7142857142857143,
+          "pass_rate": 0.7142857142857143,
+          "num_visits": 4,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 0
+        },
+        "best": {
+          "index": 1,
+          "parent_index": 0,
+          "program_id": "1f2b70f6f2a31018",
+          "iteration": 1,
+          "change_summary": "In `source/xgcm/padding.py`'s `_pad_face_connections`, replaced hash-seed-dependent `set()`-based axis ordering with order-preserving `dict.fromkeys()` and added a final `.transpose(*da.dims)` so conn",
+          "score": 1.0,
+          "pass_rate": 1.0,
+          "num_visits": 4,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 2048
+        },
+        "data": {
+          "task_id": "045",
+          "title": "Repair inconsistent finite-volume operations on a connected multi-face grid",
+          "domain": "computational-oceanography-finite-volume-grids",
+          "language": "python",
+          "repository": "https://github.com/xgcm/xgcm",
+          "base_commit": "3831b46accbff35f06e4ed3831600d71d5d8da18",
+          "source_license": "MIT",
+          "license_gate": "none",
+          "environment_image": "docker.io/kevinxulearning/swe-bench-science-environment-python-task-045:v0.1.1@sha256:7c1a6d7c324fb06b666139cc162487e81c848774f8392ff857ea3130c8bdf145",
+          "verifier_image": "docker.io/kevinxulearning/swe-bench-science-verifier-python-task-045:v0.1.1@sha256:8f1017124bd8c6ff303864a9f681042f38a68c6026620b1ddc187bfba8555525",
+          "private_tests": 16,
+          "visible_tests": 12,
+          "held_back_tests": 4,
+          "scoring_shards": 4,
+          "held_back_shards": 2,
+          "shard_rule": "subset",
+          "seed": 0
+        },
+        "framework": {
+          "baseline_reward": 0.7142857142857143,
+          "final_reward": 1.0,
+          "quality_gain": 0.2857142857142857,
+          "stop_reason": "rounds",
+          "error": null,
+          "outcomes": {
+            "committed": 1,
+            "tree-updated": 3
+          },
+          "rollouts": 4,
+          "rollout_seconds": 12.323162078857422,
+          "eval_seconds": 9.5000638961792,
+          "stale_considered": 4,
+          "stale_discarded": 0,
+          "stale_rate": 0.0,
+          "retired_workers": 0,
+          "history": [
+            {
+              "round": 0,
+              "held_out_reward": 1.0,
+              "elapsed_s": 281.42218565940857,
+              "rollouts": 1,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 1,
+              "held_out_reward": 1.0,
+              "elapsed_s": 348.6553111076355,
+              "rollouts": 2,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 2,
+              "held_out_reward": 1.0,
+              "elapsed_s": 595.320321559906,
+              "rollouts": 3,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 3,
+              "held_out_reward": 1.0,
+              "elapsed_s": 797.1136200428009,
+              "rollouts": 4,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            }
+          ]
+        },
+        "actor_usage": {
+          "calls": 10,
+          "failures": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "model_seconds": 791.817205
+        },
+        "tree": {
+          "nodes": 5,
+          "valid_nodes": 5,
+          "max_depth": 4,
+          "root_visits": 4,
+          "c_puct": 1.0,
+          "tree": [
+            {
+              "index": 0,
+              "parent_index": null,
+              "program_id": "e3b0c44298fc1c14",
+              "iteration": 0,
+              "change_summary": "the unmodified baseline repository (empty patch)",
+              "score": 0.7142857142857143,
+              "pass_rate": 0.7142857142857143,
+              "num_visits": 4,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 0
+            },
+            {
+              "index": 1,
+              "parent_index": 0,
+              "program_id": "1f2b70f6f2a31018",
+              "iteration": 1,
+              "change_summary": "In `source/xgcm/padding.py`'s `_pad_face_connections`, replaced hash-seed-dependent `set()`-based axis ordering with order-preserving `dict.fromkeys()` and added a final `.transpose(*da.dims)` so conn",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 4,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 2048
+            },
+            {
+              "index": 2,
+              "parent_index": 1,
+              "program_id": "1f2b70f6f2a31018",
+              "iteration": 2,
+              "change_summary": "All relevant tests pass and the fix is deterministic across hash seeds, so no scratch files to clean up. The existing patch correctly addresses the root cause; no further changes needed.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 3,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 2048
+            },
+            {
+              "index": 3,
+              "parent_index": 2,
+              "program_id": "1f2b70f6f2a31018",
+              "iteration": 3,
+              "change_summary": "The existing patch in `source/xgcm/padding.py` correctly addresses the root cause: it replaces non-deterministic `set()`-based axis ordering with order-preserving `dict.fromkeys()`, and adds a final `",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 2,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 2048
+            },
+            {
+              "index": 4,
+              "parent_index": 3,
+              "program_id": "1f2b70f6f2a31018",
+              "iteration": 4,
+              "change_summary": "No scratch files were created, and the working tree already contains a correct, generalizable fix. I reviewed and confirmed the existing patch in `source/xgcm/padding.py`: replacing `set()` with `dict",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 2048
+            }
+          ]
+        },
+        "test": {
+          "baseline": {
+            "score": 0.6,
+            "pass_rate": 0.6,
+            "passed": 3,
+            "collected": 4,
+            "public": 0,
+            "checks": 5,
+            "subset_resolved": 0,
+            "seconds": 5.244,
+            "error": "",
+            "report": "public reproduction (reproduce.py) exited 1:\n \"target_face\": 2\n        },\n        {\n          \"axis\": \"X\",\n          \"declared_neighbor_face\": 1,\n          \"matches_declared_neighbor\": true,\n          \"observed_values_in_input_layout\": [\n            1.0,\n            1.0,\n            1.0,\n            1.0\n          ],\n          \"side\": \"right\",\n          \"target_face\": 5\n        }\n      ],\n      \"connected_edges_match_in_input_layout\": true,\n      \"connected_grid_contract_holds\": true,\n      \"dimension_order_preserved\": true,\n      \"input_dimension_order\": [\n        \"face\",\n        \"y\",\n        \"x\"\n      ],\n      \"process_hash_seed\": 2,\n      \"representation_observation\": {\n        \"authoritative\": false,\n        \"exact_match\": true,\n        \"input_dimension_orders\": [\n          [\n            \"face\",\n            \"y\",\n            \"x\"\n          ],\n          [\n            \"face\",\n            \"x\",\n            \"y\"\n          ]\n        ],\n        \"max_abs_difference\": 0.0,\n        \"same_canonical_shape\": true\n      },\n      \"returned_dimension_order\": [\n        \"face\",\n        \"y\",\n        \"x\"\n      ]\n    }\n  ],\n  \"schema_version\": \"2.0\",\n  \"scientific_check\": \"declared_cubed_sphere_neighbors\",\n  \"status\": \"pre_fix_expected_failure\"\n}\nvisible private checks:\n=================================== FAILURES ===================================\n_______________ test_upstream_coordinate_free_case_is_stable[1] ________________\n\nseed = '1'\n\n    @pytest.mark.parametrize(\"seed\", [\"1\", \"17\"])\n    def test_upstream_coordinate_free_case_is_stable(seed):\n        helper = Path(__file__).with_name(\"upstream_seeded_case.py\")\n        result = subprocess.run(\n            [sys.executable, str(helper), str(SOURCE_DIR)],\n            check=True,\n            capture_output=True,\n            text=True,\n            env={**os.environ, \"PYTHONHASHSEED\": seed},\n        )\n        payload = __import__(\"json\").loads(result.stdout)\n>       assert tuple(payload[\"dims\"]) == (\"face\", \"y\", \"x\")\nE       AssertionError: assert ('face', 'x', 'y') == ('face', 'y', 'x')\nE         \nE         At index 1 diff: 'x' != 'y'\nE         Use -v to get more diff\n\n/tests/private_tests/test_connected_grid_semantics.py:228: AssertionError\n=========================== short test summary info ============================\nFAILED ../../tests/private_tests/test_connected_grid_semantics.py::test_upstream_coordinate_free_case_is_stable[1]\n1 failed, 3 passed, 3 warnings in 1.83s"
+          },
+          "best": {
+            "score": 1.0,
+            "pass_rate": 1.0,
+            "passed": 4,
+            "collected": 4,
+            "public": 1,
+            "checks": 5,
+            "subset_resolved": 1,
+            "seconds": 5.176,
+            "error": "",
+            "report": ""
+          },
+          "pass_rate_gain": 0.4
+        }
+      },
+      "actor_usage": {
+        "calls": 10,
+        "failures": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "model_seconds": 791.817205
+      },
+      "regraded": {
+        "previous_reward_baseline": 0,
+        "previous_reward_best": 1,
+        "previous_grade_baseline": {
+          "private": {
+            "collected": 16,
+            "failed": 2,
+            "passed": 14,
+            "return_code": 1
+          },
+          "public": {
+            "collected": 1,
+            "passed": 0,
+            "return_code": 1
+          },
+          "reward": 0,
+          "task_id": "task_045"
+        },
+        "previous_grade_best": {
+          "private": {
+            "collected": 16,
+            "failed": 0,
+            "passed": 16,
+            "return_code": 0
+          },
+          "public": {
+            "collected": 1,
+            "passed": 1,
+            "return_code": 0
+          },
+          "reward": 1,
+          "task_id": "task_045"
+        }
+      }
+    }
+  ],
+  "failures": [],
+  "agent_sessions": {
+    "agent": "claude-code",
+    "command": "claude -p --permission-mode acceptEdits --allowedTools Bash Edit Write Read Glob Grep TodoWrite",
+    "timeout_s": 420.0,
+    "failed": 8,
+    "sessions": 12
+  },
+  "agent_usage": {
+    "calls": 12,
+    "failures": 8,
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0,
+    "model_seconds": 4129.45332
+  },
+  "model_usage": {
+    "calls": 0,
+    "failures": 0,
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0,
+    "model_seconds": 0.0
+  },
+  "regraded_at": "2026-08-30T18:46:43+00:00",
+  "regraded_reason": "the run's own grading step ran the grader baked into each verifier image; some of those are stale (task 034's collects nothing and scores every submission 0). Re-run with the release's own task-bundle grader, which is what its tests/docker-compose.yaml mounts. The search itself is untouched -- grading is a pure function of the patch."
+}

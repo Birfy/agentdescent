@@ -1,0 +1,1278 @@
+{
+  "experiment": "ERA on AgentDescent -- SWE-bench Science, one tree per task",
+  "status": "completed",
+  "completed_at": "2026-08-30T18:07:42+00:00",
+  "upstream_commit": "b836730b5c000526af95116b1d0e2c60c8cf0a10",
+  "benchmark": "SWE-bench Science (OpenMOSS-Team/SWE-bench-Science@d8bdbcb4ecb2b565686382459c815d2b6291fd31)",
+  "protocol": "ERA's, not the benchmark's: the leaderboard gives an agent one attempt per task with no verifier feedback, while this scores a tree of agent sessions against the visible part of each private suite and keeps the best node. `benchmark_reward_*` is the release's own grader over the whole private suite; the search never reads it.",
+  "config": {
+    "provider": "claude",
+    "model": null,
+    "seed": 0,
+    "asynchronous": false,
+    "async_ratio": 1,
+    "max_seconds": 1800.0,
+    "pipelined_gate": false,
+    "gate_workers": 2,
+    "dry_run": false,
+    "serial": false,
+    "budget_rollouts": null,
+    "val_cap": null,
+    "eval_concurrency": null,
+    "reflective_merge": false,
+    "eval_cache": "",
+    "no_thinking": false,
+    "tasks": "001,002,022,029",
+    "list_tasks": false,
+    "allow_restricted_licenses": false,
+    "release": null,
+    "agent": "claude-code",
+    "agent_command": "",
+    "agent_timeout": 1200.0,
+    "staleness": "guarded",
+    "iterations": 4,
+    "workers": 2,
+    "shards": 4,
+    "test_shards": 2,
+    "held_back_frac": 0.25,
+    "no_public": false,
+    "held_out_frac": 0.5,
+    "c_puct": 1.0,
+    "prior_exponent": 0.0,
+    "verifier_timeout": 1800.0,
+    "max_patch_bytes": 400000,
+    "workspace_root": "/tmp/claude-0/-home-user-agentdescent/02a9c808-7ec2-5eb1-9055-691e73d63a11/scratchpad/run2",
+    "keep_workspaces": false,
+    "no_pull": false,
+    "max_tokens": 16000,
+    "temperature": 0.7,
+    "thinking": "default",
+    "api_timeout": 600.0,
+    "shutdown_grace": 120.0,
+    "quality_target": null
+  },
+  "summary": {
+    "tasks_run": 4,
+    "tasks_failed": 0,
+    "tasks_improved_on_held_back": 4,
+    "resolved_baseline": 0,
+    "resolved_best": 4,
+    "resolve_rate": 1.0,
+    "wall_seconds": 6485.791405194001
+  },
+  "tasks": [
+    {
+      "task_id": "001",
+      "title": "Repair an inconsistent transition-state rotor workflow",
+      "domain": "computational-reaction-chemistry",
+      "status": "completed",
+      "benchmark_reward_baseline": 0,
+      "benchmark_reward_best": 1,
+      "benchmark_grade_baseline": {
+        "private": {
+          "collected": 3,
+          "failed": 2,
+          "passed": 1,
+          "return_code": 1
+        },
+        "public": {
+          "collected": 1,
+          "passed": 1,
+          "return_code": 0
+        },
+        "reward": 0,
+        "task_id": "task_001"
+      },
+      "benchmark_grade_best": {
+        "private": {
+          "collected": 3,
+          "failed": 0,
+          "passed": 3,
+          "return_code": 0
+        },
+        "public": {
+          "collected": 1,
+          "passed": 1,
+          "return_code": 0
+        },
+        "reward": 1,
+        "task_id": "task_001"
+      },
+      "held_back_tests": 1,
+      "held_back_pass_rate_baseline": 0.5,
+      "held_back_pass_rate_best": 1.0,
+      "held_back_gain": 0.5,
+      "visible_pass_rate_baseline": 0.6666666666666666,
+      "visible_pass_rate_best": 1.0,
+      "nodes": 5,
+      "wall_seconds": 2296.4405486499995,
+      "best_patch_chars": 4686,
+      "observation": {
+        "mode": "sync",
+        "wall_seconds": 2296.4405486499995,
+        "baseline": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "e3b0c44298fc1c14",
+          "iteration": 0,
+          "change_summary": "the unmodified baseline repository (empty patch)",
+          "score": 0.6666666666666666,
+          "pass_rate": 0.6666666666666666,
+          "num_visits": 4,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 0
+        },
+        "best": {
+          "index": 1,
+          "parent_index": 0,
+          "program_id": "7ff0776980ed1de1",
+          "iteration": 1,
+          "change_summary": "All 3 private tests pass, `reproduce.py` now reports `signature_agreement: true`, and no scratch files remain in the working tree.",
+          "score": 1.0,
+          "pass_rate": 1.0,
+          "num_visits": 1,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 4686
+        },
+        "data": {
+          "task_id": "001",
+          "title": "Repair an inconsistent transition-state rotor workflow",
+          "domain": "computational-reaction-chemistry",
+          "language": "python",
+          "repository": "https://github.com/Auto-Mech/autochem",
+          "base_commit": "cbe1a0c1102b8125608841eb8ac536cfe3b09671",
+          "source_license": "MIT",
+          "license_gate": "none",
+          "environment_image": "docker.io/kevinxulearning/swe-bench-science-environment-python-task-001:v0.1.0@sha256:0b6b41e556cd862f10e9e8c489e9b539eda27d277718e0504de440048c62d3c7",
+          "verifier_image": "docker.io/kevinxulearning/swe-bench-science-verifier-python-task-001:v0.1.0@sha256:7af68a1c44876615b0f961abd18e7fb656dae5f117820a35ff8e1d10faa430b0",
+          "private_tests": 3,
+          "visible_tests": 2,
+          "held_back_tests": 1,
+          "scoring_shards": 4,
+          "held_back_shards": 2,
+          "shard_rule": "replicate",
+          "seed": 0
+        },
+        "framework": {
+          "baseline_reward": 0.6666666666666666,
+          "final_reward": 1.0,
+          "quality_gain": 0.33333333333333337,
+          "stop_reason": "rounds",
+          "error": null,
+          "outcomes": {
+            "committed": 1,
+            "tree-updated": 1
+          },
+          "rollouts": 4,
+          "rollout_seconds": 0.00041866302490234375,
+          "eval_seconds": 0.00028014183044433594,
+          "stale_considered": 4,
+          "stale_discarded": 0,
+          "stale_rate": 0.0,
+          "retired_workers": 0,
+          "history": [
+            {
+              "round": 0,
+              "held_out_reward": 1.0,
+              "elapsed_s": 1196.2598357200623,
+              "rollouts": 2,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 1,
+              "held_out_reward": 1.0,
+              "elapsed_s": 2286.187887907028,
+              "rollouts": 4,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            }
+          ]
+        },
+        "actor_usage": {
+          "calls": 10,
+          "failures": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "model_seconds": 4047.348853
+        },
+        "tree": {
+          "nodes": 5,
+          "valid_nodes": 5,
+          "max_depth": 2,
+          "root_visits": 4,
+          "c_puct": 1.0,
+          "tree": [
+            {
+              "index": 0,
+              "parent_index": null,
+              "program_id": "e3b0c44298fc1c14",
+              "iteration": 0,
+              "change_summary": "the unmodified baseline repository (empty patch)",
+              "score": 0.6666666666666666,
+              "pass_rate": 0.6666666666666666,
+              "num_visits": 4,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 0
+            },
+            {
+              "index": 1,
+              "parent_index": 0,
+              "program_id": "7ff0776980ed1de1",
+              "iteration": 1,
+              "change_summary": "All 3 private tests pass, `reproduce.py` now reports `signature_agreement: true`, and no scratch files remain in the working tree.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 4686
+            },
+            {
+              "index": 2,
+              "parent_index": 0,
+              "program_id": "4685588e814b237e",
+              "iteration": 2,
+              "change_summary": "Fixed the linear-axis \"cap\" resolution to be direction- and topology-consistent: in `_03kekule.py`'s `linear_segment_cap_keys`, a TS atom that both forms and breaks a bond (donor⋯atom⋯acceptor) now ex",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 3,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 4705
+            },
+            {
+              "index": 3,
+              "parent_index": 2,
+              "program_id": "c17536f6ebdfb183",
+              "iteration": 3,
+              "change_summary": "Clean diff, no scratch files left, and the reproduction still passes.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 5244
+            },
+            {
+              "index": 4,
+              "parent_index": 2,
+              "program_id": "a481903c983ff43f",
+              "iteration": 4,
+              "change_summary": "Good, `outputs/` is gitignored so it won't appear in the diff. Everything is clean.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 8976
+            }
+          ]
+        },
+        "test": {
+          "baseline": {
+            "score": 0.5,
+            "pass_rate": 0.5,
+            "passed": 0,
+            "collected": 1,
+            "public": 1,
+            "checks": 2,
+            "subset_resolved": 0,
+            "seconds": 9.519,
+            "error": "",
+            "report": "visible private checks:\n=================================== FAILURES ===================================\n_______ test_relabelled_out_of_line_transition_state_has_consistent_caps _______\n\n    def test_relabelled_out_of_line_transition_state_has_consistent_caps():\n        gra = _sn2_graph()\n        segments = _segment_sets(gra)\n>       assert segments == [frozenset({3, 40, 120})]\nE       assert [frozenset({3, 40, 99})] == [frozenset({3, 40, 120})]\nE         \nE         At index 0 diff: frozenset({40, 99, 3}) != frozenset({40, 3, 120})\nE         Use -v to get more diff\n\n/tests/private_tests/test_transition_state_symmetry.py:118: AssertionError\n=========================== short test summary info ============================\nFAILED ../../tests/private_tests/test_transition_state_symmetry.py::test_relabelled_out_of_line_transition_state_has_consistent_caps\n1 failed, 20 warnings in 3.51s"
+          },
+          "best": {
+            "score": 1.0,
+            "pass_rate": 1.0,
+            "passed": 1,
+            "collected": 1,
+            "public": 1,
+            "checks": 2,
+            "subset_resolved": 1,
+            "seconds": 9.756,
+            "error": "",
+            "report": ""
+          },
+          "pass_rate_gain": 0.5
+        }
+      },
+      "actor_usage": {
+        "calls": 10,
+        "failures": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "model_seconds": 4047.348853
+      },
+      "best_patch": "diff --git a/source/automol/graph/base/_03kekule.py b/source/automol/graph/base/_03kekule.py\nindex f66c53c..a3576bc 100644\n--- a/source/automol/graph/base/_03kekule.py\n+++ b/source/automol/graph/base/_03kekule.py\n@@ -285,6 +285,30 @@ def linear_atom_keys(gra, dummy=True):\n     return frozenset(lin_atm_keys)\n \n \n+def _linear_segment_extension_key(gra, end_key, tra_dct, excl_keys):\n+    \"\"\"Find the in-line neighbor of a linear segment end, for extending the segment\n+\n+    For a transferring atom (breaking one bond and forming another), the true\n+    reaction axis runs through its donor and acceptor, so these are used instead of\n+    the generic neighbor sort, which is skewed by the fractional bond orders of the\n+    forming/breaking bonds and can otherwise pick a spectator substituent instead.\n+\n+    :param gra: A graph, without dummy atoms\n+    :param end_key: The key of the linear segment's end atom\n+    :param tra_dct: Transferring atoms, mapping each onto its donor and acceptor\n+    :param excl_keys: Keys to exclude as candidates\n+    :returns: The extension key, or `None` if there isn't one\n+    \"\"\"\n+    if end_key in tra_dct:\n+        cand_keys = sorted(set(tra_dct[end_key]) - set(excl_keys))\n+        return cand_keys[0] if cand_keys else None\n+    # Deprioritize forming (0.1) *and* breaking (0.9) bond partners, so a reacting\n+    # neighbor is never picked over a genuine spectator substituent as the in-line cap\n+    return atom_neighbor_atom_key(\n+        gra, end_key, ords_last=(0.1, 0.9), excl_keys=excl_keys\n+    )\n+\n+\n def linear_segment_cap_keys(\n     gra, lin_keys: Optional[List[int]] = None, extend: bool = False\n ) -> Dict[List[int], Tuple[Optional[int], Optional[int]]]:\n@@ -352,16 +376,17 @@ def linear_segment_cap_keys(\n \n     lin_seg_dct = {}\n     gra_ = without_dummy_atoms(gra)\n+    tra_dct = ts_transferring_atoms(gra_) if is_ts_graph(gra_) else {}\n     for keys in keys_lst:\n         end_key1 = keys[0]\n         end_key2 = keys[-1]\n \n         # Identify in-line neighbors\n         excl_keys = set(keys)\n-        ext_key1 = atom_neighbor_atom_key(gra_, end_key1, excl_keys=excl_keys)\n+        ext_key1 = _linear_segment_extension_key(gra_, end_key1, tra_dct, excl_keys)\n \n         excl_keys.add(ext_key1)\n-        ext_key2 = atom_neighbor_atom_key(gra_, end_key2, excl_keys=excl_keys)\n+        ext_key2 = _linear_segment_extension_key(gra_, end_key2, tra_dct, excl_keys)\n \n         # Add in-line neighbors to the extended keys list, if not None\n         ext_keys = keys\ndiff --git a/source/automol/graph/base/_06heur.py b/source/automol/graph/base/_06heur.py\nindex 5199fb4..fe05cc1 100644\n--- a/source/automol/graph/base/_06heur.py\n+++ b/source/automol/graph/base/_06heur.py\n@@ -32,6 +32,7 @@ from ._02algo import branch_atom_keys, rings_bond_keys\n from ._03kekule import (\n     atom_hybridizations,\n     kekules_bond_orders_collated,\n+    linear_segment_cap_keys,\n     linear_segments_atom_keys,\n     rigid_planar_bonds,\n     sigma_radical_atom_bond_keys,\n@@ -357,18 +358,22 @@ def rotational_symmetry_number(gra, key1, key2, lin_keys=None):\n     imp_hyd_dct = atom_implicit_hydrogens(implicit(gra))\n \n     axis_keys = {key1, key2}\n-    # If the keys are part of a linear chain, use the ends of that for the\n-    # symmetry number calculation\n-    lin_keys_lst = linear_segments_atom_keys(gra, lin_keys=lin_keys)\n-    for keys in lin_keys_lst:\n-        if key1 in keys or key2 in keys:\n-            if len(keys) == 1:\n-                key1, key2 = sorted(ngb_keys_dct[keys[0]])\n-            else:\n-                (key1,) = ngb_keys_dct[keys[0]] - {keys[1]}\n-                (key2,) = ngb_keys_dct[keys[-1]] - {keys[-2]}\n-                axis_keys |= set(keys)\n-                break\n+    # If the axis lies along a linear chain, use the true ends of that chain for the\n+    # symmetry number calculation, since the chain doesn't rotate internally.\n+    # (A single-atom \"chain\" is a transferring or sigma-radical atom in its own\n+    # right, so either axis key matching it is enough to trigger this; for a\n+    # multi-atom chain, both axis keys must be interior chain atoms -- an axis key\n+    # that is merely a capping neighbor of the chain already carries its own,\n+    # correct substituent information and shouldn't be overridden.)\n+    lin_seg_dct = linear_segment_cap_keys(gra, lin_keys=lin_keys)\n+    for keys, cap_keys in lin_seg_dct.items():\n+        in_seg = key1 in keys or key2 in keys if len(keys) == 1 else (\n+            key1 in keys and key2 in keys\n+        )\n+        if in_seg:\n+            key1, key2 = cap_keys\n+            axis_keys |= set(keys)\n+            break\n \n     sym_num = 1\n     for key in (key1, key2):\n",
+      "regraded": {
+        "previous_reward_baseline": 0,
+        "previous_reward_best": 1,
+        "previous_grade_baseline": {
+          "private": {
+            "collected": 3,
+            "failed": 2,
+            "passed": 1,
+            "return_code": 1
+          },
+          "public": {
+            "collected": 1,
+            "passed": 1,
+            "return_code": 0
+          },
+          "reward": 0,
+          "task_id": "task_001"
+        },
+        "previous_grade_best": {
+          "private": {
+            "collected": 3,
+            "failed": 0,
+            "passed": 3,
+            "return_code": 0
+          },
+          "public": {
+            "collected": 1,
+            "passed": 1,
+            "return_code": 0
+          },
+          "reward": 1,
+          "task_id": "task_001"
+        }
+      }
+    },
+    {
+      "task_id": "002",
+      "title": "Repair an inconsistent reduced validation workflow",
+      "domain": "density-functional-theory",
+      "status": "completed",
+      "benchmark_reward_baseline": 0,
+      "benchmark_reward_best": 1,
+      "benchmark_grade_baseline": {
+        "private": {
+          "collected": 8,
+          "failed": 5,
+          "passed": 3,
+          "return_code": 1
+        },
+        "public": {
+          "collected": 1,
+          "passed": 1,
+          "return_code": 0
+        },
+        "reward": 0,
+        "task_id": "task_002"
+      },
+      "benchmark_grade_best": {
+        "private": {
+          "collected": 8,
+          "failed": 0,
+          "passed": 8,
+          "return_code": 0
+        },
+        "public": {
+          "collected": 1,
+          "passed": 1,
+          "return_code": 0
+        },
+        "reward": 1,
+        "task_id": "task_002"
+      },
+      "held_back_tests": 2,
+      "held_back_pass_rate_baseline": 0.6666666666666666,
+      "held_back_pass_rate_best": 1.0,
+      "held_back_gain": 0.33333333333333337,
+      "visible_pass_rate_baseline": 0.42857142857142855,
+      "visible_pass_rate_best": 1.0,
+      "nodes": 5,
+      "wall_seconds": 2231.832953943999,
+      "best_patch_chars": 1527,
+      "observation": {
+        "mode": "sync",
+        "wall_seconds": 2231.832953943999,
+        "baseline": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "e3b0c44298fc1c14",
+          "iteration": 0,
+          "change_summary": "the unmodified baseline repository (empty patch)",
+          "score": 0.42857142857142855,
+          "pass_rate": 0.42857142857142855,
+          "num_visits": 4,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 0
+        },
+        "best": {
+          "index": 1,
+          "parent_index": 0,
+          "program_id": "8c535843cf0c834e",
+          "iteration": 2,
+          "change_summary": "Clean — only `source/task002_benchmark.py` is modified, no stray scratch files (the `outputs/` report is gitignored).",
+          "score": 1.0,
+          "pass_rate": 1.0,
+          "num_visits": 1,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 1527
+        },
+        "data": {
+          "task_id": "002",
+          "title": "Repair an inconsistent reduced validation workflow",
+          "domain": "density-functional-theory",
+          "language": "python",
+          "repository": "https://github.com/aditisingh4812/simplified_tuned_range_separated",
+          "base_commit": "f794ca5265d38906782506f1ac4e197b4e273fc4",
+          "source_license": "BSD-3-Clause",
+          "license_gate": "none",
+          "environment_image": "docker.io/kevinxulearning/swe-bench-science-environment-python-task-002:v0.1.0@sha256:13e8c428f486c685ec92b031e46f3520bac3d4e26b6bdd83fde9826a488b7761",
+          "verifier_image": "docker.io/kevinxulearning/swe-bench-science-verifier-python-task-002:v0.1.0@sha256:a863b98f920e1e9b1aede8bd0460d039628aab19a413cce3dad7417028e1bd1a",
+          "private_tests": 8,
+          "visible_tests": 6,
+          "held_back_tests": 2,
+          "scoring_shards": 4,
+          "held_back_shards": 2,
+          "shard_rule": "replicate",
+          "seed": 0
+        },
+        "framework": {
+          "baseline_reward": 0.42857142857142855,
+          "final_reward": 1.0,
+          "quality_gain": 0.5714285714285714,
+          "stop_reason": "rounds",
+          "error": null,
+          "outcomes": {
+            "committed": 1,
+            "tree-updated": 1
+          },
+          "rollouts": 4,
+          "rollout_seconds": 0.0008053779602050781,
+          "eval_seconds": 0.00027680397033691406,
+          "stale_considered": 4,
+          "stale_discarded": 0,
+          "stale_rate": 0.0,
+          "retired_workers": 0,
+          "history": [
+            {
+              "round": 0,
+              "held_out_reward": 1.0,
+              "elapsed_s": 1038.4036316871643,
+              "rollouts": 2,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 1,
+              "held_out_reward": 1.0,
+              "elapsed_s": 1970.648917913437,
+              "rollouts": 4,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            }
+          ]
+        },
+        "actor_usage": {
+          "calls": 10,
+          "failures": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "model_seconds": 2598.288207
+        },
+        "tree": {
+          "nodes": 5,
+          "valid_nodes": 5,
+          "max_depth": 2,
+          "root_visits": 4,
+          "c_puct": 1.0,
+          "tree": [
+            {
+              "index": 0,
+              "parent_index": null,
+              "program_id": "e3b0c44298fc1c14",
+              "iteration": 0,
+              "change_summary": "the unmodified baseline repository (empty patch)",
+              "score": 0.42857142857142855,
+              "pass_rate": 0.42857142857142855,
+              "num_visits": 4,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 0
+            },
+            {
+              "index": 1,
+              "parent_index": 0,
+              "program_id": "8c535843cf0c834e",
+              "iteration": 2,
+              "change_summary": "Clean — only `source/task002_benchmark.py` is modified, no stray scratch files (the `outputs/` report is gitignored).",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 1527
+            },
+            {
+              "index": 2,
+              "parent_index": 0,
+              "program_id": "7aa4bd3053d9b7f2",
+              "iteration": 1,
+              "change_summary": "Only the intended source file is modified, and no scratch files remain.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 3,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 1580
+            },
+            {
+              "index": 3,
+              "parent_index": 2,
+              "program_id": "7aa4bd3053d9b7f2",
+              "iteration": 4,
+              "change_summary": "Good — `outputs/` is gitignored and not part of the scored diff. The working tree is clean with only the intended source fix.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 1580
+            },
+            {
+              "index": 4,
+              "parent_index": 2,
+              "program_id": "7aa4bd3053d9b7f2",
+              "iteration": 3,
+              "change_summary": "Good, `outputs/` is gitignored so it won't appear in the scored diff. The checkout is clean, with only `source/task002_benchmark.py` modified.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 1580
+            }
+          ]
+        },
+        "test": {
+          "baseline": {
+            "score": 0.6666666666666666,
+            "pass_rate": 0.6666666666666666,
+            "passed": 1,
+            "collected": 2,
+            "public": 1,
+            "checks": 3,
+            "subset_resolved": 0,
+            "seconds": 53.751,
+            "error": "",
+            "report": "visible private checks:\nkeyPatch object at 0x7fd89bfbac50>\n\n    def test_collection_workflow_keeps_the_portable_boundary(monkeypatch):\n        systems = [benchmark.SystemRecord(\"synthetic\", \"sample\", 1, \"sample\", \"synthetic\")]\n        field = GridField(\n            values=np.array([0.18, 0.05, 0.008]),\n            weights=np.array([0.7, 2.0, 9.0]),\n            length_unit=\"bohr\",\n        )\n        calls = {\"pack\": 0, \"unpack\": 0}\n        original_pack = benchmark.pack_grid_field\n        original_unpack = benchmark.unpack_grid_field\n    \n        def tracked_pack(value):\n            calls[\"pack\"] += 1\n            return original_pack(value)\n    \n        def tracked_unpack(value):\n            calls[\"unpack\"] += 1\n            restored = original_unpack(value)\n            assert restored.length_unit == \"angstrom\"\n            return restored\n    \n        monkeypatch.setattr(benchmark, \"sample_grid_field\", lambda *args, **kwargs: field)\n        monkeypatch.setattr(benchmark, \"pack_grid_field\", tracked_pack)\n        monkeypatch.setattr(benchmark, \"unpack_grid_field\", tracked_unpack)\n    \n        results = benchmark._process_collection(\n            systems,\n            basis=benchmark.DEFAULT_BASIS,\n            grid_level=benchmark.DEFAULT_GRID_LEVEL,\n        )\n        assert calls == {\"pack\": 1, \"unpack\": 1}\n>       assert np.isclose(\n            results[0].screening_parameter,\n            screening_parameter_from_field(field),\n            rtol=1e-12,\n            atol=1e-12,\n        )\nE       AssertionError: assert False\nE        +  where False = <function isclose at 0x7fd8a518e0f0>(0.6771693840286662, 0.8657175628798416, rtol=1e-12, atol=1e-12)\nE        +    where <function isclose at 0x7fd8a518e0f0> = np.isclose\nE        +    and   0.6771693840286662 = SystemResult(family='synthetic', label='sample', chain_index=1, screening_parameter=0.6771693840286662).screening_parameter\nE        +    and   0.8657175628798416 = screening_parameter_from_field(GridField(values=array([0.18 , 0.05 , 0.008]), weights=array([0.7, 2. , 9. ]), length_unit='bohr'))\n\n/tests/private_tests/test_task_002.py:99: AssertionError\n-------------------- generated xml file: /tmp/era-junit.xml --------------------\n=========================== short test summary info ============================\nFAILED ../../tests/private_tests/test_task_002.py::test_collection_workflow_keeps_the_portable_boundary\n1 failed, 1 passed in 0.37s"
+          },
+          "best": {
+            "score": 1.0,
+            "pass_rate": 1.0,
+            "passed": 2,
+            "collected": 2,
+            "public": 1,
+            "checks": 3,
+            "subset_resolved": 1,
+            "seconds": 53.252,
+            "error": "",
+            "report": ""
+          },
+          "pass_rate_gain": 0.33333333333333337
+        }
+      },
+      "actor_usage": {
+        "calls": 10,
+        "failures": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "model_seconds": 2598.288207
+      },
+      "best_patch": "diff --git a/source/task002_benchmark.py b/source/task002_benchmark.py\nindex e15332e..72c4a8b 100644\n--- a/source/task002_benchmark.py\n+++ b/source/task002_benchmark.py\n@@ -356,7 +356,21 @@ def _integrated_field(field: GridField) -> float:\n     return value\n \n \n+def _as_bohr_field(field: GridField) -> GridField:\n+    if field.length_unit == \"bohr\":\n+        return field\n+    if field.length_unit == \"angstrom\":\n+        volume_factor = BOHR_TO_ANGSTROM**3\n+        return GridField(\n+            values=np.asarray(field.values) * volume_factor,\n+            weights=np.asarray(field.weights) / volume_factor,\n+            length_unit=\"bohr\",\n+        )\n+    raise ValueError(f\"Unsupported grid field unit: {field.length_unit}\")\n+\n+\n def screening_parameter_from_field(field: GridField) -> float:\n+    field = _as_bohr_field(field)\n     total = _integrated_field(field)\n     switch = erf(total * field.values / RHO_IN)\n     mask = field.values > EPSILON\n@@ -369,10 +383,6 @@ def screening_parameter_from_field(field: GridField) -> float:\n     if abs(normalization) < 1e-14:\n         raise ZeroDivisionError(\"screening normalization vanished\")\n     avg_rs = float(np.dot(integrand, field.weights) / normalization)\n-    if field.length_unit == \"angstrom\":\n-        avg_rs /= BOHR_TO_ANGSTROM\n-    elif field.length_unit != \"bohr\":\n-        raise ValueError(f\"Unsupported grid field unit: {field.length_unit}\")\n     return float(\n         OMEGA_EFF_A1 / avg_rs\n         + OMEGA_EFF_A2 * avg_rs / (1.0 + OMEGA_EFF_A3 * avg_rs**2)\n",
+      "regraded": {
+        "previous_reward_baseline": 0,
+        "previous_reward_best": 1,
+        "previous_grade_baseline": {
+          "private": {
+            "collected": 8,
+            "failed": 5,
+            "passed": 3,
+            "return_code": 1
+          },
+          "public": {
+            "collected": 1,
+            "passed": 1,
+            "return_code": 0
+          },
+          "reward": 0,
+          "task_id": "task_002"
+        },
+        "previous_grade_best": {
+          "private": {
+            "collected": 8,
+            "failed": 0,
+            "passed": 8,
+            "return_code": 0
+          },
+          "public": {
+            "collected": 1,
+            "passed": 1,
+            "return_code": 0
+          },
+          "reward": 1,
+          "task_id": "task_002"
+        }
+      }
+    },
+    {
+      "task_id": "022",
+      "title": "Repair an inconsistent volume-to-surface projection",
+      "domain": "neuroimaging",
+      "status": "completed",
+      "benchmark_reward_baseline": 0,
+      "benchmark_reward_best": 1,
+      "benchmark_grade_baseline": {
+        "private": {
+          "collected": 12,
+          "failed": 8,
+          "passed": 4,
+          "return_code": 1
+        },
+        "public": {
+          "collected": 1,
+          "passed": 0,
+          "return_code": 1
+        },
+        "reward": 0,
+        "task_id": "task_022"
+      },
+      "benchmark_grade_best": {
+        "private": {
+          "collected": 12,
+          "failed": 0,
+          "passed": 12,
+          "return_code": 0
+        },
+        "public": {
+          "collected": 1,
+          "passed": 1,
+          "return_code": 0
+        },
+        "reward": 1,
+        "task_id": "task_022"
+      },
+      "held_back_tests": 3,
+      "held_back_pass_rate_baseline": 0.0,
+      "held_back_pass_rate_best": 1.0,
+      "held_back_gain": 1.0,
+      "visible_pass_rate_baseline": 0.2,
+      "visible_pass_rate_best": 1.0,
+      "nodes": 5,
+      "wall_seconds": 424.98383086099966,
+      "best_patch_chars": 9629,
+      "observation": {
+        "mode": "sync",
+        "wall_seconds": 424.98383086099966,
+        "baseline": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "e3b0c44298fc1c14",
+          "iteration": 0,
+          "change_summary": "the unmodified baseline repository (empty patch)",
+          "score": 0.2,
+          "pass_rate": 0.2,
+          "num_visits": 4,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 0
+        },
+        "best": {
+          "index": 2,
+          "parent_index": 0,
+          "program_id": "dd0758a893b6b971",
+          "iteration": 2,
+          "change_summary": "Clean diff — only `source/nilearn/surface/surface.py` changed, and `outputs/` (git-ignored) holds the generated report.",
+          "score": 1.0,
+          "pass_rate": 1.0,
+          "num_visits": 3,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 9629
+        },
+        "data": {
+          "task_id": "022",
+          "title": "Repair an inconsistent volume-to-surface projection",
+          "domain": "neuroimaging",
+          "language": "python",
+          "repository": "https://github.com/nilearn/nilearn",
+          "base_commit": "fefa4d30c262384ebda0f1123a1691abf466a9f0",
+          "source_license": "BSD-3-Clause",
+          "license_gate": "none",
+          "environment_image": "docker.io/kevinxulearning/swe-bench-science-environment-python-task-022:v0.1.0@sha256:0c0ed46caaa7b0d52a862dad6461ebdc165396fe7f96e8e50df3e4fed8155cf2",
+          "verifier_image": "docker.io/kevinxulearning/swe-bench-science-verifier-python-task-022:v0.1.0@sha256:ae3adfc761d0744164c6e5e45f686cd766b5ceb1ac17c8c590ce074e0dee938e",
+          "private_tests": 12,
+          "visible_tests": 9,
+          "held_back_tests": 3,
+          "scoring_shards": 4,
+          "held_back_shards": 2,
+          "shard_rule": "subset",
+          "seed": 0
+        },
+        "framework": {
+          "baseline_reward": 0.2,
+          "final_reward": 1.0,
+          "quality_gain": 0.8,
+          "stop_reason": "rounds",
+          "error": null,
+          "outcomes": {
+            "committed": 1,
+            "tree-updated": 1
+          },
+          "rollouts": 4,
+          "rollout_seconds": 18.587082862854004,
+          "eval_seconds": 9.384320497512817,
+          "stale_considered": 4,
+          "stale_discarded": 0,
+          "stale_rate": 0.0,
+          "retired_workers": 0,
+          "history": [
+            {
+              "round": 0,
+              "held_out_reward": 1.0,
+              "elapsed_s": 316.8718020915985,
+              "rollouts": 2,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 1,
+              "held_out_reward": 1.0,
+              "elapsed_s": 420.34346556663513,
+              "rollouts": 4,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            }
+          ]
+        },
+        "actor_usage": {
+          "calls": 10,
+          "failures": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "model_seconds": 784.411685
+        },
+        "tree": {
+          "nodes": 5,
+          "valid_nodes": 5,
+          "max_depth": 2,
+          "root_visits": 4,
+          "c_puct": 1.0,
+          "tree": [
+            {
+              "index": 0,
+              "parent_index": null,
+              "program_id": "e3b0c44298fc1c14",
+              "iteration": 0,
+              "change_summary": "the unmodified baseline repository (empty patch)",
+              "score": 0.2,
+              "pass_rate": 0.2,
+              "num_visits": 4,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 0
+            },
+            {
+              "index": 1,
+              "parent_index": 0,
+              "program_id": "ddc64cbf344072f5",
+              "iteration": 1,
+              "change_summary": "Fixed `nilearn.surface._nearest_voxel_sampling` (in `source/nilearn/surface/surface.py`) so `interpolation=\"nearest\"` in `vol_to_surf` excludes out-of-volume/masked samples before reducing, then combi",
+              "score": 0.8,
+              "pass_rate": 0.8,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 3964
+            },
+            {
+              "index": 2,
+              "parent_index": 0,
+              "program_id": "dd0758a893b6b971",
+              "iteration": 2,
+              "change_summary": "Clean diff — only `source/nilearn/surface/surface.py` changed, and `outputs/` (git-ignored) holds the generated report.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 3,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 9629
+            },
+            {
+              "index": 3,
+              "parent_index": 2,
+              "program_id": "dd0758a893b6b971",
+              "iteration": 3,
+              "change_summary": "Working tree is clean apart from the intended change and the git-ignored generated report. No scratch files to remove.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 9629
+            },
+            {
+              "index": 4,
+              "parent_index": 2,
+              "program_id": "dd0758a893b6b971",
+              "iteration": 4,
+              "change_summary": "No stray files, only the intended change remains. Verified the existing patch is correct and sufficient; made no further changes.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 9629
+            }
+          ]
+        },
+        "test": {
+          "baseline": {
+            "score": 0.0,
+            "pass_rate": 0.0,
+            "passed": 0,
+            "collected": 3,
+            "public": 0,
+            "checks": 4,
+            "subset_resolved": 0,
+            "seconds": 4.481,
+            "error": "",
+            "report": "public reproduction (reproduce.py) exited 1:\n{\n  \"failure_kind\": \"lookup_join_failure\",\n  \"finite_surface_value_count\": 4,\n  \"offline\": true,\n  \"schema_version\": \"0.1\",\n  \"status\": \"pre_fix_expected_failure\",\n  \"table_entry_count\": 3,\n  \"unmatched_surface_value_count\": 4\n}\nvisible private checks:\n 1, 2], [1, 3, 2]], dtype=np.int64),\n        )\n        results = _label_results(\n            image,\n            mesh,\n            kind=\"line\",\n            radius=6.0,\n            n_samples=7,\n        )\n        source_labels = set(np.unique(image.get_fdata()))\n>       assert _has_result(\n            results,\n            lambda result: np.all(result == 9)\n            and set(np.unique(result)) <= source_labels,\n        )\nE       assert False\nE        +  where False = _has_result([array([8.14285714, 8.14285714, 8.14285714, 8.14285714]), array([8.14285714, 8.14285714, 8.14285714, 8.14285714])], <function test_non_identity_affine_preserves_identifier_semantics.<locals>.<lambda> at 0x7f0f8357ea20>)\n\n/tests/private_tests/test_atlas_projection.py:205: AssertionError\n______________ test_ball_sampling_preserves_the_identifier_space _______________\n\n    def test_ball_sampling_preserves_the_identifier_space():\n        data = np.zeros((7, 7, 7), dtype=float)\n        data[3:, :, :] = 11.0\n        image = nib.Nifti1Image(data, np.eye(4))\n        mesh = surface.InMemoryMesh(\n            np.asarray(\n                [[3.0, 3.0, 3.0], [4.0, 3.0, 3.0], [3.0, 4.0, 3.0], [4.0, 4.0, 3.0]]\n            ),\n            np.asarray([[0, 1, 2], [1, 3, 2]], dtype=np.int64),\n        )\n        results = _label_results(\n            image,\n            mesh,\n            kind=\"ball\",\n            radius=2.0,\n            n_samples=20,\n        )\n>       assert _has_result(\n            results,\n            lambda result: np.all(np.isfinite(result)) and np.all(result == 11.0),\n        )\nE       assert False\nE        +  where False = _has_result([array([ 7.46289018, 10.53030641,  7.46289018, 10.53030641]), array([ 7.15, 11.  ,  7.15, 11.  ])], <function test_ball_sampling_preserves_the_identifier_space.<locals>.<lambda> at 0x7f0f8582a520>)\n\n/tests/private_tests/test_atlas_projection.py:229: AssertionError\n-------------------- generated xml file: /tmp/era-junit.xml --------------------\n=========================== short test summary info ============================\nFAILED ../../tests/private_tests/test_atlas_projection.py::test_each_vertex_uses_its_local_consensus\nFAILED ../../tests/private_tests/test_atlas_projection.py::test_non_identity_affine_preserves_identifier_semantics\nFAILED ../../tests/private_tests/test_atlas_projection.py::test_ball_sampling_preserves_the_identifier_space\n3 failed in 1.51s"
+          },
+          "best": {
+            "score": 1.0,
+            "pass_rate": 1.0,
+            "passed": 3,
+            "collected": 3,
+            "public": 1,
+            "checks": 4,
+            "subset_resolved": 1,
+            "seconds": 4.54,
+            "error": "",
+            "report": ""
+          },
+          "pass_rate_gain": 1.0
+        }
+      },
+      "actor_usage": {
+        "calls": 10,
+        "failures": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "model_seconds": 784.411685
+      },
+      "best_patch": "diff --git a/source/nilearn/surface/surface.py b/source/nilearn/surface/surface.py\nindex 4fbbfae..7fdeb48 100644\n--- a/source/nilearn/surface/surface.py\n+++ b/source/nilearn/surface/surface.py\n@@ -340,6 +340,57 @@ def _masked_indices(sample_locations, img_shape, mask=None):\n     return ~kept\n \n \n+def _voxel_indices(\n+    mesh,\n+    affine,\n+    img_shape,\n+    kind=\"auto\",\n+    radius=3.0,\n+    n_points=None,\n+    mask=None,\n+    inner_mesh=None,\n+    depth=None,\n+):\n+    \"\"\"Get, for every mesh vertex, the flat voxel index sampled at each point.\n+\n+    Parameters\n+    ----------\n+    See :func:`_projection_matrix`.\n+\n+    Returns\n+    -------\n+    sample_indices : :obj:`numpy.ndarray` of shape (n_vertices, n_points)\n+        Index into the raveled image data sampled at each point around each\n+        vertex.\n+\n+    masked : :obj:`numpy.ndarray` of :obj:`bool`, shape (n_vertices, n_points)\n+        True where the corresponding sample should be ignored (it falls\n+        outside of the image, or is excluded by `mask`).\n+\n+    \"\"\"\n+    mesh = load_surf_mesh(mesh)\n+    sample_locations = _sample_locations(\n+        mesh,\n+        affine,\n+        kind=kind,\n+        radius=radius,\n+        n_points=n_points,\n+        inner_mesh=inner_mesh,\n+        depth=depth,\n+    )\n+    sample_locations = np.asarray(np.round(sample_locations), dtype=int)\n+    n_vertices, n_points, _ = sample_locations.shape\n+    masked = _masked_indices(np.vstack(sample_locations), img_shape, mask=mask)\n+    rolled_locations = np.rollaxis(sample_locations, -1)\n+    sample_indices = np.ravel_multi_index(\n+        rolled_locations, img_shape, mode=\"clip\"\n+    )\n+    return (\n+        sample_indices.reshape(n_vertices, n_points),\n+        masked.reshape(n_vertices, n_points),\n+    )\n+\n+\n def _projection_matrix(\n     mesh,\n     affine,\n@@ -430,30 +481,27 @@ def _projection_matrix(\n     # A user might want to call this function directly so check mask size.\n     if mask is not None and tuple(mask.shape) != img_shape:\n         raise ValueError(\"mask should have shape img_shape\")\n-    mesh = load_surf_mesh(mesh)\n-    sample_locations = _sample_locations(\n+    sample_indices, masked = _voxel_indices(\n         mesh,\n         affine,\n+        img_shape,\n         kind=kind,\n         radius=radius,\n         n_points=n_points,\n+        mask=mask,\n         inner_mesh=inner_mesh,\n         depth=depth,\n     )\n-    sample_locations = np.asarray(np.round(sample_locations), dtype=int)\n-    n_vertices, n_points, _ = sample_locations.shape\n-    masked = _masked_indices(np.vstack(sample_locations), img_shape, mask=mask)\n-    sample_locations = np.rollaxis(sample_locations, -1)\n-    sample_indices = np.ravel_multi_index(\n-        sample_locations, img_shape, mode=\"clip\"\n-    ).ravel()\n+    n_vertices, n_points = sample_indices.shape\n     row_indices, _ = np.mgrid[:n_vertices, :n_points]\n     row_indices = row_indices.ravel()\n+    sample_indices = sample_indices.ravel()\n+    masked = masked.ravel()\n     row_indices = row_indices[~masked]\n     sample_indices = sample_indices[~masked]\n     weights = np.ones(len(row_indices))\n     proj = sparse.csr_matrix(\n-        (weights, (row_indices, sample_indices.ravel())),\n+        (weights, (row_indices, sample_indices)),\n         shape=(n_vertices, np.prod(img_shape)),\n     )\n     proj = sklearn.preprocessing.normalize(proj, axis=1, norm=\"l1\")\n@@ -499,6 +547,68 @@ def _nearest_voxel_sampling(\n     return texture.T\n \n \n+def _most_frequent(values):\n+    \"\"\"Return the most frequent value in a 1-d array, ignoring NaNs.\n+\n+    Ties are broken by picking the smallest of the tied values, so the\n+    result is deterministic. Returns ``numpy.nan`` if `values` contains\n+    no finite entries.\n+    \"\"\"\n+    values = values[~np.isnan(values)]\n+    if values.size == 0:\n+        return np.nan\n+    uniques, counts = np.unique(values, return_counts=True)\n+    return uniques[np.argmax(counts)]\n+\n+\n+def _nearest_most_frequent_voxel_sampling(\n+    images,\n+    mesh,\n+    affine,\n+    kind=\"auto\",\n+    radius=3.0,\n+    n_points=None,\n+    mask=None,\n+    inner_mesh=None,\n+    depth=None,\n+):\n+    \"\"\"In each image, find the most frequent intensity around each node.\n+\n+    Like 'nearest', every sample point around a vertex takes the intensity\n+    of its nearest voxel. Unlike 'nearest', which averages those sampled\n+    intensities, this keeps whichever intensity was sampled most often.\n+    Averaging can produce a value that is not present anywhere in the\n+    original image, which is undesirable when the image encodes\n+    categorical identifiers (for example, an atlas built from an\n+    accompanying lookup table) rather than a continuous measurement.\n+    A 2-d array is returned, where each row corresponds to an image and each\n+    column to a mesh vertex.\n+    See documentation of vol_to_surf for details.\n+\n+    \"\"\"\n+    sample_indices, masked = _voxel_indices(\n+        mesh,\n+        affine,\n+        images[0].shape,\n+        kind=kind,\n+        radius=radius,\n+        n_points=n_points,\n+        mask=mask,\n+        inner_mesh=inner_mesh,\n+        depth=depth,\n+    )\n+    n_vertices = sample_indices.shape[0]\n+    texture = np.empty((len(images), n_vertices))\n+    for image_index, img in enumerate(images):\n+        sampled = np.asarray(img).ravel()[sample_indices].astype(float)\n+        sampled[masked] = np.nan\n+        for vertex_index in range(n_vertices):\n+            texture[image_index, vertex_index] = _most_frequent(\n+                sampled[vertex_index]\n+            )\n+    return texture\n+\n+\n def _interpolation_sampling(\n     images,\n     mesh,\n@@ -582,17 +692,30 @@ def vol_to_surf(\n         The size (in mm) of the neighbourhood from which samples are drawn\n         around each node. Ignored if `inner_mesh` is provided.\n \n-    interpolation : {'linear', 'nearest'}, default='linear'\n-        How the image intensity is measured at a sample point.\n+    interpolation : {'linear', 'nearest', 'nearest_most_frequent'}, \\\n+                    default='linear'\n+        How the image intensity is measured at a sample point, and how the\n+        samples drawn around a vertex are combined into that vertex's value.\n \n         - 'linear':\n-            Use a trilinear interpolation of neighboring voxels.\n+            Use a trilinear interpolation of neighboring voxels, and average\n+            the interpolated values.\n         - 'nearest':\n-            Use the intensity of the nearest voxel.\n+            Use the intensity of the nearest voxel, and average the sampled\n+            values.\n+        - 'nearest_most_frequent':\n+            Use the intensity of the nearest voxel, like 'nearest', but keep\n+            the most frequently sampled intensity instead of averaging.\n+            Use this for images whose values are categorical identifiers\n+            (for example, an atlas paired with a lookup table) so the\n+            output only ever contains values that are actually present in\n+            the input image.\n \n         For one image, the speed difference is small, 'linear' takes about x1.5\n         more time. For many images, 'nearest' scales much better, up to x20\n-        faster.\n+        faster. 'nearest_most_frequent' does the same voxel sampling as\n+        'nearest' but is slower to reduce, as it looks for the most frequent\n+        value at each vertex rather than averaging.\n \n     kind : {'auto', 'depth', 'line', 'ball'}, default='auto'\n         The strategy used to sample image intensities around each vertex.\n@@ -697,17 +820,21 @@ def vol_to_surf(\n     this vertex will be ``numpy.nan``.\n \n     The 3d image then needs to be interpolated at each of the remaining points.\n-    Two options are available: 'nearest' selects the value of the nearest\n-    voxel, and 'linear' performs trilinear interpolation of neighboring\n-    voxels. 'linear' may give better results - for example, the projected\n-    values are more stable when resampling the 3d image or applying affine\n-    transformations to it. For one image, the speed difference is small,\n-    'linear' takes about x1.5 more time. For many images, 'nearest' scales much\n-    better, up to x20 faster.\n+    'nearest' selects the value of the nearest voxel, 'nearest_most_frequent'\n+    does the same, and 'linear' performs trilinear interpolation of\n+    neighboring voxels. 'linear' may give better results - for example, the\n+    projected values are more stable when resampling the 3d image or\n+    applying affine transformations to it. For one image, the speed\n+    difference is small, 'linear' takes about x1.5 more time. For many\n+    images, 'nearest' scales much better, up to x20 faster.\n \n     Once the 3d image has been interpolated at each sample point, the\n-    interpolated values are averaged to produce the value associated to this\n-    particular :term:`mesh` vertex.\n+    interpolated values are combined to produce the value associated to this\n+    particular :term:`mesh` vertex: 'linear' and 'nearest' average them,\n+    while 'nearest_most_frequent' keeps whichever value was sampled most\n+    often, so the result always matches a value present in the input image\n+    -- the appropriate choice when the image holds categorical identifiers,\n+    such as an atlas with an accompanying lookup table.\n \n     Examples\n     --------\n@@ -733,6 +860,7 @@ def vol_to_surf(\n     sampling_schemes = {\n         \"linear\": _interpolation_sampling,\n         \"nearest\": _nearest_voxel_sampling,\n+        \"nearest_most_frequent\": _nearest_most_frequent_voxel_sampling,\n     }\n     if interpolation not in sampling_schemes:\n         raise ValueError(\n",
+      "regraded": {
+        "previous_reward_baseline": 0,
+        "previous_reward_best": 0,
+        "previous_grade_baseline": {
+          "private": {
+            "collected": 0,
+            "failed": 0,
+            "passed": 0,
+            "return_code": 4
+          },
+          "public": {
+            "collected": 1,
+            "passed": 0,
+            "return_code": 1
+          },
+          "reward": 0,
+          "task_id": "task_022"
+        },
+        "previous_grade_best": {
+          "private": {
+            "collected": 0,
+            "failed": 0,
+            "passed": 0,
+            "return_code": 4
+          },
+          "public": {
+            "collected": 1,
+            "passed": 1,
+            "return_code": 0
+          },
+          "reward": 0,
+          "task_id": "task_022"
+        }
+      }
+    },
+    {
+      "task_id": "029",
+      "title": "Restore annotation equivalence after circular-record orientation normalization",
+      "domain": "genomics-sequence-annotation",
+      "status": "completed",
+      "benchmark_reward_baseline": 0,
+      "benchmark_reward_best": 1,
+      "benchmark_grade_baseline": {
+        "private": {
+          "collected": 29,
+          "failed": 15,
+          "passed": 14,
+          "return_code": 1
+        },
+        "public": {
+          "collected": 1,
+          "passed": 1,
+          "return_code": 0
+        },
+        "reward": 0,
+        "task_id": "task_029"
+      },
+      "benchmark_grade_best": {
+        "private": {
+          "collected": 29,
+          "failed": 0,
+          "passed": 29,
+          "return_code": 0
+        },
+        "public": {
+          "collected": 1,
+          "passed": 1,
+          "return_code": 0
+        },
+        "reward": 1,
+        "task_id": "task_029"
+      },
+      "held_back_tests": 7,
+      "held_back_pass_rate_baseline": 0.375,
+      "held_back_pass_rate_best": 1.0,
+      "held_back_gain": 0.625,
+      "visible_pass_rate_baseline": 0.5454545454545454,
+      "visible_pass_rate_best": 1.0,
+      "nodes": 5,
+      "wall_seconds": 1040.205576884,
+      "best_patch_chars": 1492,
+      "observation": {
+        "mode": "sync",
+        "wall_seconds": 1040.205576884,
+        "baseline": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "e3b0c44298fc1c14",
+          "iteration": 0,
+          "change_summary": "the unmodified baseline repository (empty patch)",
+          "score": 0.5454545454545454,
+          "pass_rate": 0.5454545454545454,
+          "num_visits": 4,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 0
+        },
+        "best": {
+          "index": 1,
+          "parent_index": 0,
+          "program_id": "6b20e7db634b5281",
+          "iteration": 1,
+          "change_summary": "Good, `outputs/` is gitignored and untracked-but-ignored, so it won't affect the diff. The checkout is clean.",
+          "score": 1.0,
+          "pass_rate": 1.0,
+          "num_visits": 1,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 1492
+        },
+        "data": {
+          "task_id": "029",
+          "title": "Restore annotation equivalence after circular-record orientation normalization",
+          "domain": "genomics-sequence-annotation",
+          "language": "python",
+          "repository": "https://github.com/biopython/biopython",
+          "base_commit": "fb0e7f522d714d76eec42f5fd428eb7942a11dde",
+          "source_license": "BSD-3-Clause",
+          "license_gate": "none",
+          "environment_image": "docker.io/kevinxulearning/swe-bench-science-environment-python-task-029:v0.1.2@sha256:a369032185670228103a05a7d1d3c16ffbe5a82074c8dd8976feeba787e385f3",
+          "verifier_image": "docker.io/kevinxulearning/swe-bench-science-verifier-python-task-029:v0.1.2@sha256:e517cabd9151676fb17dc610d9eebc3ae1415fdc99e98b990c1b7cae904235c1",
+          "private_tests": 29,
+          "visible_tests": 22,
+          "held_back_tests": 7,
+          "scoring_shards": 4,
+          "held_back_shards": 2,
+          "shard_rule": "subset",
+          "seed": 0
+        },
+        "framework": {
+          "baseline_reward": 0.5454545454545454,
+          "final_reward": 1.0,
+          "quality_gain": 0.4545454545454546,
+          "stop_reason": "rounds",
+          "error": null,
+          "outcomes": {
+            "committed": 1,
+            "tree-updated": 1
+          },
+          "rollouts": 4,
+          "rollout_seconds": 8.764224767684937,
+          "eval_seconds": 3.809999704360962,
+          "stale_considered": 4,
+          "stale_discarded": 0,
+          "stale_rate": 0.0,
+          "retired_workers": 0,
+          "history": [
+            {
+              "round": 0,
+              "held_out_reward": 1.0,
+              "elapsed_s": 571.7570421695709,
+              "rollouts": 2,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 1,
+              "held_out_reward": 1.0,
+              "elapsed_s": 1038.3466985225677,
+              "rollouts": 4,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            }
+          ]
+        },
+        "actor_usage": {
+          "calls": 10,
+          "failures": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "model_seconds": 1660.524693
+        },
+        "tree": {
+          "nodes": 5,
+          "valid_nodes": 5,
+          "max_depth": 2,
+          "root_visits": 4,
+          "c_puct": 1.0,
+          "tree": [
+            {
+              "index": 0,
+              "parent_index": null,
+              "program_id": "e3b0c44298fc1c14",
+              "iteration": 0,
+              "change_summary": "the unmodified baseline repository (empty patch)",
+              "score": 0.5454545454545454,
+              "pass_rate": 0.5454545454545454,
+              "num_visits": 4,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 0
+            },
+            {
+              "index": 1,
+              "parent_index": 0,
+              "program_id": "6b20e7db634b5281",
+              "iteration": 1,
+              "change_summary": "Good, `outputs/` is gitignored and untracked-but-ignored, so it won't affect the diff. The checkout is clean.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 1492
+            },
+            {
+              "index": 2,
+              "parent_index": 0,
+              "program_id": "6cdcf58a05618ca8",
+              "iteration": 2,
+              "change_summary": "Fixed `CompoundLocation._flip` in `source/Bio/SeqFeature.py` to reverse the part order when reverse-complementing a fully unstranded compound location (all parts strand `None`/`0`), since such locatio",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 3,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 1155
+            },
+            {
+              "index": 3,
+              "parent_index": 2,
+              "program_id": "6cdcf58a05618ca8",
+              "iteration": 3,
+              "change_summary": "Good — `outputs/` is gitignored, so nothing to clean up. Final `git status` shows only the intended change to `source/Bio/SeqFeature.py`, and `reproduce.py` still passes.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 1155
+            },
+            {
+              "index": 4,
+              "parent_index": 2,
+              "program_id": "6cdcf58a05618ca8",
+              "iteration": 4,
+              "change_summary": "Clean. I verified the existing patch mathematically: for a `CompoundLocation` whose parts are all non-directional (strand `None`/`0`), the correct invariant after a full-sequence reverse-complement is",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 1155
+            }
+          ]
+        },
+        "test": {
+          "baseline": {
+            "score": 0.375,
+            "pass_rate": 0.375,
+            "passed": 2,
+            "collected": 7,
+            "public": 1,
+            "checks": 8,
+            "subset_resolved": 0,
+            "seconds": 1.822,
+            "error": "",
+            "report": "visible private checks:\nk.parametrize(\"seed\", [3, 11, 97, 555])\n    def test_wrapping_representation_preserved(self, seed: int) -> None:\n        rng = random.Random(seed)\n        length = rng.randint(30, 160)\n        seq = make_dna(rng, length)\n        count = rng.randint(2, 4)\n        parts = wrapping_parts(rng, length, count)\n        location = compound([(s, e, None) for s, e in parts])\n        assert descent_count(location) == 1\n        record = make_record(seq, [SeqFeature(location, type=\"misc_feature\")])\n        moved = record.reverse_complement().features[0]\n>       assert descent_count(moved.location) == 1, (\n            f\"origin-wrapping representation lost: \"\n            f\"{location} -> {moved.location} (length {length})\"\n        )\nE       AssertionError: origin-wrapping representation lost: join{[103:129], [0:3]} -> join{[16:42], [142:145]} (length 145)\nE       assert 0 == 1\nE        +  where 0 = descent_count(CompoundLocation([SimpleLocation(ExactPosition(16), ExactPosition(42)), SimpleLocation(ExactPosition(142), ExactPosition(145))], 'join'))\nE        +    where CompoundLocation([SimpleLocation(ExactPosition(16), ExactPosition(42)), SimpleLocation(ExactPosition(142), ExactPosition(145))], 'join') = SeqFeature(CompoundLocation([SimpleLocation(ExactPosition(16), ExactPosition(42)), SimpleLocation(ExactPosition(142), ExactPosition(145))], 'join'), type='misc_feature').location\n\n/tests/private_tests/test_circular_reverse_complement.py:136: AssertionError\n-------------------- generated xml file: /tmp/era-junit.xml --------------------\n=========================== short test summary info ============================\nFAILED ../../tests/private_tests/test_circular_reverse_complement.py::TestUnstrandedCompoundConsistency::test_extraction_matches_reverse_complement[7]\nFAILED ../../tests/private_tests/test_circular_reverse_complement.py::TestUnstrandedCompoundConsistency::test_extraction_matches_reverse_complement[2024]\nFAILED ../../tests/private_tests/test_circular_reverse_complement.py::TestUnstrandedCompoundConsistency::test_non_wrapping_stays_ascending[5]\nFAILED ../../tests/private_tests/test_circular_reverse_complement.py::TestUnstrandedCompoundConsistency::test_extraction_matches_reverse_complement[42]\nFAILED ../../tests/private_tests/test_circular_reverse_complement.py::TestUnstrandedCompoundConsistency::test_wrapping_representation_preserved[11]\n5 failed, 2 passed in 0.34s"
+          },
+          "best": {
+            "score": 1.0,
+            "pass_rate": 1.0,
+            "passed": 7,
+            "collected": 7,
+            "public": 1,
+            "checks": 8,
+            "subset_resolved": 1,
+            "seconds": 1.784,
+            "error": "",
+            "report": ""
+          },
+          "pass_rate_gain": 0.625
+        }
+      },
+      "actor_usage": {
+        "calls": 10,
+        "failures": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "model_seconds": 1660.524693
+      },
+      "best_patch": "diff --git a/source/Bio/SeqFeature.py b/source/Bio/SeqFeature.py\nindex 394c839..4a5785a 100644\n--- a/source/Bio/SeqFeature.py\n+++ b/source/Bio/SeqFeature.py\n@@ -1710,10 +1710,23 @@ class CompoundLocation(Location):\n         versions of Biopython which would have given join{[5:29](-), [37:52](-)}\n         and the translation would have wrongly been \"EXAMPLE*SILLY\" instead.\n \n+        Unstranded parts (strand of None on every part) carry no inherent\n+        reading direction of their own, so the GenBank presented-strand\n+        convention treats their listed order as tied to the forward strand\n+        of the parent molecule. Once the parent is reversed, that listed\n+        order must be reversed too, or both the concatenated sequence and\n+        any origin-spanning (wrap) layout of the parts would come out\n+        wrong:\n+\n+        >>> from Bio.SeqFeature import SimpleLocation\n+        >>> unstranded = SimpleLocation(90, 100, strand=None) + SimpleLocation(0, 10, strand=None)\n+        >>> print(unstranded._flip(100))\n+        join{[90:100], [0:10]}\n         \"\"\"\n-        return CompoundLocation(\n-            [loc._flip(length) for loc in self.parts], self.operator\n-        )\n+        flipped_parts = [loc._flip(length) for loc in self.parts]\n+        if len({loc.strand for loc in self.parts}) == 1 and self.parts[0].strand is None:\n+            flipped_parts.reverse()\n+        return CompoundLocation(flipped_parts, self.operator)\n \n     @property\n     def start(self):\n",
+      "regraded": {
+        "previous_reward_baseline": 0,
+        "previous_reward_best": 1,
+        "previous_grade_baseline": {
+          "private": {
+            "collected": 29,
+            "failed": 15,
+            "passed": 14,
+            "return_code": 1
+          },
+          "public": {
+            "collected": 1,
+            "passed": 1,
+            "return_code": 0
+          },
+          "reward": 0,
+          "task_id": "task_029"
+        },
+        "previous_grade_best": {
+          "private": {
+            "collected": 29,
+            "failed": 0,
+            "passed": 29,
+            "return_code": 0
+          },
+          "public": {
+            "collected": 1,
+            "passed": 1,
+            "return_code": 0
+          },
+          "reward": 1,
+          "task_id": "task_029"
+        }
+      }
+    }
+  ],
+  "failures": [],
+  "agent_sessions": {
+    "agent": "claude-code",
+    "command": "claude -p --permission-mode acceptEdits --allowedTools Bash Edit Write Read Glob Grep TodoWrite",
+    "timeout_s": 1200.0,
+    "sessions": 16
+  },
+  "agent_usage": {
+    "calls": 16,
+    "failures": 0,
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0,
+    "model_seconds": 9041.445359
+  },
+  "model_usage": {
+    "calls": 0,
+    "failures": 0,
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0,
+    "model_seconds": 0.0
+  },
+  "regraded_at": "2026-08-30T18:14:52+00:00",
+  "regraded_reason": "the run's own grading step ran the grader baked into each verifier image; some of those are stale (task 034's collects nothing and scores every submission 0). Re-run with the release's own task-bundle grader, which is what its tests/docker-compose.yaml mounts. The search itself is untouched -- grading is a pure function of the patch."
+}

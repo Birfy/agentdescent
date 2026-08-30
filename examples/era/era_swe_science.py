@@ -101,6 +101,7 @@ from examples.era._era_swe_science import (
     RELEASE_TASKS,
     RELEASE_VERIFIER_TIMEOUT,
     Suite,
+    agent_version,
     docker_backend,
     envelope,
     evaluate_patch,
@@ -671,6 +672,11 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             "agent": args.agent,
             "command": " ".join(agent_command(args)) if args.agent != "completion"
                        else "",
+            # The CLI carries its own model, so a result that named only the
+            # command could not be repeated.
+            "version": (agent_version(agent_command(args))
+                        if args.agent != "completion" else ""),
+            "model": args.model or "",
             "timeout_s": args.agent_timeout,
             **{key: value for key, value in sorted(sessions.items())},
         },

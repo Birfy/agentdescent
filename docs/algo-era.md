@@ -1443,6 +1443,168 @@ Raw data: the eight
 [`bench/results/era-algotune-prior-*.json`](https://github.com/Birfy/agentdescent/tree/main/bench/results)
 files and the winning program beside each.
 
+## Measured results — SWE-bench Science
+
+### The method
+
+Six tasks — the port's own `--tasks default`, one from each of six scientific
+domains and all six inside the release's unrestricted 96 — one flat-PUCT tree
+each, **4 expansions per tree**, 2 workers, `c_puct = 1.0`, uniform prior,
+`--held-back-frac 0.25`, seed 0, synchronous mode.
+
+The mutation operator is the **Claude Code CLI** (`claude -p`, version 2.1.251)
+at `--agent-timeout 1200`, with no `--model`, so each session runs whatever
+model that CLI defaults to. That is a reproducibility gap and it is the reason
+`agent_sessions.version` is now recorded; a run meant to be repeated should pass
+`--model`.
+
+Everything else is the release as published: both pinned images per task pulled
+by digest, the agent's container on `--network none`, and the reward read from
+`tasks/task_NNN/tests/grader.py` over the **whole** private suite. The search
+never sees that grader — it ranks on the visible split only, and
+`--held-back-frac 0.25` of each private suite is never shown to it in any shard
+or any prompt.
+
+Two processes on one host, identical configuration, split only to use the
+wall-clock: tasks 001/002/022/029 in
+[`bench/results/era-swe-science-1200s-a.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-1200s-a.json)
+and 034/045 in
+[`bench/results/era-swe-science-1200s-b.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-1200s-b.json).
+Each file carries the winning patch, the whole tree, and the grader's output for
+the baseline and the best node.
+
+### The result
+
+**6 of 6 resolved, from 0 of 6.** The reward column is the release's own
+grader's binary verdict; the counts beside it are its private-suite totals.
+
+| task | domain | private tests | grader passed | reward | visible pass rate | held-back pass rate | winning node | wall |
+|---|---|---:|---:|:---:|---:|---:|---:|---:|
+| 001 | computational-reaction-chemistry | 3 | 1/3 → **3/3** | 0 → **1** | 0.667 → 1.000 | 0.500 → 1.000 | #1 (round 0) | 38.3 min |
+| 002 | density-functional-theory | 8 | 3/8 → **8/8** | 0 → **1** | 0.429 → 1.000 | 0.667 → 1.000 | #1 (round 0) | 37.2 min |
+| 022 | neuroimaging | 12 | 4/12 → **12/12** | 0 → **1** | 0.200 → 1.000 | 0.000 → 1.000 | #2 (round 0) | 7.1 min |
+| 029 | genomics-sequence-annotation | 29 | 14/29 → **29/29** | 0 → **1** | 0.545 → 1.000 | 0.375 → 1.000 | #1 (round 0) | 17.3 min |
+| 034 | stochastic-numerical-analysis | 8 | 1/8 → **8/8** | 0 → **1** | 0.286 → 1.000 | 0.333 → 1.000 | #1 (round 0) | 21.8 min |
+| 045 | computational-oceanography | 16 | 14/16 → **16/16** | 0 → **1** | 0.714 → 1.000 | 0.600 → 1.000 | #1 (round 0) | 18.4 min |
+
+The held-back column is the one that says the result is not an artefact of the
+signal the search was given: **every held-back test passes on every task**,
+including the three the search never saw on 022, where the baseline passed none
+of them. Nothing here was fixed by writing to the checks the tree could read.
+
+24 agent sessions across the six trees. Three of them failed — one at the
+timeout, two on an endpoint error — and cost nothing beyond their expansion: a
+failed session is a node carrying whatever was in the checkout, which is the
+release's own rule for a timed-out agent.
+
+### The tree did not do the work, and saying so is the result
+
+**Every winning node is a round-0 child of the root.** Five of the six trees
+were won by node #1 and the sixth by node #2 — the first two expansions, both
+drawn from the empty patch. Rounds 2 and 3 produced four more nodes per tree and
+not one of them beat the first round. On these six tasks, *one* Claude Code
+session solves the task, and flat-PUCT spends three more sessions confirming it.
+
+So the honest reading of the table is that it measures **the agent under this
+port's harness**, not that a tree search helps on SWE-bench Science. The search
+is doing what it is supposed to — it selects, expands, keeps failures as nodes,
+and commits the best — and there is nothing left for it to select *between*
+when the first sample already scores 1.0 on everything visible.
+
+### Where the tree would have had room, at a shorter session budget
+
+The obvious follow-up is the regime where a single session cannot finish: three
+of the same tasks, same tree, `--workers 1` (upstream FUTS's own shape — four
+*sequential* expansions, each selecting from the whole tree) and
+`--agent-timeout 420`.
+
+**All 12 sessions hit the timeout**, and the tree does not recover what the
+per-session budget takes away.
+
+| task | grader passed, 420 s | reward | winning node | the same task at 1200 s |
+|---|---:|:---:|---:|---:|
+| 001 | 1/3 → **1/3** | 0 | **#0, the root** — no expansion beat the empty patch | 3/3, reward 1 |
+| 034 | 1/8 → **4/8** | 0 | #1 (round 0); rounds 1–3 added nothing | 8/8, reward 1 |
+| 045 | 14/16 → **16/16** | **1** | #1 (round 0) | 16/16, reward 1 |
+
+Three points fall out of it. The **per-session budget is the binding
+constraint**: 3/3 resolved at 1200 s becomes 1/3 at 420 s, on the same tasks,
+same tree, same expansion count. Four truncated sessions are not one finished
+session, and **PUCT cannot combine them** — a node is a whole patch, and the
+tree selects among patches rather than merging them, so partial progress in two
+different directions stays partial. And on 001 the search **correctly kept the
+root**: four expansions all scored worse than the empty patch and the tree
+committed none of them, which is the behaviour that stops a truncated session
+from being reported as a result. Raw data:
+[`bench/results/era-swe-science-420s.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-420s.json).
+
+Across both arms, then, **no tree ever improved on its round-0 nodes** — nine
+task-runs, 36 expansions, and the winner was a first-round child of the root
+every time except the one where it was the root itself.
+
+### What the wins actually are
+
+Real defects in real libraries, not benchmark-shaped ones:
+
+* **034 — `diffrax`, backward-in-time stochastic integration.** Two bugs, both
+  fixed: the drift term was scaled by the stepping loop's internally re-oriented
+  (always positive) increment instead of the signed control increment, and
+  `WrapTerm.contr` negated the *whole* Brownian increment structure when it
+  should negate only `W` and the space-time-time Lévy area `K` — `dt` and the
+  space-time Lévy area `H` are defined by the pair of endpoints and do not
+  change with the direction of travel.
+* **045 — `xgcm`, deterministic face-connection padding.** `list(set(...))` for
+  the connection axes plus an `xr.concat` that reorders dimensions when one side
+  is missing the concat dimension made the output layout depend on
+  `PYTHONHASHSEED`. Fixed with `sorted()` and a transpose back to the
+  pre-padding dimension order.
+* **029 — Biopython, `CompoundLocation._flip`.** An unstranded compound location
+  carries no reading direction of its own, so the GenBank presented-strand
+  convention ties its listed part order to the parent's forward strand; flipping
+  the parent has to reverse that order too, or an origin-spanning feature comes
+  back with its parts in the wrong sequence.
+* **022 — `nilearn`, volume-to-surface projection.** The largest patch of the
+  six (9.6 kB), factoring the per-vertex sampled voxel indices out of the
+  projection matrix so that the two paths agree.
+
+### Two things about the published release this run had to route around
+
+1. **Three of the six verifier images ship a grader that cannot score
+   anything.** `022`, `034` and `045` bake a `/tests/grader.py` that runs pytest
+   on `/tests/private_tests/test_task_NNN.py`, a file that does not exist beside
+   the `test_atlas_projection.py` / `test_stochastic_orientation.py` /
+   `test_connected_grid_semantics.py` that does — so it collects nothing, exits
+   4, and scores every submission 0 however correct. The release does not rely
+   on it: `tasks/task_NNN/tests/docker-compose.yaml` binds the task bundle's
+   `grader.py` over that path and `tests/Dockerfile` copies it in, with the
+   comment "Keep the runtime entrypoint in sync with the task bundle." This port
+   ran the image's copy at first and reported a floor of zero for its trouble;
+   it now writes the bundle grader in beside the patch, and
+   `test_the_bundle_grader_is_the_one_that_runs` pins that against task 034.
+2. **`evolve(solved_threshold=1.0)` was silently under-spending the budget.** A
+   shard here is a handful of tests, and a rollout that clears all of them says
+   nothing about the held-back ones the benchmark's verdict rests on — while the
+   engine took it as a reason to skip that worker's expansion. The first run of
+   task 001 bought two expansions and spent one. This task now passes an
+   unreachable threshold, which is upstream FUTS's own behaviour: the selected
+   node is expanded whatever it scored.
+
+### What this is not
+
+* **Six tasks of 119, one seed, one model.** It is a demonstration that the port
+  runs end to end against the real release and resolves the tasks it was pointed
+  at, not a rate. A 6/6 on six tasks has a 95% interval reaching well below any
+  published number.
+* **Not a leaderboard row.** The protocol is ERA's: a tree of agent sessions,
+  scored between attempts against the visible part of each private suite, best
+  node kept. The leaderboard setting is one attempt with no verifier feedback.
+  Given that every winner here came from round 0, the closest honest comparison
+  is "best of the first two sessions with a scored selection between them" —
+  which is still not one attempt.
+* **The reward is the benchmark's; the search's score is not.** `pass_rate` is
+  this port's construction, and it exists because a binary reward gives PUCT
+  nothing to rank.
+
 ## Run it
 
 Preview without an API key, network access, or sandbox process:
@@ -1535,5 +1697,35 @@ letting the result file claim the budget it was given.
 `--tasks all` runs all 72; `--tasks default` (the default) runs the eight that
 span AlgoTune's categories.
 
+SWE-bench Science needs a **Docker daemon** and a command-line coding agent on
+PATH; `--iterations` is expansions per task, and each one is an agent session.
+
+```bash
+python -m examples.era.era_swe_science --dry-run
+python -m examples.era.era_swe_science --list-tasks
+
+python -m examples.era.era_swe_science --yes --tasks 001,034,045 \
+    --iterations 4 --workers 2 --shards 4 --test-shards 2 \
+    --agent-timeout 1200 --agent claude-code --model claude-opus-5
+```
+
+`--tasks` takes the release's own id-and-range syntax (`002,005-007`),
+`unrestricted` for its 96-task default selection, or `all` for the 119 — the 23
+it gates on GPL-family, non-commercial or restricted-material licences need
+`--allow-restricted-licenses`, and that flag selects task bundles rather than
+replacing the upstream licence obligations. Budget about 1.6 GB of images and
+one agent session's wall-clock per expansion; `--agent codex` or `--agent
+command '<argv>'` runs a different agent, and `--agent completion` is the
+tool-less control arm.
+
+Grading is a pure function of the patch, so a finished result file can be
+re-scored without paying for the search again:
+
+```bash
+python -m examples.era.era_swe_science --regrade era-swe-science-result.json
+```
+
 Offline tests: `tests/test_era_example.py`, `tests/test_era_integrals.py`,
-`tests/test_era_hyp2f1.py`, `tests/test_era_algotune.py`.
+`tests/test_era_hyp2f1.py`, `tests/test_era_algotune.py`,
+`tests/test_era_swe_science.py`. The last one's release and container checks are
+skipped unless `AGENTDESCENT_SWE_SCIENCE_NETWORK=1` is set and a daemon answers.
