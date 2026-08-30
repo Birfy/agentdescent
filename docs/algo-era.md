@@ -1501,9 +1501,10 @@ release's own rule for a timed-out agent.
 
 **Every winning node is a round-0 child of the root.** Five of the six trees
 were won by node #1 and the sixth by node #2 — the first two expansions, both
-drawn from the empty patch. Rounds 2 and 3 produced four more nodes per tree and
-not one of them beat the first round. On these six tasks, *one* Claude Code
-session solves the task, and flat-PUCT spends three more sessions confirming it.
+drawn from the empty patch. The second round added two more nodes to every tree
+and not one of them beat the first round. On these six tasks *one* Claude Code
+session solves the task, and flat-PUCT spends the remaining expansions
+confirming it.
 
 So the honest reading of the table is that it measures **the agent under this
 port's harness**, not that a tree search helps on SWE-bench Science. The search
