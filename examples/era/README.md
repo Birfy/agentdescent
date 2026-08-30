@@ -14,6 +14,7 @@ AgentDescent engine, running **four** tasks on one search.
 | Third task | Gauss hypergeometric `2F1` in double precision — not in the paper at all; 3000 points against a 25-digit mpmath reference, baseline `scipy.special.hyp2f1` |
 | Fourth task | **LLM-SRBench** (arXiv:2504.10415, ICML 2025) — the 240 scientific equation-discovery problems the benchmark released (its paper says 239), someone else's benchmark and someone else's metrics |
 | Fifth task | [AlgoTune](https://github.com/oripress/AlgoTune) ([arXiv:2507.15887](https://arxiv.org/abs/2507.15887)) — 147 of its 154 tasks, scored in **speedup** over the task's own reference implementation, **one tree per task** |
+| Sixth task | [SWE-bench Science](https://huggingface.co/datasets/OpenMOSS-Team/SWE-bench-Science) — 119 repository-scale tasks from scientific-computing projects, where a node is a **patch** and an expansion is a **coding-agent session**, **one tree per task** |
 | `evolve()` plug-ins | `strategy` + `aggregator_factory=` FUTS tree, `selection.FlatPuct` |
 
 ## Run
@@ -25,17 +26,18 @@ python -m examples.era.era_hypergeometric --dry-run       # 2F1 vs a 25-digit re
 python -m examples.era.era_llm_srbench --dry-run          # LLM-SRBench equation discovery
 python -m examples.era.era_llm_srbench --dry-run --per-problem   # ... its own per-problem protocol
 python -m examples.era.era_algotune --dry-run            # AlgoTune, speedup over the reference
+python -m examples.era.era_swe_science --dry-run         # SWE-bench Science, patches by agent
 ```
 
 `--dry-run` prints the configuration and returns with **zero network access
 and no API key**.
 
-## The five tasks
+## The six tasks
 
-All four entry points run the *same* flat-PUCT tree search, the same aggregator, the
-same sandbox and the same governance layer. What differs is a
-[`Domain`](_era_domain.py): the seed program, the sandboxed evaluator, the
-mutation prompt, and the name of the metric.
+All six entry points run the *same* flat-PUCT tree search, the same aggregator, the
+same governance layer, and — for the five that evaluate a single file — the same
+sandbox. What differs is a [`Domain`](_era_domain.py): the seed program, the
+evaluator, the mutation prompt, and the name of the metric.
 
 **`era_empirical_software.py` — Kaggle Playground S3E1.** Upstream's own bundled
 task, verbatim: the 80/20 head/tail split, the `train_and_predict(train_path,
@@ -181,6 +183,42 @@ a uniform prior. On AlgoTune's eight most-published tasks it takes the harmonic
 mean from 1.440x to 2.195x:
 [`bench/results/era-algotune-model-prior.md`](../../bench/results/era-algotune-model-prior.md).
 
+**`era_swe_science.py` — SWE-bench Science, and a mutation that is an agent.**
+The five tasks above evolve *one file*, and a single model call can rewrite one.
+These cannot: they are repository-scale — "repair an inconsistent
+transition-state rotor workflow" across a 3 MB reaction-chemistry package. So a
+node here is a **patch to a repository** (the release's own `model.patch`, `git
+diff --cached --binary <baseline>`), the root of every tree is the *empty*
+patch, and an expansion is a **coding-agent session**: Claude Code, Codex or any
+command-line agent, run inside a checkout with the selected node's patch already
+applied, able to read the whole tree and to *run* it — `run-in-env` executes
+inside the task's own offline container, where its dependencies are installed.
+
+The benchmark's reward is binary (the public reproduction exits 0 **and** every
+private test passes), which is the number this port reports and the number the
+search may not have: it is flat almost everywhere, and a tree that ranks by rank
+cannot tell a patch that fixed four checks of five from one that deleted the
+module. The tree ranks on a **pass rate** instead, over a private suite that is
+split — `--held-back-frac` of each task's tests are drawn once from a seeded
+shuffle and never shown to the search, in any shard or any prompt. The reported
+reward comes from the release's own `/tests/grader.py`, unmodified, over the
+whole suite.
+
+**The protocol is ERA's, not the benchmark's**, as with LLM-SRBench and for the
+same reason: on the leaderboard an agent gets one attempt per task and no
+verifier feedback, while here a tree of agent sessions is scored between
+attempts and the best node is kept. Same tasks, same pinned images, same grader,
+different experiment — said in the result file, in the module docstring, and in
+[`docs/algo-era.md`](../../docs/algo-era.md).
+
+This is the one task that needs **Docker** rather than the shared sandbox: the
+benchmark is distributed as 238 pinned `linux/amd64` images (about 1.6 GB per
+task) and there is no offline substitute — the dependencies, the public fixtures
+and the held-out tests all live in them. `--list-tasks` prints the release's
+table; `--tasks unrestricted` is its own 96-task default selection, and the 23
+tasks it gates on GPL-family, non-commercial or restricted-material licences
+need `--allow-restricted-licenses`.
+
 ## What is in here
 
 - [`era_empirical_software.py`](era_empirical_software.py) — the runnable port, and the search every task shares
@@ -200,6 +238,9 @@ mean from 1.440x to 2.195x:
 - [`_era_hyp2f1_runner.py`](_era_hyp2f1_runner.py) — the sandbox-side runner (2F1)
 - [`data/hyp2f1_stress.json`](data/hyp2f1_stress.json) — the committed stress set and its references,
   produced by [`tools/gen_hyp2f1_stress.py`](../../tools/gen_hyp2f1_stress.py)
+- [`era_swe_science.py`](era_swe_science.py) — the SWE-bench Science entry point
+- [`_era_swe_science.py`](_era_swe_science.py) — release catalogue, Docker workspace, verifier, prompt (SWE-bench Science)
+- [`_era_swe_science_runner.py`](_era_swe_science_runner.py) — the release's own grader plus a selection, run inside the verifier image
 - [`era_llm_srbench.py`](era_llm_srbench.py) — the LLM-SRBench entry point
 - [`_era_srbench.py`](_era_srbench.py) — download, shards, sandboxed evaluator, prompt (LLM-SRBench)
 - [`_era_srbench_expr.py`](_era_srbench_expr.py) — the answer grammar and the benchmark's metrics
@@ -208,8 +249,9 @@ mean from 1.440x to 2.195x:
 - Offline tests: [`tests/test_era_example.py`](../../tests/test_era_example.py),
   [`tests/test_era_integrals.py`](../../tests/test_era_integrals.py),
   [`tests/test_era_hyp2f1.py`](../../tests/test_era_hyp2f1.py),
-  [`tests/test_era_srbench.py`](../../tests/test_era_srbench.py)
-  [`tests/test_era_algotune.py`](../../tests/test_era_algotune.py)
+  [`tests/test_era_srbench.py`](../../tests/test_era_srbench.py),
+  [`tests/test_era_algotune.py`](../../tests/test_era_algotune.py),
+  [`tests/test_era_swe_science.py`](../../tests/test_era_swe_science.py)
 
 ## When the channel damages a reply
 
@@ -234,8 +276,13 @@ run on a host with neither. Because the benchmark requires `pandas`, `numpy`
 and `scikit-learn`, the AST gate here is far weaker than the OpenEvolve port's,
 so the sandbox rather than the gate is the boundary;
 `test_the_sandbox_blocks_the_writes_and_network_it_claims_to_block` checks that
-against the kernel rather than by reading the profile back. All four tasks run
-under the same profile — `sandbox_wrapper` — rather than under a copy of it.
+against the kernel rather than by reading the profile back. All five
+single-file tasks run under the same profile — `sandbox_wrapper` — rather than
+under a copy of it. SWE-bench Science is the exception and not a weakening of
+the rule: its candidate is a patch to someone else's repository and its
+evaluator is that release's own container, so the isolation there is the
+benchmark's own pinned image with `--network none`, and the port refuses to run
+where no Docker daemon answers.
 
 All ports share one command-line contract (`--provider/--model/--seed/--async/--async-ratio/--max-seconds/--dry-run/--yes`),
 defined in [`examples/_common.py`](../_common.py) and enforced by

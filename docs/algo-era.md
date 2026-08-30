@@ -18,6 +18,7 @@
 | **Third task** | [`examples/era/era_hypergeometric.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/era_hypergeometric.py) — `2F1` in double precision, against a 25-digit mpmath reference |
 | **Fourth task** | [`examples/era/era_llm_srbench.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/era_llm_srbench.py) — [LLM-SRBench](https://arxiv.org/abs/2504.10415) equation discovery, on the benchmark's own metrics |
 | **Fifth task** | [`examples/era/era_algotune.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/era_algotune.py) — [AlgoTune](https://github.com/oripress/AlgoTune) ([arXiv:2507.15887](https://arxiv.org/abs/2507.15887)), scored in **speedup** over each task's own reference, one tree per task |
+| **Sixth task** | [`examples/era/era_swe_science.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/era_swe_science.py) — [SWE-bench Science](https://huggingface.co/datasets/OpenMOSS-Team/SWE-bench-Science), where a node is a **patch to a repository** and an expansion is a **coding-agent session**, one tree per task |
 | **Layer** | L1 program (`blast_radius=0.6`, AST-gated and sandbox-isolated) |
 | **Fidelity** | `benchmark_faithful` — [what the classes mean](port-fidelity.md) |
 
@@ -664,6 +665,137 @@ runnable set.
    with it and with no ceiling to saturate against: a 40x candidate still outranks
    a 20x one, where a rescale by an assumed maximum would flatten both to 1.0 and
    blind the acceptance gate exactly where the task gets interesting.
+
+## The sixth task — SWE-bench Science, and a mutation that is an agent
+
+The five tasks above all evolve **one file**, and every one of them can be
+mutated by a single model call that rewrites it end to end.
+[`examples/era/era_swe_science.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/era_swe_science.py)
+cannot: its tasks are repository-scale.
+
+[SWE-bench Science](https://huggingface.co/datasets/OpenMOSS-Team/SWE-bench-Science)
+([OpenMOSS/SWE-bench-Science](https://github.com/OpenMOSS/SWE-bench-Science)) is
+119 software-engineering tasks taken from scientific-computing repositories
+across 20 domains — computational reaction chemistry, plasma stability,
+genomics, neuroimaging, crystallography — each shipped as a pinned
+`linux/amd64` **environment image** (the baseline source, the public fixtures,
+the dependencies, a git repo with a single baseline commit) and a separate
+pinned **verifier image** (held-out tests, and a grader). The artifact an agent
+is judged on is `/logs/artifacts/model.patch`, which the release's own
+`pre_artifacts.sh` produces as `git add -A && git diff --cached --binary
+<baseline>`.
+
+So in this port a node's payload is that patch, the root of every tree is the
+**empty** patch, and an expansion is a **coding-agent session** — Claude Code,
+Codex, or anything `--agent command` names — run inside a checkout with the
+selected node's patch already applied.
+
+### Three containers, and what each is for
+
+* A **checkout** is copied out of the environment image and bind-mounted back
+  into a container of that same image. The agent edits ordinary files on the
+  host; `run-in-env '<command>'` (and `python`/`python3`/`pytest` shims on its
+  PATH) execute them inside the container, against the task's own installed
+  dependencies. That container has **no network** — the release's own
+  `[agent] network_mode = "no-network"`.
+* The **agent process** runs on the host and reaches its model provider, which
+  is what Pier's own `--agent claude-code` harness does. Nothing the *task* runs
+  can reach the network.
+* **Scoring** starts a container from the **verifier** image, applies the
+  candidate patch to the checkout the private tests import, and runs the
+  grader.
+
+An agent that fails or runs out of time still produces a node: whatever it had
+written is diffed and scored. That is the release's rule, not a convenience —
+`pre_artifacts.sh` writes the artifact "including for a clean or timed-out agent
+run".
+
+### Why the score is not the benchmark's reward
+
+The benchmark's reward is binary: `reproduce.py` exits 0 **and** every private
+test passes. That is the number this port reports, and the number the search is
+not allowed to have. A binary reward is flat almost everywhere, and FUTS ranks
+by *rank among nodes* — so a patch that fixes four checks of five and one that
+deleted the module would sit at the same rank until one of them happened to
+finish the job.
+
+The tree therefore ranks on a **pass rate** over the checks an evaluation ran:
+`(public + private passed) / (1 + private collected)`. It is `1.0` exactly when
+the benchmark's own rule is satisfied on that selection, and the engine's
+`[0, 1]` reward is the same number, so the tree and the acceptance gate cannot
+disagree. The public reproduction counts as a check because it is the
+benchmark's own first condition: a patch that breaks it has broken the task
+however many private tests still pass.
+
+### The held-back split, from both ends
+
+Ranking on the private suite means the search reads the thing it is measured on.
+So the private suite is split the way every other ERA task splits its data:
+`--held-back-frac` of each task's tests are drawn once from a seeded shuffle and
+**never shown to the search** — not in a scoring shard, not in a held-out shard,
+not in the failure report a child's prompt quotes. `tests/test_era_swe_science.py`
+checks that from both ends, because it is the only thing standing between this
+number and a tuned-on-the-test-set number.
+
+What is reported per task is then:
+
+* `benchmark_reward_*` — the release's own `/tests/grader.py`, unmodified, over
+  the **whole** private suite, read once for the root patch and once for the
+  best node. The search never sees it.
+* `held_back_pass_rate_*` — whether the gain reached past what the search could
+  see.
+
+A task with a single private test holds nothing back, and the result file says
+so rather than reporting a held-back figure it could not have measured.
+
+### The evaluator is the release's grader with one thing added
+
+A node needs a *selection*, and the published grader has no way to express one,
+so this port runs
+[`_era_swe_science_runner.py`](https://github.com/Birfy/agentdescent/blob/main/examples/era/_era_swe_science_runner.py)
+inside the verifier image instead: the same working directory, the same
+`PYTHONPATH`, the same `SCI_BENCH_*` variables, `reproduce.py` first, the counts
+read out of pytest's JUnit XML with the grader's own arithmetic
+(`passed = tests − failures − errors`, skips included). The only additions are
+the node-id selection and keeping the public and private counts apart.
+
+That copy is safe because **all 119 published graders are byte-identical once
+the task id is normalised** — `test_every_published_grader_is_the_same_grader`
+checks that against the release rather than taking it on trust — and the full
+grader is still what produces the reported reward.
+
+### The protocol is ERA's, not the benchmark's
+
+On the leaderboard an agent gets **one attempt** per task and no feedback from
+any verifier. Here a tree of agent sessions is scored between attempts against
+the visible part of each private suite, and the best node is kept. Same tasks,
+same pinned images, same grader, **different experiment** — so a number from
+here is a number about this search and does not belong in a leaderboard column.
+The same disclosure the LLM-SRBench task carries, for the same reason.
+
+### Deviations this task adds
+
+1. **Docker instead of Bubblewrap.** The other five tasks isolate a candidate
+   with the shared `sandbox_wrapper`. This one runs someone else's published
+   images, so Docker is not an isolation choice that could be swapped — it is
+   what the benchmark is distributed as. The port refuses to run without a
+   daemon rather than substituting something weaker.
+2. **`--agent-timeout` defaults to 1800 s**, against the release's 5400 s for a
+   single attempt. A tree spends several sessions per task, and a run that
+   raises the cap is not comparable to one that did not.
+3. **A shard is a subset of the private tests**, and when a suite is too small
+   to fill `--shards` with distinct members — most of them are; a private suite
+   of three tests is common — the partition degrades into a **cover**, with a
+   shard repeating a test rather than being empty. Evaluations are deterministic
+   and memoised per run, so a repeated shard costs no container.
+4. **No `--reply-attempts`.** The other tasks redraw a reply the channel
+   damaged, because their candidate is model-written text that has to parse as
+   Python. Here the candidate comes out of `git diff`, so there is no channel
+   between the model and the artifact for a splice to happen in.
+5. **`--agent completion` is a control arm, not a contender**: one model call,
+   no tools, the instruction and the repository's file listing, asked for a
+   unified diff. It exists so that "a repository needs an agent" is something
+   the port can be asked rather than something it asserts.
 
 ## Measured results — Playground S3E1
 

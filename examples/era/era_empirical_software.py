@@ -423,11 +423,22 @@ def make_propose(
     repair_prompt: Optional[Callable[[Program, str, str, int], str]] = None,
     repair_attempts: int = 1,
     repair_counter: Optional[Dict[str, int]] = None,
+    extract: Optional[Callable[[str], Tuple[str, str]]] = None,
+    empty_warning: str = "",
 ) -> Callable[[str, Task, str, float], Optional[str]]:
     """`PlaygroundGenerator.__call__`, behind the engine's actor API.
 
     ``prompt_for`` is the domain's mutation prompt; without one this is the
     Kaggle task's, which is what upstream ships.
+
+    ``extract`` is how a reply becomes `(candidate, change summary)`; without
+    one this is `extract_program`, upstream's markdown stripping. A task whose
+    candidate is not a Python source file supplies its own -- the SWE-bench
+    Science task's candidate is a patch, and a diff of a markdown file carries
+    fences that upstream's "longest fenced block" rule would take instead.
+    ``empty_warning`` replaces the advice printed when replies parse to nothing,
+    which is about a reasoning model's token budget and is wrong for a task
+    whose mutation is an agent session.
 
     ``repair`` turns a single draw into a **fix-it loop**, and is off unless a
     task asks for it -- upstream appends a program that fails as a node scoring
@@ -451,6 +462,7 @@ def make_propose(
     write_prompt = prompt_for or (
         lambda program: mutation_prompt(
             program, preview=preview, timeout=candidate_timeout))
+    read_reply = extract or extract_program
 
     def propose(rendered: str, task: Task, output: str, reward: float) -> Optional[str]:
         selection = tree.select_parent()
@@ -461,7 +473,7 @@ def make_propose(
         code, summary, promise = "", "", None
         for attempt in range(max(1, repair_attempts)):
             raw = complete(prompt).strip()
-            code, summary = extract_program(raw)
+            code, summary = read_reply(raw)
             promise = _read_promise(raw) if promise is None else promise
             # The final draw is not checked: there is no retry left to spend on
             # the answer, and the aggregator evaluates it moments later anyway.
@@ -489,10 +501,11 @@ def make_propose(
             if _EMPTY_PROPOSALS["n"] in (1, 5, 25):
                 warnings.warn(
                     f"{_EMPTY_PROPOSALS['n']} mutation repl(y/ies) came back empty, "
-                    f"so no program could be parsed. On a reasoning model that is "
-                    f"the token budget going to hidden thinking: pass "
-                    f"--thinking disabled, and raise --max-tokens -- this port "
-                    f"rewrites the whole program on every expansion.",
+                    f"so no program could be parsed. " + (empty_warning or (
+                        "On a reasoning model that is the token budget going to "
+                        "hidden thinking: pass --thinking disabled, and raise "
+                        "--max-tokens -- this port rewrites the whole program on "
+                        "every expansion.")),
                     RuntimeWarning, stacklevel=2)
         return json.dumps(
             {
@@ -902,6 +915,9 @@ def run_agentdescent_era(
     repair_attempts: int = 1,
     repair_prompt: Optional[Callable[[Program, str, str, int], str]] = None,
     repair_counter: Optional[Dict[str, int]] = None,
+    extract: Optional[Callable[[str], Tuple[str, str]]] = None,
+    empty_warning: str = "",
+    solved_threshold: float = 1.0,
     verbose: bool = False,
 ) -> EraRun:
     """Run one fixed-expansion-budget serial, sync, or async experiment.
@@ -935,7 +951,8 @@ def run_agentdescent_era(
     propose = make_propose(tree, complete, prompt_for=domain.prompt,
                            repair=repair, repair_prompt=repair_prompt,
                            repair_attempts=repair_attempts,
-                           repair_counter=repair_counter)
+                           repair_counter=repair_counter,
+                           extract=extract, empty_warning=empty_warning)
 
     def factory(ledger, verifier, audit, config, policy):
         aggregator = EraTreeAggregator(
@@ -968,7 +985,15 @@ def run_agentdescent_era(
         # recorded configuration disagree with the run.
         "eval_concurrency": eval_concurrency if eval_concurrency else workers,
         "held_out_frac": held_out_frac,
-        "solved_threshold": 1.0,
+        # `evolve` skips a worker's proposal when its rollout already scored
+        # `>= solved_threshold`. For the four tasks whose reward is
+        # `x / (1 + x)` that can never fire, and 1.0 is upstream's shape: a
+        # candidate that is perfect on a shard has nothing left to propose.
+        # A task where a shard *can* reach 1.0 while the search is not finished
+        # -- SWE-bench Science, where a shard is a handful of tests and the
+        # benchmark's own verdict is a different set -- raises it, so the
+        # expansion budget the run reports is the budget it spends.
+        "solved_threshold": solved_threshold,
         "usage": usage,
         "aggregator_factory": factory,
         "verbose": verbose,

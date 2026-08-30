@@ -1,15 +1,16 @@
 """The command-line contract shared by the eight faithful algorithm ports.
 
-Eleven entry points, because ERA ships four tasks on one search: the Kaggle
+Twelve entry points, because ERA ships six tasks on one search: the Kaggle
 regression upstream bundles, the paper's *numerical solution of integrals*,
 double-precision evaluation of the Gauss hypergeometric function, equation
-discovery on LLM-SRBench, and the AlgoTune speedup benchmark. The contract is
-per entry point -- it is about the command line a user types -- so all five are
-rows here, and none of them adds an algorithm to the fidelity table.
+discovery on LLM-SRBench, the AlgoTune speedup benchmark, and SWE-bench
+Science. The contract is per entry point -- it is about the command line a user
+types -- so all six are rows here, and none of them adds an algorithm to the
+fidelity table.
 
-Ten of the eleven where numpy is absent: the LLM-SRBench task's scoring module
-maps its grammar's function names onto numpy's, so its entry point cannot be
-imported without it, and this repository treats numpy as optional.
+Eleven of the twelve where numpy is absent: the LLM-SRBench task's scoring
+module maps its grammar's function names onto numpy's, so its entry point
+cannot be imported without it, and this repository treats numpy as optional.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from examples.era import era_algotune as era_algotune
 from examples.era import era_empirical_software as era
 from examples.era import era_hard_integrals as era_integrals
 from examples.era import era_hypergeometric as era_hyp2f1
+from examples.era import era_swe_science as era_swe
 
 try:                                    # numpy is optional for this repo
     from examples.era import era_llm_srbench as era_srbench
@@ -103,6 +105,16 @@ PORTS = (
     # `prepare_suite` is the boundary a dry-run must not cross.
     Port(era_algotune, "iterations", "glm-5.2", 1800.0, "prepare_suite",
          provider="openai", async_ratio=1, budget_is_iterations=True),
+    # ERA's SWE-bench Science task, one tree per benchmark task. Two deviations
+    # of its own, both because the mutation operator is a **coding agent** and
+    # not a completion: `provider` keeps the shared default because the agent
+    # CLI carries its own credentials, and `model` defaults to None because the
+    # CLI has a model of its own -- `--model` is forwarded when given, and only
+    # the `--agent completion` control arm requires one. `prepare_suite` is the
+    # boundary a dry-run must not cross: it fetches the release manifest and
+    # pulls two pinned Docker images.
+    Port(era_swe, "iterations", None, 1800.0, "prepare_suite",
+         async_ratio=1, budget_is_iterations=True),
 )
 
 # ERA's fourth task, equation discovery on LLM-SRBench. Same deviations again,
