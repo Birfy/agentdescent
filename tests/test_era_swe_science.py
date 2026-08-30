@@ -91,22 +91,87 @@ def test_the_held_back_shards_hold_only_held_back_tests():
     assert set(suite.tests_for(suite.test_range())) == set(suite.held_back)
 
 
+def _scored(report_private, *, public_passed=0):
+    """Metrics shaped like a real evaluation, with a private failure report."""
+    return {"passed": 1, "collected": 3, "public": public_passed, "checks": 4,
+            "pass_rate": 0.5, "report": report_private,
+            "report_public": "" if public_passed else
+                             "public reproduction (reproduce.py) exited 1:\n{}"}
+
+
 def test_a_mutation_prompt_quotes_no_held_back_test():
     """The prompt is the other end of the leak: an agent that read a held-out
-    test's name could write to it directly. The report a prompt quotes is built
-    from a scoring-shard evaluation, so it cannot hold one -- and this pins that
-    against the assembled string rather than against the intention."""
+    test's name could write to it directly. Checked at the *most* permissive
+    feedback level, because that is where there is something to leak."""
     suite = make_suite()
-    metrics = {"passed": 1, "collected": 3, "public": 1, "checks": 4,
-               "pass_rate": 0.5,
-               "report": "visible private checks:\nFAILED " + suite.visible[0]}
+    metrics = _scored("FAILED " + suite.visible[0])
     program = Program("p", 3, None, "diff --git a/x b/x\n", "tried a thing",
                       metrics, True, "")
-    text = swe.mutation_prompt(program, suite=suite, agent_timeout=600)
+    text = swe.mutation_prompt(program, suite=suite, agent_timeout=600,
+                               feedback="tests")
     for node in suite.held_back:
         assert node not in text
         assert node.rsplit("::", 1)[-1] not in text
     assert suite.instruction in text, "the benchmark's own instruction must go in whole"
+
+
+def test_the_default_feedback_quotes_nothing_from_the_private_suite():
+    """The defect the first runs shipped with, and the reason `--feedback`
+    exists.
+
+    pytest's traceback embeds the **body** of the failing test, so a prompt
+    built from the private suite hands over its assertions and expected values
+    before the agent makes an edit. On the benchmark an agent has `reproduce.py`
+    and nothing else. The default must therefore quote the public reproduction
+    and not one word of the private run -- not the source, not a node id, not
+    even how many checks there were.
+    """
+    suite = make_suite()
+    metrics = _scored(
+        "=== FAILURES ===\n"
+        "def test_secret_invariant():\n>   assert rotor_number(g) == 3\n"
+        "FAILED /tests/private_tests/test_secret.py::test_secret_invariant")
+    program = Program("p", 1, None, "diff --git a/x b/x\n", "a change", metrics,
+                      True, "")
+    text = swe.mutation_prompt(program, suite=suite, agent_timeout=600)
+
+    assert "test_secret_invariant" not in text
+    assert "rotor_number(g) == 3" not in text
+    assert "/tests/private_tests" not in text
+    assert "3 private check" not in text and "1 of them passed" not in text
+    # ...but the benchmark's own signal is still there.
+    assert "public reproduction" in text
+    assert "does NOT exit 0" in text
+
+
+def test_counts_says_how_many_and_never_which():
+    suite = make_suite()
+    metrics = _scored("def test_secret_invariant(): assert x == 3")
+    program = Program("p", 1, None, "", "", metrics, True, "")
+    text = swe.mutation_prompt(program, suite=suite, agent_timeout=600,
+                               feedback="counts")
+    assert "3 private check(s)" in text and "1 of them passed" in text
+    assert "test_secret_invariant" not in text
+
+
+def test_tests_level_says_out_loud_that_more_are_hidden():
+    """At `tests` the agent has seen the visible split's source, so telling it
+    the verifier's tests "cannot be read" would be false."""
+    suite = make_suite()
+    program = Program("p", 1, None, "", "", _scored("boom"), True, "")
+    shown = swe.mutation_prompt(program, suite=suite, agent_timeout=600,
+                               feedback="tests")
+    assert "further tests you have not been shown" in shown
+    assert "cannot see and cannot read" not in shown
+    hidden = swe.mutation_prompt(program, suite=suite, agent_timeout=600)
+    assert "cannot see and cannot read" in hidden
+
+
+def test_an_unknown_feedback_level_is_refused():
+    program = Program("p", 0, None, "", "", {}, True, "")
+    with pytest.raises(ValueError):
+        swe.mutation_prompt(program, suite=make_suite(), agent_timeout=60,
+                            feedback="everything")
 
 
 def test_the_split_is_deterministic_in_the_seed():

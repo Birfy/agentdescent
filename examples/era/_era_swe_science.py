@@ -576,19 +576,42 @@ def pytest_failures(output: str) -> str:
     return "\n".join(keep).strip() or output.strip()
 
 
-def _failure_report(payload: Dict[str, Any]) -> str:
-    """What a child's prompt is allowed to quote: only what this run scored."""
-    lines: List[str] = []
+#: How much of an evaluation a child's prompt may quote back.
+#:
+#: This is the most consequential knob in the port, and the first runs had it
+#: silently at ``tests``. pytest's traceback embeds the **body of the failing
+#: test**, so a report built from the private suite hands the agent the hidden
+#: specification -- the assertions, the expected values, the file name -- before
+#: it makes a single edit. On the benchmark an agent has `reproduce.py` and
+#: nothing else, and a resolve rate measured with the tests quoted is not a
+#: measurement of the same task.
+#:
+#: The tree still *ranks* on the private suite either way; what changes is what
+#: the agent is told. `public` is the benchmark's own information budget and the
+#: default.
+FEEDBACK_LEVELS = ("public", "counts", "tests")
+
+
+def _public_report(payload: Dict[str, Any]) -> str:
     public = payload.get("public") or {}
-    if public.get("return_code") is not None and not public.get("passed"):
-        lines.append("public reproduction (reproduce.py) exited "
-                     f"{public.get('return_code')}:")
-        lines.append((public.get("output") or "").strip()[-1200:])
+    if public.get("return_code") is None or public.get("passed"):
+        return ""
+    return ("public reproduction (reproduce.py) exited "
+            f"{public.get('return_code')}:\n"
+            + (public.get("output") or "").strip()[-1800:])
+
+
+def _failure_report(payload: Dict[str, Any]) -> str:
+    """The private suite's own failure output -- quoted only at `tests`.
+
+    Stored on the node either way: the result file is a record of the run and
+    keeping it there costs the agent nothing. `mutation_prompt` decides what
+    reaches a prompt.
+    """
     private = payload.get("private") or {}
-    if private.get("failed"):
-        lines.append("visible private checks:")
-        lines.append(pytest_failures(private.get("output") or "")[-2400:])
-    return "\n".join(lines)[-REPORT_CHARS:]
+    if not private.get("failed"):
+        return ""
+    return pytest_failures(private.get("output") or "")[-2400:]
 
 
 def evaluate_patch(patch: str, *, suite: Suite, shards: Sequence[int],
@@ -646,7 +669,7 @@ def evaluate_patch(patch: str, *, suite: Suite, shards: Sequence[int],
 def _zero_metrics(error: str) -> Dict[str, Any]:
     return {"score": float("-inf"), "pass_rate": 0.0, "passed": 0, "collected": 0,
             "public": 0, "checks": 0, "subset_resolved": 0, "seconds": 0.0,
-            "error": error, "report": ""}
+            "error": error, "report": "", "report_public": ""}
 
 
 def _metrics_from(payload: Dict[str, Any], selection: Sequence[str], public: bool,
@@ -681,6 +704,10 @@ def _metrics_from(payload: Dict[str, Any], selection: Sequence[str], public: boo
         "subset_resolved": int(bool(checks) and passes == checks),
         "seconds": seconds,
         "error": "",
+        # Kept apart so `mutation_prompt` can obey --feedback: the
+        # public half is what the benchmark itself gives an agent, the
+        # private half is the hidden suite's own output.
+        "report_public": _public_report(payload),
         "report": _failure_report(payload),
     }
     return True, metrics, ""
@@ -920,15 +947,36 @@ def _numbered(text: str, limit: int = 2000) -> str:
 
 
 def mutation_prompt(program: Program, *, suite: Suite, agent_timeout: float,
-                    ask_promise: bool = False) -> str:
+                    ask_promise: bool = False, feedback: str = "public") -> str:
     """What the coding agent is told before it edits the checkout.
 
     The task's own `instruction.md` goes in verbatim -- it is the benchmark's
     prompt and rewriting it would make this a different benchmark. What this
     port adds around it is the ERA loop: where the agent is, how to run the
-    task's code, what the previous attempt in this branch of the tree scored,
-    and the fact that tests it will never see are what decides the result.
+    task's code, and what the previous attempt in this branch of the tree
+    scored.
+
+    ``feedback`` decides how much of that score reaches the agent, and it is the
+    difference between two different experiments:
+
+    * ``public`` -- the public reproduction's own output and nothing else. This
+      is the information the benchmark itself gives an agent, and it is the
+      default.
+    * ``counts`` -- adds how many of the visible private checks passed, with no
+      names and no output. The agent learns that it is not finished; it learns
+      nothing about what is being checked.
+    * ``tests`` -- adds pytest's failure sections for the visible split. Read
+      what that means before using it: **pytest's traceback embeds the body of
+      the failing test**, so this hands over the hidden suite's assertions and
+      expected values. A resolve rate measured here is a measurement of "an
+      agent shown most of the hidden tests", not of the benchmark's task.
+
+    The tree ranks on the private suite at every level -- that is ERA's
+    protocol, the evaluator drives selection -- so what this changes is the
+    agent's information, not the search's.
     """
+    if feedback not in FEEDBACK_LEVELS:
+        raise ValueError(f"feedback must be one of {FEEDBACK_LEVELS}")
     metrics = program.metrics or {}
     lines = [
         "You are one expansion of a tree search over patches to a scientific "
@@ -971,18 +1019,26 @@ def mutation_prompt(program: Program, *, suite: Suite, agent_timeout: float,
 
     passed, checks = metrics.get("passed"), metrics.get("checks")
     if checks:
-        lines += [
-            "## How it scored",
-            "",
-            f"{(passed or 0) + (metrics.get('public') or 0)} of {checks} visible "
-            f"checks passed (the public reproduction plus "
-            f"{metrics.get('collected', 0)} of the private tests this search is "
-            f"allowed to see).",
-            "",
-        ]
-        report = _numbered(metrics.get("report", ""), REPORT_CHARS)
-        if report:
-            lines += ["What failed:", "", "```", report, "```", ""]
+        public_ok = bool(metrics.get("public"))
+        lines += ["## How it scored", ""]
+        lines.append("The public reproduction "
+                     + ("exits 0." if public_ok else "does NOT exit 0."))
+        if feedback in ("counts", "tests"):
+            lines.append(
+                f"A held-out verifier also ran {metrics.get('collected', 0)} "
+                f"private check(s) that this search may see, and "
+                f"{passed or 0} of them passed. You are not told which, or what "
+                f"they check.")
+        lines.append("")
+        shown = _numbered(metrics.get("report_public", ""), REPORT_CHARS)
+        if shown:
+            lines += ["What the public reproduction reported:", "", "```",
+                      shown, "```", ""]
+        if feedback == "tests":
+            private = _numbered(metrics.get("report", ""), REPORT_CHARS)
+            if private:
+                lines += ["What the visible private checks reported:", "",
+                          "```", private, "```", ""]
     elif metrics.get("error"):
         lines += ["## How it scored", "",
                   f"It could not be evaluated: {metrics['error'][:600]}", ""]
@@ -991,9 +1047,11 @@ def mutation_prompt(program: Program, *, suite: Suite, agent_timeout: float,
         "## Rules",
         "",
         "* Fix the real defect in the task's own source. The verifier holds "
-        "tests you cannot see and cannot read, so a change that special-cases "
-        "the public reproduction, the fixtures, or a value you observed will "
-        "score worse, not better.",
+        + ("further tests you have not been shown, so "
+           if feedback == "tests" else
+           "tests you cannot see and cannot read, so ")
+        + "a change that special-cases the public reproduction, the fixtures, "
+        "or a value you observed will score worse, not better.",
         "* Do not edit `reproduce.py`, the fixtures, or any generated report.",
         "* Do not add dependencies or reach the network; the evaluation "
         "environment is offline.",
@@ -1023,7 +1081,7 @@ def mutation_prompt(program: Program, *, suite: Suite, agent_timeout: float,
 
 
 def envelope(program: Program, *, suite: Suite, agent_timeout: float,
-             ask_promise: bool = False) -> str:
+             ask_promise: bool = False, feedback: str = "public") -> str:
     """`Domain.prompt` for this task: the parent patch plus the agent's prompt.
 
     The search hands a mutation the parent *program*; here the parent program is
@@ -1035,7 +1093,7 @@ def envelope(program: Program, *, suite: Suite, agent_timeout: float,
     return json.dumps({
         "patch": program.code,
         "text": mutation_prompt(program, suite=suite, agent_timeout=agent_timeout,
-                                ask_promise=ask_promise),
+                                ask_promise=ask_promise, feedback=feedback),
     })
 
 

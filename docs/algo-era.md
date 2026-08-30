@@ -1469,6 +1469,11 @@ never sees that grader — it ranks on the visible split only, and
 `--held-back-frac 0.25` of each private suite is never shown to it in any shard
 or any prompt.
 
+The runs predate `--feedback` and behave as `--feedback tests` does now: the
+prompt quoted the visible split's pytest output. That is the single most
+important line in this section and it is why the table below is not a
+benchmark number.
+
 Two processes on one host, identical configuration, split only to use the
 wall-clock: tasks 001/002/022/029 in
 [`bench/results/era-swe-science-1200s-a.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-1200s-a.json)
@@ -1477,10 +1482,21 @@ and 034/045 in
 Each file carries the winning patch, the whole tree, and the grader's output for
 the baseline and the best node.
 
-### The result
+### The result — and read the next section before quoting it
 
 **6 of 6 resolved, from 0 of 6.** The reward column is the release's own
 grader's binary verdict; the counts beside it are its private-suite totals.
+
+!!! danger "This arm ran at `--feedback tests`, which shows the agent the hidden tests"
+    These runs predate the `--feedback` flag, and the behaviour they got is what
+    the flag now calls `tests`: every prompt quoted pytest's failure sections
+    for the visible half of the private suite — **and pytest's traceback embeds
+    the body of the failing test**, so each agent session was handed those
+    tests' assertions and expected values before it made an edit. All 16
+    root-node prompts across the three arms did this. The number below is
+    therefore "an agent shown most of the hidden specification resolves the
+    task", not the benchmark's task. See
+    [what was wrong with the first number](#what-was-wrong-with-the-first-number).
 
 | task | domain | private tests | grader passed | reward | visible pass rate | held-back pass rate | winning node | wall |
 |---|---|---:|---:|:---:|---:|---:|---:|---:|
@@ -1593,6 +1609,55 @@ Real defects in real libraries, not benchmark-shaped ones:
    task 001 bought two expansions and spent one. This task now passes an
    unreachable threshold, which is upstream FUTS's own behaviour: the selected
    node is expanded whatever it scored.
+
+### What was wrong with the first number
+
+The 6/6 above was measured with the port quoting the visible private tests'
+pytest output into every mutation prompt. That looked innocuous — it is what
+the other five ERA tasks do, hand the evaluator's own error back to the model —
+and on this benchmark it is not, because **pytest's traceback prints the source
+of the failing test**. A round-0 prompt for task 022 carried this:
+
+```
+    def test_four_dimensional_frames_are_reduced_independently():
+        ...
+>       assert _has_result(
+            results,
+            lambda result: result.shape == (4, 2)
+            and np.all(result[:, 0] == 100)
+            and np.all(result[:, 1] == 8),
+        )
+E       assert False
+```
+
+— the hidden suite's file name, its node ids, its assertions and its expected
+values, handed over before the agent made a single edit. Checked across the
+transcripts the CLI leaves behind: **16 of 16 root-node sessions** quoted
+`/tests/private_tests` source or ids. On the benchmark an agent has
+`reproduce.py` and nothing else.
+
+The held-back split does **not** catch this, and it is worth being precise about
+why. It rules out a patch tuned to the *particular* visible assertions — the
+held-back tests pass too — but the tests it holds back exercise the same defect,
+so an agent told exactly which invariant to satisfy passes them for the same
+reason it passes the visible ones. What the split measures is "did the fix
+generalise"; what it cannot measure is "was the specification given away".
+
+The port's own prompt was also asserting something false at that level: *"The
+verifier holds tests you cannot see and cannot read."*
+
+The fix is `--feedback {public,counts,tests}`, defaulting to **`public`** — the
+public reproduction's own output and nothing from the private run, which is the
+benchmark's own information budget. `counts` adds how many visible checks passed
+and nothing about what they check. `tests` is the old behaviour, kept because it
+is a legitimate *different* experiment as long as it is labelled, and named so
+that nobody reaches it by accident.
+`test_the_default_feedback_quotes_nothing_from_the_private_suite` pins the
+default against the exact strings that leaked.
+
+The tree still ranks on the private suite at every level — that is ERA's
+protocol, the evaluator drives selection, and it is disclosed. What changed is
+what the *agent* is told.
 
 ### What this is not
 

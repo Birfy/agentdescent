@@ -94,6 +94,7 @@ from examples.era._era_domain import Domain
 from examples.era._era_support import UPSTREAM_COMMIT
 from examples.era._era_swe_science import (
     DEFAULT_TASKS,
+    FEEDBACK_LEVELS,
     RELEASE_AGENT_TIMEOUT,
     RELEASE_GITHUB,
     RELEASE_REPO,
@@ -166,7 +167,7 @@ def build_launch(args: argparse.Namespace, usage: Usage):
 
 def swe_science_domain(suite: Suite, *, verifier_timeout: float,
                        max_patch_bytes: int, agent_timeout: float,
-                       ask_promise: bool, public: bool,
+                       ask_promise: bool, public: bool, feedback: str,
                        cache: Optional[Dict[str, Any]] = None) -> Domain:
     """One SWE-bench Science task, in the four terms the ERA search needs."""
     return Domain(
@@ -183,7 +184,8 @@ def swe_science_domain(suite: Suite, *, verifier_timeout: float,
         reward=framework_score,
         prompt=lambda program: envelope(program, suite=suite,
                                         agent_timeout=agent_timeout,
-                                        ask_promise=ask_promise),
+                                        ask_promise=ask_promise,
+                                        feedback=feedback),
         task_prompt=lambda index: (
             f"Score the patch for SWE-bench Science task {suite.task_id} on "
             f"held-out check set {index}."),
@@ -256,6 +258,17 @@ def build_parser() -> argparse.ArgumentParser:
                               "never sees, in any shard or prompt. 0 turns the "
                               "split off, and a run with it off cannot report a "
                               "held-back figure"))
+    parser.add_argument("--feedback", default="public", choices=FEEDBACK_LEVELS,
+                        help=("how much of an evaluation a child's prompt may "
+                              "quote. `public` is the public reproduction's own "
+                              "output and nothing else -- the information the "
+                              "benchmark itself gives an agent, and the default. "
+                              "`counts` adds how many visible private checks "
+                              "passed, with no names. `tests` adds pytest's "
+                              "failure sections, which embed the **body of the "
+                              "failing test**: it hands over the hidden suite's "
+                              "assertions, and a resolve rate measured under it "
+                              "is not a measurement of the benchmark's task"))
     parser.add_argument("--no-public", action="store_true",
                         help=("leave the public reproduction out of the score. "
                               "It is the benchmark's own first condition, so "
@@ -476,6 +489,10 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         f"/task, workers={args.workers}, c_puct={args.c_puct}, "
         f"agent_timeout={args.agent_timeout:g}s"
     )
+    print(f"Feedback : {args.feedback} -- what a child's prompt may quote of "
+          f"its parent's evaluation"
+          + ("  [the visible tests' own tracebacks, which embed their source]"
+             if args.feedback == "tests" else ""))
     print(f"Split    : {args.held_back_frac:g} of each private suite held back "
           f"from the search; the reported reward is the release's own grader "
           f"over the whole suite")
@@ -564,7 +581,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             suite, verifier_timeout=args.verifier_timeout,
             max_patch_bytes=args.max_patch_bytes, agent_timeout=args.agent_timeout,
             ask_promise=args.prior_exponent > 0.0, public=not args.no_public,
-            cache=cache)
+            feedback=args.feedback, cache=cache)
         if launch is not None:
             mutate = make_agent_mutation(
                 suite, launch=launch, run_root=args.workspace_root,
