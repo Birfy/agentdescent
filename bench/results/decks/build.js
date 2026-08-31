@@ -131,7 +131,8 @@ const RK=D.algotune_metric_rank, hf=Math.ceil(RK.length/2), mv=2.45;
 s.addShape(p.ShapeType.roundRect,{x:M,y:6.42,w:W-2*M,h:0.84,fill:{color:INK},
   line:{color:INK,width:0},rectRadius:0.05});
 s.addText([{text:'The third column is the harness. ',options:{bold:true,color:WHITE}},
- {text:'Eighteen AlgoTuner rows run the benchmark’s own agent at its calibrated n. Three amber rows run OpenEvolve’s search — MetaEvolve and its baseline say so outright, and none of the three states its problem sizes. That is the axis to hold in mind before reading the order: the top four and the AlgoTuner field may not be measuring the same problems.',options:{color:'D6E0E4'}}],
+ {text:'Eighteen AlgoTuner rows run the benchmark’s own agent at its calibrated n; three amber rows run OpenEvolve’s search, and none of those three states its problem sizes. Read that before the order — the top four and the AlgoTuner field may not be measuring the same problems.  ',options:{color:'D6E0E4'}},
+ {text:'OpenEvolve* is its own published 1.984x (the final of four phases). Its per-task list is a cross-phase discoveries log, so the 2.267x that list averages to is not a score anyone achieved in one configuration.',options:{color:'E8C98A'}}],
  {x:M+0.26,y:6.50,w:W-2*M-0.52,h:0.68,fontFace:B,fontSize:10.5,lineSpacing:14,
   isTextBox:true,margin:0});
 s.addNotes('Under AlgoTune’s own scoring nobody is below 1.0 and no model needs excluding, so this replaces both the “winners only” chart and the four-task workaround.');
@@ -211,12 +212,12 @@ r5.push([{text:'harmonic mean, raw',options:{bold:true,align:'left',fill:{color:
    .map((v,j)=>({text:v,options:{align:'center',bold:true,fill:{color:INK},
      color:(j===1||j===2)?'6FD9BF':WHITE,fontSize:11}}))]);
 r5.push([{text:'AlgoTune score (clipped)',options:{bold:true,align:'left',fill:{color:INK},color:WHITE}},
- ...['—',D.ours_score[0].toFixed(3),D.ours_score[1].toFixed(3),'1.392','2.045','2.267','—','—']
+ ...['—',D.ours_score[0].toFixed(3),D.ours_score[1].toFixed(3),'1.392','2.045','1.984','—','—']
    .map((v,j)=>({text:v,options:{align:'center',bold:true,fill:{color:INK},
      color:(j===1||j===2)?'6FD9BF':WHITE,fontSize:11}}))]);
 s.addTable(r5,{...tblBase,x:M,y:1.92,w:W-2*M,colW:[2.72,0.95,1.02,1.02,0.95,0.95,1.0,1.36,2.12],
   rowH:0.345});
-s.addText('amber = above the best of all 14–18 AlgoTune models at this n.  “Clipped” is AlgoTune’s own rule: anything under 1.0 counts as 1.0, which is why OpenEvolve’s column moves from its published 1.984 to the 2.267 its own table computes to.',
+s.addText('amber = above the best of all 14–18 AlgoTune models at this n.  “Clipped” is AlgoTune’s own rule: anything under 1.0 counts as 1.0.  The OpenEvolve column is that project’s cross-phase discoveries log rather than one run, so its per-task cells and its published 1.984x score do not come from the same configuration.',
   {x:M,y:HT-1.06,w:W-2*M,h:0.34,fontFace:B,fontSize:9.5,color:BRASS,lineSpacing:12,isTextBox:true,margin:0});
 foot(s,'Max and median use every model with a result on that task. The nine with no score on at least one of the eight — claude-opus-4, 4.5 and 4.6, sonnet-4.5, gemini-2.5-pro, gemini-3-pro, gemini-3.1-pro, gpt-oss-120b, qwen3-coder — still have solver files upstream; only the score is missing, and they include the newest models on the board. AlgoTune publishes no GLM-5 result at all.');
 s.addNotes('The amber cells are the whole argument of slide 7.');

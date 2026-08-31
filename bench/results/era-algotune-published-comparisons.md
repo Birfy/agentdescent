@@ -150,8 +150,8 @@ Scored AlgoTune's way, on the same eight tasks, nobody excluded:
 |---:|---|---:|---|
 | 1 | **this port, seed 0** | **2.290** | ERA on AgentDescent |
 | 2 | **this port, seed 1** | **2.268** | ERA on AgentDescent |
-| 3 | OpenEvolve | 2.267 | OpenEvolve |
-| 4 | MetaEvolve (RL) | 2.045 | OpenEvolve's search |
+| 3 | MetaEvolve (RL) | 2.045 | OpenEvolve's search |
+| 4 | OpenEvolve\* | 1.984 | OpenEvolve |
 | 5 | claude-opus-4.6 | 1.837 | AlgoTuner |
 | 6 | gemini-3.1-pro-preview | 1.833 | AlgoTuner |
 | 7 | claude-opus-4.5 | 1.830 | AlgoTuner |
@@ -159,6 +159,18 @@ Scored AlgoTune's way, on the same eight tasks, nobody excluded:
 | ... | | | |
 | 17 | Qwen3-14B, no RL | 1.392 | OpenEvolve's search |
 | 23 | gpt-5-mini | 1.254 | AlgoTuner |
+
+\* OpenEvolve's row is its own published 1.984x, the last of four phases (1.381x
+generic hints, 1.886x specific hints, 1.984x final). **It is not the harmonic mean
+of the eight per-task numbers this file quotes for it.** Those come from that
+project's *Task-by-Task Optimization Discoveries* section, which is a log of the
+best result found for each task across the whole journey -- 321.01x for
+`polynomial_real` came from the JAX discovery, 3.22x for `affine_transform_2d`
+from the specific-hints phase -- so its harmonic mean, 2.267x, corresponds to no
+configuration anyone ran. This file computed and printed that 2.267x twice, and
+withdrew it twice; it is recorded here so it does not come back a third time. The
+per-task cells stay, because each was really measured, but the column is a
+discoveries log and its score row is Phase 4.
 
 Read the harness column before the order. The eighteen AlgoTuner rows are at the
 calibrated `n`; the three above them run OpenEvolve's search and none of the three

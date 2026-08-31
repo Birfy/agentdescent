@@ -413,16 +413,16 @@
    "ERA"
   ],
   [
-   "OpenEvolve",
-   2.267,
-   false,
-   "OpenEvolve"
-  ],
-  [
    "MetaEvolve (RL)",
    2.045,
    false,
    "OpenEvolve"
+  ],
+  [
+   "OpenEvolve",
+   1.984,
+   false,
+   "OpenEvolve*"
   ],
   [
    "claude-opus-4.6",
