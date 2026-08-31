@@ -362,7 +362,15 @@ class EraStrategy:
     ) -> Optional[Diff]:
         try:
             payload = json.loads(proposal)
-            code = str(payload["code"]).strip()
+            # `.strip("\n")`, not `.strip()`. For a program the difference is
+            # cosmetic; for a **patch** it is destructive. A unified diff writes
+            # an empty context line as a single space, so a diff ending in one
+            # loses that whole line to a bare `.strip()`, the last hunk then
+            # holds one line fewer than its header declares, and `git apply`
+            # rejects it as a corrupt patch. Measured before the fix: 6 of 327
+            # expansions, and four of those were single-attempt runs where the
+            # task's only candidate was destroyed.
+            code = str(payload["code"]).strip("\n")
             iteration = int(payload["iteration"])
             parent_index = int(payload["parent_index"])
         except (KeyError, TypeError, ValueError, json.JSONDecodeError):

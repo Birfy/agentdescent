@@ -439,6 +439,33 @@ def test_a_reply_with_no_patch_markers_yields_no_patch():
     assert swe.extract_patch("the agent said something else")[0] == ""
 
 
+def test_a_diff_ending_in_an_empty_context_line_survives_the_ledger():
+    """The bug that cost four single-attempt runs their only candidate.
+
+    A unified diff writes an empty context line as a single space. `to_diff`
+    used a bare `.strip()`, which ate that whole line when it came last, so the
+    final hunk held one line fewer than its header declared and `git apply`
+    called the patch corrupt. The candidate has to reach the evaluator byte for
+    byte, minus at most its trailing newline.
+    """
+    from examples.era.era_empirical_software import EraStrategy
+
+    patch = ("diff --git a/s.py b/s.py\n--- a/s.py\n+++ b/s.py\n"
+             "@@ -1,3 +1,4 @@\n import os\n+import sys\n x = 1\n \n")
+    reply = swe.wrap_reply("added an import", patch)
+    code, _ = swe.extract_patch(reply)
+    diff = EraStrategy().to_diff({}, json.dumps(
+        {"code": code, "iteration": 1, "parent_index": 0}), "w0", 0, "era_program")
+    assert diff is not None
+    restored = swe._normalise_patch(diff.ops["code"])
+    assert restored == patch, "the empty context line was eaten"
+    assert restored.splitlines()[-1] == " "
+    # ...and the hunk still declares what it holds.
+    body = restored.splitlines()[4:]
+    assert sum(1 for l in body if l[:1] in (" ", "-")) == 3
+    assert sum(1 for l in body if l[:1] in (" ", "+")) == 4
+
+
 def test_the_trailing_newline_git_apply_needs_survives_the_ledger():
     """`Diff.ops` are strings and `to_diff` strips them, and `git apply` refuses
     a patch whose last hunk has no newline."""
