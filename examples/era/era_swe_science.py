@@ -152,11 +152,27 @@ def agent_command(args: argparse.Namespace) -> Tuple[str, ...]:
             raise SystemExit("--agent command needs --agent-command '<argv>'")
         return tuple(shlex.split(args.agent_command))
     base = CLAUDE_CODE if args.agent == "claude-code" else CODEX
-    return base + (("--model", args.model) if args.model else ())
+    # `--agent-arg` goes *before* the model so a caller can add the flags a
+    # third-party endpoint needs. Claude Code reaches one only in `--bare`
+    # mode: with a managed OAuth credential present it wins over
+    # ANTHROPIC_API_KEY and the endpoint answers "Authentication error",
+    # while `--bare` reads the key and nothing else. It also drops hooks,
+    # plugins and CLAUDE.md discovery, which is what a benchmark harness
+    # wants anyway -- none of that is part of the task.
+    return (base + tuple(args.agent_arg or ())
+            + (("--model", args.model) if args.model else ()))
 
 
 def agent_environment(args: argparse.Namespace) -> Dict[str, str]:
     """Environment overrides for one agent session, beyond the workspace's PATH.
+
+    ``--agent-env KEY=VALUE`` is how a different provider is reached without
+    touching the process that launched the run: the release's own profiles point
+    Claude Code at an endpoint with ``ANTHROPIC_BASE_URL`` and
+    ``ANTHROPIC_AUTH_TOKEN``, and setting those globally here would redirect
+    *this* process too. They go to the agent's subprocess and nowhere else, and
+    only their **names** are recorded -- a result file that wrote an auth token
+    into `config` would carry it into the repository.
 
     ``--thinking disabled`` sets ``MAX_THINKING_TOKENS=0``, which is the CLI's
     own budget knob rather than anything this port invents. It matters twice
@@ -166,11 +182,17 @@ def agent_environment(args: argparse.Namespace) -> Dict[str, str]:
     could not be repeated. `agent_sessions.thinking_tokens` carries the value
     that was in force.
     """
+    env: Dict[str, str] = {}
+    for pair in (args.agent_env or ()):
+        key, sep, value = pair.partition("=")
+        if not sep:
+            raise SystemExit(f"--agent-env expects KEY=VALUE, got {key!r}")
+        env[key.strip()] = value
     if args.thinking == "disabled":
-        return {"MAX_THINKING_TOKENS": "0"}
-    if args.thinking == "enabled" and not os.getenv("MAX_THINKING_TOKENS"):
-        return {"MAX_THINKING_TOKENS": "31999"}
-    return {}
+        env["MAX_THINKING_TOKENS"] = "0"
+    elif args.thinking == "enabled" and not os.getenv("MAX_THINKING_TOKENS"):
+        env["MAX_THINKING_TOKENS"] = "31999"
+    return env
 
 
 def build_launch(args: argparse.Namespace, usage: Usage):
@@ -250,6 +272,21 @@ def build_parser() -> argparse.ArgumentParser:
                               "-- one model call, no tools, asked for a diff"))
     parser.add_argument("--agent-command", default="",
                         help="argv for --agent command; the prompt goes to stdin")
+    parser.add_argument("--agent-arg", action="append", default=None,
+                        metavar="FLAG",
+                        help=("an extra argument for the built-in agent command "
+                              "-- repeatable. `--agent-arg --bare` is what a "
+                              "third-party ANTHROPIC_BASE_URL needs from Claude "
+                              "Code, which otherwise prefers a managed OAuth "
+                              "credential and gets an authentication error"))
+    parser.add_argument("--agent-env", action="append", default=None,
+                        metavar="KEY=VALUE",
+                        help=("an environment variable for the agent's "
+                              "subprocess only -- repeatable. This is how a "
+                              "different provider is reached "
+                              "(ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN), "
+                              "without redirecting the process that launched "
+                              "the run. Only the NAMES reach the result file"))
     parser.add_argument("--agent-timeout", type=float, default=1800.0,
                         help=(f"wall clock for one agent session. The release "
                               f"allows {int(RELEASE_AGENT_TIMEOUT)}s per task "
@@ -914,7 +951,9 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             "release's own grader over the whole private suite; the search "
             "never reads it."),
         "config": {
-            key: str(value) if isinstance(value, Path) else value
+            key: (sorted(p.partition("=")[0] for p in (value or ()))
+                  if key == "agent_env" else
+                  str(value) if isinstance(value, Path) else value)
             for key, value in vars(args).items() if key not in ("output", "yes")
         },
         "summary": {
