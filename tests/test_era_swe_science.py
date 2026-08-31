@@ -870,6 +870,59 @@ def test_the_agent_session_env_carries_the_workspace_path_and_the_override(monke
     assert seen["via_stdin"] is True
 
 
+def test_fail2pass_and_pass2pass_are_defined_against_the_baseline(capsys):
+    """The leaderboard's two per-test columns are not "tests that pass". F2P is
+    the repair -- tests that *failed* before and pass now. P2P is the regression
+    check -- tests that passed before and still do. An aggregate count cannot
+    produce either, which is why the grader's JUnit report is read back."""
+    before = {"t.py::a": "failed", "t.py::b": "failed", "t.py::c": "passed",
+              "t.py::d": "passed"}
+    after = {"t.py::a": "passed", "t.py::b": "failed", "t.py::c": "passed",
+             "t.py::d": "failed"}
+    card = port.task_scorecard(
+        {"tests": before, "reward": 0,
+         "private": {"passed": 2, "collected": 4}, "public": {"passed": 1}},
+        {"tests": after, "reward": 0,
+         "private": {"passed": 2, "collected": 4}, "public": {"passed": 1}})
+    assert card["f2p_passed"] == 1 and card["f2p_total"] == 2, "a and b failed before"
+    assert card["p2p_passed"] == 1 and card["p2p_total"] == 2, "d regressed"
+    assert card["private_passed"] == 2 and card["private_total"] == 4
+    assert card["resolved"] == 0
+
+
+def test_a_scorecard_refuses_a_result_file_that_was_never_regraded(tmp_path):
+    path = tmp_path / "r.json"
+    path.write_text(json.dumps({"config": {"iterations": 1},
+                                "tasks": [{"task_id": "001"}]}), encoding="utf-8")
+    with pytest.raises(SystemExit) as excinfo:
+        port.scorecard([path])
+    assert "regrade" in str(excinfo.value)
+
+
+def test_a_scorecard_says_when_it_is_not_pass_at_1_and_over_how_many(tmp_path, capsys):
+    """A rate over a subset is not the published number, and a table that hid
+    its own denominator is how it would be quoted as one."""
+    card = {"resolved": 1, "public": 1, "private_passed": 3, "private_total": 3,
+            "f2p_passed": 2, "f2p_total": 2, "p2p_passed": 1, "p2p_total": 1}
+    path = tmp_path / "r.json"
+    path.write_text(json.dumps({
+        "config": {"iterations": 4, "feedback": "public"},
+        "tasks": [{"task_id": "001", "graded_node": None, "scorecard": card}]}),
+        encoding="utf-8")
+    port.scorecard([path])
+    out = capsys.readouterr().out
+    assert "NOT Pass@1" in out
+    assert "1 task(s)" in out
+    assert "119" in out, "the published denominator has to be on the page"
+
+    path.write_text(json.dumps({
+        "config": {"iterations": 1, "feedback": "public"},
+        "tasks": [{"task_id": "001", "graded_node": 1, "scorecard": card}]}),
+        encoding="utf-8")
+    port.scorecard([path])
+    assert "Pass@1 -- one attempt per task" in capsys.readouterr().out
+
+
 def test_an_agent_command_arm_with_no_command_is_refused():
     parser = port.build_parser()
     with pytest.raises(SystemExit):

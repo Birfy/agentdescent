@@ -68,6 +68,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import xml.etree.ElementTree as ET
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -741,10 +742,17 @@ def grade(patch: str, *, suite: Suite, timeout: float = RELEASE_VERIFIER_TIMEOUT
             _release_file(f"tasks/task_{suite.task_id}/tests/grader.py",
                           release=release, timeout=120.0),
             encoding="utf-8")
+        # The grader writes per-test results to /logs/verifier/junit.xml on its
+        # way to the counts it prints. Copying that out is what makes
+        # FAIL2PASS and PASS2PASS computable: both are defined per *test*
+        # against the baseline's outcome, and an aggregate "8 of 8" cannot say
+        # which eight. `|| true` because the artifact is a bonus -- a grader
+        # that ran and printed its summary has done its job.
         script = (
             f'set -e; cd {suite.workdir}; '
             'if [ -s /era/model.patch ]; then git apply --binary -p1 /era/model.patch; fi; '
-            'python /era/grader.py'
+            'python /era/grader.py; '
+            'cp /logs/verifier/junit.xml /era/junit.xml 2>/dev/null || true'
         )
         proc = _docker(
             ["run", "--rm", "--network", "none", "--platform", "linux/amd64",
@@ -755,7 +763,9 @@ def grade(patch: str, *, suite: Suite, timeout: float = RELEASE_VERIFIER_TIMEOUT
         for line in reversed(text):
             line = line.strip()
             if line.startswith("{") and '"reward"' in line:
-                return json.loads(line)
+                summary = json.loads(line)
+                summary["tests"] = _junit_outcomes(job / "junit.xml")
+                return summary
         return {"reward": 0, "error": "the grader produced no summary",
                 "exit": proc.returncode,
                 "output": ((proc.stderr or "") + (proc.stdout or "")).strip()[-800:]}
@@ -763,6 +773,35 @@ def grade(patch: str, *, suite: Suite, timeout: float = RELEASE_VERIFIER_TIMEOUT
         return {"reward": 0, "error": f"{type(exc).__name__}: {exc}"}
     finally:
         shutil.rmtree(job, ignore_errors=True)
+
+
+def _junit_outcomes(path: Path) -> Dict[str, str]:
+    """`{node id: passed|failed|skipped}` from the grader's own JUnit report.
+
+    The benchmark's FAIL2PASS and PASS2PASS are per-*test* rates against the
+    baseline's outcome for that same test, so the aggregate counts the grader
+    prints cannot produce them: "8 of 8" does not say which eight.
+    """
+    if not path.is_file():
+        return {}
+    try:
+        root = ET.parse(str(path)).getroot()
+    except (ET.ParseError, OSError):
+        return {}
+    out: Dict[str, str] = {}
+    for case in root.iter("testcase"):
+        name = "%s::%s" % (case.attrib.get("classname", ""),
+                           case.attrib.get("name", ""))
+        state = "passed"
+        for child in case:
+            tag = child.tag.lower()
+            if tag in ("failure", "error"):
+                state = "failed"
+                break
+            if tag == "skipped":
+                state = "skipped"
+        out[name] = state
+    return out
 
 
 def framework_score(metrics: Dict[str, Any]) -> float:

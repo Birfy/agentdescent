@@ -79,7 +79,7 @@ import os
 import shlex
 import time
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from agentdescent.agents import Usage, cli_agent
 from agentdescent.evolution import EvolvingArtifact
@@ -319,6 +319,12 @@ def build_parser() -> argparse.ArgumentParser:
                         help="do not delete an expansion's checkout afterwards")
     parser.add_argument("--no-pull", action="store_true",
                         help="fail rather than fetch a pinned image that is missing")
+    parser.add_argument("--scorecard", type=Path, nargs="+", default=None,
+                        metavar="RESULT.json",
+                        help=("aggregate regraded result files into the "
+                              "leaderboard's own columns (OVERALL, PUBLIC, "
+                              "PRIVATE, FAIL2PASS, PASS2PASS). Arithmetic over "
+                              "grades already in hand -- no container, no agent"))
     parser.add_argument("--grade-node", type=int, default=None, metavar="INDEX",
                         help=("with --regrade, score this tree node instead of "
                               "the winner. `--grade-node 1` is the benchmark's "
@@ -401,6 +407,101 @@ def _task_payload(suite: Suite, domain: Domain, run: Any,
                          for node in run.tree.nodes},
         "observation": run.summary(quality_target),
     }
+
+
+def task_scorecard(baseline: Dict[str, Any], after: Dict[str, Any]
+                   ) -> Dict[str, Any]:
+    """One task's row in the leaderboard's own columns.
+
+    The published columns are not one metric. `OVERALL` is Pass@1 -- every
+    applicable private test passing, all or nothing, per task. `PUBLIC` is
+    per task too. `PRIVATE`, `FAIL2PASS` and `PASS2PASS` are per **test**, and
+    the last two are defined against the *baseline's* outcome for that same
+    test: fail-to-pass is the repair, pass-to-pass is the regression check.
+    Which is why both grades are needed here, with their per-test maps.
+    """
+    before = baseline.get("tests") or {}
+    now = after.get("tests") or {}
+    shared = [name for name in now if name in before]
+    f2p = [n for n in shared if before[n] == "failed"]
+    p2p = [n for n in shared if before[n] == "passed"]
+    private = after.get("private") or {}
+    return {
+        "resolved": int(after.get("reward", 0) or 0),
+        "public": int((after.get("public") or {}).get("passed", 0) or 0),
+        "private_passed": int(private.get("passed", 0) or 0),
+        "private_total": int(private.get("collected", 0) or 0),
+        "f2p_passed": sum(1 for n in f2p if now[n] == "passed"),
+        "f2p_total": len(f2p),
+        "p2p_passed": sum(1 for n in p2p if now[n] == "passed"),
+        "p2p_total": len(p2p),
+        "per_test_available": bool(before and now),
+    }
+
+
+def scorecard(paths: Sequence[Path]) -> int:
+    """Aggregate regraded result files into the leaderboard's columns.
+
+    Pure arithmetic over grades already in hand -- no container, no agent. The
+    leaderboard's denominator is **119 tasks**; this prints the denominator it
+    actually had, because a rate over a subset is not the published number and
+    a table that hid that is how it would be quoted as one.
+    """
+    rows: List[Dict[str, Any]] = []
+    attempts, graded_nodes, feedback = set(), set(), set()
+    for path in paths:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        attempts.add(payload.get("config", {}).get("iterations"))
+        feedback.add(payload.get("config", {}).get("feedback"))
+        for entry in payload.get("tasks", []):
+            graded_nodes.add(entry.get("graded_node"))
+            card = entry.get("scorecard")
+            if card is None:
+                raise SystemExit(
+                    f"{path} task {entry['task_id']} has no scorecard: regrade it "
+                    "first (--regrade PATH [--grade-node 1]) so the per-test "
+                    "outcomes are recorded.")
+            rows.append(dict(card, task_id=entry["task_id"]))
+    if not rows:
+        raise SystemExit("no tasks in the given result files")
+
+    def rate(num, den):
+        return (100.0 * num / den) if den else None
+
+    n = len(rows)
+    tot = lambda key: sum(r[key] for r in rows)              # noqa: E731
+    single = graded_nodes == {1} or attempts == {1}
+    print(f"Scorecard: SWE-bench Science, {n} task(s)")
+    print(f"  protocol : {'Pass@1 -- one attempt per task' if single else 'NOT Pass@1'}"
+          f" (iterations={sorted(a for a in attempts if a is not None)}, "
+          f"graded node={sorted(g for g in graded_nodes if g is not None) or 'best'})")
+    print(f"  feedback : {sorted(f for f in feedback if f)}")
+    print()
+    print(f"  {'column':<12} {'value':>8}   {'counts':>14}")
+    print(f"  {'-'*12} {'-'*8}   {'-'*14}")
+    for label, num, den in (
+        ("OVERALL", tot("resolved"), n),
+        ("PUBLIC", tot("public"), n),
+        ("PRIVATE", tot("private_passed"), tot("private_total")),
+        ("FAIL2PASS", tot("f2p_passed"), tot("f2p_total")),
+        ("PASS2PASS", tot("p2p_passed"), tot("p2p_total")),
+    ):
+        value = rate(num, den)
+        print(f"  {label:<12} {('%.2f%%' % value) if value is not None else 'n/a':>8}"
+              f"   {num:>6} / {den:<6}")
+    print()
+    print("  per task:")
+    for r in sorted(rows, key=lambda r: r["task_id"]):
+        print(f"    {r['task_id']}  resolved={r['resolved']}  public={r['public']}  "
+              f"private={r['private_passed']}/{r['private_total']}  "
+              f"f2p={r['f2p_passed']}/{r['f2p_total']}  "
+              f"p2p={r['p2p_passed']}/{r['p2p_total']}")
+    print()
+    print(f"  The published leaderboard's denominator is 119 tasks and its "
+          f"ISSUE/EXPERT/ENGINEERING columns split them 52/49/18 by task "
+          f"paradigm.\n  This is {n} task(s) and the release ships no per-task "
+          f"paradigm label, so those three columns cannot be reproduced here.")
+    return 0
 
 
 def _resolve_summary(entries: List[Dict[str, Any]], baseline: int, resolved: int,
@@ -489,6 +590,7 @@ def regrade(args: argparse.Namespace) -> int:
                       grade(patch, suite=suite, timeout=args.verifier_timeout,
                             release=args.release))
         entry["graded_node"] = args.grade_node
+        entry["scorecard"] = task_scorecard(baseline_grade, best_grade)
         entry["regraded"] = {
             "previous_reward_baseline": entry.get("benchmark_reward_baseline"),
             "previous_reward_best": entry.get("benchmark_reward_best"),
@@ -548,6 +650,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                   f"{row.get('title', '')}")
         return 0
 
+    if args.scorecard:
+        return scorecard(args.scorecard)
     if args.regrade:
         # Ahead of the run plan, because none of it applies: a regrade spends no
         # agent session and reads the patches a finished run already produced.
