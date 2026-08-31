@@ -75,6 +75,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shlex
 import time
 from pathlib import Path
@@ -154,13 +155,32 @@ def agent_command(args: argparse.Namespace) -> Tuple[str, ...]:
     return base + (("--model", args.model) if args.model else ())
 
 
+def agent_environment(args: argparse.Namespace) -> Dict[str, str]:
+    """Environment overrides for one agent session, beyond the workspace's PATH.
+
+    ``--thinking disabled`` sets ``MAX_THINKING_TOKENS=0``, which is the CLI's
+    own budget knob rather than anything this port invents. It matters twice
+    over: extended thinking is most of a session's wall-clock, so turning it off
+    is what makes a *deep* tree affordable -- and the variable is inherited from
+    whatever shell launched the run, so a result file that did not record it
+    could not be repeated. `agent_sessions.thinking_tokens` carries the value
+    that was in force.
+    """
+    if args.thinking == "disabled":
+        return {"MAX_THINKING_TOKENS": "0"}
+    if args.thinking == "enabled" and not os.getenv("MAX_THINKING_TOKENS"):
+        return {"MAX_THINKING_TOKENS": "31999"}
+    return {}
+
+
 def build_launch(args: argparse.Namespace, usage: Usage):
     """`launch(workspace, env)` -> the callable that runs one agent session."""
     command = agent_command(args)
+    overrides = agent_environment(args)
 
     def launch(workspace: str, env: Dict[str, str]):
-        return cli_agent(command, workspace=workspace, env=env, via_stdin=True,
-                         timeout=args.agent_timeout, usage=usage)
+        return cli_agent(command, workspace=workspace, env={**env, **overrides},
+                         via_stdin=True, timeout=args.agent_timeout, usage=usage)
 
     return launch
 
@@ -309,7 +329,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-tokens", type=int, default=16000)
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--thinking", choices=("disabled", "enabled", "default"),
-                        default="default")
+                        default="default",
+                        help=("extended thinking. For the agent arms this sets "
+                              "the CLI's own MAX_THINKING_TOKENS (0 when "
+                              "disabled); `default` inherits whatever the "
+                              "launching shell had, which is why the effective "
+                              "value is recorded in the result file. Thinking is "
+                              "most of a session's wall-clock, so turning it off "
+                              "is what makes a deep tree affordable"))
     parser.add_argument("--api-timeout", type=float, default=600.0)
     parser.add_argument("--shutdown-grace", type=float, default=120.0)
     parser.add_argument("--quality-target", type=float)
@@ -694,6 +721,11 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             "version": (agent_version(agent_command(args))
                         if args.agent != "completion" else ""),
             "model": args.model or "",
+            # Inherited from the launching shell unless --thinking says
+            # otherwise, and most of a session's wall-clock either way.
+            "thinking": args.thinking,
+            "thinking_tokens": (agent_environment(args).get("MAX_THINKING_TOKENS")
+                                or os.getenv("MAX_THINKING_TOKENS", "")),
             "timeout_s": args.agent_timeout,
             **{key: value for key, value in sorted(sessions.items())},
         },

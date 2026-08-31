@@ -840,6 +840,36 @@ def test_the_agent_command_forwards_the_model_only_when_one_was_given():
         ("my-agent", "--go")
 
 
+def test_thinking_disabled_reaches_the_agent_cli_as_its_own_budget_knob(monkeypatch):
+    """Extended thinking is most of a session's wall-clock, and the CLI takes it
+    from an environment variable the launching shell may already have set -- so
+    the flag has to *override* it, not merely decline to set it, and the run has
+    to record what was in force."""
+    parser = port.build_parser()
+    monkeypatch.setenv("MAX_THINKING_TOKENS", "31999")
+    assert port.agent_environment(parser.parse_args([])) == {}
+    assert port.agent_environment(parser.parse_args(["--thinking", "disabled"])) == {
+        "MAX_THINKING_TOKENS": "0"}
+    monkeypatch.delenv("MAX_THINKING_TOKENS")
+    assert port.agent_environment(parser.parse_args(["--thinking", "enabled"])) == {
+        "MAX_THINKING_TOKENS": "31999"}
+
+
+def test_the_agent_session_env_carries_the_workspace_path_and_the_override(monkeypatch):
+    seen = {}
+
+    def fake_cli_agent(command, **kwargs):
+        seen.update(kwargs)
+        return lambda prompt: "ok"
+
+    monkeypatch.setattr(port, "cli_agent", fake_cli_agent)
+    args = port.build_parser().parse_args(["--thinking", "disabled"])
+    port.build_launch(args, port.Usage())("/tmp/ws", {"PATH": "/era/bin:/usr/bin"})
+    assert seen["env"]["PATH"] == "/era/bin:/usr/bin", "the run-in-env shims must survive"
+    assert seen["env"]["MAX_THINKING_TOKENS"] == "0"
+    assert seen["via_stdin"] is True
+
+
 def test_an_agent_command_arm_with_no_command_is_refused():
     parser = port.build_parser()
     with pytest.raises(SystemExit):
