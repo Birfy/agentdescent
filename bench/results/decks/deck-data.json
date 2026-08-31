@@ -419,10 +419,16 @@
    "OpenEvolve"
   ],
   [
-   "OpenEvolve",
+   "OpenEvolve \u2014 ph.4, hints + config",
    1.984,
    false,
-   "OpenEvolve*"
+   "OpenEvolve"
+  ],
+  [
+   "OpenEvolve \u2014 ph.3, specific hints",
+   1.886,
+   false,
+   "OpenEvolve"
   ],
   [
    "claude-opus-4.6",
@@ -499,6 +505,12 @@
   [
    "Qwen3-14B, no RL",
    1.392,
+   false,
+   "OpenEvolve"
+  ],
+  [
+   "OpenEvolve \u2014 ph.1, library names",
+   1.381,
    false,
    "OpenEvolve"
   ],
@@ -632,6 +644,32 @@
    "\u2014",
    "no independent runs",
    "epoch.ai/benchmarks/algotune"
+  ]
+ ],
+ "hint_ladder": [
+  [
+   "This port",
+   "the AlgoTuner system message with upstream\u2019s own bullet list of package names, no gloss on any of them",
+   null,
+   "2.290 / 2.268"
+  ],
+  [
+   "OpenEvolve ph.1",
+   "\u201cbasic library mentions without implementation details\u201d",
+   1.381,
+   "1.381"
+  ],
+  [
+   "OpenEvolve ph.3",
+   "detailed implementation hints written from manual discoveries; their note: \u201cbest theoretical performance but raised overfitting concerns\u201d",
+   1.886,
+   "1.886"
+  ],
+  [
+   "OpenEvolve ph.4",
+   "generic hints plus per-task config tuning \u2014 but the block still reads \u201cJAX \u2026 can provide 100x+ speedups\u201d and \u201cLower-order interpolation: Try order=0,1,2,3\u201d",
+   1.984,
+   "1.984"
   ]
  ]
 }

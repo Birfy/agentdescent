@@ -151,7 +151,9 @@ Scored AlgoTune's way, on the same eight tasks, nobody excluded:
 | 1 | **this port, seed 0** | **2.290** | ERA on AgentDescent |
 | 2 | **this port, seed 1** | **2.268** | ERA on AgentDescent |
 | 3 | MetaEvolve (RL) | 2.045 | OpenEvolve's search |
-| 4 | OpenEvolve\* | 1.984 | OpenEvolve |
+| 4 | OpenEvolve, phase 4 -- hints + config\* | 1.984 | OpenEvolve |
+| 5 | OpenEvolve, phase 3 -- specific hints\* | 1.886 | OpenEvolve |
+| ... | OpenEvolve, phase 1 -- library names\* | 1.381 | OpenEvolve |
 | 5 | claude-opus-4.6 | 1.837 | AlgoTuner |
 | 6 | gemini-3.1-pro-preview | 1.833 | AlgoTuner |
 | 7 | claude-opus-4.5 | 1.830 | AlgoTuner |
@@ -171,6 +173,32 @@ configuration anyone ran. This file computed and printed that 2.267x twice, and
 withdrew it twice; it is recorded here so it does not come back a third time. The
 per-task cells stay, because each was really measured, but the column is a
 discoveries log and its score row is Phase 4.
+
+### OpenEvolve, split by how much the prompt was told
+
+Their report is four phases with different prompts and a score for each, so the
+single row above understates what varies between them:
+
+| phase | what the prompt carried | score |
+|---|---|---:|
+| 1 | "basic library mentions without implementation details" | 1.381x |
+| 3 | detailed implementation hints written from manual discoveries; their own note: "best theoretical performance but raised overfitting concerns" | 1.886x |
+| 4 (their headline) | generic hints plus per-task config tuning -- but the block still reads *"JAX ... can provide 100x+ speedups"* and *"Lower-order interpolation: Try order=0,1,2,3"* | **1.984x** |
+
+Two things worth reading off that. Their phases are **not** ordered by hint
+strength: the specific-hints arm scored *below* the generic one. And even the
+1.984x prompt names JAX with a promised 100x+ and tells the model to try lower
+interpolation orders -- which is most of the answer to `affine_transform_2d`,
+the task where they report 3.22x against an AlgoTuner field whose best is 1.015x.
+
+This port's arm carries neither: the AlgoTuner system message with upstream's own
+bullet list of package names and no gloss on any of them (`--packages bare`). Its
+own hint ablation exists but was run on a different task batch and the feature
+was then removed, so **no number here compares bare against hinted on these eight
+tasks**. What that ablation found, for the record: naming four techniques next to
+the parent's profile was worth 3/8 draws reaching for a compiler against 0/8, and
+a one-sentence invitation to use the listed packages bought nothing at all -- 0/8
+against the bare list's 1/8 on `polynomial_real`.
 
 Read the harness column before the order. The eighteen AlgoTuner rows are at the
 calibrated `n`; the three above them run OpenEvolve's search and none of the three

@@ -110,21 +110,22 @@ s=p.addSlide();
 head(s,'THE HEADLINE','Everything published on these eight tasks',
   'One metric — AlgoTune’s own — over the same eight tasks. Nobody excluded, nothing selected.',0.30);
 const RK=D.algotune_metric_rank, hf=Math.ceil(RK.length/2), mv=2.45;
+// 25 rows now that OpenEvolve is split by phase; tighten the pitch to fit.
 [[0,hf,M],[hf,RK.length,7.0]].forEach(([a0,b0,x])=>{
   RK.slice(a0,b0).forEach((r,i)=>{
-    const y=1.98+i*0.375, mine=r[2];
+    const y=1.98+i*0.348, mine=r[2];
     const col = mine?VIRID:(r[3]==='OpenEvolve'?BRASS:SLATE);
-    s.addShape(p.ShapeType.roundRect,{x,y,w:5.71,h:0.33,
+    s.addShape(p.ShapeType.roundRect,{x,y,w:5.71,h:0.31,
       fill:{color:mine?'E6F2EF':(i%2?WHITE:MIST)},line:{color:RULE,width:0.6},rectRadius:0.05});
-    s.addText(String(a0+i+1),{x:x+0.1,y,w:0.36,h:0.33,fontFace:B,fontSize:9.5,bold:mine,
+    s.addText(String(a0+i+1),{x:x+0.1,y,w:0.36,h:0.31,fontFace:B,fontSize:9,bold:mine,
       color:mine?VIRID:SLATE,align:'right',valign:'middle',isTextBox:true,margin:0});
-    s.addText(r[0],{x:x+0.56,y,w:2.62,h:0.33,fontFace:B,fontSize:10,bold:mine,
+    s.addText(r[0],{x:x+0.52,y,w:2.72,h:0.31,fontFace:B,fontSize:9,bold:mine,
       color:col,valign:'middle',isTextBox:true,margin:0});
-    s.addText(r[3],{x:x+3.2,y,w:0.92,h:0.33,fontFace:B,fontSize:7.5,color:SLATE,
+    s.addText(r[3],{x:x+3.28,y,w:0.86,h:0.31,fontFace:B,fontSize:7,color:SLATE,
       valign:'middle',isTextBox:true,margin:0});
-    s.addShape(p.ShapeType.rect,{x:x+4.18,y:y+0.115,w:Math.max(0.92*r[1]/mv,0.03),h:0.10,
+    s.addShape(p.ShapeType.rect,{x:x+4.18,y:y+0.105,w:Math.max(0.92*r[1]/mv,0.03),h:0.10,
       fill:{color:col},line:{width:0}});
-    s.addText(r[1].toFixed(3),{x:x+5.12,y,w:0.5,h:0.33,fontFace:B,fontSize:9.5,bold:mine,
+    s.addText(r[1].toFixed(3),{x:x+5.12,y,w:0.5,h:0.31,fontFace:B,fontSize:9,bold:mine,
       color:mine?VIRID:GRAPH,align:'right',valign:'middle',isTextBox:true,margin:0});
   });
 });
@@ -168,6 +169,28 @@ s.addTable(pr,{...tblBase,x:6.9,y:2.06,w:5.81,colW:[2.85,1.42,1.54],rowH:0.315})
     lineSpacing:15,isTextBox:true,margin:0});
 });
 s.addNotes('Say the correction out loud. The reproduction is the evidence that the metric here is the benchmark’s, not one invented for this deck.');
+
+/* ---------------------------------------------------- 4bb hints */
+s=p.addSlide();
+head(s,'HOW MUCH THE PROMPT WAS TOLD','OpenEvolve, split by phase',
+  'OpenEvolve’s report is four phases with different prompts and a score for each. Their headline is the last one.',0.32);
+D.hint_ladder.forEach((r,i)=>{
+  const y=1.94+i*1.13, mine=i===0;
+  s.addShape(p.ShapeType.roundRect,{x:M,y,w:W-2*M,h:1.02,fill:{color:mine?'E6F2EF':MIST},
+    line:{color:RULE,width:0.75},rectRadius:0.06,shadow:shadow()});
+  s.addText(r[0],{x:M+0.28,y:y+0.12,w:2.5,h:0.3,fontFace:B,fontSize:13,bold:true,
+    color:mine?VIRID:INK,isTextBox:true,margin:0});
+  s.addText(r[3]+'x',{x:M+0.28,y:y+0.46,w:2.5,h:0.44,fontFace:H,fontSize:mine?19:24,bold:true,
+    color:mine?VIRID:(i===3?BRASS:GRAPH),isTextBox:true,margin:0});
+  s.addText(r[1],{x:M+3.0,y:y+0.16,w:8.95,h:0.74,fontFace:B,fontSize:12,color:GRAPH,
+    lineSpacing:16,isTextBox:true,margin:0});
+});
+s.addShape(p.ShapeType.roundRect,{x:M,y:6.62,w:W-2*M,h:0.84,fill:{color:INK},
+  line:{color:INK,width:0},rectRadius:0.05});
+s.addText('Their phases are not ordered by hint strength: the specific-hints arm (1.886x) scored below the generic one (1.984x), and they flagged it for overfitting. What matters for reading the table is that even the 1.984x prompt names JAX with a promised 100x+ and tells the model to try lower interpolation orders — which is most of the answer to affine_transform_2d. This port’s arm carries neither, and no bare-versus-hinted pair was run on these eight tasks, so no number here compares the two directly.',
+  {x:M+0.26,y:6.70,w:W-2*M-0.52,h:0.68,fontFace:B,fontSize:10.5,color:'D6E0E4',
+   lineSpacing:14,isTextBox:true,margin:0});
+s.addNotes('The port’s own hint ablation was run on a different task batch and the feature was then removed: naming four techniques was worth 3/8 draws reaching for a compiler against 0/8, and a one-sentence invitation to use the listed packages bought nothing (0/8 against the bare list’s 1/8 on polynomial_real).');
 
 /* ---------------------------------------------------- 4c who else has published */
 s=p.addSlide();
