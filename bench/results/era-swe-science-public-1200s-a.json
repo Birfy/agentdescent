@@ -1,0 +1,991 @@
+{
+  "experiment": "ERA on AgentDescent -- SWE-bench Science, one tree per task",
+  "status": "completed",
+  "completed_at": "2026-08-31T00:00:12+00:00",
+  "upstream_commit": "b836730b5c000526af95116b1d0e2c60c8cf0a10",
+  "benchmark": "SWE-bench Science (OpenMOSS-Team/SWE-bench-Science@d8bdbcb4ecb2b565686382459c815d2b6291fd31)",
+  "protocol": "ERA's, not the benchmark's: the leaderboard gives an agent one attempt per task with no verifier feedback, while this scores a tree of agent sessions against the visible part of each private suite and keeps the best node. `benchmark_reward_*` is the release's own grader over the whole private suite; the search never reads it.",
+  "config": {
+    "provider": "claude",
+    "model": null,
+    "seed": 0,
+    "asynchronous": false,
+    "async_ratio": 1,
+    "max_seconds": 1800.0,
+    "pipelined_gate": false,
+    "gate_workers": 2,
+    "dry_run": false,
+    "serial": false,
+    "budget_rollouts": null,
+    "val_cap": null,
+    "eval_concurrency": null,
+    "reflective_merge": false,
+    "eval_cache": "",
+    "no_thinking": false,
+    "tasks": "001,002,022",
+    "list_tasks": false,
+    "allow_restricted_licenses": false,
+    "release": null,
+    "agent": "claude-code",
+    "agent_command": "",
+    "agent_timeout": 1200.0,
+    "staleness": "guarded",
+    "iterations": 4,
+    "workers": 2,
+    "shards": 4,
+    "test_shards": 2,
+    "held_back_frac": 0.25,
+    "feedback": "public",
+    "no_public": false,
+    "held_out_frac": 0.5,
+    "c_puct": 1.0,
+    "prior_exponent": 0.0,
+    "verifier_timeout": 1800.0,
+    "max_patch_bytes": 400000,
+    "workspace_root": "/tmp/claude-0/-home-user-agentdescent/02a9c808-7ec2-5eb1-9055-691e73d63a11/scratchpad/pub-a",
+    "keep_workspaces": false,
+    "no_pull": false,
+    "regrade": null,
+    "max_tokens": 16000,
+    "temperature": 0.7,
+    "thinking": "default",
+    "api_timeout": 600.0,
+    "shutdown_grace": 120.0,
+    "quality_target": null
+  },
+  "summary": {
+    "tasks_run": 3,
+    "tasks_failed": 0,
+    "tasks_improved_on_held_back": 2,
+    "resolved_baseline": 0,
+    "resolved_best": 2,
+    "resolve_rate": 0.6666666666666666,
+    "wall_seconds": 3597.9618242409997
+  },
+  "tasks": [
+    {
+      "task_id": "001",
+      "title": "Repair an inconsistent transition-state rotor workflow",
+      "domain": "computational-reaction-chemistry",
+      "status": "completed",
+      "benchmark_reward_baseline": 0,
+      "benchmark_reward_best": 0,
+      "benchmark_grade_baseline": {
+        "private": {
+          "collected": 3,
+          "failed": 2,
+          "passed": 1,
+          "return_code": 1
+        },
+        "public": {
+          "collected": 1,
+          "passed": 1,
+          "return_code": 0
+        },
+        "reward": 0,
+        "task_id": "task_001"
+      },
+      "benchmark_grade_best": {
+        "private": {
+          "collected": 3,
+          "failed": 2,
+          "passed": 1,
+          "return_code": 1
+        },
+        "public": {
+          "collected": 1,
+          "passed": 1,
+          "return_code": 0
+        },
+        "reward": 0,
+        "task_id": "task_001"
+      },
+      "held_back_tests": 1,
+      "held_back_pass_rate_baseline": 0.5,
+      "held_back_pass_rate_best": 0.5,
+      "held_back_gain": 0.0,
+      "visible_pass_rate_baseline": 0.6666666666666666,
+      "visible_pass_rate_best": 0.6666666666666666,
+      "nodes": 5,
+      "wall_seconds": 1454.1210874519998,
+      "best_patch_chars": 0,
+      "best_patch": "",
+      "observation": {
+        "mode": "sync",
+        "wall_seconds": 1454.1210874519998,
+        "baseline": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "e3b0c44298fc1c14",
+          "iteration": 0,
+          "change_summary": "the unmodified baseline repository (empty patch)",
+          "score": 0.6666666666666666,
+          "pass_rate": 0.6666666666666666,
+          "num_visits": 4,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 0
+        },
+        "best": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "e3b0c44298fc1c14",
+          "iteration": 0,
+          "change_summary": "the unmodified baseline repository (empty patch)",
+          "score": 0.6666666666666666,
+          "pass_rate": 0.6666666666666666,
+          "num_visits": 4,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 0
+        },
+        "data": {
+          "task_id": "001",
+          "title": "Repair an inconsistent transition-state rotor workflow",
+          "domain": "computational-reaction-chemistry",
+          "language": "python",
+          "repository": "https://github.com/Auto-Mech/autochem",
+          "base_commit": "cbe1a0c1102b8125608841eb8ac536cfe3b09671",
+          "source_license": "MIT",
+          "license_gate": "none",
+          "environment_image": "docker.io/kevinxulearning/swe-bench-science-environment-python-task-001:v0.1.0@sha256:0b6b41e556cd862f10e9e8c489e9b539eda27d277718e0504de440048c62d3c7",
+          "verifier_image": "docker.io/kevinxulearning/swe-bench-science-verifier-python-task-001:v0.1.0@sha256:7af68a1c44876615b0f961abd18e7fb656dae5f117820a35ff8e1d10faa430b0",
+          "private_tests": 3,
+          "visible_tests": 2,
+          "held_back_tests": 1,
+          "scoring_shards": 4,
+          "held_back_shards": 2,
+          "shard_rule": "replicate",
+          "seed": 0
+        },
+        "framework": {
+          "baseline_reward": 0.6666666666666666,
+          "final_reward": 0.6666666666666666,
+          "quality_gain": 0.0,
+          "stop_reason": "rounds",
+          "error": null,
+          "outcomes": {
+            "tree-updated": 2
+          },
+          "rollouts": 4,
+          "rollout_seconds": 0.0003876686096191406,
+          "eval_seconds": 0.0003147125244140625,
+          "stale_considered": 4,
+          "stale_discarded": 0,
+          "stale_rate": 0.0,
+          "retired_workers": 0,
+          "history": [
+            {
+              "round": 0,
+              "held_out_reward": 0.6666666666666666,
+              "elapsed_s": 1022.823228597641,
+              "rollouts": 2,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 1,
+              "held_out_reward": 0.6666666666666666,
+              "elapsed_s": 1413.4505851268768,
+              "rollouts": 4,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            }
+          ]
+        },
+        "actor_usage": {
+          "calls": 10,
+          "failures": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "model_seconds": 1969.735202
+        },
+        "tree": {
+          "nodes": 5,
+          "valid_nodes": 5,
+          "max_depth": 2,
+          "root_visits": 4,
+          "c_puct": 1.0,
+          "tree": [
+            {
+              "index": 0,
+              "parent_index": null,
+              "program_id": "e3b0c44298fc1c14",
+              "iteration": 0,
+              "change_summary": "the unmodified baseline repository (empty patch)",
+              "score": 0.6666666666666666,
+              "pass_rate": 0.6666666666666666,
+              "num_visits": 4,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 0
+            },
+            {
+              "index": 1,
+              "parent_index": 0,
+              "program_id": "27e329fa4a95a78f",
+              "iteration": 2,
+              "change_summary": "Clean diff, no scratch files left. The fix and reproduction check confirm `signature_agreement: true` while the negative control stays distinct.",
+              "score": 0.6666666666666666,
+              "pass_rate": 0.6666666666666666,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 3266
+            },
+            {
+              "index": 2,
+              "parent_index": 0,
+              "program_id": "50567f4eca5e31f6",
+              "iteration": 1,
+              "change_summary": "Good — `outputs/` is gitignored, so it won't show in the scored diff. Final state is clean with only the two intended source edits.",
+              "score": 0.6666666666666666,
+              "pass_rate": 0.6666666666666666,
+              "num_visits": 3,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 2076
+            },
+            {
+              "index": 3,
+              "parent_index": 2,
+              "program_id": "ffec85582b0ba6e3",
+              "iteration": 4,
+              "change_summary": "Confirmed clean — only the three source edits remain, no stray files.",
+              "score": 0.6666666666666666,
+              "pass_rate": 0.6666666666666666,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 3056
+            },
+            {
+              "index": 4,
+              "parent_index": 2,
+              "program_id": "2e486baf220435ff",
+              "iteration": 3,
+              "change_summary": "Reproduction passes with exit 0 and only the three intended source files are modified; no scratch files remain.",
+              "score": 0.6666666666666666,
+              "pass_rate": 0.6666666666666666,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 5390
+            }
+          ]
+        },
+        "test": {
+          "baseline": {
+            "score": 0.5,
+            "pass_rate": 0.5,
+            "passed": 0,
+            "collected": 1,
+            "public": 1,
+            "checks": 2,
+            "subset_resolved": 0,
+            "seconds": 8.683,
+            "error": "",
+            "report_public": "",
+            "report": "=================================== FAILURES ===================================\n_______ test_relabelled_out_of_line_transition_state_has_consistent_caps _______\n\n    def test_relabelled_out_of_line_transition_state_has_consistent_caps():\n        gra = _sn2_graph()\n        segments = _segment_sets(gra)\n>       assert segments == [frozenset({3, 40, 120})]\nE       assert [frozenset({3, 40, 99})] == [frozenset({3, 40, 120})]\nE         \nE         At index 0 diff: frozenset({40, 99, 3}) != frozenset({40, 3, 120})\nE         Use -v to get more diff\n\n/tests/private_tests/test_transition_state_symmetry.py:118: AssertionError\n=========================== short test summary info ============================\nFAILED ../../tests/private_tests/test_transition_state_symmetry.py::test_relabelled_out_of_line_transition_state_has_consistent_caps\n1 failed, 20 warnings in 3.21s"
+          },
+          "best": {
+            "score": 0.5,
+            "pass_rate": 0.5,
+            "passed": 0,
+            "collected": 1,
+            "public": 1,
+            "checks": 2,
+            "subset_resolved": 0,
+            "seconds": 8.683,
+            "error": "",
+            "report_public": "",
+            "report": "=================================== FAILURES ===================================\n_______ test_relabelled_out_of_line_transition_state_has_consistent_caps _______\n\n    def test_relabelled_out_of_line_transition_state_has_consistent_caps():\n        gra = _sn2_graph()\n        segments = _segment_sets(gra)\n>       assert segments == [frozenset({3, 40, 120})]\nE       assert [frozenset({3, 40, 99})] == [frozenset({3, 40, 120})]\nE         \nE         At index 0 diff: frozenset({40, 99, 3}) != frozenset({40, 3, 120})\nE         Use -v to get more diff\n\n/tests/private_tests/test_transition_state_symmetry.py:118: AssertionError\n=========================== short test summary info ============================\nFAILED ../../tests/private_tests/test_transition_state_symmetry.py::test_relabelled_out_of_line_transition_state_has_consistent_caps\n1 failed, 20 warnings in 3.21s"
+          },
+          "pass_rate_gain": 0.0
+        }
+      },
+      "actor_usage": {
+        "calls": 10,
+        "failures": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "model_seconds": 1969.735202
+      },
+      "regraded": {
+        "previous_reward_baseline": 0,
+        "previous_reward_best": 0,
+        "previous_grade_baseline": {
+          "private": {
+            "collected": 3,
+            "failed": 2,
+            "passed": 1,
+            "return_code": 1
+          },
+          "public": {
+            "collected": 1,
+            "passed": 1,
+            "return_code": 0
+          },
+          "reward": 0,
+          "task_id": "task_001"
+        },
+        "previous_grade_best": {
+          "private": {
+            "collected": 3,
+            "failed": 2,
+            "passed": 1,
+            "return_code": 1
+          },
+          "public": {
+            "collected": 1,
+            "passed": 1,
+            "return_code": 0
+          },
+          "reward": 0,
+          "task_id": "task_001"
+        }
+      }
+    },
+    {
+      "task_id": "002",
+      "title": "Repair an inconsistent reduced validation workflow",
+      "domain": "density-functional-theory",
+      "status": "completed",
+      "benchmark_reward_baseline": 0,
+      "benchmark_reward_best": 1,
+      "benchmark_grade_baseline": {
+        "private": {
+          "collected": 8,
+          "failed": 5,
+          "passed": 3,
+          "return_code": 1
+        },
+        "public": {
+          "collected": 1,
+          "passed": 1,
+          "return_code": 0
+        },
+        "reward": 0,
+        "task_id": "task_002"
+      },
+      "benchmark_grade_best": {
+        "private": {
+          "collected": 8,
+          "failed": 0,
+          "passed": 8,
+          "return_code": 0
+        },
+        "public": {
+          "collected": 1,
+          "passed": 1,
+          "return_code": 0
+        },
+        "reward": 1,
+        "task_id": "task_002"
+      },
+      "held_back_tests": 2,
+      "held_back_pass_rate_baseline": 0.6666666666666666,
+      "held_back_pass_rate_best": 1.0,
+      "held_back_gain": 0.33333333333333337,
+      "visible_pass_rate_baseline": 0.42857142857142855,
+      "visible_pass_rate_best": 1.0,
+      "nodes": 5,
+      "wall_seconds": 1143.569820185,
+      "best_patch_chars": 1692,
+      "best_patch": "diff --git a/source/task002_benchmark.py b/source/task002_benchmark.py\nindex e15332e..594d728 100644\n--- a/source/task002_benchmark.py\n+++ b/source/task002_benchmark.py\n@@ -349,6 +349,19 @@ def sample_grid_field(\n     )\n \n \n+def _as_bohr_field(field: GridField) -> GridField:\n+    if field.length_unit == \"bohr\":\n+        return field\n+    if field.length_unit == \"angstrom\":\n+        volume_factor = BOHR_TO_ANGSTROM**3\n+        return GridField(\n+            values=np.asarray(field.values) * volume_factor,\n+            weights=np.asarray(field.weights) / volume_factor,\n+            length_unit=\"bohr\",\n+        )\n+    raise ValueError(f\"Unsupported grid field unit: {field.length_unit}\")\n+\n+\n def _integrated_field(field: GridField) -> float:\n     value = float(np.dot(field.values, field.weights))\n     if value <= 0.0:\n@@ -357,6 +370,7 @@ def _integrated_field(field: GridField) -> float:\n \n \n def screening_parameter_from_field(field: GridField) -> float:\n+    field = _as_bohr_field(field)\n     total = _integrated_field(field)\n     switch = erf(total * field.values / RHO_IN)\n     mask = field.values > EPSILON\n@@ -369,10 +383,6 @@ def screening_parameter_from_field(field: GridField) -> float:\n     if abs(normalization) < 1e-14:\n         raise ZeroDivisionError(\"screening normalization vanished\")\n     avg_rs = float(np.dot(integrand, field.weights) / normalization)\n-    if field.length_unit == \"angstrom\":\n-        avg_rs /= BOHR_TO_ANGSTROM\n-    elif field.length_unit != \"bohr\":\n-        raise ValueError(f\"Unsupported grid field unit: {field.length_unit}\")\n     return float(\n         OMEGA_EFF_A1 / avg_rs\n         + OMEGA_EFF_A2 * avg_rs / (1.0 + OMEGA_EFF_A3 * avg_rs**2)",
+      "observation": {
+        "mode": "sync",
+        "wall_seconds": 1143.569820185,
+        "baseline": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "e3b0c44298fc1c14",
+          "iteration": 0,
+          "change_summary": "the unmodified baseline repository (empty patch)",
+          "score": 0.42857142857142855,
+          "pass_rate": 0.42857142857142855,
+          "num_visits": 4,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 0
+        },
+        "best": {
+          "index": 1,
+          "parent_index": 0,
+          "program_id": "cbadf5d6da10ffd3",
+          "iteration": 1,
+          "change_summary": "Clean diff, no stray files.",
+          "score": 1.0,
+          "pass_rate": 1.0,
+          "num_visits": 1,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 1692
+        },
+        "data": {
+          "task_id": "002",
+          "title": "Repair an inconsistent reduced validation workflow",
+          "domain": "density-functional-theory",
+          "language": "python",
+          "repository": "https://github.com/aditisingh4812/simplified_tuned_range_separated",
+          "base_commit": "f794ca5265d38906782506f1ac4e197b4e273fc4",
+          "source_license": "BSD-3-Clause",
+          "license_gate": "none",
+          "environment_image": "docker.io/kevinxulearning/swe-bench-science-environment-python-task-002:v0.1.0@sha256:13e8c428f486c685ec92b031e46f3520bac3d4e26b6bdd83fde9826a488b7761",
+          "verifier_image": "docker.io/kevinxulearning/swe-bench-science-verifier-python-task-002:v0.1.0@sha256:a863b98f920e1e9b1aede8bd0460d039628aab19a413cce3dad7417028e1bd1a",
+          "private_tests": 8,
+          "visible_tests": 6,
+          "held_back_tests": 2,
+          "scoring_shards": 4,
+          "held_back_shards": 2,
+          "shard_rule": "replicate",
+          "seed": 0
+        },
+        "framework": {
+          "baseline_reward": 0.42857142857142855,
+          "final_reward": 1.0,
+          "quality_gain": 0.5714285714285714,
+          "stop_reason": "rounds",
+          "error": null,
+          "outcomes": {
+            "committed": 1,
+            "tree-updated": 1
+          },
+          "rollouts": 4,
+          "rollout_seconds": 0.00042176246643066406,
+          "eval_seconds": 0.00024580955505371094,
+          "stale_considered": 4,
+          "stale_discarded": 0,
+          "stale_rate": 0.0,
+          "retired_workers": 0,
+          "history": [
+            {
+              "round": 0,
+              "held_out_reward": 1.0,
+              "elapsed_s": 982.5567197799683,
+              "rollouts": 2,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 1,
+              "held_out_reward": 1.0,
+              "elapsed_s": 985.5918610095978,
+              "rollouts": 4,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            }
+          ]
+        },
+        "actor_usage": {
+          "calls": 10,
+          "failures": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "model_seconds": 1018.257043
+        },
+        "tree": {
+          "nodes": 5,
+          "valid_nodes": 5,
+          "max_depth": 2,
+          "root_visits": 4,
+          "c_puct": 1.0,
+          "tree": [
+            {
+              "index": 0,
+              "parent_index": null,
+              "program_id": "e3b0c44298fc1c14",
+              "iteration": 0,
+              "change_summary": "the unmodified baseline repository (empty patch)",
+              "score": 0.42857142857142855,
+              "pass_rate": 0.42857142857142855,
+              "num_visits": 4,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 0
+            },
+            {
+              "index": 1,
+              "parent_index": 0,
+              "program_id": "cbadf5d6da10ffd3",
+              "iteration": 1,
+              "change_summary": "Clean diff, no stray files.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 1692
+            },
+            {
+              "index": 2,
+              "parent_index": 0,
+              "program_id": "f8c9f7294f7aef5e",
+              "iteration": 2,
+              "change_summary": "Good — `outputs/` is gitignored so it won't show in the diff, and `git status` confirms only the source fix is present. Nothing else to clean up.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 3,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 1854
+            },
+            {
+              "index": 3,
+              "parent_index": 2,
+              "program_id": "f8c9f7294f7aef5e",
+              "iteration": 4,
+              "change_summary": "",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 1854
+            },
+            {
+              "index": 4,
+              "parent_index": 2,
+              "program_id": "f8c9f7294f7aef5e",
+              "iteration": 3,
+              "change_summary": "",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 1854
+            }
+          ]
+        },
+        "test": {
+          "baseline": {
+            "score": 0.6666666666666666,
+            "pass_rate": 0.6666666666666666,
+            "passed": 1,
+            "collected": 2,
+            "public": 1,
+            "checks": 3,
+            "subset_resolved": 0,
+            "seconds": 58.29,
+            "error": "",
+            "report_public": "",
+            "report": "keyPatch object at 0x7fb103a6f710>\n\n    def test_collection_workflow_keeps_the_portable_boundary(monkeypatch):\n        systems = [benchmark.SystemRecord(\"synthetic\", \"sample\", 1, \"sample\", \"synthetic\")]\n        field = GridField(\n            values=np.array([0.18, 0.05, 0.008]),\n            weights=np.array([0.7, 2.0, 9.0]),\n            length_unit=\"bohr\",\n        )\n        calls = {\"pack\": 0, \"unpack\": 0}\n        original_pack = benchmark.pack_grid_field\n        original_unpack = benchmark.unpack_grid_field\n    \n        def tracked_pack(value):\n            calls[\"pack\"] += 1\n            return original_pack(value)\n    \n        def tracked_unpack(value):\n            calls[\"unpack\"] += 1\n            restored = original_unpack(value)\n            assert restored.length_unit == \"angstrom\"\n            return restored\n    \n        monkeypatch.setattr(benchmark, \"sample_grid_field\", lambda *args, **kwargs: field)\n        monkeypatch.setattr(benchmark, \"pack_grid_field\", tracked_pack)\n        monkeypatch.setattr(benchmark, \"unpack_grid_field\", tracked_unpack)\n    \n        results = benchmark._process_collection(\n            systems,\n            basis=benchmark.DEFAULT_BASIS,\n            grid_level=benchmark.DEFAULT_GRID_LEVEL,\n        )\n        assert calls == {\"pack\": 1, \"unpack\": 1}\n>       assert np.isclose(\n            results[0].screening_parameter,\n            screening_parameter_from_field(field),\n            rtol=1e-12,\n            atol=1e-12,\n        )\nE       AssertionError: assert False\nE        +  where False = <function isclose at 0x7fb10fdb6930>(0.6771693840286662, 0.8657175628798416, rtol=1e-12, atol=1e-12)\nE        +    where <function isclose at 0x7fb10fdb6930> = np.isclose\nE        +    and   0.6771693840286662 = SystemResult(family='synthetic', label='sample', chain_index=1, screening_parameter=0.6771693840286662).screening_parameter\nE        +    and   0.8657175628798416 = screening_parameter_from_field(GridField(values=array([0.18 , 0.05 , 0.008]), weights=array([0.7, 2. , 9. ]), length_unit='bohr'))\n\n/tests/private_tests/test_task_002.py:99: AssertionError\n-------------------- generated xml file: /tmp/era-junit.xml --------------------\n=========================== short test summary info ============================\nFAILED ../../tests/private_tests/test_task_002.py::test_collection_workflow_keeps_the_portable_boundary\n1 failed, 1 passed in 0.39s"
+          },
+          "best": {
+            "score": 1.0,
+            "pass_rate": 1.0,
+            "passed": 2,
+            "collected": 2,
+            "public": 1,
+            "checks": 3,
+            "subset_resolved": 1,
+            "seconds": 52.511,
+            "error": "",
+            "report_public": "",
+            "report": ""
+          },
+          "pass_rate_gain": 0.33333333333333337
+        }
+      },
+      "actor_usage": {
+        "calls": 10,
+        "failures": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "model_seconds": 1018.257043
+      },
+      "regraded": {
+        "previous_reward_baseline": 0,
+        "previous_reward_best": 1,
+        "previous_grade_baseline": {
+          "private": {
+            "collected": 8,
+            "failed": 5,
+            "passed": 3,
+            "return_code": 1
+          },
+          "public": {
+            "collected": 1,
+            "passed": 1,
+            "return_code": 0
+          },
+          "reward": 0,
+          "task_id": "task_002"
+        },
+        "previous_grade_best": {
+          "private": {
+            "collected": 8,
+            "failed": 0,
+            "passed": 8,
+            "return_code": 0
+          },
+          "public": {
+            "collected": 1,
+            "passed": 1,
+            "return_code": 0
+          },
+          "reward": 1,
+          "task_id": "task_002"
+        }
+      }
+    },
+    {
+      "task_id": "022",
+      "title": "Repair an inconsistent volume-to-surface projection",
+      "domain": "neuroimaging",
+      "status": "completed",
+      "benchmark_reward_baseline": 0,
+      "benchmark_reward_best": 1,
+      "benchmark_grade_baseline": {
+        "private": {
+          "collected": 12,
+          "failed": 8,
+          "passed": 4,
+          "return_code": 1
+        },
+        "public": {
+          "collected": 1,
+          "passed": 0,
+          "return_code": 1
+        },
+        "reward": 0,
+        "task_id": "task_022"
+      },
+      "benchmark_grade_best": {
+        "private": {
+          "collected": 12,
+          "failed": 0,
+          "passed": 12,
+          "return_code": 0
+        },
+        "public": {
+          "collected": 1,
+          "passed": 1,
+          "return_code": 0
+        },
+        "reward": 1,
+        "task_id": "task_022"
+      },
+      "held_back_tests": 3,
+      "held_back_pass_rate_baseline": 0.0,
+      "held_back_pass_rate_best": 1.0,
+      "held_back_gain": 1.0,
+      "visible_pass_rate_baseline": 0.2,
+      "visible_pass_rate_best": 1.0,
+      "nodes": 5,
+      "wall_seconds": 434.01500673300006,
+      "best_patch_chars": 6748,
+      "best_patch": "diff --git a/source/nilearn/surface/surface.py b/source/nilearn/surface/surface.py\nindex 4fbbfae..2811242 100644\n--- a/source/nilearn/surface/surface.py\n+++ b/source/nilearn/surface/surface.py\n@@ -499,6 +499,65 @@ def _nearest_voxel_sampling(\n     return texture.T\n \n \n+def _nearest_most_frequent_voxel_sampling(\n+    images,\n+    mesh,\n+    affine,\n+    kind=\"auto\",\n+    radius=3.0,\n+    n_points=None,\n+    mask=None,\n+    inner_mesh=None,\n+    depth=None,\n+):\n+    \"\"\"In each image, measure the most frequent intensity among the voxels\n+    nearest to the samples drawn around each node of the mesh.\n+\n+    Each sample point around a mesh vertex is assigned the value of its\n+    nearest voxel, and the value that occurs most often among a vertex's\n+    samples is kept for that vertex, instead of averaging the samples\n+    together. This makes it suitable for images that hold discrete codes\n+    from a lookup table (for instance a parcellation or atlas), for which\n+    averaging the numeric codes would produce values that are not part of\n+    the original lookup table.\n+    A 2-d array is returned, where each row corresponds to an image and each\n+    column to a mesh vertex.\n+    See documentation of vol_to_surf for details.\n+\n+    \"\"\"\n+    img_shape = images[0].shape\n+    sample_locations = _sample_locations(\n+        mesh,\n+        affine,\n+        kind=kind,\n+        radius=radius,\n+        n_points=n_points,\n+        inner_mesh=inner_mesh,\n+        depth=depth,\n+    )\n+    sample_locations = np.asarray(np.round(sample_locations), dtype=int)\n+    n_vertices, n_samples, _ = sample_locations.shape\n+    masked = _masked_indices(\n+        np.vstack(sample_locations), img_shape, mask=mask\n+    ).reshape((n_vertices, n_samples))\n+    sample_indices = np.ravel_multi_index(\n+        np.rollaxis(sample_locations, -1), img_shape, mode=\"clip\"\n+    ).reshape((n_vertices, n_samples))\n+\n+    texture = np.full((len(images), n_vertices), np.nan)\n+    for image_index, image in enumerate(images):\n+        flat_image = np.asarray(image).reshape(-1)\n+        sampled_values = flat_image[sample_indices]\n+        for vertex_index in range(n_vertices):\n+            kept = sampled_values[vertex_index][~masked[vertex_index]]\n+            kept = kept[np.isfinite(kept)]\n+            if kept.size == 0:\n+                continue\n+            uniques, counts = np.unique(kept, return_counts=True)\n+            texture[image_index, vertex_index] = uniques[np.argmax(counts)]\n+    return texture\n+\n+\n def _interpolation_sampling(\n     images,\n     mesh,\n@@ -582,17 +641,28 @@ def vol_to_surf(\n         The size (in mm) of the neighbourhood from which samples are drawn\n         around each node. Ignored if `inner_mesh` is provided.\n \n-    interpolation : {'linear', 'nearest'}, default='linear'\n-        How the image intensity is measured at a sample point.\n+    interpolation : {'linear', 'nearest', 'nearest_most_frequent'}, \\\n+                    default='linear'\n+        How the image intensity is measured at a sample point, and how the\n+        samples drawn around a mesh node are combined.\n \n         - 'linear':\n-            Use a trilinear interpolation of neighboring voxels.\n+            Use a trilinear interpolation of neighboring voxels, and average\n+            the samples drawn around each node.\n         - 'nearest':\n-            Use the intensity of the nearest voxel.\n+            Use the intensity of the nearest voxel, and average the samples\n+            drawn around each node.\n+        - 'nearest_most_frequent':\n+            Use the intensity of the nearest voxel, and, instead of\n+            averaging, keep the value that occurs most often among the\n+            samples drawn around each node. Use this for images that hold\n+            discrete codes from a lookup table, such as a parcellation or\n+            atlas, for which averaging numeric codes together would produce\n+            values that are not part of the original lookup table.\n \n         For one image, the speed difference is small, 'linear' takes about x1.5\n-        more time. For many images, 'nearest' scales much better, up to x20\n-        faster.\n+        more time. For many images, 'nearest' and 'nearest_most_frequent' scale\n+        much better, up to x20 faster.\n \n     kind : {'auto', 'depth', 'line', 'ball'}, default='auto'\n         The strategy used to sample image intensities around each vertex.\n@@ -697,17 +767,24 @@ def vol_to_surf(\n     this vertex will be ``numpy.nan``.\n \n     The 3d image then needs to be interpolated at each of the remaining points.\n-    Two options are available: 'nearest' selects the value of the nearest\n-    voxel, and 'linear' performs trilinear interpolation of neighboring\n-    voxels. 'linear' may give better results - for example, the projected\n-    values are more stable when resampling the 3d image or applying affine\n-    transformations to it. For one image, the speed difference is small,\n-    'linear' takes about x1.5 more time. For many images, 'nearest' scales much\n-    better, up to x20 faster.\n-\n-    Once the 3d image has been interpolated at each sample point, the\n-    interpolated values are averaged to produce the value associated to this\n-    particular :term:`mesh` vertex.\n+    Two options are available: 'nearest' (and 'nearest_most_frequent') select\n+    the value of the nearest voxel, and 'linear' performs trilinear\n+    interpolation of neighboring voxels. 'linear' may give better results -\n+    for example, the projected values are more stable when resampling the 3d\n+    image or applying affine transformations to it. For one image, the speed\n+    difference is small, 'linear' takes about x1.5 more time. For many\n+    images, 'nearest' and 'nearest_most_frequent' scale much better, up to\n+    x20 faster.\n+\n+    Once the 3d image has been interpolated at each sample point, for\n+    'linear' and 'nearest' the interpolated values are averaged to produce\n+    the value associated to this particular :term:`mesh` vertex. Averaging\n+    is not meaningful for images whose values are discrete codes drawn from\n+    a lookup table, such as a parcellation or atlas: the average of a few\n+    such codes is generally not itself one of the codes in the lookup\n+    table. For this kind of image, use 'nearest_most_frequent', which keeps\n+    the value occurring most often among the samples instead of averaging\n+    them.\n \n     Examples\n     --------\n@@ -733,6 +810,7 @@ def vol_to_surf(\n     sampling_schemes = {\n         \"linear\": _interpolation_sampling,\n         \"nearest\": _nearest_voxel_sampling,\n+        \"nearest_most_frequent\": _nearest_most_frequent_voxel_sampling,\n     }\n     if interpolation not in sampling_schemes:\n         raise ValueError(",
+      "observation": {
+        "mode": "sync",
+        "wall_seconds": 434.01500673300006,
+        "baseline": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "e3b0c44298fc1c14",
+          "iteration": 0,
+          "change_summary": "the unmodified baseline repository (empty patch)",
+          "score": 0.2,
+          "pass_rate": 0.2,
+          "num_visits": 4,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 0
+        },
+        "best": {
+          "index": 2,
+          "parent_index": 0,
+          "program_id": "be591cc1d7d684ea",
+          "iteration": 1,
+          "change_summary": "Good, `outputs/` is gitignored so it won't pollute the diff. The working tree is clean except for the intended source change.",
+          "score": 1.0,
+          "pass_rate": 1.0,
+          "num_visits": 3,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 6748
+        },
+        "data": {
+          "task_id": "022",
+          "title": "Repair an inconsistent volume-to-surface projection",
+          "domain": "neuroimaging",
+          "language": "python",
+          "repository": "https://github.com/nilearn/nilearn",
+          "base_commit": "fefa4d30c262384ebda0f1123a1691abf466a9f0",
+          "source_license": "BSD-3-Clause",
+          "license_gate": "none",
+          "environment_image": "docker.io/kevinxulearning/swe-bench-science-environment-python-task-022:v0.1.0@sha256:0c0ed46caaa7b0d52a862dad6461ebdc165396fe7f96e8e50df3e4fed8155cf2",
+          "verifier_image": "docker.io/kevinxulearning/swe-bench-science-verifier-python-task-022:v0.1.0@sha256:ae3adfc761d0744164c6e5e45f686cd766b5ceb1ac17c8c590ce074e0dee938e",
+          "private_tests": 12,
+          "visible_tests": 9,
+          "held_back_tests": 3,
+          "scoring_shards": 4,
+          "held_back_shards": 2,
+          "shard_rule": "subset",
+          "seed": 0
+        },
+        "framework": {
+          "baseline_reward": 0.2,
+          "final_reward": 1.0,
+          "quality_gain": 0.8,
+          "stop_reason": "rounds",
+          "error": null,
+          "outcomes": {
+            "committed": 1,
+            "tree-updated": 1
+          },
+          "rollouts": 4,
+          "rollout_seconds": 18.65133762359619,
+          "eval_seconds": 8.520427942276001,
+          "stale_considered": 4,
+          "stale_discarded": 0,
+          "stale_rate": 0.0,
+          "retired_workers": 0,
+          "history": [
+            {
+              "round": 0,
+              "held_out_reward": 1.0,
+              "elapsed_s": 344.25942635536194,
+              "rollouts": 2,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 1,
+              "held_out_reward": 1.0,
+              "elapsed_s": 413.2657904624939,
+              "rollouts": 4,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            }
+          ]
+        },
+        "actor_usage": {
+          "calls": 10,
+          "failures": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "model_seconds": 779.806642
+        },
+        "tree": {
+          "nodes": 5,
+          "valid_nodes": 5,
+          "max_depth": 2,
+          "root_visits": 4,
+          "c_puct": 1.0,
+          "tree": [
+            {
+              "index": 0,
+              "parent_index": null,
+              "program_id": "e3b0c44298fc1c14",
+              "iteration": 0,
+              "change_summary": "the unmodified baseline repository (empty patch)",
+              "score": 0.2,
+              "pass_rate": 0.2,
+              "num_visits": 4,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 0
+            },
+            {
+              "index": 1,
+              "parent_index": 0,
+              "program_id": "adc5e55f794b2074",
+              "iteration": 2,
+              "change_summary": "Fixed `_nearest_voxel_sampling` in `source/nilearn/surface/surface.py` so `vol_to_surf(..., interpolation=\"nearest\")` combines the per-vertex nearest-voxel samples by taking their most-frequent value ",
+              "score": 0.8,
+              "pass_rate": 0.8,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 5451
+            },
+            {
+              "index": 2,
+              "parent_index": 0,
+              "program_id": "be591cc1d7d684ea",
+              "iteration": 1,
+              "change_summary": "Good, `outputs/` is gitignored so it won't pollute the diff. The working tree is clean except for the intended source change.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 3,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 6748
+            },
+            {
+              "index": 3,
+              "parent_index": 2,
+              "program_id": "be591cc1d7d684ea",
+              "iteration": 4,
+              "change_summary": "All 142 surface tests pass, no regressions, and the working tree only has the intended `source/nilearn/surface/surface.py` change (no scratch files, `outputs/` is gitignored). The prior node's fix is ",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 6748
+            },
+            {
+              "index": 4,
+              "parent_index": 2,
+              "program_id": "be591cc1d7d684ea",
+              "iteration": 3,
+              "change_summary": "Confirmed clean (outputs/ is gitignored, no scratch files left).",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 6748
+            }
+          ]
+        },
+        "test": {
+          "baseline": {
+            "score": 0.0,
+            "pass_rate": 0.0,
+            "passed": 0,
+            "collected": 3,
+            "public": 0,
+            "checks": 4,
+            "subset_resolved": 0,
+            "seconds": 4.212,
+            "error": "",
+            "report_public": "public reproduction (reproduce.py) exited 1:\n{\n  \"failure_kind\": \"lookup_join_failure\",\n  \"finite_surface_value_count\": 4,\n  \"offline\": true,\n  \"schema_version\": \"0.1\",\n  \"status\": \"pre_fix_expected_failure\",\n  \"table_entry_count\": 3,\n  \"unmatched_surface_value_count\": 4\n}",
+            "report": " 1, 2], [1, 3, 2]], dtype=np.int64),\n        )\n        results = _label_results(\n            image,\n            mesh,\n            kind=\"line\",\n            radius=6.0,\n            n_samples=7,\n        )\n        source_labels = set(np.unique(image.get_fdata()))\n>       assert _has_result(\n            results,\n            lambda result: np.all(result == 9)\n            and set(np.unique(result)) <= source_labels,\n        )\nE       assert False\nE        +  where False = _has_result([array([8.14285714, 8.14285714, 8.14285714, 8.14285714]), array([8.14285714, 8.14285714, 8.14285714, 8.14285714])], <function test_non_identity_affine_preserves_identifier_semantics.<locals>.<lambda> at 0x7fb09394aa20>)\n\n/tests/private_tests/test_atlas_projection.py:205: AssertionError\n______________ test_ball_sampling_preserves_the_identifier_space _______________\n\n    def test_ball_sampling_preserves_the_identifier_space():\n        data = np.zeros((7, 7, 7), dtype=float)\n        data[3:, :, :] = 11.0\n        image = nib.Nifti1Image(data, np.eye(4))\n        mesh = surface.InMemoryMesh(\n            np.asarray(\n                [[3.0, 3.0, 3.0], [4.0, 3.0, 3.0], [3.0, 4.0, 3.0], [4.0, 4.0, 3.0]]\n            ),\n            np.asarray([[0, 1, 2], [1, 3, 2]], dtype=np.int64),\n        )\n        results = _label_results(\n            image,\n            mesh,\n            kind=\"ball\",\n            radius=2.0,\n            n_samples=20,\n        )\n>       assert _has_result(\n            results,\n            lambda result: np.all(np.isfinite(result)) and np.all(result == 11.0),\n        )\nE       assert False\nE        +  where False = _has_result([array([ 7.46289018, 10.53030641,  7.46289018, 10.53030641]), array([ 7.15, 11.  ,  7.15, 11.  ])], <function test_ball_sampling_preserves_the_identifier_space.<locals>.<lambda> at 0x7fb095b5e520>)\n\n/tests/private_tests/test_atlas_projection.py:229: AssertionError\n-------------------- generated xml file: /tmp/era-junit.xml --------------------\n=========================== short test summary info ============================\nFAILED ../../tests/private_tests/test_atlas_projection.py::test_each_vertex_uses_its_local_consensus\nFAILED ../../tests/private_tests/test_atlas_projection.py::test_non_identity_affine_preserves_identifier_semantics\nFAILED ../../tests/private_tests/test_atlas_projection.py::test_ball_sampling_preserves_the_identifier_space\n3 failed in 1.38s"
+          },
+          "best": {
+            "score": 1.0,
+            "pass_rate": 1.0,
+            "passed": 3,
+            "collected": 3,
+            "public": 1,
+            "checks": 4,
+            "subset_resolved": 1,
+            "seconds": 4.061,
+            "error": "",
+            "report_public": "",
+            "report": ""
+          },
+          "pass_rate_gain": 1.0
+        }
+      },
+      "actor_usage": {
+        "calls": 10,
+        "failures": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "model_seconds": 779.806642
+      },
+      "regraded": {
+        "previous_reward_baseline": 0,
+        "previous_reward_best": 1,
+        "previous_grade_baseline": {
+          "private": {
+            "collected": 12,
+            "failed": 8,
+            "passed": 4,
+            "return_code": 1
+          },
+          "public": {
+            "collected": 1,
+            "passed": 0,
+            "return_code": 1
+          },
+          "reward": 0,
+          "task_id": "task_022"
+        },
+        "previous_grade_best": {
+          "private": {
+            "collected": 12,
+            "failed": 0,
+            "passed": 12,
+            "return_code": 0
+          },
+          "public": {
+            "collected": 1,
+            "passed": 1,
+            "return_code": 0
+          },
+          "reward": 1,
+          "task_id": "task_022"
+        }
+      }
+    }
+  ],
+  "failures": [],
+  "agent_sessions": {
+    "agent": "claude-code",
+    "command": "claude -p --permission-mode acceptEdits --allowedTools Bash Edit Write Read Glob Grep TodoWrite",
+    "version": "2.1.251 (Claude Code)",
+    "model": "",
+    "timeout_s": 1200.0,
+    "failed": 2,
+    "sessions": 12
+  },
+  "agent_usage": {
+    "calls": 12,
+    "failures": 2,
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0,
+    "model_seconds": 3730.663791
+  },
+  "model_usage": {
+    "calls": 0,
+    "failures": 0,
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0,
+    "model_seconds": 0.0
+  },
+  "regraded_at": "2026-08-31T00:09:13+00:00",
+  "regraded_reason": "the run's own grading step ran the grader baked into each verifier image; some of those are stale (task 034's collects nothing and scores every submission 0). Re-run with the release's own task-bundle grader, which is what its tests/docker-compose.yaml mounts. The search itself is untouched -- grading is a pure function of the patch."
+}

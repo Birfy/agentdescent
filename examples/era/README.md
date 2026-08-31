@@ -1,7 +1,7 @@
 # ERA — empirical-software search (Flat UCB tree search)
 
 Faithful port of Google Research's released ERA implementation onto the
-AgentDescent engine, running **four** tasks on one search.
+AgentDescent engine, running **six** tasks on one search.
 
 | | |
 |---|---|
@@ -212,14 +212,22 @@ different experiment — said in the result file, in the module docstring, and i
 [`docs/algo-era.md`](../../docs/algo-era.md).
 
 Measured, the six `--tasks default` tasks against the Claude Code CLI at 4
-expansions per tree: **6 of 6 resolved by the release's own grader, from 0 of
-6**, and every held-back test passes on every task. But **every winning node
-came from round 0** — one agent session solves these tasks and the tree spends
-three more confirming it, so the table measures the agent under this harness
-rather than the search. At a shorter session budget, where a single session
-cannot finish, the tree does not recover what the budget takes away either. Full
-table, the two defects in the published release this had to route around, and
-the caveats: [`docs/algo-era.md`](../../docs/algo-era.md#measured-results--swe-bench-science).
+expansions per tree: **3 of 6 resolved by the release's own grader, from 0 of
+6**, at `--feedback public` — the information the benchmark itself gives an
+agent. The same configuration at `--feedback tests` resolves **6 of 6**, and the
+difference is the point: pytest's traceback prints the body of the failing test,
+so quoting the visible split's output hands the agent the hidden suite's
+assertions. Half the resolutions were bought with the specification, and the
+held-back split cannot detect that — it shows the fix generalised, not that the
+spec was withheld.
+
+**Every winning node came from round 0**, in both arms and at a shorter session
+budget too: fifteen task-runs, sixty expansions, and the winner was a
+first-round child of the root every time except twice, when it was the root
+itself. So the tables measure the agent under this harness, not the search.
+Full tables, the two defects in the published release this had to route around,
+and the caveats:
+[`docs/algo-era.md`](../../docs/algo-era.md#measured-results--swe-bench-science).
 
 This is the one task that needs **Docker** rather than the shared sandbox: the
 benchmark is distributed as 238 pinned `linux/amd64` images (about 1.6 GB per

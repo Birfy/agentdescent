@@ -1452,15 +1452,13 @@ domains and all six inside the release's unrestricted 96 — one flat-PUCT tree
 each, **4 expansions per tree**, 2 workers, `c_puct = 1.0`, uniform prior,
 `--held-back-frac 0.25`, seed 0, synchronous mode.
 
-The mutation operator is the **Claude Code CLI** (`claude -p
---permission-mode acceptEdits --allowedTools "Bash Edit Write Read Glob Grep
-TodoWrite"`, version 2.1.251, prompt over stdin) at `--agent-timeout 1200`. The
-run passed no `--model`, so each session took that CLI's default: **`claude-sonnet-5`**
-in all 37 sessions across the three arms, read back afterwards from the CLI's
-own transcripts (`~/.claude/projects/*/`) rather than from the result file,
-which is why `agent_sessions.version` and `agent_sessions.model` are recorded
-now. A run meant to be repeated should pass `--model`; these three predate the
-field and carry it only here.
+The mutation operator is the **Claude Code CLI** (`claude -p --permission-mode
+acceptEdits --allowedTools "Bash Edit Write Read Glob Grep TodoWrite"`, version
+2.1.251, prompt over stdin) at `--agent-timeout 1200`. The runs passed no
+`--model`, so each session took that CLI's default: **`claude-sonnet-5`** in all
+61 sessions, read back afterwards from the CLI's own transcripts
+(`~/.claude/projects/*/`) rather than from the result file, which is why
+`agent_sessions.version` and `agent_sessions.model` are recorded now.
 
 Everything else is the release as published: both pinned images per task pulled
 by digest, the agent's container on `--network none`, and the reward read from
@@ -1469,107 +1467,144 @@ never sees that grader — it ranks on the visible split only, and
 `--held-back-frac 0.25` of each private suite is never shown to it in any shard
 or any prompt.
 
-The runs predate `--feedback` and behave as `--feedback tests` does now: the
-prompt quoted the visible split's pytest output. That is the single most
-important line in this section and it is why the table below is not a
-benchmark number.
+Two arms, differing in `--feedback` and nothing else:
 
-Two processes on one host, identical configuration, split only to use the
-wall-clock: tasks 001/002/022/029 in
-[`bench/results/era-swe-science-1200s-a.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-1200s-a.json)
-and 034/045 in
-[`bench/results/era-swe-science-1200s-b.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-1200s-b.json).
+| arm | what a prompt may quote | result files |
+|---|---|---|
+| **`public`** — the benchmark's own information budget | `reproduce.py`'s output | [`…-public-1200s-a`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-public-1200s-a.json), [`…-b`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-public-1200s-b.json) |
+| `tests` — the visible split's pytest output | that, **plus the failing tests' own source** | [`…-tests-1200s-a`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-tests-1200s-a.json), [`…-b`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-tests-1200s-b.json) |
+
 Each file carries the winning patch, the whole tree, and the grader's output for
-the baseline and the best node.
+the baseline and the best node. Each arm is two processes on one host, split
+only to use the wall-clock.
 
-### The result — and read the next section before quoting it
+### The result: 3 of 6, at the benchmark's own information budget
 
-**6 of 6 resolved, from 0 of 6.** The reward column is the release's own
-grader's binary verdict; the counts beside it are its private-suite totals.
+| task | domain | private tests | grader passed | reward | visible pass rate | held-back pass rate | winning node |
+|---|---|---:|---:|:---:|---:|---:|---:|
+| 001 | computational-reaction-chemistry | 3 | 1/3 → 1/3 | 0 → 0 | 0.667 → 0.667 | 0.500 → 0.500 | **#0, the root** |
+| 002 | density-functional-theory | 8 | 3/8 → **8/8** | 0 → **1** | 0.429 → 1.000 | 0.667 → 1.000 | #1 |
+| 022 | neuroimaging | 12 | 4/12 → **12/12** | 0 → **1** | 0.200 → 1.000 | 0.000 → 1.000 | #2 |
+| 029 | genomics-sequence-annotation | 29 | 14/29 → 27/29 | 0 → 0 | 0.545 → 0.818 | 0.375 → 1.000 | #2 |
+| 034 | stochastic-numerical-analysis | 8 | 1/8 → 5/8 | 0 → 0 | 0.286 → 0.714 | 0.333 → 0.667 | #1 |
+| 045 | computational-oceanography | 16 | 14/16 → **16/16** | 0 → **1** | 0.714 → 1.000 | 0.600 → 1.000 | #1 |
 
-!!! danger "This arm ran at `--feedback tests`, which shows the agent the hidden tests"
-    These runs predate the `--feedback` flag, and the behaviour they got is what
-    the flag now calls `tests`: every prompt quoted pytest's failure sections
-    for the visible half of the private suite — **and pytest's traceback embeds
-    the body of the failing test**, so each agent session was handed those
-    tests' assertions and expected values before it made an edit. All 16
-    root-node prompts across the three arms did this. The number below is
-    therefore "an agent shown most of the hidden specification resolves the
-    task", not the benchmark's task. See
-    [what was wrong with the first number](#what-was-wrong-with-the-first-number).
+**3 of 6 resolved, from 0 of 6.** The three that did not resolve failed
+differently and the difference is informative: 001 produced nothing at all (the
+tree kept the empty patch over all four expansions), while 029 reached 27 of 29
+and 034 reached 5 of 8 — partial repairs of the right defect that the
+benchmark's all-or-nothing reward scores as zero.
 
-| task | domain | private tests | grader passed | reward | visible pass rate | held-back pass rate | winning node | wall |
-|---|---|---:|---:|:---:|---:|---:|---:|---:|
-| 001 | computational-reaction-chemistry | 3 | 1/3 → **3/3** | 0 → **1** | 0.667 → 1.000 | 0.500 → 1.000 | #1 (round 0) | 38.3 min |
-| 002 | density-functional-theory | 8 | 3/8 → **8/8** | 0 → **1** | 0.429 → 1.000 | 0.667 → 1.000 | #1 (round 0) | 37.2 min |
-| 022 | neuroimaging | 12 | 4/12 → **12/12** | 0 → **1** | 0.200 → 1.000 | 0.000 → 1.000 | #2 (round 0) | 7.1 min |
-| 029 | genomics-sequence-annotation | 29 | 14/29 → **29/29** | 0 → **1** | 0.545 → 1.000 | 0.375 → 1.000 | #1 (round 0) | 17.3 min |
-| 034 | stochastic-numerical-analysis | 8 | 1/8 → **8/8** | 0 → **1** | 0.286 → 1.000 | 0.333 → 1.000 | #1 (round 0) | 21.8 min |
-| 045 | computational-oceanography | 16 | 14/16 → **16/16** | 0 → **1** | 0.714 → 1.000 | 0.600 → 1.000 | #1 (round 0) | 18.4 min |
+029 is worth one more line: its **held-back** split went to 1.000 while two
+*visible* tests still failed. The split is drawn at random, so it can land on
+the easier half; a held-back column at 1.000 is evidence the fix generalised,
+not evidence the task is done.
 
-The held-back column is the one that says the result is not an artefact of the
-signal the search was given: **every held-back test passes on every task**,
-including the three the search never saw on 022, where the baseline passed none
-of them. Nothing here was fixed by writing to the checks the tree could read.
+24 agent sessions. Four died on an endpoint TLS error rather than on the task,
+costing this arm four of its 24 expansions — recorded in the result files, and
+not an excuse for the number.
 
-24 agent sessions across the six trees. Three of them failed — one at the
-timeout, two on an endpoint error — and cost nothing beyond their expansion: a
-failed session is a node carrying whatever was in the checkout, which is the
-release's own rule for a timed-out agent.
+### What the leaked tests were worth: 3/6 → 6/6
 
-### The tree did not do the work, and saying so is the result
+The first version of this port quoted the visible split's pytest output into
+every prompt, which is what `--feedback tests` now names. Same tasks, same tree,
+same budget, everything else identical:
 
-**Every winning node is a round-0 child of the root.** Five of the six trees
-were won by node #1 and the sixth by node #2 — the first two expansions, both
-drawn from the empty patch. The second round added two more nodes to every tree
-and not one of them beat the first round. On these six tasks *one* Claude Code
-session solves the task, and flat-PUCT spends the remaining expansions
-confirming it.
+| task | `public` | `tests` |
+|---|:---:|:---:|
+| 001 | 1/3, reward 0 | 3/3, reward **1** |
+| 002 | 8/8, reward 1 | 8/8, reward 1 |
+| 022 | 12/12, reward 1 | 12/12, reward 1 |
+| 029 | 27/29, reward 0 | 29/29, reward **1** |
+| 034 | 5/8, reward 0 | 8/8, reward **1** |
+| 045 | 16/16, reward 1 | 16/16, reward 1 |
+| | **3 / 6** | **6 / 6** |
 
-So the honest reading of the table is that it measures **the agent under this
-port's harness**, not that a tree search helps on SWE-bench Science. The search
-is doing what it is supposed to — it selects, expands, keeps failures as nodes,
-and commits the best — and there is nothing left for it to select *between*
-when the first sample already scores 1.0 on everything visible.
+**Half the resolutions were bought with the specification.** The mechanism is
+that **pytest's traceback prints the body of the failing test**, so a report
+built from the private suite hands over its assertions and expected values
+before the agent makes an edit. A round-0 prompt for task 022 carried this:
+
+```
+    def test_four_dimensional_frames_are_reduced_independently():
+        ...
+>       assert _has_result(
+            results,
+            lambda result: result.shape == (4, 2)
+            and np.all(result[:, 0] == 100)
+            and np.all(result[:, 1] == 8),
+        )
+E       assert False
+```
+
+Read back from the transcripts the CLI leaves behind: **16 of 16 root-node
+sessions** in the `tests` arms quoted `/tests/private_tests` source or ids.
+
+The split of the gap is as informative as its size. 002, 022 and 045 resolve
+either way — their public reproduction already reports the anomaly in usable
+terms (022's prints `lookup_join_failure` with the unmatched count, and it is
+the fastest task in both arms). 001, 029 and 034 flip. On 034 the difference is
+visible in the patch: at `public` the agent found the drift term scaled by the
+wrong increment and stopped there (5/8); shown the tests it also found the
+second bug, `WrapTerm.contr` negating the whole Brownian increment instead of
+only `W` and `K` (8/8).
+
+The **held-back split does not catch this**, and it is worth being precise about
+why. It rules out a patch tuned to the *particular* visible assertions — the
+held-back tests pass too — but they exercise the same defect, so an agent told
+which invariant to satisfy passes them for the same reason it passes the visible
+ones. The split measures whether the fix generalised. It cannot measure whether
+the specification was given away.
+
+The port's own prompt was also asserting something false at that level: *"The
+verifier holds tests you cannot see and cannot read."* `--feedback` now defaults
+to `public`, `tests` says "further tests you have not been shown" instead, and
+`test_the_default_feedback_quotes_nothing_from_the_private_suite` pins the
+default against the exact strings that leaked.
+
+### The tree did not do the work, in either arm
+
+**Every winning node came from round 0.** Across fifteen task-runs — six at
+`public`, six at `tests`, three at 420 s — and sixty expansions, the winner was
+a first-round child of the root every time except the two where it was the root
+itself. The second round added two nodes to every tree and never beat the first.
+
+So both tables measure **the agent under this port's harness**, not that a tree
+search helps on SWE-bench Science. The search is doing what it should — it
+selects, expands, keeps failures as nodes, commits the best, and on 001 at
+`public` it correctly kept the empty patch over four worse ones — but there is
+nothing to select *between* when the first sample is already the best one drawn.
 
 ### Where the tree would have had room, at a shorter session budget
 
-The obvious follow-up is the regime where a single session cannot finish: three
-of the same tasks, same tree, `--workers 1` (upstream FUTS's own shape — four
-*sequential* expansions, each selecting from the whole tree) and
-`--agent-timeout 420`.
+The regime where a single session cannot finish: three of the same tasks,
+`--workers 1` (upstream FUTS's own shape — four *sequential* expansions, each
+selecting from the whole tree), `--agent-timeout 420`, and the `tests`
+feedback level.
 
 **All 12 sessions hit the timeout**, and the tree does not recover what the
 per-session budget takes away.
 
-| task | grader passed, 420 s | reward | winning node | the same task at 1200 s |
+| task | grader passed, 420 s | reward | winning node | same task, 1200 s |
 |---|---:|:---:|---:|---:|
-| 001 | 1/3 → **1/3** | 0 | **#0, the root** — no expansion beat the empty patch | 3/3, reward 1 |
-| 034 | 1/8 → **4/8** | 0 | #1 (round 0); rounds 1–3 added nothing | 8/8, reward 1 |
-| 045 | 14/16 → **16/16** | **1** | #1 (round 0) | 16/16, reward 1 |
+| 001 | 1/3 → **1/3** | 0 | **#0, the root** | 3/3, reward 1 |
+| 034 | 1/8 → **4/8** | 0 | #1; rounds 1–3 added nothing | 8/8, reward 1 |
+| 045 | 14/16 → **16/16** | **1** | #1 | 16/16, reward 1 |
 
-Three points fall out of it. The **per-session budget is the binding
-constraint**: 3/3 resolved at 1200 s becomes 1/3 at 420 s, on the same tasks,
-same tree, same expansion count. Four truncated sessions are not one finished
-session, and **PUCT cannot combine them** — a node is a whole patch, and the
-tree selects among patches rather than merging them, so partial progress in two
-different directions stays partial. And on 001 the search **correctly kept the
-root**: four expansions all scored worse than the empty patch and the tree
-committed none of them, which is the behaviour that stops a truncated session
-from being reported as a result. Raw data:
-[`bench/results/era-swe-science-420s.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-420s.json).
-
-Across both arms, then, **no tree ever improved on its round-0 nodes** — nine
-task-runs, 36 expansions, and the winner was a first-round child of the root
-every time except the one where it was the root itself.
+Four truncated sessions are not one finished session, and **PUCT cannot combine
+them** — a node is a whole patch, and the tree selects among patches rather than
+merging them, so partial progress in two directions stays partial. Raw data:
+[`bench/results/era-swe-science-tests-420s.json`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-tests-420s.json).
 
 ### What the wins actually are
 
-Real defects in real libraries, not benchmark-shaped ones:
+Real defects in real libraries, not benchmark-shaped ones. All four fixes below
+come from the `tests` arm; the `public` arm found the same file every time, and
+the same fix except on 034.
 
-* **034 — `diffrax`, backward-in-time stochastic integration.** Two bugs, both
-  fixed: the drift term was scaled by the stepping loop's internally re-oriented
-  (always positive) increment instead of the signed control increment, and
+* **034 — `diffrax`, backward-in-time stochastic integration.** Two bugs: the
+  drift term was scaled by the stepping loop's internally re-oriented (always
+  positive) increment instead of the signed control increment, and
   `WrapTerm.contr` negated the *whole* Brownian increment structure when it
   should negate only `W` and the space-time-time Lévy area `K` — `dt` and the
   space-time Lévy area `H` are defined by the pair of endpoints and do not
@@ -1596,11 +1631,13 @@ Real defects in real libraries, not benchmark-shaped ones:
    the `test_atlas_projection.py` / `test_stochastic_orientation.py` /
    `test_connected_grid_semantics.py` that does — so it collects nothing, exits
    4, and scores every submission 0 however correct. The release does not rely
-   on it: `tasks/task_NNN/tests/docker-compose.yaml` binds the task bundle's
-   `grader.py` over that path and `tests/Dockerfile` copies it in, with the
-   comment "Keep the runtime entrypoint in sync with the task bundle." This port
-   ran the image's copy at first and reported a floor of zero for its trouble;
-   it now writes the bundle grader in beside the patch, and
+   on it, and says so: `tasks/task_NNN/tests/docker-compose.yaml` binds the task
+   bundle's `grader.py` over that path, and `docs/run-batch.md` states that
+   "Private-test collection is directory-based… The task's Compose override
+   mounts the bundle's dynamic grader into an existing prebuilt verifier image,
+   so correcting test discovery does not require rebuilding the image." This
+   port ran the image's copy at first and reported a floor of zero for its
+   trouble; it now writes the bundle grader in beside the patch, and
    `test_the_bundle_grader_is_the_one_that_runs` pins that against task 034.
 2. **`evolve(solved_threshold=1.0)` was silently under-spending the budget.** A
    shard here is a handful of tests, and a rollout that clears all of them says
@@ -1610,67 +1647,17 @@ Real defects in real libraries, not benchmark-shaped ones:
    unreachable threshold, which is upstream FUTS's own behaviour: the selected
    node is expanded whatever it scored.
 
-### What was wrong with the first number
-
-The 6/6 above was measured with the port quoting the visible private tests'
-pytest output into every mutation prompt. That looked innocuous — it is what
-the other five ERA tasks do, hand the evaluator's own error back to the model —
-and on this benchmark it is not, because **pytest's traceback prints the source
-of the failing test**. A round-0 prompt for task 022 carried this:
-
-```
-    def test_four_dimensional_frames_are_reduced_independently():
-        ...
->       assert _has_result(
-            results,
-            lambda result: result.shape == (4, 2)
-            and np.all(result[:, 0] == 100)
-            and np.all(result[:, 1] == 8),
-        )
-E       assert False
-```
-
-— the hidden suite's file name, its node ids, its assertions and its expected
-values, handed over before the agent made a single edit. Checked across the
-transcripts the CLI leaves behind: **16 of 16 root-node sessions** quoted
-`/tests/private_tests` source or ids. On the benchmark an agent has
-`reproduce.py` and nothing else.
-
-The held-back split does **not** catch this, and it is worth being precise about
-why. It rules out a patch tuned to the *particular* visible assertions — the
-held-back tests pass too — but the tests it holds back exercise the same defect,
-so an agent told exactly which invariant to satisfy passes them for the same
-reason it passes the visible ones. What the split measures is "did the fix
-generalise"; what it cannot measure is "was the specification given away".
-
-The port's own prompt was also asserting something false at that level: *"The
-verifier holds tests you cannot see and cannot read."*
-
-The fix is `--feedback {public,counts,tests}`, defaulting to **`public`** — the
-public reproduction's own output and nothing from the private run, which is the
-benchmark's own information budget. `counts` adds how many visible checks passed
-and nothing about what they check. `tests` is the old behaviour, kept because it
-is a legitimate *different* experiment as long as it is labelled, and named so
-that nobody reaches it by accident.
-`test_the_default_feedback_quotes_nothing_from_the_private_suite` pins the
-default against the exact strings that leaked.
-
-The tree still ranks on the private suite at every level — that is ERA's
-protocol, the evaluator drives selection, and it is disclosed. What changed is
-what the *agent* is told.
-
 ### What this is not
 
-* **Six tasks of 119, one seed, one model.** It is a demonstration that the port
-  runs end to end against the real release and resolves the tasks it was pointed
-  at, not a rate. A 6/6 on six tasks has a 95% interval reaching well below any
-  published number.
-* **Not a leaderboard row.** The protocol is ERA's: a tree of agent sessions,
-  scored between attempts against the visible part of each private suite, best
-  node kept. The leaderboard setting is one attempt with no verifier feedback.
-  Given that every winner here came from round 0, the closest honest comparison
-  is "best of the first two sessions with a scored selection between them" —
-  which is still not one attempt.
+* **Six tasks of 119, one seed, one model.** 3/6 is a demonstration that the
+  port runs end to end against the real release, not a rate. Its 95% interval
+  spans most of the unit line.
+* **Not a leaderboard row, even at `public`.** The leaderboard setting is one
+  attempt per task. Here four agent sessions are drawn per task and the best is
+  kept **by a selector that reads the private suite** — oracle selection, which
+  is a real advantage even when the agent is told nothing. Given that every
+  winner came from round 0, the closest honest description is "best of the first
+  two sessions, chosen by a verifier".
 * **The reward is the benchmark's; the search's score is not.** `pass_rate` is
   this port's construction, and it exists because a binary reward gives PUCT
   nothing to rank.
