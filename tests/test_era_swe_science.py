@@ -936,18 +936,25 @@ def test_a_scorecard_says_when_it_is_not_pass_at_1_and_over_how_many(tmp_path, c
         "config": {"iterations": 4, "feedback": "public"},
         "tasks": [{"task_id": "001", "graded_node": None, "scorecard": card}]}),
         encoding="utf-8")
-    port.scorecard([path])
+    port.scorecard([path], label="a-model", harness="Claude Code")
     out = capsys.readouterr().out
     assert "NOT Pass@1" in out
-    assert "1 task(s)" in out
-    assert "119" in out, "the published denominator has to be on the page"
+    assert "tasks          : 1, not the release's 119" in out
+    # ...the two columns the release cannot support must say so, not show 0.00%.
+    assert out.count("n/a") >= 3
+    assert "no per-task paradigm label" in out
 
     path.write_text(json.dumps({
         "config": {"iterations": 1, "feedback": "public"},
         "tasks": [{"task_id": "001", "graded_node": 1, "scorecard": card}]}),
         encoding="utf-8")
-    port.scorecard([path])
-    assert "Pass@1 -- one attempt per task" in capsys.readouterr().out
+    port.scorecard([path], label="a-model", harness="Claude Code")
+    out = capsys.readouterr().out
+    assert "Pass@1 -- one attempt per task" in out
+    # the row is the site's own column order
+    assert ("Public" in out and out.index("Public") < out.index("Private")
+            < out.index("Fail2Pass") < out.index("Pass2Pass") < out.index("Overall")
+            < out.index("Issue") < out.index("Expert") < out.index("Engineering"))
 
 
 def test_an_agent_command_arm_with_no_command_is_refused():

@@ -325,6 +325,10 @@ def build_parser() -> argparse.ArgumentParser:
                               "leaderboard's own columns (OVERALL, PUBLIC, "
                               "PRIVATE, FAIL2PASS, PASS2PASS). Arithmetic over "
                               "grades already in hand -- no container, no agent"))
+    parser.add_argument("--scorecard-label", default="",
+                        help="the LLM column of the scorecard row")
+    parser.add_argument("--scorecard-harness", default="",
+                        help="the Harness column of the scorecard row")
     parser.add_argument("--grade-node", type=int, default=None, metavar="INDEX",
                         help=("with --regrade, score this tree node instead of "
                               "the winner. `--grade-node 1` is the benchmark's "
@@ -439,20 +443,46 @@ def task_scorecard(baseline: Dict[str, Any], after: Dict[str, Any]
     }
 
 
-def scorecard(paths: Sequence[Path]) -> int:
-    """Aggregate regraded result files into the leaderboard's columns.
+def scorecard(paths: Sequence[Path], *, label: str = "",
+              harness: str = "") -> int:
+    """Report in the published leaderboard's own columns, and nothing else.
 
-    Pure arithmetic over grades already in hand -- no container, no agent. The
-    leaderboard's denominator is **119 tasks**; this prints the denominator it
-    actually had, because a rate over a subset is not the published number and
-    a table that hid that is how it would be quoted as one.
+    https://swescience.github.io reports one row per configuration:
+
+        LLM | Harness | Public | Private | Fail2Pass | Pass2Pass | Overall |
+        Issue | Expert | Engineering
+
+    and states the rule in two sentences: *"Pass@1 requires every applicable
+    private test to pass. Issue, Expert, and Engineering report Pass@1 for the
+    three task paradigms."* Overall is therefore a per-**task** rate over the
+    release's 119; Public is per task; Private, Fail2Pass and Pass2Pass are per
+    **test**, the last two against the baseline's outcome for that same test.
+
+    Two things this cannot fill in, and it says so in the row rather than
+    leaving a plausible number there:
+
+    * **Issue / Expert / Engineering.** The published release ships no per-task
+      paradigm label -- `manifests/tasks.jsonl` carries `domain`, `language` and
+      licence fields and nothing that partitions the 119 into 52/49/18.
+    * **The denominator.** A rate over a subset is not the published number, so
+      the row prints `n` beside it.
+
+    Private/Fail2Pass/Pass2Pass are printed **both** ways -- pooled over tests
+    (micro) and averaged over tasks (macro) -- because the site does not say
+    which it uses, and inverting its own rows gives a fail2pass share that
+    drifts between 0.743 and 0.774 across configurations, which is consistent
+    with either. Reporting one silently would be picking an answer.
     """
     rows: List[Dict[str, Any]] = []
-    attempts, graded_nodes, feedback = set(), set(), set()
+    attempts, graded_nodes, feedback, agents, models = set(), set(), set(), set(), set()
     for path in paths:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        attempts.add(payload.get("config", {}).get("iterations"))
-        feedback.add(payload.get("config", {}).get("feedback"))
+        config = payload.get("config", {})
+        attempts.add(config.get("iterations"))
+        feedback.add(config.get("feedback"))
+        sessions = payload.get("agent_sessions", {})
+        agents.add(sessions.get("agent"))
+        models.add(sessions.get("model") or "")
         for entry in payload.get("tasks", []):
             graded_nodes.add(entry.get("graded_node"))
             card = entry.get("scorecard")
@@ -465,42 +495,60 @@ def scorecard(paths: Sequence[Path]) -> int:
     if not rows:
         raise SystemExit("no tasks in the given result files")
 
-    def rate(num, den):
-        return (100.0 * num / den) if den else None
-
     n = len(rows)
-    tot = lambda key: sum(r[key] for r in rows)              # noqa: E731
+    tot = lambda key: sum(r[key] for r in rows)                    # noqa: E731
+
+    def micro(num_key, den_key):
+        den = tot(den_key)
+        return (100.0 * tot(num_key) / den) if den else None
+
+    def macro(num_key, den_key):
+        vals = [100.0 * r[num_key] / r[den_key] for r in rows if r[den_key]]
+        return (sum(vals) / len(vals)) if vals else None
+
+    def cell(value):
+        return f"{value:.2f}%" if value is not None else "n/a"
+
     single = graded_nodes == {1} or attempts == {1}
-    print(f"Scorecard: SWE-bench Science, {n} task(s)")
-    print(f"  protocol : {'Pass@1 -- one attempt per task' if single else 'NOT Pass@1'}"
-          f" (iterations={sorted(a for a in attempts if a is not None)}, "
-          f"graded node={sorted(g for g in graded_nodes if g is not None) or 'best'})")
-    print(f"  feedback : {sorted(f for f in feedback if f)}")
+    public = 100.0 * tot("public") / n
+    overall = 100.0 * tot("resolved") / n
+
+    print(f"SWE-bench Science -- https://swescience.github.io column format")
     print()
-    print(f"  {'column':<12} {'value':>8}   {'counts':>14}")
-    print(f"  {'-'*12} {'-'*8}   {'-'*14}")
-    for label, num, den in (
-        ("OVERALL", tot("resolved"), n),
-        ("PUBLIC", tot("public"), n),
-        ("PRIVATE", tot("private_passed"), tot("private_total")),
-        ("FAIL2PASS", tot("f2p_passed"), tot("f2p_total")),
-        ("PASS2PASS", tot("p2p_passed"), tot("p2p_total")),
-    ):
-        value = rate(num, den)
-        print(f"  {label:<12} {('%.2f%%' % value) if value is not None else 'n/a':>8}"
-              f"   {num:>6} / {den:<6}")
+    print(f"  {'LLM':<26}{'Harness':<14}{'Public':>8}{'Private':>9}"
+          f"{'Fail2Pass':>11}{'Pass2Pass':>11}{'Overall':>9}"
+          f"{'Issue':>7}{'Expert':>8}{'Engineering':>13}")
+    print(f"  {label or '(this run)':<26}"
+          f"{harness or (sorted(a for a in agents if a) or ['?'])[0]:<14}"
+          f"{cell(public):>8}{cell(micro('private_passed', 'private_total')):>9}"
+          f"{cell(micro('f2p_passed', 'f2p_total')):>11}"
+          f"{cell(micro('p2p_passed', 'p2p_total')):>11}"
+          f"{cell(overall):>9}{'n/a':>7}{'n/a':>8}{'n/a':>13}")
+    print()
+    print("  Private/Fail2Pass/Pass2Pass, macro (mean over tasks) instead of "
+          "pooled over tests:")
+    print(f"    Private {cell(macro('private_passed', 'private_total'))}   "
+          f"Fail2Pass {cell(macro('f2p_passed', 'f2p_total'))}   "
+          f"Pass2Pass {cell(macro('p2p_passed', 'p2p_total'))}")
+    print()
+    print("  How this row differs from a published one")
+    print(f"    tasks          : {n}, not the release's 119. "
+          f"Overall is {tot('resolved')}/{n}.")
+    print(f"    protocol       : "
+          + ("Pass@1 -- one attempt per task, as the site defines it"
+             if single else
+             "NOT Pass@1 -- best of "
+             f"{sorted(a for a in attempts if a)} chosen by an oracle selector"))
+    print(f"    agent feedback : {sorted(f for f in feedback if f)}")
+    print(f"    Issue/Expert/Engineering: not computable -- the release ships no "
+          f"per-task paradigm label.")
     print()
     print("  per task:")
     for r in sorted(rows, key=lambda r: r["task_id"]):
-        print(f"    {r['task_id']}  resolved={r['resolved']}  public={r['public']}  "
+        print(f"    {r['task_id']}  overall={r['resolved']}  public={r['public']}  "
               f"private={r['private_passed']}/{r['private_total']}  "
               f"f2p={r['f2p_passed']}/{r['f2p_total']}  "
               f"p2p={r['p2p_passed']}/{r['p2p_total']}")
-    print()
-    print(f"  The published leaderboard's denominator is 119 tasks and its "
-          f"ISSUE/EXPERT/ENGINEERING columns split them 52/49/18 by task "
-          f"paradigm.\n  This is {n} task(s) and the release ships no per-task "
-          f"paradigm label, so those three columns cannot be reproduced here.")
     return 0
 
 
@@ -651,7 +699,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         return 0
 
     if args.scorecard:
-        return scorecard(args.scorecard)
+        return scorecard(args.scorecard, label=args.scorecard_label,
+                         harness=args.scorecard_harness)
     if args.regrade:
         # Ahead of the run plan, because none of it applies: a regrade spends no
         # agent session and reads the patches a finished run already produced.
