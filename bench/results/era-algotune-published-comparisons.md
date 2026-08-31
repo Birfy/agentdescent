@@ -51,9 +51,21 @@ Both rows' per-task tables reconcile with their headline scores to three decimal
 1.3921 against a published 1.392, 2.0449 against 2.045. OpenEvolve's does not: its table
 gives 2.267x against a published 1.984x.
 
-**All three published columns are the same codebase.** MetaEvolve and its baseline run
-OpenEvolve's search, and OpenEvolve's AlgoTune harness takes the problem size from a
-config field rather than from AlgoTune's calibration:
+**All three published columns are the same codebase.** Section 3.1.3 of the paper,
+verbatim: *"For AlphaEvolve and MetaEvolve, we use the same evolutionary search
+algorithm implemented in OpenEvolve. The only difference lies in the backbone LLM
+used to generate solutions at each evolution step."* That covers **both** of its
+rows -- MetaEvolve has no inference-time search of its own; its contribution is the
+training, and 1.392x -> 2.045x is the backbone changing under a fixed search.
+
+And the paper states no measurement methodology for AlgoTune at all. Section 3.1.1
+gives one sentence -- *"we adopt 8 tasks from the AlgoTune benchmark ... spanning
+linear algebra, signal processing, and scientific computing"* -- with nothing on how
+problems were generated, at what size, or how the speedup was timed. It is not only
+`n` that is unstated.
+
+Meanwhile OpenEvolve's AlgoTune harness takes the problem size from a config field
+rather than from AlgoTune's calibration:
 
 ```yaml
   data_size: 35          # AlgoTune's calibrated n for psd_cone_projection is 349
