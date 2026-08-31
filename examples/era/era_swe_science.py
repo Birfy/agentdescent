@@ -585,11 +585,17 @@ def scorecard(paths: Sequence[Path], *, label: str = "",
 
     print(f"SWE-bench Science -- https://swescience.github.io column format")
     print()
-    print(f"  {'LLM':<26}{'Harness':<14}{'Public':>8}{'Private':>9}"
+    # The two text columns widen to fit rather than truncating: a label that ran
+    # into the next column would stop the row lining up with the header exactly
+    # when it is being read against a published table, and a *truncated* model
+    # name is worse still -- it is the one cell that says what was measured.
+    llm = label or "(this run)"
+    run = harness or (sorted(a for a in agents if a) or ["?"])[0]
+    w_llm, w_run = max(26, len(llm) + 2), max(14, len(run) + 2)
+    print(f"  {'LLM':<{w_llm}}{'Harness':<{w_run}}{'Public':>8}{'Private':>9}"
           f"{'Fail2Pass':>11}{'Pass2Pass':>11}{'Overall':>9}"
           f"{'Issue':>7}{'Expert':>8}{'Engineering':>13}")
-    print(f"  {label or '(this run)':<26}"
-          f"{harness or (sorted(a for a in agents if a) or ['?'])[0]:<14}"
+    print(f"  {llm:<{w_llm}}{run:<{w_run}}"
           f"{cell(public):>8}{cell(micro('private_passed', 'private_total')):>9}"
           f"{cell(micro('f2p_passed', 'f2p_total')):>11}"
           f"{cell(micro('p2p_passed', 'p2p_total')):>11}"
