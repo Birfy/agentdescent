@@ -1,0 +1,1463 @@
+{
+  "experiment": "ERA on AgentDescent -- SWE-bench Science, one tree per task",
+  "status": "completed",
+  "completed_at": "2026-08-31T07:08:57+00:00",
+  "upstream_commit": "b836730b5c000526af95116b1d0e2c60c8cf0a10",
+  "benchmark": "SWE-bench Science (OpenMOSS-Team/SWE-bench-Science@d8bdbcb4ecb2b565686382459c815d2b6291fd31)",
+  "protocol": "ERA's, not the benchmark's: the leaderboard gives an agent one attempt per task with no verifier feedback, while this scores a tree of agent sessions against the visible part of each private suite and keeps the best node. `benchmark_reward_*` is the release's own grader over the whole private suite; the search never reads it.",
+  "config": {
+    "provider": "claude",
+    "model": null,
+    "seed": 0,
+    "asynchronous": false,
+    "async_ratio": 1,
+    "max_seconds": 1800.0,
+    "pipelined_gate": false,
+    "gate_workers": 2,
+    "dry_run": false,
+    "serial": false,
+    "budget_rollouts": null,
+    "val_cap": null,
+    "eval_concurrency": null,
+    "reflective_merge": false,
+    "eval_cache": "",
+    "no_thinking": false,
+    "tasks": "029,034,045",
+    "list_tasks": false,
+    "allow_restricted_licenses": false,
+    "release": null,
+    "agent": "claude-code",
+    "agent_command": "",
+    "agent_timeout": 1200.0,
+    "staleness": "guarded",
+    "iterations": 12,
+    "workers": 2,
+    "shards": 4,
+    "test_shards": 2,
+    "held_back_frac": 0.25,
+    "feedback": "counts",
+    "no_public": false,
+    "held_out_frac": 0.5,
+    "c_puct": 1.0,
+    "prior_exponent": 0.0,
+    "verifier_timeout": 1800.0,
+    "max_patch_bytes": 400000,
+    "workspace_root": "/tmp/claude-0/-home-user-agentdescent/02a9c808-7ec2-5eb1-9055-691e73d63a11/scratchpad/deep-b",
+    "keep_workspaces": false,
+    "no_pull": false,
+    "regrade": null,
+    "max_tokens": 16000,
+    "temperature": 0.7,
+    "thinking": "disabled",
+    "api_timeout": 600.0,
+    "shutdown_grace": 120.0,
+    "quality_target": null
+  },
+  "summary": {
+    "tasks_run": 3,
+    "tasks_failed": 0,
+    "tasks_improved_on_held_back": 3,
+    "resolved_baseline": 0,
+    "resolved_best": 3,
+    "resolve_rate": 1.0,
+    "wall_seconds": 13325.5011811
+  },
+  "tasks": [
+    {
+      "task_id": "029",
+      "title": "Restore annotation equivalence after circular-record orientation normalization",
+      "domain": "genomics-sequence-annotation",
+      "status": "completed",
+      "benchmark_reward_baseline": 0,
+      "benchmark_reward_best": 1,
+      "benchmark_grade_baseline": {
+        "private": {
+          "collected": 29,
+          "failed": 15,
+          "passed": 14,
+          "return_code": 1
+        },
+        "public": {
+          "collected": 1,
+          "passed": 1,
+          "return_code": 0
+        },
+        "reward": 0,
+        "task_id": "task_029"
+      },
+      "benchmark_grade_best": {
+        "private": {
+          "collected": 29,
+          "failed": 0,
+          "passed": 29,
+          "return_code": 0
+        },
+        "public": {
+          "collected": 1,
+          "passed": 1,
+          "return_code": 0
+        },
+        "reward": 1,
+        "task_id": "task_029"
+      },
+      "held_back_tests": 7,
+      "held_back_pass_rate_baseline": 0.375,
+      "held_back_pass_rate_best": 1.0,
+      "held_back_gain": 0.625,
+      "visible_pass_rate_baseline": 0.5454545454545454,
+      "visible_pass_rate_best": 1.0,
+      "nodes": 13,
+      "wall_seconds": 4282.048569619999,
+      "best_patch_chars": 2027,
+      "best_patch": "diff --git a/source/Bio/SeqFeature.py b/source/Bio/SeqFeature.py\nindex 394c839..6e35098 100644\n--- a/source/Bio/SeqFeature.py\n+++ b/source/Bio/SeqFeature.py\n@@ -1710,10 +1710,30 @@ class CompoundLocation(Location):\n         versions of Biopython which would have given join{[5:29](-), [37:52](-)}\n         and the translation would have wrongly been \"EXAMPLE*SILLY\" instead.\n \n+        This part-order preservation relies on each part's own strand being\n+        flipped (+1 becomes -1, and vice versa), which makes extract() apply\n+        a compensating reverse complement to each part. That holds whenever\n+        a part carries an explicit strand (+1 or -1) - including \"evil\"\n+        mixed-strand joins such as\n+        join(complement(69611..69724),139856..140087,140625..140650), where\n+        each part's own strand already determines whether it gets\n+        complemented, and the listed order encodes the splicing order which\n+        must be left alone.\n+\n+        Only when a part has no strand asserted at all (None, or 0 meaning\n+        stranded-but-unknown) does SimpleLocation._flip leave its strand\n+        unchanged, so extract() never complements that individual part. If\n+        *every* part of this CompoundLocation is like that, preserving the\n+        part order would silently scramble the joined sequence instead of\n+        reproducing the same biological content read from the new frame of\n+        reference, so the part order must be reversed to compensate. A join\n+        mixing strandless parts with explicitly stranded ones keeps its\n+        order, matching the stranded parts it contains.\n         \"\"\"\n-        return CompoundLocation(\n-            [loc._flip(length) for loc in self.parts], self.operator\n-        )\n+        flipped_parts = [loc._flip(length) for loc in self.parts]\n+        if all(loc.strand in (None, 0) for loc in self.parts):\n+            flipped_parts.reverse()\n+        return CompoundLocation(flipped_parts, self.operator)\n \n     @property\n     def start(self):",
+      "observation": {
+        "mode": "sync",
+        "wall_seconds": 4282.048569619999,
+        "baseline": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "e3b0c44298fc1c14",
+          "iteration": 0,
+          "change_summary": "the unmodified baseline repository (empty patch)",
+          "score": 0.5454545454545454,
+          "pass_rate": 0.5454545454545454,
+          "num_visits": 12,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 0
+        },
+        "best": {
+          "index": 3,
+          "parent_index": 2,
+          "program_id": "0ef542f80d0cebf4",
+          "iteration": 4,
+          "change_summary": "Clean. Only the intended `SeqFeature.py` modification remains.",
+          "score": 1.0,
+          "pass_rate": 1.0,
+          "num_visits": 9,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 2027
+        },
+        "data": {
+          "task_id": "029",
+          "title": "Restore annotation equivalence after circular-record orientation normalization",
+          "domain": "genomics-sequence-annotation",
+          "language": "python",
+          "repository": "https://github.com/biopython/biopython",
+          "base_commit": "fb0e7f522d714d76eec42f5fd428eb7942a11dde",
+          "source_license": "BSD-3-Clause",
+          "license_gate": "none",
+          "environment_image": "docker.io/kevinxulearning/swe-bench-science-environment-python-task-029:v0.1.2@sha256:a369032185670228103a05a7d1d3c16ffbe5a82074c8dd8976feeba787e385f3",
+          "verifier_image": "docker.io/kevinxulearning/swe-bench-science-verifier-python-task-029:v0.1.2@sha256:e517cabd9151676fb17dc610d9eebc3ae1415fdc99e98b990c1b7cae904235c1",
+          "private_tests": 29,
+          "visible_tests": 22,
+          "held_back_tests": 7,
+          "scoring_shards": 4,
+          "held_back_shards": 2,
+          "shard_rule": "subset",
+          "seed": 0
+        },
+        "framework": {
+          "baseline_reward": 0.5454545454545454,
+          "final_reward": 1.0,
+          "quality_gain": 0.4545454545454546,
+          "stop_reason": "rounds",
+          "error": null,
+          "outcomes": {
+            "committed": 2,
+            "tree-updated": 4
+          },
+          "rollouts": 12,
+          "rollout_seconds": 20.90056848526001,
+          "eval_seconds": 10.100924491882324,
+          "stale_considered": 12,
+          "stale_discarded": 0,
+          "stale_rate": 0.0,
+          "retired_workers": 0,
+          "history": [
+            {
+              "round": 0,
+              "held_out_reward": 0.8333333333333334,
+              "elapsed_s": 1216.983500957489,
+              "rollouts": 2,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 1,
+              "held_out_reward": 1.0,
+              "elapsed_s": 1931.438123703003,
+              "rollouts": 4,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 2,
+              "held_out_reward": 1.0,
+              "elapsed_s": 2567.055280685425,
+              "rollouts": 6,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 3,
+              "held_out_reward": 1.0,
+              "elapsed_s": 3281.53950715065,
+              "rollouts": 8,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 4,
+              "held_out_reward": 1.0,
+              "elapsed_s": 3852.6812782287598,
+              "rollouts": 10,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 5,
+              "held_out_reward": 1.0,
+              "elapsed_s": 4266.420422792435,
+              "rollouts": 12,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            }
+          ]
+        },
+        "actor_usage": {
+          "calls": 28,
+          "failures": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "model_seconds": 7077.687137
+        },
+        "tree": {
+          "nodes": 13,
+          "valid_nodes": 13,
+          "max_depth": 6,
+          "root_visits": 12,
+          "c_puct": 1.0,
+          "tree": [
+            {
+              "index": 0,
+              "parent_index": null,
+              "program_id": "e3b0c44298fc1c14",
+              "iteration": 0,
+              "change_summary": "the unmodified baseline repository (empty patch)",
+              "score": 0.5454545454545454,
+              "pass_rate": 0.5454545454545454,
+              "num_visits": 12,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 0
+            },
+            {
+              "index": 1,
+              "parent_index": 0,
+              "program_id": "feac2c1a786d90c4",
+              "iteration": 2,
+              "change_summary": "Just a `__pycache__` (gitignored) and the intended source change. Clean.",
+              "score": 0.8181818181818182,
+              "pass_rate": 0.8181818181818182,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 1528
+            },
+            {
+              "index": 2,
+              "parent_index": 0,
+              "program_id": "29fd6d0eb5eea234",
+              "iteration": 1,
+              "change_summary": "",
+              "score": 0.8181818181818182,
+              "pass_rate": 0.8181818181818182,
+              "num_visits": 11,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 1396
+            },
+            {
+              "index": 3,
+              "parent_index": 2,
+              "program_id": "0ef542f80d0cebf4",
+              "iteration": 4,
+              "change_summary": "Clean. Only the intended `SeqFeature.py` modification remains.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 9,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 2027
+            },
+            {
+              "index": 4,
+              "parent_index": 2,
+              "program_id": "5acf70c8726313a9",
+              "iteration": 3,
+              "change_summary": "This is a clean, targeted diff: it reverts node-1's speculative and incorrect `CompoundLocation._flip` part-reordering (which broke content equivalence for mixed-strand joins) and instead fixes the ac",
+              "score": 0.5454545454545454,
+              "pass_rate": 0.5454545454545454,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 1668
+            },
+            {
+              "index": 5,
+              "parent_index": 3,
+              "program_id": "e4593e293cbcb127",
+              "iteration": 6,
+              "change_summary": "This is clean and correctly scoped to `Bio/SeqFeature.py`. The final diff is verified against `reproduce.py` (passes), manifest fixtures (all features biologically correct), doctests (no new regressio",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 3140
+            },
+            {
+              "index": 6,
+              "parent_index": 3,
+              "program_id": "0ef542f80d0cebf4",
+              "iteration": 5,
+              "change_summary": "This diff is exactly the state I inherited from tree node 4, which I've now rigorously verified through independent analysis (doctest confirmation, GenBank round-trip proofs, per-feature equivalence c",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 7,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 2027
+            },
+            {
+              "index": 7,
+              "parent_index": 6,
+              "program_id": "a77807536407f0a4",
+              "iteration": 7,
+              "change_summary": "Clean. Final diff is a single, focused change to `CompoundLocation._flip` in `source/Bio/SeqFeature.py`.",
+              "score": 0.5454545454545454,
+              "pass_rate": 0.5454545454545454,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 2263
+            },
+            {
+              "index": 8,
+              "parent_index": 6,
+              "program_id": "0ef542f80d0cebf4",
+              "iteration": 8,
+              "change_summary": "Clean working tree with only the intended change. My analysis confirmed the inherited fix is correct: I proved via exhaustive derivation that (1) the reorder-based fix for all-None-strand `CompoundLoc",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 5,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 2027
+            },
+            {
+              "index": 9,
+              "parent_index": 8,
+              "program_id": "0ef542f80d0cebf4",
+              "iteration": 10,
+              "change_summary": "This is the final state. I independently re-derived the correctness of this fix from first principles (verified against the upstream `reverse_complement` docstring ground truth, 2000+ randomized prope",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 3,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 2027
+            },
+            {
+              "index": 10,
+              "parent_index": 8,
+              "program_id": "35d91e63ee67b922",
+              "iteration": 9,
+              "change_summary": "Clean diff, only `source/Bio/SeqFeature.py` touched, no scratch files left behind.",
+              "score": 0.5454545454545454,
+              "pass_rate": 0.5454545454545454,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 3638
+            },
+            {
+              "index": 11,
+              "parent_index": 9,
+              "program_id": "89a3d671f260be95",
+              "iteration": 12,
+              "change_summary": "The behavioral code now exactly matches the original upstream (pre-node-10) implementation, with only an added clarifying docstring comment (no functional change). The buggy conditional part-reversal ",
+              "score": 0.5454545454545454,
+              "pass_rate": 0.5454545454545454,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 1163
+            },
+            {
+              "index": 12,
+              "parent_index": 9,
+              "program_id": "d1fcb4fc007f3e93",
+              "iteration": 11,
+              "change_summary": "This is the final state of the diff — it's clean and matches only `source/Bio/SeqFeature.py`.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 2264
+            }
+          ]
+        },
+        "test": {
+          "baseline": {
+            "score": 0.375,
+            "pass_rate": 0.375,
+            "passed": 2,
+            "collected": 7,
+            "public": 1,
+            "checks": 8,
+            "subset_resolved": 0,
+            "seconds": 2.725,
+            "error": "",
+            "report_public": "",
+            "report": "k.parametrize(\"seed\", [3, 11, 97, 555])\n    def test_wrapping_representation_preserved(self, seed: int) -> None:\n        rng = random.Random(seed)\n        length = rng.randint(30, 160)\n        seq = make_dna(rng, length)\n        count = rng.randint(2, 4)\n        parts = wrapping_parts(rng, length, count)\n        location = compound([(s, e, None) for s, e in parts])\n        assert descent_count(location) == 1\n        record = make_record(seq, [SeqFeature(location, type=\"misc_feature\")])\n        moved = record.reverse_complement().features[0]\n>       assert descent_count(moved.location) == 1, (\n            f\"origin-wrapping representation lost: \"\n            f\"{location} -> {moved.location} (length {length})\"\n        )\nE       AssertionError: origin-wrapping representation lost: join{[103:129], [0:3]} -> join{[16:42], [142:145]} (length 145)\nE       assert 0 == 1\nE        +  where 0 = descent_count(CompoundLocation([SimpleLocation(ExactPosition(16), ExactPosition(42)), SimpleLocation(ExactPosition(142), ExactPosition(145))], 'join'))\nE        +    where CompoundLocation([SimpleLocation(ExactPosition(16), ExactPosition(42)), SimpleLocation(ExactPosition(142), ExactPosition(145))], 'join') = SeqFeature(CompoundLocation([SimpleLocation(ExactPosition(16), ExactPosition(42)), SimpleLocation(ExactPosition(142), ExactPosition(145))], 'join'), type='misc_feature').location\n\n/tests/private_tests/test_circular_reverse_complement.py:136: AssertionError\n-------------------- generated xml file: /tmp/era-junit.xml --------------------\n=========================== short test summary info ============================\nFAILED ../../tests/private_tests/test_circular_reverse_complement.py::TestUnstrandedCompoundConsistency::test_extraction_matches_reverse_complement[7]\nFAILED ../../tests/private_tests/test_circular_reverse_complement.py::TestUnstrandedCompoundConsistency::test_extraction_matches_reverse_complement[2024]\nFAILED ../../tests/private_tests/test_circular_reverse_complement.py::TestUnstrandedCompoundConsistency::test_non_wrapping_stays_ascending[5]\nFAILED ../../tests/private_tests/test_circular_reverse_complement.py::TestUnstrandedCompoundConsistency::test_extraction_matches_reverse_complement[42]\nFAILED ../../tests/private_tests/test_circular_reverse_complement.py::TestUnstrandedCompoundConsistency::test_wrapping_representation_preserved[11]\n5 failed, 2 passed in 0.57s"
+          },
+          "best": {
+            "score": 1.0,
+            "pass_rate": 1.0,
+            "passed": 7,
+            "collected": 7,
+            "public": 1,
+            "checks": 8,
+            "subset_resolved": 1,
+            "seconds": 2.565,
+            "error": "",
+            "report_public": "",
+            "report": ""
+          },
+          "pass_rate_gain": 0.625
+        }
+      },
+      "actor_usage": {
+        "calls": 28,
+        "failures": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "model_seconds": 7077.687137
+      },
+      "regraded": {
+        "previous_reward_baseline": 0,
+        "previous_reward_best": 1,
+        "previous_grade_baseline": {
+          "private": {
+            "collected": 29,
+            "failed": 15,
+            "passed": 14,
+            "return_code": 1
+          },
+          "public": {
+            "collected": 1,
+            "passed": 1,
+            "return_code": 0
+          },
+          "reward": 0,
+          "task_id": "task_029"
+        },
+        "previous_grade_best": {
+          "private": {
+            "collected": 29,
+            "failed": 0,
+            "passed": 29,
+            "return_code": 0
+          },
+          "public": {
+            "collected": 1,
+            "passed": 1,
+            "return_code": 0
+          },
+          "reward": 1,
+          "task_id": "task_029"
+        }
+      }
+    },
+    {
+      "task_id": "034",
+      "title": "Repair an inconsistent stochastic trajectory calculation",
+      "domain": "stochastic-numerical-analysis",
+      "status": "completed",
+      "benchmark_reward_baseline": 0,
+      "benchmark_reward_best": 1,
+      "benchmark_grade_baseline": {
+        "private": {
+          "collected": 8,
+          "failed": 7,
+          "passed": 1,
+          "return_code": 1
+        },
+        "public": {
+          "collected": 1,
+          "passed": 1,
+          "return_code": 0
+        },
+        "reward": 0,
+        "task_id": "task_034"
+      },
+      "benchmark_grade_best": {
+        "private": {
+          "collected": 8,
+          "failed": 0,
+          "passed": 8,
+          "return_code": 0
+        },
+        "public": {
+          "collected": 1,
+          "passed": 1,
+          "return_code": 0
+        },
+        "reward": 1,
+        "task_id": "task_034"
+      },
+      "held_back_tests": 2,
+      "held_back_pass_rate_baseline": 0.3333333333333333,
+      "held_back_pass_rate_best": 1.0,
+      "held_back_gain": 0.6666666666666667,
+      "visible_pass_rate_baseline": 0.2857142857142857,
+      "visible_pass_rate_best": 1.0,
+      "nodes": 13,
+      "wall_seconds": 5588.539189962999,
+      "best_patch_chars": 30620,
+      "best_patch": "diff --git a/source/diffrax/_solver/srk.py b/source/diffrax/_solver/srk.py\nindex ddb0309..fd98469 100644\n--- a/source/diffrax/_solver/srk.py\n+++ b/source/diffrax/_solver/srk.py\n@@ -360,8 +360,14 @@ class AbstractSRK(AbstractSolver[_SolverState]):\n         else:\n             ignore_stage_g = jnp.array(self.tableau.ignore_stage_g)\n \n-        # time increment\n+        # time increment used to place the stage times `t0 + c_j * h`; `t0 < t1`\n+        # always holds here (the surrounding step loop runs forward even when the\n+        # overall integration is in reverse time), so this must stay positive.\n         h = t1 - t0\n+        # The control fed to the drift term's `vf_prod`, by contrast, must carry\n+        # the sign flip that `WrapTerm` applies when running in reverse time (the\n+        # same correction that `diffusion.contr` below picks up automatically).\n+        drift_h = drift.contr(t0, t1)\n \n         # First the drift related stuff\n         a = self._embed_a_lower(self.tableau.a, dtype)\n@@ -545,7 +551,7 @@ class AbstractSRK(AbstractSolver[_SolverState]):\n             z_j = (y0**ω + _drift_result**ω + _diffusion_result**ω).ω\n \n             def compute_and_insert_kf_j(_h_kfs_in):\n-                h_kf_j = drift.vf_prod(t0 + c_j * h, z_j, args, h)\n+                h_kf_j = drift.vf_prod(t0 + c_j * h, z_j, args, drift_h)\n                 return insert_jth_stage(_h_kfs_in, h_kf_j, j)\n \n             if ignore_stage_f is None:\ndiff --git a/source/diffrax/_term.py b/source/diffrax/_term.py\nindex 9b0c031..c429856 100644\n--- a/source/diffrax/_term.py\n+++ b/source/diffrax/_term.py\n@@ -17,6 +17,8 @@ from jaxtyping import Array, ArrayLike, PyTree, Shaped\n from ._brownian import AbstractBrownianPath\n from ._custom_types import (\n     AbstractBrownianIncrement,\n+    AbstractSpaceTimeLevyArea,\n+    AbstractSpaceTimeTimeLevyArea,\n     Args,\n     Control,\n     IntScalarLike,\n@@ -742,7 +744,26 @@ class WrapTerm(AbstractTerm[_VF, _Control]):\n     def contr(self, t0: RealScalarLike, t1: RealScalarLike, **kwargs) -> _Control:\n         _t0 = jnp.where(self.direction == 1, t0, -t1)\n         _t1 = jnp.where(self.direction == 1, t1, -t0)\n-        return (self.direction * self.term.contr(_t0, _t1, **kwargs) ** ω).ω\n+        control = self.term.contr(_t0, _t1, **kwargs)\n+        if isinstance(control, AbstractBrownianIncrement):\n+            # The Brownian increment `W` is odd under the time-reversal `t -> -t`\n+            # (as is `dt`, the length of the underlying physical interval), so\n+            # those flip sign along with `direction`. The Lévy areas `H` and `K`\n+            # are even under this reflection -- they are built from a \"detrended\"\n+            # path increment that is invariant when both the time axis and the\n+            # path values are negated together -- so they must be left unchanged\n+            # regardless of `direction`.\n+            updates = {\"dt\": self.direction * control.dt, \"W\": (self.direction * control.W**ω).ω}\n+            if isinstance(control, AbstractSpaceTimeLevyArea):\n+                updates[\"H\"] = control.H\n+            if isinstance(control, AbstractSpaceTimeTimeLevyArea):\n+                updates[\"K\"] = control.K\n+            return eqx.tree_at(\n+                lambda c: tuple(getattr(c, name) for name in updates),\n+                control,\n+                tuple(updates.values()),\n+            )\n+        return (self.direction * control**ω).ω\n \n     def prod(self, vf: _VF, control: _Control) -> Y:\n         with jax.numpy_dtype_promotion(\"standard\"):\ndiff --git a/verify.py b/verify.py\nnew file mode 100644\nindex 0000000..2a7e115\n--- /dev/null\n+++ b/verify.py\n@@ -0,0 +1,53 @@\n+import numpy as np\n+\n+rng = np.random.default_rng(0)\n+\n+def brownian_path(n, dt):\n+    incs = rng.normal(scale=np.sqrt(dt), size=n)\n+    W = np.concatenate([[0.0], np.cumsum(incs)])\n+    return W\n+\n+def H_of(W, times, s_idx, t_idx):\n+    s, t = times[s_idx], times[t_idx]\n+    Wst = W[t_idx] - W[s_idx]\n+    integrand = W[s_idx:t_idx+1] - (times[s_idx:t_idx+1]-s)/(t-s)*Wst\n+    val = np.trapezoid(integrand, times[s_idx:t_idx+1]) / (t-s)\n+    return val\n+\n+n = 200001\n+T = 1.0\n+dt = T/(n-1)\n+times = np.linspace(0, T, n)\n+W = brownian_path(n-1, dt)\n+\n+i0, i1 = 40000, 90000\n+_t0, _t1 = times[i0], times[i1]\n+Wphys = W[i1]-W[i0]\n+Hphys = H_of(W, times, i0, i1)\n+\n+t0, t1 = -_t1, -_t0\n+tprime = -times[i0:i1+1][::-1]\n+Wprime = W[i0:i1+1][::-1]\n+\n+Wprime_inc = Wprime[-1]-Wprime[0]\n+Hprime = H_of(Wprime, tprime, 0, len(tprime)-1)\n+\n+print(\"Wphys inc:\", Wphys)\n+print(\"-Wphys:\", -Wphys)\n+print(\"W' inc:\", Wprime_inc)\n+print()\n+print(\"Hphys:\", Hphys)\n+print(\"-Hphys:\", -Hphys)\n+print(\"H' (reversed process):\", Hprime)\n+print(\"Hphys - 0.5*Wphys:\", Hphys - 0.5*Wphys)\n+print(\"-(Hphys - 0.5*Wphys):\", -(Hphys - 0.5*Wphys))\n+\n+# Try to find the correct closed form relating H' to Hphys and Wphys\n+# H'_{t0,t1} = 1/(t1-t0) int_{t0}^{t1} (W'(u) - (u-t0)/(t1-t0) W'_{t0,t1}) du\n+# with W'(u) = Wphys(-u), substitute v=-u.\n+# Let's just brute-force check candidate: H' = -Hphys + Wphys  (i.e. -(Hphys - Wphys))\n+print()\n+print(\"candidate -Hphys+Wphys:\", -Hphys+Wphys)\n+print(\"candidate Hphys-Wphys:\", Hphys-Wphys)\n+print(\"candidate -(Hphys-Wphys):\", -(Hphys-Wphys))\n+print(\"H' target:\", Hprime)\ndiff --git a/verify_H_transform.py b/verify_H_transform.py\nnew file mode 100644\nindex 0000000..a1bb181\n--- /dev/null\n+++ b/verify_H_transform.py\n@@ -0,0 +1,55 @@\n+import numpy as np\n+\n+# Brute force: given a fine discretized Brownian path W(t) on [0,1] (t increasing),\n+# compute H_{a,b} for a<b via trapezoidal approx of the defining integral.\n+rng = np.random.default_rng(0)\n+N = 200000\n+ts = np.linspace(0, 1, N)\n+dt = ts[1] - ts[0]\n+dW = rng.normal(scale=np.sqrt(dt), size=N-1)\n+W = np.concatenate([[0.0], np.cumsum(dW)])\n+\n+def H(a, b):\n+    ia = np.searchsorted(ts, a)\n+    ib = np.searchsorted(ts, b)\n+    sub_t = ts[ia:ib+1]\n+    sub_W = W[ia:ib+1]\n+    Wab = sub_W[-1] - sub_W[0]\n+    ramp = (sub_t - a) / (b - a)\n+    integrand = sub_W - sub_W[0] - ramp * Wab\n+    I = np.trapezoid(integrand, sub_t)\n+    return I / (b - a)\n+\n+a, b = 0.2, 0.7\n+H_ab = H(a, b)\n+Wab = W[np.searchsorted(ts, b)] - W[np.searchsorted(ts, a)]\n+print(\"H_ab =\", H_ab, \"W_ab =\", Wab)\n+\n+# Reversed process W'(u) = W(-u) defined on interval u in [-b, -a] (so u increasing corresponds to t=-u decreasing)\n+# We sample W' at discretized points t0=-b, t1=-a\n+# W'(u) = W(-u). Build fine grid for u in [-b,-a]\n+us = np.linspace(-b, -a, N)\n+def Wprime_interp(u):\n+    t = -u\n+    return np.interp(t, ts, W)\n+\n+Wp = Wprime_interp(us)\n+\n+def Hprime(t0, t1):\n+    # analogous integral for W' over [t0,t1]\n+    mask = (us >= t0) & (us <= t1)\n+    sub_u = us[mask]\n+    sub_Wp = Wp[mask]\n+    W_t0t1 = sub_Wp[-1] - sub_Wp[0]\n+    ramp = (sub_u - t0) / (t1 - t0)\n+    integrand = sub_Wp - sub_Wp[0] - ramp * W_t0t1\n+    I = np.trapezoid(integrand, sub_u)\n+    return I / (t1 - t0)\n+\n+t0, t1 = -b, -a\n+Hp = Hprime(t0, t1)\n+Wp_incr = Wp[-1] - Wp[0]\n+print(\"H'_{t0,t1} =\", Hp, \" W'_{t0,t1} =\", Wp_incr)\n+print(\"check W' == -W_ab:\", Wp_incr, -Wab)\n+print(\"check H' == H_ab + W_ab (predicted):\", Hp, H_ab + Wab)\n+print(\"check H' == -H_ab (old code):\", Hp, -H_ab)\ndiff --git a/verify_H_transform2.py b/verify_H_transform2.py\nnew file mode 100644\nindex 0000000..0aaf721\n--- /dev/null\n+++ b/verify_H_transform2.py\n@@ -0,0 +1,50 @@\n+import numpy as np\n+\n+rng = np.random.default_rng(0)\n+N = 200001  # points, so N-1 intervals\n+ts = np.linspace(0, 1, N)\n+dt = ts[1] - ts[0]\n+dW = rng.normal(scale=np.sqrt(dt), size=N-1)\n+W = np.concatenate([[0.0], np.cumsum(dW)])\n+# Reversed path sampled at EXACT mirrored grid points: us = -ts (reversed order), W'(u_i) = W(t_{N-1-i})\n+us = (-ts)[::-1]  # increasing\n+Wp = W[::-1]      # W'(us[i]) = W(ts[N-1-i]) = W(-us[i])\n+\n+assert np.allclose(us, -ts[::-1])\n+\n+def H_forward(a_idx, b_idx):\n+    sub_t = ts[a_idx:b_idx+1]\n+    sub_W = W[a_idx:b_idx+1]\n+    a, b = sub_t[0], sub_t[-1]\n+    Wab = sub_W[-1]-sub_W[0]\n+    ramp = (sub_t - a)/(b-a)\n+    integrand = sub_W - sub_W[0] - ramp*Wab\n+    return np.trapezoid(integrand, sub_t)/(b-a), Wab\n+\n+def H_reversed(a_idx, b_idx):\n+    sub_u = us[a_idx:b_idx+1]\n+    sub_Wp = Wp[a_idx:b_idx+1]\n+    t0,t1 = sub_u[0], sub_u[-1]\n+    Wincr = sub_Wp[-1]-sub_Wp[0]\n+    ramp = (sub_u - t0)/(t1-t0)\n+    integrand = sub_Wp - sub_Wp[0] - ramp*Wincr\n+    return np.trapezoid(integrand, sub_u)/(t1-t0), Wincr\n+\n+# pick physical a,b indices\n+ia, ib = 40000, 140000  # a=0.2, b=0.7\n+H_ab, W_ab = H_forward(ia, ib)\n+\n+# corresponding reversed indices: us index j corresponds to ts index N-1-j\n+# t0 = -b => ts index ib => us index N-1-ib\n+# t1 = -a => ts index ia => us index N-1-ia\n+ja = N-1-ib\n+jb = N-1-ia\n+Hp, Wp_incr = H_reversed(ja, jb)\n+\n+print(\"H_ab\", H_ab, \"W_ab\", W_ab)\n+print(\"H'  \", Hp, \"W' \", Wp_incr)\n+print(\"-W_ab\", -W_ab)\n+print(\"-H_ab\", -H_ab)\n+print(\"H_ab+W_ab\", H_ab+W_ab)\n+print(\"diff H' vs -H_ab:\", Hp - (-H_ab))\n+print(\"diff H' vs (H_ab+W_ab):\", Hp - (H_ab+W_ab))\ndiff --git a/verify_H_transform3.py b/verify_H_transform3.py\nnew file mode 100644\nindex 0000000..5f55d7f\n--- /dev/null\n+++ b/verify_H_transform3.py\n@@ -0,0 +1,24 @@\n+import numpy as np\n+\n+rng = np.random.default_rng(1)\n+N = 400001\n+ts = np.linspace(0, 2, N)\n+dt = ts[1]-ts[0]\n+dW = rng.normal(scale=np.sqrt(dt), size=N-1)\n+W = np.concatenate([[0.0], np.cumsum(dW)])\n+us = (-ts)[::-1]\n+Wp = W[::-1]\n+\n+def H_of(tarr, warr, a_idx, b_idx):\n+    sub_t = tarr[a_idx:b_idx+1]; sub_W = warr[a_idx:b_idx+1]\n+    a,b = sub_t[0], sub_t[-1]\n+    Wab = sub_W[-1]-sub_W[0]\n+    ramp = (sub_t-a)/(b-a)\n+    integrand = sub_W - sub_W[0] - ramp*Wab\n+    return np.trapezoid(integrand, sub_t)/(b-a), Wab\n+\n+for (ia,ib) in [(1000, 5000), (150000, 151000), (0, 400000), (399000,400000)]:\n+    H_ab, W_ab = H_of(ts, W, ia, ib)\n+    ja, jb = N-1-ib, N-1-ia\n+    Hp, Wp_incr = H_of(us, Wp, ja, jb)\n+    print(f\"ia={ia},ib={ib}: H_ab={H_ab:.6f} H'={Hp:.6f} match={np.isclose(H_ab,Hp,atol=1e-8)}  W_ab={W_ab:.6f} -W'={-Wp_incr:.6f} match={np.isclose(W_ab,-Wp_incr,atol=1e-8)}\")\ndiff --git a/verify_K_transform.py b/verify_K_transform.py\nnew file mode 100644\nindex 0000000..babf959\n--- /dev/null\n+++ b/verify_K_transform.py\n@@ -0,0 +1,65 @@\n+import numpy as np\n+\n+# K_{s,t} definition (space-time-time Levy area), per Foster's thesis / diffrax docs:\n+# bhh_t = t*H_{0,t} = integral_0^t (W_u - u/t * W_t) du\n+# For K we use the double-integral definition consistent with the code's bkk relation:\n+# Rather than re-derive the exact formula, use the recursive definition via\n+# bkk_su implied by the code's _levy_diff, but that requires the tree internals.\n+#\n+# Instead, use the general definition from Foster's thesis (as referenced in tree.py):\n+# K_{s,t} is defined via the iterated integral structure such that it's part of a\n+# \"space-time-time\" Levy area capturing the *second* moment of the detrended path,\n+# analogous to H's *first* moment. Both H and K are constructed from the SAME\n+# detrended/de-meaned quantity (W_u - ramp*W_st), just weighted by different powers\n+# of the local rescaled coordinate. Since this weighting is symmetric in the sense\n+# that reflecting u -> s+t-u and time-reversing together leaves domain the same,\n+# and since (as shown for H) the detrended integral integrand is invariant under\n+# the combined \"reverse time and reverse value\" map, any Levy area built purely by\n+# integrating powers of the detrended increment against the *even*-under-that-symmetry\n+# ramp functions will be invariant, same as H.\n+#\n+# We verify this concretely for K using its recursive Chen relation _levy_diff logic,\n+# reproduced from tree.py, applied to BOTH a forward fine random walk and its time-negated\n+# mirror (same trick as verify_H_transform2/3), using the *bhh*, *bkk* running sums\n+# defined by brownian_arch's incremental splitting -- but that's an approximation\n+# (midpoint tree), not a closed form we can trivially invert.\n+#\n+# Simpler and fully rigorous approach: use the known closed-form definition of K via\n+# nested integrals (see e.g. Foster 2020, or Kloeden & Platen \"double Wiener integral\"):\n+#  bar{K}_{s,t} = integral_s^t integral_s^r (W_v - ramp-detrended...) -- complex.\n+#\n+# Given time constraints, we instead verify the GENERAL principle numerically:\n+# build W(t) on a fine grid, define W'(u) = W(-u) on the mirrored grid (exact point\n+# correspondence, no interpolation), then compute K via the SAME recursive\n+# \"space-time-time\" formula used by the library's _brownian_arch/_evaluate_leaf\n+# midpoint construction is not closed-form -- so instead verify via the alternative\n+# known closed form:\n+#   bar{H}_{s,t} = int_s^t (W_u - W_s) du - (t-s)/2 * W_{s,t}\n+#   bar{K}_{s,t} = int_s^t (u-s) * (W_u - W_s) du - (t-s)^2/6 * W_{s,t} - (t-s)/2*bar{H}_{s,t}\n+# (this is a standard identity: K relates to the moment int (u-s)(W_u-W_s)du)\n+# Let's just directly test invariance of int_s^t (u-s)(W_u - W_s) du analog under reversal,\n+# since bar{K} is built from that plus already-shown-invariant bar{H} and W terms multiplied\n+# by things that are themselves already accounted the same way as bar H sign-wise (up to the\n+# W_{s,t} terms whose sign flips, consistently, in the code's b_error / bkk constructions).\n+\n+rng = np.random.default_rng(2)\n+N = 400001\n+ts = np.linspace(0, 2, N)\n+dt = ts[1]-ts[0]\n+dW = rng.normal(scale=np.sqrt(dt), size=N-1)\n+W = np.concatenate([[0.0], np.cumsum(dW)])\n+us = (-ts)[::-1]\n+Wp = W[::-1]\n+\n+def moment1(tarr, warr, a_idx, b_idx):\n+    # int_s^t (u-s)*(W_u - W_s) du  -- the raw moment feeding bar{K}\n+    sub_t = tarr[a_idx:b_idx+1]; sub_W = warr[a_idx:b_idx+1]\n+    a = sub_t[0]\n+    integrand = (sub_t - a) * (sub_W - sub_W[0])\n+    return np.trapezoid(integrand, sub_t)\n+\n+for (ia, ib) in [(1000,5000),(150000,151000),(0,400000)]:\n+    m_fwd = moment1(ts, W, ia, ib)\n+    ja, jb = N-1-ib, N-1-ia\n+    m_rev = moment1(us, Wp, ja, jb)\n+    print(f\"ia={ia},ib={ib}: moment_fwd={m_fwd:.6f} moment_rev={m_rev:.6f} ratio={m_rev/m_fwd:.4f}\")\ndiff --git a/verify_chen.py b/verify_chen.py\nnew file mode 100644\nindex 0000000..3b80a72\n--- /dev/null\n+++ b/verify_chen.py\n@@ -0,0 +1,77 @@\n+import os\n+os.environ.setdefault(\"JAX_ENABLE_X64\", \"true\")\n+import sys\n+sys.path.insert(0, \"source\")\n+import jax, jax.numpy as jnp, jax.random as jr\n+jax.config.update(\"jax_enable_x64\", True)\n+import diffrax as dfx\n+\n+shape = jax.ShapeDtypeStruct((), jnp.float64)\n+key = jr.key(11)\n+vbt = dfx.VirtualBrownianTree(t0=0.0, t1=1.0, tol=1e-9, shape=shape, key=key, levy_area=dfx.SpaceTimeTimeLevyArea)\n+\n+# physical times a < m < b\n+a, m, b = 0.1, 0.42, 0.77\n+\n+inc_am = vbt.evaluate(a, m, use_levy=True)\n+inc_mb = vbt.evaluate(m, b, use_levy=True)\n+inc_ab = vbt.evaluate(a, b, use_levy=True)\n+\n+print(\"Physical: W_am+W_mb =\", inc_am.W+inc_mb.W, \" vs W_ab =\", inc_ab.W)\n+\n+# Chen's relation for H (from _levy_diff logic, using bar_H accumulation) is complex;\n+# instead let's directly test the two candidate transforms for internal WrapTerm.contr\n+# reconstructing internal-frame stage sub-increments and checking they combine correctly\n+# with the internal-frame Chen relation used by _levy_diff itself (since the SRK doesn't\n+# call _levy_diff directly during a step -- it just needs the per-step (W,H,K) to be a\n+# valid realization of an SDE's SRK stage over the internal sub-step). The real test:\n+# does the \"wrapped, reversed\" VBT (i.e. running an actual diffeqsolve with WrapTerm)\n+# used as the SRK diffusion term produce numerically correct results, matching a\n+# reference obtained by transforming the SDE analytically and solving forward?\n+#\n+# We'll do exactly that: solve dY = sin(Y) dt + dW forward from y(a)=y0 to y(b),\n+# and solve the SAME physical SDE but by calling diffeqsolve with t0=b, t1=a\n+# (reverse time, direction=-1) using the SAME underlying Brownian path (same VBT,\n+# same key), and check the reverse-time solve reproduces y(a) starting from y(b)\n+# -- i.e. round-trip consistency: forward solve to get y(b) from y(a), then a\n+# reverse-time solve from t0=b to t1=a using the same VBT/key should reconstruct y(a),\n+# for the DETERMINISTIC (no noise) part combined correctly, but since it's the SAME\n+# realized path, the reverse SRK step must be solving the *reverse* SDE correctly.\n+#\n+# Simpler: since SlowRK is being used with additive noise in the real study, test\n+# with additive noise (diffusion constant) where the exact solution has a closed form\n+# we can check against a high-resolution Euler-Maruyama reference using the SAME path.\n+\n+def drift(t, y, args):\n+    return jnp.sin(y)\n+\n+def diffusion(t, y, args):\n+    return 1.0\n+\n+t0p, t1p = 0.1, 0.9  # physical forward orientation for building a reference\n+y0 = jnp.array(1.0, dtype=jnp.float64)\n+\n+control = dfx.VirtualBrownianTree(t0=t0p, t1=t1p, tol=1e-8, shape=shape, key=jr.key(99), levy_area=dfx.SpaceTimeLevyArea)\n+terms = dfx.MultiTerm(dfx.ODETerm(drift), dfx.ControlTerm(diffusion, control))\n+\n+# High-res Euler-Maruyama forward reference using many small SRK/Euler steps forward a->b\n+sol_fwd = dfx.diffeqsolve(terms, dfx.Euler(), t0=t0p, t1=t1p, dt0=(t1p-t0p)/200000, y0=y0,\n+                            saveat=dfx.SaveAt(ts=jnp.array([t0p, t1p])),\n+                            stepsize_controller=dfx.ConstantStepSize(), max_steps=2**20)\n+y_at_t1p_ref = sol_fwd.ys[-1]\n+print(\"Euler forward reference y(t1p) =\", y_at_t1p_ref)\n+\n+# Now solve forward a->b using SlowRK with coarse steps\n+sol_srk_fwd = dfx.diffeqsolve(terms, dfx.SlowRK(), t0=t0p, t1=t1p, dt0=(t1p-t0p)/64, y0=y0,\n+                            saveat=dfx.SaveAt(ts=jnp.array([t0p, t1p])),\n+                            stepsize_controller=dfx.ConstantStepSize(), max_steps=2**16)\n+print(\"SlowRK forward y(t1p) =\", sol_srk_fwd.ys[-1])\n+\n+# Now solve REVERSE: t0=t1p, t1=t0p using the SAME control (VirtualBrownianTree with\n+# SAME t0,t1,key), starting from y(t1p) [use the accurate Euler reference], and see if\n+# SlowRK reverse-time reconstructs y(t0p) == y0 to reasonable SRK-level (not Euler-level) accuracy.\n+sol_srk_rev = dfx.diffeqsolve(terms, dfx.SlowRK(), t0=t1p, t1=t0p, dt0=-(t1p-t0p)/64, y0=y_at_t1p_ref,\n+                            saveat=dfx.SaveAt(ts=jnp.array([t1p, t0p])),\n+                            stepsize_controller=dfx.ConstantStepSize(), max_steps=2**16)\n+print(\"SlowRK reverse-time y(t0p) [should be close to y0=1.0] =\", sol_srk_rev.ys[-1])\n+print(\"error:\", abs(sol_srk_rev.ys[-1] - y0))\ndiff --git a/verify_drift_h.py b/verify_drift_h.py\nnew file mode 100644\nindex 0000000..44a28e1\n--- /dev/null\n+++ b/verify_drift_h.py\n@@ -0,0 +1,38 @@\n+import os\n+os.environ.setdefault(\"JAX_ENABLE_X64\", \"true\")\n+import sys\n+sys.path.insert(0, \"source\")\n+import jax, jax.numpy as jnp, jax.random as jr\n+jax.config.update(\"jax_enable_x64\", True)\n+import diffrax as dfx\n+\n+shape = jax.ShapeDtypeStruct((), jnp.float64)\n+\n+def drift(t, y, args):\n+    return jnp.sin(y) + 0.3*jnp.cos(2*t)\n+\n+def diffusion(t, y, args):\n+    return 0.0  # zero noise -> pure ODE via SRK, isolates drift_h correctness\n+\n+t0p, t1p = 0.1, 1.3\n+y0 = jnp.array(0.5, dtype=jnp.float64)\n+key = jr.key(3)\n+control = dfx.VirtualBrownianTree(t0=t0p, t1=t1p, tol=1e-8, shape=shape, key=key, levy_area=dfx.SpaceTimeLevyArea)\n+terms = dfx.MultiTerm(dfx.ODETerm(drift), dfx.ControlTerm(diffusion, control))\n+\n+sol_ref = dfx.diffeqsolve(terms, dfx.Euler(), t0=t0p, t1=t1p, dt0=(t1p-t0p)/500000, y0=y0,\n+                            saveat=dfx.SaveAt(ts=jnp.array([t0p, t1p])),\n+                            stepsize_controller=dfx.ConstantStepSize(), max_steps=2**21)\n+y_ref = sol_ref.ys[-1]\n+print(\"ref y(t1p) =\", y_ref)\n+\n+for n in [16, 64, 256]:\n+    sol_fwd = dfx.diffeqsolve(terms, dfx.SlowRK(), t0=t0p, t1=t1p, dt0=(t1p-t0p)/n, y0=y0,\n+                                saveat=dfx.SaveAt(ts=jnp.array([t0p, t1p])),\n+                                stepsize_controller=dfx.ConstantStepSize(), max_steps=2**16)\n+    y_fwd = sol_fwd.ys[-1]\n+    sol_rev = dfx.diffeqsolve(terms, dfx.SlowRK(), t0=t1p, t1=t0p, dt0=-(t1p-t0p)/n, y0=y_ref,\n+                                saveat=dfx.SaveAt(ts=jnp.array([t1p, t0p])),\n+                                stepsize_controller=dfx.ConstantStepSize(), max_steps=2**16)\n+    y_rev = sol_rev.ys[-1]\n+    print(f\"n={n:4d} fwd_err={float(abs(y_fwd-y_ref)):.6e}  rev_roundtrip_err={float(abs(y_rev-y0)):.6e}\")\ndiff --git a/verify_forward_unaffected.py b/verify_forward_unaffected.py\nnew file mode 100644\nindex 0000000..6d2337b\n--- /dev/null\n+++ b/verify_forward_unaffected.py\n@@ -0,0 +1,26 @@\n+import os\n+os.environ.setdefault(\"JAX_ENABLE_X64\", \"true\")\n+import sys\n+sys.path.insert(0, \"source\")\n+import jax, jax.numpy as jnp, jax.random as jr\n+jax.config.update(\"jax_enable_x64\", True)\n+import diffrax as dfx\n+\n+shape = jax.ShapeDtypeStruct((), jnp.float64)\n+\n+def drift(t, y, args):\n+    return -0.5 * y + jnp.sin(3*t)\n+\n+def diffusion_t(t, y, args):\n+    return 1.0 + 0.4*jnp.sin(2*t)\n+\n+t0p, t1p = 0.1, 0.9\n+y0 = jnp.array(1.0, dtype=jnp.float64)\n+key = jr.key(777)\n+control = dfx.VirtualBrownianTree(t0=t0p, t1=t1p, tol=1e-8, shape=shape, key=key, levy_area=dfx.SpaceTimeLevyArea)\n+terms = dfx.MultiTerm(dfx.ODETerm(drift), dfx.ControlTerm(diffusion_t, control))\n+\n+sol = dfx.diffeqsolve(terms, dfx.SlowRK(), t0=t0p, t1=t1p, dt0=(t1p-t0p)/64, y0=y0,\n+                        saveat=dfx.SaveAt(ts=jnp.array([t0p, t1p])),\n+                        stepsize_controller=dfx.ConstantStepSize(), max_steps=2**16)\n+print(\"forward solve y(t1p) =\", sol.ys[-1])\ndiff --git a/verify_isolate.py b/verify_isolate.py\nnew file mode 100644\nindex 0000000..6922392\n--- /dev/null\n+++ b/verify_isolate.py\n@@ -0,0 +1,44 @@\n+import os\n+os.environ.setdefault(\"JAX_ENABLE_X64\", \"true\")\n+import sys\n+sys.path.insert(0, \"source\")\n+import jax, jax.numpy as jnp, jax.random as jr\n+jax.config.update(\"jax_enable_x64\", True)\n+import diffrax as dfx\n+\n+shape = jax.ShapeDtypeStruct((), jnp.float64)\n+\n+# Use MULTIPLICATIVE noise (state-dependent diffusion) so that H actually enters\n+# the SRK stage computations (for additive noise it's the same weight, less sensitive).\n+# g(t,y) = 0.3 + 0.1*y  (linear, so vf non-constant -> non-additive noise path in SRK)\n+\n+def drift(t, y, args):\n+    return -0.5 * y\n+\n+def diffusion(t, y, args):\n+    return 0.3 + 0.1 * y\n+\n+t0p, t1p = 0.1, 0.9\n+y0 = jnp.array(1.0, dtype=jnp.float64)\n+\n+key = jr.key(2024)\n+control = dfx.VirtualBrownianTree(t0=t0p, t1=t1p, tol=1e-8, shape=shape, key=key, levy_area=dfx.SpaceTimeLevyArea)\n+terms = dfx.MultiTerm(dfx.ODETerm(drift), dfx.ControlTerm(diffusion, control))\n+\n+# Very fine Euler-Maruyama forward reference for y(t1p)\n+sol_fwd_ref = dfx.diffeqsolve(terms, dfx.Euler(), t0=t0p, t1=t1p, dt0=(t1p-t0p)/500000, y0=y0,\n+                            saveat=dfx.SaveAt(ts=jnp.array([t0p, t1p])),\n+                            stepsize_controller=dfx.ConstantStepSize(), max_steps=2**21)\n+y_t1p_ref = sol_fwd_ref.ys[-1]\n+\n+for n in [16, 32, 64, 128, 256]:\n+    sol_srk_fwd = dfx.diffeqsolve(terms, dfx.SlowRK(), t0=t0p, t1=t1p, dt0=(t1p-t0p)/n, y0=y0,\n+                                saveat=dfx.SaveAt(ts=jnp.array([t0p, t1p])),\n+                                stepsize_controller=dfx.ConstantStepSize(), max_steps=2**16)\n+    y_fwd = sol_srk_fwd.ys[-1]\n+\n+    sol_srk_rev = dfx.diffeqsolve(terms, dfx.SlowRK(), t0=t1p, t1=t0p, dt0=-(t1p-t0p)/n, y0=y_t1p_ref,\n+                                saveat=dfx.SaveAt(ts=jnp.array([t1p, t0p])),\n+                                stepsize_controller=dfx.ConstantStepSize(), max_steps=2**16)\n+    y_rev = sol_srk_rev.ys[-1]\n+    print(f\"n={n:4d}  fwd_err={float(abs(y_fwd-y_t1p_ref)):.6e}  rev_roundtrip_err={float(abs(y_rev-y0)):.6e}\")\ndiff --git a/verify_isolate2.py b/verify_isolate2.py\nnew file mode 100644\nindex 0000000..cfad335\n--- /dev/null\n+++ b/verify_isolate2.py\n@@ -0,0 +1,43 @@\n+import os\n+os.environ.setdefault(\"JAX_ENABLE_X64\", \"true\")\n+import sys\n+sys.path.insert(0, \"source\")\n+import jax, jax.numpy as jnp, jax.random as jr\n+jax.config.update(\"jax_enable_x64\", True)\n+import diffrax as dfx\n+\n+shape = jax.ShapeDtypeStruct((), jnp.float64)\n+\n+def drift(t, y, args):\n+    return -0.5 * y + jnp.sin(3*t)\n+\n+def diffusion(t, y, args):\n+    return 1.0  # additive but still exercises H via time-dependence correction term? Actually constant g has no t-dependence.\n+\n+def diffusion_t(t, y, args):\n+    return 1.0 + 0.4*jnp.sin(2*t)  # time-varying additive noise -> uses g_delta/H correction\n+\n+t0p, t1p = 0.1, 0.9\n+y0 = jnp.array(1.0, dtype=jnp.float64)\n+\n+key = jr.key(777)\n+control = dfx.VirtualBrownianTree(t0=t0p, t1=t1p, tol=1e-8, shape=shape, key=key, levy_area=dfx.SpaceTimeLevyArea)\n+terms = dfx.MultiTerm(dfx.ODETerm(drift), dfx.ControlTerm(diffusion_t, control))\n+\n+sol_fwd_ref = dfx.diffeqsolve(terms, dfx.Euler(), t0=t0p, t1=t1p, dt0=(t1p-t0p)/500000, y0=y0,\n+                            saveat=dfx.SaveAt(ts=jnp.array([t0p, t1p])),\n+                            stepsize_controller=dfx.ConstantStepSize(), max_steps=2**21)\n+y_t1p_ref = sol_fwd_ref.ys[-1]\n+print(\"ref y(t1p)=\", y_t1p_ref)\n+\n+for n in [16, 32, 64, 128, 256, 512]:\n+    sol_srk_fwd = dfx.diffeqsolve(terms, dfx.SlowRK(), t0=t0p, t1=t1p, dt0=(t1p-t0p)/n, y0=y0,\n+                                saveat=dfx.SaveAt(ts=jnp.array([t0p, t1p])),\n+                                stepsize_controller=dfx.ConstantStepSize(), max_steps=2**16)\n+    y_fwd = sol_srk_fwd.ys[-1]\n+\n+    sol_srk_rev = dfx.diffeqsolve(terms, dfx.SlowRK(), t0=t1p, t1=t0p, dt0=-(t1p-t0p)/n, y0=y_t1p_ref,\n+                                saveat=dfx.SaveAt(ts=jnp.array([t1p, t0p])),\n+                                stepsize_controller=dfx.ConstantStepSize(), max_steps=2**16)\n+    y_rev = sol_srk_rev.ys[-1]\n+    print(f\"n={n:4d}  fwd_err={float(abs(y_fwd-y_t1p_ref)):.6e}  rev_roundtrip_err={float(abs(y_rev-y0)):.6e}\")\ndiff --git a/verify_levy4.py b/verify_levy4.py\nnew file mode 100644\nindex 0000000..beb228b\n--- /dev/null\n+++ b/verify_levy4.py\n@@ -0,0 +1,49 @@\n+import os\n+os.environ.setdefault(\"JAX_ENABLE_X64\", \"true\")\n+import sys\n+sys.path.insert(0, \"source\")\n+import jax, jax.numpy as jnp, jax.random as jr\n+jax.config.update(\"jax_enable_x64\", True)\n+import diffrax as dfx\n+from diffrax._term import WrapTerm\n+\n+shape = jax.ShapeDtypeStruct((), jnp.float64)\n+key = jr.key(7)\n+vbt = dfx.VirtualBrownianTree(t0=0.0, t1=1.0, tol=1e-8, shape=shape, key=key, levy_area=dfx.SpaceTimeLevyArea)\n+\n+s, u = 0.05, 0.85  # s < u\n+\n+\n+def diffusion(t, y, args):\n+    return 1.0\n+\n+\n+N = 20000\n+rs = jnp.linspace(u, s, N)  # from u down to s\n+\n+\n+def ev(r):\n+    return vbt.evaluate(0.0, r)\n+\n+\n+Ws = jax.jit(jax.vmap(ev))(rs)\n+Ws = jax.device_get(Ws)\n+rs_np = jax.device_get(rs)\n+import numpy as np\n+\n+Wu = Ws[0]\n+integrand = Ws - Wu\n+I = np.trapezoid(integrand, rs_np)\n+denom = s - u\n+H_reversed_anchor_u = I / denom - 0.5 * (Ws[-1] - Wu)\n+print(\"brute force H with anchor at u, integrating to s:\", H_reversed_anchor_u)\n+\n+inc_su = vbt.evaluate(s, u, use_levy=True)\n+print(\"forward H_su (anchor s):\", inc_su.H, \" W_su:\", inc_su.W)\n+print(\"predicted from patch: H_su + W_su =\", inc_su.H + inc_su.W)\n+\n+cterm = dfx.ControlTerm(diffusion, vbt)\n+wrapped = WrapTerm(cterm, direction=jnp.asarray(-1))\n+tau0, tau1 = -u, -s\n+control_out = wrapped.contr(tau0, tau1, use_levy=True)\n+print(\"WrapTerm.contr direction=-1 gives W,H:\", control_out.W, control_out.H)\ndiff --git a/verify_shark.py b/verify_shark.py\nnew file mode 100644\nindex 0000000..271cd16\n--- /dev/null\n+++ b/verify_shark.py\n@@ -0,0 +1,39 @@\n+import os\n+os.environ.setdefault(\"JAX_ENABLE_X64\", \"true\")\n+import sys\n+sys.path.insert(0, \"source\")\n+import jax, jax.numpy as jnp, jax.random as jr\n+jax.config.update(\"jax_enable_x64\", True)\n+import diffrax as dfx\n+\n+shape = jax.ShapeDtypeStruct((), jnp.float64)\n+\n+def drift(t, y, args):\n+    return -0.5 * y + jnp.sin(3*t)\n+\n+def diffusion_t(t, y, args):\n+    return 1.0 + 0.4*jnp.sin(2*t)\n+\n+t0p, t1p = 0.1, 0.9\n+y0 = jnp.array(1.0, dtype=jnp.float64)\n+key = jr.key(555)\n+control = dfx.VirtualBrownianTree(t0=t0p, t1=t1p, tol=1e-8, shape=shape, key=key, levy_area=dfx.SpaceTimeLevyArea)\n+terms = dfx.MultiTerm(dfx.ODETerm(drift), dfx.ControlTerm(diffusion_t, control))\n+\n+sol_ref = dfx.diffeqsolve(terms, dfx.Euler(), t0=t0p, t1=t1p, dt0=(t1p-t0p)/500000, y0=y0,\n+                            saveat=dfx.SaveAt(ts=jnp.array([t0p, t1p])),\n+                            stepsize_controller=dfx.ConstantStepSize(), max_steps=2**21)\n+y_ref = sol_ref.ys[-1]\n+\n+for SolverCls in [dfx.ShARK, dfx.SPaRK, dfx.SRA1]:\n+    print(\"Solver:\", SolverCls.__name__)\n+    for n in [32, 128, 512]:\n+        sol_fwd = dfx.diffeqsolve(terms, SolverCls(), t0=t0p, t1=t1p, dt0=(t1p-t0p)/n, y0=y0,\n+                                    saveat=dfx.SaveAt(ts=jnp.array([t0p, t1p])),\n+                                    stepsize_controller=dfx.ConstantStepSize(), max_steps=2**16)\n+        y_fwd = sol_fwd.ys[-1]\n+        sol_rev = dfx.diffeqsolve(terms, SolverCls(), t0=t1p, t1=t0p, dt0=-(t1p-t0p)/n, y0=y_ref,\n+                                    saveat=dfx.SaveAt(ts=jnp.array([t1p, t0p])),\n+                                    stepsize_controller=dfx.ConstantStepSize(), max_steps=2**16)\n+        y_rev = sol_rev.ys[-1]\n+        print(f\"  n={n:4d} fwd_err={float(abs(y_fwd-y_ref)):.6e}  rev_roundtrip_err={float(abs(y_rev-y0)):.6e}\")\ndiff --git a/verify_vbt_direct.py b/verify_vbt_direct.py\nnew file mode 100644\nindex 0000000..a37278c\n--- /dev/null\n+++ b/verify_vbt_direct.py\n@@ -0,0 +1,31 @@\n+import os\n+os.environ.setdefault(\"JAX_ENABLE_X64\", \"true\")\n+import sys\n+sys.path.insert(0, \"source\")\n+import jax, jax.numpy as jnp, jax.random as jr\n+jax.config.update(\"jax_enable_x64\", True)\n+import diffrax as dfx\n+\n+shape = jax.ShapeDtypeStruct((), jnp.float64)\n+key = jr.key(7)\n+vbt = dfx.VirtualBrownianTree(t0=0.0, t1=1.0, tol=1e-8, shape=shape, key=key, levy_area=dfx.SpaceTimeLevyArea)\n+\n+s, u = 0.05, 0.85  # s < u, physical\n+\n+inc_su = vbt.evaluate(s, u, use_levy=True)\n+print(\"physical H_{s,u} =\", inc_su.H, \" W_{s,u} =\", inc_su.W)\n+\n+# internal-frame \"reversed\" would need vbt defined on internal time axis;\n+# but let's directly test what value SRK *should* use: per our derivation,\n+# H'_{t0,t1} (internal) with t0=-u, t1=-s should equal the physical\n+# H_{s,u} unchanged (not negated), while W' = -W_{s,u}.\n+print(\"predicted internal control (W', H') = (\", -inc_su.W, \",\", inc_su.H, \")\")\n+\n+from diffrax._term import WrapTerm\n+def diffusion(t, y, args):\n+    return 1.0\n+cterm = dfx.ControlTerm(diffusion, vbt)\n+wrapped = WrapTerm(cterm, direction=jnp.asarray(-1))\n+tau0, tau1 = -u, -s\n+control_out = wrapped.contr(tau0, tau1, use_levy=True)\n+print(\"WrapTerm.contr actual (W,H) =\", control_out.W, control_out.H)",
+      "observation": {
+        "mode": "sync",
+        "wall_seconds": 5588.539189962999,
+        "baseline": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "e3b0c44298fc1c14",
+          "iteration": 0,
+          "change_summary": "the unmodified baseline repository (empty patch)",
+          "score": 0.2857142857142857,
+          "pass_rate": 0.2857142857142857,
+          "num_visits": 12,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 0
+        },
+        "best": {
+          "index": 8,
+          "parent_index": 6,
+          "program_id": "5cda266b79791724",
+          "iteration": 8,
+          "change_summary": "",
+          "score": 1.0,
+          "pass_rate": 1.0,
+          "num_visits": 5,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 30620
+        },
+        "data": {
+          "task_id": "034",
+          "title": "Repair an inconsistent stochastic trajectory calculation",
+          "domain": "stochastic-numerical-analysis",
+          "language": "python",
+          "repository": "https://github.com/patrick-kidger/diffrax",
+          "base_commit": "56d78e1acbdc9c1493caef17a34777931430f3bf",
+          "source_license": "Apache-2.0",
+          "license_gate": "none",
+          "environment_image": "docker.io/kevinxulearning/swe-bench-science-environment-python-task-034:v0.1.1@sha256:fa45aacfb4bbf402fbd7597ca767d61065cf767a35e9c457f708bb024e46a29f",
+          "verifier_image": "docker.io/kevinxulearning/swe-bench-science-verifier-python-task-034:v0.1.1@sha256:05bcfc247e7ddf648bb2c176a6a51e0044fe3e262fb1520291c13384074fdaa7",
+          "private_tests": 8,
+          "visible_tests": 6,
+          "held_back_tests": 2,
+          "scoring_shards": 4,
+          "held_back_shards": 2,
+          "shard_rule": "replicate",
+          "seed": 0
+        },
+        "framework": {
+          "baseline_reward": 0.2857142857142857,
+          "final_reward": 1.0,
+          "quality_gain": 0.7142857142857143,
+          "stop_reason": "rounds",
+          "error": null,
+          "outcomes": {
+            "tree-updated": 4,
+            "committed": 2
+          },
+          "rollouts": 12,
+          "rollout_seconds": 0.0035419464111328125,
+          "eval_seconds": 0.0035364627838134766,
+          "stale_considered": 12,
+          "stale_discarded": 0,
+          "stale_rate": 0.0,
+          "retired_workers": 0,
+          "history": [
+            {
+              "round": 0,
+              "held_out_reward": 0.2857142857142857,
+              "elapsed_s": 1369.0112037658691,
+              "rollouts": 2,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 1,
+              "held_out_reward": 0.7142857142857143,
+              "elapsed_s": 2751.0793142318726,
+              "rollouts": 4,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 2,
+              "held_out_reward": 0.7142857142857143,
+              "elapsed_s": 3188.6434137821198,
+              "rollouts": 6,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 3,
+              "held_out_reward": 1.0,
+              "elapsed_s": 4479.556969404221,
+              "rollouts": 8,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 4,
+              "held_out_reward": 1.0,
+              "elapsed_s": 5193.840878486633,
+              "rollouts": 10,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 5,
+              "held_out_reward": 1.0,
+              "elapsed_s": 5478.945640802383,
+              "rollouts": 12,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            }
+          ]
+        },
+        "actor_usage": {
+          "calls": 30,
+          "failures": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "model_seconds": 6616.691948
+        },
+        "tree": {
+          "nodes": 13,
+          "valid_nodes": 13,
+          "max_depth": 6,
+          "root_visits": 12,
+          "c_puct": 1.0,
+          "tree": [
+            {
+              "index": 0,
+              "parent_index": null,
+              "program_id": "e3b0c44298fc1c14",
+              "iteration": 0,
+              "change_summary": "the unmodified baseline repository (empty patch)",
+              "score": 0.2857142857142857,
+              "pass_rate": 0.2857142857142857,
+              "num_visits": 12,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 0
+            },
+            {
+              "index": 1,
+              "parent_index": 0,
+              "program_id": "b14dec88ec1ecf52",
+              "iteration": 2,
+              "change_summary": "Clean — only the intended fix is present.",
+              "score": 0.2857142857142857,
+              "pass_rate": 0.2857142857142857,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 1372
+            },
+            {
+              "index": 2,
+              "parent_index": 0,
+              "program_id": "2acabc31d76e937a",
+              "iteration": 1,
+              "change_summary": "",
+              "score": 0.2857142857142857,
+              "pass_rate": 0.2857142857142857,
+              "num_visits": 11,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 2597
+            },
+            {
+              "index": 3,
+              "parent_index": 2,
+              "program_id": "62af28e4a3ca3ad6",
+              "iteration": 4,
+              "change_summary": "Reproduction passes cleanly, and the working tree diff contains only the corrected fix in `source/diffrax/_term.py`.",
+              "score": 0.5714285714285714,
+              "pass_rate": 0.5714285714285714,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 1806
+            },
+            {
+              "index": 4,
+              "parent_index": 2,
+              "program_id": "6de385ddc98740f0",
+              "iteration": 3,
+              "change_summary": "",
+              "score": 0.7142857142857143,
+              "pass_rate": 0.7142857142857143,
+              "num_visits": 9,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 8608
+            },
+            {
+              "index": 5,
+              "parent_index": 4,
+              "program_id": "b74b4d454c8e9fc2",
+              "iteration": 6,
+              "change_summary": "Reproduction passes and the fix is verified to generalize (confirmed via forward/backward retracing of the deterministic drift, and agreement with an independent solver in reverse time). The checkout ",
+              "score": 0.7142857142857143,
+              "pass_rate": 0.7142857142857143,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 1450
+            },
+            {
+              "index": 6,
+              "parent_index": 4,
+              "program_id": "b74b4d454c8e9fc2",
+              "iteration": 5,
+              "change_summary": "The working tree is clean (only the intended `srk.py` fix remains), the public reproduction passes, and I've thoroughly validated the fix both mathematically and empirically (round-trip forward/revers",
+              "score": 0.7142857142857143,
+              "pass_rate": 0.7142857142857143,
+              "num_visits": 7,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 1450
+            },
+            {
+              "index": 7,
+              "parent_index": 6,
+              "program_id": "b74b4d454c8e9fc2",
+              "iteration": 7,
+              "change_summary": "Clean working tree with only the intended fix, reproduction passes, and I've independently validated the fix is mathematically correct (round-trip forward/reverse recovers initial condition to ~1e-6 p",
+              "score": 0.7142857142857143,
+              "pass_rate": 0.7142857142857143,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 1450
+            },
+            {
+              "index": 8,
+              "parent_index": 6,
+              "program_id": "5cda266b79791724",
+              "iteration": 8,
+              "change_summary": "",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 5,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 30620
+            },
+            {
+              "index": 9,
+              "parent_index": 8,
+              "program_id": "f2a6e9a364ac54b7",
+              "iteration": 10,
+              "change_summary": "This diff is well-reasoned, generalizes to any solver/model/interval (not fixture-specific), and I've independently verified both the `H` and `K` Lévy-area invariance and the drift-control sign correc",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 2,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 3541
+            },
+            {
+              "index": 10,
+              "parent_index": 8,
+              "program_id": "d0755d350cf8b893",
+              "iteration": 9,
+              "change_summary": "The diff is clean, minimal, and correctly generalizes: it fixes both the drift-control sign bug in `srk.py` (already present from node 8, verified correct) and corrects the space-time-time Lévy area `",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 2,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 3919
+            },
+            {
+              "index": 11,
+              "parent_index": 9,
+              "program_id": "f2a6e9a364ac54b7",
+              "iteration": 12,
+              "change_summary": "Good, `outputs/` is gitignored so it won't pollute the diff. The checkout is clean with only the intended source changes. Everything is verified — the existing fix in this branch correctly repairs rev",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 3541
+            },
+            {
+              "index": 12,
+              "parent_index": 10,
+              "program_id": "d0755d350cf8b893",
+              "iteration": 11,
+              "change_summary": "Good. The checkout already inherited from node 9 was correct: I verified via independent roundtrip testing (forward-then-backward integration over the same Brownian path recovering the initial conditi",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 3919
+            }
+          ]
+        },
+        "test": {
+          "baseline": {
+            "score": 0.3333333333333333,
+            "pass_rate": 0.3333333333333333,
+            "passed": 0,
+            "collected": 2,
+            "public": 1,
+            "checks": 3,
+            "subset_resolved": 0,
+            "seconds": 35.841,
+            "error": "",
+            "report_public": "",
+            "report": ", 3037, 1.25, 0.15, 0.05),\n            (\"general\", \"SPaRK\", 4051, 1.25, 0.15, 0.05),\n        ],\n    )\n    def test_reverse_oriented_solvers_reach_the_independent_path_limit(\n        model_name: str,\n        solver_name: str,\n        seed: int,\n        t0: float,\n        t1: float,\n        tolerance: float,\n    ) -> None:\n        error = independent_limit_error(\n            model_name,\n            solver_name,\n            seed=seed,\n            t0=t0,\n            t1=t1,\n            candidate_step=2**-7,\n            reference_step=2**-10,\n        )\n>       assert error < tolerance\nE       assert 1.1407909204213587 < 0.08\n\n/tests/private_tests/test_stochastic_orientation.py:292: AssertionError\n_ test_reverse_oriented_high_order_methods_retain_strong_convergence[oscillator-SlowRK-7021-1.0-0.0] _\n\nmodel_name = 'oscillator', solver_name = 'SlowRK', seed = 7021, t0 = 1.0\nt1 = 0.0\n\n    @pytest.mark.parametrize(\n        (\"model_name\", \"solver_name\", \"seed\", \"t0\", \"t1\"),\n        [\n            (\"oscillator\", \"SlowRK\", 7021, 1.0, 0.0),\n            (\"time_additive\", \"SRA1\", 8191, 1.15, 0.15),\n            (\"commutative\", \"SlowRK\", 12347, 1.15, 0.15),\n        ],\n    )\n    def test_reverse_oriented_high_order_methods_retain_strong_convergence(\n        model_name: str,\n        solver_name: str,\n        seed: int,\n        t0: float,\n        t1: float,\n    ) -> None:\n        slope, errors = empirical_strong_order(\n            model_name,\n            solver_name,\n            seed=seed,\n            t0=t0,\n            t1=t1,\n        )\n        assert np.all(np.isfinite(np.asarray(errors)))\n>       assert slope > 1.35, (slope, errors)\nE       AssertionError: (1.0865628912953849, [0.05683779889976725, 0.030710213332323433, 0.011984198284883497, 0.006317837607275986])\nE       assert 1.0865628912953849 > 1.35\n\n/tests/private_tests/test_stochastic_orientation.py:318: AssertionError\n-------------------- generated xml file: /tmp/era-junit.xml --------------------\n=========================== short test summary info ============================\nFAILED ../../tests/private_tests/test_stochastic_orientation.py::test_reverse_oriented_solvers_reach_the_independent_path_limit[time_additive-SPaRK-2029-1.25-0.15-0.08]\nFAILED ../../tests/private_tests/test_stochastic_orientation.py::test_reverse_oriented_high_order_methods_retain_strong_convergence[oscillator-SlowRK-7021-1.0-0.0]\n2 failed in 27.40s"
+          },
+          "best": {
+            "score": 1.0,
+            "pass_rate": 1.0,
+            "passed": 2,
+            "collected": 2,
+            "public": 1,
+            "checks": 3,
+            "subset_resolved": 1,
+            "seconds": 43.386,
+            "error": "",
+            "report_public": "",
+            "report": ""
+          },
+          "pass_rate_gain": 0.6666666666666667
+        }
+      },
+      "actor_usage": {
+        "calls": 30,
+        "failures": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "model_seconds": 6616.691948
+      },
+      "regraded": {
+        "previous_reward_baseline": 0,
+        "previous_reward_best": 1,
+        "previous_grade_baseline": {
+          "private": {
+            "collected": 8,
+            "failed": 7,
+            "passed": 1,
+            "return_code": 1
+          },
+          "public": {
+            "collected": 1,
+            "passed": 1,
+            "return_code": 0
+          },
+          "reward": 0,
+          "task_id": "task_034"
+        },
+        "previous_grade_best": {
+          "private": {
+            "collected": 8,
+            "failed": 0,
+            "passed": 8,
+            "return_code": 0
+          },
+          "public": {
+            "collected": 1,
+            "passed": 1,
+            "return_code": 0
+          },
+          "reward": 1,
+          "task_id": "task_034"
+        }
+      }
+    },
+    {
+      "task_id": "045",
+      "title": "Repair inconsistent finite-volume operations on a connected multi-face grid",
+      "domain": "computational-oceanography-finite-volume-grids",
+      "status": "completed",
+      "benchmark_reward_baseline": 0,
+      "benchmark_reward_best": 1,
+      "benchmark_grade_baseline": {
+        "private": {
+          "collected": 16,
+          "failed": 2,
+          "passed": 14,
+          "return_code": 1
+        },
+        "public": {
+          "collected": 1,
+          "passed": 0,
+          "return_code": 1
+        },
+        "reward": 0,
+        "task_id": "task_045"
+      },
+      "benchmark_grade_best": {
+        "private": {
+          "collected": 16,
+          "failed": 0,
+          "passed": 16,
+          "return_code": 0
+        },
+        "public": {
+          "collected": 1,
+          "passed": 1,
+          "return_code": 0
+        },
+        "reward": 1,
+        "task_id": "task_045"
+      },
+      "held_back_tests": 4,
+      "held_back_pass_rate_baseline": 0.6,
+      "held_back_pass_rate_best": 1.0,
+      "held_back_gain": 0.4,
+      "visible_pass_rate_baseline": 0.7142857142857143,
+      "visible_pass_rate_best": 1.0,
+      "nodes": 13,
+      "wall_seconds": 3049.59596866,
+      "best_patch_chars": 1739,
+      "best_patch": "diff --git a/source/xgcm/padding.py b/source/xgcm/padding.py\nindex c3dc5b2..94948fa 100644\n--- a/source/xgcm/padding.py\n+++ b/source/xgcm/padding.py\n@@ -156,6 +156,12 @@ def _pad_face_connections(\n     # Iterate over each face and pad accordingly\n     for i in range(n_facedim):\n         target_da = da_prepadded.isel({facedim: i})\n+        # xr.concat can reorder dimensions (moving the concatenated dimension\n+        # to the end), and the order in which axes get processed below is not\n+        # guaranteed (it is derived from set iteration order). Remember the\n+        # original per-face dimension order so it can be restored afterwards,\n+        # keeping the result independent of axis-processing order.\n+        original_face_dims = target_da.dims\n         connection_single = connections[facedim][i]\n         for axname in pad_axes:\n             # get any connections relevant to the current axis, default to None.\n@@ -296,9 +302,15 @@ def _pad_face_connections(\n                             join=\"override\",\n                         )\n                         # TODO: Can we do this with an assignment in xarray? Maybe not important yet.\n+        # Restore the original dimension order for this face, since the\n+        # per-axis concat operations above may have reordered dimensions.\n+        target_da = target_da.transpose(*original_face_dims)\n         faces.append(target_da)\n \n     da_padded = xr.concat(faces, dim=facedim)\n+    # Ensure the overall dimension order matches the input, regardless of\n+    # where xr.concat placed the face dimension.\n+    da_padded = da_padded.transpose(*da.dims)\n \n     # trim back to original shape\n     def _trim_expanded_padding_width(da, grid, padding_width, padding_width_expanded):",
+      "observation": {
+        "mode": "sync",
+        "wall_seconds": 3049.59596866,
+        "baseline": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "e3b0c44298fc1c14",
+          "iteration": 0,
+          "change_summary": "the unmodified baseline repository (empty patch)",
+          "score": 0.7142857142857143,
+          "pass_rate": 0.7142857142857143,
+          "num_visits": 12,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 0
+        },
+        "best": {
+          "index": 2,
+          "parent_index": 0,
+          "program_id": "d11b286a49709363",
+          "iteration": 1,
+          "change_summary": "I'll pause here and wait for the notification when the full test suite (and my wait-wrapper) complete.",
+          "score": 1.0,
+          "pass_rate": 1.0,
+          "num_visits": 11,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 1739
+        },
+        "data": {
+          "task_id": "045",
+          "title": "Repair inconsistent finite-volume operations on a connected multi-face grid",
+          "domain": "computational-oceanography-finite-volume-grids",
+          "language": "python",
+          "repository": "https://github.com/xgcm/xgcm",
+          "base_commit": "3831b46accbff35f06e4ed3831600d71d5d8da18",
+          "source_license": "MIT",
+          "license_gate": "none",
+          "environment_image": "docker.io/kevinxulearning/swe-bench-science-environment-python-task-045:v0.1.1@sha256:7c1a6d7c324fb06b666139cc162487e81c848774f8392ff857ea3130c8bdf145",
+          "verifier_image": "docker.io/kevinxulearning/swe-bench-science-verifier-python-task-045:v0.1.1@sha256:8f1017124bd8c6ff303864a9f681042f38a68c6026620b1ddc187bfba8555525",
+          "private_tests": 16,
+          "visible_tests": 12,
+          "held_back_tests": 4,
+          "scoring_shards": 4,
+          "held_back_shards": 2,
+          "shard_rule": "subset",
+          "seed": 0
+        },
+        "framework": {
+          "baseline_reward": 0.7142857142857143,
+          "final_reward": 1.0,
+          "quality_gain": 0.2857142857142857,
+          "stop_reason": "rounds",
+          "error": null,
+          "outcomes": {
+            "committed": 1,
+            "tree-updated": 5
+          },
+          "rollouts": 12,
+          "rollout_seconds": 25.191287755966187,
+          "eval_seconds": 15.07606840133667,
+          "stale_considered": 12,
+          "stale_discarded": 0,
+          "stale_rate": 0.0,
+          "retired_workers": 0,
+          "history": [
+            {
+              "round": 0,
+              "held_out_reward": 1.0,
+              "elapsed_s": 313.7422685623169,
+              "rollouts": 2,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 1,
+              "held_out_reward": 1.0,
+              "elapsed_s": 1323.2081117630005,
+              "rollouts": 4,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 2,
+              "held_out_reward": 1.0,
+              "elapsed_s": 1983.3065538406372,
+              "rollouts": 6,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 3,
+              "held_out_reward": 1.0,
+              "elapsed_s": 2635.2699661254883,
+              "rollouts": 8,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 4,
+              "held_out_reward": 1.0,
+              "elapsed_s": 2640.315508365631,
+              "rollouts": 10,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 5,
+              "held_out_reward": 1.0,
+              "elapsed_s": 3033.612550497055,
+              "rollouts": 12,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            }
+          ]
+        },
+        "actor_usage": {
+          "calls": 26,
+          "failures": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "model_seconds": 4556.77524
+        },
+        "tree": {
+          "nodes": 13,
+          "valid_nodes": 13,
+          "max_depth": 6,
+          "root_visits": 12,
+          "c_puct": 1.0,
+          "tree": [
+            {
+              "index": 0,
+              "parent_index": null,
+              "program_id": "e3b0c44298fc1c14",
+              "iteration": 0,
+              "change_summary": "the unmodified baseline repository (empty patch)",
+              "score": 0.7142857142857143,
+              "pass_rate": 0.7142857142857143,
+              "num_visits": 12,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 0
+            },
+            {
+              "index": 1,
+              "parent_index": 0,
+              "program_id": "e3b0c44298fc1c14",
+              "iteration": 2,
+              "change_summary": "",
+              "score": 0.7142857142857143,
+              "pass_rate": 0.7142857142857143,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 0
+            },
+            {
+              "index": 2,
+              "parent_index": 0,
+              "program_id": "d11b286a49709363",
+              "iteration": 1,
+              "change_summary": "I'll pause here and wait for the notification when the full test suite (and my wait-wrapper) complete.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 11,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 1739
+            },
+            {
+              "index": 3,
+              "parent_index": 2,
+              "program_id": "d11b286a49709363",
+              "iteration": 3,
+              "change_summary": "Working tree is clean except the intended change, scratch files removed, and `python reproduce.py` exits 0.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 1739
+            },
+            {
+              "index": 4,
+              "parent_index": 2,
+              "program_id": "f80459535f57d8e4",
+              "iteration": 4,
+              "change_summary": "This preserves node 1's dimension-order fix and adds the missing piece: made `pad_axes`/`_get_all_connection_axes` order-preserving instead of `set`-based, eliminating `PYTHONHASHSEED`-dependent axis-",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 9,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 2823
+            },
+            {
+              "index": 5,
+              "parent_index": 4,
+              "program_id": "f80459535f57d8e4",
+              "iteration": 6,
+              "change_summary": "No change made — verified the existing branch fix (order-preserving `pad_axes`/`_get_all_connection_axes` plus dimension-order restoration in `source/xgcm/padding.py`) is correct via the full `test_pa",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 2823
+            },
+            {
+              "index": 6,
+              "parent_index": 4,
+              "program_id": "f80459535f57d8e4",
+              "iteration": 5,
+              "change_summary": "No scratch files left in the checkout (the temp file was outside it, now removed). The working tree only contains the intended modification to `source/xgcm/padding.py`.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 7,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 2823
+            },
+            {
+              "index": 7,
+              "parent_index": 6,
+              "program_id": "f80459535f57d8e4",
+              "iteration": 7,
+              "change_summary": "Clean — only the intended modification. The existing patch already correctly fixes the dimension-order bug and makes axis iteration deterministic (list instead of set), and reproduce.py + the full pad",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 2823
+            },
+            {
+              "index": 8,
+              "parent_index": 6,
+              "program_id": "f80459535f57d8e4",
+              "iteration": 8,
+              "change_summary": "The checkout already contains a correct, complete fix. I verified it thoroughly and made no further changes — cleaned up my scratch probe file only.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 5,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 2823
+            },
+            {
+              "index": 9,
+              "parent_index": 8,
+              "program_id": "f80459535f57d8e4",
+              "iteration": 9,
+              "change_summary": "",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 2,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 2823
+            },
+            {
+              "index": 10,
+              "parent_index": 8,
+              "program_id": "f80459535f57d8e4",
+              "iteration": 10,
+              "change_summary": "",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 2,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 2823
+            },
+            {
+              "index": 11,
+              "parent_index": 10,
+              "program_id": "f80459535f57d8e4",
+              "iteration": 11,
+              "change_summary": "Everything passes. The existing patch on this branch (node 10) already fixes the two real defects: (1) unordered `set()` usage in `_get_all_connection_axes`/`pad_axes` causing `PYTHONHASHSEED`-depende",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 2823
+            },
+            {
+              "index": 12,
+              "parent_index": 9,
+              "program_id": "f80459535f57d8e4",
+              "iteration": 12,
+              "change_summary": "Only the intended file is modified. The existing patch in `source/xgcm/padding.py` is correct and complete: it makes connection-axis iteration order deterministic (list-based dedup instead of `set`) a",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 2823
+            }
+          ]
+        },
+        "test": {
+          "baseline": {
+            "score": 0.6,
+            "pass_rate": 0.6,
+            "passed": 3,
+            "collected": 4,
+            "public": 0,
+            "checks": 5,
+            "subset_resolved": 0,
+            "seconds": 7.457,
+            "error": "",
+            "report_public": "public reproduction (reproduce.py) exited 1:\n0\n        },\n        {\n          \"axis\": \"Y\",\n          \"declared_neighbor_face\": 4,\n          \"matches_declared_neighbor\": true,\n          \"observed_values_in_input_layout\": [\n            4.0,\n            4.0,\n            4.0,\n            4.0\n          ],\n          \"side\": \"left\",\n          \"target_face\": 1\n        },\n        {\n          \"axis\": \"Y\",\n          \"declared_neighbor_face\": 4,\n          \"matches_declared_neighbor\": true,\n          \"observed_values_in_input_layout\": [\n            4.0,\n            4.0,\n            4.0,\n            4.0\n          ],\n          \"side\": \"left\",\n          \"target_face\": 2\n        },\n        {\n          \"axis\": \"X\",\n          \"declared_neighbor_face\": 1,\n          \"matches_declared_neighbor\": true,\n          \"observed_values_in_input_layout\": [\n            1.0,\n            1.0,\n            1.0,\n            1.0\n          ],\n          \"side\": \"right\",\n          \"target_face\": 5\n        }\n      ],\n      \"connected_edges_match_in_input_layout\": true,\n      \"connected_grid_contract_holds\": true,\n      \"dimension_order_preserved\": true,\n      \"input_dimension_order\": [\n        \"face\",\n        \"y\",\n        \"x\"\n      ],\n      \"process_hash_seed\": 2,\n      \"representation_observation\": {\n        \"authoritative\": false,\n        \"exact_match\": true,\n        \"input_dimension_orders\": [\n          [\n            \"face\",\n            \"y\",\n            \"x\"\n          ],\n          [\n            \"face\",\n            \"x\",\n            \"y\"\n          ]\n        ],\n        \"max_abs_difference\": 0.0,\n        \"same_canonical_shape\": true\n      },\n      \"returned_dimension_order\": [\n        \"face\",\n        \"y\",\n        \"x\"\n      ]\n    }\n  ],\n  \"schema_version\": \"2.0\",\n  \"scientific_check\": \"declared_cubed_sphere_neighbors\",\n  \"status\": \"pre_fix_expected_failure\"\n}",
+            "report": "=================================== FAILURES ===================================\n_______________ test_upstream_coordinate_free_case_is_stable[1] ________________\n\nseed = '1'\n\n    @pytest.mark.parametrize(\"seed\", [\"1\", \"17\"])\n    def test_upstream_coordinate_free_case_is_stable(seed):\n        helper = Path(__file__).with_name(\"upstream_seeded_case.py\")\n        result = subprocess.run(\n            [sys.executable, str(helper), str(SOURCE_DIR)],\n            check=True,\n            capture_output=True,\n            text=True,\n            env={**os.environ, \"PYTHONHASHSEED\": seed},\n        )\n        payload = __import__(\"json\").loads(result.stdout)\n>       assert tuple(payload[\"dims\"]) == (\"face\", \"y\", \"x\")\nE       AssertionError: assert ('face', 'x', 'y') == ('face', 'y', 'x')\nE         \nE         At index 1 diff: 'x' != 'y'\nE         Use -v to get more diff\n\n/tests/private_tests/test_connected_grid_semantics.py:228: AssertionError\n=========================== short test summary info ============================\nFAILED ../../tests/private_tests/test_connected_grid_semantics.py::test_upstream_coordinate_free_case_is_stable[1]\n1 failed, 3 passed, 3 warnings in 2.60s"
+          },
+          "best": {
+            "score": 1.0,
+            "pass_rate": 1.0,
+            "passed": 4,
+            "collected": 4,
+            "public": 1,
+            "checks": 5,
+            "subset_resolved": 1,
+            "seconds": 7.593,
+            "error": "",
+            "report_public": "",
+            "report": ""
+          },
+          "pass_rate_gain": 0.4
+        }
+      },
+      "actor_usage": {
+        "calls": 26,
+        "failures": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "model_seconds": 4556.77524
+      },
+      "regraded": {
+        "previous_reward_baseline": 0,
+        "previous_reward_best": 1,
+        "previous_grade_baseline": {
+          "private": {
+            "collected": 16,
+            "failed": 2,
+            "passed": 14,
+            "return_code": 1
+          },
+          "public": {
+            "collected": 1,
+            "passed": 0,
+            "return_code": 1
+          },
+          "reward": 0,
+          "task_id": "task_045"
+        },
+        "previous_grade_best": {
+          "private": {
+            "collected": 16,
+            "failed": 0,
+            "passed": 16,
+            "return_code": 0
+          },
+          "public": {
+            "collected": 1,
+            "passed": 1,
+            "return_code": 0
+          },
+          "reward": 1,
+          "task_id": "task_045"
+        }
+      }
+    }
+  ],
+  "failures": [],
+  "agent_sessions": {
+    "agent": "claude-code",
+    "command": "claude -p --permission-mode acceptEdits --allowedTools Bash Edit Write Read Glob Grep TodoWrite",
+    "version": "2.1.251 (Claude Code)",
+    "model": "",
+    "thinking": "disabled",
+    "thinking_tokens": "0",
+    "timeout_s": 1200.0,
+    "empty": 1,
+    "failed": 7,
+    "sessions": 36
+  },
+  "agent_usage": {
+    "calls": 36,
+    "failures": 7,
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0,
+    "model_seconds": 18138.777074
+  },
+  "model_usage": {
+    "calls": 0,
+    "failures": 0,
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0,
+    "model_seconds": 0.0
+  },
+  "regraded_at": "2026-08-31T07:14:46+00:00",
+  "regraded_reason": "the run's own grading step ran the grader baked into each verifier image; some of those are stale (task 034's collects nothing and scores every submission 0). Re-run with the release's own task-bundle grader, which is what its tests/docker-compose.yaml mounts. The search itself is untouched -- grading is a pure function of the patch."
+}

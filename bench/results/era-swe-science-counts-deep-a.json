@@ -1,0 +1,1462 @@
+{
+  "experiment": "ERA on AgentDescent -- SWE-bench Science, one tree per task",
+  "status": "completed",
+  "completed_at": "2026-08-31T07:45:04+00:00",
+  "upstream_commit": "b836730b5c000526af95116b1d0e2c60c8cf0a10",
+  "benchmark": "SWE-bench Science (OpenMOSS-Team/SWE-bench-Science@d8bdbcb4ecb2b565686382459c815d2b6291fd31)",
+  "protocol": "ERA's, not the benchmark's: the leaderboard gives an agent one attempt per task with no verifier feedback, while this scores a tree of agent sessions against the visible part of each private suite and keeps the best node. `benchmark_reward_*` is the release's own grader over the whole private suite; the search never reads it.",
+  "config": {
+    "provider": "claude",
+    "model": null,
+    "seed": 0,
+    "asynchronous": false,
+    "async_ratio": 1,
+    "max_seconds": 1800.0,
+    "pipelined_gate": false,
+    "gate_workers": 2,
+    "dry_run": false,
+    "serial": false,
+    "budget_rollouts": null,
+    "val_cap": null,
+    "eval_concurrency": null,
+    "reflective_merge": false,
+    "eval_cache": "",
+    "no_thinking": false,
+    "tasks": "001,002,022",
+    "list_tasks": false,
+    "allow_restricted_licenses": false,
+    "release": null,
+    "agent": "claude-code",
+    "agent_command": "",
+    "agent_timeout": 1200.0,
+    "staleness": "guarded",
+    "iterations": 12,
+    "workers": 2,
+    "shards": 4,
+    "test_shards": 2,
+    "held_back_frac": 0.25,
+    "feedback": "counts",
+    "no_public": false,
+    "held_out_frac": 0.5,
+    "c_puct": 1.0,
+    "prior_exponent": 0.0,
+    "verifier_timeout": 1800.0,
+    "max_patch_bytes": 400000,
+    "workspace_root": "/tmp/claude-0/-home-user-agentdescent/02a9c808-7ec2-5eb1-9055-691e73d63a11/scratchpad/deep-a",
+    "keep_workspaces": false,
+    "no_pull": false,
+    "regrade": null,
+    "max_tokens": 16000,
+    "temperature": 0.7,
+    "thinking": "disabled",
+    "api_timeout": 600.0,
+    "shutdown_grace": 120.0,
+    "quality_target": null
+  },
+  "summary": {
+    "tasks_run": 3,
+    "tasks_failed": 0,
+    "tasks_improved_on_held_back": 2,
+    "resolved_baseline": 0,
+    "resolved_best": 2,
+    "resolve_rate": 0.6666666666666666,
+    "wall_seconds": 15482.884032385002
+  },
+  "tasks": [
+    {
+      "task_id": "001",
+      "title": "Repair an inconsistent transition-state rotor workflow",
+      "domain": "computational-reaction-chemistry",
+      "status": "completed",
+      "benchmark_reward_baseline": 0,
+      "benchmark_reward_best": 0,
+      "benchmark_grade_baseline": {
+        "private": {
+          "collected": 3,
+          "failed": 2,
+          "passed": 1,
+          "return_code": 1
+        },
+        "public": {
+          "collected": 1,
+          "passed": 1,
+          "return_code": 0
+        },
+        "reward": 0,
+        "task_id": "task_001"
+      },
+      "benchmark_grade_best": {
+        "private": {
+          "collected": 3,
+          "failed": 2,
+          "passed": 1,
+          "return_code": 1
+        },
+        "public": {
+          "collected": 1,
+          "passed": 1,
+          "return_code": 0
+        },
+        "reward": 0,
+        "task_id": "task_001"
+      },
+      "held_back_tests": 1,
+      "held_back_pass_rate_baseline": 0.5,
+      "held_back_pass_rate_best": 0.5,
+      "held_back_gain": 0.0,
+      "visible_pass_rate_baseline": 0.6666666666666666,
+      "visible_pass_rate_best": 0.6666666666666666,
+      "nodes": 13,
+      "wall_seconds": 5371.145462844,
+      "best_patch_chars": 0,
+      "best_patch": "",
+      "observation": {
+        "mode": "sync",
+        "wall_seconds": 5371.145462844,
+        "baseline": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "e3b0c44298fc1c14",
+          "iteration": 0,
+          "change_summary": "the unmodified baseline repository (empty patch)",
+          "score": 0.6666666666666666,
+          "pass_rate": 0.6666666666666666,
+          "num_visits": 12,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 0
+        },
+        "best": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "e3b0c44298fc1c14",
+          "iteration": 0,
+          "change_summary": "the unmodified baseline repository (empty patch)",
+          "score": 0.6666666666666666,
+          "pass_rate": 0.6666666666666666,
+          "num_visits": 12,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 0
+        },
+        "data": {
+          "task_id": "001",
+          "title": "Repair an inconsistent transition-state rotor workflow",
+          "domain": "computational-reaction-chemistry",
+          "language": "python",
+          "repository": "https://github.com/Auto-Mech/autochem",
+          "base_commit": "cbe1a0c1102b8125608841eb8ac536cfe3b09671",
+          "source_license": "MIT",
+          "license_gate": "none",
+          "environment_image": "docker.io/kevinxulearning/swe-bench-science-environment-python-task-001:v0.1.0@sha256:0b6b41e556cd862f10e9e8c489e9b539eda27d277718e0504de440048c62d3c7",
+          "verifier_image": "docker.io/kevinxulearning/swe-bench-science-verifier-python-task-001:v0.1.0@sha256:7af68a1c44876615b0f961abd18e7fb656dae5f117820a35ff8e1d10faa430b0",
+          "private_tests": 3,
+          "visible_tests": 2,
+          "held_back_tests": 1,
+          "scoring_shards": 4,
+          "held_back_shards": 2,
+          "shard_rule": "replicate",
+          "seed": 0
+        },
+        "framework": {
+          "baseline_reward": 0.6666666666666666,
+          "final_reward": 0.6666666666666666,
+          "quality_gain": 0.0,
+          "stop_reason": "rounds",
+          "error": null,
+          "outcomes": {
+            "tree-updated": 6
+          },
+          "rollouts": 12,
+          "rollout_seconds": 0.0014524459838867188,
+          "eval_seconds": 0.00049591064453125,
+          "stale_considered": 12,
+          "stale_discarded": 0,
+          "stale_rate": 0.0,
+          "retired_workers": 0,
+          "history": [
+            {
+              "round": 0,
+              "held_out_reward": 0.6666666666666666,
+              "elapsed_s": 433.53759598731995,
+              "rollouts": 2,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 1,
+              "held_out_reward": 0.6666666666666666,
+              "elapsed_s": 1387.0080106258392,
+              "rollouts": 4,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 2,
+              "held_out_reward": 0.6666666666666666,
+              "elapsed_s": 2445.6673567295074,
+              "rollouts": 6,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 3,
+              "held_out_reward": 0.6666666666666666,
+              "elapsed_s": 3260.727501630783,
+              "rollouts": 8,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 4,
+              "held_out_reward": 0.6666666666666666,
+              "elapsed_s": 4475.307731389999,
+              "rollouts": 10,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 5,
+              "held_out_reward": 0.6666666666666666,
+              "elapsed_s": 5330.124164819717,
+              "rollouts": 12,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            }
+          ]
+        },
+        "actor_usage": {
+          "calls": 26,
+          "failures": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "model_seconds": 8518.325423
+        },
+        "tree": {
+          "nodes": 13,
+          "valid_nodes": 13,
+          "max_depth": 6,
+          "root_visits": 12,
+          "c_puct": 1.0,
+          "tree": [
+            {
+              "index": 0,
+              "parent_index": null,
+              "program_id": "e3b0c44298fc1c14",
+              "iteration": 0,
+              "change_summary": "the unmodified baseline repository (empty patch)",
+              "score": 0.6666666666666666,
+              "pass_rate": 0.6666666666666666,
+              "num_visits": 12,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 0
+            },
+            {
+              "index": 1,
+              "parent_index": 0,
+              "program_id": "0a73034c9fdb2a1c",
+              "iteration": 2,
+              "change_summary": "Everything passes and scratch files are removed.",
+              "score": 0.6666666666666666,
+              "pass_rate": 0.6666666666666666,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 4421
+            },
+            {
+              "index": 2,
+              "parent_index": 0,
+              "program_id": "8f3a9cff6e1f29f0",
+              "iteration": 1,
+              "change_summary": "This is a minimal, targeted fix confirmed by the reproduction (`signature_agreement: true`), independent test graphs for TS reversal invariance, and no regressions in the existing test suite.",
+              "score": 0.6666666666666666,
+              "pass_rate": 0.6666666666666666,
+              "num_visits": 11,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 3131
+            },
+            {
+              "index": 3,
+              "parent_index": 2,
+              "program_id": "8f3a9cff6e1f29f0",
+              "iteration": 4,
+              "change_summary": "Everything passes and the checkout is clean. I extensively stress-tested the inherited fix (extending `ords_last` from `(0.1,)` to `(0.1, 0.9)` in the neighbor-sorting helpers used by `rotational_coor",
+              "score": 0.6666666666666666,
+              "pass_rate": 0.6666666666666666,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 3131
+            },
+            {
+              "index": 4,
+              "parent_index": 2,
+              "program_id": "7d832ffe9f9ae08a",
+              "iteration": 3,
+              "change_summary": "Reproduction still passes, working tree is clean of scratch files.",
+              "score": 0.6666666666666666,
+              "pass_rate": 0.6666666666666666,
+              "num_visits": 9,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 4159
+            },
+            {
+              "index": 5,
+              "parent_index": 4,
+              "program_id": "7d832ffe9f9ae08a",
+              "iteration": 5,
+              "change_summary": "Everything is clean. The existing patch on this branch (node 3) already correctly fixes the root cause: it makes the forming (0.1) and breaking (0.9) TS bond orders both treated as \"last priority\" wit",
+              "score": 0.6666666666666666,
+              "pass_rate": 0.6666666666666666,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 4159
+            },
+            {
+              "index": 6,
+              "parent_index": 4,
+              "program_id": "7d832ffe9f9ae08a",
+              "iteration": 6,
+              "change_summary": "Reproduction passes with exit 0. The working tree is clean of scratch files, and the fix in place (from tree node 3, verified sound through extensive fuzz testing) makes `atom_sorted_neighbor_atom_key",
+              "score": 0.6666666666666666,
+              "pass_rate": 0.6666666666666666,
+              "num_visits": 7,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 4159
+            },
+            {
+              "index": 7,
+              "parent_index": 6,
+              "program_id": "9823c182177b54e8",
+              "iteration": 7,
+              "change_summary": "Everything passes, working tree is clean of scratch files, and the diff is limited to the source fix plus a stale docstring cleanup.",
+              "score": 0.6666666666666666,
+              "pass_rate": 0.6666666666666666,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 5103
+            },
+            {
+              "index": 8,
+              "parent_index": 6,
+              "program_id": "7d832ffe9f9ae08a",
+              "iteration": 8,
+              "change_summary": "Reproduction passes cleanly and my fuzz testing (149 random TS graphs, remapped and reversed) confirms the fix in place — treating both TS forming (0.1) and breaking (0.9) bond orders as equal-priorit",
+              "score": 0.6666666666666666,
+              "pass_rate": 0.6666666666666666,
+              "num_visits": 5,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 4159
+            },
+            {
+              "index": 9,
+              "parent_index": 8,
+              "program_id": "7d832ffe9f9ae08a",
+              "iteration": 9,
+              "change_summary": "`outputs/` isn't tracked/dirty (gitignored likely), so nothing else to clean. The checkout is left exactly as node 8's fix, which I've now validated extensively with 300+ fuzz trials (branched trees, ",
+              "score": 0.6666666666666666,
+              "pass_rate": 0.6666666666666666,
+              "num_visits": 2,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 4159
+            },
+            {
+              "index": 10,
+              "parent_index": 8,
+              "program_id": "97aad26dc63cb31c",
+              "iteration": 10,
+              "change_summary": "",
+              "score": 0.6666666666666666,
+              "pass_rate": 0.6666666666666666,
+              "num_visits": 2,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 14427
+            },
+            {
+              "index": 11,
+              "parent_index": 10,
+              "program_id": "7d832ffe9f9ae08a",
+              "iteration": 11,
+              "change_summary": "Clean. The working tree now only contains the substantive fix, and scratch files are removed. The existing fix was verified extensively via fuzz testing (700+ random TS graphs with remapping, reversal",
+              "score": 0.6666666666666666,
+              "pass_rate": 0.6666666666666666,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 4159
+            },
+            {
+              "index": 12,
+              "parent_index": 9,
+              "program_id": "7d832ffe9f9ae08a",
+              "iteration": 12,
+              "change_summary": "The checkout was already carrying a correct fix (from earlier tree nodes): I verified it and left it unchanged after extensive additional fuzz testing (relabeling × reversal, 500+ trials across the ca",
+              "score": 0.6666666666666666,
+              "pass_rate": 0.6666666666666666,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 4159
+            }
+          ]
+        },
+        "test": {
+          "baseline": {
+            "score": 0.5,
+            "pass_rate": 0.5,
+            "passed": 0,
+            "collected": 1,
+            "public": 1,
+            "checks": 2,
+            "subset_resolved": 0,
+            "seconds": 13.476,
+            "error": "",
+            "report_public": "",
+            "report": "=================================== FAILURES ===================================\n_______ test_relabelled_out_of_line_transition_state_has_consistent_caps _______\n\n    def test_relabelled_out_of_line_transition_state_has_consistent_caps():\n        gra = _sn2_graph()\n        segments = _segment_sets(gra)\n>       assert segments == [frozenset({3, 40, 120})]\nE       assert [frozenset({3, 40, 99})] == [frozenset({3, 40, 120})]\nE         \nE         At index 0 diff: frozenset({40, 99, 3}) != frozenset({40, 3, 120})\nE         Use -v to get more diff\n\n/tests/private_tests/test_transition_state_symmetry.py:118: AssertionError\n=========================== short test summary info ============================\nFAILED ../../tests/private_tests/test_transition_state_symmetry.py::test_relabelled_out_of_line_transition_state_has_consistent_caps\n1 failed, 20 warnings in 4.81s"
+          },
+          "best": {
+            "score": 0.5,
+            "pass_rate": 0.5,
+            "passed": 0,
+            "collected": 1,
+            "public": 1,
+            "checks": 2,
+            "subset_resolved": 0,
+            "seconds": 13.476,
+            "error": "",
+            "report_public": "",
+            "report": "=================================== FAILURES ===================================\n_______ test_relabelled_out_of_line_transition_state_has_consistent_caps _______\n\n    def test_relabelled_out_of_line_transition_state_has_consistent_caps():\n        gra = _sn2_graph()\n        segments = _segment_sets(gra)\n>       assert segments == [frozenset({3, 40, 120})]\nE       assert [frozenset({3, 40, 99})] == [frozenset({3, 40, 120})]\nE         \nE         At index 0 diff: frozenset({40, 99, 3}) != frozenset({40, 3, 120})\nE         Use -v to get more diff\n\n/tests/private_tests/test_transition_state_symmetry.py:118: AssertionError\n=========================== short test summary info ============================\nFAILED ../../tests/private_tests/test_transition_state_symmetry.py::test_relabelled_out_of_line_transition_state_has_consistent_caps\n1 failed, 20 warnings in 4.81s"
+          },
+          "pass_rate_gain": 0.0
+        }
+      },
+      "actor_usage": {
+        "calls": 26,
+        "failures": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "model_seconds": 8518.325423
+      },
+      "regraded": {
+        "previous_reward_baseline": 0,
+        "previous_reward_best": 0,
+        "previous_grade_baseline": {
+          "private": {
+            "collected": 3,
+            "failed": 2,
+            "passed": 1,
+            "return_code": 1
+          },
+          "public": {
+            "collected": 1,
+            "passed": 1,
+            "return_code": 0
+          },
+          "reward": 0,
+          "task_id": "task_001"
+        },
+        "previous_grade_best": {
+          "private": {
+            "collected": 3,
+            "failed": 2,
+            "passed": 1,
+            "return_code": 1
+          },
+          "public": {
+            "collected": 1,
+            "passed": 1,
+            "return_code": 0
+          },
+          "reward": 0,
+          "task_id": "task_001"
+        }
+      }
+    },
+    {
+      "task_id": "002",
+      "title": "Repair an inconsistent reduced validation workflow",
+      "domain": "density-functional-theory",
+      "status": "completed",
+      "benchmark_reward_baseline": 0,
+      "benchmark_reward_best": 1,
+      "benchmark_grade_baseline": {
+        "private": {
+          "collected": 8,
+          "failed": 5,
+          "passed": 3,
+          "return_code": 1
+        },
+        "public": {
+          "collected": 1,
+          "passed": 1,
+          "return_code": 0
+        },
+        "reward": 0,
+        "task_id": "task_002"
+      },
+      "benchmark_grade_best": {
+        "private": {
+          "collected": 8,
+          "failed": 0,
+          "passed": 8,
+          "return_code": 0
+        },
+        "public": {
+          "collected": 1,
+          "passed": 1,
+          "return_code": 0
+        },
+        "reward": 1,
+        "task_id": "task_002"
+      },
+      "held_back_tests": 2,
+      "held_back_pass_rate_baseline": 0.6666666666666666,
+      "held_back_pass_rate_best": 1.0,
+      "held_back_gain": 0.33333333333333337,
+      "visible_pass_rate_baseline": 0.42857142857142855,
+      "visible_pass_rate_best": 1.0,
+      "nodes": 13,
+      "wall_seconds": 8151.157224471999,
+      "best_patch_chars": 2198,
+      "best_patch": "diff --git a/source/task002_benchmark.py b/source/task002_benchmark.py\nindex e15332e..6e5b37d 100644\n--- a/source/task002_benchmark.py\n+++ b/source/task002_benchmark.py\n@@ -349,30 +349,32 @@ def sample_grid_field(\n     )\n \n \n-def _integrated_field(field: GridField) -> float:\n-    value = float(np.dot(field.values, field.weights))\n-    if value <= 0.0:\n-        raise ValueError(\"Cannot evaluate an empty grid field\")\n-    return value\n+def screening_parameter_from_field(field: GridField) -> float:\n+    if field.length_unit == \"angstrom\":\n+        volume_factor = BOHR_TO_ANGSTROM**3\n+        values = field.values * volume_factor\n+        weights = field.weights / volume_factor\n+    elif field.length_unit == \"bohr\":\n+        values = field.values\n+        weights = field.weights\n+    else:\n+        raise ValueError(f\"Unsupported grid field unit: {field.length_unit}\")\n \n+    total = float(np.dot(values, weights))\n+    if total <= 0.0:\n+        raise ValueError(\"Cannot evaluate an empty grid field\")\n \n-def screening_parameter_from_field(field: GridField) -> float:\n-    total = _integrated_field(field)\n-    switch = erf(total * field.values / RHO_IN)\n-    mask = field.values > EPSILON\n-    integrand = np.zeros_like(field.values)\n+    switch = erf(total * values / RHO_IN)\n+    mask = values > EPSILON\n+    integrand = np.zeros_like(values)\n     integrand[mask] = (\n-        (3.0 / (4.0 * np.pi * field.values[mask])) ** (1.0 / 3.0)\n+        (3.0 / (4.0 * np.pi * values[mask])) ** (1.0 / 3.0)\n         * switch[mask]\n     )\n-    normalization = float(np.dot(switch, field.weights))\n+    normalization = float(np.dot(switch, weights))\n     if abs(normalization) < 1e-14:\n         raise ZeroDivisionError(\"screening normalization vanished\")\n-    avg_rs = float(np.dot(integrand, field.weights) / normalization)\n-    if field.length_unit == \"angstrom\":\n-        avg_rs /= BOHR_TO_ANGSTROM\n-    elif field.length_unit != \"bohr\":\n-        raise ValueError(f\"Unsupported grid field unit: {field.length_unit}\")\n+    avg_rs = float(np.dot(integrand, weights) / normalization)\n     return float(\n         OMEGA_EFF_A1 / avg_rs\n         + OMEGA_EFF_A2 * avg_rs / (1.0 + OMEGA_EFF_A3 * avg_rs**2)",
+      "observation": {
+        "mode": "sync",
+        "wall_seconds": 8151.157224471999,
+        "baseline": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "e3b0c44298fc1c14",
+          "iteration": 0,
+          "change_summary": "the unmodified baseline repository (empty patch)",
+          "score": 0.42857142857142855,
+          "pass_rate": 0.42857142857142855,
+          "num_visits": 12,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 0
+        },
+        "best": {
+          "index": 3,
+          "parent_index": 2,
+          "program_id": "f59a7df3ade19a55",
+          "iteration": 4,
+          "change_summary": "The working tree is clean except for the intended fix. Summary of the diagnosis and fix:",
+          "score": 1.0,
+          "pass_rate": 1.0,
+          "num_visits": 1,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 2198
+        },
+        "data": {
+          "task_id": "002",
+          "title": "Repair an inconsistent reduced validation workflow",
+          "domain": "density-functional-theory",
+          "language": "python",
+          "repository": "https://github.com/aditisingh4812/simplified_tuned_range_separated",
+          "base_commit": "f794ca5265d38906782506f1ac4e197b4e273fc4",
+          "source_license": "BSD-3-Clause",
+          "license_gate": "none",
+          "environment_image": "docker.io/kevinxulearning/swe-bench-science-environment-python-task-002:v0.1.0@sha256:13e8c428f486c685ec92b031e46f3520bac3d4e26b6bdd83fde9826a488b7761",
+          "verifier_image": "docker.io/kevinxulearning/swe-bench-science-verifier-python-task-002:v0.1.0@sha256:a863b98f920e1e9b1aede8bd0460d039628aab19a413cce3dad7417028e1bd1a",
+          "private_tests": 8,
+          "visible_tests": 6,
+          "held_back_tests": 2,
+          "scoring_shards": 4,
+          "held_back_shards": 2,
+          "shard_rule": "replicate",
+          "seed": 0
+        },
+        "framework": {
+          "baseline_reward": 0.42857142857142855,
+          "final_reward": 1.0,
+          "quality_gain": 0.5714285714285714,
+          "stop_reason": "rounds",
+          "error": null,
+          "outcomes": {
+            "tree-updated": 5,
+            "committed": 1
+          },
+          "rollouts": 12,
+          "rollout_seconds": 0.0027251243591308594,
+          "eval_seconds": 0.0007033348083496094,
+          "stale_considered": 12,
+          "stale_discarded": 0,
+          "stale_rate": 0.0,
+          "retired_workers": 0,
+          "history": [
+            {
+              "round": 0,
+              "held_out_reward": 0.42857142857142855,
+              "elapsed_s": 4.36063814163208,
+              "rollouts": 2,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 1,
+              "held_out_reward": 1.0,
+              "elapsed_s": 1832.2748749256134,
+              "rollouts": 4,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 2,
+              "held_out_reward": 1.0,
+              "elapsed_s": 3356.218384027481,
+              "rollouts": 6,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 3,
+              "held_out_reward": 1.0,
+              "elapsed_s": 4226.648584842682,
+              "rollouts": 8,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 4,
+              "held_out_reward": 1.0,
+              "elapsed_s": 6823.472468137741,
+              "rollouts": 10,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 5,
+              "held_out_reward": 1.0,
+              "elapsed_s": 7944.198632955551,
+              "rollouts": 12,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            }
+          ]
+        },
+        "actor_usage": {
+          "calls": 28,
+          "failures": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "model_seconds": 7298.027281
+        },
+        "tree": {
+          "nodes": 13,
+          "valid_nodes": 11,
+          "max_depth": 6,
+          "root_visits": 12,
+          "c_puct": 1.0,
+          "tree": [
+            {
+              "index": 0,
+              "parent_index": null,
+              "program_id": "e3b0c44298fc1c14",
+              "iteration": 0,
+              "change_summary": "the unmodified baseline repository (empty patch)",
+              "score": 0.42857142857142855,
+              "pass_rate": 0.42857142857142855,
+              "num_visits": 12,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 0
+            },
+            {
+              "index": 1,
+              "parent_index": 0,
+              "program_id": "e3b0c44298fc1c14",
+              "iteration": 1,
+              "change_summary": "",
+              "score": 0.42857142857142855,
+              "pass_rate": 0.42857142857142855,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 0
+            },
+            {
+              "index": 2,
+              "parent_index": 0,
+              "program_id": "e3b0c44298fc1c14",
+              "iteration": 2,
+              "change_summary": "",
+              "score": 0.42857142857142855,
+              "pass_rate": 0.42857142857142855,
+              "num_visits": 11,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 0
+            },
+            {
+              "index": 3,
+              "parent_index": 2,
+              "program_id": "f59a7df3ade19a55",
+              "iteration": 4,
+              "change_summary": "The working tree is clean except for the intended fix. Summary of the diagnosis and fix:",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 2198
+            },
+            {
+              "index": 4,
+              "parent_index": 2,
+              "program_id": "b6ed515d32157435",
+              "iteration": 3,
+              "change_summary": "Clean — only the intended source file is modified, no scratch files left behind.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 9,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 3726
+            },
+            {
+              "index": 5,
+              "parent_index": 4,
+              "program_id": "c86c0b03204beedd",
+              "iteration": 6,
+              "change_summary": "Added a Newton/SOSCF (second-order SCF) fallback in `run_pbe_density` in `source/task002_benchmark.py` so open-shell PBE densities that oscillate under default DIIS (e.g. the OH radical) still converg",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 3965
+            },
+            {
+              "index": 6,
+              "parent_index": 4,
+              "program_id": "c86c0b03204beedd",
+              "iteration": 5,
+              "change_summary": "",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 7,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 3965
+            },
+            {
+              "index": 7,
+              "parent_index": 6,
+              "program_id": "c86c0b03204beedd",
+              "iteration": 8,
+              "change_summary": "All 6 validation studies run successfully end-to-end with physically sensible values (all in the 0.24–0.39 range, matching the paper's reported `ω_eff ∈ (0.22–0.42)` window for molecular systems), dec",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 3965
+            },
+            {
+              "index": 8,
+              "parent_index": 6,
+              "program_id": "c86c0b03204beedd",
+              "iteration": 7,
+              "change_summary": "Reproduction works cleanly, and the working tree diff is limited to the intended source fix.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 5,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 3965
+            },
+            {
+              "index": 9,
+              "parent_index": 8,
+              "program_id": "2aa5d47419609c4f",
+              "iteration": 9,
+              "change_summary": "This will properly notify me when both PID processes exit. I'll now stop and genuinely wait for that notification.",
+              "score": null,
+              "pass_rate": 0.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": false,
+              "error": "TimeoutExpired: Command '['docker', 'run', '--rm', '--network', 'none', '--platform', 'linux/amd64', '-v', '/tmp/era-swe-eval-ia1bkze4:/era', '-w', '/app/task_002', 'docker.io/kevinxulearning/swe-bench-science-verifier-python-task-002:v0.1.0@sha256:a863b98f920e1e9b1aede8bd0460d039628aab19a413cce3dad7417028e1bd1a', 'python', '/era/runner.py', '/era/config.json']' timed out after 2100.0 seconds",
+              "code_chars": 4189
+            },
+            {
+              "index": 10,
+              "parent_index": 8,
+              "program_id": "c86c0b03204beedd",
+              "iteration": 10,
+              "change_summary": "Checkout is clean aside from the intended fix. The working tree matches what I reviewed and validated.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 3,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 3965
+            },
+            {
+              "index": 11,
+              "parent_index": 10,
+              "program_id": "c86c0b03204beedd",
+              "iteration": 11,
+              "change_summary": "",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 3965
+            },
+            {
+              "index": 12,
+              "parent_index": 10,
+              "program_id": "2aa5d47419609c4f",
+              "iteration": 12,
+              "change_summary": "That monitor was watching a scratch test file I've since deleted — no longer relevant since I already confirmed the fix via the aniline validation and cleaned up all scratch files. No action needed.",
+              "score": null,
+              "pass_rate": 0.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": false,
+              "error": "TimeoutExpired: Command '['docker', 'run', '--rm', '--network', 'none', '--platform', 'linux/amd64', '-v', '/tmp/era-swe-eval-ia1bkze4:/era', '-w', '/app/task_002', 'docker.io/kevinxulearning/swe-bench-science-verifier-python-task-002:v0.1.0@sha256:a863b98f920e1e9b1aede8bd0460d039628aab19a413cce3dad7417028e1bd1a', 'python', '/era/runner.py', '/era/config.json']' timed out after 2100.0 seconds",
+              "code_chars": 4189
+            }
+          ]
+        },
+        "test": {
+          "baseline": {
+            "score": 0.6666666666666666,
+            "pass_rate": 0.6666666666666666,
+            "passed": 1,
+            "collected": 2,
+            "public": 1,
+            "checks": 3,
+            "subset_resolved": 0,
+            "seconds": 85.126,
+            "error": "",
+            "report_public": "",
+            "report": "keyPatch object at 0x7f9cffd12ad0>\n\n    def test_collection_workflow_keeps_the_portable_boundary(monkeypatch):\n        systems = [benchmark.SystemRecord(\"synthetic\", \"sample\", 1, \"sample\", \"synthetic\")]\n        field = GridField(\n            values=np.array([0.18, 0.05, 0.008]),\n            weights=np.array([0.7, 2.0, 9.0]),\n            length_unit=\"bohr\",\n        )\n        calls = {\"pack\": 0, \"unpack\": 0}\n        original_pack = benchmark.pack_grid_field\n        original_unpack = benchmark.unpack_grid_field\n    \n        def tracked_pack(value):\n            calls[\"pack\"] += 1\n            return original_pack(value)\n    \n        def tracked_unpack(value):\n            calls[\"unpack\"] += 1\n            restored = original_unpack(value)\n            assert restored.length_unit == \"angstrom\"\n            return restored\n    \n        monkeypatch.setattr(benchmark, \"sample_grid_field\", lambda *args, **kwargs: field)\n        monkeypatch.setattr(benchmark, \"pack_grid_field\", tracked_pack)\n        monkeypatch.setattr(benchmark, \"unpack_grid_field\", tracked_unpack)\n    \n        results = benchmark._process_collection(\n            systems,\n            basis=benchmark.DEFAULT_BASIS,\n            grid_level=benchmark.DEFAULT_GRID_LEVEL,\n        )\n        assert calls == {\"pack\": 1, \"unpack\": 1}\n>       assert np.isclose(\n            results[0].screening_parameter,\n            screening_parameter_from_field(field),\n            rtol=1e-12,\n            atol=1e-12,\n        )\nE       AssertionError: assert False\nE        +  where False = <function isclose at 0x7f9cffd8e570>(0.6771693840286662, 0.8657175628798416, rtol=1e-12, atol=1e-12)\nE        +    where <function isclose at 0x7f9cffd8e570> = np.isclose\nE        +    and   0.6771693840286662 = SystemResult(family='synthetic', label='sample', chain_index=1, screening_parameter=0.6771693840286662).screening_parameter\nE        +    and   0.8657175628798416 = screening_parameter_from_field(GridField(values=array([0.18 , 0.05 , 0.008]), weights=array([0.7, 2. , 9. ]), length_unit='bohr'))\n\n/tests/private_tests/test_task_002.py:99: AssertionError\n-------------------- generated xml file: /tmp/era-junit.xml --------------------\n=========================== short test summary info ============================\nFAILED ../../tests/private_tests/test_task_002.py::test_collection_workflow_keeps_the_portable_boundary\n1 failed, 1 passed in 0.60s"
+          },
+          "best": {
+            "score": 1.0,
+            "pass_rate": 1.0,
+            "passed": 2,
+            "collected": 2,
+            "public": 1,
+            "checks": 3,
+            "subset_resolved": 1,
+            "seconds": 71.884,
+            "error": "",
+            "report_public": "",
+            "report": ""
+          },
+          "pass_rate_gain": 0.33333333333333337
+        }
+      },
+      "actor_usage": {
+        "calls": 28,
+        "failures": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "model_seconds": 7298.027281
+      },
+      "regraded": {
+        "previous_reward_baseline": 0,
+        "previous_reward_best": 1,
+        "previous_grade_baseline": {
+          "private": {
+            "collected": 8,
+            "failed": 5,
+            "passed": 3,
+            "return_code": 1
+          },
+          "public": {
+            "collected": 1,
+            "passed": 1,
+            "return_code": 0
+          },
+          "reward": 0,
+          "task_id": "task_002"
+        },
+        "previous_grade_best": {
+          "private": {
+            "collected": 8,
+            "failed": 0,
+            "passed": 8,
+            "return_code": 0
+          },
+          "public": {
+            "collected": 1,
+            "passed": 1,
+            "return_code": 0
+          },
+          "reward": 1,
+          "task_id": "task_002"
+        }
+      }
+    },
+    {
+      "task_id": "022",
+      "title": "Repair an inconsistent volume-to-surface projection",
+      "domain": "neuroimaging",
+      "status": "completed",
+      "benchmark_reward_baseline": 0,
+      "benchmark_reward_best": 1,
+      "benchmark_grade_baseline": {
+        "private": {
+          "collected": 12,
+          "failed": 8,
+          "passed": 4,
+          "return_code": 1
+        },
+        "public": {
+          "collected": 1,
+          "passed": 0,
+          "return_code": 1
+        },
+        "reward": 0,
+        "task_id": "task_022"
+      },
+      "benchmark_grade_best": {
+        "private": {
+          "collected": 12,
+          "failed": 0,
+          "passed": 12,
+          "return_code": 0
+        },
+        "public": {
+          "collected": 1,
+          "passed": 1,
+          "return_code": 0
+        },
+        "reward": 1,
+        "task_id": "task_022"
+      },
+      "held_back_tests": 3,
+      "held_back_pass_rate_baseline": 0.0,
+      "held_back_pass_rate_best": 1.0,
+      "held_back_gain": 1.0,
+      "visible_pass_rate_baseline": 0.2,
+      "visible_pass_rate_best": 1.0,
+      "nodes": 13,
+      "wall_seconds": 1265.4516263570004,
+      "best_patch_chars": 4036,
+      "best_patch": "diff --git a/source/nilearn/surface/surface.py b/source/nilearn/surface/surface.py\nindex 4fbbfae..2f05072 100644\n--- a/source/nilearn/surface/surface.py\n+++ b/source/nilearn/surface/surface.py\n@@ -499,6 +499,65 @@ def _nearest_voxel_sampling(\n     return texture.T\n \n \n+def _nearest_most_frequent_sampling(\n+    images,\n+    mesh,\n+    affine,\n+    kind=\"auto\",\n+    radius=3.0,\n+    n_points=None,\n+    mask=None,\n+    inner_mesh=None,\n+    depth=None,\n+):\n+    \"\"\"In each image, measure the intensity at each node of the mesh.\n+\n+    For each mesh vertex, every sample point around it is assigned the value\n+    of its nearest voxel, and the value retained for the vertex is the most\n+    frequent one among those sample points (ties are broken by keeping the\n+    value encountered first). Unlike 'linear' or 'nearest' interpolation,\n+    which both average the sampled values, this never produces a value that\n+    is not present in the image, so it is the appropriate choice for images\n+    that hold discrete labels (e.g. an atlas) rather than a continuous\n+    quantity.\n+    A 2-d array is returned, where each row corresponds to an image and each\n+    column to a mesh vertex.\n+    See documentation of vol_to_surf for details.\n+\n+    \"\"\"\n+    sample_locations = _sample_locations(\n+        mesh,\n+        affine,\n+        kind=kind,\n+        radius=radius,\n+        n_points=n_points,\n+        inner_mesh=inner_mesh,\n+        depth=depth,\n+    )\n+    sample_locations = np.asarray(np.round(sample_locations), dtype=int)\n+    n_vertices, n_points, _ = sample_locations.shape\n+    img_shape = images[0].shape\n+    masked = _masked_indices(\n+        np.vstack(sample_locations), img_shape, mask=mask\n+    ).reshape(n_vertices, n_points)\n+    voxel_indices = np.ravel_multi_index(\n+        np.rollaxis(sample_locations, -1), img_shape, mode=\"clip\"\n+    )\n+\n+    all_textures = []\n+    for img in images:\n+        flat_img = np.asarray(img).reshape(-1)\n+        sampled_values = flat_img[voxel_indices]\n+        texture = np.full(n_vertices, np.nan)\n+        for vertex in range(n_vertices):\n+            valid = sampled_values[vertex][~masked[vertex]]\n+            if valid.size:\n+                values, counts = np.unique(valid, return_counts=True)\n+                texture[vertex] = values[np.argmax(counts)]\n+        all_textures.append(texture)\n+    return np.asarray(all_textures)\n+\n+\n def _interpolation_sampling(\n     images,\n     mesh,\n@@ -582,13 +641,22 @@ def vol_to_surf(\n         The size (in mm) of the neighbourhood from which samples are drawn\n         around each node. Ignored if `inner_mesh` is provided.\n \n-    interpolation : {'linear', 'nearest'}, default='linear'\n+    interpolation : {'linear', 'nearest', 'nearest_most_frequent'}, \\\n+                    default='linear'\n         How the image intensity is measured at a sample point.\n \n         - 'linear':\n             Use a trilinear interpolation of neighboring voxels.\n         - 'nearest':\n             Use the intensity of the nearest voxel.\n+        - 'nearest_most_frequent':\n+            Use the intensity of the nearest voxel at each sample point, then\n+            keep the value that is most frequent among the sample points\n+            drawn around the :term:`vertex`. Unlike 'linear' and 'nearest',\n+            which both average the sampled values, this never produces a\n+            value that was not present in the image, which makes it the\n+            appropriate choice for images holding discrete labels, such as\n+            an atlas, rather than a continuous quantity.\n \n         For one image, the speed difference is small, 'linear' takes about x1.5\n         more time. For many images, 'nearest' scales much better, up to x20\n@@ -733,6 +801,7 @@ def vol_to_surf(\n     sampling_schemes = {\n         \"linear\": _interpolation_sampling,\n         \"nearest\": _nearest_voxel_sampling,\n+        \"nearest_most_frequent\": _nearest_most_frequent_sampling,\n     }\n     if interpolation not in sampling_schemes:\n         raise ValueError(",
+      "observation": {
+        "mode": "sync",
+        "wall_seconds": 1265.4516263570004,
+        "baseline": {
+          "index": 0,
+          "parent_index": null,
+          "program_id": "e3b0c44298fc1c14",
+          "iteration": 0,
+          "change_summary": "the unmodified baseline repository (empty patch)",
+          "score": 0.2,
+          "pass_rate": 0.2,
+          "num_visits": 12,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 0
+        },
+        "best": {
+          "index": 2,
+          "parent_index": 0,
+          "program_id": "089f23f423547eb1",
+          "iteration": 2,
+          "change_summary": "Good, `outputs/` is gitignored as expected. The fix is complete and verified.",
+          "score": 1.0,
+          "pass_rate": 1.0,
+          "num_visits": 11,
+          "promise": null,
+          "valid": true,
+          "error": "",
+          "code_chars": 4036
+        },
+        "data": {
+          "task_id": "022",
+          "title": "Repair an inconsistent volume-to-surface projection",
+          "domain": "neuroimaging",
+          "language": "python",
+          "repository": "https://github.com/nilearn/nilearn",
+          "base_commit": "fefa4d30c262384ebda0f1123a1691abf466a9f0",
+          "source_license": "BSD-3-Clause",
+          "license_gate": "none",
+          "environment_image": "docker.io/kevinxulearning/swe-bench-science-environment-python-task-022:v0.1.0@sha256:0c0ed46caaa7b0d52a862dad6461ebdc165396fe7f96e8e50df3e4fed8155cf2",
+          "verifier_image": "docker.io/kevinxulearning/swe-bench-science-verifier-python-task-022:v0.1.0@sha256:ae3adfc761d0744164c6e5e45f686cd766b5ceb1ac17c8c590ce074e0dee938e",
+          "private_tests": 12,
+          "visible_tests": 9,
+          "held_back_tests": 3,
+          "scoring_shards": 4,
+          "held_back_shards": 2,
+          "shard_rule": "subset",
+          "seed": 0
+        },
+        "framework": {
+          "baseline_reward": 0.2,
+          "final_reward": 1.0,
+          "quality_gain": 0.8,
+          "stop_reason": "rounds",
+          "error": null,
+          "outcomes": {
+            "committed": 1,
+            "tree-updated": 5
+          },
+          "rollouts": 12,
+          "rollout_seconds": 27.899736404418945,
+          "eval_seconds": 13.764108896255493,
+          "stale_considered": 12,
+          "stale_discarded": 0,
+          "stale_rate": 0.0,
+          "retired_workers": 0,
+          "history": [
+            {
+              "round": 0,
+              "held_out_reward": 1.0,
+              "elapsed_s": 665.3086957931519,
+              "rollouts": 2,
+              "committed": 1,
+              "rejected": 0,
+              "reasons": {
+                "committed": 1
+              }
+            },
+            {
+              "round": 1,
+              "held_out_reward": 1.0,
+              "elapsed_s": 787.213573217392,
+              "rollouts": 4,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 2,
+              "held_out_reward": 1.0,
+              "elapsed_s": 915.0146582126617,
+              "rollouts": 6,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 3,
+              "held_out_reward": 1.0,
+              "elapsed_s": 1001.3384532928467,
+              "rollouts": 8,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 4,
+              "held_out_reward": 1.0,
+              "elapsed_s": 1135.6008093357086,
+              "rollouts": 10,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            },
+            {
+              "round": 5,
+              "held_out_reward": 1.0,
+              "elapsed_s": 1237.4197978973389,
+              "rollouts": 12,
+              "committed": 0,
+              "rejected": 1,
+              "reasons": {
+                "tree-updated": 1
+              }
+            }
+          ]
+        },
+        "actor_usage": {
+          "calls": 26,
+          "failures": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "model_seconds": 1920.677386
+        },
+        "tree": {
+          "nodes": 13,
+          "valid_nodes": 13,
+          "max_depth": 6,
+          "root_visits": 12,
+          "c_puct": 1.0,
+          "tree": [
+            {
+              "index": 0,
+              "parent_index": null,
+              "program_id": "e3b0c44298fc1c14",
+              "iteration": 0,
+              "change_summary": "the unmodified baseline repository (empty patch)",
+              "score": 0.2,
+              "pass_rate": 0.2,
+              "num_visits": 12,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 0
+            },
+            {
+              "index": 1,
+              "parent_index": 0,
+              "program_id": "49b6a129023c7575",
+              "iteration": 1,
+              "change_summary": "`outputs/` is gitignored, so it won't pollute the diff. The fix is complete.",
+              "score": 0.8,
+              "pass_rate": 0.8,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 2771
+            },
+            {
+              "index": 2,
+              "parent_index": 0,
+              "program_id": "089f23f423547eb1",
+              "iteration": 2,
+              "change_summary": "Good, `outputs/` is gitignored as expected. The fix is complete and verified.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 11,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 4036
+            },
+            {
+              "index": 3,
+              "parent_index": 2,
+              "program_id": "089f23f423547eb1",
+              "iteration": 4,
+              "change_summary": "",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 4036
+            },
+            {
+              "index": 4,
+              "parent_index": 2,
+              "program_id": "8e0606293a61623e",
+              "iteration": 3,
+              "change_summary": "The checkout already had the correct fix from the prior node: added a `nearest_most_frequent` interpolation scheme to `vol_to_surf` (mode-based label sampling instead of averaging), which avoids produ",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 9,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 5717
+            },
+            {
+              "index": 5,
+              "parent_index": 4,
+              "program_id": "69a21c95633ae920",
+              "iteration": 6,
+              "change_summary": "Good, `outputs/` is gitignored so it won't pollute the diff. Everything is in order.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 5708
+            },
+            {
+              "index": 6,
+              "parent_index": 4,
+              "program_id": "8e0606293a61623e",
+              "iteration": 5,
+              "change_summary": "Good, `outputs/` is gitignored as expected (generated report files belong there per instructions). The checkout is clean otherwise.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 7,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 5717
+            },
+            {
+              "index": 7,
+              "parent_index": 6,
+              "program_id": "8e0606293a61623e",
+              "iteration": 7,
+              "change_summary": "Clean — only the intended source file is modified, and `outputs/` is gitignored. No scratch files to remove.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 5717
+            },
+            {
+              "index": 8,
+              "parent_index": 6,
+              "program_id": "8e0606293a61623e",
+              "iteration": 8,
+              "change_summary": "Clean — only the intended source file is modified, and `outputs/` (gitignored) holds the generated report. The fix is complete, generalizes to any `vol_to_surf` call (not specialized to the fixture), ",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 5,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 5717
+            },
+            {
+              "index": 9,
+              "parent_index": 8,
+              "program_id": "8e0606293a61623e",
+              "iteration": 9,
+              "change_summary": "Clean working tree — only `surface.py` modified, no scratch files. The existing patch from node 8 is already correct and complete: it properly identifies the root cause (label averaging in `nearest` i",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 2,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 5717
+            },
+            {
+              "index": 10,
+              "parent_index": 8,
+              "program_id": "8e0606293a61623e",
+              "iteration": 10,
+              "change_summary": "The checkout is clean — only `source/nilearn/surface/surface.py` is modified, `reproduce.py` reports `post_fix_success` and exits 0, and the full surface test suite (142 tests) still passes.",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 2,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 5717
+            },
+            {
+              "index": 11,
+              "parent_index": 10,
+              "program_id": "8e0606293a61623e",
+              "iteration": 11,
+              "change_summary": "Everything checks out: reproduce.py reports `post_fix_success` with exit 0, the full surface test suite (142 tests) passes, and only `source/nilearn/surface/surface.py` is modified. The existing fix f",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 5717
+            },
+            {
+              "index": 12,
+              "parent_index": 9,
+              "program_id": "8e0606293a61623e",
+              "iteration": 12,
+              "change_summary": "Clean — only `surface.py` modified, `outputs/public_reproduction_report.json` is a generated artifact from `reproduce.py`. Everything checks out: the existing patch correctly fixes the root cause and ",
+              "score": 1.0,
+              "pass_rate": 1.0,
+              "num_visits": 1,
+              "promise": null,
+              "valid": true,
+              "error": "",
+              "code_chars": 5717
+            }
+          ]
+        },
+        "test": {
+          "baseline": {
+            "score": 0.0,
+            "pass_rate": 0.0,
+            "passed": 0,
+            "collected": 3,
+            "public": 0,
+            "checks": 4,
+            "subset_resolved": 0,
+            "seconds": 7.223,
+            "error": "",
+            "report_public": "public reproduction (reproduce.py) exited 1:\n{\n  \"failure_kind\": \"lookup_join_failure\",\n  \"finite_surface_value_count\": 4,\n  \"offline\": true,\n  \"schema_version\": \"0.1\",\n  \"status\": \"pre_fix_expected_failure\",\n  \"table_entry_count\": 3,\n  \"unmatched_surface_value_count\": 4\n}",
+            "report": " 1, 2], [1, 3, 2]], dtype=np.int64),\n        )\n        results = _label_results(\n            image,\n            mesh,\n            kind=\"line\",\n            radius=6.0,\n            n_samples=7,\n        )\n        source_labels = set(np.unique(image.get_fdata()))\n>       assert _has_result(\n            results,\n            lambda result: np.all(result == 9)\n            and set(np.unique(result)) <= source_labels,\n        )\nE       assert False\nE        +  where False = _has_result([array([8.14285714, 8.14285714, 8.14285714, 8.14285714]), array([8.14285714, 8.14285714, 8.14285714, 8.14285714])], <function test_non_identity_affine_preserves_identifier_semantics.<locals>.<lambda> at 0x7efd18b4aa20>)\n\n/tests/private_tests/test_atlas_projection.py:205: AssertionError\n______________ test_ball_sampling_preserves_the_identifier_space _______________\n\n    def test_ball_sampling_preserves_the_identifier_space():\n        data = np.zeros((7, 7, 7), dtype=float)\n        data[3:, :, :] = 11.0\n        image = nib.Nifti1Image(data, np.eye(4))\n        mesh = surface.InMemoryMesh(\n            np.asarray(\n                [[3.0, 3.0, 3.0], [4.0, 3.0, 3.0], [3.0, 4.0, 3.0], [4.0, 4.0, 3.0]]\n            ),\n            np.asarray([[0, 1, 2], [1, 3, 2]], dtype=np.int64),\n        )\n        results = _label_results(\n            image,\n            mesh,\n            kind=\"ball\",\n            radius=2.0,\n            n_samples=20,\n        )\n>       assert _has_result(\n            results,\n            lambda result: np.all(np.isfinite(result)) and np.all(result == 11.0),\n        )\nE       assert False\nE        +  where False = _has_result([array([ 7.46289018, 10.53030641,  7.46289018, 10.53030641]), array([ 7.15, 11.  ,  7.15, 11.  ])], <function test_ball_sampling_preserves_the_identifier_space.<locals>.<lambda> at 0x7efd1ae5e520>)\n\n/tests/private_tests/test_atlas_projection.py:229: AssertionError\n-------------------- generated xml file: /tmp/era-junit.xml --------------------\n=========================== short test summary info ============================\nFAILED ../../tests/private_tests/test_atlas_projection.py::test_each_vertex_uses_its_local_consensus\nFAILED ../../tests/private_tests/test_atlas_projection.py::test_non_identity_affine_preserves_identifier_semantics\nFAILED ../../tests/private_tests/test_atlas_projection.py::test_ball_sampling_preserves_the_identifier_space\n3 failed in 2.24s"
+          },
+          "best": {
+            "score": 1.0,
+            "pass_rate": 1.0,
+            "passed": 3,
+            "collected": 3,
+            "public": 1,
+            "checks": 4,
+            "subset_resolved": 1,
+            "seconds": 6.773,
+            "error": "",
+            "report_public": "",
+            "report": ""
+          },
+          "pass_rate_gain": 1.0
+        }
+      },
+      "actor_usage": {
+        "calls": 26,
+        "failures": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "model_seconds": 1920.677386
+      },
+      "regraded": {
+        "previous_reward_baseline": 0,
+        "previous_reward_best": 1,
+        "previous_grade_baseline": {
+          "private": {
+            "collected": 12,
+            "failed": 8,
+            "passed": 4,
+            "return_code": 1
+          },
+          "public": {
+            "collected": 1,
+            "passed": 0,
+            "return_code": 1
+          },
+          "reward": 0,
+          "task_id": "task_022"
+        },
+        "previous_grade_best": {
+          "private": {
+            "collected": 12,
+            "failed": 0,
+            "passed": 12,
+            "return_code": 0
+          },
+          "public": {
+            "collected": 1,
+            "passed": 1,
+            "return_code": 0
+          },
+          "reward": 1,
+          "task_id": "task_022"
+        }
+      }
+    }
+  ],
+  "failures": [],
+  "agent_sessions": {
+    "agent": "claude-code",
+    "command": "claude -p --permission-mode acceptEdits --allowedTools Bash Edit Write Read Glob Grep TodoWrite",
+    "version": "2.1.251 (Claude Code)",
+    "model": "",
+    "thinking": "disabled",
+    "thinking_tokens": "0",
+    "timeout_s": 1200.0,
+    "empty": 2,
+    "failed": 6,
+    "sessions": 36
+  },
+  "agent_usage": {
+    "calls": 36,
+    "failures": 6,
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0,
+    "model_seconds": 17662.026843
+  },
+  "model_usage": {
+    "calls": 0,
+    "failures": 0,
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0,
+    "model_seconds": 0.0
+  },
+  "regraded_at": "2026-08-31T07:52:10+00:00",
+  "regraded_reason": "the run's own grading step ran the grader baked into each verifier image; some of those are stale (task 034's collects nothing and scores every submission 0). Re-run with the release's own task-bundle grader, which is what its tests/docker-compose.yaml mounts. The search itself is untouched -- grading is a pure function of the patch."
+}

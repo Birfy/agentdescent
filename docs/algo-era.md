@@ -1475,6 +1475,11 @@ Three arms, differing in `--feedback` and nothing else:
 | `counts` | that, plus *how many* visible private checks failed — never which | **5/6** | [`…-counts-1200s-a`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-counts-1200s-a.json), [`…-b`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-counts-1200s-b.json) |
 | `tests` | that, **plus the failing tests' own source** | **6/6** | [`…-tests-1200s-a`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-tests-1200s-a.json), [`…-b`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-tests-1200s-b.json) |
 
+A fourth arm repeats `counts` with **12 expansions per tree** instead of 4 and
+extended thinking off, to ask whether the *search* contributes when it is given
+room: [`…-counts-deep-a`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-counts-deep-a.json),
+[`…-b`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-counts-deep-b.json).
+
 Each file carries the winning patch, the whole tree, and the grader's output for
 the baseline and the best node. Each arm is two processes on one host, split
 only to use the wall-clock.
@@ -1563,56 +1568,75 @@ to `public`, `tests` says "further tests you have not been shown" instead, and
 `test_the_default_feedback_quotes_nothing_from_the_private_suite` pins the
 default against the exact strings that leaked.
 
-### Does the tree do anything? Once in eighteen trees
+### Does the tree do anything? Only when the first round falls short
 
-The question the port exists to answer, and the answer is close to no.
+The question the port exists to ask. Four arms, same six tasks, same tree, same
+1200 s per session; `--feedback` and the expansion budget are what differ.
 
-| `--feedback` | resolved | trees where a **later** round strictly beat round 0 | later expansions that produced a reply | …that changed nothing |
+| arm | resolved | trees improving **after** round 0 | later expansions live/dead | live no-ops |
 |---|:---:|:---:|---:|---:|
-| `public` | 3/6 | **0/6** | 8 of 12 | 5 (62%) |
-| `counts` | 5/6 | **1/6** | 7 of 12 | 3 (43%) |
-| `tests` | 6/6 | **0/6** | 10 of 12 | 7 (70%) |
+| `public`, 4 expansions | 3/6 | 0/6 | 8 / 4 | 5 |
+| `counts`, 4 expansions | 5/6 | 1/6 | 7 / 5 | 3 |
+| `tests`, 4 expansions | 6/6 | 0/6 | 10 / 2 | 7 |
+| `counts`, **12 expansions**, thinking off | 5/6 | **3/6** | 52 / 8 | 29 |
 
-**One tree in eighteen** ever improved on its own first round: task 034 at
-`counts`, 0.714 → 1.000, and it resolved because of it. Every other winning node
-across the three arms — and across the 420 s arm below — is a round-0 child of
-the root, or twice the root itself.
+The per-round curve is the evidence, not the resolve count. Best visible score
+after each round, `counts` at 12 expansions (6 rounds of 2):
 
-That makes the `counts` arm's two extra resolutions worth separating. Only
-**one** of them (034) came from the search. The other (029) came from a better
-*first-round* draw: told that checks remained, the agent kept working inside its
-first session and got there without a second expansion. `counts` is mostly a
-**prompt** effect, not a search effect.
+```
+001  root 0.667 → 0.667 0.667 0.667 0.667 0.667 0.667   never moved
+002  root 0.429 → 0.429 1.000 1.000 1.000 1.000 1.000   round 1
+022  root 0.200 → 1.000 1.000 1.000 1.000 1.000 1.000   round 0
+029  root 0.545 → 0.818 1.000 1.000 1.000 1.000 1.000   round 1
+034  root 0.286 → 0.286 0.714 1.000 1.000 1.000 1.000   rounds 1 and 3
+045  root 0.714 → 1.000 1.000 1.000 1.000 1.000 1.000   round 0
+```
 
-What `counts` does fix is a failure mode the `public` arm made visible. A later
-expansion inherits the best node's patch, and at `public` the only signal it
-carries is "the public reproduction exits 0" — which is true of the best node by
-construction. So the agent concludes the task is done and returns the parent's
-patch **byte for byte**. Task 029 at `public` is the clean case: the best node
-scored 0.818 with two private tests still failing, its public reproduction
-passed, and both round-1 expansions came back unchanged. Telling the agent that
-*k of n* checks remain, without saying which, drops the share of live later
-sessions that change nothing from 62% to 43% — and at `tests`, where the agent
-believes it has seen the specification and satisfied it, that share is worst of
-all at 70%.
+**Three of six trees improved after their first round**, against 0/6 and 1/6 at
+four expansions — and 034 needed round *3*, which a two-round budget cannot
+observe by construction. The earlier "one tree in eighteen" was a statement
+about the budget, not about the search, and this supersedes it.
 
-!!! warning "This under-tests the tree rather than settling it"
-    A third to a half of the later expansions never ran: 4 of 12 at `public`,
-    **5 of 12** at `counts`, 2 of 12 at `tests` produced no reply at all —
-    endpoint TLS errors and one timeout, recorded per run in the result files.
-    The second round is the only round that could have shown a search effect,
-    and it is exactly the round that lost sessions. "The tree contributed once
-    in eighteen" is what was measured; it is not evidence that a well-fed tree
-    contributes nothing, and a rerun with more expansions per tree and a healthy
-    endpoint is the experiment that would settle it.
+**But depth bought no resolutions.** `counts` resolves 5/6 at four expansions
+and 5/6 at twelve; the same five tasks, and 001 is unsolved in every arm. What
+the extra rounds did was *compensate for weaker sessions*: this arm ran with
+thinking off, and the two tasks that needed later rounds here reached the same
+place in round 0 or 1 when thinking was on. More rounds recovered what a
+cheaper session gave up. They did not reach anywhere a strong first round could
+not.
 
-There is also a structural reason to expect little from more rounds *as this
-port is built*: a node is a **whole patch**, and the tree selects among patches
-rather than merging them. Two expansions that each fix a different half of a
-two-part defect cannot be combined — one of them is selected and the other is a
-dead node. Task 034 is exactly that shape (a drift-scaling bug and a Lévy-area
-bug), and the only run that fixed both in one node is the one that was shown the
-tests.
+That is also visible in what the budget bought: **22 of the 72 expansions (31%)
+produced the final score; the other 50 ran after their tree had already
+saturated.** Once a tree hits 1.0 on the checks it can see, every later
+expansion inherits a patch the agent believes is finished, and 29 of the 52 live
+later expansions returned their parent's patch byte for byte. A search whose
+score is bounded above and reachable spends most of a deep budget confirming
+itself.
+
+!!! note "Two confounds, both real"
+    The deep arm turned thinking off (`MAX_THINKING_TOKENS=0`) and the
+    four-expansion `counts` arm did not, so their resolve counts are not a clean
+    depth comparison — only the *curves within* an arm are. And endpoint
+    failures continue: 8 of the 60 later expansions here produced no reply at
+    all, and in `002` both round-0 sessions died on a TLS error, so that tree's
+    "round 1 improvement" is partly a round-0 that never ran.
+
+### Turning thinking off does not buy wall-clock here
+
+The reason to disable extended thinking was to afford a deeper tree. It did not
+work the way the arithmetic suggested. Measured over the session transcripts the
+CLI leaves behind:
+
+| arm | thinking | median session | tool calls / session |
+|---|---|---:|---:|
+| `counts`, 4 expansions | on (31999) | 6.9 / 8.7 min | ~44 |
+| `counts`, 12 expansions | **off** | 5.7 / 11.7 min | **~66** |
+
+The agent moved the budget from thinking into **tool calls** — it stopped
+reasoning about the defect and started running the code more. For an agent that
+can execute what it edits, the two are substitutes, and the wall-clock saving is
+close to nothing. What made the deep arm affordable was accepting ~4 hours per
+process, not the flag.
 
 ### Where the tree would have had room, at a shorter session budget
 

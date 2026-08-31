@@ -222,12 +222,12 @@ held-back split cannot detect that — it shows the fix generalised, not that th
 spec was withheld.
 
 A middle level, `--feedback counts` — how many visible checks failed, never
-which — resolves **5 of 6**, and it is the one that says what the tree is worth:
-**one tree in eighteen** ever improved on its own first round. `counts` mostly
-buys a better *first* session rather than a useful second one, and a third to a
-half of the later expansions never ran at all (endpoint failures), so this
-under-tests the search rather than settling it. So the tables measure the agent
-under this harness, not the search.
+which — resolves **5 of 6**. Given room (12 expansions per tree, six rounds)
+**three of six trees improve after their first round**, one of them only at
+round 3 — so the search does contribute, and a two-round budget could not have
+seen it. But depth bought no extra *resolutions*: 5 of 6 at four expansions and
+5 of 6 at twelve, with 31% of the deep budget producing the final score and the
+rest running after the tree had saturated.
 Full tables, the two defects in the published release this had to route around,
 and the caveats:
 [`docs/algo-era.md`](../../docs/algo-era.md#measured-results--swe-bench-science).
