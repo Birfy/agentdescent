@@ -1467,12 +1467,13 @@ never sees that grader — it ranks on the visible split only, and
 `--held-back-frac 0.25` of each private suite is never shown to it in any shard
 or any prompt.
 
-Two arms, differing in `--feedback` and nothing else:
+Three arms, differing in `--feedback` and nothing else:
 
-| arm | what a prompt may quote | result files |
-|---|---|---|
-| **`public`** — the benchmark's own information budget | `reproduce.py`'s output | [`…-public-1200s-a`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-public-1200s-a.json), [`…-b`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-public-1200s-b.json) |
-| `tests` — the visible split's pytest output | that, **plus the failing tests' own source** | [`…-tests-1200s-a`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-tests-1200s-a.json), [`…-b`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-tests-1200s-b.json) |
+| arm | what a prompt may quote | resolved | result files |
+|---|---|:---:|---|
+| **`public`** — the benchmark's own information budget | `reproduce.py`'s output | **3/6** | [`…-public-1200s-a`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-public-1200s-a.json), [`…-b`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-public-1200s-b.json) |
+| `counts` | that, plus *how many* visible private checks failed — never which | **5/6** | [`…-counts-1200s-a`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-counts-1200s-a.json), [`…-b`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-counts-1200s-b.json) |
+| `tests` | that, **plus the failing tests' own source** | **6/6** | [`…-tests-1200s-a`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-tests-1200s-a.json), [`…-b`](https://github.com/Birfy/agentdescent/blob/main/bench/results/era-swe-science-tests-1200s-b.json) |
 
 Each file carries the winning patch, the whole tree, and the grader's output for
 the baseline and the best node. Each arm is two processes on one host, split
@@ -1562,18 +1563,56 @@ to `public`, `tests` says "further tests you have not been shown" instead, and
 `test_the_default_feedback_quotes_nothing_from_the_private_suite` pins the
 default against the exact strings that leaked.
 
-### The tree did not do the work, in either arm
+### Does the tree do anything? Once in eighteen trees
 
-**Every winning node came from round 0.** Across fifteen task-runs — six at
-`public`, six at `tests`, three at 420 s — and sixty expansions, the winner was
-a first-round child of the root every time except the two where it was the root
-itself. The second round added two nodes to every tree and never beat the first.
+The question the port exists to answer, and the answer is close to no.
 
-So both tables measure **the agent under this port's harness**, not that a tree
-search helps on SWE-bench Science. The search is doing what it should — it
-selects, expands, keeps failures as nodes, commits the best, and on 001 at
-`public` it correctly kept the empty patch over four worse ones — but there is
-nothing to select *between* when the first sample is already the best one drawn.
+| `--feedback` | resolved | trees where a **later** round strictly beat round 0 | later expansions that produced a reply | …that changed nothing |
+|---|:---:|:---:|---:|---:|
+| `public` | 3/6 | **0/6** | 8 of 12 | 5 (62%) |
+| `counts` | 5/6 | **1/6** | 7 of 12 | 3 (43%) |
+| `tests` | 6/6 | **0/6** | 10 of 12 | 7 (70%) |
+
+**One tree in eighteen** ever improved on its own first round: task 034 at
+`counts`, 0.714 → 1.000, and it resolved because of it. Every other winning node
+across the three arms — and across the 420 s arm below — is a round-0 child of
+the root, or twice the root itself.
+
+That makes the `counts` arm's two extra resolutions worth separating. Only
+**one** of them (034) came from the search. The other (029) came from a better
+*first-round* draw: told that checks remained, the agent kept working inside its
+first session and got there without a second expansion. `counts` is mostly a
+**prompt** effect, not a search effect.
+
+What `counts` does fix is a failure mode the `public` arm made visible. A later
+expansion inherits the best node's patch, and at `public` the only signal it
+carries is "the public reproduction exits 0" — which is true of the best node by
+construction. So the agent concludes the task is done and returns the parent's
+patch **byte for byte**. Task 029 at `public` is the clean case: the best node
+scored 0.818 with two private tests still failing, its public reproduction
+passed, and both round-1 expansions came back unchanged. Telling the agent that
+*k of n* checks remain, without saying which, drops the share of live later
+sessions that change nothing from 62% to 43% — and at `tests`, where the agent
+believes it has seen the specification and satisfied it, that share is worst of
+all at 70%.
+
+!!! warning "This under-tests the tree rather than settling it"
+    A third to a half of the later expansions never ran: 4 of 12 at `public`,
+    **5 of 12** at `counts`, 2 of 12 at `tests` produced no reply at all —
+    endpoint TLS errors and one timeout, recorded per run in the result files.
+    The second round is the only round that could have shown a search effect,
+    and it is exactly the round that lost sessions. "The tree contributed once
+    in eighteen" is what was measured; it is not evidence that a well-fed tree
+    contributes nothing, and a rerun with more expansions per tree and a healthy
+    endpoint is the experiment that would settle it.
+
+There is also a structural reason to expect little from more rounds *as this
+port is built*: a node is a **whole patch**, and the tree selects among patches
+rather than merging them. Two expansions that each fix a different half of a
+two-part defect cannot be combined — one of them is selected and the other is a
+dead node. Task 034 is exactly that shape (a drift-scaling bug and a Lévy-area
+bug), and the only run that fixed both in one node is the one that was shown the
+tests.
 
 ### Where the tree would have had room, at a shorter session budget
 

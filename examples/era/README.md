@@ -221,10 +221,13 @@ assertions. Half the resolutions were bought with the specification, and the
 held-back split cannot detect that — it shows the fix generalised, not that the
 spec was withheld.
 
-**Every winning node came from round 0**, in both arms and at a shorter session
-budget too: fifteen task-runs, sixty expansions, and the winner was a
-first-round child of the root every time except twice, when it was the root
-itself. So the tables measure the agent under this harness, not the search.
+A middle level, `--feedback counts` — how many visible checks failed, never
+which — resolves **5 of 6**, and it is the one that says what the tree is worth:
+**one tree in eighteen** ever improved on its own first round. `counts` mostly
+buys a better *first* session rather than a useful second one, and a third to a
+half of the later expansions never ran at all (endpoint failures), so this
+under-tests the search rather than settling it. So the tables measure the agent
+under this harness, not the search.
 Full tables, the two defects in the published release this had to route around,
 and the caveats:
 [`docs/algo-era.md`](../../docs/algo-era.md#measured-results--swe-bench-science).
