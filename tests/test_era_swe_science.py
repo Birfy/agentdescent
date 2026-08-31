@@ -867,6 +867,33 @@ def test_the_agent_command_forwards_the_model_only_when_one_was_given():
         ("my-agent", "--go")
 
 
+def test_effort_is_spelled_the_way_each_agent_cli_spells_it():
+    """The leaderboard reports effort as part of the model -- "DeepSeek-V4-flash
+    (max)" -- so a run compared against such a row has to set it, and the two
+    CLIs name it differently. Unset means the CLI's own default, which is what a
+    row that names no effort was run at."""
+    parser = port.build_parser()
+    assert "--effort" not in port.agent_command(parser.parse_args([]))
+    claude = port.agent_command(parser.parse_args(
+        ["--effort", "max", "--model", "deepseek-v4-flash"]))
+    assert claude[-4:] == ("--effort", "max", "--model", "deepseek-v4-flash")
+    codex = port.agent_command(parser.parse_args(
+        ["--agent", "codex", "--effort", "high"]))
+    assert codex[-2:] == ("-c", "model_reasoning_effort=high")
+    # ...and it reaches the result file, which is what makes the run repeatable.
+    assert "--effort max" in " ".join(claude)
+
+
+def test_the_agent_session_budget_defaults_to_the_release_s_own():
+    """A single attempt gets [agent] timeout_sec = 5400 upstream. Defaulting
+    lower would quietly make every unqualified run incomparable to the
+    leaderboard; a tree that wants a smaller budget has to say so."""
+    parser = port.build_parser()
+    assert parser.parse_args([]).agent_timeout == swe.RELEASE_AGENT_TIMEOUT
+    assert (parser.parse_args([]).verifier_timeout
+            == swe.RELEASE_VERIFIER_TIMEOUT)
+
+
 def test_thinking_disabled_reaches_the_agent_cli_as_its_own_budget_knob(monkeypatch):
     """Extended thinking is most of a session's wall-clock, and the CLI takes it
     from an environment variable the launching shell may already have set -- so

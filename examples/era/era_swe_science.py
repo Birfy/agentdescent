@@ -139,6 +139,14 @@ CLAUDE_CODE = ("claude", "-p", "--permission-mode", "acceptEdits",
                "--allowedTools", "Bash Edit Write Read Glob Grep TodoWrite")
 CODEX = ("codex", "exec", "--full-auto")
 
+# How each CLI names a reasoning-effort level. The leaderboard reports effort as
+# part of the model ("DeepSeek-V4-flash (max)"), and the release's own profiles
+# carry it too (`CODEX_REASONING_EFFORT=high`, which `scripts/run_batch.py`
+# forwards as `reasoning_effort=`), so a run that leaves it at the CLI default is
+# not comparable to a leaderboard row that names one.
+EFFORT_FLAG = {"claude-code": lambda level: ("--effort", level),
+               "codex": lambda level: ("-c", f"model_reasoning_effort={level}")}
+
 EMPTY_WARNING = (
     "For this task that means an agent session that left the checkout "
     "unchanged -- it timed out, refused, or could not find the defect. The "
@@ -159,7 +167,12 @@ def agent_command(args: argparse.Namespace) -> Tuple[str, ...]:
     # while `--bare` reads the key and nothing else. It also drops hooks,
     # plugins and CLAUDE.md discovery, which is what a benchmark harness
     # wants anyway -- none of that is part of the task.
-    return (base + tuple(args.agent_arg or ())
+    effort = (EFFORT_FLAG[args.agent](args.effort)
+              if args.effort and args.agent in EFFORT_FLAG else ())
+    if args.effort and not effort:
+        raise SystemExit(f"--effort has no spelling for --agent {args.agent}; "
+                         f"pass it through --agent-arg instead")
+    return (base + tuple(args.agent_arg or ()) + effort
             + (("--model", args.model) if args.model else ()))
 
 
@@ -287,12 +300,22 @@ def build_parser() -> argparse.ArgumentParser:
                               "(ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN), "
                               "without redirecting the process that launched "
                               "the run. Only the NAMES reach the result file"))
-    parser.add_argument("--agent-timeout", type=float, default=1800.0,
-                        help=(f"wall clock for one agent session. The release "
-                              f"allows {int(RELEASE_AGENT_TIMEOUT)}s per task "
-                              f"for a single attempt; a tree spends several, so "
-                              f"the default here is lower and a run that raises "
-                              f"it is not comparable to one that did not"))
+    parser.add_argument("--effort", default=None,
+                        help=("reasoning-effort level for the agent CLI "
+                              "(Claude Code: low|medium|high|xhigh|max). The "
+                              "leaderboard names it alongside the model, so a "
+                              "run reporting against a row that names one sets "
+                              "it here; unset leaves the CLI's own default"))
+    parser.add_argument("--agent-timeout", type=float,
+                        default=RELEASE_AGENT_TIMEOUT,
+                        help=(f"wall clock for one agent session, defaulting to "
+                              f"the release's own [agent] timeout_sec "
+                              f"({int(RELEASE_AGENT_TIMEOUT)}). That is the "
+                              f"allowance for a *single* attempt, so a tree "
+                              f"spending several expansions costs a multiple of "
+                              f"it -- lower it to make a deep tree affordable, "
+                              f"knowing a run that did is not comparable to a "
+                              f"leaderboard row that did not"))
     parser.add_argument("--staleness", default="guarded",
                         choices=["guarded", "reflective", "full"],
                         help=("what to do with an expansion proposed against a "
@@ -763,7 +786,9 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     print(f"Evaluator: the release's own grader in its own pinned verifier "
           f"image, {backend or 'NO DOCKER DAEMON -- this run will fail'}")
     print(f"Mutation : one {args.agent} session per expansion, in a checkout "
-          f"bind-mounted into the task's offline environment image")
+          f"bind-mounted into the task's offline environment image"
+          + (f", model={args.model}" if args.model else "")
+          + (f", effort={args.effort}" if args.effort else ""))
     print(
         f"Plan     : mode={mode}, tasks={args.tasks}, iterations={args.iterations}"
         f"/task, workers={args.workers}, c_puct={args.c_puct}, "
@@ -975,6 +1000,9 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             "version": (agent_version(agent_command(args))
                         if args.agent != "completion" else ""),
             "model": args.model or "",
+            # The leaderboard names effort with the model, so a row it is
+            # compared against is only matched when this matches too.
+            "effort": args.effort or "",
             # Inherited from the launching shell unless --thinking says
             # otherwise, and most of a session's wall-clock either way.
             "thinking": args.thinking,

@@ -780,9 +780,15 @@ The same disclosure the LLM-SRBench task carries, for the same reason.
    images, so Docker is not an isolation choice that could be swapped — it is
    what the benchmark is distributed as. The port refuses to run without a
    daemon rather than substituting something weaker.
-2. **`--agent-timeout` defaults to 1800 s**, against the release's 5400 s for a
-   single attempt. A tree spends several sessions per task, and a run that
-   raises the cap is not comparable to one that did not.
+2. **A tree multiplies the release's per-attempt budget.** `--agent-timeout`
+   defaults to the release's own `[agent] timeout_sec = 5400`, so a single
+   expansion is what the benchmark allows; a tree of *n* expansions therefore
+   spends up to *n* × that on one task. Lowering the cap is what makes a deep
+   tree affordable, and a run that lowered it is not comparable to a
+   leaderboard row that did not — the result file records the value in force.
+   `--effort` is the same kind of knob: the leaderboard names it with the model
+   ("DeepSeek-V4-flash (max)"), so a run reporting against such a row has to
+   set it, and unset means the CLI's own default.
 3. **A shard is a subset of the private tests**, and when a suite is too small
    to fill `--shards` with distinct members — most of them are; a private suite
    of three tests is common — the partition degrades into a **cover**, with a
