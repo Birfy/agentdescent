@@ -43,7 +43,7 @@ s.addText('AlgoTune  ·  eight tasks  ·  one configuration  ·  two seeds',
    charSpacing:2.4,isTextBox:true,margin:0});
 s.addText('Measured Twice',
   {x:M,y:2.42,w:9.4,h:1.0,fontFace:H,fontSize:54,bold:true,color:WHITE,isTextBox:true,margin:0});
-s.addText('An ERA flat-PUCT tree search on AgentDescent, put beside AlphaEvolve, MetaEvolve, OpenEvolve and the AlgoTune leaderboard — and what turns out not to be the same measurement.',
+s.addText('An ERA flat-PUCT tree search on AgentDescent, put beside MetaEvolve, its untrained baseline, OpenEvolve and the AlgoTune leaderboard — and what turns out not to be the same measurement.',
   {x:M,y:3.5,w:8.4,h:0.9,fontFace:B,fontSize:15,color:'C6D0D6',lineSpacing:24,isTextBox:true,margin:0});
 [['2.285x / 2.254x','8-task harmonic mean, seeds 0 and 1'],
  ['16','complete runs, 10.7 h, 4.62 M tokens'],
@@ -88,8 +88,8 @@ head(s,'WHO ELSE IS IN THE TABLE','Four other systems, four different setups',
 const rows=[[hdr('System'),hdr('Harness'),hdr('Model'),hdr('Search budget'),hdr('Problem size n')]];
 const others=[
  ['This port','own AlgoTune domain\non AgentDescent','deepseek-v4-flash','99 rollouts/task\n× 2 seeds','upstream calibrated\n(verified)'],
- ['AlphaEvolve\narXiv:2607.21971','own','Qwen3-14B','50 rounds','not stated'],
- ['MetaEvolve\narXiv:2607.21971','own','Qwen3-14B','50 rounds','not stated'],
+ ['Qwen3-14B, no RL\nMetaEvolve’s baseline','OpenEvolve’s search\narXiv:2607.21971','Qwen3-14B\nno training','50 rounds','not stated'],
+ ['MetaEvolve\narXiv:2607.21971','OpenEvolve’s search','Qwen3-14B\n+ RL on synthesised\nevolution trajectories','50 rounds','not stated'],
  ['OpenEvolve','own','gemini-2.5-flash 0.8\n+ gemini-2.5-pro 0.2','100 iterations,\npopulation 1000','10x–4337x below\ncalibrated, on 6 of 8'],
  ['AlgoTune\nleaderboard','AlgoTuner\n(the benchmark’s own)','18 models\n(9 complete here)','the harness’s own','upstream calibrated'],
 ];
@@ -102,7 +102,7 @@ others.forEach((r,i)=>{
 });
 s.addTable(rows,{...tblBase,x:M,y:1.95,w:W-2*M,colW:[2.05,2.35,2.4,2.15,3.14],
   rowH:[0.34,0.72,0.56,0.56,0.7,0.7]});
-foot(s,'“not stated” is not an accusation — neither paper publishes its sizes. Slides 7 and 8 ask what their own numbers imply about them.');
+foot(s,'The first two rows are one paper’s ablation of a single variable: same search, same model, RL or not. Neither states its problem sizes, and all three run OpenEvolve’s search — whose AlgoTune harness takes n from a config field rather than from AlgoTune’s calibration. DeepMind’s AlphaEvolve is absent because it has never been run on AlgoTune and is not publicly available; the row often labelled with its name is this paper’s untrained baseline.');
 s.addNotes('Set up the comparability question here without answering it yet.');
 
 /* ---------------------------------------------------- 4  headline chart */
@@ -112,10 +112,10 @@ head(s,'THE HEADLINE','Everything that beat the reference',
 const winners=[
  ['This port — seed 0',D.ours_hm[0],'deepseek-v4-flash-ga  ·  ERA flat-PUCT on AgentDescent',VIRID],
  ['This port — seed 1',D.ours_hm[1],'deepseek-v4-flash-ga  ·  ERA flat-PUCT on AgentDescent',VIRID],
- ['MetaEvolve',2.045,'Qwen3-14B  ·  own harness, 50 rounds  ·  arXiv:2607.21971',SLATE],
+ ['MetaEvolve',2.045,'Qwen3-14B + RL  ·  OpenEvolve’s search  ·  arXiv:2607.21971',SLATE],
  ['OpenEvolve',1.984,'gemini-2.5-flash + 2.5-pro  ·  own harness, 100 iterations',BRASS],
  ['gpt-5.4',1.566,'gpt-5.4  ·  AlgoTuner — the benchmark’s own harness',SLATE],
- ['AlphaEvolve',1.392,'Qwen3-14B  ·  own harness, 50 rounds  ·  arXiv:2607.21971',SLATE],
+ ['Qwen3-14B, no RL',1.392,'Qwen3-14B, untrained  ·  OpenEvolve’s search algorithm',SLATE],
  ['gpt-5.2',1.280,'gpt-5.2  ·  AlgoTuner — the benchmark’s own harness',SLATE],
  ['gpt-5',1.081,'gpt-5  ·  AlgoTuner — the benchmark’s own harness',SLATE]];
 const wt=1.98, wr=0.545, wx=3.72, ww=7.62, wm=2.4;
@@ -175,7 +175,7 @@ s=p.addSlide();
 head(s,'PER TASK','All eight, nothing selected',
   'Both our seeds shown. The last two columns are the spread across AlgoTune’s own 14–18 models at the same n.');
 const T=D.tasks;
-const r5=[[hdr('Task'),hdr('n'),hdr('ours s0'),hdr('ours s1'),hdr('Alpha'),hdr('Meta'),hdr('OpenEv'),hdr('AlgoTune max'),hdr('AlgoTune median')]];
+const r5=[[hdr('Task'),hdr('n'),hdr('ours s0'),hdr('ours s1'),hdr('Qwen3-14B\nno RL'),hdr('Meta\nEvolve'),hdr('Open\nEvolve'),hdr('AlgoTune max'),hdr('AlgoTune median')]];
 T.forEach((t,i)=>{
   const o=D.ours[t], q=D.published[t], u=D.upstream_per_task[t];
   const over=v=>v>u.max*1.001;
@@ -241,12 +241,12 @@ s=p.addSlide();
 head(s,'THE FINDING','Half the comparison is not the same problem',
   'AlgoTune’s own 14–18 models, at the calibrated n, bracket what is achievable. Three systems fall outside the bracket — in both directions.');
 const A=[['Above the best of every AlgoTune model',BRASS,
-  [['eigenvectors_complex','max 1.039x over 18 models','Alpha 1.432 · Meta 1.474 · OpenEv 1.48'],
-   ['affine_transform_2d','max 1.015x over 14 models','Meta 6.945 · OpenEv 3.22'],
-   ['fft_convolution','max 1.021x over 15 models','Meta 1.346 · OpenEv 1.38']]],
+  [['eigenvectors_complex','max 1.039x over 18 models','no-RL 1.432 · MetaEvolve 1.474 · OpenEvolve 1.48'],
+   ['affine_transform_2d','max 1.015x over 14 models','MetaEvolve 6.945 · OpenEvolve 3.22'],
+   ['fft_convolution','max 1.021x over 15 models','MetaEvolve 1.346 · OpenEvolve 1.38']]],
  ['Below AlgoTune’s median',SLATE,
-  [['psd_cone_projection','median 8.728x over 18 models','Alpha 1.795 · Meta 1.914 · OpenEv 1.94'],
-   ['convolve2d_full_fill','median 144.938x over 18 models','Meta 78.128'],
+  [['psd_cone_projection','median 8.728x over 18 models','no-RL 1.795 · MetaEvolve 1.914 · OpenEvolve 1.94'],
+   ['convolve2d_full_fill','median 144.938x over 18 models','MetaEvolve 78.128'],
    ['',' ',' ']]]];
 A.forEach((col,ci)=>{
   const x=M+ci*6.15;
@@ -267,7 +267,7 @@ A.forEach((col,ci)=>{
 });
 s.addShape(p.ShapeType.roundRect,{x:M,y:5.66,w:W-2*M,h:1.06,fill:{color:INK},
   line:{color:INK,width:0},rectRadius:0.06});
-s.addText('That two-sided pattern is the signature of a smaller problem, not a better search. Shrink n and the tasks whose only headroom is Python overhead become winnable; the tasks whose win is genuinely algorithmic at scale lose theirs.',
+s.addText('That two-sided pattern is the signature of a smaller problem, not a better search. Shrink n and the tasks whose only headroom is Python overhead become winnable; the tasks whose win is genuinely algorithmic at scale lose theirs. All three columns run OpenEvolve’s search, and three of the eight agree with OpenEvolve’s own numbers to within 2.5%.',
   {x:M+0.28,y:5.82,w:W-2*M-0.56,h:0.76,fontFace:B,fontSize:13,color:'D6E0E4',
    lineSpacing:19,isTextBox:true,margin:0});
 s.addNotes('Both directions matter. One direction alone would be explainable as a stronger search.');
@@ -348,7 +348,7 @@ s.addNotes('Correcting an earlier read: affine is nearly closed, lu and psd are 
 /* ---------------------------------------------------- 10 other tasks */
 s=p.addSlide();
 head(s,'BEYOND THE EIGHT','The other tasks run with the model prior',
-  'Ten tasks have a prior-arm run. The two outside the comparison set have no AlphaEvolve or MetaEvolve number, so AlgoTune is the only yardstick.');
+  'Ten tasks have a prior-arm run. The two outside the comparison set have no MetaEvolve number, so AlgoTune is the only yardstick.');
 const extra=[['lp_centering',1.001,1.039,1.000,12,'At the field’s median and within 4% of its best. Nothing here for anyone.'],
  ['least_squares',null,3.810,1.910,13,'A genuine miss: the search never found a valid improvement, while half the field is above 1.9x.']];
 extra.forEach((r,i)=>{

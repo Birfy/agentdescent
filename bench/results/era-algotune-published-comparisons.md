@@ -19,14 +19,57 @@
 
 Published as a page: https://claude.ai/code/artifact/2fe924b7-09e0-432e-8fc4-58d5128dfa24
 
-## AlphaEvolve and MetaEvolve (arXiv:2607.21971)
+## MetaEvolve and its baseline (arXiv:2607.21971)
 
-Qwen3-14B, 50 rounds, on exactly the eight tasks OpenEvolve publishes. Both papers'
-per-task tables reconcile with their headline scores to three decimals -- AlphaEvolve
-1.3921 against a published 1.392, MetaEvolve 2.0449 against 2.045. OpenEvolve's does not:
-its table gives 2.267x against a published 1.984x.
+> **The `AlphaEvolve` column in the tables below is not DeepMind's AlphaEvolve, and
+> earlier revisions of this file were wrong to imply it was.** DeepMind's AlphaEvolve
+> has never been run on AlgoTune: it was evaluated on ~50 mathematical problems and on
+> Google's own infrastructure kernels, it predates the AlgoTune paper, and it is not
+> publicly available, so nobody outside Google can run it on anything. The row named
+> `AlphaEvolve` here is **MetaEvolve's own untrained baseline** -- the paper's words:
+> "we use the same evolutionary search algorithm implemented in OpenEvolve; the only
+> difference lies in the backbone LLM used to generate solutions", all "implemented on
+> Qwen3-14B for fair comparison". It is relabelled `Qwen3-14B, no RL` below. Nothing in
+> this file is a comparison against DeepMind's system.
 
-| task | aligned run | our best | AlphaEvolve | MetaEvolve | OpenEvolve |
+The paper is *Teaching LLMs to Self-Evolve: Cultivating Core Meta-Skills with
+Reinforcement Learning*, and its two rows are a controlled one-variable ablation:
+
+| | search | model | training | eight-task score |
+|---|---|---|---|---:|
+| `Qwen3-14B, no RL` | OpenEvolve's | Qwen3-14B | none | 1.392x |
+| `MetaEvolve` | OpenEvolve's | Qwen3-14B | RL on synthesised evolution trajectories | 2.045x |
+
+**MetaEvolve trains the model**, which this port does not: RL with verifiable rewards
+from test execution, on evolution trajectories (a program, its fitness, and the history
+of prior attempts) synthesised from `PRIME-RL/Eurus-2-RL-Data` -- TACO, APPS, Codeforces
+and CodeContests. AlgoTune is held out and named as the out-of-distribution evaluation,
+"entirely outside the training domain", so this is not train-on-test. 50 rounds of
+self-evolution at inference.
+
+Both rows' per-task tables reconcile with their headline scores to three decimals --
+1.3921 against a published 1.392, 2.0449 against 2.045. OpenEvolve's does not: its table
+gives 2.267x against a published 1.984x.
+
+**All three published columns are the same codebase.** MetaEvolve and its baseline run
+OpenEvolve's search, and OpenEvolve's AlgoTune harness takes the problem size from a
+config field rather than from AlgoTune's calibration:
+
+```yaml
+  data_size: 35          # AlgoTune's calibrated n for psd_cone_projection is 349
+```
+```python
+problem = task_instance.generate_problem(n=data_size, random_seed=trial)
+```
+
+Neither paper states its sizes. Three of the eight tasks agree with OpenEvolve's
+published numbers to within 2.5% -- `psd_cone_projection` 1.914 against 1.94,
+`eigenvectors_complex` 1.474 against 1.48, `fft_convolution` 1.346 against 1.38 -- which
+is what one would expect if the sizes came along with the harness. That is an inference,
+not a demonstration; the demonstration is the ceiling argument further down, which shows
+all three columns exceed what is physically possible on `eigenvectors_complex` at n=463.
+
+| task | aligned run | our best | Qwen3-14B, no RL | MetaEvolve (RL) | OpenEvolve |
 |---|---:|---:|---:|---:|---:|
 | `convolve2d_full_fill` | 111.915 | 111.915 | 291.338 | 78.128 | 256.15 |
 | `affine_transform_2d` | 1.004 | 1.004 | 1.072 | 6.945 | 3.22 |
@@ -40,7 +83,7 @@ its table gives 2.267x against a published 1.984x.
 
 \* their published headline; the mean of their own table is 2.267x.
 
-Best configuration wins 5 of 8 against each of AlphaEvolve and MetaEvolve. Neither paper
+Best configuration wins 5 of 8 against each of the baseline and MetaEvolve. Neither paper
 states its problem sizes, so the comparability OpenEvolve fails cannot be confirmed for them
 either -- but their per-task values are at least consistent with AlgoTune's distribution at the
 calibrated sizes (polynomial_real at 1.014x and 2.457x against upstream's 1.009x median,
@@ -57,7 +100,7 @@ Below is a single configuration (`--iterations 99 --async --staleness full
 --c-puct 2.5 --prior-exponent 2`) run twice, on the same eight tasks. Both seeds
 are shown; neither is selected.
 
-| task | 99, seed 0 | 99, seed 1 | AlphaEvolve | MetaEvolve | OpenEvolve\* |
+| task | 99, seed 0 | 99, seed 1 | Qwen3-14B, no RL | MetaEvolve (RL) | OpenEvolve\* |
 |---|---:|---:|---:|---:|---:|
 | `convolve2d_full_fill` | 115.835 | 100.721 | 291.338 | 78.128 | 256.15 |
 | `affine_transform_2d` | 0.992 | 0.978 | 1.072 | 6.945 | 3.22 |
@@ -74,7 +117,7 @@ is 10x-4337x below AlgoTune's calibrated `n` on six of these eight tasks, so it
 is not measuring the same problems; see `era-algotune-openevolve-comparison.md`.
 
 **The two seeds agree to 1.4%**, and the win counts are identical: 4 of 8
-against AlphaEvolve on both, 5 of 8 against MetaEvolve on both. Seven of the
+against the untrained baseline on both, 5 of 8 against MetaEvolve on both. Seven of the
 eight tasks reproduce within 15% -- median seed-to-seed spread 1.02x. The
 exception is `polynomial_real` at 3.97x, which remains genuinely multi-modal:
 the search finds a fast direction every time, but not always the same one.
@@ -96,7 +139,7 @@ Two caveats that the number does not carry on its own:
   OpenEvolve's 1.19x puts the aggregate at 1.905x.
 * **Three tasks find nothing.** `affine_transform_2d` (0.99x),
   `fft_convolution` (1.00x) and `eigenvectors_complex` (1.03x) are where both
-  AlphaEvolve and MetaEvolve beat this port, on both seeds. A harmonic mean is
+  the Qwen3-14B baseline and MetaEvolve beat this port, on both seeds. A harmonic mean is
   set by its smallest terms, so these three are what the headline is actually a
   statement about.
 

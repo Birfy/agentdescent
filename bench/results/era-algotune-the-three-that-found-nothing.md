@@ -3,7 +3,12 @@
 At 99 rollouts and two seeds, three of the eight comparison tasks come back at
 roughly 1.0x on both seeds:
 
-| task | 99, seed 0 | 99, seed 1 | AlphaEvolve | MetaEvolve | OpenEvolve |
+(The column previously headed `AlphaEvolve` is relabelled: it is not DeepMind's
+AlphaEvolve, which has never been run on AlgoTune and is not publicly available, but
+MetaEvolve's own untrained baseline -- OpenEvolve's search on Qwen3-14B without its RL.
+See `era-algotune-published-comparisons.md`.)
+
+| task | 99, seed 0 | 99, seed 1 | Qwen3-14B, no RL | MetaEvolve (RL) | OpenEvolve |
 |---|---:|---:|---:|---:|---:|
 | `affine_transform_2d` | 0.992 | 0.978 | 1.072 | 6.945 | 3.22 |
 | `eigenvectors_complex` | 1.039 | 1.023 | 1.432 | 1.474 | 1.48 |
@@ -60,7 +65,7 @@ are not wrong -- they are measured somewhere else. The size curve says where:
 
 All three land in the n~50 band. `era-algotune-openevolve-comparison.md`
 demonstrated this size mismatch for OpenEvolve from its published
-`algotune.data_size`. For AlphaEvolve and MetaEvolve, which state no sizes, the
+`algotune.data_size`. For the two rows of arXiv:2607.21971, which state no sizes, the
 conclusion has to come from the task instead -- and the first version of this
 argument was not strong enough to carry it, because a ratio measured on one
 machine can move on another. Two checks close that gap.
