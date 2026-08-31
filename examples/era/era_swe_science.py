@@ -319,6 +319,12 @@ def build_parser() -> argparse.ArgumentParser:
                         help="do not delete an expansion's checkout afterwards")
     parser.add_argument("--no-pull", action="store_true",
                         help="fail rather than fetch a pinned image that is missing")
+    parser.add_argument("--grade-node", type=int, default=None, metavar="INDEX",
+                        help=("with --regrade, score this tree node instead of "
+                              "the winner. `--grade-node 1` is the benchmark's "
+                              "own protocol: the first expansion from the "
+                              "baseline, with no verifier in the loop choosing "
+                              "it. 0 is the untouched repository"))
     parser.add_argument("--regrade", type=Path, default=None,
                         help=("re-run the release's grader over the patches a "
                               "finished result file already holds, and write "
@@ -385,6 +391,14 @@ def _task_payload(suite: Suite, domain: Domain, run: Any,
         # reads it back, and a reader can see what was actually submitted rather
         # than a character count.
         "best_patch": run.tree.best().program.code,
+        # Every node's artifact, not only the winner's. The tree's `best()` is
+        # an **oracle selector** -- it reads the private suite -- so a result
+        # file that kept only the winner could not answer the one question the
+        # benchmark actually asks: what does a *single* attempt resolve? With
+        # these, `--regrade` can score any node, and pass@1 is the first
+        # expansion's patch rather than a rerun.
+        "node_patches": {str(node.index): node.program.code
+                         for node in run.tree.nodes},
         "observation": run.summary(quality_target),
     }
 
@@ -418,16 +432,26 @@ def regrade(args: argparse.Namespace) -> int:
             held_back_frac=float(config.get("held_back_frac", args.held_back_frac)),
             seed=int(config.get("seed", args.seed)), release=args.release,
             pull=not args.no_pull)
-        patch = entry.get("best_patch")
-        if patch is None:
-            sidecar = path.with_name(f"{path.stem}-task{task_id}-best.patch")
-            patch = sidecar.read_text(encoding="utf-8") if sidecar.is_file() else ""
-            entry["best_patch"] = patch
+        if args.grade_node is not None:
+            nodes = entry.get("node_patches") or {}
+            if str(args.grade_node) not in nodes:
+                raise SystemExit(
+                    f"task {task_id} has no node {args.grade_node} recorded. "
+                    "Only runs made after `node_patches` was added carry every "
+                    "node's artifact; older ones keep the winner alone.")
+            patch = nodes[str(args.grade_node)]
+        else:
+            patch = entry.get("best_patch")
+            if patch is None:
+                sidecar = path.with_name(f"{path.stem}-task{task_id}-best.patch")
+                patch = sidecar.read_text(encoding="utf-8") if sidecar.is_file() else ""
+                entry["best_patch"] = patch
         baseline_grade = grade("", suite=suite, timeout=args.verifier_timeout,
                                release=args.release)
         best_grade = (baseline_grade if not patch.strip() else
                       grade(patch, suite=suite, timeout=args.verifier_timeout,
                             release=args.release))
+        entry["graded_node"] = args.grade_node
         entry["regraded"] = {
             "previous_reward_baseline": entry.get("benchmark_reward_baseline"),
             "previous_reward_best": entry.get("benchmark_reward_best"),
