@@ -194,6 +194,13 @@ def agent_environment(args: argparse.Namespace) -> Dict[str, str]:
     whatever shell launched the run, so a result file that did not record it
     could not be repeated. `agent_sessions.thinking_tokens` carries the value
     that was in force.
+
+    It does not always win, though: measured against Claude Code 2.1.x,
+    ``--effort max`` keeps thinking on with ``MAX_THINKING_TOKENS=0`` set, while
+    an unset or low effort honours it. So a run cannot both suppress thinking
+    and match a leaderboard row that names ``max`` -- one of the two has to go,
+    and the result file records which by carrying `effort` and
+    `thinking_tokens` side by side.
     """
     env: Dict[str, str] = {}
     for pair in (args.agent_env or ()):
@@ -305,7 +312,10 @@ def build_parser() -> argparse.ArgumentParser:
                               "(Claude Code: low|medium|high|xhigh|max). The "
                               "leaderboard names it alongside the model, so a "
                               "run reporting against a row that names one sets "
-                              "it here; unset leaves the CLI's own default"))
+                              "it here; unset leaves the CLI's own default. "
+                              "NOTE: `--effort max` outranks `--thinking "
+                              "disabled` -- sessions still think -- so the two "
+                              "cannot both hold"))
     parser.add_argument("--agent-timeout", type=float,
                         default=RELEASE_AGENT_TIMEOUT,
                         help=(f"wall clock for one agent session, defaulting to "
