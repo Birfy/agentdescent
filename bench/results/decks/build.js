@@ -107,45 +107,68 @@ s.addNotes('Set up the comparability question here without answering it yet.');
 
 /* ---------------------------------------------------- 4  headline chart */
 s=p.addSlide();
-head(s,'THE HEADLINE','Two rankings, because neither one is the whole field',
-  'Left: the eight tasks the papers report — but only 9 of AlgoTune’s 18 models have a score on all eight. Right: the four tasks every model has, nobody excluded.',0.52);
-
-function panel(title,note,items,x,w,rowh,fs,maxv){
-  s.addText(title,{x,y:1.94,w,h:0.26,fontFace:B,fontSize:12,bold:true,color:INK,
+head(s,'THE HEADLINE','Everything that beat the reference',
+  'Harmonic mean over the same eight tasks. Each row names the model and harness behind it — not the same experiment.',0.30);
+const winners=[
+ ['This port — seed 0',D.ours_hm[0],'deepseek-v4-flash-ga  ·  ERA flat-PUCT on AgentDescent',VIRID],
+ ['This port — seed 1',D.ours_hm[1],'deepseek-v4-flash-ga  ·  ERA flat-PUCT on AgentDescent',VIRID],
+ ['MetaEvolve',2.045,'Qwen3-14B  ·  own harness, 50 rounds  ·  arXiv:2607.21971',SLATE],
+ ['OpenEvolve',1.984,'gemini-2.5-flash + 2.5-pro  ·  own harness, 100 iterations',BRASS],
+ ['gpt-5.4',1.566,'gpt-5.4  ·  AlgoTuner — the benchmark’s own harness',SLATE],
+ ['AlphaEvolve',1.392,'Qwen3-14B  ·  own harness, 50 rounds  ·  arXiv:2607.21971',SLATE],
+ ['gpt-5.2',1.280,'gpt-5.2  ·  AlgoTuner — the benchmark’s own harness',SLATE],
+ ['gpt-5',1.081,'gpt-5  ·  AlgoTuner — the benchmark’s own harness',SLATE]];
+const wt=1.98, wr=0.545, wx=3.72, ww=7.62, wm=2.4;
+winners.forEach((r,i)=>{
+  const y=wt+i*wr, mine=r[3]===VIRID;
+  s.addText(r[0],{x:M,y:y+0.02,w:2.98,h:0.26,fontFace:B,fontSize:12.5,bold:true,
+    color:mine?VIRID:INK,align:'right',valign:'middle',isTextBox:true,margin:0});
+  s.addText(r[2],{x:M-0.62,y:y+0.27,w:3.60,h:0.24,fontFace:B,fontSize:8.5,
+    color:r[3]===BRASS?BRASS:SLATE,align:'right',valign:'middle',isTextBox:true,margin:0});
+  s.addShape(p.ShapeType.rect,{x:wx,y:y+0.09,w:Math.max(ww*r[1]/wm,0.05),h:0.3,
+    fill:{color:r[3]},line:{width:0}});
+  s.addText(r[1].toFixed(3)+'x',{x:wx+ww*r[1]/wm+0.09,y:y+0.04,w:0.95,h:0.3,
+    fontFace:B,fontSize:12,bold:mine,color:mine?VIRID:GRAPH,valign:'middle',
     isTextBox:true,margin:0});
-  s.addText(note,{x,y:2.20,w,h:0.24,fontFace:B,fontSize:9,color:SLATE,isTextBox:true,margin:0});
-  const top=2.46, lw=w*0.315, bx=x+lw+0.06, bw=w-lw-0.78;
-  items.forEach((r,i)=>{
-    const y=top+i*rowh, mine=r[2];
-    s.addText(r[0],{x,y:y-0.015,w:lw,h:rowh,fontFace:B,fontSize:fs,bold:mine,
-      color:mine?VIRID:GRAPH,align:'right',valign:'middle',isTextBox:true,margin:0});
-    s.addShape(p.ShapeType.rect,{x:bx,y:y+0.028,w:Math.max(bw*r[1]/maxv,0.04),
-      h:rowh-0.085,fill:{color:mine?VIRID:(r[3]||SLATE)},line:{width:0}});
-    s.addText(r[1].toFixed(3),{x:bx+bw*r[1]/maxv+0.05,y:y-0.015,w:0.66,h:rowh,
-      fontFace:B,fontSize:fs,bold:mine,color:mine?VIRID:GRAPH,valign:'middle',
-      isTextBox:true,margin:0});
-  });
-  s.addShape(p.ShapeType.line,{x:bx+bw/maxv,y:top-0.04,w:0,h:items.length*rowh+0.02,
-    line:{color:SLATE,width:1,dashType:'dash'}});
-  return top+items.length*rowh;
-}
+});
+s.addShape(p.ShapeType.line,{x:wx+ww/wm,y:wt+0.02,w:0,h:winners.length*wr-0.05,
+  line:{color:SLATE,width:1,dashType:'dash'}});
+s.addText('1.0x — no improvement',{x:wx+ww/wm+0.07,y:wt-0.26,w:2.2,h:0.24,
+  fontFace:B,fontSize:9.5,color:SLATE,isTextBox:true,margin:0});
+s.addShape(p.ShapeType.roundRect,{x:M,y:6.46,w:W-2*M,h:0.80,fill:{color:MIST},
+  line:{color:RULE,width:0.75},rectRadius:0.05});
+s.addText([{text:'Six more AlgoTuner models are not shown, because they land below 1.0 — 0.848x down to 0.665x. ',options:{bold:true,color:INK}},
+ {text:'Not a failure to find anything: they submitted solvers that are slower than the reference, mostly by adding a .tolist() the reference does not do. A harmonic mean punishes that hard — one task at 0.221x is half the denominator, while a task at 163x contributes 0.1%.',options:{color:GRAPH}}],
+ {x:M+0.26,y:6.54,w:W-2*M-0.52,h:0.64,fontFace:B,fontSize:10.5,lineSpacing:14,
+  isTextBox:true,margin:0});
+s.addNotes('The six omitted are glm-4.5, o4-mini, deepseek-reasoner, claude-opus-4.1, gpt-5-mini and gpt-5-pro (medium). Nine further AlgoTune models have no score on at least one of the eight tasks and are on the next slide.');
 
-const left=[['This port — seed 0',D.ours_hm[0],true],['This port — seed 1',D.ours_hm[1],true],
- ['MetaEvolve',2.045,false],['OpenEvolve',1.984,false,BRASS],['gpt-5.4',1.566,false],
- ['AlphaEvolve',1.392,false],['gpt-5.2',1.280,false],['gpt-5',1.081,false],
- ['glm-4.5',0.848,false],['o4-mini',0.834,false],['deepseek-reasoner',0.792,false],
- ['claude-opus-4.1',0.750,false],['gpt-5-mini',0.677,false],['gpt-5-pro (med)',0.665,false]];
-panel('Eight tasks  ·  9 of 18 models','the papers’ own task set; 9 models have no score on at least one of the eight',
-      left,M,5.82,0.283,9.5,2.4);
-const right=D.sub4_rank.map(r=>[r[0].replace('This port — ','This port — '),r[1],r[2]]);
-panel('Four tasks  ·  all 18 models  +  both our seeds','eigenvectors · psd_cone · fft_cmplx · convolve2d — the only four nobody is missing',
-      right,7.0,5.71,0.198,8.5,3.2);
-s.addShape(p.ShapeType.roundRect,{x:M,y:6.52,w:W-2*M,h:0.74,fill:{color:INK},
+/* ---------------------------------------------------- 4b all models */
+s=p.addSlide();
+head(s,'THE SAME QUESTION, NOBODY EXCLUDED','Four tasks, all eighteen AlgoTune models',
+  'The previous slide uses the eight tasks the papers report — but nine of AlgoTune’s eighteen models have no score on at least one of them. These four are the only tasks every model has.',0.52);
+const R=D.sub4_rank, half=Math.ceil(R.length/2);
+[[0,half,M],[half,R.length,7.0]].forEach(([a,b,x])=>{
+  R.slice(a,b).forEach((r,i)=>{
+    const y=2.04+i*0.43, mine=r[2], rank=a+i+1;
+    s.addShape(p.ShapeType.roundRect,{x,y,w:5.71,h:0.38,
+      fill:{color:mine?'E6F2EF':(i%2?WHITE:MIST)},line:{color:RULE,width:0.6},rectRadius:0.05});
+    s.addText(String(rank),{x:x+0.12,y,w:0.4,h:0.38,fontFace:B,fontSize:10.5,
+      color:mine?VIRID:SLATE,bold:mine,align:'right',valign:'middle',isTextBox:true,margin:0});
+    s.addText(r[0],{x:x+0.62,y,w:3.3,h:0.38,fontFace:B,fontSize:11,bold:mine,
+      color:mine?VIRID:GRAPH,valign:'middle',isTextBox:true,margin:0});
+    s.addShape(p.ShapeType.rect,{x:x+3.95,y:y+0.13,w:Math.max(1.05*r[1]/3.2,0.03),h:0.12,
+      fill:{color:mine?VIRID:SLATE},line:{width:0}});
+    s.addText(r[1].toFixed(3)+'x',{x:x+5.06,y,w:0.6,h:0.38,fontFace:B,fontSize:10.5,
+      bold:mine,color:mine?VIRID:GRAPH,align:'right',valign:'middle',isTextBox:true,margin:0});
+  });
+});
+s.addShape(p.ShapeType.roundRect,{x:M,y:6.46,w:W-2*M,h:0.80,fill:{color:INK},
   line:{color:INK,width:0},rectRadius:0.05});
-s.addText('The rankings disagree, and that is the point: dropping four tasks moves gpt-5.4 from 4th to 17th, and moves this port from 1st to 3rd — behind claude-opus-4.6 and gemini-3.1-pro. Neither panel is “the” answer; the left one excludes the newest models, the right one excludes the two tasks this port is strongest on.',
-  {x:M+0.24,y:6.60,w:W-2*M-0.48,h:0.60,fontFace:B,fontSize:11,color:'D6E0E4',
-   lineSpacing:15,isTextBox:true,margin:0});
-s.addNotes('Do not show the left panel without the right one. The nine excluded models are claude-opus-4, 4.5, 4.6, sonnet-4.5, gemini-2.5-pro, gemini-3-pro, gemini-3.1-pro, gpt-oss-120b, qwen3-coder — their solvers exist upstream but the score is N/A, and they include the newest models on the board.');
+s.addText('Third and fifth of twenty, not first — claude-opus-4.6 and gemini-3.1-pro are ahead. The two rankings disagree about more than us: gpt-5.4 is 5th on the previous slide and 17th here, because the four dropped tasks include its 29.677x on lu_factorization. Neither subset is the answer; that one excludes the newest models, this one excludes polynomial_real and lu_factorization, the two this port is strongest on.',
+  {x:M+0.26,y:6.54,w:W-2*M-0.52,h:0.64,fontFace:B,fontSize:10.5,color:'D6E0E4',
+   lineSpacing:14,isTextBox:true,margin:0});
+s.addNotes('The nine with a missing score are claude-opus-4, 4.5 and 4.6, sonnet-4.5, gemini-2.5-pro, gemini-3-pro, gemini-3.1-pro, gpt-oss-120b and qwen3-coder. Their solver files exist upstream; only the score is N/A. AlgoTune publishes no GLM-5 result at all.');
 
 /* ---------------------------------------------------- 5  per-task */
 s=p.addSlide();
