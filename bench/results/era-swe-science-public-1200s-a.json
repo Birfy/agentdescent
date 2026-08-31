@@ -58,9 +58,11 @@
     "tasks_failed": 0,
     "tasks_improved_on_held_back": 2,
     "resolved_baseline": 0,
-    "resolved_best": 2,
-    "resolve_rate": 0.6666666666666666,
-    "wall_seconds": 3597.9618242409997
+    "wall_seconds": 3597.9618242409997,
+    "resolved": 2,
+    "attempts_per_task": 4,
+    "best_of_n_resolve_rate": 0.6666666666666666,
+    "selection": "ORACLE -- the tree's best node, ranked on the private suite. This is not the benchmark's resolve rate."
   },
   "tasks": [
     {
@@ -987,5 +989,6 @@
     "model_seconds": 0.0
   },
   "regraded_at": "2026-08-31T00:09:13+00:00",
-  "regraded_reason": "the run's own grading step ran the grader baked into each verifier image; some of those are stale (task 034's collects nothing and scores every submission 0). Re-run with the release's own task-bundle grader, which is what its tests/docker-compose.yaml mounts. The search itself is untouched -- grading is a pure function of the patch."
+  "regraded_reason": "the run's own grading step ran the grader baked into each verifier image; some of those are stale (task 034's collects nothing and scores every submission 0). Re-run with the release's own task-bundle grader, which is what its tests/docker-compose.yaml mounts. The search itself is untouched -- grading is a pure function of the patch.",
+  "renamed_note": "`summary.resolve_rate` was renamed to `best_of_n_resolve_rate`: it was computed from the tree's best node, chosen by a selector that reads the private suite, out of `attempts_per_task` attempts. The benchmark's resolve rate is one attempt per task and is a different number."
 }

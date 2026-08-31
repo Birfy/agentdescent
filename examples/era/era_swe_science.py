@@ -403,6 +403,43 @@ def _task_payload(suite: Suite, domain: Domain, run: Any,
     }
 
 
+def _resolve_summary(entries: List[Dict[str, Any]], baseline: int, resolved: int,
+                     attempts: Optional[int], graded_node: Optional[int]
+                     ) -> Dict[str, Any]:
+    """Name the rate after what it measures, and never after what it is not.
+
+    The benchmark's `resolve rate` is **one attempt per task**. What this port
+    produces by default is the reward of the tree's best node -- chosen by a
+    selector that reads the private suite, out of `--iterations` attempts. Those
+    are different numbers, and a field called `resolve_rate` carrying the second
+    one is how the second gets quoted as the first.
+
+    So the benchmark's name is emitted only when the run earns it: a single
+    expansion per task, or a regrade of node 1, which is that first expansion
+    with nothing in the loop choosing it. Otherwise the field says
+    `best_of_n_resolve_rate` and carries the `n` beside it.
+    """
+    n = len(entries)
+    rate = (resolved / n) if n else None
+    single = (attempts == 1) or (graded_node == 1)
+    summary: Dict[str, Any] = {
+        "tasks_run": n,
+        "resolved_baseline": baseline,
+        "resolved": resolved,
+        "attempts_per_task": attempts,
+    }
+    if single:
+        summary["resolve_rate"] = rate
+        summary["selection"] = "none -- one attempt per task, as the benchmark scores it"
+    else:
+        summary["best_of_n_resolve_rate"] = rate
+        summary["selection"] = (
+            "ORACLE -- the tree's best node, ranked on the private suite. This is "
+            "not the benchmark's resolve rate; run --iterations 1, or regrade "
+            "with --grade-node 1, for that.")
+    return summary
+
+
 def regrade(args: argparse.Namespace) -> int:
     """Re-run the release's grader over a finished run's saved patches.
 
@@ -469,11 +506,10 @@ def regrade(args: argparse.Namespace) -> int:
               f"/{best_grade.get('private', {}).get('collected')})", flush=True)
     resolved = sum(entry["benchmark_reward_best"] for entry in entries)
     baseline = sum(entry["benchmark_reward_baseline"] for entry in entries)
-    payload.setdefault("summary", {}).update({
-        "resolved_baseline": baseline,
-        "resolved_best": resolved,
-        "resolve_rate": (resolved / len(entries)) if entries else None,
-    })
+    payload.setdefault("summary", {}).update(
+        _resolve_summary(entries, baseline, resolved,
+                         int(config.get("iterations", 0)) or None,
+                         args.grade_node))
     payload["regraded_at"] = _utc_now()
     payload["regraded_reason"] = (
         "the run's own grading step ran the grader baked into each verifier "
@@ -482,8 +518,11 @@ def regrade(args: argparse.Namespace) -> int:
         "which is what its tests/docker-compose.yaml mounts. The search itself "
         "is untouched -- grading is a pure function of the patch.")
     _write_json(path, payload)
-    print(f"\nregraded : resolved {baseline} -> {resolved} of {len(entries)}, "
-          f"output={path}")
+    print(f"\nregraded : resolved {baseline} -> {resolved} of {len(entries)}"
+          + (f" (node {args.grade_node}, one attempt per task)"
+             if args.grade_node is not None else " (best of "
+             f"{config.get('iterations')}, oracle-selected)")
+          + f", output={path}")
     return 0
 
 
@@ -729,9 +768,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             "tasks_run": len(entries),
             "tasks_failed": len(failures),
             "tasks_improved_on_held_back": improved,
-            "resolved_baseline": resolved_baseline,
-            "resolved_best": resolved,
-            "resolve_rate": (resolved / len(entries)) if entries else None,
+            **_resolve_summary(entries, resolved_baseline, resolved,
+                               args.iterations, None),
             "wall_seconds": wall,
         },
         "tasks": entries,
