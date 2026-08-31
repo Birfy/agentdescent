@@ -607,29 +607,29 @@
    "AlgoTune leaderboard",
    "AlgoTuner (the benchmark\u2019s own)",
    "18 models",
-   "154 tasks, calibrated n",
-   "reports/agent_summary.json"
+   "154 tasks at the calibrated n",
+   "reports/\nagent_summary.json"
   ],
   [
    "MetaEvolve + baseline",
-   "OpenEvolve\u2019s search",
+   "OpenEvolve\u2019s search (\u00a73.1.3)",
    "Qwen3-14B, \u00b1 RL",
-   "8 tasks, sizes not stated",
+   "8 tasks; no sizes, no timing method",
    "arXiv:2607.21971"
   ],
   [
    "OpenEvolve",
-   "own",
+   "own \u2014 the tool itself",
    "gemini-2.5-flash + 2.5-pro",
-   "8 tasks, data_size far below calibrated",
+   "8 tasks over 4 phases; data_size far below calibrated",
    "openevolve repo"
   ],
   [
    "Dria, \u201cTowards Open\nEvolutionary Agents\u201d",
    "OpenEvolve, via algotune_to_openevolve.py",
-   "Gemini Flash 2.5 2.04x\nGemma 3 27B 1.63x\nQwen3-Coder 480B 1.41x",
-   "30 tasks, sizes not stated",
-   "HuggingFace, Aug 2025"
+   "Gemini Flash 2.5 2.04x, Gemma 3 27B\n1.63x, Qwen3-Coder 480B 1.41x",
+   "30 tasks, sizes not stated. Co-authored by\nOpenEvolve\u2019s own author \u2014 not third-party",
+   "HuggingFace\ncommunity post"
   ],
   [
    "EvoMem",
@@ -643,7 +643,7 @@
    "none \u2014 mirrors the AlgoTune leaderboard",
    "\u2014",
    "no independent runs",
-   "epoch.ai/benchmarks/algotune"
+   "epoch.ai"
   ]
  ],
  "hint_ladder": [

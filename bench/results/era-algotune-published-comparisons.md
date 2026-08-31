@@ -227,12 +227,16 @@ Searched arXiv, GitHub, HuggingFace and Epoch AI:
 | AlgoTune leaderboard | AlgoTuner | 18 models | 154 tasks at the calibrated `n` |
 | MetaEvolve + baseline (arXiv:2607.21971) | OpenEvolve's search | Qwen3-14B, +/- RL | 8 tasks, sizes not stated |
 | OpenEvolve | own | gemini-2.5-flash + 2.5-pro | 8 tasks, `data_size` far below calibrated |
-| Dria, *Towards Open Evolutionary Agents* (HuggingFace, Aug 2025) | OpenEvolve, via `algotune_to_openevolve.py` | Gemini Flash 2.5 2.04x (200 iters), Gemma 3 27B 1.63x, Qwen3-Coder 480B 1.41x | 30 tasks, sizes not stated |
+| Dria, *Towards Open Evolutionary Agents* (HuggingFace community post, Aug 2025) | OpenEvolve, via `algotune_to_openevolve.py` | Gemini Flash 2.5 2.04x (200 iters), Gemma 3 27B 1.63x, Qwen3-Coder 480B 1.41x | 30 tasks, sizes not stated. **Co-authored by Asankhaya Sharma (codelion), OpenEvolve's own author** -- so it is the tool's author reporting on the tool, not a third-party evaluation, and it is a blog post rather than peer-reviewed |
 | EvoMem (arXiv:2608.10795) | own | Gemini 3 Flash | aggregate only: 8.58x mean, 16.33x max |
 | Epoch AI | none | -- | mirrors the AlgoTune leaderboard, no independent runs |
 
-Four of the six run OpenEvolve's converter or its search, and not one of those four
-states a problem size. Checked and *not* on AlgoTune: CodeEvolve (the AlphaEvolve
+Four of the six run OpenEvolve's converter or its search, not one of those four
+states a problem size, and **two of the four are OpenEvolve's own author writing
+about his own tool**. Of everything published on AlgoTune, exactly one source is
+both independent of OpenEvolve and known to sit at the calibrated `n`: AlgoTune's
+own leaderboard. That is why the comparison this file puts weight on is the one
+against those eighteen models, and not the ordering at the top of the table. Checked and *not* on AlgoTune: CodeEvolve (the AlphaEvolve
 suite), ThetaEvolve (circle packing), ParEVO (PBBS/ParEval), RL4RLA, ProgramBench.
 
 \* OpenEvolve's column is carried for continuity only. Its `algotune.data_size`

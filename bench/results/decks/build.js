@@ -200,11 +200,11 @@ const os=[[hdr('Source'),hdr('Harness'),hdr('Model'),hdr('What it reports'),hdr(
 D.other_sources.forEach((r,i)=>os.push(r.map((c,j)=>({text:c,options:{
   align:j===0?'left':'left', bold:j===0, color:GRAPH,
   fill:{color:i%2?WHITE:MIST}, fontSize:9.5}}))));
-s.addTable(os,{...tblBase,x:M,y:2.06,w:W-2*M,colW:[2.35,2.72,2.42,3.16,1.44],
-  rowH:[0.3,0.42,0.42,0.42,0.72,0.42,0.42]});
+s.addTable(os,{...tblBase,x:M,y:2.06,w:W-2*M,colW:[2.28,2.62,2.46,3.35,1.38],
+  rowH:[0.3,0.44,0.46,0.5,0.78,0.42,0.42]});
 s.addShape(p.ShapeType.roundRect,{x:M,y:5.66,w:W-2*M,h:1.1,fill:{color:INK},
   line:{color:INK,width:0},rectRadius:0.05});
-s.addText('Four of the six run OpenEvolve’s converter or its search, and not one of those four states a problem size. Only the AlgoTune leaderboard is known to sit at the calibrated n — which is why this deck’s comparison against those eighteen models is the one it puts weight on, and the three OpenEvolve-derived rows the ones it flags.',
+s.addText('Four of the six run OpenEvolve’s converter or its search, not one of those four states a problem size, and two of the four are OpenEvolve’s own author writing about his own tool. Only the AlgoTune leaderboard is known to sit at the calibrated n — so of everything published, exactly one source is both independent and size-verified, which is why the comparison against those eighteen models is the one this deck puts weight on.',
   {x:M+0.26,y:5.76,w:W-2*M-0.52,h:0.9,fontFace:B,fontSize:12,color:'D6E0E4',
    lineSpacing:17,isTextBox:true,margin:0});
 s.addNotes('Checked and not on AlgoTune: CodeEvolve (AlphaEvolve suite), ThetaEvolve (circle packing), ParEVO (PBBS/ParEval), RL4RLA, ProgramBench.');
