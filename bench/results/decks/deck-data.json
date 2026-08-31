@@ -258,5 +258,145 @@
    2.383,
    161.955
   ]
+ },
+ "sub4_tasks": [
+  "eigenvectors_complex",
+  "psd_cone_projection",
+  "fft_cmplx_scipy_fftpack",
+  "convolve2d_full_fill"
+ ],
+ "sub4_rank": [
+  [
+   "claude-opus-4.6",
+   3.027,
+   false
+  ],
+  [
+   "gemini-3.1-pro-preview",
+   2.996,
+   false
+  ],
+  [
+   "This port \u2014 seed 0",
+   2.96,
+   true
+  ],
+  [
+   "claude-opus-4.5",
+   2.889,
+   false
+  ],
+  [
+   "This port \u2014 seed 1",
+   2.869,
+   true
+  ],
+  [
+   "gemini-3-pro-preview",
+   2.86,
+   false
+  ],
+  [
+   "gpt-5.2",
+   2.691,
+   false
+  ],
+  [
+   "o4-mini",
+   2.666,
+   false
+  ],
+  [
+   "glm-4.5",
+   2.606,
+   false
+  ],
+  [
+   "claude-opus-4-20250514",
+   2.598,
+   false
+  ],
+  [
+   "claude-sonnet-4-5-20250929",
+   2.384,
+   false
+  ],
+  [
+   "qwen3-coder",
+   2.349,
+   false
+  ],
+  [
+   "deepseek-reasoner",
+   2.273,
+   false
+  ],
+  [
+   "gemini-2.5-pro",
+   2.193,
+   false
+  ],
+  [
+   "claude-opus-4-1-20250805",
+   2.186,
+   false
+  ],
+  [
+   "gpt-5",
+   1.965,
+   false
+  ],
+  [
+   "gpt-5.4",
+   1.905,
+   false
+  ],
+  [
+   "gpt-5-pro (medium)",
+   1.799,
+   false
+  ],
+  [
+   "gpt-5-mini",
+   1.679,
+   false
+  ],
+  [
+   "gpt-oss-120b",
+   1.65,
+   false
+  ]
+ ],
+ "excluded_from_eight": {
+  "claude-opus-4-20250514": [
+   "affine_transform_2d",
+   "fft_convolution"
+  ],
+  "claude-opus-4.5": [
+   "polynomial_real"
+  ],
+  "claude-opus-4.6": [
+   "polynomial_real",
+   "affine_transform_2d"
+  ],
+  "claude-sonnet-4-5-20250929": [
+   "affine_transform_2d",
+   "fft_convolution"
+  ],
+  "gemini-2.5-pro": [
+   "affine_transform_2d"
+  ],
+  "gemini-3-pro-preview": [
+   "lu_factorization"
+  ],
+  "gemini-3.1-pro-preview": [
+   "polynomial_real"
+  ],
+  "gpt-oss-120b": [
+   "polynomial_real"
+  ],
+  "qwen3-coder": [
+   "fft_convolution"
+  ]
  }
 }

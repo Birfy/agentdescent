@@ -107,32 +107,45 @@ s.addNotes('Set up the comparability question here without answering it yet.');
 
 /* ---------------------------------------------------- 4  headline chart */
 s=p.addSlide();
-head(s,'THE HEADLINE','Harmonic mean over the same eight tasks',
-  'Every bar is the same eight tasks. Grey bars are recomputed by us from AlgoTune’s published per-task data.',0.30);
-const series=[
- ['This port — seed 0',D.ours_hm[0],VIRID],['This port — seed 1',D.ours_hm[1],VIRID],
- ['MetaEvolve',2.045,SLATE],['OpenEvolve',1.984,BRASS],['gpt-5.4',1.566,SLATE],
- ['AlphaEvolve',1.392,SLATE],['gpt-5.2',1.280,SLATE],['gpt-5',1.081,SLATE],
- ['glm-4.5',0.848,SLATE],['o4-mini',0.834,SLATE],['deepseek-reasoner',0.792,SLATE],
- ['claude-opus-4.1',0.750,SLATE],['gpt-5-mini',0.677,SLATE],['gpt-5-pro (med)',0.665,SLATE]];
-const top=2.02, rowh=0.335, x0=3.15, maxw=8.1, maxv=2.4;
-series.forEach((r,i)=>{
-  const y=top+i*rowh;
-  s.addText(r[0],{x:M,y:y-0.02,w:2.45,h:0.3,fontFace:B,fontSize:10.5,
-    bold:r[2]===VIRID,color:r[2]===VIRID?VIRID:GRAPH,align:'right',valign:'middle',
+head(s,'THE HEADLINE','Two rankings, because neither one is the whole field',
+  'Left: the eight tasks the papers report — but only 9 of AlgoTune’s 18 models have a score on all eight. Right: the four tasks every model has, nobody excluded.',0.52);
+
+function panel(title,note,items,x,w,rowh,fs,maxv){
+  s.addText(title,{x,y:1.94,w,h:0.26,fontFace:B,fontSize:12,bold:true,color:INK,
     isTextBox:true,margin:0});
-  s.addShape(p.ShapeType.rect,{x:x0,y:y+0.03,w:Math.max(maxw*r[1]/maxv,0.05),h:0.24,
-    fill:{color:r[2]},line:{color:r[2],width:0}});
-  s.addText(r[1].toFixed(3)+'x',{x:x0+maxw*r[1]/maxv+0.08,y:y-0.02,w:0.95,h:0.3,
-    fontFace:B,fontSize:10.5,bold:r[2]===VIRID,color:r[2]===VIRID?VIRID:GRAPH,
-    valign:'middle',isTextBox:true,margin:0});
-});
-s.addShape(p.ShapeType.line,{x:x0+maxw*1.0/maxv,y:top-0.06,w:0,h:series.length*rowh+0.04,
-  line:{color:SLATE,width:1,dashType:'dash'}});
-s.addText('1.0x  —  no improvement',{x:x0+maxw/maxv+0.06,y:1.72,w:2.4,h:0.26,
-  fontFace:B,fontSize:9.5,color:SLATE,isTextBox:true,margin:0});
-foot(s,'AlgoTune’s own published leaderboard scores are NOT used: their aggregation could not be reproduced from their per-task file. These grey bars are harmonic means we computed — the statistic AlphaEvolve and MetaEvolve use, whose tables do reconcile to their headlines.');
-s.addNotes('Two honesty points: the grey bars are our recomputation, and OpenEvolve is amber because its sizes are known to differ.');
+  s.addText(note,{x,y:2.20,w,h:0.24,fontFace:B,fontSize:9,color:SLATE,isTextBox:true,margin:0});
+  const top=2.46, lw=w*0.315, bx=x+lw+0.06, bw=w-lw-0.78;
+  items.forEach((r,i)=>{
+    const y=top+i*rowh, mine=r[2];
+    s.addText(r[0],{x,y:y-0.015,w:lw,h:rowh,fontFace:B,fontSize:fs,bold:mine,
+      color:mine?VIRID:GRAPH,align:'right',valign:'middle',isTextBox:true,margin:0});
+    s.addShape(p.ShapeType.rect,{x:bx,y:y+0.028,w:Math.max(bw*r[1]/maxv,0.04),
+      h:rowh-0.085,fill:{color:mine?VIRID:(r[3]||SLATE)},line:{width:0}});
+    s.addText(r[1].toFixed(3),{x:bx+bw*r[1]/maxv+0.05,y:y-0.015,w:0.66,h:rowh,
+      fontFace:B,fontSize:fs,bold:mine,color:mine?VIRID:GRAPH,valign:'middle',
+      isTextBox:true,margin:0});
+  });
+  s.addShape(p.ShapeType.line,{x:bx+bw/maxv,y:top-0.04,w:0,h:items.length*rowh+0.02,
+    line:{color:SLATE,width:1,dashType:'dash'}});
+  return top+items.length*rowh;
+}
+
+const left=[['This port — seed 0',D.ours_hm[0],true],['This port — seed 1',D.ours_hm[1],true],
+ ['MetaEvolve',2.045,false],['OpenEvolve',1.984,false,BRASS],['gpt-5.4',1.566,false],
+ ['AlphaEvolve',1.392,false],['gpt-5.2',1.280,false],['gpt-5',1.081,false],
+ ['glm-4.5',0.848,false],['o4-mini',0.834,false],['deepseek-reasoner',0.792,false],
+ ['claude-opus-4.1',0.750,false],['gpt-5-mini',0.677,false],['gpt-5-pro (med)',0.665,false]];
+panel('Eight tasks  ·  9 of 18 models','the papers’ own task set; 9 models have no score on at least one of the eight',
+      left,M,5.82,0.283,9.5,2.4);
+const right=D.sub4_rank.map(r=>[r[0].replace('This port — ','This port — '),r[1],r[2]]);
+panel('Four tasks  ·  all 18 models  +  both our seeds','eigenvectors · psd_cone · fft_cmplx · convolve2d — the only four nobody is missing',
+      right,7.0,5.71,0.198,8.5,3.2);
+s.addShape(p.ShapeType.roundRect,{x:M,y:6.52,w:W-2*M,h:0.74,fill:{color:INK},
+  line:{color:INK,width:0},rectRadius:0.05});
+s.addText('The rankings disagree, and that is the point: dropping four tasks moves gpt-5.4 from 4th to 17th, and moves this port from 1st to 3rd — behind claude-opus-4.6 and gemini-3.1-pro. Neither panel is “the” answer; the left one excludes the newest models, the right one excludes the two tasks this port is strongest on.',
+  {x:M+0.24,y:6.60,w:W-2*M-0.48,h:0.60,fontFace:B,fontSize:11,color:'D6E0E4',
+   lineSpacing:15,isTextBox:true,margin:0});
+s.addNotes('Do not show the left panel without the right one. The nine excluded models are claude-opus-4, 4.5, 4.6, sonnet-4.5, gemini-2.5-pro, gemini-3-pro, gemini-3.1-pro, gpt-oss-120b, qwen3-coder — their solvers exist upstream but the score is N/A, and they include the newest models on the board.');
 
 /* ---------------------------------------------------- 5  per-task */
 s=p.addSlide();
@@ -163,7 +176,7 @@ s.addTable(r5,{...tblBase,x:M,y:1.92,w:W-2*M,colW:[2.72,0.95,1.02,1.02,0.95,0.95
   rowH:0.375});
 s.addText('amber = above the best of all 14–18 AlgoTune models at this n',
   {x:M,y:HT-0.86,w:6.5,h:0.26,fontFace:B,fontSize:10,bold:true,color:BRASS,isTextBox:true,margin:0});
-foot(s,'Nine of AlgoTune’s 18 models have a result on all eight tasks; max and median use every model that has a result on that task.');
+foot(s,'Max and median use every model with a result on that task. The nine with no score on at least one of the eight — claude-opus-4, 4.5 and 4.6, sonnet-4.5, gemini-2.5-pro, gemini-3-pro, gemini-3.1-pro, gpt-oss-120b, qwen3-coder — still have solver files upstream; only the score is missing, and they include the newest models on the board. AlgoTune publishes no GLM-5 result at all.');
 s.addNotes('The amber cells are the whole argument of slide 7.');
 
 /* ---------------------------------------------------- 6  reproducibility */
@@ -358,8 +371,8 @@ s.addText('Three things, and one it does not',{x:M,y:0.94,w:W-2*M,h:0.6,fontFace
   s.addText(r[2],{x:M+0.95,y:y+0.42,w:11.3,h:0.86,fontFace:B,fontSize:12,color:'B9C6CD',
     lineSpacing:17,isTextBox:true,margin:0});
 });
-s.addText('And one it does not: that this port is better than AlphaEvolve or MetaEvolve. lu_factorization at 7.0x is the reference’s .tolist() serialisation, not a faster factorisation — discount it to 1.19x and the aggregate is 1.905x. Three tasks were run at sizes we can only infer. One seed each is what everyone reports, and it is still one seed.',
-  {x:M,y:6.28,w:W-2*M,h:0.78,fontFace:B,fontSize:12,color:BRASS,lineSpacing:17,isTextBox:true,margin:0});
+s.addText('And one it does not: that this port leads the field. On the four tasks every AlgoTune model has, it ranks 3rd and 5th of 20 — claude-opus-4.6 and gemini-3.1-pro are ahead. lu_factorization at 7.0x is the reference’s .tolist() serialisation, not a faster factorisation; discount it to 1.19x and the eight-task aggregate is 1.905x. Three tasks were run at sizes we can only infer, and one seed each is still one seed.',
+  {x:M,y:6.20,w:W-2*M,h:0.86,fontFace:B,fontSize:12,color:BRASS,lineSpacing:17,isTextBox:true,margin:0});
 s.addNotes('End on the limits. The credibility of slides 4-9 depends on saying this one out loud.');
 
 p.writeFile({fileName:'/tmp/claude-0/-home-user-agentdescent/fb2fcee5-712c-5980-96a9-578815787660/scratchpad/deck/algotune-eight-tasks.pptx'})
