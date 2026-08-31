@@ -105,70 +105,85 @@ s.addTable(rows,{...tblBase,x:M,y:1.95,w:W-2*M,colW:[2.05,2.35,2.4,2.15,3.14],
 foot(s,'The first two rows are one paper’s ablation of a single variable: same search, same model, RL or not. Neither states its problem sizes, and all three run OpenEvolve’s search — whose AlgoTune harness takes n from a config field rather than from AlgoTune’s calibration. DeepMind’s AlphaEvolve is absent because it has never been run on AlgoTune and is not publicly available; the row often labelled with its name is this paper’s untrained baseline.');
 s.addNotes('Set up the comparability question here without answering it yet.');
 
-/* ---------------------------------------------------- 4  headline chart */
+/* ---------------------------------------------------- 4  headline, AlgoTune metric */
 s=p.addSlide();
-head(s,'THE HEADLINE','Everything that beat the reference',
-  'Harmonic mean over the same eight tasks. Each row names the model and harness behind it — not the same experiment.',0.30);
-const winners=[
- ['This port — seed 0',D.ours_hm[0],'deepseek-v4-flash-ga  ·  ERA flat-PUCT on AgentDescent',VIRID],
- ['This port — seed 1',D.ours_hm[1],'deepseek-v4-flash-ga  ·  ERA flat-PUCT on AgentDescent',VIRID],
- ['MetaEvolve',2.045,'Qwen3-14B + RL  ·  OpenEvolve’s search  ·  arXiv:2607.21971',SLATE],
- ['OpenEvolve',1.984,'gemini-2.5-flash + 2.5-pro  ·  own harness, 100 iterations',BRASS],
- ['gpt-5.4',1.566,'gpt-5.4  ·  AlgoTuner — the benchmark’s own harness',SLATE],
- ['Qwen3-14B, no RL',1.392,'Qwen3-14B, untrained  ·  OpenEvolve’s search algorithm',SLATE],
- ['gpt-5.2',1.280,'gpt-5.2  ·  AlgoTuner — the benchmark’s own harness',SLATE],
- ['gpt-5',1.081,'gpt-5  ·  AlgoTuner — the benchmark’s own harness',SLATE]];
-const wt=1.98, wr=0.545, wx=3.72, ww=7.62, wm=2.4;
-winners.forEach((r,i)=>{
-  const y=wt+i*wr, mine=r[3]===VIRID;
-  s.addText(r[0],{x:M,y:y+0.02,w:2.98,h:0.26,fontFace:B,fontSize:12.5,bold:true,
-    color:mine?VIRID:INK,align:'right',valign:'middle',isTextBox:true,margin:0});
-  s.addText(r[2],{x:M-0.62,y:y+0.27,w:3.60,h:0.24,fontFace:B,fontSize:8.5,
-    color:r[3]===BRASS?BRASS:SLATE,align:'right',valign:'middle',isTextBox:true,margin:0});
-  s.addShape(p.ShapeType.rect,{x:wx,y:y+0.09,w:Math.max(ww*r[1]/wm,0.05),h:0.3,
-    fill:{color:r[3]},line:{width:0}});
-  s.addText(r[1].toFixed(3)+'x',{x:wx+ww*r[1]/wm+0.09,y:y+0.04,w:0.95,h:0.3,
-    fontFace:B,fontSize:12,bold:mine,color:mine?VIRID:GRAPH,valign:'middle',
-    isTextBox:true,margin:0});
-});
-s.addShape(p.ShapeType.line,{x:wx+ww/wm,y:wt+0.02,w:0,h:winners.length*wr-0.05,
-  line:{color:SLATE,width:1,dashType:'dash'}});
-s.addText('1.0x — no improvement',{x:wx+ww/wm+0.07,y:wt-0.26,w:2.2,h:0.24,
-  fontFace:B,fontSize:9.5,color:SLATE,isTextBox:true,margin:0});
-s.addShape(p.ShapeType.roundRect,{x:M,y:6.46,w:W-2*M,h:0.80,fill:{color:MIST},
-  line:{color:RULE,width:0.75},rectRadius:0.05});
-s.addText([{text:'Six more AlgoTuner models are not shown, because they land below 1.0 — 0.848x down to 0.665x. ',options:{bold:true,color:INK}},
- {text:'Not a failure to find anything: they submitted solvers that are slower than the reference, mostly by adding a .tolist() the reference does not do. A harmonic mean punishes that hard — one task at 0.221x is half the denominator, while a task at 163x contributes 0.1%.',options:{color:GRAPH}}],
- {x:M+0.26,y:6.54,w:W-2*M-0.52,h:0.64,fontFace:B,fontSize:10.5,lineSpacing:14,
-  isTextBox:true,margin:0});
-s.addNotes('The six omitted are glm-4.5, o4-mini, deepseek-reasoner, claude-opus-4.1, gpt-5-mini and gpt-5-pro (medium). Nine further AlgoTune models have no score on at least one of the eight tasks and are on the next slide.');
-
-/* ---------------------------------------------------- 4b all models */
-s=p.addSlide();
-head(s,'THE SAME QUESTION, NOBODY EXCLUDED','Four tasks, all eighteen AlgoTune models',
-  'The previous slide uses the eight tasks the papers report — but nine of AlgoTune’s eighteen models have no score on at least one of them. These four are the only tasks every model has.',0.52);
-const R=D.sub4_rank, half=Math.ceil(R.length/2);
-[[0,half,M],[half,R.length,7.0]].forEach(([a,b,x])=>{
-  R.slice(a,b).forEach((r,i)=>{
-    const y=2.04+i*0.43, mine=r[2], rank=a+i+1;
-    s.addShape(p.ShapeType.roundRect,{x,y,w:5.71,h:0.38,
+head(s,'THE HEADLINE','Everything published on these eight tasks',
+  'One metric — AlgoTune’s own — over the same eight tasks. Nobody excluded, nothing selected.',0.30);
+const RK=D.algotune_metric_rank, hf=Math.ceil(RK.length/2), mv=2.45;
+[[0,hf,M],[hf,RK.length,7.0]].forEach(([a0,b0,x])=>{
+  RK.slice(a0,b0).forEach((r,i)=>{
+    const y=1.98+i*0.375, mine=r[2];
+    const col = mine?VIRID:(r[3]==='OpenEvolve'?BRASS:SLATE);
+    s.addShape(p.ShapeType.roundRect,{x,y,w:5.71,h:0.33,
       fill:{color:mine?'E6F2EF':(i%2?WHITE:MIST)},line:{color:RULE,width:0.6},rectRadius:0.05});
-    s.addText(String(rank),{x:x+0.12,y,w:0.4,h:0.38,fontFace:B,fontSize:10.5,
-      color:mine?VIRID:SLATE,bold:mine,align:'right',valign:'middle',isTextBox:true,margin:0});
-    s.addText(r[0],{x:x+0.62,y,w:3.3,h:0.38,fontFace:B,fontSize:11,bold:mine,
-      color:mine?VIRID:GRAPH,valign:'middle',isTextBox:true,margin:0});
-    s.addShape(p.ShapeType.rect,{x:x+3.95,y:y+0.13,w:Math.max(1.05*r[1]/3.2,0.03),h:0.12,
-      fill:{color:mine?VIRID:SLATE},line:{width:0}});
-    s.addText(r[1].toFixed(3)+'x',{x:x+5.06,y,w:0.6,h:0.38,fontFace:B,fontSize:10.5,
-      bold:mine,color:mine?VIRID:GRAPH,align:'right',valign:'middle',isTextBox:true,margin:0});
+    s.addText(String(a0+i+1),{x:x+0.1,y,w:0.36,h:0.33,fontFace:B,fontSize:9.5,bold:mine,
+      color:mine?VIRID:SLATE,align:'right',valign:'middle',isTextBox:true,margin:0});
+    s.addText(r[0],{x:x+0.56,y,w:2.62,h:0.33,fontFace:B,fontSize:10,bold:mine,
+      color:col,valign:'middle',isTextBox:true,margin:0});
+    s.addText(r[3],{x:x+3.2,y,w:0.92,h:0.33,fontFace:B,fontSize:7.5,color:SLATE,
+      valign:'middle',isTextBox:true,margin:0});
+    s.addShape(p.ShapeType.rect,{x:x+4.18,y:y+0.115,w:Math.max(0.92*r[1]/mv,0.03),h:0.10,
+      fill:{color:col},line:{width:0}});
+    s.addText(r[1].toFixed(3),{x:x+5.12,y,w:0.5,h:0.33,fontFace:B,fontSize:9.5,bold:mine,
+      color:mine?VIRID:GRAPH,align:'right',valign:'middle',isTextBox:true,margin:0});
   });
 });
-s.addShape(p.ShapeType.roundRect,{x:M,y:6.46,w:W-2*M,h:0.80,fill:{color:INK},
+s.addShape(p.ShapeType.roundRect,{x:M,y:6.42,w:W-2*M,h:0.84,fill:{color:INK},
   line:{color:INK,width:0},rectRadius:0.05});
-s.addText('Third and fifth of twenty, not first — claude-opus-4.6 and gemini-3.1-pro are ahead. The two rankings disagree about more than us: gpt-5.4 is 5th on the previous slide and 17th here, because the four dropped tasks include its 29.677x on lu_factorization. Neither subset is the answer; that one excludes the newest models, this one excludes polynomial_real and lu_factorization, the two this port is strongest on.',
-  {x:M+0.26,y:6.54,w:W-2*M-0.52,h:0.64,fontFace:B,fontSize:10.5,color:'D6E0E4',
-   lineSpacing:14,isTextBox:true,margin:0});
-s.addNotes('The nine with a missing score are claude-opus-4, 4.5 and 4.6, sonnet-4.5, gemini-2.5-pro, gemini-3-pro, gemini-3.1-pro, gpt-oss-120b and qwen3-coder. Their solver files exist upstream; only the score is N/A. AlgoTune publishes no GLM-5 result at all.');
+s.addText([{text:'The third column is the harness. ',options:{bold:true,color:WHITE}},
+ {text:'Eighteen AlgoTuner rows run the benchmark’s own agent at its calibrated n. Three amber rows run OpenEvolve’s search — MetaEvolve and its baseline say so outright, and none of the three states its problem sizes. That is the axis to hold in mind before reading the order: the top four and the AlgoTuner field may not be measuring the same problems.',options:{color:'D6E0E4'}}],
+ {x:M+0.26,y:6.50,w:W-2*M-0.52,h:0.68,fontFace:B,fontSize:10.5,lineSpacing:14,
+  isTextBox:true,margin:0});
+s.addNotes('Under AlgoTune’s own scoring nobody is below 1.0 and no model needs excluding, so this replaces both the “winners only” chart and the four-task workaround.');
+
+/* ---------------------------------------------------- 4b the metric */
+s=p.addSlide();
+head(s,'THE METRIC, AND A CORRECTION','AlgoTune’s score reproduces exactly',
+  'An earlier version of this deck said their aggregation could not be reproduced. That was wrong, and the rule it missed changes what the numbers mean.',0.52);
+s.addShape(p.ShapeType.roundRect,{x:M,y:2.06,w:6.0,h:1.62,fill:{color:MIST},
+  line:{color:RULE,width:0.75},rectRadius:0.06,shadow:shadow()});
+s.addText('The rule, from AlgoTune’s own description',{x:M+0.26,y:2.18,w:5.5,h:0.28,
+  fontFace:B,fontSize:12,bold:true,color:INK,isTextBox:true,margin:0});
+s.addText([{text:'“solutions that yield invalid outputs or that have a speedup of under 1× ',options:{color:GRAPH}},
+ {text:'assigned a speedup of 1×',options:{bold:true,color:INK}},{text:'”, a task with no result also counts 1×, then the ',options:{color:GRAPH}},
+ {text:'harmonic mean',options:{bold:true,color:INK}},{text:' over every task.',options:{color:GRAPH}}],
+ {x:M+0.26,y:2.52,w:5.5,h:1.02,fontFace:B,fontSize:12,lineSpacing:17,isTextBox:true,margin:0});
+const pr=[[hdr('model'),hdr('published'),hdr('recomputed')]];
+D.metric_proof.forEach((r,i)=>pr.push([
+ {text:r[0],options:{align:'left',fill:{color:i%2?WHITE:MIST},fontSize:10.5}},
+ {text:r[1].toFixed(2),options:{align:'center',fill:{color:i%2?WHITE:MIST},fontSize:10.5,color:SLATE}},
+ {text:r[2].toFixed(3),options:{align:'center',fill:{color:i%2?WHITE:MIST},fontSize:10.5,bold:true,color:VIRID}}]));
+s.addTable(pr,{...tblBase,x:6.9,y:2.06,w:5.81,colW:[2.85,1.42,1.54],rowH:0.315});
+[['What it invalidates','The six models this deck previously showed “below 1.0” — 0.848x down to 0.665x — are at 1.0 under the benchmark’s own rule. Those were raw ratios, which AlgoTune deliberately does not score.'],
+ ['What it repairs','Nine models were dropped for having no score on some task. A missing task counts 1×, so nothing needs excluding and all eighteen rank on all eight tasks.'],
+ ['What survives','The underlying observation still holds and is still worth stating: those models did submit solvers slower than the reference, mostly by adding a .tolist() the reference does not do. AlgoTune simply chooses not to punish it.']]
+.forEach((r,i)=>{
+  const y=3.86+i*0.96;
+  s.addShape(p.ShapeType.roundRect,{x:M,y,w:W-2*M,h:0.86,fill:{color:MIST},
+    line:{color:RULE,width:0.75},rectRadius:0.06});
+  s.addText(r[0],{x:M+0.26,y:y+0.1,w:2.4,h:0.28,fontFace:B,fontSize:11.5,bold:true,
+    color:i===2?VIRID:BRASS,isTextBox:true,margin:0});
+  s.addText(r[1],{x:M+2.8,y:y+0.1,w:9.2,h:0.68,fontFace:B,fontSize:11.5,color:GRAPH,
+    lineSpacing:15,isTextBox:true,margin:0});
+});
+s.addNotes('Say the correction out loud. The reproduction is the evidence that the metric here is the benchmark’s, not one invented for this deck.');
+
+/* ---------------------------------------------------- 4c who else has published */
+s=p.addSlide();
+head(s,'EVERYTHING ELSE PUBLISHED ON ALGOTUNE','Six sources, and what each one actually is',
+  'Searched arXiv, GitHub, HuggingFace and Epoch AI. DeepMind’s AlphaEvolve is absent from this list because it has never been run on AlgoTune and is not publicly available.',0.52);
+const os=[[hdr('Source'),hdr('Harness'),hdr('Model'),hdr('What it reports'),hdr('Where')]];
+D.other_sources.forEach((r,i)=>os.push(r.map((c,j)=>({text:c,options:{
+  align:j===0?'left':'left', bold:j===0, color:GRAPH,
+  fill:{color:i%2?WHITE:MIST}, fontSize:9.5}}))));
+s.addTable(os,{...tblBase,x:M,y:2.06,w:W-2*M,colW:[2.35,2.72,2.42,3.16,1.44],
+  rowH:[0.3,0.42,0.42,0.42,0.72,0.42,0.42]});
+s.addShape(p.ShapeType.roundRect,{x:M,y:5.66,w:W-2*M,h:1.1,fill:{color:INK},
+  line:{color:INK,width:0},rectRadius:0.05});
+s.addText('Four of the six run OpenEvolve’s converter or its search, and not one of those four states a problem size. Only the AlgoTune leaderboard is known to sit at the calibrated n — which is why this deck’s comparison against those eighteen models is the one it puts weight on, and the three OpenEvolve-derived rows the ones it flags.',
+  {x:M+0.26,y:5.76,w:W-2*M-0.52,h:0.9,fontFace:B,fontSize:12,color:'D6E0E4',
+   lineSpacing:17,isTextBox:true,margin:0});
+s.addNotes('Checked and not on AlgoTune: CodeEvolve (AlphaEvolve suite), ThetaEvolve (circle packing), ParEVO (PBBS/ParEval), RL4RLA, ProgramBench.');
 
 /* ---------------------------------------------------- 5  per-task */
 s=p.addSlide();
@@ -191,14 +206,18 @@ T.forEach((t,i)=>{
    {text:u.median.toFixed(3),options:{align:'center',color:SLATE}},
   ].map(c=>({...c,options:{...c.options,fill:{color:i%2?WHITE:MIST},fontSize:11}})));
 });
-r5.push([{text:'harmonic mean',options:{bold:true,align:'left',fill:{color:INK},color:WHITE}},
+r5.push([{text:'harmonic mean, raw',options:{bold:true,align:'left',fill:{color:INK},color:WHITE}},
  ...['—',D.ours_hm[0].toFixed(3),D.ours_hm[1].toFixed(3),'1.392','2.045','1.984','—','—']
    .map((v,j)=>({text:v,options:{align:'center',bold:true,fill:{color:INK},
      color:(j===1||j===2)?'6FD9BF':WHITE,fontSize:11}}))]);
+r5.push([{text:'AlgoTune score (clipped)',options:{bold:true,align:'left',fill:{color:INK},color:WHITE}},
+ ...['—',D.ours_score[0].toFixed(3),D.ours_score[1].toFixed(3),'1.392','2.045','2.267','—','—']
+   .map((v,j)=>({text:v,options:{align:'center',bold:true,fill:{color:INK},
+     color:(j===1||j===2)?'6FD9BF':WHITE,fontSize:11}}))]);
 s.addTable(r5,{...tblBase,x:M,y:1.92,w:W-2*M,colW:[2.72,0.95,1.02,1.02,0.95,0.95,1.0,1.36,2.12],
-  rowH:0.375});
-s.addText('amber = above the best of all 14–18 AlgoTune models at this n',
-  {x:M,y:HT-0.86,w:6.5,h:0.26,fontFace:B,fontSize:10,bold:true,color:BRASS,isTextBox:true,margin:0});
+  rowH:0.345});
+s.addText('amber = above the best of all 14–18 AlgoTune models at this n.  “Clipped” is AlgoTune’s own rule: anything under 1.0 counts as 1.0, which is why OpenEvolve’s column moves from its published 1.984 to the 2.267 its own table computes to.',
+  {x:M,y:HT-1.06,w:W-2*M,h:0.34,fontFace:B,fontSize:9.5,color:BRASS,lineSpacing:12,isTextBox:true,margin:0});
 foot(s,'Max and median use every model with a result on that task. The nine with no score on at least one of the eight — claude-opus-4, 4.5 and 4.6, sonnet-4.5, gemini-2.5-pro, gemini-3-pro, gemini-3.1-pro, gpt-oss-120b, qwen3-coder — still have solver files upstream; only the score is missing, and they include the newest models on the board. AlgoTune publishes no GLM-5 result at all.');
 s.addNotes('The amber cells are the whole argument of slide 7.');
 
@@ -394,7 +413,7 @@ s.addText('Three things, and one it does not',{x:M,y:0.94,w:W-2*M,h:0.6,fontFace
   s.addText(r[2],{x:M+0.95,y:y+0.42,w:11.3,h:0.86,fontFace:B,fontSize:12,color:'B9C6CD',
     lineSpacing:17,isTextBox:true,margin:0});
 });
-s.addText('And one it does not: that this port leads the field. On the four tasks every AlgoTune model has, it ranks 3rd and 5th of 20 — claude-opus-4.6 and gemini-3.1-pro are ahead. lu_factorization at 7.0x is the reference’s .tolist() serialisation, not a faster factorisation; discount it to 1.19x and the eight-task aggregate is 1.905x. Three tasks were run at sizes we can only infer, and one seed each is still one seed.',
+s.addText('And one it does not: that this port leads the field. Under AlgoTune’s own scoring it is 1st and 2nd of 23 on these eight tasks, but the three rows above the AlgoTuner field all run OpenEvolve’s search at sizes none of them states. lu_factorization at 7.0x is the reference’s .tolist() serialisation, not a faster factorisation; discount it to 1.19x and the eight-task aggregate is 1.905x. Three tasks were run at sizes we can only infer, and one seed each is still one seed.',
   {x:M,y:6.20,w:W-2*M,h:0.86,fontFace:B,fontSize:12,color:BRASS,lineSpacing:17,isTextBox:true,margin:0});
 s.addNotes('End on the limits. The credibility of slides 4-9 depends on saying this one out loud.');
 

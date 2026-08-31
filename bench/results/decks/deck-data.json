@@ -398,5 +398,240 @@
   "qwen3-coder": [
    "fft_convolution"
   ]
- }
+ },
+ "algotune_metric_rank": [
+  [
+   "This port \u2014 seed 0",
+   2.29,
+   true,
+   "ERA"
+  ],
+  [
+   "This port \u2014 seed 1",
+   2.268,
+   true,
+   "ERA"
+  ],
+  [
+   "OpenEvolve",
+   2.267,
+   false,
+   "OpenEvolve"
+  ],
+  [
+   "MetaEvolve (RL)",
+   2.045,
+   false,
+   "OpenEvolve"
+  ],
+  [
+   "claude-opus-4.6",
+   1.837,
+   false,
+   "AlgoTuner"
+  ],
+  [
+   "gemini-3.1-pro-preview",
+   1.833,
+   false,
+   "AlgoTuner"
+  ],
+  [
+   "claude-opus-4.5",
+   1.83,
+   false,
+   "AlgoTuner"
+  ],
+  [
+   "gpt-5.2",
+   1.788,
+   false,
+   "AlgoTuner"
+  ],
+  [
+   "o4-mini",
+   1.774,
+   false,
+   "AlgoTuner"
+  ],
+  [
+   "glm-4.5",
+   1.761,
+   false,
+   "AlgoTuner"
+  ],
+  [
+   "claude-sonnet-4-5-20250929",
+   1.707,
+   false,
+   "AlgoTuner"
+  ],
+  [
+   "deepseek-reasoner",
+   1.679,
+   false,
+   "AlgoTuner"
+  ],
+  [
+   "gpt-5.4",
+   1.567,
+   false,
+   "AlgoTuner"
+  ],
+  [
+   "claude-opus-4-20250514",
+   1.497,
+   false,
+   "AlgoTuner"
+  ],
+  [
+   "gemini-3-pro-preview",
+   1.483,
+   false,
+   "AlgoTuner"
+  ],
+  [
+   "qwen3-coder",
+   1.403,
+   false,
+   "AlgoTuner"
+  ],
+  [
+   "Qwen3-14B, no RL",
+   1.392,
+   false,
+   "OpenEvolve"
+  ],
+  [
+   "gemini-2.5-pro",
+   1.374,
+   false,
+   "AlgoTuner"
+  ],
+  [
+   "claude-opus-4-1-20250805",
+   1.373,
+   false,
+   "AlgoTuner"
+  ],
+  [
+   "gpt-5",
+   1.328,
+   false,
+   "AlgoTuner"
+  ],
+  [
+   "gpt-5-pro (medium)",
+   1.31,
+   false,
+   "AlgoTuner"
+  ],
+  [
+   "gpt-oss-120b",
+   1.309,
+   false,
+   "AlgoTuner"
+  ],
+  [
+   "gpt-5-mini",
+   1.254,
+   false,
+   "AlgoTuner"
+  ]
+ ],
+ "ours_score": [
+  2.29,
+  2.268
+ ],
+ "metric_proof": [
+  [
+   "gpt-5.2",
+   2.05,
+   2.054
+  ],
+  [
+   "gemini-3.1-pro-preview",
+   2.02,
+   2.016
+  ],
+  [
+   "gpt-5.4",
+   1.85,
+   1.854
+  ],
+  [
+   "gemini-3-pro-preview",
+   1.83,
+   1.832
+  ],
+  [
+   "claude-opus-4.5",
+   1.77,
+   1.766
+  ],
+  [
+   "o4-mini",
+   1.72,
+   1.716
+  ],
+  [
+   "deepseek-reasoner",
+   1.7,
+   1.702
+  ],
+  [
+   "gpt-5",
+   1.67,
+   1.669
+  ],
+  [
+   "gpt-5-pro (medium)",
+   1.31,
+   1.307
+  ]
+ ],
+ "other_sources": [
+  [
+   "AlgoTune leaderboard",
+   "AlgoTuner (the benchmark\u2019s own)",
+   "18 models",
+   "154 tasks, calibrated n",
+   "reports/agent_summary.json"
+  ],
+  [
+   "MetaEvolve + baseline",
+   "OpenEvolve\u2019s search",
+   "Qwen3-14B, \u00b1 RL",
+   "8 tasks, sizes not stated",
+   "arXiv:2607.21971"
+  ],
+  [
+   "OpenEvolve",
+   "own",
+   "gemini-2.5-flash + 2.5-pro",
+   "8 tasks, data_size far below calibrated",
+   "openevolve repo"
+  ],
+  [
+   "Dria, \u201cTowards Open\nEvolutionary Agents\u201d",
+   "OpenEvolve, via algotune_to_openevolve.py",
+   "Gemini Flash 2.5 2.04x\nGemma 3 27B 1.63x\nQwen3-Coder 480B 1.41x",
+   "30 tasks, sizes not stated",
+   "HuggingFace, Aug 2025"
+  ],
+  [
+   "EvoMem",
+   "own",
+   "Gemini 3 Flash",
+   "aggregate only: 8.58x mean, 16.33x max",
+   "arXiv:2608.10795"
+  ],
+  [
+   "Epoch AI",
+   "none \u2014 mirrors the AlgoTune leaderboard",
+   "\u2014",
+   "no independent runs",
+   "epoch.ai/benchmarks/algotune"
+  ]
+ ]
 }

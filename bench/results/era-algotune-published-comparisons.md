@@ -112,6 +112,77 @@ are shown; neither is selected.
 | `lu_factorization` | 7.000 | 7.139 | 1.300 | 1.311 | 1.19 |
 | **harmonic mean** | **2.285** | **2.254** | **1.392** | **2.045** | 1.984 |
 
+### AlgoTune's own metric, and a correction
+
+An earlier revision of this file said AlgoTune's leaderboard aggregation could not
+be reproduced from its per-task data. **That was wrong.** The rule it missed is
+stated in AlgoTune's own description of the score: *"solutions that yield invalid
+outputs or that have a speedup of under 1x [are] assigned a speedup of 1x"*, a task
+with no result likewise counts 1x, and the score is the harmonic mean over every
+task. Applied to `reports/agent_summary.json` it reproduces the published
+leaderboard to three decimals on all nine models with a published figure:
+
+| model | published | recomputed |
+|---|---:|---:|
+| gpt-5.2 | 2.05 | 2.054 |
+| gemini-3.1-pro-preview | 2.02 | 2.016 |
+| gpt-5.4 | 1.85 | 1.854 |
+| gemini-3-pro-preview | 1.83 | 1.832 |
+| claude-opus-4.5 | 1.77 | 1.766 |
+| o4-mini | 1.72 | 1.716 |
+| deepseek-reasoner | 1.70 | 1.702 |
+| gpt-5 | 1.67 | 1.669 |
+| gpt-5-pro (medium) | 1.31 | 1.307 |
+
+Three things follow. **The clip changes what "below 1.0" means**: models this file
+had shown at 0.665x-0.848x are at 1.0 under the benchmark's own rule, because those
+were raw ratios AlgoTune deliberately does not score. **Nothing needs excluding**:
+a missing task counts 1x, so all eighteen models rank on all eight tasks and the
+"complete on all eight" filter that dropped nine of them -- including every recent
+Anthropic and Google model -- was unnecessary. And **the underlying observation
+survives**: those models did submit solvers slower than the reference, mostly by
+adding a `.tolist()` the reference does not do; AlgoTune simply chooses not to
+punish it.
+
+Scored AlgoTune's way, on the same eight tasks, nobody excluded:
+
+| # | | score | harness |
+|---:|---|---:|---|
+| 1 | **this port, seed 0** | **2.290** | ERA on AgentDescent |
+| 2 | **this port, seed 1** | **2.268** | ERA on AgentDescent |
+| 3 | OpenEvolve | 2.267 | OpenEvolve |
+| 4 | MetaEvolve (RL) | 2.045 | OpenEvolve's search |
+| 5 | claude-opus-4.6 | 1.837 | AlgoTuner |
+| 6 | gemini-3.1-pro-preview | 1.833 | AlgoTuner |
+| 7 | claude-opus-4.5 | 1.830 | AlgoTuner |
+| 8 | gpt-5.2 | 1.788 | AlgoTuner |
+| ... | | | |
+| 17 | Qwen3-14B, no RL | 1.392 | OpenEvolve's search |
+| 23 | gpt-5-mini | 1.254 | AlgoTuner |
+
+Read the harness column before the order. The eighteen AlgoTuner rows are at the
+calibrated `n`; the three above them run OpenEvolve's search and none of the three
+states its sizes. Against the field that is known to be measuring the same
+problems, this port's 2.290 sits above claude-opus-4.6's 1.837 -- that is the
+comparison this file puts weight on.
+
+## Everything else published on AlgoTune
+
+Searched arXiv, GitHub, HuggingFace and Epoch AI:
+
+| source | harness | model | what it reports |
+|---|---|---|---|
+| AlgoTune leaderboard | AlgoTuner | 18 models | 154 tasks at the calibrated `n` |
+| MetaEvolve + baseline (arXiv:2607.21971) | OpenEvolve's search | Qwen3-14B, +/- RL | 8 tasks, sizes not stated |
+| OpenEvolve | own | gemini-2.5-flash + 2.5-pro | 8 tasks, `data_size` far below calibrated |
+| Dria, *Towards Open Evolutionary Agents* (HuggingFace, Aug 2025) | OpenEvolve, via `algotune_to_openevolve.py` | Gemini Flash 2.5 2.04x (200 iters), Gemma 3 27B 1.63x, Qwen3-Coder 480B 1.41x | 30 tasks, sizes not stated |
+| EvoMem (arXiv:2608.10795) | own | Gemini 3 Flash | aggregate only: 8.58x mean, 16.33x max |
+| Epoch AI | none | -- | mirrors the AlgoTune leaderboard, no independent runs |
+
+Four of the six run OpenEvolve's converter or its search, and not one of those four
+states a problem size. Checked and *not* on AlgoTune: CodeEvolve (the AlphaEvolve
+suite), ThetaEvolve (circle packing), ParEVO (PBBS/ParEval), RL4RLA, ProgramBench.
+
 \* OpenEvolve's column is carried for continuity only. Its `algotune.data_size`
 is 10x-4337x below AlgoTune's calibrated `n` on six of these eight tasks, so it
 is not measuring the same problems; see `era-algotune-openevolve-comparison.md`.
