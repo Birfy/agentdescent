@@ -75,6 +75,25 @@ what this search produces is a ranked list of candidates *to send to* that
 calculation. [`docs/porous-molecules.md`](../../docs/porous-molecules.md) states
 where the proxy is weakest and how to replace the scorer with a real one.
 
+## What one run looks like
+
+`deepseek-v4-pro`, benzene as the seed, 12 expansions over 4 workers:
+
+```
+Seed : c1ccccc1                                            score 0.620
+Best : Ic1ccc(cc1)-c2c(-c3ccc(I)cc3)c(...)c2-c7ccc(I)cc7   score 0.813
+       hexakis(4-iodophenyl)benzene, C42H24I6, 72 atoms
+       rigidity 0.60  symmetry 0.92  interactions 0.91  packing 0.78  synth 0.87
+       packing = sqrt(awkwardness 0.650 x cohesion 0.928)
+Held-back weightings: 0.541 -> 0.805
+```
+
+Every reply was a valid molecule on the first draft, and the model aimed at the
+criterion the breakdown said was weakest — one node's own summary reads
+*"inserted an ethynyl spacer into each of the six arms … targeting the low
+rigidity score"*. Full numbers, including what the run cost and what it lost to
+the endpoint, are in [`docs/porous-molecules.md`](../../docs/porous-molecules.md).
+
 ## Files
 
 | File | What is in it |

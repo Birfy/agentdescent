@@ -236,43 +236,54 @@ uniform prior keeps mining the incumbent while the headroom prior moves.
 ## Measured — with a model
 
 `deepseek-v4-pro` (a reasoning model, behind an OpenAI-compatible endpoint),
-benzene as the seed, 4 expansions over 2 workers, `--prior-exponent 1`:
+benzene as the seed, `--iterations 12 --workers 4 --prior-exponent 1`, on the
+rubric as it ships.
 
 | | molecule | score | held-back weightings |
 |---|---|---|---|
-| seed | `c1ccccc1` | 0.614 | 0.541 |
-| best | `c1(-c2ccc(Br)cc2)c(...)...` — hexakis(4-bromophenyl)benzene | **0.775** | **0.783** |
+| seed | `c1ccccc1` | 0.620 | 0.541 |
+| best | hexakis(4-iodophenyl)benzene | **0.813** | **0.805** |
 
-(Both molecules are re-scored here under the rubric as it ships. The run itself
-was made before the synthesizability term was recalibrated, so the numbers it
-printed at the time were 0.795 and 0.801; what it *found* — the molecule, in
-four expansions — is what the row is reporting.)
+Six expansions took a flat dense packer to a propeller-shaped hexaarylbenzene
+carrying six aryl-iodide σ-holes — a halogen-bonded scaffold family that really
+does form porous crystals. The tree it built is worth reading as much as the
+answer:
 
-Four expansions, and the search left a flat dense packer for a propeller-shaped
-hexasubstituted benzene with six halogen-bond donors — a scaffold family that
-really does form clathrates. The reply that produced it named the criteria it
-was aiming at:
+| node | parent | score | similarity to parent | what the model said it was doing |
+|---|---|---|---|---|
+| 1 | seed | 0.791 | 0.06 | six 4-bromophenyl groups, "a rigid, non-planar propeller with six directional Br halogen-bond sites" |
+| 2 | seed | **0.813** | 0.06 | the same move with iodine — "six strong directional halogen-bond donors" |
+| 3 | seed | 0.813 | 0.06 | *duplicate of node 2*, proposed by another worker in the same round |
+| 4 | seed | 0.747 | 0.08 | **replaced the skeleton**: a tetrahedral tetrakis(4-iodoethynylphenyl)methane core |
+| 5 | 3 | 0.738 | 0.64 | ethynyl spacers into all six arms, "targeting the low rigidity score" |
+| 6 | 3 | 0.738 | 0.64 | *duplicate of node 5* |
 
-> *"I substituted all six benzene positions with 4-iodophenyl groups, turning the
-> flat, dense parent into a non-planar, high-symmetry propeller with six
-> directional I halogen-bond donors to target the weak packing and interaction
-> scores."*
+Three things in that table are the design working. The model aims at the
+**named weak criterion** ("targeting the low rigidity score") because the prompt
+shows it the breakdown rather than a single number. It is willing to **replace
+the skeleton** (node 4), not only decorate it. And the two moves that
+restructure the molecule score 0.06 against their parent while the two that
+extend it score 0.64 — the spread that makes a lineage gate impossible.
 
-which is the design of the prompt working: the model is shown the parent's
-**breakdown**, not its score, so it can aim at the failing criterion.
+**Every reply was a valid molecule on the first draft**: `reply:valid: 6`, no
+repairs, nothing refused by the gate. That is what a strong model does with an
+explicit constraint list; the repair loop is insurance, not the common path.
 
-Two costs worth recording. A reasoning model spends around 200 s and 14 000
-tokens on one expansion — the thinking is billed and timed like output, even
-though the reply is three lines — so a 4-expansion run took 13 minutes of
-wall-clock for 20 calls, and at the old 180 s timeout three of four workers lost
-their first round to `TimeoutError` before the adapter's retries recovered them.
-That is why `--api-timeout` defaults to 300 s and `--max-tokens` to 4096 here: a
-reasoning model starved of either returns an empty reply, which this search
-would record as a node the gate refused, indistinguishable from bad chemistry. And two workers in the same round proposed the same molecule under
-different spellings — the aromaticity perception caught it and the second node
-is flagged `duplicate_of`, but the "already tried" list in the prompt can only
-show children that have already been merged, so same-round twins are a real cost
-of parallel expansion here.
+The costs are the honest part. 56 model calls produced 6 proposals: **28 of
+those calls failed** (`RemoteDisconnected`, and at the previous 180 s timeout,
+`TimeoutError`), and the engine's retries absorbed them, so a 12-expansion
+budget bought 6 landed expansions and a 7-node tree in 43 minutes of wall-clock
+for 84 000 tokens. A reasoning model spends around 200 s and 14 000 tokens
+writing three lines, because the thinking is billed and timed like output — and
+starved of either it returns an empty reply, which this search would record as a
+node the gate refused, indistinguishable from bad chemistry. That is why
+`--api-timeout` defaults to 300 s and `--max-tokens` to 4096 here.
+
+Two workers in the same round proposed the same molecule twice over (nodes 3 and
+6). Aromaticity perception caught both and flagged them `duplicate_of`, but the
+"already tried" list in the prompt can only show children that have already been
+merged, so same-round twins are a real cost of parallel expansion in this
+design.
 
 ## What this is not
 
