@@ -30,6 +30,7 @@ from examples.porous._descriptors import describe, rotatable_bonds
 from examples.porous._mutations import enumerate_mutations, propose_offline
 from examples.porous._prior import expansion_prior, structural_headroom
 from examples.porous._prompts import extract_molecule
+from examples.porous._report import _chrome, render_html, write_pdf
 from examples.porous._score import (
     DEFAULT_WEIGHTS,
     TERMS,
@@ -532,6 +533,44 @@ def test_the_svg_labels_heteroatoms_and_leaves_carbon_as_a_vertex():
     assert ">N<" in drawing and ">OH<" in drawing
     assert ">C<" not in drawing, "carbons are vertices, not labels"
     assert drawing.count("<line") >= len(validate("N#Cc1ccc(O)cc1").molecule.bonds)
+
+
+# -- the report -----------------------------------------------------------------
+
+
+def _report_payload():
+    run = port.run_search(None, mode="sync", seed_smiles="c1ccccc1", iterations=6,
+                          workers=2, profiles=6, test_profiles=3, seed=4)
+    return run.payload({"mode": "sync", "iterations": 6,
+                        "weights": DEFAULT_WEIGHTS.normalized().as_dict()}, None)
+
+
+def test_the_report_renders_every_section_and_draws_the_molecules():
+    html = render_html(_report_payload(), lang="en",
+                       rubric_note="note", caveats=["a caveat"])
+    for fragment in ("Starting molecule", "Best molecule found",
+                     "Every valid candidate", "The search trajectory",
+                     "What the run cost", "a caveat"):
+        assert fragment in html, fragment
+    assert html.count("<svg") >= 2, "the two headline molecules must be drawn"
+    assert "<script" not in html, "a printable report needs no scripts"
+
+
+def test_the_report_speaks_both_languages_without_changing_the_numbers():
+    payload = _report_payload()
+    english = render_html(payload, lang="en")
+    chinese = render_html(payload, lang="zh")
+    assert "多孔分子晶体候选分子" in chinese and "Porous molecular" in english
+    best = payload["best_molecule"]["score"]
+    assert f"{best:.3f}" in english and f"{best:.3f}" in chinese
+
+
+@pytest.mark.skipif(_chrome() is None, reason="no headless Chromium installed")
+def test_the_pdf_is_actually_written(tmp_path):
+    """A zero-byte PDF is the failure this must not report as success."""
+    path = write_pdf(render_html(_report_payload()), tmp_path / "report.pdf")
+    assert path.exists() and path.stat().st_size > 5000
+    assert path.read_bytes()[:5] == b"%PDF-"
 
 
 # -- one whole run --------------------------------------------------------------
