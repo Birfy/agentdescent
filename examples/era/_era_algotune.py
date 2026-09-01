@@ -76,16 +76,19 @@ Not faithful, and deliberately:
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import hashlib
 import json
 import math
+import os
 import subprocess
 import tempfile
 import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
 from agentdescent.dataloader import cache_path, fetch_text
 
@@ -614,6 +617,46 @@ def _zero_metrics(error: str) -> Dict[str, Any]:
 #: where contention costs wall clock and nothing else; here it costs the number.
 _EVALUATION = threading.Lock()
 
+#: The same exclusion across *processes*, for running several tasks at once.
+#:
+#: :data:`_EVALUATION` is a :class:`threading.Lock`, so it serialises the three
+#: workers inside one `era_algotune` run and nothing else. Two runs launched
+#: side by side are two interpreters and share no such lock -- which is exactly
+#: the ``load 2`` row of the table above, the configuration that reports 3.2x for
+#: a solver worth 834x. Sweeping 147 tasks one process at a time is ~92 hours,
+#: and the obvious fix of running four at once would have silently destroyed the
+#: measurement rather than slowed it down.
+#:
+#: So the timed subprocess also takes an exclusive ``flock`` on a fixed path.
+#: Only one candidate is ever being timed on the machine, whatever launched it.
+#: What still overlaps is everything that is not the measurement, and that is
+#: most of it: ``eval_seconds`` was 424.7 of 1512.8 wall-clock seconds on the
+#: 99-rollout `polynomial_real` run, so ~72% of a run is waiting on the model and
+#: parallelises freely. The ceiling is therefore about 1/0.28 -- three or four
+#: concurrent tasks, past which the serialised evaluations are the bottleneck and
+#: more processes buy queueing.
+#:
+#: `flock` is released by the kernel if the holder dies, so a killed run cannot
+#: wedge the sweep -- which matters when the container has already been reclaimed
+#: once mid-sweep.
+_EVALUATION_LOCKFILE = os.environ.get(
+    "ERA_ALGOTUNE_EVAL_LOCK", "/tmp/era-algotune-eval.lock")
+
+
+@contextlib.contextmanager
+def _timed_alone() -> Iterator[None]:
+    """Hold the machine for one timed run: threads first, then processes."""
+    with _EVALUATION:
+        handle = open(_EVALUATION_LOCKFILE, "w")
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
+
 
 def run_candidate(
     code: str,
@@ -706,7 +749,7 @@ def run_candidate(
             # writes and the JSON parse around it are cheap and need no
             # exclusion, and holding it over them would serialise the search
             # rather than the measurement.
-            with _EVALUATION:
+            with _timed_alone():
                 completed = subprocess.run(
                     command, capture_output=True, text=True,
                     timeout=timeout + 10.0, env=env, cwd=scratch)

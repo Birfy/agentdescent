@@ -1311,12 +1311,12 @@ def test_only_one_sandbox_is_timed_at_a_time():
         "the evaluation mutex is gone or is no longer a lock")
 
     source = inspect.getsource(algotune.run_candidate)
-    assert "with _EVALUATION:" in source, (
+    assert "with _timed_alone():" in source, (
         "run_candidate no longer serialises the sandbox, so three workers time "
         "three candidates against each other")
     # It has to be around the timed run and not around the whole function, or it
     # serialises the search rather than the measurement.
-    held = source[source.index("with _EVALUATION:"):]
+    held = source[source.index("with _timed_alone():"):]
     held = held[:held.index("except subprocess.TimeoutExpired")]
     assert "subprocess.run(" in held, "the lock no longer covers the timed run"
     assert "validate_source" not in held and "write_text" not in held, (
@@ -1367,3 +1367,54 @@ def test_a_finished_rollout_is_never_discarded_for_being_stale():
     guarded = get_policy("guarded")
     assert guarded.decide(6, 5, False) is StaleAction.DISCARD
     assert guarded.decide(1, 5, False) is StaleAction.REBASE
+
+
+def test_two_processes_cannot_time_a_candidate_at_once(tmp_path):
+    """The mutex has to cross processes, or sweeping in parallel breaks the score.
+
+    `_EVALUATION` is a `threading.Lock`, so it serialises the workers inside one
+    run and nothing else. Two `era_algotune` processes side by side are two
+    interpreters -- which is the `load 2` row of the table in `_era_algotune`:
+    3.2x reported for a solver worth 834x. Running the 147-task sweep four at a
+    time would not have been four times faster, it would have been wrong.
+
+    So this asserts the real property rather than the presence of the word
+    `flock`: two independent interpreters, each taking `_timed_alone()` around a
+    sleep, cannot overlap. Their held intervals are appended to one file and
+    checked for intersection.
+    """
+    import pathlib
+    import subprocess as sp
+    import sys
+
+    REPO_ROOT = pathlib.Path(algotune.__file__).resolve().parents[2]
+    lock = tmp_path / "eval.lock"
+    log = tmp_path / "intervals"
+    prog = "\n".join([
+        "import os, sys, time",
+        f"os.environ[\'ERA_ALGOTUNE_EVAL_LOCK\'] = {str(lock)!r}",
+        f"sys.path.insert(0, {str(REPO_ROOT)!r})",
+        "from examples.era import _era_algotune as a",
+        f"a._EVALUATION_LOCKFILE = {str(lock)!r}",
+        "for _ in range(3):",
+        "    with a._timed_alone():",
+        "        start = time.monotonic()",
+        "        time.sleep(0.12)",
+        f"        open({str(log)!r}, 'a').write(f'{{start}} {{time.monotonic()}}\\n')",
+    ]) + "\n"
+    script = tmp_path / "holder.py"
+    script.write_text(prog)
+    procs = [sp.Popen([sys.executable, str(script)]) for _ in range(3)]
+    for proc in procs:
+        assert proc.wait(timeout=90) == 0, "a lock holder crashed"
+
+    spans = sorted(
+        tuple(float(x) for x in line.split())
+        for line in log.read_text().splitlines() if line.strip())
+    assert len(spans) == 9, f"expected 9 held intervals, got {len(spans)}"
+    for (a_start, a_end), (b_start, b_end) in zip(spans, spans[1:]):
+        overlap = min(a_end, b_end) - max(a_start, b_start)
+        assert overlap <= 0.0, (
+            f"two processes timed a candidate together for {overlap:.3f}s; the "
+            "sandbox lock does not cross processes, so a parallel sweep would "
+            "measure candidates against each other")
