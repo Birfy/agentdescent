@@ -799,6 +799,12 @@ def run_search(
     held_out_frac: float = 0.5,
     async_ratio: int = 1,
     max_seconds: float = 600.0,
+    #: How long `--async` waits for expansions already in flight when the
+    #: budget runs out. The engine's own default is two seconds, which is right
+    #: when a rollout is a fast API call and wrong here: one expansion on a
+    #: reasoning model takes minutes, so a two-second grace throws away work
+    #: that was seconds from landing.
+    shutdown_grace: float = 300.0,
     staleness: str = "guarded",
     eval_concurrency: Optional[int] = None,
     seed: int = 0,
@@ -856,7 +862,7 @@ def run_search(
     if mode == "async":
         result = async_evolve(tasks, reward_molecule, async_ratio=async_ratio,
                               max_seconds=max_seconds, max_iters=iterations,
-                              **common)
+                              shutdown_grace=shutdown_grace, **common)
     else:
         result = evolve(tasks, reward_molecule, rounds=iterations // workers,
                         max_concurrency=1 if mode == "serial" else workers,
@@ -904,6 +910,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repair-attempts", type=int, default=2,
                         help=("draws per expansion: an invalid SMILES goes back "
                               "to the model with the gate's reason attached"))
+    parser.add_argument("--shutdown-grace", type=float, default=300.0,
+                        help=("--async only: how long to wait for expansions "
+                              "already in flight when the budget runs out"))
     parser.add_argument("--offline", action="store_true",
                         help=("propose with the rule-based edit operators "
                               "instead of a model -- no API key, no network"))
@@ -989,7 +998,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         c_puct=args.c_puct, prior_exponent=args.prior_exponent,
         max_atoms=args.max_atoms, weights=weights, jitter=args.jitter,
         repair_attempts=args.repair_attempts, async_ratio=args.async_ratio,
-        max_seconds=args.max_seconds, eval_concurrency=args.eval_concurrency,
+        max_seconds=args.max_seconds, shutdown_grace=args.shutdown_grace,
+        eval_concurrency=args.eval_concurrency,
         seed=args.seed, usage=usage if not args.offline else None,
         verbose=not args.quiet,
     )
@@ -1002,6 +1012,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         "weights": weights.normalized().as_dict(), "profiles": args.profiles,
         "test_profiles": args.test_profiles, "jitter": args.jitter,
         "repair_attempts": args.repair_attempts, "seed": args.seed,
+        "shutdown_grace": args.shutdown_grace if args.asynchronous else None,
         "proposer": "offline-operators" if args.offline else f"{args.provider}/{args.model}",
     }
     payload = run.payload(config, None if args.offline else usage)
