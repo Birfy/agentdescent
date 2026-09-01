@@ -800,13 +800,21 @@ def run_search(
     held_out_frac: float = 0.5,
     async_ratio: int = 1,
     max_seconds: float = 600.0,
+    #: "full" -- keep every completed expansion -- and not the engine's usual
+    #: "guarded", because staleness has nothing to bite on here. A node's place
+    #: in the tree is its parent index, and a moving head cannot invalidate
+    #: that, so a proposal that arrives late is still exactly the expansion it
+    #: was when it was drawn. Measured offline at `async_ratio=2`, 16 cards
+    #: considered: `guarded` discarded 11 of them and built a 6-node tree,
+    #: `full` discarded none and built a 17-node one, on the same 19 rollouts.
+    #: Each of those discards is a five-minute model call on a live run.
     #: How long `--async` waits for expansions already in flight when the
     #: budget runs out. The engine's own default is two seconds, which is right
     #: when a rollout is a fast API call and wrong here: one expansion on a
     #: reasoning model takes minutes, so a two-second grace throws away work
     #: that was seconds from landing.
     shutdown_grace: float = 300.0,
-    staleness: str = "guarded",
+    staleness: str = "full",
     eval_concurrency: Optional[int] = None,
     seed: int = 0,
     usage: Optional[Usage] = None,
@@ -935,6 +943,11 @@ def build_parser() -> argparse.ArgumentParser:
               "and a gateway with an idle timeout closes the connection under "
               "it -- measured here, four concurrent non-streaming expansions "
               "were all cut at 301s while streamed ones ran past 700s"))
+    parser.add_argument("--staleness", default="full",
+                        choices=("full", "guarded", "reflective"),
+                        help=("what to do with a proposal whose base version "
+                              "moved while it was in flight; 'full' keeps them "
+                              "all, which is right for an append-only tree"))
     parser.add_argument("--shutdown-grace", type=float, default=300.0,
                         help=("--async only: how long to wait for expansions "
                               "already in flight when the budget runs out"))
@@ -1030,6 +1043,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         max_atoms=args.max_atoms, weights=weights, jitter=args.jitter,
         repair_attempts=args.repair_attempts, async_ratio=args.async_ratio,
         max_seconds=args.max_seconds, shutdown_grace=args.shutdown_grace,
+        staleness=args.staleness,
         eval_concurrency=args.eval_concurrency,
         seed=args.seed, usage=usage if not args.offline else None,
         verbose=not args.quiet,
@@ -1043,6 +1057,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         "weights": weights.normalized().as_dict(), "profiles": args.profiles,
         "test_profiles": args.test_profiles, "jitter": args.jitter,
         "repair_attempts": args.repair_attempts, "seed": args.seed,
+        "staleness": args.staleness,
         "shutdown_grace": args.shutdown_grace if args.asynchronous else None,
         "proposer": "offline-operators" if args.offline else f"{args.provider}/{args.model}",
         "streaming": bool(is_openai_compatible(args) and args.stream and not args.offline),

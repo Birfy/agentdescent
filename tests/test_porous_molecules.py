@@ -22,6 +22,7 @@ import random
 
 import pytest
 
+from agentdescent.aggregator import AggregatorConfig
 from agentdescent.selection import Candidate, FlatPuct, SelectionContext
 
 from examples.porous import porous_tree_search as port
@@ -533,6 +534,38 @@ def test_the_svg_labels_heteroatoms_and_leaves_carbon_as_a_vertex():
     assert ">N<" in drawing and ">OH<" in drawing
     assert ">C<" not in drawing, "carbons are vertices, not labels"
     assert drawing.count("<line") >= len(validate("N#Cc1ccc(O)cc1").molecule.bonds)
+
+
+def test_a_late_expansion_is_kept_because_the_tree_cannot_go_stale():
+    """The default staleness policy here is `full`, and this is why.
+
+    A node's place in the tree is its parent index; the head moving on cannot
+    make a molecule that was drawn from node 3 stop being an expansion of node
+    3. Measured offline at `async_ratio=2`: `guarded` discarded 11 of 16
+    completed expansions and built a 6-node tree where `full` discarded none and
+    built a 17-node one, on the same rollouts. On a live run each of those
+    discards is a five-minute model call.
+    """
+    from agentdescent.evolvable import Diff, EvidenceCard
+    from agentdescent.staleness import get_policy
+
+    def filtered(policy_name):
+        aggregator = port.PorousTreeAggregator(
+            ledger=None, verifier=None, tree=port.MoleculeTree(),
+            config=AggregatorConfig(), staleness_policy=get_policy(policy_name),
+            profiles=[DEFAULT_WEIGHTS])
+        card = EvidenceCard(
+            diff=Diff(diff_id="d", target=port.ARTIFACT_ID,
+                      ops={"smiles": "Ic1ccccc1"}, author="w0"),
+            base_version={port.ARTIFACT_ID: 0}, touched=["smiles"])
+        survivors, discarded = aggregator._staleness_filter(
+            {port.ARTIFACT_ID: 9}, [card])          # nine versions behind
+        return survivors, discarded
+
+    kept, dropped = filtered("full")
+    assert len(kept) == 1 and not dropped
+    kept, dropped = filtered("guarded")
+    assert not kept and len(dropped) == 1, "guarded is the policy `full` replaces"
 
 
 # -- the report -----------------------------------------------------------------
