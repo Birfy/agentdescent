@@ -629,12 +629,26 @@ _EVALUATION = threading.Lock()
 #:
 #: So the timed subprocess also takes an exclusive ``flock`` on a fixed path.
 #: Only one candidate is ever being timed on the machine, whatever launched it.
-#: What still overlaps is everything that is not the measurement, and that is
-#: most of it: ``eval_seconds`` was 424.7 of 1512.8 wall-clock seconds on the
-#: 99-rollout `polynomial_real` run, so ~72% of a run is waiting on the model and
-#: parallelises freely. The ceiling is therefore about 1/0.28 -- three or four
-#: concurrent tasks, past which the serialised evaluations are the bottleneck and
-#: more processes buy queueing.
+#: What still overlaps is everything that is not the measurement, and on this
+#: configuration that is nearly all of it: ``eval_seconds`` is 176.2 of 1825
+#: wall-clock seconds on the 99-rollout `polynomial_real` run -- **10%** -- so
+#: the serialised evaluations do not saturate until something like ten concurrent
+#: tasks.
+#:
+#: An earlier version of this comment said 28% and inferred a ceiling of three or
+#: four. That 28% (424.7 of 1512.8) is from the *guarded* run of the same task,
+#: and guarded is precisely the policy whose REBASE branch spends an extra scored
+#: sandbox run per stale card. Removing it removed most of the evaluation load,
+#: so quoting the old figure understated the headroom by roughly a factor of
+#: three. Whatever the right shard count is, it is not derivable from a number
+#: measured under a different staleness policy.
+#:
+#: What the ceiling actually is has not been measured. A three-shard sweep was
+#: started and stopped after fifteen minutes, at which point each of its three
+#: tasks had completed one sweep against a single-process baseline of roughly one
+#: sweep per forty seconds. That is slower than 10% evaluation can explain, and
+#: the cause was not established before the run was stopped -- cold start, these
+#: particular tasks, or real contention are all still open.
 #:
 #: `flock` is released by the kernel if the holder dies, so a killed run cannot
 #: wedge the sweep -- which matters when the container has already been reclaimed
