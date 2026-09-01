@@ -97,7 +97,7 @@ from examples.porous._score import (
     parse_weights,
     weight_profiles,
 )
-from examples.porous._smiles import DEFAULT_ELEMENTS
+from examples.porous._smiles import DEFAULT_ELEMENTS, similarity
 
 ARTIFACT_ID = "porous_molecule"
 TREE_UPDATED = "tree-updated"
@@ -160,6 +160,9 @@ class Node:
     headroom: Optional[Headroom] = None
     promise: Optional[float] = None
     duplicate_of: Optional[int] = None
+    #: Multiset Tanimoto against the parent this was expanded from, radius 1.
+    #: Reported, never gated on -- see `PorousTreeAggregator.step`.
+    parent_similarity: Optional[float] = None
     profile_scores: Dict[str, float] = field(default_factory=dict)
 
     @property
@@ -186,6 +189,7 @@ class Node:
             "promise": self.promise,
             "headroom": self.headroom.as_dict() if self.headroom else {},
             "duplicate_of": self.duplicate_of,
+            "parent_similarity": self.parent_similarity,
             "profile_scores": dict(self.profile_scores),
         }
 
@@ -267,6 +271,10 @@ class MoleculeTree:
                 node.duplicate_of = seen.get(node.report.canonical)
             self.nodes.append(node)
             return node
+
+    def node_at(self, index: int) -> Optional[Node]:
+        with self._lock:
+            return self.nodes[index] if 0 <= index < len(self.nodes) else None
 
     def children_of(self, index: int) -> List[Node]:
         with self._lock:
@@ -628,9 +636,30 @@ class PorousTreeAggregator(AggregatorProtocol):
                 promise = None
             headroom = (structural_headroom(report.descriptors, max_atoms=self.max_atoms)
                         if report.ok and report.descriptors else None)
+            parent_index = int(ops.get("parent_index", "0") or 0)
+            # Recorded, and deliberately *not* enforced. A floor on this would
+            # be the obvious way to hold the search to "modify the parent", and
+            # measurement says it cannot be: benzene -> hexakis(4-bromophenyl)-
+            # benzene, the best molecule the live run found, scores 0.06 here,
+            # while benzene -> hexane, which shares nothing at all, scores 0.00.
+            # There is no threshold between "bold but legitimate" and
+            # "unrelated", because substituting every symmetry-equivalent
+            # position at once -- the move this rubric most wants -- rewrites
+            # every atom environment there is. The prompt asks for a
+            # modification; this number is how a reader checks whether it got
+            # one.
+            parent = self.tree.node_at(parent_index)
+            lineage = None
+            if (report.ok and report.validation is not None
+                    and report.validation.molecule is not None
+                    and parent is not None and parent.report is not None
+                    and parent.report.validation is not None
+                    and parent.report.validation.molecule is not None):
+                lineage = similarity(parent.report.validation.molecule,
+                                     report.validation.molecule, radius=1)
             self.tree.add_node(Node(
                 index=-1,
-                parent_index=int(ops.get("parent_index", "0") or 0),
+                parent_index=parent_index,
                 smiles=smiles,
                 summary=ops.get("change_summary", ""),
                 score=score,
@@ -639,6 +668,7 @@ class PorousTreeAggregator(AggregatorProtocol):
                 prior=expansion_prior(headroom, promise),
                 headroom=headroom,
                 promise=promise,
+                parent_similarity=lineage,
                 profile_scores=per_profile,
             ))
             valid_candidates += int(report.ok)
@@ -873,8 +903,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--offline", action="store_true",
                         help=("propose with the rule-based edit operators "
                               "instead of a model -- no API key, no network"))
-    parser.add_argument("--max-tokens", type=int, default=2048)
-    parser.add_argument("--api-timeout", type=float, default=180.0)
+    # Both defaults are set by what a reasoning model actually does here, not
+    # by the size of the reply. One measured `deepseek-v4-pro` expansion took
+    # 205 s and 14 000 tokens to produce three lines, because the thinking is
+    # billed and timed like output: at 180 s three of four workers timed out in
+    # the first round, and at a low `--max-tokens` the budget goes to hidden
+    # reasoning and the reply arrives empty -- which this search would record as
+    # a node the gate refused, indistinguishable from bad chemistry.
+    parser.add_argument("--max-tokens", type=int, default=4096)
+    parser.add_argument("--api-timeout", type=float, default=300.0)
     parser.add_argument("--temperature", type=float, default=0.9,
                         help="a tree search wants varied children, not the mode")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)

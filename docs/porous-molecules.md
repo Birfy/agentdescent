@@ -82,6 +82,26 @@ including fusion atoms whose double bond points into the neighbouring ring). Two
 spellings of one molecule therefore de-duplicate against each other and get the
 same symmetry orbits, which they did not before that step existed.
 
+### "Modify the molecule you were given" is recorded, not enforced
+
+Every expansion is asked for **one deliberate modification of the parent**, and
+each node records `parent_similarity` — a multiset Tanimoto over atom
+environments at radius 1 — so a reader of the result file can check that it got
+one. There is no floor on it, and the measurement is why:
+
+| parent → child | similarity |
+|---|---|
+| benzene → iodobenzene | 0.44 |
+| benzene → hexakis(4-bromophenyl)benzene *(the best molecule the live run found)* | **0.06** |
+| benzene → hexane *(shares nothing)* | 0.00 |
+
+There is no threshold between "bold but legitimate" and "unrelated", because the
+move this rubric most wants — substituting **every** symmetry-equivalent
+position at once — rewrites every atom environment in the parent. A gate at any
+value that rejects the third row also rejects the second.
+`tests/test_porous_molecules.py::test_lineage_is_measurable_but_not_gateable`
+pins those numbers, so the decision fails loudly if the metric ever changes.
+
 ## The rubric
 
 Five criteria, each in `[0, 1]`, combined by weights that default to

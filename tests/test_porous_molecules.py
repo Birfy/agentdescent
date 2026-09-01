@@ -38,6 +38,7 @@ from examples.porous._score import (
 )
 from examples.porous._smiles import (
     canonical_key,
+    similarity,
     kekulize,
     orbits,
     parse_smiles,
@@ -113,6 +114,23 @@ def test_writing_and_reparsing_gives_the_same_molecule(smiles):
     again = parse_smiles(write_smiles(mol))
     kekulize(again)
     assert canonical_key(mol) == canonical_key(again)
+
+
+def test_the_writer_keeps_every_fragment_of_a_disconnected_input():
+    """`validate` refuses these; the writer must still not lose half a molecule."""
+    mol = parse_smiles("c1ccccc1.CCO")
+    kekulize(mol)
+    written = write_smiles(mol)
+    assert written.count(".") == 1
+    assert len(parse_smiles(written).atoms) == len(mol.atoms)
+
+
+def test_stereochemistry_is_read_reported_and_then_dropped():
+    """Re-emitting `@` after reordering neighbours would state the wrong thing."""
+    report = validate("C[C@H](N)C(=O)O")
+    assert report.ok and "stereochemistry is not tracked" in report.warnings[0]
+    assert "@" not in report.canonical
+    assert report.canonical == validate("C[C@@H](N)C(=O)O").canonical
 
 
 def test_the_kekule_form_a_molecule_was_written_in_does_not_change_it():
@@ -308,6 +326,43 @@ def test_the_offline_proposer_is_deterministic_for_a_seed():
     first = propose_offline("c1ccccc1", random.Random(7))
     second = propose_offline("c1ccccc1", random.Random(7))
     assert first is not None and first.smiles == second.smiles
+
+
+def test_lineage_is_measurable_but_not_gateable():
+    """Why the search records `parent_similarity` and never enforces it.
+
+    A floor on parent similarity is the obvious way to hold a search to "modify
+    the molecule you were given". These numbers are why it is not there: the
+    best molecule the live run found scores *below* a threshold that an
+    unrelated molecule would also fail, because substituting every
+    symmetry-equivalent position rewrites every atom environment in the parent.
+    """
+    def sim(a, b):
+        return similarity(validate(a).molecule, validate(b).molecule, radius=1)
+
+    hexasubstituted = ("c1(-c2ccc(Br)cc2)c(-c2ccc(Br)cc2)c(-c2ccc(Br)cc2)"
+                       "c(-c2ccc(Br)cc2)c(-c2ccc(Br)cc2)c1-c2ccc(Br)cc2")
+    assert sim("c1ccccc1", "Ic1ccccc1") > 0.4          # one substituent: obvious
+    assert sim("c1ccccc1", hexasubstituted) < 0.1      # legitimate, and unrecognisable
+    assert sim("c1ccccc1", "CCCCCC") == 0.0            # genuinely unrelated
+    assert sim("c1ccccc1", "c1ccccc1") == 1.0
+
+
+def test_the_fingerprint_does_not_move_between_processes():
+    """`hash()` is salted per process, so a canonical form built on it is
+    canonical only within one run -- and two runs of a seeded search would then
+    disagree about which molecules they had already seen."""
+    import subprocess
+    import sys
+
+    code = ("import sys; sys.path.insert(0, '.');"
+            "from examples.porous._smiles import validate;"
+            "print(validate('Ic1ccc(C#N)cc1').canonical)")
+    seen = {subprocess.run([sys.executable, "-c", code], capture_output=True,
+                           text=True, env={"PYTHONHASHSEED": seed, "PATH": "/usr/bin:/bin"}
+                           ).stdout.strip()
+            for seed in ("0", "1", "12345")}
+    assert len(seen) == 1 and seen != {""}, seen
 
 
 # -- the tree -------------------------------------------------------------------

@@ -34,11 +34,20 @@ What the gate actually checks, in order:
 `validate()` returns a report rather than raising: an invalid candidate is
 ordinary output from a language model, not an exception, and the search records
 it as a dead-end node with the reason attached.
+
+One limitation to state plainly: **stereochemistry is parsed and then dropped.**
+A chirality marker is read, counted towards the synthesizability penalty and
+reported as a warning, but never re-emitted -- its meaning is "the neighbours in
+the order they were written", and the canonical writer reorders neighbours. Two
+stereoisomers are therefore one molecule to everything here, which is consistent
+with the rest of the example: every descriptor is constitutional.
 """
 
 from __future__ import annotations
 
+import hashlib
 import re
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
@@ -52,11 +61,13 @@ __all__ = [
     "aromatize",
     "DEFAULT_ELEMENTS",
     "canonical_key",
+    "fingerprint",
     "orbits",
     "parse_smiles",
     "ring_bonds",
     "ring_sizes",
     "ring_systems",
+    "similarity",
     "smallest_cycles",
     "validate",
     "write_smiles",
@@ -782,6 +793,77 @@ def kekulize(mol: Molecule) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _stable_hash(value: object) -> int:
+    """A hash that does not move between processes.
+
+    Python's `hash()` is salted per process for strings, so a canonical form
+    built on it is canonical only within one run -- and two runs of a seeded
+    search would then disagree about which molecules they had already seen.
+    """
+    return int.from_bytes(
+        hashlib.blake2b(repr(value).encode("utf-8"), digest_size=8).digest(),
+        "big")
+
+
+def _wl_colors(mol: Molecule, rounds: int) -> List[List[int]]:
+    """Weisfeiler-Lehman colours after each round, comparable *across* molecules.
+
+    :func:`orbits` re-ranks its colours to small integers, which makes them
+    meaningless outside the molecule they came from. These are raw stable
+    hashes, so the same substructure hashes to the same number in two different
+    molecules -- which is what :func:`fingerprint` needs.
+    """
+    def weight(bond: Bond) -> float:
+        return 1.5 if bond.aromatic else float(bond.order)
+
+    colors = [
+        _stable_hash((atom.element, atom.aromatic, atom.charge, mol.degree(i),
+                      mol.h_count(i),
+                      tuple(sorted(weight(b) for b in mol.incident(i)))))
+        for i, atom in enumerate(mol.atoms)
+    ]
+    history = [list(colors)]
+    for _ in range(rounds):
+        colors = [
+            _stable_hash((colors[i],
+                          tuple(sorted((weight(b), colors[b.other(i)])
+                                       for b in mol.incident(i)))))
+            for i in range(len(mol.atoms))
+        ]
+        history.append(list(colors))
+    return history
+
+
+def fingerprint(mol: Molecule, radius: int = 2) -> "Counter":
+    """Every atom environment up to ``radius`` bonds, as a multiset.
+
+    A Morgan/ECFP-shaped fingerprint built out of the refinement this module
+    already computes. Used for one thing: deciding whether a proposed child is
+    actually a *modification of its parent* rather than an unrelated molecule
+    the model preferred to write.
+    """
+    counts: "Counter" = Counter()
+    for layer in _wl_colors(mol, radius):
+        counts.update(layer)
+    return counts
+
+
+def similarity(left: Molecule, right: Molecule, radius: int = 2) -> float:
+    """Tanimoto over :func:`fingerprint` multisets, in ``[0, 1]``.
+
+    Multiset Tanimoto -- ``sum(min) / sum(max)`` -- rather than the set form, so
+    substituting four of a molecule's six positions is measurably a bigger
+    change than substituting one.
+    """
+    a, b = fingerprint(left, radius), fingerprint(right, radius)
+    if not a or not b:
+        return 0.0
+    keys = set(a) | set(b)
+    intersection = sum(min(a.get(k, 0), b.get(k, 0)) for k in keys)
+    union = sum(max(a.get(k, 0), b.get(k, 0)) for k in keys)
+    return round(intersection / union, 4) if union else 0.0
+
+
 def orbits(mol: Molecule) -> List[int]:
     """Weisfeiler-Lehman refinement colours -- the topological symmetry classes.
 
@@ -802,8 +884,9 @@ def orbits(mol: Molecule) -> List[int]:
         return 1.5 if bond.aromatic else float(bond.order)
 
     colors = [
-        hash((atom.element, atom.aromatic, atom.charge, mol.degree(i),
-              mol.h_count(i), tuple(sorted(weight(b) for b in mol.incident(i)))))
+        _stable_hash((atom.element, atom.aromatic, atom.charge, mol.degree(i),
+                      mol.h_count(i),
+                      tuple(sorted(weight(b) for b in mol.incident(i)))))
         for i, atom in enumerate(mol.atoms)
     ]
     for _ in range(len(mol.atoms)):
@@ -838,7 +921,6 @@ def _atom_token(mol: Molecule, index: int) -> str:
         atom.element not in ORGANIC_SUBSET
         or atom.charge != 0
         or atom.isotope is not None
-        or atom.chiral
         # An aromatic heteroatom carrying hydrogen has to keep its brackets:
         # written bare, `n1cccc1` says pyridine-with-a-missing-bond and no
         # longer kekulises. `[nH]1cccc1` is pyrrole.
@@ -850,7 +932,13 @@ def _atom_token(mol: Molecule, index: int) -> str:
     inside = ""
     if atom.isotope is not None:
         inside += str(atom.isotope)
-    inside += symbol + atom.chiral
+    # The chirality marker is parsed, counted and then *dropped*. Its meaning
+    # is "the neighbours in the order they were written", and this writer
+    # reorders neighbours by refinement colour -- so re-emitting it would state
+    # a configuration the string no longer means. Everything downstream is
+    # constitutional (the descriptors, the rubric, the canonical key), so
+    # stereoisomers are one molecule here, which `validate` warns about.
+    inside += symbol
     if hydrogens == 1:
         inside += "H"
     elif hydrogens > 1:
@@ -914,7 +1002,12 @@ def write_smiles(mol: Molecule, root: int = 0,
             nxt = bond.other(node)
             if nxt in visited:
                 if id(bond) not in ring_labels:
-                    label = next(n for n in range(1, 100) if n not in used_labels)
+                    free = [n for n in range(1, 100) if n not in used_labels]
+                    if not free:
+                        raise SmilesError(
+                            "more than 99 open ring closures; this writer does "
+                            "not recycle labels")
+                    label = free[0]
                     used_labels.add(label)
                     ring_labels[id(bond)] = label
                     closures.setdefault(nxt, []).append((label, bond))
@@ -924,9 +1017,15 @@ def write_smiles(mol: Molecule, root: int = 0,
                 tree[node].append((nxt, bond))
                 walk(nxt, bond)
 
+    roots = [root]
     walk(root, None)
     for start in range(len(mol.atoms)):
         if start not in visited:
+            # A second fragment. `validate` refuses these by default, but the
+            # writer must not silently drop half a molecule when something else
+            # -- an edit operator mid-cut, a caller with its own gate -- hands
+            # one over.
+            roots.append(start)
             walk(start, None)
 
     emitted_closures: Set[int] = set()
@@ -943,11 +1042,7 @@ def write_smiles(mol: Molecule, root: int = 0,
             out += f"({branch})" if position < len(children) - 1 else branch
         return out
 
-    text = emit(root, None)
-    extra = [i for i in range(len(mol.atoms)) if i not in order_seen]
-    for start in extra:                    # disconnected input; kept readable
-        text += "." + emit(start, None)
-    return text
+    return ".".join(emit(start, None) for start in roots)
 
 
 def canonical_key(mol: Molecule) -> str:
@@ -1070,7 +1165,9 @@ def validate(smiles: str, *, max_atoms: int = 100,
         if atom.charge:
             warnings.append(f"formal charge {atom.charge:+d} on atom {index}")
         if atom.chiral:
-            warnings.append(f"stereocentre at atom {index}")
+            warnings.append(
+                f"stereocentre at atom {index}; stereochemistry is not tracked "
+                "-- this search treats stereoisomers as one molecule")
 
     charge = mol.total_charge()
     if charge != 0:
