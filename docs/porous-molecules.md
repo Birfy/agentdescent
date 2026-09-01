@@ -14,6 +14,10 @@ leaves uniform.
 ```bash
 python -m examples.porous.porous_tree_search --dry-run
 python -m examples.porous.porous_tree_search --offline --iterations 24 --workers 4
+
+# any OpenAI-compatible endpoint, through agentdescent.agents.openai_compatible
+export OPENAI_BASE_URL=...      # e.g. https://ark.cn-beijing.volces.com/api/coding/v1
+export OPENAI_API_KEY=...
 python -m examples.porous.porous_tree_search --provider openai \
     --model deepseek-v4-pro --iterations 24 --workers 4 --yes
 ```
@@ -252,8 +256,13 @@ which is the design of the prompt working: the model is shown the parent's
 **breakdown**, not its score, so it can aim at the failing criterion.
 
 Two costs worth recording. A reasoning model spends around 200 s and 14 000
-tokens on one expansion, so a 4-expansion run took 13 minutes of wall-clock for
-20 calls. And two workers in the same round proposed the same molecule under
+tokens on one expansion — the thinking is billed and timed like output, even
+though the reply is three lines — so a 4-expansion run took 13 minutes of
+wall-clock for 20 calls, and at the old 180 s timeout three of four workers lost
+their first round to `TimeoutError` before the adapter's retries recovered them.
+That is why `--api-timeout` defaults to 300 s and `--max-tokens` to 4096 here: a
+reasoning model starved of either returns an empty reply, which this search
+would record as a node the gate refused, indistinguishable from bad chemistry. And two workers in the same round proposed the same molecule under
 different spellings — the aromaticity perception caught it and the second node
 is flagged `duplicate_of`, but the "already tried" list in the prompt can only
 show children that have already been merged, so same-round twins are a real cost
