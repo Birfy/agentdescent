@@ -204,16 +204,17 @@ entirely, mean ± population standard deviation over the six seeds.
 
 | `--prior-exponent` | mean gain | best molecule seen |
 |---|---|---|
-| `0` — ERA's uniform `1/N` | **+0.163** ± 0.045 | 0.823 |
-| `1` — the headroom prior (this example's default) | **+0.153** ± 0.043 | 0.823 |
-| `2` — squared | **+0.153** ± 0.043 | 0.823 |
+| `0` — ERA's uniform `1/N` | **+0.118** ± 0.039 | 0.802 |
+| `1` — the headroom prior (this example's default) | **+0.109** ± 0.051 | 0.802 |
+| `2` — squared | **+0.112** ± 0.055 | 0.802 |
 
 **There is no effect here, and the honest reading is that this experiment could
-not have found one.** The difference between the first row and the other two is
-a fifth of one standard deviation; rows two and three are identical to four
-decimal places, because in a 24-node tree the rank term moves by `1/23` per
-place and the prior moves the exploration term by less than two places, so the
-argmax rarely changes. All three rows converge on the same best molecule.
+not have found one.** The three rows span 0.009 while a single row's own spread
+across seeds is four to six times that, and all three converge on the same best
+molecule. The mechanism is working — rows `1` and `2` differ, so the prior does
+move the search — it simply does not decide anything at this size: in a 24-node
+tree the rank term steps by `1/23` per place, and the prior moves the
+exploration term by less than two places, so the argmax rarely changes.
 
 Two things that experiment is *not* evidence about:
 
@@ -240,7 +241,12 @@ benzene as the seed, 4 expansions over 2 workers, `--prior-exponent 1`:
 | | molecule | score | held-back weightings |
 |---|---|---|---|
 | seed | `c1ccccc1` | 0.614 | 0.541 |
-| best | `c1(-c2ccc(Br)cc2)c(...)...` — hexakis(4-bromophenyl)benzene | **0.795** | **0.801** |
+| best | `c1(-c2ccc(Br)cc2)c(...)...` — hexakis(4-bromophenyl)benzene | **0.775** | **0.783** |
+
+(Both molecules are re-scored here under the rubric as it ships. The run itself
+was made before the synthesizability term was recalibrated, so the numbers it
+printed at the time were 0.795 and 0.801; what it *found* — the molecule, in
+four expansions — is what the row is reporting.)
 
 Four expansions, and the search left a flat dense packer for a propeller-shaped
 hexasubstituted benzene with six halogen-bond donors — a scaffold family that
