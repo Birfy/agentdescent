@@ -828,6 +828,22 @@ def run_search(
                            repair_attempts=repair_attempts, offline_seed=seed,
                            counters=counters)
 
+    def progress(info: Any) -> None:
+        """One line per merge sweep, because a long run is otherwise silent.
+
+        The synchronous driver prints a line per round; `async_evolve` prints
+        only when something *fails*, so a healthy barrier-free run on a slow
+        proposer -- which is exactly the configuration that takes hours -- says
+        nothing at all between start and finish. This runs on the merger thread
+        after each sweep and reports the tree, which is the thing being built.
+        """
+        best = tree.best()
+        newest = tree.nodes[-1]
+        state = "ok" if newest.valid else "refused"
+        print(f"  tree: {len(tree.nodes)} nodes  best={best.score:.3f}  "
+              f"latest #{newest.index} ({state}) {newest.smiles[:56]}",
+              flush=True)
+
     def factory(ledger, verifier, audit, config, policy):
         aggregator = PorousTreeAggregator(
             ledger, verifier, tree, config, policy, profiles=search_profiles,
@@ -858,6 +874,7 @@ def run_search(
         "verbose": verbose,
         "seed": seed,
         "staleness_policy": get_policy(staleness),
+        "on_round": progress if verbose else None,
     }
     if mode == "async":
         result = async_evolve(tasks, reward_molecule, async_ratio=async_ratio,
