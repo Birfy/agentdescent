@@ -157,6 +157,7 @@ Full docs live in [`docs/`](https://github.com/Birfy/agentdescent/tree/main/docs
 | [Example: skill evolution](https://github.com/Birfy/agentdescent/blob/main/docs/skill-evolution.md) | One complete run — real dataset, real LLM, every module |
 | [Self-evolution algorithms](https://github.com/Birfy/agentdescent/blob/main/docs/self-evolution-examples.md) | Nineteen algorithm ports, their fidelity classes, and every measured result in one table |
 | [Runtime matrix](https://github.com/Birfy/agentdescent/blob/main/docs/matrix-overview.md) | The 11-method serial/sync/async scheduler comparison, with explicit fidelity boundaries |
+| [Molecule search — porous crystals](https://github.com/Birfy/agentdescent/blob/main/docs/porous-molecules.md) | A domain application: flat-PUCT tree search over molecules, with a validity gate and a real `P(s,a)` |
 
 ```bash
 pip install -e ".[docs]"
