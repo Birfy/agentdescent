@@ -104,3 +104,105 @@ def test_both_provider_adapters_bound_a_request():
 
     for fn in (claude, openai_compatible):
         assert "timeout" in inspect.signature(fn).parameters, fn.__name__
+
+# ---------------------------------------------------------------------------
+# Streaming: the transport a reasoning model behind a gateway needs
+# ---------------------------------------------------------------------------
+
+
+class _FakeStream:
+    """A minimal stand-in for the file object `urlopen` returns on an SSE body."""
+
+    def __init__(self, lines):
+        self._lines = [line.encode("utf-8") for line in lines]
+
+    def __iter__(self):
+        return iter(self._lines)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+SSE_LINES = [
+    'data: {"choices":[{"delta":{"reasoning_content":"thinking"},"index":0}]}\n',
+    'data: {"choices":[{"delta":{"content":"Hello "},"index":0}]}\n',
+    "\n",
+    "event: ping\n",
+    "data: {not json at all}\n",
+    'data: {"choices":[{"delta":{"content":"world"},"finish_reason":"stop",'
+    '"index":0}],"usage":{"prompt_tokens":10,"completion_tokens":5,'
+    '"total_tokens":15}}\n',
+    "data: [DONE]\n",
+]
+
+
+def test_the_sse_reader_rebuilds_the_reply_and_survives_junk():
+    """One malformed frame is a provider quirk, not a reason to lose the answer."""
+    from agentdescent.agents import _read_sse
+
+    data = _read_sse(_FakeStream(SSE_LINES))
+    assert data["choices"][0]["message"]["content"] == "Hello world"
+    assert data["choices"][0]["finish_reason"] == "stop"
+    assert data["usage"]["total_tokens"] == 15
+
+
+def test_streaming_asks_for_usage_and_still_records_it(monkeypatch):
+    """`stream=True` must not quietly turn token accounting off.
+
+    A streamed response carries usage only if the request asked for it, so the
+    adapter sends `stream_options.include_usage` and reads the final chunk. An
+    endpoint that ignores the field reports zero rather than failing.
+    """
+    import json
+
+    from agentdescent.agents import Usage, openai_compatible
+    import agentdescent.agents as agents
+
+    sent = {}
+
+    def fake_urlopen(req, timeout=None):
+        sent["body"] = json.loads(req.data.decode())
+        sent["timeout"] = timeout
+        return _FakeStream(SSE_LINES)
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(agents.urllib.request, "urlopen", fake_urlopen)
+    meter = Usage()
+    reply = openai_compatible(model="m", usage=meter, retries=1, stream=True)("hi")
+    assert reply == "Hello world"
+    assert sent["body"]["stream"] is True
+    assert sent["body"]["stream_options"] == {"include_usage": True}
+    assert meter.total_tokens == 15
+
+
+def test_the_plain_path_is_untouched_by_the_streaming_option(monkeypatch):
+    """Streaming is opt-in; the default request must not grow a `stream` field."""
+    import io
+    import json
+
+    from agentdescent.agents import openai_compatible
+    import agentdescent.agents as agents
+
+    sent = {}
+
+    class _Plain(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def fake_urlopen(req, timeout=None):
+        sent["body"] = json.loads(req.data.decode())
+        return _Plain(json.dumps({
+            "choices": [{"message": {"content": "plain"}}],
+            "usage": {"total_tokens": 3},
+        }).encode())
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(agents.urllib.request, "urlopen", fake_urlopen)
+    assert openai_compatible(model="m", retries=1)("hi") == "plain"
+    assert "stream" not in sent["body"]

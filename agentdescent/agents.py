@@ -26,7 +26,8 @@ import subprocess
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Optional, Protocol, Sequence, runtime_checkable
+from typing import (Any, Callable, Dict, List, Optional, Protocol, Sequence,
+                    runtime_checkable)
 
 Completion = Callable[[str], str]
 
@@ -314,11 +315,54 @@ def claude(model: str = "claude-opus-4-8", max_tokens: int = 4096,
     return with_retries(complete, attempts=retries) if retries > 1 else complete
 
 
+def _read_sse(response: Any) -> Dict[str, Any]:
+    """Reassemble an OpenAI-shaped SSE stream into the response it stands for.
+
+    Returns the same shape the non-streaming path parses -- ``choices[0].message``
+    plus ``usage`` -- so nothing downstream has to know which transport was used.
+
+    Deliberately forgiving about the stream and strict about nothing: a chunk
+    that will not parse is skipped rather than raised on, because one malformed
+    frame in a hundred is a provider quirk and not a reason to throw away a
+    completed answer. `reasoning_content` deltas are read and dropped: they are
+    what keeps the connection from going idle, and they are not the reply.
+    """
+    text: List[str] = []
+    usage_payload: Dict[str, Any] = {}
+    finish: Optional[str] = None
+    for raw in response:
+        line = raw.decode("utf-8", "replace").strip()
+        if not line or not line.startswith("data:"):
+            continue
+        chunk_text = line[len("data:"):].strip()
+        if chunk_text == "[DONE]":
+            break
+        try:
+            chunk = json.loads(chunk_text)
+        except ValueError:
+            continue
+        if isinstance(chunk.get("usage"), dict):
+            usage_payload = chunk["usage"]
+        for choice in chunk.get("choices") or ():
+            delta = choice.get("delta") or {}
+            piece = delta.get("content")
+            if piece:
+                text.append(piece)
+            if choice.get("finish_reason"):
+                finish = choice["finish_reason"]
+    return {
+        "choices": [{"message": {"role": "assistant", "content": "".join(text)},
+                     "finish_reason": finish}],
+        "usage": usage_payload,
+    }
+
+
 def openai_compatible(model: str, *, base_url_env: str = "OPENAI_BASE_URL",
                       api_key_env: str = "OPENAI_API_KEY",
                       default_base_url: str = "https://api.openai.com/v1",
                       max_tokens: int = 4096, timeout: float = 120.0,
                       usage: Optional[Usage] = None, retries: int = 3,
+                      stream: bool = False,
                       **create_kwargs) -> Completion:
     """A completion for any OpenAI-compatible chat endpoint (GLM/Zhipu, proxies,
     local servers, OpenAI itself).
@@ -332,6 +376,19 @@ def openai_compatible(model: str, *, base_url_env: str = "OPENAI_BASE_URL",
     model starved of budget returns empty content, and at 1024 that happened for
     half of one measured batch of reflection prompts.
 
+    ``stream=True`` sends the request as SSE and reassembles the text, which is
+    a **reliability** knob rather than a latency one: a non-streaming request to
+    a reasoning model sends no bytes at all while the model thinks, and any
+    gateway with an idle timeout closes the connection underneath it. Measured
+    against one such endpoint: a single request finished in 205 s, but four
+    concurrent ones -- queued behind each other, so each took longer -- were all
+    cut at 301 s with `RemoteDisconnected`, three of them within 0.2 s of each
+    other. The same prompts streamed ran past ten minutes with bytes arriving
+    continuously, because the reasoning deltas themselves keep the connection
+    warm. Usage still comes back: `stream_options.include_usage` puts it in the
+    final chunk, and an endpoint that ignores that field simply reports zero
+    tokens rather than failing.
+
     Extra keyword arguments go into the request body, so ``temperature=0`` and any
     provider-specific field work the same way they do on :func:`claude`."""
     def complete(prompt: str) -> str:
@@ -339,19 +396,23 @@ def openai_compatible(model: str, *, base_url_env: str = "OPENAI_BASE_URL",
         key = os.environ.get(api_key_env)
         if not key:
             raise RuntimeError(f"set {api_key_env} (and {base_url_env}) in your environment")
-        body = json.dumps({
+        payload: Dict[str, Any] = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": max_tokens,
             **create_kwargs,
-        }).encode()
+        }
+        if stream:
+            payload["stream"] = True
+            payload.setdefault("stream_options", {"include_usage": True})
+        body = json.dumps(payload).encode()
         req = urllib.request.Request(
             f"{base}/chat/completions", data=body,
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
         t0 = time.time()
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
-                data = json.load(resp)
+                data = _read_sse(resp) if stream else json.load(resp)
         except urllib.error.HTTPError as e:
             # The body carries the only useful part -- "rate limit: retry in 12s",
             # "context length exceeded", "insufficient quota" -- and it lives on

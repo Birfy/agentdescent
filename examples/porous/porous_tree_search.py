@@ -82,6 +82,7 @@ from examples._common import (
     add_standard_args,
     completion_for,
     confirm,
+    is_openai_compatible,
     report_engine,
     worker_count,
 )
@@ -927,6 +928,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repair-attempts", type=int, default=2,
                         help=("draws per expansion: an invalid SMILES goes back "
                               "to the model with the gate's reason attached"))
+    parser.add_argument(
+        "--no-stream", dest="stream", action="store_false", default=True,
+        help=("OpenAI-compatible endpoints only: send the request as SSE. On by "
+              "default because a reasoning model sends no bytes while it thinks, "
+              "and a gateway with an idle timeout closes the connection under "
+              "it -- measured here, four concurrent non-streaming expansions "
+              "were all cut at 301s while streamed ones ran past 700s"))
     parser.add_argument("--shutdown-grace", type=float, default=300.0,
                         help=("--async only: how long to wait for expansions "
                               "already in flight when the budget runs out"))
@@ -1004,9 +1012,15 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             return 2
         if not confirm(args):
             return 1
+        # `stream` reaches only the OpenAI-compatible adapter; `claude()` does
+        # not take it, and passing it there would be a TypeError at the first
+        # call rather than at start-up.
+        options: Dict[str, Any] = {}
+        if is_openai_compatible(args) and args.stream:
+            options["stream"] = True
         complete = completion_for(args, usage=usage, max_tokens=args.max_tokens,
                                   timeout=args.api_timeout,
-                                  temperature=args.temperature)
+                                  temperature=args.temperature, **options)
 
     run = run_search(
         complete, mode=mode, seed_smiles=args.seed_smiles,
@@ -1031,6 +1045,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         "repair_attempts": args.repair_attempts, "seed": args.seed,
         "shutdown_grace": args.shutdown_grace if args.asynchronous else None,
         "proposer": "offline-operators" if args.offline else f"{args.provider}/{args.model}",
+        "streaming": bool(is_openai_compatible(args) and args.stream and not args.offline),
     }
     payload = run.payload(config, None if args.offline else usage)
     _write_json(args.output, payload)
