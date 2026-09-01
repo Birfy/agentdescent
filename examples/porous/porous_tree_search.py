@@ -569,6 +569,30 @@ class PorousTreeAggregator(AggregatorProtocol):
         mean = sum(per_profile.values()) / len(per_profile)
         return report, round(mean, 6), per_profile
 
+    def _lineage(self, parent_index: int, report: ScoreReport) -> Optional[float]:
+        """How much of the parent survives in the child, as a diagnostic.
+
+        Recorded, and deliberately **not** enforced. A floor on this would be
+        the obvious way to hold the search to "modify the molecule you were
+        given", and measurement says it cannot be: benzene ->
+        hexakis(4-bromophenyl)benzene, the best molecule the live run found,
+        scores 0.06 here, while benzene -> hexane, which shares nothing at all,
+        scores 0.00. There is no threshold between "bold but legitimate" and
+        "unrelated", because substituting every symmetry-equivalent position at
+        once -- the move this rubric most wants -- rewrites every atom
+        environment in the parent. The prompt asks for a modification; this
+        number is how a reader of the result file checks that it got one.
+        """
+        parent = self.tree.node_at(parent_index)
+        if not report.ok or report.validation is None or report.validation.molecule is None:
+            return None
+        if (parent is None or parent.report is None
+                or parent.report.validation is None
+                or parent.report.validation.molecule is None):
+            return None
+        return similarity(parent.report.validation.molecule,
+                          report.validation.molecule, radius=1)
+
     def seed(self) -> None:
         if self._seeded:
             return
@@ -637,26 +661,6 @@ class PorousTreeAggregator(AggregatorProtocol):
             headroom = (structural_headroom(report.descriptors, max_atoms=self.max_atoms)
                         if report.ok and report.descriptors else None)
             parent_index = int(ops.get("parent_index", "0") or 0)
-            # Recorded, and deliberately *not* enforced. A floor on this would
-            # be the obvious way to hold the search to "modify the parent", and
-            # measurement says it cannot be: benzene -> hexakis(4-bromophenyl)-
-            # benzene, the best molecule the live run found, scores 0.06 here,
-            # while benzene -> hexane, which shares nothing at all, scores 0.00.
-            # There is no threshold between "bold but legitimate" and
-            # "unrelated", because substituting every symmetry-equivalent
-            # position at once -- the move this rubric most wants -- rewrites
-            # every atom environment there is. The prompt asks for a
-            # modification; this number is how a reader checks whether it got
-            # one.
-            parent = self.tree.node_at(parent_index)
-            lineage = None
-            if (report.ok and report.validation is not None
-                    and report.validation.molecule is not None
-                    and parent is not None and parent.report is not None
-                    and parent.report.validation is not None
-                    and parent.report.validation.molecule is not None):
-                lineage = similarity(parent.report.validation.molecule,
-                                     report.validation.molecule, radius=1)
             self.tree.add_node(Node(
                 index=-1,
                 parent_index=parent_index,
@@ -668,7 +672,7 @@ class PorousTreeAggregator(AggregatorProtocol):
                 prior=expansion_prior(headroom, promise),
                 headroom=headroom,
                 promise=promise,
-                parent_similarity=lineage,
+                parent_similarity=self._lineage(parent_index, report),
                 profile_scores=per_profile,
             ))
             valid_candidates += int(report.ok)

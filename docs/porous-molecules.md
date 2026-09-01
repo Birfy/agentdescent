@@ -150,7 +150,7 @@ cannot pack densely but has nothing holding a crystal together scores zero; so
 does a strongly cohesive flat disc. A weighted sum would let a candidate buy one
 with the other, which is the failure mode "chase the biggest void" names.
 
-Naphthalene is the check on that term: rigid (0.97), symmetric (0.83), and
+Naphthalene is the check on that term: rigid (1.00), symmetric (0.83), and
 **packing exactly 0.00** — a flat plate is the densest-packing shape there is.
 
 **Synthesizability.** Not the published SA_Score, whose fragment-frequency table
