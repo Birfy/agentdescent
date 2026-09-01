@@ -41,6 +41,7 @@ LABELS: Dict[str, Dict[str, str]] = {
         "best": "Best molecule found",
         "rubric": "How a candidate is scored",
         "leaderboard": "Every valid candidate, ranked",
+        "gallery": "Every node in the tree",
         "trajectory": "The search trajectory",
         "cost": "What the run cost",
         "caveats": "What this is and is not",
@@ -67,6 +68,7 @@ LABELS: Dict[str, Dict[str, str]] = {
         "best": "搜索得到的最优分子",
         "rubric": "打分标准",
         "leaderboard": "全部合法候选分子排名",
+        "gallery": "树中每一个节点的分子",
         "trajectory": "搜索轨迹",
         "cost": "本次运行的开销",
         "caveats": "这份结果是什么，不是什么",
@@ -130,6 +132,9 @@ li { margin-bottom: 3px; }
 .thumb { border: 1px solid #dde4ea; border-radius: 6px; padding: 6px;
          width: 32%; }
 .thumb .cap { font-size: 8.5px; color: #5a6a7a; margin-bottom: 2px; }
+.thumb { page-break-inside: avoid; }
+.refused { height: 165px; display: flex; flex-direction: column; gap: 4px;
+           justify-content: center; padding: 0 6px; }
 """
 
 
@@ -180,6 +185,32 @@ def _molecule_card(node: Dict[str, Any], weights: Dict[str, float],
     <div class="smiles">{_esc(node["smiles"])}</div>
   </div>
 </div>"""
+
+
+def _gallery_card(node: Dict[str, Any], lab: Dict[str, str]) -> str:
+    """One node of the tree, drawn -- or, when the gate refused it, explained.
+
+    Every node appears, including the dead ends: a tree reported with only its
+    successes in it is not the tree the search built, and the refusals are how a
+    reader sees what the model kept trying to do that could not be made.
+    """
+    index = node["index"]
+    parent = ("" if node["parent_index"] is None
+              else f' &nbsp;·&nbsp; {lab["parent"]} #{node["parent_index"]}')
+    if node.get("valid"):
+        score = f'{node["score"]:.3f}'
+        head = (f'#{index} &nbsp; <b>{score}</b> &nbsp; '
+                f'{_esc(node.get("formula") or "")}{parent}')
+        if node.get("duplicate_of") is not None:
+            head += (f' <span class="kv">[{lab["duplicate"]} '
+                     f'#{node["duplicate_of"]}]</span>')
+        body = _fig(node["smiles"], width=210, height=165)
+    else:
+        head = (f'#{index} &nbsp; <b>{lab["refused_note"]}</b>{parent}')
+        body = (f'<div class="refused"><div class="smiles">'
+                f'{_esc(node["smiles"]) or "(empty reply)"}</div>'
+                f'<div class="note">{_esc(node.get("reason"))}</div></div>')
+    return f'<div class="thumb"><div class="cap">{head}</div>{body}</div>'
 
 
 def _cell(value: Optional[float], digits: int = 2) -> str:
@@ -236,11 +267,7 @@ def render_html(payload: Dict[str, Any], *, lang: str = "en",
 
     trajectory = "".join(_trajectory_row(node, lab) for node in tree)
 
-    thumbs = "".join(
-        f'<div class="thumb"><div class="cap">#{n["index"]} &nbsp; '
-        f'{n["score"]:.3f} &nbsp; {_esc(n.get("formula") or "")}</div>'
-        f'{_fig(n["smiles"], width=210, height=165)}</div>'
-        for n in valid[:6])
+    gallery = "".join(_gallery_card(n, lab) for n in tree)
 
     usage = payload.get("usage") or {}
     summary = payload["tree"]
@@ -291,7 +318,10 @@ def render_html(payload: Dict[str, Any], *, lang: str = "en",
 <table><tr><th class="num">#</th><th class="num">{_esc(lab["score"])}</th>
 {"".join(f'<th class="num">{_esc(lab[t])}</th>' for t in TERM_ORDER)}
 <th>{_esc(lab["formula"])}</th><th>SMILES</th></tr>{board}</table>
-<div class="thumbgrid">{thumbs}</div>
+
+<div class="pagebreak"></div>
+<h2>{_esc(lab["gallery"])}</h2>
+<div class="thumbgrid">{gallery}</div>
 
 <div class="pagebreak"></div>
 <h2>{_esc(lab["trajectory"])}</h2>
