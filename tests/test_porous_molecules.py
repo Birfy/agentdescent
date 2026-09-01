@@ -25,6 +25,7 @@ import pytest
 from agentdescent.selection import Candidate, FlatPuct, SelectionContext
 
 from examples.porous import porous_tree_search as port
+from examples.porous._depict import coordinates, svg
 from examples.porous._descriptors import describe, rotatable_bonds
 from examples.porous._mutations import enumerate_mutations, propose_offline
 from examples.porous._prior import expansion_prior, structural_headroom
@@ -481,6 +482,56 @@ def test_the_strategy_round_trips_a_proposal_into_a_diff():
 def test_a_reply_is_read_leniently_and_a_missing_rating_stays_missing(reply, expected):
     smiles, _summary, promise = extract_molecule(reply)
     assert (smiles, promise) == expected
+
+
+# -- the drawing ----------------------------------------------------------------
+
+
+@pytest.mark.parametrize("smiles,floor,ceiling", [
+    ("c1ccccc1", 0.85, 1.2),
+    ("c1ccc2ccccc2c1", 0.85, 1.2),
+    ("C(c1ccccc1)(c1ccccc1)(c1ccccc1)c1ccccc1", 0.85, 1.2),
+    ("C#Cc1ccc(C#Cc2ccccc2)cc1", 0.85, 1.2),
+    ("OCC(O)CO", 0.85, 1.2),
+    # Bridged polycyclics get a wider band, and the reason is geometry rather
+    # than a weak layout: three benzo rings sharing two bridgehead carbons have
+    # no planar drawing with equal bonds, which is why every textbook draws
+    # triptycene stylised. The band still catches a regression -- at the
+    # parameters this module shipped with, triptycene sits at 0.57 / 1.56.
+    ("C1=CC=C2C(=C1)C3C4=CC=CC=C4C2C5=CC=CC=C35", 0.5, 1.7),
+    ("C1CC2CCC1CC2", 0.5, 1.7),
+])
+def test_every_heavy_atom_gets_a_position_and_bonds_come_out_the_same_length(
+        smiles, floor, ceiling):
+    """A depiction that drops atoms or stretches bonds is worse than no picture."""
+    mol = validate(smiles).molecule
+    pos = coordinates(mol)
+    heavy = [i for i, a in enumerate(mol.atoms) if a.element != "H"]
+    assert set(pos) == set(heavy)
+    lengths = [math.dist(pos[b.a], pos[b.b]) for b in mol.bonds]
+    mean = sum(lengths) / len(lengths)
+    assert floor < min(lengths) / mean, lengths
+    assert max(lengths) / mean < ceiling, lengths
+
+
+def test_a_ring_is_drawn_as_a_ring():
+    """Benzene's six bonds are equal and its atoms sit on a circle."""
+    mol = validate("c1ccccc1").molecule
+    pos = coordinates(mol)
+    lengths = [math.dist(pos[b.a], pos[b.b]) for b in mol.bonds]
+    assert max(lengths) - min(lengths) < 0.05
+    cx = sum(p[0] for p in pos.values()) / 6
+    cy = sum(p[1] for p in pos.values()) / 6
+    radii = [math.dist(p, (cx, cy)) for p in pos.values()]
+    assert max(radii) - min(radii) < 0.05
+
+
+def test_the_svg_labels_heteroatoms_and_leaves_carbon_as_a_vertex():
+    drawing = svg(validate("N#Cc1ccc(O)cc1").molecule)
+    assert drawing.startswith("<svg") and drawing.endswith("</svg>")
+    assert ">N<" in drawing and ">OH<" in drawing
+    assert ">C<" not in drawing, "carbons are vertices, not labels"
+    assert drawing.count("<line") >= len(validate("N#Cc1ccc(O)cc1").molecule.bonds)
 
 
 # -- one whole run --------------------------------------------------------------
