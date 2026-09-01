@@ -203,6 +203,16 @@ def agent_environment(args: argparse.Namespace) -> Dict[str, str]:
     `thinking_tokens` side by side.
     """
     env: Dict[str, str] = {}
+    # Non-essential model traffic is the CLI's own housekeeping -- generating a
+    # session title, and the like. None of it is part of the task, and against a
+    # third-party endpoint it is actively destructive: measured over 117 tasks,
+    # 49 sessions (42%) died as `claude exited 1:
+    # [claude-code:unrecognized_model] {"query_source":"generate_session_title"}`
+    # *after* the agent had edited the checkout, and every one of them was
+    # scored as an empty patch. A caller can still put it back with
+    # `--agent-env CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=0`.
+    if args.agent == "claude-code":
+        env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
     for pair in (args.agent_env or ()):
         key, sep, value = pair.partition("=")
         if not sep:

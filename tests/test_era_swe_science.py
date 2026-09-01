@@ -867,6 +867,24 @@ def test_the_agent_command_forwards_the_model_only_when_one_was_given():
         ("my-agent", "--go")
 
 
+def test_the_cli_s_own_housekeeping_traffic_cannot_fail_a_session(monkeypatch):
+    """A session-title query is not part of the benchmark task, but against a
+    third-party endpoint it killed the CLI *after* the agent had edited the
+    checkout -- 49 of 117 tasks scored as empty patches. The port turns that
+    traffic off, and a caller who wants it back has to say so."""
+    parser = port.build_parser()
+    monkeypatch.delenv("MAX_THINKING_TOKENS", raising=False)
+    assert port.agent_environment(parser.parse_args([])) == {
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+    # ...explicitly, so it is readable in the result file rather than implied.
+    back = port.agent_environment(parser.parse_args(
+        ["--agent-env", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=0"]))
+    assert back["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] == "0"
+    # An agent whose CLI this variable means nothing to does not get it.
+    assert "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" not in port.agent_environment(
+        parser.parse_args(["--agent", "codex"]))
+
+
 def test_effort_is_spelled_the_way_each_agent_cli_spells_it():
     """The leaderboard reports effort as part of the model -- "DeepSeek-V4-flash
     (max)" -- so a run compared against such a row has to set it, and the two
@@ -900,13 +918,13 @@ def test_thinking_disabled_reaches_the_agent_cli_as_its_own_budget_knob(monkeypa
     the flag has to *override* it, not merely decline to set it, and the run has
     to record what was in force."""
     parser = port.build_parser()
+    budget = lambda *argv: port.agent_environment(
+        parser.parse_args(list(argv))).get("MAX_THINKING_TOKENS")
     monkeypatch.setenv("MAX_THINKING_TOKENS", "31999")
-    assert port.agent_environment(parser.parse_args([])) == {}
-    assert port.agent_environment(parser.parse_args(["--thinking", "disabled"])) == {
-        "MAX_THINKING_TOKENS": "0"}
+    assert budget() is None, "the shell's own value is left alone by default"
+    assert budget("--thinking", "disabled") == "0"
     monkeypatch.delenv("MAX_THINKING_TOKENS")
-    assert port.agent_environment(parser.parse_args(["--thinking", "enabled"])) == {
-        "MAX_THINKING_TOKENS": "31999"}
+    assert budget("--thinking", "enabled") == "31999"
 
 
 def test_the_agent_session_env_carries_the_workspace_path_and_the_override(monkeypatch):
