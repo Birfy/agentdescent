@@ -829,13 +829,13 @@ def run_search(
                            counters=counters)
 
     def progress(info: Any) -> None:
-        """One line per merge sweep, because a long run is otherwise silent.
+        """The tree, after each merge sweep.
 
-        The synchronous driver prints a line per round; `async_evolve` prints
-        only when something *fails*, so a healthy barrier-free run on a slow
-        proposer -- which is exactly the configuration that takes hours -- says
-        nothing at all between start and finish. This runs on the merger thread
-        after each sweep and reports the tree, which is the thing being built.
+        Both drivers already report the *sweep* -- `sweep 3 reward=0.870
+        merged=1 +1 pending=0` -- which says the engine is healthy and nothing
+        about what it built. On a run where one expansion costs minutes, the
+        question a watcher actually has is which molecule landed, whether the
+        gate took it, and how big the tree is now. That is this line.
         """
         best = tree.best()
         newest = tree.nodes[-1]
