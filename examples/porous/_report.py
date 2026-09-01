@@ -42,6 +42,12 @@ LABELS: Dict[str, Dict[str, str]] = {
         "rubric": "How a candidate is scored",
         "leaderboard": "Every valid candidate, ranked",
         "gallery": "Every node in the tree",
+        "shape": "The shape of the search tree",
+        "shape_note": ("Left to right by depth. A bold border is the best node, "
+                       "a dashed one a duplicate, a pale one a candidate the "
+                       "gate refused. Every node stays selectable in flat PUCT, "
+                       "so a wide root means the search kept returning to the "
+                       "starting molecule."),
         "trajectory": "The search trajectory",
         "cost": "What the run cost",
         "caveats": "What this is and is not",
@@ -69,6 +75,10 @@ LABELS: Dict[str, Dict[str, str]] = {
         "rubric": "打分标准",
         "leaderboard": "全部合法候选分子排名",
         "gallery": "树中每一个节点的分子",
+        "shape": "搜索树的形状",
+        "shape_note": ("从左到右按深度排列。粗边框是最优节点，虚线框是重复分子，"
+                       "浅色框是被合法性闸门拒绝的候选。flat PUCT 里每个节点始终"
+                       "可被再次选中，所以根部很宽意味着搜索一直在回到起点分子上做变体。"),
         "trajectory": "搜索轨迹",
         "cost": "本次运行的开销",
         "caveats": "这份结果是什么，不是什么",
@@ -129,6 +139,8 @@ ul { margin: 6px 0 0 16px; padding: 0; }
 li { margin-bottom: 3px; }
 .pagebreak { page-break-before: always; }
 .thumbgrid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.treefig { margin-top: 8px; }
+.treefig svg { max-width: 100%; height: auto; }
 .thumb { border: 1px solid #dde4ea; border-radius: 6px; padding: 6px;
          width: 32%; }
 .thumb .cap { font-size: 8.5px; color: #5a6a7a; margin-bottom: 2px; }
@@ -185,6 +197,94 @@ def _molecule_card(node: Dict[str, Any], weights: Dict[str, float],
     <div class="smiles">{_esc(node["smiles"])}</div>
   </div>
 </div>"""
+
+
+def tree_svg(nodes: Sequence[Dict[str, Any]], lab: Dict[str, str], *,
+             row: int = 26, column: int = 132, pad: int = 12) -> str:
+    """The tree as a diagram: who was expanded from whom, and how that went.
+
+    A flat-PUCT tree is not a neat binary cascade -- every node stays selectable
+    forever, so the shape itself carries the result. A wide root means the
+    search kept going back to the starting molecule; a long chain means it found
+    a direction worth following; a cluster of siblings at one node means it
+    scanned variations of a single idea. None of that is visible in a table
+    sorted by score.
+
+    Laid out left to right: depth sets the column, a depth-first walk sets the
+    row, and the connectors are elbows rather than diagonals so a parent with
+    twelve children stays readable.
+    """
+    if not nodes:
+        return ""
+    by_index = {n["index"]: n for n in nodes}
+    children: Dict[int, List[int]] = {}
+    for node in nodes:
+        parent = node["parent_index"]
+        if parent is not None and parent in by_index:
+            children.setdefault(parent, []).append(node["index"])
+
+    depth: Dict[int, int] = {}
+    order: List[int] = []
+
+    def walk(index: int, level: int) -> None:
+        depth[index] = level
+        order.append(index)
+        for child in sorted(children.get(index, [])):
+            walk(child, level + 1)
+
+    roots = [n["index"] for n in nodes if n["parent_index"] is None
+             or n["parent_index"] not in by_index]
+    for root in roots or [nodes[0]["index"]]:
+        walk(root, 0)
+    for node in nodes:                      # anything a cycle would have hidden
+        if node["index"] not in depth:
+            walk(node["index"], 0)
+
+    row_of = {index: position for position, index in enumerate(order)}
+    width = pad * 2 + (max(depth.values()) + 1) * column
+    height = pad * 2 + len(order) * row
+    scores = [n["score"] for n in nodes if n.get("valid") and n["score"] is not None]
+    best_score = max(scores) if scores else None
+
+    parts = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" '
+             f'height="{height}" viewBox="0 0 {width} {height}" '
+             f'font-family="Helvetica, Arial, sans-serif">']
+    for node in nodes:
+        parent = node["parent_index"]
+        if parent is None or parent not in by_index or node["index"] == parent:
+            continue
+        x1 = pad + depth[parent] * column + 74
+        y1 = pad + row_of[parent] * row + row // 2
+        x2 = pad + depth[node["index"]] * column
+        y2 = pad + row_of[node["index"]] * row + row // 2
+        mid = x1 + 14
+        parts.append(
+            f'<path d="M{x1} {y1} H{mid} V{y2} H{x2}" fill="none" '
+            f'stroke="#c3ced9" stroke-width="1.2"/>')
+    for node in nodes:
+        index = node["index"]
+        x = pad + depth[index] * column
+        y = pad + row_of[index] * row
+        valid = bool(node.get("valid"))
+        duplicate = node.get("duplicate_of") is not None
+        is_best = valid and best_score is not None and node["score"] == best_score
+        fill = "#eef4fb" if valid else "#f4f0f0"
+        stroke = "#3a6ea5" if is_best else ("#9fb3c6" if valid else "#d6b0b0")
+        dash = ' stroke-dasharray="3 2"' if duplicate else ""
+        parts.append(
+            f'<rect x="{x}" y="{y + 3}" width="74" height="{row - 7}" rx="4" '
+            f'fill="{fill}" stroke="{stroke}" stroke-width="'
+            f'{2 if is_best else 1}"{dash}/>')
+        score = (f'{node["score"]:.3f}' if valid and node["score"] is not None
+                 else lab["refused_note"])
+        parts.append(
+            f'<text x="{x + 6}" y="{y + row - 8}" font-size="9.5" '
+            f'fill="#3d4d5d">#{index}</text>'
+            f'<text x="{x + 68}" y="{y + row - 8}" font-size="9.5" '
+            f'text-anchor="end" fill="{"#1b4d8a" if is_best else "#5a6a7a"}">'
+            f'{score}</text>')
+    parts.append("</svg>")
+    return "".join(parts)
 
 
 def _gallery_card(node: Dict[str, Any], lab: Dict[str, str]) -> str:
@@ -318,6 +418,10 @@ def render_html(payload: Dict[str, Any], *, lang: str = "en",
 <table><tr><th class="num">#</th><th class="num">{_esc(lab["score"])}</th>
 {"".join(f'<th class="num">{_esc(lab[t])}</th>' for t in TERM_ORDER)}
 <th>{_esc(lab["formula"])}</th><th>SMILES</th></tr>{board}</table>
+
+<h2>{_esc(lab["shape"])}</h2>
+<div class="note">{_esc(lab["shape_note"])}</div>
+<div class="treefig">{tree_svg(tree, lab)}</div>
 
 <div class="pagebreak"></div>
 <h2>{_esc(lab["gallery"])}</h2>
