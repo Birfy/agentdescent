@@ -29,6 +29,7 @@ from examples.porous._smiles import (
     ring_bonds,
     ring_sizes,
     ring_systems,
+    smallest_cycles,
 )
 
 __all__ = [
@@ -367,6 +368,7 @@ def describe(mol: Molecule) -> Descriptors:
     colors = orbits(mol)
     heavy_colors = [colors[i] for i in heavy]
     sizes = ring_sizes(mol)
+    cycles = smallest_cycles(mol)
     on_ring_bonds = ring_bonds(mol)
     ring_atom_set = {i for bond in on_ring_bonds for i in (bond.a, bond.b)}
     systems = ring_systems(mol)
@@ -446,8 +448,13 @@ def describe(mol: Molecule) -> Descriptors:
         fused_atoms=fused_atoms,
         aromatic_atoms=sum(1 for i in heavy if mol.atoms[i].aromatic),
         aromatic_rings=aromatic_rings,
-        macrocycles=sum(1 for size in set(sizes.values()) if size >= 9),
-        strained_rings=sum(1 for size in sizes.values() if size <= 4) // 2,
+        # Counted over distinct rings, not over ring bonds. `sizes` is keyed by
+        # bond, so `set(sizes.values())` counted "there exists a ring of size 9"
+        # once however many there were, and the strained count divided bonds by
+        # two -- which is right for an isolated cyclopropane and wrong for every
+        # fused system, where a bond belongs to two faces.
+        macrocycles=sum(1 for cycle in cycles if len(cycle) >= 9),
+        strained_rings=sum(1 for cycle in cycles if len(cycle) <= 4),
         spiro_atoms=sum(1 for i, n in ring_bond_count.items() if n >= 4),
         fusion_atoms=sum(1 for i, n in ring_bond_count.items() if n == 3),
         quaternary_atoms=sum(

@@ -221,6 +221,45 @@ def test_an_invalid_candidate_scores_nothing_and_says_why():
     assert "INVALID" in report.explain()
 
 
+REFERENCE_SET = [
+    "c1ccccc1", "CCCCCC", "C(c1ccccc1)(c1ccccc1)(c1ccccc1)c1ccccc1",
+    "N#Cc1ccc(C#N)cc1", "Ic1ccc(I)cc1", "OCC(O)CO", "C1CC2CCC1CC2",
+    "c1ccc2ccccc2c1", "C(c1ccc(I)cc1)(c1ccc(I)cc1)(c1ccc(I)cc1)c1ccc(I)cc1",
+    "C12C3C4C1C5C4C3C25", "COCCOCCOC",
+    "C1(c2ccccc2)(c2ccccc2)c2ccccc2-c2ccccc21", "C#Cc1ccc(C#Cc2ccccc2)cc1",
+    "C1CC1", "OOc1ccccc1",
+    "C(c1ccc(O)cc1)(c1ccc(O)cc1)(c1ccc(O)cc1)c1ccc(O)cc1",
+    "C1CCCCCCCCCCC1", "[SiH3]c1ccccc1",
+]
+
+
+def test_every_criterion_actually_separates_molecules():
+    """A criterion pinned at its ceiling is weight that ranks nothing.
+
+    Synthesizability was exactly that: it started at 1.0 and only subtracted, so
+    sixteen of these eighteen molecules scored 1.000 on it and a fifth of the
+    rubric's weight was a constant. The guard is the property, not the fix --
+    any future criterion that saturates fails here.
+    """
+    reports = [evaluate_smiles(smiles) for smiles in REFERENCE_SET]
+    assert all(report.ok for report in reports)
+    for term in TERMS:
+        values = [report.terms[term] for report in reports]
+        at_ceiling = sum(1 for value in values if value > 0.995)
+        assert at_ceiling <= len(values) // 3, (
+            f"{term} is at its ceiling for {at_ceiling}/{len(values)} reference "
+            "molecules, so its weight is not ranking anything")
+        assert max(values) - min(values) > 0.4, f"{term} barely varies"
+
+
+def test_ring_penalties_count_rings_rather_than_ring_bonds():
+    """A fused system shares bonds between faces; halving bonds is not a count."""
+    assert describe(validate("C12C3C4C1C5C4C3C25").molecule).strained_rings == 6
+    assert describe(validate("C1CC1").molecule).strained_rings == 1
+    assert describe(validate("C1CCCCCCCCCCC1").molecule).macrocycles == 1
+    assert describe(validate("c1ccccc1").molecule).macrocycles == 0
+
+
 # -- weight profiles ------------------------------------------------------------
 
 

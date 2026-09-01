@@ -255,7 +255,13 @@ def synthesizability_term(d: Descriptors) -> float:
     chemistry, which is the toolbox this field actually uses.
     """
     heavy = max(1, d.heavy_atoms)
-    score = 1.0
+    # The base is 0.55, not 1.0, and that is calibration rather than pessimism:
+    # at 1.0 every candidate under thirty heavy atoms with nothing wrong with it
+    # scored exactly 1.000 -- sixteen of an eighteen-molecule reference set sat
+    # on the ceiling -- so a fifth of the rubric's weight was a constant and
+    # ranked nothing. The absolute value is not a probability that anyone can
+    # make the molecule; only the ordering is meant to carry information.
+    score = 0.55
     score -= 0.06 * max(0, d.heavy_atoms - 30) / 10.0
     score -= 0.05 * d.spiro_atoms
     score -= 0.10 * d.macrocycles
@@ -268,8 +274,8 @@ def synthesizability_term(d: Descriptors) -> float:
     familiar = (d.aromatic_atoms + d.sp_atoms
                 + sum(v for k, v in d.groups.items() if k.startswith("halogen_aryl"))
                 + d.groups.get("nitrile", 0) + d.groups.get("imine", 0))
-    score += 0.10 * _saturating(familiar / heavy, 0.7)
-    score += 0.15 * symmetry_term(d)
+    score += 0.20 * _saturating(familiar / heavy, 0.7)
+    score += 0.25 * symmetry_term(d)
     return round(max(0.0, min(1.0, score)), 4)
 
 
