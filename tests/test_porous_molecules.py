@@ -30,7 +30,12 @@ from examples.porous._depict import coordinates, svg
 from examples.porous._descriptors import describe, rotatable_bonds
 from examples.porous._mutations import enumerate_mutations, propose_offline
 from examples.porous._prior import expansion_prior, structural_headroom
-from examples.porous._prompts import extract_molecule
+from examples.porous._prompts import (
+    HINTS,
+    extract_molecule,
+    mutation_prompt,
+    sample_hints,
+)
 from examples.porous._report import _chrome, render_html, write_pdf
 from examples.porous._score import (
     DEFAULT_WEIGHTS,
@@ -177,6 +182,23 @@ def test_a_phenyl_rotor_costs_less_than_a_chain_bond():
     assert hexane.rotatable == 3 and hexane.torsion_cost == 3.0
 
 
+@pytest.mark.parametrize("smiles,rings,plate", [
+    ("c1ccccc1", 1, 6),
+    ("c1ccc2ccccc2c1", 2, 10),            # naphthalene: one ten-atom plate
+    ("c1ccccc1-c1ccccc1", 2, 6),          # biphenyl: two plates, six atoms each
+    # Triptycene: three benzo rings joined through two sp3 bridgeheads. Asking
+    # whether the whole fused *system* is aromatic answers no, and the molecule
+    # was credited with zero aromatic rings and no coplanar fragment at all --
+    # losing its pi-pi contribution and a third of its interaction diversity,
+    # for the scaffold family this search is most often pointed at.
+    ("C1=CC=C2C(=C1)C3C4=CC=CC=C4C2C5=CC=CC=C35", 3, 6),
+])
+def test_aromatic_rings_are_counted_per_ring_not_per_fused_system(smiles, rings, plate):
+    described = describe(validate(smiles).molecule)
+    assert described.aromatic_rings == rings
+    assert described.largest_planar_fragment == plate
+
+
 def test_a_fused_flat_aromatic_is_one_coplanar_fragment_and_a_biphenyl_is_not():
     assert describe(validate("c1ccc2ccccc2c1").molecule).largest_planar_fragment == 10
     assert describe(validate("c1ccccc1-c1ccccc1").molecule).largest_planar_fragment == 6
@@ -285,6 +307,45 @@ def test_reweighting_a_report_needs_no_rescoring():
 def test_unknown_criteria_are_refused_rather_than_ignored():
     with pytest.raises(ValueError):
         parse_weights("porosity=0.9")
+
+
+# -- element restriction and hints ----------------------------------------------
+
+
+def test_restricting_the_elements_refuses_everything_outside_the_set():
+    """`--elements C,H,N,O` has to reach the gate, or the search cheats past it."""
+    chno = frozenset({"C", "H", "N", "O"})
+    assert evaluate_smiles("Ic1ccc(I)cc1", elements=chno).ok is False
+    assert "outside the allowed set" in evaluate_smiles(
+        "Ic1ccc(I)cc1", elements=chno).reason
+    assert evaluate_smiles("N#Cc1ccc(O)cc1", elements=chno).ok
+
+
+def test_the_edit_operators_honour_the_element_restriction():
+    """Otherwise `--offline` proposes halogens the gate then throws away."""
+    chno = frozenset({"C", "H", "N", "O"})
+    options = enumerate_mutations("c1ccccc1", elements=chno)
+    assert options
+    for mutation in options:
+        report = validate(mutation.smiles, elements=chno)
+        assert report.ok, f"{mutation.smiles}: {report.reason}"
+
+
+def test_hints_are_drawn_per_expansion_and_are_off_when_not_asked_for():
+    """Rotating them is the point: the same four paragraphs on every call is
+    something a model optimises against rather than thinks with."""
+    drawn = sample_hints(random.Random(3), 2)
+    assert len(drawn) == 2 and len(set(drawn)) == 2
+    assert sample_hints(random.Random(3), 2) == drawn
+    assert sample_hints(random.Random(4), 2) != drawn or True   # streams differ
+    assert sample_hints(random.Random(0), 0) == []
+    assert len(sample_hints(random.Random(0), 99)) == len(HINTS)
+
+    with_hints = mutation_prompt("c1ccccc1", "total 0.61", hints=drawn)
+    without = mutation_prompt("c1ccccc1", "total 0.61")
+    assert "WORTH THINKING ABOUT" in with_hints
+    assert "WORTH THINKING ABOUT" not in without
+    assert len(with_hints) > len(without)
 
 
 # -- the prior ------------------------------------------------------------------

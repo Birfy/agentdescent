@@ -88,7 +88,12 @@ from examples._common import (
 )
 from examples.porous._mutations import propose_offline
 from examples.porous._prior import Headroom, expansion_prior, structural_headroom
-from examples.porous._prompts import extract_molecule, mutation_prompt, repair_prompt
+from examples.porous._prompts import (
+    extract_molecule,
+    mutation_prompt,
+    repair_prompt,
+    sample_hints,
+)
 from examples.porous._score import (
     DEFAULT_WEIGHTS,
     TERMS,
@@ -372,8 +377,10 @@ def make_propose(
     complete: Optional[Completion],
     *,
     max_atoms: int = 100,
+    elements: Iterable[str] = DEFAULT_ELEMENTS,
     repair_attempts: int = 2,
     offline_seed: int = 0,
+    hints_per_expansion: int = 2,
     counters: Optional[Dict[str, int]] = None,
 ) -> Callable[[str, Task, str, float], Optional[str]]:
     """The expansion step: PUCT picks the parent, the model writes the child.
@@ -389,6 +396,7 @@ def make_propose(
     reason goes straight back to the model and it gets another try.
     """
     tally = counters if counters is not None else {}
+    allowed = frozenset(elements)
 
     def bump(key: str) -> None:
         tally[key] = tally.get(key, 0) + 1
@@ -403,7 +411,8 @@ def make_propose(
 
         if complete is None:
             rng = random.Random((offline_seed * 1_000_003) ^ (iteration * 7919))
-            mutation = propose_offline(parent.smiles, rng, max_atoms=max_atoms)
+            mutation = propose_offline(parent.smiles, rng, max_atoms=max_atoms,
+                                       elements=allowed)
             if mutation is not None:
                 smiles, summary = mutation.smiles, mutation.summary
                 bump(f"operator:{mutation.operator}")
@@ -415,17 +424,23 @@ def make_propose(
             explain = parent.report.explain() if parent.report else "not scored"
             best_line = (f"{best.smiles} (score {best.score:.3f})"
                          if best.valid else "")
+            # Drawn per expansion from a seeded stream, so two expansions in the
+            # same run are pushed by different considerations and a re-run with
+            # the same seed sees the same ones.
+            hint_rng = random.Random((offline_seed * 6_700_417) ^ (iteration * 104_729))
             prompt = mutation_prompt(
                 parent.smiles, explain, max_atoms=max_atoms,
-                elements=", ".join(sorted(DEFAULT_ELEMENTS)),
-                siblings=siblings, best=best_line)
+                elements=", ".join(sorted(allowed)),
+                siblings=siblings, best=best_line,
+                hints=sample_hints(hint_rng, hints_per_expansion))
             for attempt in range(max(1, repair_attempts)):
                 reply = complete(prompt)
                 smiles, summary, found = extract_molecule(reply or "")
                 promise = found if promise is None else promise
                 if not smiles:
                     bump("reply:unreadable")
-                check = evaluate_smiles(smiles, max_atoms=max_atoms) if smiles else None
+                check = (evaluate_smiles(smiles, max_atoms=max_atoms,
+                                         elements=allowed) if smiles else None)
                 if check is not None and check.ok:
                     bump("repair:succeeded" if attempt else "reply:valid")
                     break
@@ -482,14 +497,16 @@ def build_tasks(count: int, seed: int = 0, *, jitter: float = 0.45,
     ]
 
 
-def make_run(profiles: Sequence[Weights], *, max_atoms: int = 100
+def make_run(profiles: Sequence[Weights], *, max_atoms: int = 100,
+             elements: Iterable[str] = DEFAULT_ELEMENTS
              ) -> Callable[[str, Task], str]:
     """A rollout is scoring the current molecule under one weight profile."""
+    allowed = frozenset(elements)
 
     def run(rendered: str, task: Task) -> str:
         index = int(task.meta["profile"])
         report = evaluate_smiles(rendered, weights=profiles[index],
-                                 max_atoms=max_atoms)
+                                 max_atoms=max_atoms, elements=allowed)
         return json.dumps(
             {"ok": report.ok, "score": report.total, "reason": report.reason,
              "terms": report.terms},
@@ -528,6 +545,7 @@ class PorousTreeAggregator(AggregatorProtocol):
         profiles: Sequence[Weights],
         seed_smiles: str = DEFAULT_SEED,
         max_atoms: int = 100,
+        elements: Iterable[str] = DEFAULT_ELEMENTS,
         artifact_id: str = ARTIFACT_ID,
     ) -> None:
         self.ledger = ledger
@@ -538,6 +556,7 @@ class PorousTreeAggregator(AggregatorProtocol):
         self.profiles = list(profiles)
         self.seed_smiles = seed_smiles
         self.max_atoms = max_atoms
+        self.elements = frozenset(elements)
         self.artifact_id = artifact_id
         self.cards: List[EvidenceCard] = []
         self._cards_lock = threading.Lock()
@@ -560,7 +579,8 @@ class PorousTreeAggregator(AggregatorProtocol):
         for a program that would not run, and the reason a dead end is never
         selected again while still counting towards the rank denominator.
         """
-        report = evaluate_smiles(smiles, max_atoms=self.max_atoms)
+        report = evaluate_smiles(smiles, max_atoms=self.max_atoms,
+                                 elements=self.elements)
         if not report.ok:
             return report, -math.inf, {}
         per_profile = {
@@ -794,6 +814,8 @@ def run_search(
     c_puct: float = 1.0,
     prior_exponent: float = 1.0,
     max_atoms: int = 100,
+    elements: Iterable[str] = DEFAULT_ELEMENTS,
+    hints_per_expansion: int = 2,
     weights: Weights = DEFAULT_WEIGHTS,
     jitter: float = 0.45,
     repair_attempts: int = 2,
@@ -833,8 +855,9 @@ def run_search(
     tree = MoleculeTree(c_puct=c_puct, prior_exponent=prior_exponent,
                         candidate_limit=iterations)
     counters: Dict[str, int] = {}
-    propose = make_propose(tree, complete, max_atoms=max_atoms,
+    propose = make_propose(tree, complete, max_atoms=max_atoms, elements=elements,
                            repair_attempts=repair_attempts, offline_seed=seed,
+                           hints_per_expansion=hints_per_expansion,
                            counters=counters)
 
     def progress(info: Any) -> None:
@@ -856,13 +879,13 @@ def run_search(
     def factory(ledger, verifier, audit, config, policy):
         aggregator = PorousTreeAggregator(
             ledger, verifier, tree, config, policy, profiles=search_profiles,
-            seed_smiles=seed_smiles, max_atoms=max_atoms)
+            seed_smiles=seed_smiles, max_atoms=max_atoms, elements=elements)
         aggregator.seed()
         return aggregator
 
     started = time.monotonic()
     common: Dict[str, Any] = {
-        "run": make_run(search_profiles, max_atoms=max_atoms),
+        "run": make_run(search_profiles, max_atoms=max_atoms, elements=elements),
         "propose": propose,
         "strategy": MoleculeStrategy(seed_smiles),
         # A molecule is an L2 artifact: it is evaluated in-process by a pure
@@ -915,6 +938,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--seed-smiles", default=DEFAULT_SEED,
                         help=f"the molecule the search starts from (default {DEFAULT_SEED})")
+    parser.add_argument(
+        "--elements", default="",
+        help=("restrict the allowed elements, e.g. 'C,H,N,O'. Everything "
+              "outside the set is refused by the gate, so the search has to "
+              "reach porosity with what is left -- with CHNO that means "
+              "hydrogen bonds, pi-stacking and shape rather than halogen bonds"))
+    parser.add_argument("--hints-per-expansion", type=int, default=2,
+                        help=("how many crystal-engineering hints to draw into "
+                              "each expansion prompt (0 disables them)"))
     parser.add_argument("--max-atoms", type=int, default=100,
                         help="hard cap on atoms including hydrogens (default 100)")
     parser.add_argument("--c-puct", type=float, default=1.0,
@@ -991,6 +1023,9 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         args.iterations = args.budget_rollouts
     args.workers = worker_count(args, args.workers)
     weights = parse_weights(args.weights) if args.weights else DEFAULT_WEIGHTS
+    elements = (frozenset(part.strip().capitalize()
+                          for part in args.elements.split(",") if part.strip())
+                if args.elements else DEFAULT_ELEMENTS)
     mode = "async" if args.asynchronous else ("serial" if args.workers == 1 else "sync")
 
     print("Search   : porous molecular crystals -- flat-PUCT tree over molecules")
@@ -1004,13 +1039,16 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
           f"prior_exponent={args.prior_exponent}, max_atoms={args.max_atoms}")
     print(f"Profiles : {args.profiles} scored ({args.test_profiles} held back "
           f"entirely), jitter={args.jitter}")
+    print(f"Elements : {', '.join(sorted(elements))}   "
+          f"hints/expansion={args.hints_per_expansion}")
 
     if args.dry_run:
         print("Data     : none to load -- the rubric is a pure function of the SMILES")
         print("Dry-run  : plan only; no model API was accessed.")
         return 0
 
-    check = evaluate_smiles(args.seed_smiles, max_atoms=args.max_atoms)
+    check = evaluate_smiles(args.seed_smiles, max_atoms=args.max_atoms,
+                            elements=elements)
     if not check.ok:
         print(f"The seed molecule is not usable: {check.reason}", file=sys.stderr)
         return 2
@@ -1040,7 +1078,9 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         iterations=args.iterations, workers=args.workers,
         profiles=args.profiles, test_profiles=args.test_profiles,
         c_puct=args.c_puct, prior_exponent=args.prior_exponent,
-        max_atoms=args.max_atoms, weights=weights, jitter=args.jitter,
+        max_atoms=args.max_atoms, elements=elements,
+        hints_per_expansion=args.hints_per_expansion,
+        weights=weights, jitter=args.jitter,
         repair_attempts=args.repair_attempts, async_ratio=args.async_ratio,
         max_seconds=args.max_seconds, shutdown_grace=args.shutdown_grace,
         staleness=args.staleness,
@@ -1053,6 +1093,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     config = {
         "mode": run.mode, "iterations": args.iterations, "workers": args.workers,
         "seed_smiles": args.seed_smiles, "max_atoms": args.max_atoms,
+        "elements": ", ".join(sorted(elements)),
+        "hints_per_expansion": args.hints_per_expansion,
         "c_puct": args.c_puct, "prior_exponent": args.prior_exponent,
         "weights": weights.normalized().as_dict(), "profiles": args.profiles,
         "test_profiles": args.test_profiles, "jitter": args.jitter,

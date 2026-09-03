@@ -26,10 +26,11 @@ from __future__ import annotations
 import copy
 import random
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from examples.porous._smiles import (
     Atom,
+    DEFAULT_ELEMENTS,
     Bond,
     Molecule,
     SmilesError,
@@ -75,7 +76,8 @@ class Mutation:
 
 
 def _finish(mol: Molecule, summary: str, operator: str, *,
-            max_atoms: int) -> Optional[Tuple[Mutation, str]]:
+            max_atoms: int,
+            elements: Optional[Iterable[str]] = None) -> Optional[Tuple[Mutation, str]]:
     """Kekulise, serialise and validate an edited graph; drop it if it is not one.
 
     Edits are made on a molecule that was already kekulised, and
@@ -88,7 +90,8 @@ def _finish(mol: Molecule, summary: str, operator: str, *,
         smiles = write_smiles(mol)
     except (SmilesError, RecursionError):
         return None
-    report = validate(smiles, max_atoms=max_atoms)
+    report = validate(smiles, max_atoms=max_atoms,
+                      elements=elements or DEFAULT_ELEMENTS)
     if not report.ok:
         return None
     # The canonical key travels with the mutation: `offer` de-duplicates on it,
@@ -162,6 +165,7 @@ def _delete_branch(mol: Molecule, bond: Bond) -> Optional[Molecule]:
 
 
 def enumerate_mutations(smiles: str, *, max_atoms: int = 100,
+                        elements: Optional[Iterable[str]] = None,
                         limit: int = 400) -> List[Mutation]:
     """Every distinct valid single edit of ``smiles``, de-duplicated.
 
@@ -170,7 +174,10 @@ def enumerate_mutations(smiles: str, *, max_atoms: int = 100,
     breaks a five-ring, an attachment that busts the atom cap -- are simply not
     in the list.
     """
-    report = validate(smiles, max_atoms=max_atoms)
+    # Normalised once here rather than threaded down as None: every `_finish`
+    # below then gets a real set, and `validate` never sees a None to choke on.
+    elements = frozenset(elements) if elements else DEFAULT_ELEMENTS
+    report = validate(smiles, max_atoms=max_atoms, elements=elements)
     if not report.ok or report.molecule is None:
         return []
     parent = report.molecule
@@ -200,13 +207,13 @@ def enumerate_mutations(smiles: str, *, max_atoms: int = 100,
             where = "aromatic C" if parent.atoms[site].aromatic else "sp3 C"
             offer(_finish(_attach(parent, [site], fragment),
                           f"add {name} at one {where}", "substitute",
-                          max_atoms=max_atoms))
+                          max_atoms=max_atoms, elements=elements))
             group = _orbit_sites(parent, site)
             if len(group) > 1:
                 offer(_finish(
                     _attach(parent, group, fragment),
                     f"add {name} at all {len(group)} symmetry-equivalent "
-                    f"{where} sites", "symmetrise", max_atoms=max_atoms))
+                    f"{where} sites", "symmetrise", max_atoms=max_atoms, elements=elements))
 
     for site in representatives.values():
         atom = parent.atoms[site]
@@ -215,7 +222,7 @@ def enumerate_mutations(smiles: str, *, max_atoms: int = 100,
             edited.atoms[site] = Atom(element="N", aromatic=True)
             offer(_finish(edited, "swap one aromatic CH for N (pyridine-type "
                                   "acceptor, no added bulk)", "aza",
-                          max_atoms=max_atoms))
+                          max_atoms=max_atoms, elements=elements))
             group = [i for i in _orbit_sites(parent, site) if
                      parent.atoms[i].aromatic and parent.degree(i) == 2]
             if len(group) > 1:
@@ -225,7 +232,7 @@ def enumerate_mutations(smiles: str, *, max_atoms: int = 100,
                 offer(_finish(edited,
                               f"swap all {len(group)} symmetry-equivalent "
                               "aromatic CH for N", "symmetrise",
-                              max_atoms=max_atoms))
+                              max_atoms=max_atoms, elements=elements))
 
     sizes = ring_sizes(parent)
     for index, bond in enumerate(parent.bonds):
@@ -235,7 +242,7 @@ def enumerate_mutations(smiles: str, *, max_atoms: int = 100,
             continue
         offer(_finish(_fuse_benzo(parent, bond),
                       "fuse a benzo ring onto an aromatic edge (rigidifies, "
-                      "adds pi surface)", "fuse", max_atoms=max_atoms))
+                      "adds pi surface)", "fuse", max_atoms=max_atoms, elements=elements))
 
     on_ring = {id(b) for b in ring_bonds(parent)}
     for bond in parent.bonds:
@@ -244,19 +251,20 @@ def enumerate_mutations(smiles: str, *, max_atoms: int = 100,
         trimmed = _delete_branch(parent, bond)
         if trimmed is not None:
             offer(_finish(trimmed, "cut a substituent back off", "trim",
-                          max_atoms=max_atoms))
+                          max_atoms=max_atoms, elements=elements))
     return out
 
 
 def propose_offline(smiles: str, rng: random.Random, *,
-                    max_atoms: int = 100) -> Optional[Mutation]:
+                    max_atoms: int = 100,
+                    elements: Optional[Iterable[str]] = None) -> Optional[Mutation]:
     """One edit, drawn uniformly from the valid ones. No scoring happens here.
 
     Uniform on purpose: an operator that picked the best-scoring child would be
     doing the search's job, and a tree search evaluated against a proposer that
     already hill-climbs measures nothing.
     """
-    options = enumerate_mutations(smiles, max_atoms=max_atoms)
+    options = enumerate_mutations(smiles, max_atoms=max_atoms, elements=elements)
     if not options:
         return None
     return options[rng.randrange(len(options))]

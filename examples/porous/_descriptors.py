@@ -269,6 +269,28 @@ def _longest_path(mol: Molecule) -> int:
     return best
 
 
+def _planar_systems(mol: Molecule) -> List[Set[int]]:
+    """Maximal sets of fused aromatic rings -- the flat plates, individually.
+
+    A ring *system* is not the unit here for the same reason it is not the unit
+    for counting aromatic rings: triptycene's three benzo rings share two sp3
+    bridgeheads, so the system is not planar while each ring in it is. Taking
+    the system reported no coplanar fragment at all for the whole scaffold
+    family; taking the rings and merging only the ones that share atoms *with
+    each other* reports one benzo ring, which is what is actually flat.
+    """
+    aromatic_rings = [set(cycle) for cycle in smallest_cycles(mol)
+                      if all(mol.atoms[i].aromatic for i in cycle)]
+    merged: List[Set[int]] = []
+    for ring in aromatic_rings:
+        joined = [group for group in merged if group & ring]
+        for group in joined:
+            merged.remove(group)
+            ring = ring | group
+        merged.append(ring)
+    return merged
+
+
 def _planar_fragment(mol: Molecule) -> int:
     """The largest set of atoms that must be coplanar, as an upper bound.
 
@@ -283,9 +305,7 @@ def _planar_fragment(mol: Molecule) -> int:
     needs, so over-estimating it is the conservative direction.
     """
     best = 0
-    for system in ring_systems(mol):
-        if not all(mol.atoms[i].aromatic for i in system):
-            continue
+    for system in _planar_systems(mol):
         size = len(system)
         for atom in system:
             for neighbor in mol.neighbors(atom):
@@ -385,13 +405,14 @@ def describe(mol: Molecule) -> Descriptors:
         for i in (bond.a, bond.b):
             ring_bond_count[i] = ring_bond_count.get(i, 0) + 1
 
-    # Rings, not ring systems: a naphthalene is two aromatic rings, and pi-pi
-    # stacking scales with rings rather than with how many systems they fall in.
-    aromatic_rings = 0
-    for system in systems:
-        bonds_in = [b for b in on_ring_bonds if b.a in system and b.b in system]
-        if all(mol.atoms[i].aromatic for i in system):
-            aromatic_rings += len(bonds_in) - len(system) + 1
+    # Per *ring*, not per ring system. Asking whether a whole fused system is
+    # aromatic gets triptycene wrong in the worst possible way: its three benzo
+    # rings are joined through two sp3 bridgehead carbons, so the system is not
+    # all-aromatic and the molecule was credited with **zero** aromatic rings --
+    # no pi-pi contribution and a third of the interaction diversity gone, for
+    # every member of the scaffold family this search is most often pointed at.
+    aromatic_rings = sum(1 for cycle in cycles
+                         if all(mol.atoms[i].aromatic for i in cycle))
 
     stereocentres = 0
     for index in heavy:

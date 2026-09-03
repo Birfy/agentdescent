@@ -22,11 +22,55 @@ because those are different claims about a first draft.
 
 from __future__ import annotations
 
+import random
 import re
 from typing import Optional, Sequence, Tuple
 
-__all__ = ["DESIGN_BRIEF", "REPLY_PROTOCOL", "extract_molecule", "mutation_prompt",
-           "repair_prompt"]
+__all__ = ["DESIGN_BRIEF", "HINTS", "REPLY_PROTOCOL", "extract_molecule",
+           "mutation_prompt", "repair_prompt", "sample_hints"]
+
+
+#: Crystal-engineering ideas a chemist would bring to this problem and a scoring
+#: rubric cannot express. They are shown a couple at a time, drawn at random per
+#: expansion, rather than all at once and every time: the brief is what every
+#: candidate must satisfy, while these are *ways of thinking* about it, and a
+#: model handed the same four paragraphs on every call optimises against the
+#: paragraphs. Rotating them is also what keeps a long run from collapsing onto
+#: one idea -- different expansions get pushed by different considerations.
+HINTS: Tuple[str, ...] = (
+    """CSP ENERGY-DENSITY LANDSCAPE AND "SPIKES". Think of the crystal structure prediction
+landscape: density on the x-axis, lattice energy on the y-axis. Most molecules crowd into a
+dense, low-energy basin -- close-packed structures with no space in them. A porous crystal
+appears as a "spike": an isolated low-energy minimum sitting at LOW density, far to the left
+of that basin. Aim for a molecule whose plausible packings include such a spike. Low density
+alone is not the target -- a low-density structure that is also high in energy is one nobody
+will ever crystallise.""",
+    """THREE-DIMENSIONALLY AWKWARD RIGID SKELETONS. A rigid skeleton that protrudes in three
+dimensions -- triptycene is the archetype, and so are spiro, adamantane-like and propeller
+shapes -- cannot mate closely with its neighbours in every direction at once. The geometry
+itself obstructs dense packing and leaves voids, without needing any particular interaction
+to hold them open. Prefer shapes whose bulk points in several directions over shapes that
+are flat or rod-like.""",
+    """HYDROGEN-BOND DONOR/ACCEPTOR BALANCE AND Z'. Count donors and acceptors. When the two
+are badly mismatched, the surplus groups are frustrated: they cannot all be satisfied by one
+symmetric arrangement, symmetry breaks, and the number of independent molecules in the
+asymmetric unit (Z') rises -- which makes the structure complicated, hard to predict, and
+usually denser. A matched donor-to-acceptor ratio lets a stable, symmetric hydrogen-bond
+network form instead, which is what templates an open framework.""",
+    """EXTRINSIC POROSITY. The pore does not have to be a cavity inside one molecule.
+Extrinsically porous molecular crystals get their channels from how the molecules pack
+against each other -- the space is between molecules, not within them -- and those channels
+are typically templated and propped open by guest molecules such as solvent. So a molecule
+with no internal cavity at all can still give a porous crystal, provided its shape and its
+directional contacts template channels rather than close-pack.""",
+)
+
+
+def sample_hints(rng: "random.Random", count: int = 2) -> Sequence[str]:
+    """``count`` of :data:`HINTS`, drawn without replacement."""
+    if count >= len(HINTS):
+        return list(HINTS)
+    return rng.sample(list(HINTS), max(0, count))
 
 
 DESIGN_BRIEF = """You are designing molecules that are likely to crystallise into POROUS
@@ -73,7 +117,7 @@ currently scores poorly; a finished molecule with nothing left to improve rates 
 
 
 _MUTATION_TMPL = """{brief}
-
+{hints}
 CURRENT MOLECULE (the parent you must modify):
   SMILES: {parent_smiles}
   {parent_explain}
@@ -105,15 +149,25 @@ valences, is neutral and closed-shell, is one molecule, and stays under {max_ato
 
 def mutation_prompt(parent_smiles: str, parent_explain: str, *,
                     max_atoms: int = 100, elements: str = "C, H, N, O, F, Si, P, S, Cl, Se, Br, I",
-                    siblings: Sequence[str] = (), best: str = "") -> str:
-    """The expansion prompt: the brief, the parent with its breakdown, the protocol."""
+                    siblings: Sequence[str] = (), best: str = "",
+                    hints: Sequence[str] = ()) -> str:
+    """The expansion prompt: the brief, the parent with its breakdown, the protocol.
+
+    ``hints`` are the rotating crystal-engineering ideas from :data:`HINTS`; an
+    empty sequence leaves the prompt exactly as it was before they existed.
+    """
     tried = ""
     if siblings:
         listed = "\n".join(f"  - {item}" for item in siblings[:8])
         tried = ("ALREADY TRIED FROM THIS PARENT (do not repeat):\n" + listed + "\n\n")
     context = f"BEST MOLECULE ANYWHERE IN THE SEARCH SO FAR:\n  {best}\n\n" if best else ""
+    hint_block = ""
+    if hints:
+        hint_block = ("\nWORTH THINKING ABOUT ON THIS EXPANSION:\n\n"
+                      + "\n\n".join(hints) + "\n")
     return _MUTATION_TMPL.format(
         brief=DESIGN_BRIEF.format(max_atoms=max_atoms, elements=elements),
+        hints=hint_block,
         parent_smiles=parent_smiles,
         parent_explain=parent_explain.replace("\n", "\n  "),
         siblings=tried,
