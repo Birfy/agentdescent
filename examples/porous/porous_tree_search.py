@@ -380,7 +380,7 @@ def make_propose(
     elements: Iterable[str] = DEFAULT_ELEMENTS,
     repair_attempts: int = 2,
     offline_seed: int = 0,
-    hints_per_expansion: int = 2,
+    hint_probability: float = 0.15,
     counters: Optional[Dict[str, int]] = None,
 ) -> Callable[[str, Task, str, float], Optional[str]]:
     """The expansion step: PUCT picks the parent, the model writes the child.
@@ -424,15 +424,22 @@ def make_propose(
             explain = parent.report.explain() if parent.report else "not scored"
             best_line = (f"{best.smiles} (score {best.score:.3f})"
                          if best.valid else "")
-            # Drawn per expansion from a seeded stream, so two expansions in the
-            # same run are pushed by different considerations and a re-run with
-            # the same seed sees the same ones.
+            # One hint, rarely. A paragraph attached to every expansion stops
+            # being a way of thinking and becomes part of the objective -- the
+            # model starts writing to the paragraph. Landing on roughly one
+            # expansion in six is a nudge: it perturbs where the search looks
+            # without redefining what it is looking for, and the seeded stream
+            # keeps a re-run reproducible.
             hint_rng = random.Random((offline_seed * 6_700_417) ^ (iteration * 104_729))
+            hints = (sample_hints(hint_rng, 1)
+                     if hint_rng.random() < hint_probability else ())
+            if hints:
+                bump("hint:given")
             prompt = mutation_prompt(
                 parent.smiles, explain, max_atoms=max_atoms,
                 elements=", ".join(sorted(allowed)),
                 siblings=siblings, best=best_line,
-                hints=sample_hints(hint_rng, hints_per_expansion))
+                hints=hints)
             for attempt in range(max(1, repair_attempts)):
                 reply = complete(prompt)
                 smiles, summary, found = extract_molecule(reply or "")
@@ -815,7 +822,7 @@ def run_search(
     prior_exponent: float = 1.0,
     max_atoms: int = 100,
     elements: Iterable[str] = DEFAULT_ELEMENTS,
-    hints_per_expansion: int = 2,
+    hint_probability: float = 0.15,
     weights: Weights = DEFAULT_WEIGHTS,
     jitter: float = 0.45,
     repair_attempts: int = 2,
@@ -857,7 +864,7 @@ def run_search(
     counters: Dict[str, int] = {}
     propose = make_propose(tree, complete, max_atoms=max_atoms, elements=elements,
                            repair_attempts=repair_attempts, offline_seed=seed,
-                           hints_per_expansion=hints_per_expansion,
+                           hint_probability=hint_probability,
                            counters=counters)
 
     def progress(info: Any) -> None:
@@ -944,9 +951,11 @@ def build_parser() -> argparse.ArgumentParser:
               "outside the set is refused by the gate, so the search has to "
               "reach porosity with what is left -- with CHNO that means "
               "hydrogen bonds, pi-stacking and shape rather than halogen bonds"))
-    parser.add_argument("--hints-per-expansion", type=int, default=2,
-                        help=("how many crystal-engineering hints to draw into "
-                              "each expansion prompt (0 disables them)"))
+    parser.add_argument("--hint-probability", type=float, default=0.15,
+                        help=("chance that an expansion prompt carries one "
+                              "crystal-engineering hint (0 disables them). A "
+                              "hint on every call becomes part of the objective; "
+                              "occasionally it is a nudge"))
     parser.add_argument("--max-atoms", type=int, default=100,
                         help="hard cap on atoms including hydrogens (default 100)")
     parser.add_argument("--c-puct", type=float, default=1.0,
@@ -1040,7 +1049,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     print(f"Profiles : {args.profiles} scored ({args.test_profiles} held back "
           f"entirely), jitter={args.jitter}")
     print(f"Elements : {', '.join(sorted(elements))}   "
-          f"hints/expansion={args.hints_per_expansion}")
+          f"hint probability={args.hint_probability}")
 
     if args.dry_run:
         print("Data     : none to load -- the rubric is a pure function of the SMILES")
@@ -1079,7 +1088,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         profiles=args.profiles, test_profiles=args.test_profiles,
         c_puct=args.c_puct, prior_exponent=args.prior_exponent,
         max_atoms=args.max_atoms, elements=elements,
-        hints_per_expansion=args.hints_per_expansion,
+        hint_probability=args.hint_probability,
         weights=weights, jitter=args.jitter,
         repair_attempts=args.repair_attempts, async_ratio=args.async_ratio,
         max_seconds=args.max_seconds, shutdown_grace=args.shutdown_grace,
@@ -1094,7 +1103,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         "mode": run.mode, "iterations": args.iterations, "workers": args.workers,
         "seed_smiles": args.seed_smiles, "max_atoms": args.max_atoms,
         "elements": ", ".join(sorted(elements)),
-        "hints_per_expansion": args.hints_per_expansion,
+        "hint_probability": args.hint_probability,
         "c_puct": args.c_puct, "prior_exponent": args.prior_exponent,
         "weights": weights.normalized().as_dict(), "profiles": args.profiles,
         "test_profiles": args.test_profiles, "jitter": args.jitter,

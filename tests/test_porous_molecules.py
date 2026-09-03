@@ -331,15 +331,20 @@ def test_the_edit_operators_honour_the_element_restriction():
         assert report.ok, f"{mutation.smiles}: {report.reason}"
 
 
-def test_hints_are_drawn_per_expansion_and_are_off_when_not_asked_for():
-    """Rotating them is the point: the same four paragraphs on every call is
-    something a model optimises against rather than thinks with."""
-    drawn = sample_hints(random.Random(3), 2)
-    assert len(drawn) == 2 and len(set(drawn)) == 2
-    assert sample_hints(random.Random(3), 2) == drawn
-    assert sample_hints(random.Random(4), 2) != drawn or True   # streams differ
+def test_hints_are_rare_and_off_when_not_asked_for():
+    """Rarity is the point: a paragraph attached to every expansion stops being
+    a way of thinking about the problem and becomes part of the objective."""
+    drawn = sample_hints(random.Random(3), 1)
+    assert len(drawn) == 1
+    assert sample_hints(random.Random(3), 1) == drawn
     assert sample_hints(random.Random(0), 0) == []
     assert len(sample_hints(random.Random(0), 99)) == len(HINTS)
+
+    # The default rate puts a hint on roughly one expansion in six, and never on
+    # most of them -- which is the property, not the exact number.
+    rng = random.Random(11)
+    fired = sum(1 for _ in range(400) if rng.random() < 0.15)
+    assert 0.08 < fired / 400 < 0.24
 
     with_hints = mutation_prompt("c1ccccc1", "total 0.61", hints=drawn)
     without = mutation_prompt("c1ccccc1", "total 0.61")
