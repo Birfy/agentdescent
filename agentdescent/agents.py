@@ -233,9 +233,36 @@ def echo(transform: Optional[Callable[[str], str]] = None) -> Completion:
     return complete
 
 
+class RateLimited(RuntimeError):
+    """The provider said "too many requests", and for how long if it bothered to.
+
+    Worth a type of its own because it wants a different retry from every other
+    failure: a transport error is worth retrying in half a second, and a rate
+    limit retried in half a second is three attempts spent inside two seconds
+    against a limiter measured in tens of them.
+    """
+
+    def __init__(self, message: str, retry_after: Optional[float] = None) -> None:
+        super().__init__(message)
+        #: Seconds the provider asked for, from `Retry-After`, when it sent one.
+        self.retry_after = retry_after
+
+
 def with_retries(completion: Completion, attempts: int = 3,
-                 backoff: float = 0.5, sleep: Callable[[float], None] = time.sleep) -> Completion:
-    """Wrap a completion with exponential-backoff retries on any exception."""
+                 backoff: float = 0.5, sleep: Callable[[float], None] = time.sleep,
+                 rate_limit_backoff: float = 5.0,
+                 max_sleep: float = 60.0) -> Completion:
+    """Wrap a completion with exponential-backoff retries on any exception.
+
+    Rate limits back off on their own, much longer, schedule. Measured against a
+    throttling endpoint: the generic 0.5s/1.0s pair spent all three attempts
+    inside two seconds, every one of them refused, and the engine -- which
+    retires a worker after three consecutive failures -- lost every worker in
+    about a minute and ended the run with an empty tree. A `Retry-After` header
+    wins over both schedules when the provider sends one, and everything is
+    capped at ``max_sleep`` so a hostile or mistaken header cannot park a worker
+    for an hour.
+    """
     def complete(prompt: str) -> str:
         last: Optional[Exception] = None
         for i in range(attempts):
@@ -244,7 +271,11 @@ def with_retries(completion: Completion, attempts: int = 3,
             except Exception as e:  # noqa: BLE001 - provider-agnostic retry
                 last = e
                 if i < attempts - 1:
-                    sleep(backoff * (2 ** i))
+                    delay = backoff * (2 ** i)
+                    if isinstance(e, RateLimited):
+                        delay = max(delay, rate_limit_backoff * (2 ** i),
+                                    e.retry_after or 0.0)
+                    sleep(min(delay, max_sleep))
         raise last  # type: ignore[misc]
     return complete
 
@@ -425,9 +456,25 @@ def openai_compatible(model: str, *, base_url_env: str = "OPENAI_BASE_URL",
                 detail = e.read().decode("utf-8", "replace").strip()[:400]
             except Exception:  # noqa: BLE001 - the body is best-effort
                 detail = ""
-            raise RuntimeError(
-                f"{base} returned HTTP {e.code} for model {model!r}"
-                + (f": {detail}" if detail else "")) from e
+            message = (f"{base} returned HTTP {e.code} for model {model!r}"
+                       + (f": {detail}" if detail else ""))
+            if e.code in (429, 503):
+                # Told apart from every other 4xx so `with_retries` can wait the
+                # seconds a limiter wants instead of the half-second a transport
+                # blip wants. `Retry-After` is seconds or an HTTP date; only the
+                # numeric form is honoured, and a missing or unreadable one
+                # falls back to the rate-limit schedule.
+                header = ""
+                try:
+                    header = (e.headers.get("Retry-After") or "").strip()
+                except Exception:  # noqa: BLE001 - headers are best-effort
+                    header = ""
+                try:
+                    retry_after = float(header) if header else None
+                except ValueError:
+                    retry_after = None
+                raise RateLimited(message, retry_after) from e
+            raise RuntimeError(message) from e
         except Exception:
             if usage is not None:
                 usage.record(seconds=time.time() - t0, failed=True)

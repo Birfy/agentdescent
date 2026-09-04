@@ -1,5 +1,7 @@
 """Tests for the provider-agnostic agent/inference layer."""
 
+import io
+
 import pytest
 
 from agentdescent.agents import claude, echo, from_callable, with_retries
@@ -206,3 +208,78 @@ def test_the_plain_path_is_untouched_by_the_streaming_option(monkeypatch):
     monkeypatch.setattr(agents.urllib.request, "urlopen", fake_urlopen)
     assert openai_compatible(model="m", retries=1)("hi") == "plain"
     assert "stream" not in sent["body"]
+
+
+def test_a_rate_limit_backs_off_on_its_own_schedule():
+    """Retrying a 429 in half a second is three attempts spent in two seconds.
+
+    Measured against a throttling endpoint: the generic schedule burned every
+    attempt inside two seconds, the engine retired each worker after three
+    consecutive failures, and a twenty-expansion run ended with an empty tree.
+    """
+    from agentdescent.agents import RateLimited, with_retries
+
+    slept = []
+
+    def limited(_prompt):
+        raise RateLimited("429 too many requests")
+
+    with pytest.raises(RateLimited):
+        with_retries(limited, attempts=3, sleep=slept.append)("hi")
+    assert slept == [5.0, 10.0], slept
+
+    def generic(_prompt):
+        raise RuntimeError("connection reset")
+
+    other = []
+    with pytest.raises(RuntimeError):
+        with_retries(generic, attempts=3, sleep=other.append)("hi")
+    assert other == [0.5, 1.0], "a transport blip must not wait like a limiter"
+
+
+def test_retry_after_wins_and_is_capped():
+    """The provider knows better than the schedule -- up to a point."""
+    from agentdescent.agents import RateLimited, with_retries
+
+    slept = []
+    with pytest.raises(RateLimited):
+        with_retries(lambda _p: (_ for _ in ()).throw(
+            RateLimited("429", retry_after=23.0)), attempts=2,
+            sleep=slept.append)("hi")
+    assert slept == [23.0]
+
+    capped = []
+    with pytest.raises(RateLimited):
+        with_retries(lambda _p: (_ for _ in ()).throw(
+            RateLimited("429", retry_after=9999.0)), attempts=2,
+            sleep=capped.append, max_sleep=60.0)("hi")
+    assert capped == [60.0], "a hostile Retry-After must not park a worker"
+
+
+def test_a_429_is_raised_as_a_rate_limit_with_its_header_read(monkeypatch):
+    """Only the status code separates "slow down" from "you are misconfigured"."""
+    import urllib.error
+
+    from agentdescent.agents import RateLimited, openai_compatible
+    import agentdescent.agents as agents
+
+    def fake_urlopen(req, timeout=None):
+        raise urllib.error.HTTPError(
+            req.full_url, 429, "Too Many Requests",
+            {"Retry-After": "12"}, io.BytesIO(b'{"error":"rate limit"}'))
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(agents.urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(RateLimited) as caught:
+        openai_compatible(model="m", retries=1)("hi")
+    assert caught.value.retry_after == 12.0
+    assert "429" in str(caught.value)
+
+    def fake_400(req, timeout=None):
+        raise urllib.error.HTTPError(req.full_url, 400, "Bad Request", {},
+                                     io.BytesIO(b'{"error":"bad model"}'))
+
+    monkeypatch.setattr(agents.urllib.request, "urlopen", fake_400)
+    with pytest.raises(RuntimeError) as plain:
+        openai_compatible(model="m", retries=1)("hi")
+    assert not isinstance(plain.value, RateLimited)

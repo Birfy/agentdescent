@@ -981,6 +981,14 @@ def run_search(
         # the held-out sweep is not the bottleneck any port-shaped default was
         # written for.
         "eval_concurrency": eval_concurrency if eval_concurrency else workers,
+        # The engine retires a worker after three *consecutive* failures, which
+        # is right when a failure means the backend is misconfigured and wrong
+        # when it means the provider is throttling: measured against a rate-
+        # limited endpoint, every worker retired inside a minute and the run
+        # ended with an empty tree. Eight lets a throttled run go slowly instead
+        # of dying, and the engine still fails fast on the case that matters --
+        # it distinguishes "no worker has *ever* completed a rollout".
+        "max_worker_errors": 8,
         "held_out_frac": held_out_frac,
         "solved_threshold": 1.0,
         "usage": usage,
