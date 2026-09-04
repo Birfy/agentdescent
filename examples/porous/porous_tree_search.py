@@ -59,6 +59,7 @@ import sys
 import tempfile
 import threading
 import time
+import warnings
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -295,6 +296,21 @@ class MoleculeTree:
     def root(self) -> Node:
         with self._lock:
             return self.nodes[0]
+
+    def checkpoint(self) -> List[Dict[str, Any]]:
+        """The little that has to survive a restart: what was tried, and where.
+
+        Not the scores: those are a pure function of the SMILES, so recomputing
+        them on resume is cheaper than trusting a file that may have been
+        written by a different rubric. What cannot be recomputed is the search's
+        *history* -- which molecule came from which parent, in what order, with
+        what the model said and rated -- and that is what this holds.
+        """
+        with self._lock:
+            return [{"smiles": n.smiles, "parent_index": n.parent_index,
+                     "iteration": n.iteration, "summary": n.summary,
+                     "promise": n.promise, "visits": n.num_visits}
+                    for n in self.nodes]
 
     def summary(self) -> Dict[str, Any]:
         with self._lock:
@@ -553,6 +569,7 @@ class PorousTreeAggregator(AggregatorProtocol):
         seed_smiles: str = DEFAULT_SEED,
         max_atoms: int = 100,
         elements: Iterable[str] = DEFAULT_ELEMENTS,
+        checkpoint_path: Optional[Path] = None,
         artifact_id: str = ARTIFACT_ID,
     ) -> None:
         self.ledger = ledger
@@ -564,6 +581,7 @@ class PorousTreeAggregator(AggregatorProtocol):
         self.seed_smiles = seed_smiles
         self.max_atoms = max_atoms
         self.elements = frozenset(elements)
+        self.checkpoint_path = checkpoint_path
         self.artifact_id = artifact_id
         self.cards: List[EvidenceCard] = []
         self._cards_lock = threading.Lock()
@@ -596,6 +614,22 @@ class PorousTreeAggregator(AggregatorProtocol):
         }
         mean = sum(per_profile.values()) / len(per_profile)
         return report, round(mean, 6), per_profile
+
+    def _write_checkpoint(self) -> None:
+        """Persist the tree after every merge, so a lost container is not a lost run.
+
+        Best-effort on purpose: a search that dies because it could not write a
+        checkpoint has been made worse by the thing meant to protect it.
+        """
+        if self.checkpoint_path is None:
+            return
+        try:
+            _write_json(self.checkpoint_path,
+                        {"nodes": self.tree.checkpoint(),
+                         "written_at": _utc_now()})
+        except OSError as exc:                      # noqa: BLE001 - best effort
+            warnings.warn(f"could not write the checkpoint: {exc}",
+                          RuntimeWarning, stacklevel=2)
 
     def _lineage(self, parent_index: int, report: ScoreReport) -> Optional[float]:
         """How much of the parent survives in the child, as a diagnostic.
@@ -705,6 +739,7 @@ class PorousTreeAggregator(AggregatorProtocol):
             ))
             valid_candidates += int(report.ok)
 
+        self._write_checkpoint()
         best = self.tree.best()
         accepted: Optional[Diff] = None
         committed_version: Optional[int] = None
@@ -752,6 +787,39 @@ class PorousTreeAggregator(AggregatorProtocol):
 # ---------------------------------------------------------------------------
 # The run
 # ---------------------------------------------------------------------------
+
+
+def restore_tree(tree: MoleculeTree, aggregator: "PorousTreeAggregator",
+                 path: Path) -> int:
+    """Rebuild a tree from a checkpoint, re-scoring every node as it goes.
+
+    Scores are recomputed rather than read back: they are a pure function of the
+    SMILES, and a rubric that has changed since the checkpoint was written would
+    otherwise produce a tree whose nodes were ranked by two different scales.
+    Returns how many nodes were restored beyond the root.
+    """
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    restored = 0
+    for entry in payload.get("nodes", [])[1:]:       # [0] is the seed
+        smiles = entry.get("smiles") or ""
+        report, score, per_profile = aggregator.evaluate(smiles)
+        headroom = (structural_headroom(report.descriptors,
+                                        max_atoms=aggregator.max_atoms)
+                    if report.ok and report.descriptors else None)
+        promise = entry.get("promise")
+        node = tree.add_node(Node(
+            index=-1, parent_index=entry.get("parent_index") or 0,
+            smiles=smiles, summary=entry.get("summary") or "", score=score,
+            report=report, iteration=int(entry.get("iteration") or 0),
+            prior=expansion_prior(headroom, promise), headroom=headroom,
+            promise=promise, profile_scores=per_profile))
+        node.num_visits = max(1, int(entry.get("visits") or 1))
+        node.parent_similarity = aggregator._lineage(node.parent_index, report)
+        restored += 1
+    return restored
 
 
 @dataclass
@@ -847,6 +915,8 @@ def run_search(
     eval_concurrency: Optional[int] = None,
     seed: int = 0,
     usage: Optional[Usage] = None,
+    checkpoint_path: Optional[Path] = None,
+    resume: bool = False,
     verbose: bool = False,
 ) -> PorousRun:
     """One search: ``iterations`` expansions of the tree, over ``workers`` workers."""
@@ -886,8 +956,13 @@ def run_search(
     def factory(ledger, verifier, audit, config, policy):
         aggregator = PorousTreeAggregator(
             ledger, verifier, tree, config, policy, profiles=search_profiles,
-            seed_smiles=seed_smiles, max_atoms=max_atoms, elements=elements)
+            seed_smiles=seed_smiles, max_atoms=max_atoms, elements=elements,
+            checkpoint_path=checkpoint_path)
         aggregator.seed()
+        if resume and checkpoint_path is not None:
+            restored = restore_tree(tree, aggregator, checkpoint_path)
+            if restored and verbose:
+                print(f"  resumed {restored} node(s) from {checkpoint_path}")
         return aggregator
 
     started = time.monotonic()
@@ -1006,6 +1081,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--api-timeout", type=float, default=300.0)
     parser.add_argument("--temperature", type=float, default=0.9,
                         help="a tree search wants varied children, not the mode")
+    parser.add_argument("--checkpoint", type=Path, default=None,
+                        help=("write the tree to this file after every merge, "
+                              "so a lost container is not a lost run"))
+    parser.add_argument("--resume", action="store_true",
+                        help="rebuild the tree from --checkpoint before searching")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--quiet", action="store_true",
                         help="do not print the tree at the end")
@@ -1095,6 +1175,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         staleness=args.staleness,
         eval_concurrency=args.eval_concurrency,
         seed=args.seed, usage=usage if not args.offline else None,
+        checkpoint_path=args.checkpoint, resume=args.resume,
         verbose=not args.quiet,
     )
 
