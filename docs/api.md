@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-199 public names across 35 modules.
+198 public names across 33 modules.
 
 ---
 
@@ -314,125 +314,6 @@ tasks_from(
 
 ---
 
-## One-call skill evolution
-
-The shortest path from a dataset to an evolved instruction. &nbsp;·&nbsp; `agentdescent.skill` &nbsp;·&nbsp; [guide](quickstart-skill.md)
-
-### `evolve_skill(...)`
-
-Evolve one instruction (a "skill") against a dataset, in one call.
-
-```python
-evolve_skill(
-    data: Sequence[Any],
-    model: Completion,
-    *,
-    prompt: str = 'prompt',
-    gold: str = 'gold',
-    score: Union[str, Callable] = 'last_number',
-    instruction: str = 'You are a helpful assistant.',
-    template: str = '{skill}\n\n{prompt}',
-    reflect_with: Optional[Completion] = None,
-    **evolve_kwargs: Any
-) -> EvolutionResult
-```
-
-| parameter | type | default | what it is |
-|---|---|---|---|
-| `data` | `Sequence[Any]` | *required* | Rows (dicts) from any source, or ready-made `Task` objects. Rows go through `tasks_from`. |
-| `model` | `Completion` | *required* | The completion your agent uses -- see `agents`. |
-| `prompt` | `str` | `'prompt'` | Which columns hold the question and the expected answer. Ignored when `data` is already Tasks. |
-| `gold` | `str` | `'gold'` | As `prompt`. |
-| `score` | `Union[str, Callable]` | `'last_number'` | A name from `SCORERS` or your own `(task, output) -> float`. |
-| `instruction` | `str` | `'You are a helpful assistant.'` | The starting skill. Everything the run learns replaces this. |
-| `template` | `str` | `'{skill}\n\n{prompt}'` | How the skill meets the question. Must contain `{skill}` and `{prompt}` -- change it to put the skill somewhere else (a suffix, a section header, inside a larger scaffold). |
-| `reflect_with` | `Optional[Completion]` | `None` | The model that proposes improvements. Defaults to `model`; a cheap reflector for an expensive agent is a good trade. |
-| `**evolve_kwargs` | `Any` |  | Passed to `evolve` and override the defaults chosen here (`asynchronous=True`, a different `strategy=`, an `aggregator_factory=`, ...). `shuffle=True` is worth knowing about: rows arrive in dataset order and the train/held-out split is positional, so grouped data otherwise holds out one end of the file. |
-
----
-
-## One-call directory evolution
-
-The same, for a skill folder, an agent folder, or its code. &nbsp;·&nbsp; `agentdescent.skilldir` &nbsp;·&nbsp; [guide](directory-evolution.md)
-
-### `evolve_agent_code(...)`
-
-Evolve **agent code**: the tree is executed, and a test gate guards it.
-
-```python
-evolve_agent_code(
-    path: str,
-    data: Sequence[Any],
-    *,
-    entrypoint: Sequence[str],
-    score: Union[str, Callable] = 'contains',
-    reflect_with: Completion,
-    prompt: str = 'prompt',
-    gold: str = 'gold',
-    name: Optional[str] = None,
-    spec: Optional[TreeSpec] = None,
-    editable: Sequence[str] = ('**',),
-    frozen: Sequence[str] = ('tests/**', 'conftest.py'),
-    max_files_per_diff: int = 2,
-    setup_cmd: Optional[Sequence[str]] = None,
-    test_cmd: Optional[Sequence[str]] = ('python', '-m', 'pytest', '-q'),
-    fixtures: Optional[Callable[[Task], Mapping[str, str]]] = None,
-    timeout: float = 120.0,
-    workspace_root: Optional[str] = None,
-    sandbox_pool: Optional['SandboxPool'] = None,
-    **evolve_kwargs: Any
-) -> EvolutionResult
-```
-
-### `evolve_agent_dir(...)`
-
-Evolve an **agent directory** (subagent definitions, tool config, harness).
-
-```python
-evolve_agent_dir(
-    path: str,
-    data: Sequence[Any],
-    *,
-    agent: Completion,
-    score: Union[str, Callable] = 'contains',
-    layout: str = 'claude_agent',
-    frozen: Sequence[str] = (),
-    **kwargs: Any
-) -> EvolutionResult
-```
-
-### `evolve_skill_dir(...)`
-
-Evolve a **skill directory**, executed by a real agent that reads it.
-
-```python
-evolve_skill_dir(
-    path: str,
-    data: Sequence[Any],
-    *,
-    agent: Completion,
-    score: Union[str, Callable] = 'contains',
-    reflect_with: Optional[Completion] = None,
-    prompt: str = 'prompt',
-    gold: str = 'gold',
-    name: Optional[str] = None,
-    layout: str = 'claude_skill',
-    spec: Optional[TreeSpec] = None,
-    editable: Sequence[str] = ('**',),
-    frozen: Sequence[str] = (),
-    max_files_per_diff: int = 2,
-    prompt_template: Optional[str] = None,
-    fixtures: Optional[Callable[[Task], Mapping[str, str]]] = None,
-    answer_file: Optional[str] = None,
-    workspace_root: Optional[str] = None,
-    sandbox_pool: Optional['SandboxPool'] = None,
-    blast_radius: float = 0.2,
-    **evolve_kwargs: Any
-) -> EvolutionResult
-```
-
----
-
 ## Agents and models
 
 Any `prompt -> text` is a completion; a `WorkspaceAgent` also has a directory. &nbsp;·&nbsp; `agentdescent.agents` &nbsp;·&nbsp; [guide](agents.md)
@@ -698,6 +579,10 @@ code_runner(
     sandbox_pool: Optional['SandboxPool'] = None
 ) -> Callable[[str, Task], str]
 ```
+
+### `gated_reward(reward: Callable[[Task, str], float]) -> Callable[[Task, str], float]`
+
+`reward`, with a failed `code_runner` gate scoring 0.
 
 ### `tree_runner(...)`
 
@@ -1385,11 +1270,11 @@ AdaptiveTrustRegion(
 |---|---|
 | `observe(outcome: str) -> TrustRegion` | Record one merge outcome and return the region for the next merge. |
 
-### `AdvantageAcceptance(inner, strength: float = 1.0) -> None`
+### `AdvantageAcceptance(inner = None, strength: float = 1.0) -> None`
 
 Shift the acceptance prior by how well a proposal did against its group.
 
-### `AdvantageConflict(inner, margin: float = 0.5) -> None`
+### `AdvantageConflict(inner = None, margin: float = 0.5) -> None`
 
 Break a contradiction by group-relative advantage, not raw score.
 
@@ -1402,7 +1287,7 @@ Standardise a rollout's reward against the group it belongs to.
 | `key(base_version: int, cluster: str = '') -> str` | The group a rollout belongs to. Same base, same cluster. |
 | `observe(key: str, reward: float) -> Optional[float]` | Record a reward and return its advantage, or `None` if unknown yet. |
 
-### `StableDistanceAcceptance(inner, strength: float = 0.1) -> None`
+### `StableDistanceAcceptance(inner = None, strength: float = 0.1) -> None`
 
 Penalise candidates that drift far from the confirmed branch.
 
@@ -1827,6 +1712,10 @@ The reward functions everyone writes, with the details right. &nbsp;·&nbsp; `ag
 
 `last_number` with a relative tolerance -- for rounded answers.
 
+### `scorer(score) -> Callable`
+
+Resolve `score` -- a name from `SCORERS` or a `(task, output) -> float` callable -- into the reward `evolve()` takes.
+
 ---
 
 ## Equal-budget baselines
@@ -2108,6 +1997,10 @@ What one rollout produced, or why it did not.
 ### `RolloutSpec`
 
 One rollout, described completely enough to run somewhere else.
+
+### `SCORERS`
+
+dict() -> new empty dictionary dict(mapping) -> new dictionary initialized from a mapping object's (key, value) pairs dict(iterable) -> new dictionary initialized as if via: d = {} for k, v in iterable: d[k] = v dict(**kwargs) -> new dictionary initialized with the name=value pairs in the keyword argument list. For example: dict(one=1, two=2)
 
 ### `SOLVED`
 
