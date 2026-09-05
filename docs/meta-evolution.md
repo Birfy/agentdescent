@@ -78,11 +78,16 @@ by `visits` is refused at proposal time.
 
 The outer loop runs a whole inner search per rollout and again per held-out
 problem at every gate, so evolve where the inner problem is cheap and validate
-where it is expensive — that is scored once per value. The example does stage
-0 offline on a synthetic landscape (a seeded family to evolve on, a harder one
-never seen), stage 1 on AlgoTune through `run_agentdescent_era(selection=…)`,
-and describes stage 2 — SWE-bench-Science and Terminal-Bench-Science as ERA
-`Domain`s — with its boundary stated in
+where it is expensive — that is scored once per value. Three experiments ship, cheapest first:
+
+| script | slot | inner problem | needs |
+|---|---|---|---|
+| [`bench/metasearch_gsm.py`](https://github.com/Birfy/agentdescent/blob/main/bench/metasearch_gsm.py) | `task_sampler` | a whole inner `evolve()` evolving an instruction on a slice of GSM-Hard / GSM8K | a model, nothing else |
+| [`bench/metasearch_algotune.py`](https://github.com/Birfy/agentdescent/blob/main/bench/metasearch_algotune.py) | `selection` | an ERA tree search on one AlgoTune task, scored in speedup | a model, a sandbox |
+| [`examples/metasearch/_harbor.py`](https://github.com/Birfy/agentdescent/tree/main/examples/metasearch) | `selection` | an ERA tree search over patches to a Harbor science task | a model, a container, an agent |
+
+The example itself does stage 0 offline on a synthetic landscape (a seeded
+family to evolve on, a harder one never seen), and its boundary is stated in
 [`examples/metasearch/README.md`](https://github.com/Birfy/agentdescent/blob/main/examples/metasearch/README.md).
 
 `meta_validate` scores the value before and after on problems disjoint from the
