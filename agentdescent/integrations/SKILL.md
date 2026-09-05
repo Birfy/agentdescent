@@ -37,6 +37,12 @@ written back until the user says so.
 6. **Ask before `apply`.** It overwrites the target; it backs up first. Tell the
    user the backup path afterwards.
 
+If the user wants to stop a run, or one is going badly (cost climbing, reward
+flat for several rounds), use **`cancel`** — it stops the run and every worker
+it started, and keeps the ledger. **`resume`** continues a cancelled, failed or
+stopped run from where it left off. Say what a cancel will cost them (the
+rounds already committed are kept).
+
 ## A spec
 
 ```json

@@ -27,6 +27,29 @@ def test_the_skill_teaches_the_procedure_and_the_guardrails():
     assert "Ask before `apply`" in text
 
 
+def test_the_skill_names_every_tool_kind_and_verb_that_exists():
+    """A skill that omits a tool is a capability the host model never uses.
+
+    `cancel` and `resume` were missing here, so a model watching a run that was
+    going badly had no way to know it could stop it."""
+    import re
+
+    from agentdescent import cli
+    from agentdescent.evolvespec import KINDS, SHORT_REFS
+    from agentdescent.mcp import TOOL_DESCRIPTIONS
+
+    text = skill_text()
+    missing = [t for t in TOOL_DESCRIPTIONS if not re.search(rf"\b{t}\b", text)]
+    assert not missing, f"tools the skill never mentions: {missing}"
+    assert not [k for k in KINDS if f"`{k}`" not in text], "every kind must be named"
+    # nothing the skill names may be made up
+    verbs = set(re.findall(r"^agentdescent (\w+)", text, re.M))
+    real = set(next(a for a in cli.build_parser()._actions if a.dest == "cmd").choices)
+    assert verbs <= real, f"skill shows CLI verbs that do not exist: {sorted(verbs - real)}"
+    agents = set(re.findall(r"`(claude_code|codex|dsh|openai_compatible|claude)`", text))
+    assert agents <= set(SHORT_REFS), f"unknown agent short names: {sorted(agents - set(SHORT_REFS))}"
+
+
 def test_install_dsh_writes_skill_hooks_and_patch(tmp_path, monkeypatch):
     monkeypatch.delenv("DSH_HOME", raising=False)
     lines = install("dsh", home=str(tmp_path))
