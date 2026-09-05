@@ -139,3 +139,39 @@ def test_checked_in_claude_plugin_matches_the_package(tmp_path):
 def test_package_data_ships_the_shared_files():
     cfg = _read(os.path.join(ROOT, "pyproject.toml"))
     assert 'agentdescent = ["integrations/*.md", "integrations/*.json"]' in cfg
+
+
+def test_install_warns_when_the_mcp_sdk_is_missing(tmp_path, monkeypatch):
+    """Every manifest tells the host to run `agentdescent mcp`; without the SDK
+    that subprocess dies and the host reports only "CONNECTION_CLOSED"."""
+    import agentdescent.integrations as integrations
+
+    monkeypatch.setattr(integrations, "mcp_sdk_missing", lambda: True)
+    lines = install("claude-code", dry_run=True, home=str(tmp_path))
+    assert any("agentdescent[mcp]" in l and l.startswith("WARNING") for l in lines), lines
+    monkeypatch.setattr(integrations, "mcp_sdk_missing", lambda: False)
+    assert not any(l.startswith("WARNING") for l in install("dsh", dry_run=True, home=str(tmp_path)))
+
+
+def test_agentdescent_mcp_without_the_sdk_says_how_to_get_it(monkeypatch, capsys):
+    """A traceback here is invisible: the host shows the user a closed pipe."""
+    import builtins
+
+    from agentdescent import cli
+
+    real = builtins.__import__
+
+    def fake(name, *a, **k):
+        # level is the 5th positional arg; a relative `from .mcp import ...`
+        # arrives as name="mcp" with level=1 and must not be intercepted.
+        level = k.get("level", a[3] if len(a) > 3 else 0)
+        if level == 0 and (name == "mcp" or name.startswith("mcp.")):
+            raise ImportError("no mcp")
+        return real(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", fake)
+    code = cli.main(["mcp"])
+    assert code == 3
+    err = capsys.readouterr().err
+    assert 'pip install "agentdescent[mcp]"' in err, err
+    assert "Traceback" not in err

@@ -401,9 +401,22 @@ def cmd_install(a: argparse.Namespace) -> int:
 
 
 def cmd_mcp(a: argparse.Namespace) -> int:
-    from .mcp import serve
+    # A host starts this as a subprocess and shows the user nothing but
+    # "CONNECTION_CLOSED" when it dies, so the one thing that can go wrong
+    # before the protocol starts -- the SDK not being installed -- has to say so
+    # in one line on stderr rather than as a traceback nobody will see.
+    try:
+        from .mcp import serve
 
-    serve(store=a.store)
+        serve(store=a.store)
+    except ImportError as e:
+        # The instruction is spelled out here rather than taken from the
+        # exception, because which import failed decides what `e` says and the
+        # user needs the same one line either way.
+        print('agentdescent mcp: cannot start the MCP server -- '
+              'pip install "agentdescent[mcp]". '
+              f'(The CLI works without it.) Underlying error: {e}', file=sys.stderr)
+        return 3
     return 0
 
 

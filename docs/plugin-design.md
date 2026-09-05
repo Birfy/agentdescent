@@ -246,7 +246,9 @@ descriptions are written for the *calling model*, since that is who reads them.
 | `cancel(run_id)` / `resume(run_id)` | new status | |
 
 Tool names carry no prefix because every host namespaces them itself
-(`mcp__agentdescent__plan` in DSH and Claude Code alike). Two resources, for
+(the host decides the prefix: `mcp__agentdescent__plan` under a dsh mcp-client
+entry or a plain `.mcp.json`, `mcp__plugin_agentdescent_agentdescent__plan` when
+Claude Code loads it as a *plugin* -- measured, see plugins.md). Two resources, for
 hosts that support them: `agentdescent://runs` (list) and
 `agentdescent://runs/{id}/rounds` (progress), so a host can render progress
 without the model spending tokens on polling.
@@ -501,7 +503,8 @@ every plugin's dataset:
   agentdescent plugin. Gold is the answer, `contains`/`exact` scores it.
 * **Regression probes** check the plugin is *present and wired*: a task whose
   prompt is "which tools do you have?" and whose `cmd` grader greps the answer
-  for `mcp__agentdescent__plan`. A refactor that breaks registration fails
+  for the host's own spelling of the tool name (see plugins.md -- a plugin adds
+  a `plugin_<name>_` segment). A refactor that breaks registration fails
   these before it fails anything subtle. On DSH, `--dump-config` in the gate
   covers most of this for free.
 * **Cost probes** read structured output, `claude -p --output-format json`

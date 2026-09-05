@@ -56,8 +56,27 @@ doctor  →  write a spec  →  plan (show the user)  →  start  →  status (o
   reaches your real directory only through it, after `show` has displayed the
   diff and the plan (`write_to(dry_run=True)`), and it backs up first.
 
-Under dsh the tools appear as `mcp__agentdescent__plan`, `mcp__agentdescent__start`
-and so on; Claude Code namespaces them the same way.
+**The tool names differ by how the server was added**, which matters when you
+allowlist them or write a probe that greps for one (verified against Claude Code
+2.1 and the dsh mcp-client docs):
+
+| added as | name |
+|---|---|
+| a Claude Code **plugin** (what `install claude-code` writes) | `mcp__plugin_agentdescent_agentdescent__doctor` — `mcp__plugin_<plugin>_<server>__<tool>` |
+| a plain MCP server entry in your own `.mcp.json` | `mcp__agentdescent__doctor` |
+| a dsh `mcp-client` entry (what `install dsh` writes) | `mcp__agentdescent__doctor` — `mcp__<serverName>__<tool>` |
+
+In an interactive session you approve the tools when they are first called. In
+headless use (`claude -p`) nothing prompts, so pass the names explicitly:
+
+```bash
+claude -p --plugin-dir <dir> --permission-mode acceptEdits \
+  --allowedTools mcp__plugin_agentdescent_agentdescent__doctor \
+                 mcp__plugin_agentdescent_agentdescent__status
+```
+
+`--allowedTools` is variadic, so give the prompt on stdin (or put it before the
+flag) or it will be swallowed as another tool name.
 
 ## The spec
 
