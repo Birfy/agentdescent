@@ -1,0 +1,20 @@
+# Rows this plugin contributes. `insert` adds rows; a bare row would be
+# read as an override of an id that does not exist, which dsh reports as
+# `patch: entry "..." not found` and then composes without it.
+- insert:
+    - id: dsh-agentdescent
+      name: 'dsh-agentdescent'
+    - id: mcp-agentdescent
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: agentdescent
+        transport: stdio
+        command: agentdescent
+        args: ["mcp"]
+        toolCallTimeoutMs: 120000
+        env:
+          # dsh scrubs KEY|PASSWORD|SECRET|TOKEN from the ambient env
+          DEEPSEEK_API_KEY: !!js process.env.DEEPSEEK_API_KEY
+          OPENAI_API_KEY: !!js process.env.OPENAI_API_KEY
+          OPENAI_BASE_URL: !!js process.env.OPENAI_BASE_URL
+          ANTHROPIC_API_KEY: !!js process.env.ANTHROPIC_API_KEY

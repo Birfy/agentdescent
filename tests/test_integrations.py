@@ -2,6 +2,8 @@
 
 import json
 import os
+import shutil
+import subprocess
 
 import pytest
 
@@ -212,3 +214,99 @@ def test_agentdescent_mcp_without_the_sdk_says_how_to_get_it(monkeypatch, capsys
     err = capsys.readouterr().err
     assert 'pip install "agentdescent[mcp]"' in err, err
     assert "Traceback" not in err
+
+
+# ---------------------------------------------------------------------------
+# the native DeepSeek Harness plugin
+# ---------------------------------------------------------------------------
+
+
+def _dsh_skill_entry():
+    """The installed `@deepseek-ai/dsh-skill` entry module, or None.
+
+    Walks up from whatever `dsh` resolves to until the package root, rather than
+    guessing a depth: the launcher is `.../@deepseek-ai/dsh/lib/bin.js` today and
+    the layout is not ours to pin."""
+    dsh = shutil.which("dsh")
+    if not dsh:
+        return None
+    node = os.path.realpath(dsh)
+    for _ in range(6):
+        node = os.path.dirname(node)
+        entry = os.path.join(node, "node_modules", "@deepseek-ai", "dsh-skill",
+                             "lib", "index.js")
+        if os.path.exists(entry):
+            return entry
+    return None
+
+
+def test_dsh_plugin_package_declares_the_bundle_field(tmp_path):
+    """Without `dsh.bundle` the package installs but its patch never applies.
+
+    `dsh plugin add` warns "declares no dsh.bundle ... not a profile layer" and
+    the plugin is inert -- verified against dsh 0.1.2-rc.1."""
+    from agentdescent.integrations import dsh_plugin_package, render_dsh_plugin
+
+    assert dsh_plugin_package()["dsh"] == {"bundle": {"patch": "./cordis.patch.yml"}}
+    render_dsh_plugin(str(tmp_path))
+    pkg = json.loads(_read(tmp_path / "package.json"))
+    assert pkg["type"] == "module" and pkg["main"] == "lib/index.js"
+    assert "dsh-plugin" in pkg["keywords"]              # the discovery topic
+    assert "@deepseek-ai/dsh-skill" in pkg["peerDependencies"]
+    assert "dependencies" not in pkg                   # a plugin shares the host's cordis
+
+
+def test_dsh_plugin_patch_inserts_itself_and_the_mcp_row(tmp_path):
+    from agentdescent.integrations import render_dsh_plugin
+
+    render_dsh_plugin(str(tmp_path))
+    patch = _read(tmp_path / "cordis.patch.yml")
+    assert patch.lstrip().startswith("#") and "- insert:" in patch
+    assert "id: dsh-agentdescent" in patch and "id: mcp-agentdescent" in patch
+    for key in DSH_FORWARDED_KEYS:
+        assert f"{key}: !!js process.env.{key}" in patch
+
+
+def test_dsh_plugin_embeds_the_shared_skill_without_frontmatter(tmp_path):
+    from agentdescent.integrations import _skill_body, _skill_description, render_dsh_plugin
+
+    render_dsh_plugin(str(tmp_path))
+    src = _read(tmp_path / "lib" / "index.js")
+    assert json.dumps(_skill_body()) in src           # the same text every host gets
+    assert json.dumps(_skill_description()) in src
+    assert not _skill_body().startswith("---")        # the registry supplies the metadata
+    assert "export const inject = ['skills'];" in src
+
+
+def test_checked_in_dsh_plugin_matches_the_package(tmp_path):
+    """`integrations/dsh-agentdescent` is rendered; it must not drift."""
+    from agentdescent.integrations import render_dsh_plugin
+
+    render_dsh_plugin(str(tmp_path))
+    checked_in = os.path.join(ROOT, "integrations", "dsh-agentdescent")
+    for dirpath, _, files in os.walk(tmp_path):
+        for f in files:
+            rel = os.path.relpath(os.path.join(dirpath, f), tmp_path)
+            assert _read(os.path.join(checked_in, rel)) == _read(os.path.join(dirpath, f)), rel
+
+
+def test_the_dsh_plugin_registers_a_valid_skill_through_the_real_registry(tmp_path):
+    """Run apply() with dsh's own `isSkillName`, not a mock of it."""
+    node = shutil.which("node")
+    entry = _dsh_skill_entry()
+    if not node or not entry:
+        pytest.skip("needs node and an installed dsh")
+    from agentdescent.integrations import render_dsh_plugin
+
+    render_dsh_plugin(str(tmp_path))
+    harness = os.path.join(ROOT, "tests", "fixtures", "verify_dsh_plugin.mjs")
+    proc = subprocess.run([node, harness, str(tmp_path / "lib" / "index.js"), entry],
+                          capture_output=True, text=True, timeout=120)
+    assert proc.returncode == 0, proc.stderr
+    out = json.loads(proc.stdout)
+    assert out["name"] == "agentdescent" and out["inject"] == ["skills"]
+    assert out["apply"] == "function"
+    assert out["registered"]["source"] == "runtime"
+    assert out["registered"]["contentLength"] > 500
+    assert out["registered"]["contentHead"].startswith("# AgentDescent")
+    assert out["disposed"] is True          # ctx.effect captured the disposer

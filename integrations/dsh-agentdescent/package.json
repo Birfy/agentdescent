@@ -1,0 +1,32 @@
+{
+  "name": "dsh-agentdescent",
+  "version": "0.4.6",
+  "description": "Evolve skills, agents, prompts, code and plugins from inside DeepSeek Harness, with AgentDescent.",
+  "keywords": [
+    "dsh-plugin",
+    "dsh",
+    "agentdescent",
+    "self-improvement"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "files": [
+    "lib/index.js",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-skill": "*"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Birfy/agentdescent.git",
+    "directory": "integrations/dsh-agentdescent"
+  }
+}

@@ -59,6 +59,17 @@ All notable changes to AgentDescent are documented here. The format follows
   preserving anything already in the file and refusing to touch one it cannot
   parse. Also `agents.opencode()` (`opencode run`), an `opencode_skill` layout,
   and an `opencode` entry in `PLUGIN_HOSTS`.
+- **A native DeepSeek Harness plugin**, `integrations/dsh-agentdescent`,
+  rendered from the Python package by `render_dsh_plugin()` so its embedded
+  skill cannot drift from the one every other host installs. It registers the
+  skill through `ctx.skills.register()` at runtime and its `cordis.patch.yml`
+  adds the MCP row, so `dsh plugin --profile web add link:<path>` is the whole
+  install. Verified by installing it into a real profile: `dsh --dump-config`
+  composes both rows, and a test drives `apply()` through dsh's own
+  `isSkillName` validator. Installing it needs
+  `"dsh": {"bundle": {"patch": "./cordis.patch.yml"}}` in `package.json` --
+  without it `dsh plugin add` warns "declares no dsh.bundle ... not a profile
+  layer" and the plugin is installed but inert.
 - **Every host manifest is now verified against the real CLI** (dsh 0.1.2-rc.1,
   Claude Code 2.1.261, codex-cli 0.153.4, opencode 1.18.29), which corrected
   three things that documentation research had got wrong:

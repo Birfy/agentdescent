@@ -26,6 +26,26 @@ agentdescent install dsh               # or: claude-code, codex, opencode
 | `codex` | `~/.codex/skills/agentdescent/SKILL.md`; an `[mcp_servers.agentdescent]` block appended to `~/.codex/config.toml` | restart Codex; check with `codex mcp list` |
 | `opencode` | `~/.config/opencode/skill/agentdescent/SKILL.md`; an `mcp.agentdescent` entry merged into `~/.config/opencode/opencode.jsonc` | restart OpenCode; check with `opencode mcp list` |
 
+### DeepSeek Harness: a native plugin, or the files
+
+`install dsh` writes files and needs no npm. The alternative is the Cordis
+plugin in [`integrations/dsh-agentdescent`](https://github.com/Birfy/agentdescent/tree/main/integrations/dsh-agentdescent):
+
+```bash
+dsh plugin --profile web add link:/path/to/dsh-agentdescent
+dsh --profile web --dump-config | grep -n agentdescent      # both rows compose
+```
+
+It registers the skill through `ctx.skills.register()` at runtime -- no file to
+install, and it cannot drift from the package -- and its own `cordis.patch.yml`
+adds the MCP row. Use one route or the other, not both.
+
+Two things a dsh plugin needs that are easy to miss, both found by installing it
+for real: `package.json` must carry `"dsh": {"bundle": {"patch":
+"./cordis.patch.yml"}}` or `dsh plugin add` warns *"declares no dsh.bundle ...
+not a profile layer"* and the plugin is inert; and rows go under `- insert:`,
+because a patch file otherwise **overrides** rows by id.
+
 It is idempotent (`--dry-run` shows what it would do) and honours `DSH_HOME`,
 `CODEX_HOME` and `XDG_CONFIG_HOME`. Every manifest here was verified by writing
 it and having the host read it back (dsh 0.1.2-rc.1, Claude Code 2.1.261,
