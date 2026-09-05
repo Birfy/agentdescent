@@ -15,7 +15,7 @@ compile from source — no external image files.
 - `arxiv.sty` — NeurIPS-derived single-column preprint style; it loads
   `geometry` and `fancyhdr` itself, so `main.tex` requests neither
 - `references.bib` — bibliography (47 entries)
-- `main.pdf` — compiled output (18 pages)
+- `main.pdf` — compiled output (19 pages)
 
 ## Build
 

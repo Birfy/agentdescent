@@ -1,4 +1,4 @@
-\begin{thebibliography}{44}
+\begin{thebibliography}{45}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
 \expandafter\ifx\csname urlstyle\endcsname\relax
@@ -18,8 +18,9 @@
 
 \bibitem[coe(2026)]{coevoskills2026}
 Self-evolving agent skills via co-evolutionary verification ({CoEvoSkills}).
-\newblock arXiv:2604.01687, 2026.
-\newblock Concurrent work; official code unreleased at the time of writing.
+\newblock \url{https://arxiv.org/abs/2604.01687}, 2026.
+\newblock Concurrent work; author list unverified, official code unreleased at
+  the time of writing.
 
 \bibitem[Agrawal et~al.(2025)Agrawal, Tan, Soylu, Ziems, Khare, Opsahl-Ong,
   Singhvi, Shandilya, Ryan, Jiang, et~al.]{agrawal2025gepa}
@@ -61,14 +62,6 @@ Wei Fu, Jiaxuan Gao, Xujie Shen, Chen Zhu, Zhiyu Mei, Chuyi He, Shusheng Xu,
 \newblock {AReaL}: A large-scale asynchronous reinforcement learning system for
   language reasoning.
 \newblock \emph{arXiv preprint arXiv:2505.24298}, 2025.
-
-\bibitem[Gao et~al.(2023)Gao, Madaan, Zhou, Alon, Liu, Yang, Callan, and
-  Neubig]{gao2023pal}
-Luyu Gao, Aman Madaan, Shuyan Zhou, Uri Alon, Pengfei Liu, Yiming Yang, Jamie
-  Callan, and Graham Neubig.
-\newblock {PAL}: Program-aided language models.
-\newblock In \emph{International Conference on Machine Learning}, pages
-  10764--10799, 2023.
 
 \bibitem[Guo et~al.(2024)Guo, Wang, Guo, Li, Song, Tan, Liu, Bian, and
   Yang]{guo2024evoprompt}
@@ -183,6 +176,13 @@ Alexander Novikov, Ng{\^a}n V{\~u}, Marvin Eisenberger, Emilien Dupont, Po-Sen
   discovery.
 \newblock \emph{arXiv preprint arXiv:2506.13131}, 2025.
 
+\bibitem[Rein et~al.(2023)Rein, Hou, Stickland, Petty, Pang, Dirani, Michael,
+  and Bowman]{rein2023gpqa}
+David Rein, Betty~Li Hou, Asa~Cooper Stickland, Jackson Petty, Richard~Yuanzhe
+  Pang, Julien Dirani, Julian Michael, and Samuel~R Bowman.
+\newblock {GPQA}: A graduate-level google-proof {Q\&A} benchmark.
+\newblock \emph{arXiv preprint arXiv:2311.12022}, 2023.
+
 \bibitem[Robeyns et~al.(2025)Robeyns, Szummer, and Aitchison]{robeyns2025sica}
 Maxime Robeyns, Martin Szummer, and Laurence Aitchison.
 \newblock A self-improving coding agent.
@@ -208,6 +208,13 @@ J{\"u}rgen Schmidhuber.
 Asankhaya Sharma.
 \newblock {OpenEvolve}: an open-source evolutionary coding agent.
 \newblock \url{https://github.com/codelion/openevolve}, 2025.
+
+\bibitem[Shi et~al.(2022)Shi, Suzgun, Freitag, Wang, Srivats, Vosoughi, Chung,
+  Tay, Ruder, Zhou, et~al.]{shi2022mgsm}
+Freda Shi, Mirac Suzgun, Markus Freitag, Xuezhi Wang, Suraj Srivats, Soroush
+  Vosoughi, Hyung~Won Chung, Yi~Tay, Sebastian Ruder, Denny Zhou, et~al.
+\newblock Language models are multilingual chain-of-thought reasoners.
+\newblock \emph{arXiv preprint arXiv:2210.03057}, 2022.
 
 \bibitem[Shinn et~al.(2023)Shinn, Cassano, Gopinath, Narasimhan, and
   Yao]{shinn2023reflexion}
