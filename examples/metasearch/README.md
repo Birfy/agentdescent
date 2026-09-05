@@ -124,12 +124,24 @@ For a Harbor task:
 | `prompt(parent)` | the task's `instruction.md`, the parent patch applied in the workspace, the scoring tests' output — handed to `claude_code()` (or `openai_compatible`) which works in the container and returns `git diff` |
 | `test_shards` | the held-back tests |
 
-That is the same split discipline ERA uses on its shards, and it is where the
-honest boundary sits: a task with one test file has nothing to hold back, and
-its search signal is then the agent's own checks. The adapter is not in this
-repository yet — it needs Docker or Modal, the `harbor`/`pier` runner and an
-agent, none of which the offline suite can exercise — and the boundary is stated
-here rather than hidden, as every port's is.
+That is the same split discipline ERA uses on its shards. The adapter is
+[`_harbor.py`](_harbor.py): `load_task` reads the task directory, `harbor_domain`
+maps `reward.json` metrics onto shards (scoring vs held-back; a `reward.txt`
+task has one metric and nothing to hold back, which the run plan says),
+`harbor_completion` puts a `WorkspaceAgent` behind ERA's `prompt -> text`
+contract (materialise the parent patch, run the agent there, `git diff`), and
+two runners verify a patch:
+
+| runner | where | status |
+|---|---|---|
+| `LocalRunner(source)` | a host checkout: `git apply`, run `tests/test.sh` with `/logs/verifier` redirected | exercised end to end by `tests/test_harbor_domain.py` with a real `git`, a real `test.sh` and a real ERA search over patches |
+| `DockerRunner()` | inside the task's own image, as Harbor does | written, not run here (no daemon in the offline suite); refusal paths tested |
+
+The boundary that remains: the **agent phase inside the container** is
+`harbor run --agent` and is not reimplemented — `LocalRunner` is honest for
+tasks whose environment is a repository and an interpreter (many of
+SWE-bench-Science's), not for ones that need the image's toolchain (most of
+Terminal-Bench-Science's). Stated here rather than hidden, as every port's is.
 
 ## Protocol
 

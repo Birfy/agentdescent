@@ -9,9 +9,10 @@
 > 一个可离线跑通的实例在 [`examples/metasearch/`](https://github.com/Birfy/agentdescent/tree/main/examples/metasearch)。
 >
 > 落地的模块：`agentdescent/meta.py`（§3 全部）、`examples/era/era_empirical_software.py`
-> 的两处注入口（§3.5）、`examples/metasearch/`（§4 的 stage 0）。
-> **未做**：SWE-bench-Science / Terminal-Bench-Science 的 `HarborDomain` 适配器（§4.3，
-> 需要容器与 agent，离线测试无法覆盖）；AlgoTune 在线跑批（P4，需要 API 与沙箱）。
+> 的两处注入口（§3.5）、`examples/metasearch/`（§4 的 stage 0 与 stage 2 的适配器
+> `_harbor.py`）、`bench/metasearch_algotune.py`（stage 1 的跑批脚本）。
+> **未做**：AlgoTune 与科研基准的**在线**跑（需要 API key、numpy/scipy 沙箱、Docker
+> 守护进程）；容器内的 agent 阶段（那是 `harbor run --agent`，不重造）。
 
 ---
 
@@ -284,9 +285,16 @@ ERA 的搜索对搜索对象无感；`Domain` 就四件事：
 | `prompt(parent)` | 任务的 `instruction.md` + 工作区里已打上的父 patch + scoring 测试的输出，交给 `claude_code()`（或 `openai_compatible`）在容器里干活，产出 `git diff` |
 | `test_shards` | held-back 测试 |
 
-这和 ERA 在 shard 上的切分纪律一致。诚实边界：只有一个测试文件的任务没东西可
-hold back，搜索信号只剩 agent 自检。适配器需要 Docker / Modal、`harbor` / `pier`
-runner 和一个 agent，离线套件跑不了，所以没进仓库；边界写在这里而不是藏起来。
+这和 ERA 在 shard 上的切分纪律一致。适配器是 `examples/metasearch/_harbor.py`：
+`load_task` 读任务目录；`harbor_domain` 把 `reward.json` 的指标映射成 shard（scoring /
+held-back；只写 `reward.txt` 的任务只有一个指标、没东西可 hold back，运行计划里会说）；
+`harbor_completion` 把 `WorkspaceAgent` 放到 ERA 的 `prompt -> text` 契约后面（物化父
+patch、在那里跑 agent、`git diff`，模型不用自己排版 diff）；两个 runner：`LocalRunner`
+在宿主机检出上 `git apply` + 跑 `tests/test.sh`（离线测试用真实 git、真实 `test.sh`、
+真实 ERA 树搜索端到端跑通），`DockerRunner` 在任务自己的镜像里验证（已写，本机无守护进程
+未跑，拒绝路径有测试）。剩下的边界：**容器内的 agent 阶段**是 `harbor run --agent`，不
+重造——`LocalRunner` 对"环境就是一个仓库加解释器"的任务是诚实的（SWE-bench-Science 的
+多数），对需要镜像工具链的任务不是（Terminal-Bench-Science 的多数）。
 
 ### 4.4 实验协议
 
@@ -321,12 +329,13 @@ runner 和一个 agent，离线套件跑不了，所以没进仓库；边界写�
 | P1 | `agentdescent/meta.py`：`MetaOutcome` / `Problem` / `auc` 等 / `ParamSlot` / `SourceSlot` / `priority_selection` / `PrioritySelection` / `meta_evolve` / `meta_validate` / `transfer_ratio` | ✅ |
 | P2 | `policy_source(slot, seed)` 通用门 + `seed_source` + `SLOT_PROTOCOLS` | ✅ |
 | P3 | `examples/metasearch/`：合成地形、离线端到端、`--dry-run`、加入 PORTS 契约 | ✅ |
-| P4 | AlgoTune 在线跑：3 seed × {seed 规则, 演化规则} × 8 任务，写入 `bench/results/` | 待跑（接口已开，需 API 与沙箱） |
-| P5 | `HarborDomain` 适配器（§4.3）+ SWE-bench-Science / TB-Science 验证 | 待做（需容器 + agent） |
+| P4 | AlgoTune 跑批脚本 `bench/metasearch_algotune.py`（训练/验证任务不相交、新 seed 验证、迁移比、结果 JSON） | ✅ 脚本 + 插桩测试；**在线跑待做**（需 API 与 numpy/scipy 沙箱） |
+| P5 | Harbor 适配器 `_harbor.py`（§4.3）+ SWE-bench-Science / TB-Science 验证 | ✅ 适配器 + `LocalRunner` 离线端到端；`DockerRunner.verify` 已写未在线跑；**基准验证待做**（需 API + Docker + 任务数据） |
 | P6 | 其余五个插槽的内置冒烟与默认种子，每个种子在真实内层 `evolve()` 里跑通 | ✅ |
 | P7 | 多插槽联合演化（`ParamSlot` 的 key 空间天然支持；`SourceSlot` 需要多槽 Strategy） | 开放 |
 
 测试：`tests/test_meta.py`（库）、`tests/test_metasearch.py`（示例）、
+`tests/test_metasearch_algotune.py`（P4 脚本）、`tests/test_harbor_domain.py`（P5 适配器）、
 `tests/test_example_entrypoints.py`（入口契约）、`tests/test_api_reference.py`（API 页同步）。
 
 ---
