@@ -1,17 +1,13 @@
 # Consumed by GitHub's "Cite this repository" button.
 #
-# Zenodo ignores this file whenever `.zenodo.json` is present, which it is --
-# the two describe the same work for different consumers and are kept in sync
-# by hand. If you edit one, edit the other.
-#
 # No `version:`/`date-released:` here on purpose. `agentdescent/__init__.py` is
-# the only place the version lives (see the note in pyproject.toml, where a
-# duplicate drifted to 0.7.0 while every wheel said 0.2.0), and Zenodo takes
-# the version from the release tag. A copy here would be a third source.
+# the only place the version lives -- see the note in pyproject.toml, written
+# where a duplicate had drifted to 0.7.0 while every wheel said 0.2.0. A copy
+# here would be a second source with nothing keeping it honest, and what this
+# file is for is citing the paper, which has no package version anyway.
 cff-version: 1.2.0
 message: >-
-  If you use AgentDescent, please cite the paper below. To cite the software
-  itself, use the archived release DOI from the repository's Zenodo record.
+  If you use AgentDescent, please cite the paper below.
 title: AgentDescent
 type: software
 abstract: >-
@@ -22,7 +18,7 @@ abstract: >-
 authors:
   - family-names: Chen
     given-names: Danyang
-    # orcid: "https://orcid.org/0000-0000-0000-0000"   # add yours
+    orcid: "https://orcid.org/0000-0002-5622-1545"
 repository-code: "https://github.com/Birfy/agentdescent"
 url: "https://birfy.github.io/agentdescent/"
 license: MIT
@@ -43,6 +39,7 @@ preferred-citation:
   authors:
     - family-names: Chen
       given-names: Danyang
+      orcid: "https://orcid.org/0000-0002-5622-1545"
   year: 2026
-  url: "https://github.com/Birfy/agentdescent/blob/paper/paper/main.pdf"
-  # doi: "10.5281/zenodo.XXXXXXX"   # fill in once the paper record is minted
+  doi: "10.5281/zenodo.22348027"
+  url: "https://doi.org/10.5281/zenodo.22348027"
