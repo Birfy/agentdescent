@@ -71,30 +71,35 @@ python -m examples.run_demo      # no API key needed
 
 ## Quickstart
 
-**Have a dataset? One call.** `evolve_skill` supplies the boilerplate — wrapping
-rows as tasks, the lambda that puts the skill in front of the question, the
-scorer, the knobs — and leaves you the three decisions that are actually yours:
-your data, how to score it, and which model.
+**Have a dataset?** There is one entry point, `evolve()`, and three building
+blocks that turn a dataset into its arguments: `tasks_from` wraps rows as tasks,
+`scorer` names a reward, `reflector` turns any model into the proposer. The
+decisions that are actually yours — your data, how to score it, which model —
+are the ones you still make.
 
 ```python
-from agentdescent import evolve_skill
-from agentdescent import openai_compatible
+from agentdescent import SingleSlot, evolve, openai_compatible, reflector, scorer, tasks_from
 from agentdescent.dataloader import hf_rows
 
 rows = hf_rows("hotpotqa/hotpot_qa", "validation", config="distractor", limit=40)
+model = openai_compatible(model="deepseek-v4-flash")
 
-result = evolve_skill(rows, model=openai_compatible(model="deepseek-v4-flash"),
-                      prompt="question", gold="answer", score="exact")
+tasks = tasks_from(rows, prompt="question", gold="answer")     # rows -> Task objects
+run = lambda skill, task: model(f"{skill}\n\n{task.prompt}")   # the skill meets the question
+
+result = evolve(tasks, scorer("exact"), run=run, propose=reflector(model),
+                strategy=SingleSlot(initial_value="You are a helpful assistant."),
+                rounds=8, n_workers=8, max_concurrency=8, held_out_frac=0.3,
+                patience=3, target_reward=0.98)
 
 print(result.rendered)        # the skill it learned
 print(result.final_reward)    # held-out reward
 print(result.outcomes())      # why it went that way
 ```
 
-It is a thin wrapper over `evolve()` — same engine, same result object — and any
-extra argument passes straight through (`asynchronous=True`, a custom
-`strategy=`, your own `run=`). Drop to `evolve()` the moment you want something
-it does not express.
+Everything in that call is an ordinary `evolve()` argument, so there is nothing
+to drop down to: swap `strategy=` for a different artifact shape, add
+`asynchronous=True`, hand it your own `run=`.
 
 <details>
 <summary>The same thing without the wrapper. Runnable as-is — no API key, no dependencies.</summary>
@@ -207,21 +212,31 @@ Guides: [the engine](https://github.com/Birfy/agentdescent/blob/main/docs/evolut
 
 ## Evolve a **directory** — a skill folder, an agent folder, its code
 
-Everything above evolves text that ends up *in a prompt*. `evolve_skill_dir`
-evolves a **directory**, and each rollout is performed by a real agent that reads
-those files off disk with its own tools:
+Everything above evolves text that ends up *in a prompt*. The same `evolve()`
+call evolves a **directory** when the strategy is a `FileTree` and the runner
+is `tree_runner`: each rollout is performed by a real agent that reads those
+files off disk with its own tools.
 
 ```python
-from agentdescent import evolve_skill_dir
+from agentdescent import FileTree, evolve, load_tree, scorer, tree_reflector, tree_runner
 from agentdescent.agents import claude_code, openai_compatible
+from agentdescent.governance import SKILL_BLAST_RADIUS
 
-result = evolve_skill_dir(
-    "~/.claude/skills/pdf-audit", rows,
-    agent=claude_code(extra_args=["--permission-mode", "acceptEdits"]),
-    reflect_with=openai_compatible(model="deepseek-v4-flash"),
-    prompt="question", gold="answer", score="contains")
+path = "~/.claude/skills/pdf-audit"                      # your directory
+tree = load_tree(path)                                   # -> {"SKILL.md": ..., ...}
+strategy = FileTree(tree, max_files_per_diff=2)          # file paths are the state keys
+run = tree_runner(claude_code(extra_args=["--permission-mode", "acceptEdits"]),
+                  layout="claude_skill", name="pdf-audit",
+                  overlay=strategy.frozen_files(tree))   # a fresh workspace per rollout
 
-result.write_to("~/.claude/skills/pdf-audit")     # opt in; backs up first
+result = evolve(tasks, scorer("contains"), run=run, strategy=strategy,
+                propose=tree_reflector(openai_compatible(model="deepseek-v4-flash"),
+                                       strategy=strategy),
+                artifact_id="pdf-audit", blast_radius=SKILL_BLAST_RADIUS,   # L2
+                self_verify=False, cheap_eval_tasks=4,   # a rollout is a real agent call
+                rounds=6, n_workers=4, max_concurrency=4, held_out_frac=0.3)
+
+result.write_to(path)     # opt in; backs up first
 ```
 
 Each rollout materialises the candidate into a throwaway workspace at
@@ -230,12 +245,13 @@ there. The optimizer is untouched: **state keys are file paths**, so two workers
 editing different files *fuse* and two editing the same file are *resolved* on
 held-out score — the same machinery as every other strategy.
 
-Three entry points, differing only in governance and what guards them:
-`evolve_skill_dir` (L2), `evolve_agent_dir` (L1 — an agent definition is a
-harness, so every merge also passes the oracle), and `evolve_agent_code`, where
-the tree is **executed** behind a frozen test suite that the candidate cannot
-rewrite (pristine files are overlaid after materialisation, so weakening the
-tests at run time does not work either).
+Three workloads, differing only in governance and what guards them: a skill
+folder (`SKILL_BLAST_RADIUS`, L2), an agent folder (`HARNESS_BLAST_RADIUS`, L1 —
+an agent definition is a harness, so every merge also passes the oracle), and
+agent code, where `code_runner` **executes** the tree behind a frozen test suite
+that the candidate cannot rewrite (pristine files are overlaid after
+materialisation, so weakening the tests at run time does not work either) and
+`gated_reward` scores a failed gate as zero.
 
 ```bash
 python -m examples.skill_dir_evolution        # offline, no API key

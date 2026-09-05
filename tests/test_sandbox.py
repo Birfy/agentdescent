@@ -445,13 +445,13 @@ def test_a_shared_pool_puts_two_runners_under_one_ceiling():
     pool.close(strict=True)
 
 
-def test_workspace_root_reaches_the_high_level_entry_points(tmp_path):
-    """It existed on the runners and nothing above them passed it down, so
-    placing a workspace was impossible from the public API."""
+def test_workspace_root_is_on_both_public_runners(tmp_path):
+    """The runners are the public API a directory run hands `evolve()`, so
+    placing a workspace has to be possible from each of them."""
     import inspect
-    from agentdescent import skilldir
+    from agentdescent import code_runner, tree_runner
 
-    for fn in (skilldir.evolve_skill_dir, skilldir.evolve_agent_code):
+    for fn in (tree_runner, code_runner):
         params = inspect.signature(fn).parameters
         assert "workspace_root" in params, f"{fn.__name__} still cannot place a workspace"
         assert "sandbox_pool" in params

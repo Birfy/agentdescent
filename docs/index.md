@@ -31,15 +31,23 @@ The one place the analogy *must* break defines the whole system:
 That is the whole input.
 
 ```python
-from agentdescent import evolve_skill, openai_compatible
+from agentdescent import SingleSlot, evolve, openai_compatible, reflector, scorer, tasks_from
 from agentdescent.dataloader import hf_rows
 
 rows = hf_rows("hotpotqa/hotpot_qa", "validation", config="distractor", limit=40)
+model = openai_compatible(model="deepseek-v4-flash")
 
-result = evolve_skill(rows, model=openai_compatible(model="deepseek-v4-flash"),
-                      prompt="question", gold="answer", score="exact")
+tasks = tasks_from(rows, prompt="question", gold="answer")     # rows -> Task objects
+run = lambda skill, task: model(f"{skill}\n\n{task.prompt}")   # the skill meets the question
+
+result = evolve(tasks, scorer("exact"), run=run, propose=reflector(model),
+                strategy=SingleSlot(initial_value="You are a helpful assistant."),
+                rounds=8, n_workers=8, max_concurrency=8, held_out_frac=0.3,
+                patience=3, target_reward=0.98)
 
 print(result.rendered)        # the skill it learned
+print(result.final_reward)    # held-out reward
+print(result.outcomes())      # why it went that way
 ```
 
 Run as written, that lifted held-out exact match from **0.167 to 0.583** and wrote
@@ -51,16 +59,25 @@ restatement."* — see [Quickstart](quickstart-skill.md) for the full measuremen
 A skill folder, a folder of subagent definitions, or the agent's own code:
 
 ```python
-from agentdescent import evolve_skill_dir
+from agentdescent import FileTree, evolve, load_tree, scorer, tree_reflector, tree_runner
 from agentdescent.agents import claude_code, openai_compatible
+from agentdescent.governance import SKILL_BLAST_RADIUS
 
-result = evolve_skill_dir(
-    "~/.claude/skills/pdf-audit", rows,
-    agent=claude_code(extra_args=["--permission-mode", "acceptEdits"]),
-    reflect_with=openai_compatible(model="deepseek-v4-flash"),
-    prompt="question", gold="answer", score="contains")
+path = "~/.claude/skills/pdf-audit"                      # your directory
+tree = load_tree(path)                                   # -> {"SKILL.md": ..., ...}
+strategy = FileTree(tree, max_files_per_diff=2)          # file paths are the state keys
+run = tree_runner(claude_code(extra_args=["--permission-mode", "acceptEdits"]),
+                  layout="claude_skill", name="pdf-audit",
+                  overlay=strategy.frozen_files(tree))   # a fresh workspace per rollout
 
-result.write_to("~/.claude/skills/pdf-audit")     # opt in; backs up first
+result = evolve(tasks, scorer("contains"), run=run, strategy=strategy,
+                propose=tree_reflector(openai_compatible(model="deepseek-v4-flash"),
+                                       strategy=strategy),
+                artifact_id="pdf-audit", blast_radius=SKILL_BLAST_RADIUS,   # L2
+                self_verify=False, cheap_eval_tasks=4,   # a rollout is a real agent call
+                rounds=6, n_workers=4, max_concurrency=4, held_out_frac=0.3)
+
+result.write_to(path)     # opt in; backs up first
 ```
 
 Each rollout materialises the candidate into a throwaway workspace and a **real

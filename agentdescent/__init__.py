@@ -112,7 +112,7 @@ from .sandbox_shared import SharedSandboxPool
 from .supervisor import ProcessExecutor
 from .workspec import Ref, RefError, RolloutSpec
 from . import rewards                      # agentdescent.rewards.last_number(...)
-from .skill import evolve_skill
+from .rewards import SCORERS, scorer
 from .meta import (
     SLOTS, SLOT_PROTOCOLS, MetaOutcome, ParamSlot, PrioritySelection, PRIORITY_SEED,
     SlotSpec, SourceSlot, auc, compile_policy_source, compile_priority, evolve_problem,
@@ -129,8 +129,7 @@ from .filetree import (
     tree_summary,
 )
 from .treestrategy import EDIT_PROTOCOL, FileTree, parse_edits, tree_reflector
-from .runners import LAYOUTS, TEST_FAILURE_MARKER, code_runner, tree_runner
-from .skilldir import evolve_agent_code, evolve_agent_dir, evolve_skill_dir
+from .runners import LAYOUTS, TEST_FAILURE_MARKER, code_runner, gated_reward, tree_runner
 from .orchestrator import AgentDescent, RoundStat, run_fork_baseline
 from .agents import (
     AgentError,
@@ -349,7 +348,8 @@ __all__ = [
     "tasks_from",
     "RoundInfo",
     "evolve",
-    "evolve_skill",
+    "SCORERS",
+    "scorer",
     "meta_evolve",
     "meta_validate",
     "evolve_problem",
@@ -386,9 +386,7 @@ __all__ = [
     "TEST_FAILURE_MARKER",
     "code_runner",
     "tree_runner",
-    "evolve_skill_dir",
-    "evolve_agent_dir",
-    "evolve_agent_code",
+    "gated_reward",
     "async_evolve",
     "claude_agent",
     "rule_id",

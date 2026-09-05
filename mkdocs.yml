@@ -63,6 +63,7 @@ nav:
     - Duration-aware scheduling: duration-scheduling.md
   - The decision plane (policies):
     - Choosing policies: policies.md
+    - Using the slots — a guide: policy-guide.md
     - Task sampling: sampling.md
     - Candidate selection: selection.md
     - Proposal policies: proposal-policies.md

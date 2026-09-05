@@ -135,7 +135,30 @@ class GroupAdvantage:
         return self._n.get(key, 0)
 
 
-class AdvantageAcceptance:
+class _ForwardsInstall:
+    """Forward the aggregator's install hooks to the wrapped rule.
+
+    A wrapper adds one term and defers to ``inner`` for everything else, so
+    whatever the engine hands over -- its verifier through ``bind``, its
+    thresholds through ``configure`` -- belongs to the inner rule, and the wrapper
+    passes it straight through. Without this a wrapper around a default rule
+    could only be installed by rebuilding the aggregator by hand.
+    """
+
+    inner: object
+
+    def bind(self, verifier) -> None:
+        fn = getattr(self.inner, "bind", None)
+        if callable(fn):
+            fn(verifier)
+
+    def configure(self, config) -> None:
+        fn = getattr(self.inner, "configure", None)
+        if callable(fn):
+            fn(config)
+
+
+class AdvantageAcceptance(_ForwardsInstall):
     """Shift the acceptance prior by how well a proposal did against its group.
 
     Wraps another :class:`~agentdescent.policies.AcceptancePolicy` rather than
@@ -152,12 +175,18 @@ class AdvantageAcceptance:
 
     Cards without an advantage are skipped, not counted as zero -- see
     :class:`GroupAdvantage`.
+
+    ``inner`` defaults to the shipped gate with the run's own thresholds: the
+    aggregator fills them in when the policy is installed, so
+    ``AdvantageAcceptance()`` and ``agg_config=`` cannot disagree.
     """
 
-    def __init__(self, inner, strength: float = 1.0) -> None:
+    def __init__(self, inner=None, strength: float = 1.0) -> None:
+        from .defaults import DefaultAcceptance
+
         if strength < 0:
             raise ValueError("strength must not be negative")
-        self.inner = inner
+        self.inner = inner if inner is not None else DefaultAcceptance()
         self.strength = strength
 
     def accept(self, ctx):
@@ -178,7 +207,7 @@ class AdvantageAcceptance:
         return self.inner.accept(_replace(ctx, prior=shifted))
 
 
-class AdvantageConflict:
+class AdvantageConflict(_ForwardsInstall):
     """Break a contradiction by group-relative advantage, not raw score.
 
     The default rule keeps whichever of two contradicting diffs scores better on
@@ -191,10 +220,17 @@ class AdvantageConflict:
     Falls through to the wrapped policy whenever either side has no advantage, or
     the two are within ``margin`` -- so it only fires where it has something the
     default does not.
+
+    ``inner`` defaults to :class:`~agentdescent.defaults.DefaultConflict`, which
+    needs the engine's verifier to score a tie. The aggregator hands it over
+    through ``bind`` when the policy is installed, so ``AdvantageConflict()`` is
+    enough on its own; nothing here has to see a verifier.
     """
 
-    def __init__(self, inner, margin: float = 0.5) -> None:
-        self.inner = inner
+    def __init__(self, inner=None, margin: float = 0.5) -> None:
+        from .defaults import DefaultConflict
+
+        self.inner = inner if inner is not None else DefaultConflict()
         self.margin = margin
 
     def resolve(self, artifact, cards):
@@ -340,7 +376,7 @@ def state_distance(a, b) -> float:
     return sum(1 for k in keys if a.get(k) != b.get(k)) / len(keys)
 
 
-class StableDistanceAcceptance:
+class StableDistanceAcceptance(_ForwardsInstall):
     """Penalise candidates that drift far from the confirmed branch.
 
     The KL-to-a-reference-policy analogy, with ``stable`` as the reference. It
@@ -358,12 +394,17 @@ class StableDistanceAcceptance:
     Wraps another policy, and does nothing at all when the context carries no
     stable distance -- so a run whose ledger has no `stable` branch yet behaves
     exactly as before.
+
+    ``inner`` defaults to the shipped gate with the run's own thresholds, filled
+    in by the aggregator when the policy is installed.
     """
 
-    def __init__(self, inner, strength: float = 0.1) -> None:
+    def __init__(self, inner=None, strength: float = 0.1) -> None:
+        from .defaults import DefaultAcceptance
+
         if strength < 0:
             raise ValueError("strength must not be negative")
-        self.inner = inner
+        self.inner = inner if inner is not None else DefaultAcceptance()
         self.strength = strength
 
     def accept(self, ctx):

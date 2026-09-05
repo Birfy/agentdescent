@@ -1,36 +1,36 @@
-# Dataset → evolved skill, in one call
+# Dataset → evolved skill
 
-> **`evolve_skill` is a thin wrapper over [`evolve`](evolution.md)** — same
-> engine, same result object. Everything it does, you can do by hand; it just
-> stops you writing the same page of boilerplate every time.
-
-Evolving a skill needs three things that are genuinely yours:
+There is one entry point, [`evolve`](evolution.md). Evolving a skill from a
+dataset needs three things that are genuinely yours:
 
 1. **your data**,
 2. **how to score an answer**,
 3. **which model**.
 
-Everything else — wrapping rows as `Task`s, the lambda that puts the skill in
-front of the question, the same last-number regex, a dozen knobs — is the same
-every time.
+Everything else — wrapping rows as `Task`s, the line that puts the skill in front
+of the question, the scorer, the proposer — is a public building block, so the
+whole program is a dozen lines and every one of them is an ordinary `evolve()`
+argument:
 
 ```python
-from agentdescent import evolve_skill
-from agentdescent import openai_compatible
+from agentdescent import SingleSlot, evolve, openai_compatible, reflector, scorer, tasks_from
 from agentdescent.dataloader import hf_rows
 
 rows = hf_rows("hotpotqa/hotpot_qa", "validation", config="distractor", limit=40)
+model = openai_compatible(model="deepseek-v4-flash")
 
-result = evolve_skill(rows, model=openai_compatible(model="deepseek-v4-flash"),
-                      prompt="question", gold="answer", score="exact")
+tasks = tasks_from(rows, prompt="question", gold="answer")     # rows -> Task objects
+run = lambda skill, task: model(f"{skill}\n\n{task.prompt}")   # the skill meets the question
+
+result = evolve(tasks, scorer("exact"), run=run, propose=reflector(model),
+                strategy=SingleSlot(initial_value="You are a helpful assistant."),
+                rounds=8, n_workers=8, max_concurrency=8, held_out_frac=0.3,
+                patience=3, target_reward=0.98)
 
 print(result.rendered)        # the skill it learned
 print(result.final_reward)    # held-out reward
 print(result.outcomes())      # why it went that way
 ```
-
-That is **11 lines against 21** for the same program written by hand, and more
-importantly it removes the decisions a first-time user has no basis to make.
 
 ## What that call actually does — measured
 
@@ -59,25 +59,22 @@ gold='Arena of Khazan'  got='In *Tunnels and Trolls*, an adventure is called a *
 cleared the gate and three were rejected for not beating it — the gate doing its
 job, not a stuck run.
 
-## The arguments
+## The pieces
 
 | | |
 |---|---|
-| `data` | rows (dicts) from anywhere, or ready-made `Task`s |
-| `model` | any [completion](agents.md) — API model, CLI agent, your own function |
-| `prompt=`, `gold=` | which columns hold the question and the expected answer |
-| `score=` | a name from `SCORERS`, or your own `(task, output) -> float` |
-| `instruction=` | the starting skill; what the run learns replaces it |
-| `template=` | where the skill meets the question — `"{skill}\n\n{prompt}"` by default |
-| `reflect_with=` | the model that proposes improvements (a cheap one is a fine trade) |
-| anything else | forwarded to [`evolve`](evolution.md) and overrides the defaults |
+| `tasks_from(rows, prompt=, gold=)` | rows (dicts) from anywhere → `Task`s; the gold lands in `meta`, where [the reflector reads it](evolution.md#bring-an-agent-you-already-have). Ready-made `Task`s need no wrapping. |
+| `scorer(name_or_callable)` | a name from `SCORERS` below, or your own `(task, output) -> float` |
+| `run=` | how the skill meets the question. The lambda above is the whole default; put the skill after the question, or inside a scaffold, by writing a different one |
+| `propose=reflector(model)` | any [completion](agents.md) as the proposer. A cheap model here behind an expensive one in `run=` is a fine trade |
+| `strategy=SingleSlot(initial_value=…)` | the artifact is one instruction, and each accepted proposal replaces it. `AppendRules` / `KeyedRules` are the other [text strategies](strategies.md) |
 
 ## The scorers
 
 `agentdescent.rewards` covers the common cases, and gets the details right that
 are easy to get wrong:
 
-| `score=` | matches when | notes |
+| `scorer(…)` | matches when | notes |
 |---|---|---|
 | `"last_number"` | the **last** number in the output equals the gold number | the default for arithmetic — models show their working, so the answer is the last number |
 | `"exact"` | output equals the gold | casefolds, collapses whitespace, strips trailing punctuation |
@@ -90,45 +87,22 @@ are easy to get wrong:
     `"#### 72"` and `"The answer is 72."` all match. A gold with no number in it
     raises, rather than scoring every item zero.
 
-## What it chooses for you
+## The knobs worth choosing
 
-All defaults, all overridable — pass any of them and yours wins:
+The values in the block above are the ones a dataset run wants, and none of them
+is a default of `evolve()` itself:
 
-* `n_workers = max_concurrency = min(8, train tasks)`
-* `rounds = 8`, `patience = 3`, `target_reward = 0.98`
-* `held_out_frac = 0.3`
+* `n_workers = max_concurrency = min(8, train tasks)` — one worker per
+  training task is the useful ceiling
+* `rounds = 8`, `patience = 3`, `target_reward = 0.98` — early stopping, so a
+  small dataset does not buy eight rounds of nothing
+* `held_out_frac = 0.3`; and `shuffle=True` is worth knowing about — rows arrive
+  in dataset order and the train/held-out split is positional, so grouped data
+  otherwise holds out one end of the file
 
-Early stopping is on so a small dataset does not buy eight rounds of nothing.
-
-## When to drop to `evolve()`
-
-The moment you want something this does not express — a different artifact shape
-([`strategy=`](evolution.md#2-the-evolution-rule-strategy)), a custom optimizer
-([`aggregator_factory=`](aggregator.md)), a multi-step agent as `run=`. You can
-also get there gradually: every one of those is just a keyword argument here,
-because they pass straight through.
-
-```python
-result = evolve_skill(rows, model=model, prompt="question", gold="answer",
-                      asynchronous=True, max_seconds=600,      # barrier-free
-                      reflect_with=cheap_model)                # cheaper reflection
-```
-
-## Building the pieces yourself
-
-The two layers underneath are public, and useful on their own:
-
-```python
-from agentdescent import tasks_from
-from agentdescent.rewards import last_number
-
-tasks = tasks_from(rows, prompt="question", gold="answer", difficulty="level")
-reward = last_number()
-```
-
-`tasks_from` numbers the rows, puts the gold in `meta` (where
-[the reflector reads it](evolution.md#bring-an-agent-you-already-have)), and maps
-any extra columns you name into `meta` too.
+Everything else — a barrier-free run (`asynchronous=True, max_seconds=600`), a
+custom optimizer (`aggregator_factory=`), a multi-step agent as `run=` — is
+[a further argument to the same call](evolution.md).
 
 ---
 
@@ -138,7 +112,6 @@ any extra columns you name into `meta` too.
   [Quickstart — evolve a directory](quickstart-directory.md) does the same thing
   for a skill folder, an agent folder, or its code, with a real agent reading the
   files off disk.
-* **Want the knobs?** [The `evolve` method](evolution.md) — `evolve_skill` is a
-  thin wrapper over it and every extra argument passes straight through.
+* **Want the knobs?** [The `evolve` method](evolution.md).
 * **Want to know why it works?** [Concepts](concepts.md), then
   [the aggregator](aggregator.md).
