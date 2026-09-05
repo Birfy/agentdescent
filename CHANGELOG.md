@@ -6,6 +6,38 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **A systematic guide to the policy slots**, `docs/policy-guide.md`: where
+  each of the eight slots sits in a round, what it is handed and must return,
+  the five composition rules the engine enforces, the three ways to fill a
+  slot (shipped, wrap, replace), the per-slot contract with its one common
+  mistake, the `bind` / `configure` install hooks, how to prove a policy ran,
+  a recipe table, and the pitfalls in the order people meet them. Linked from
+  the policies catalogue and the nav.
+
+### Fixed
+
+- **A wrapper around a default policy can now be installed through `Policies`
+  alone.** `DefaultConflict` and `DefaultFusion` take the verifier through an
+  optional `bind(verifier)` hook, `DefaultAcceptance` and `DefaultPromotion`
+  take their thresholds through `configure(config)` (or the pinned
+  `from_config(cfg)`), and the aggregator now offers both hooks to every
+  installed merge-side policy — previously only fusion was bound, so
+  `Policies(conflict=AdvantageConflict(DefaultConflict(...)))` type-checked,
+  installed, and died with `'NoneType' has no attribute 'cheap_eval'` on the
+  first contradiction that reached the inner rule; the repository's own tests
+  had to route it through an `aggregator_factory`. The wrappers
+  (`AdvantageConflict`, `AdvantageAcceptance`, `StableDistanceAcceptance`)
+  forward the hooks and default their `inner` to the shipped rule, so
+  `AdvantageAcceptance()` reads the run's `agg_config=` instead of a hand-copied
+  `DefaultAcceptance(0.5, 64, 4000)` that silently diverged from it. A default
+  used without being installed raises `PolicyUnboundError` naming the missing
+  piece. New: `agentdescent.aggregator.install_policy`,
+  `tests/test_policy_install.py`; docs on
+  [acceptance](docs/acceptance-policies.md) and
+  [conflict](docs/conflict-policies.md) policies.
+
 ## [0.4.6] — 2026-08-28
 
 ### Added

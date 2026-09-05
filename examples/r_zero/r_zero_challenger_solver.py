@@ -19,7 +19,6 @@ from __future__ import annotations
 from typing import Optional
 
 from agentdescent.advantage import AdvantageAcceptance
-from agentdescent.defaults import DefaultAcceptance
 from agentdescent.evolution import Task
 from agentdescent.policies import Policies
 from agentdescent.sampling import DifficultyWeighted
@@ -139,7 +138,7 @@ def build(seed: int) -> MethodPolicy:
         proposal_calls_per_candidate=2,
         engine=Policies(
             task_sampler=DifficultyWeighted(),
-            acceptance=AdvantageAcceptance(DefaultAcceptance(0.5, 64, 4000)),
+            acceptance=AdvantageAcceptance(),   # wraps the run's own gate
         ),
         reflective=True,
     )
