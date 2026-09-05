@@ -111,6 +111,31 @@ def starter_spec(path: str, *, kind: Optional[str] = None, data: Optional[str] =
     return spec
 
 
+#: Every published `mcp` requires Python >= 3.10, and this project supports 3.9.
+#: On 3.9 the extra installs nothing (see the marker in pyproject.toml), so
+#: "pip install agentdescent[mcp]" is not advice, it is a dead end -- the only
+#: true instruction is a newer interpreter.
+MCP_MIN_PYTHON = (3, 10)
+
+
+def mcp_unavailable() -> Optional[str]:
+    """Why the MCP server cannot run here, or None if it can."""
+    if sys.version_info < MCP_MIN_PYTHON:
+        return ("the MCP SDK needs Python >= %d.%d and this is %s, so "
+                "`agentdescent[mcp]` installs nothing here -- the CLI verbs are "
+                "the whole surface on this interpreter, and the shipped SKILL.md "
+                "falls back to them" % (MCP_MIN_PYTHON[0], MCP_MIN_PYTHON[1],
+                                        ".".join(map(str, sys.version_info[:3]))))
+    # Delegated so there is one answer to "is the SDK here", and so a caller
+    # that stubs it (the install-warning test does) steers every message.
+    from .integrations import mcp_sdk_missing
+
+    if mcp_sdk_missing():
+        return ('the mcp package is missing: pip install "agentdescent[mcp]" '
+                "to serve tools (the CLI works without it)")
+    return None
+
+
 def doctor_report() -> Dict[str, Any]:
     """What this machine can run: agent CLIs, provider keys, optional pieces."""
     clis = {name: shutil.which(name)
@@ -138,9 +163,9 @@ def doctor_report() -> Dict[str, Any]:
     if not (keys["ANTHROPIC_API_KEY"] or keys["OPENAI_API_KEY"] or keys["DEEPSEEK_API_KEY"]):
         problems.append("no provider key in the environment; a reflector needs one "
                         "(under dsh, forward keys in the mcp-client env block)")
-    if not optional["mcp"]:
-        problems.append("the mcp package is missing: pip install 'agentdescent[mcp]' "
-                        "to serve tools (the CLI works without it)")
+    why = mcp_unavailable()
+    if why:
+        problems.append(why)
     return {
         "python": sys.version.split()[0],
         "agent_clis": clis, "provider_keys_present": keys,
@@ -483,9 +508,14 @@ def cmd_mcp(a: argparse.Namespace) -> int:
         # The instruction is spelled out here rather than taken from the
         # exception, because which import failed decides what `e` says and the
         # user needs the same one line either way.
-        print('agentdescent mcp: cannot start the MCP server -- '
-              'pip install "agentdescent[mcp]". '
-              f'(The CLI works without it.) Underlying error: {e}', file=sys.stderr)
+        why = mcp_unavailable()
+        # The underlying ImportError says "pip install agentdescent[mcp]", which
+        # on 3.9 is the one thing that will not help -- so it is printed only
+        # when we have nothing better, never after a reason that contradicts it.
+        msg = why or ('pip install "agentdescent[mcp]" (the CLI works without '
+                      f'it). Underlying error: {e}')
+        print(f'agentdescent mcp: cannot start the MCP server -- {msg}',
+              file=sys.stderr)
         return 3
     return 0
 

@@ -408,3 +408,45 @@ def test_the_codex_installer_points_at_the_plugin_route(tmp_path):
     lines = install("codex", dry_run=True, home=str(tmp_path))
     assert any("codex plugin marketplace add" in l and "codex plugin add" in l
                for l in lines), lines
+
+
+# ---------------------------------------------------------------------------
+# The `[mcp]` extra on Python 3.9
+# ---------------------------------------------------------------------------
+#
+# Reported from a real 3.9 install: `pip install "agentdescent[mcp]"` -- the
+# line every install doc gives -- failed with a screen of "Ignored the following
+# versions that require a different python version" and installed *nothing*,
+# not even the CLI, because every published `mcp` requires >=3.10 and the extra
+# had no marker. These pin both halves of the fix on an interpreter that cannot
+# reproduce it.
+
+
+def test_the_mcp_extra_is_gated_on_the_python_it_needs():
+    """Without the marker, 3.9 users get no package at all -- not even the CLI."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, "pyproject.toml"), encoding="utf-8") as fh:
+        text = fh.read()
+    line = [ln for ln in text.splitlines() if ln.startswith("mcp = [")]
+    assert line, "the [mcp] extra disappeared from pyproject.toml"
+    assert "python_version >= '3.10'" in line[0], (
+        "the [mcp] extra must carry a python_version marker: every published "
+        "mcp requires >=3.10 while this project supports 3.9, and an unmarked "
+        "extra fails the whole install there instead of degrading to the CLI")
+
+
+def test_an_old_interpreter_is_told_the_truth_not_a_pip_line(monkeypatch):
+    """On 3.9 `pip install agentdescent[mcp]` is the one thing that cannot help."""
+    from agentdescent import cli
+
+    monkeypatch.setattr(cli.sys, "version_info", (3, 9, 23, "final", 0))
+    why = cli.mcp_unavailable()
+    assert why and "3.10" in why
+    assert "pip install" not in why, (
+        "on 3.9 the extra installs nothing, so advising pip sends the user in "
+        "a circle; the only true instruction is a newer interpreter")
+
+    # And the same reason reaches the two places a user actually looks.
+    assert any("3.10" in p for p in cli.doctor_report()["problems"])
+    lines = install("claude-code", dry_run=True, home="/tmp/ad-py39-probe")
+    assert any("3.10" in ln and "WARNING" in ln for ln in lines)

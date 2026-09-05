@@ -12,11 +12,17 @@ The design record — why it is shaped this way and what was considered — is
 ## Install
 
 ```bash
-pip install "agentdescent[mcp]"        # the CLI works without [mcp]; the MCP server needs it
+pip install "agentdescent[mcp]"        # the CLI works without [mcp]; the MCP server needs it (and Python >= 3.10)
 agentdescent demo                      # a complete evolution, offline, no key
 agentdescent doctor                    # which agent CLIs, keys and optional pieces are here
 agentdescent install dsh               # or: claude-code, codex, opencode
 ```
+
+The MCP SDK requires Python >= 3.10; AgentDescent supports 3.9. On 3.9 the
+extra installs nothing and the tool surface is unavailable — the CLI verbs are
+the whole API, which is what the shipped `SKILL.md` falls back to. `doctor` and
+`install` both say so rather than letting it surface as a host reporting
+`CONNECTION_CLOSED`.
 
 If you have never run one, do `demo` before `install`: it builds a skill that is
 wrong on purpose, twelve cases with known answers and a local program as the

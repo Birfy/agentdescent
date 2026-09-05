@@ -29,6 +29,14 @@ pip install -e ".[mcp]"
 `[mcp]` is the extra that lets agents talk to AgentDescent. Skip it and the CLI
 still works, but `agentdescent mcp` exits 3 and tells you to add it.
 
+!!! warning "Python 3.9: the CLI, but no MCP server"
+    The MCP SDK requires Python **3.10 or newer**, while AgentDescent itself
+    supports 3.9. On 3.9 the `[mcp]` extra installs nothing — you get the CLI
+    and the skill, and `agentdescent mcp` says why it cannot serve. The shipped
+    `SKILL.md` falls back to the CLI verbs, so an agent can still drive it; it
+    just calls `agentdescent plan` instead of a tool. `agentdescent doctor` and
+    `agentdescent install` both say so up front. For the tool surface, use 3.10+.
+
 Check that the command landed on your `PATH`:
 
 ```bash

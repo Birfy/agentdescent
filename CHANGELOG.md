@@ -8,6 +8,17 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- **`pip install "agentdescent[mcp]"` no longer fails the whole install on
+  Python 3.9.** Every published `mcp` requires >= 3.10 while this project
+  supports 3.9, and the unmarked extra meant the line every install doc gives
+  ended in a screen of "Ignored the following versions that require a different
+  python version" with *nothing* installed -- not even the CLI. The extra now
+  carries `python_version >= '3.10'`, so 3.9 gets the CLI and the skill; and
+  one helper, `cli.mcp_unavailable()`, gives `doctor`, `install` and
+  `agentdescent mcp` the same true reason instead of advising a pip command
+  that cannot help there. Reported from a real 3.9 install; verified on 3.9.23
+  and 3.11.
+
 - **`agentdescent demo` -- a complete evolution with no API key.** Every other
   entry point needs a worker agent on `PATH`, a provider key and a dataset with
   known answers, so the first thing a newcomer saw was an error about a missing

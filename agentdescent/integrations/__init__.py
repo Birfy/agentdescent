@@ -643,11 +643,17 @@ def install(host: str, *, dry_run: bool = False, home: Optional[str] = None) -> 
         raise ValueError(f"unknown host {host!r}; choose from {sorted(HOSTS)}")
     w = _Writer(dry_run)
     HOSTS[host](os.path.expanduser(home or "~"), w)
-    if mcp_sdk_missing():
+    # Imported here, not at module scope: `cli` reaches into this module from
+    # `cmd_install`, and the reason for a missing SDK belongs in one place.
+    from ..cli import mcp_unavailable
+
+    why = mcp_unavailable()
+    if why:
         # Every manifest written above tells the host to run `agentdescent mcp`.
         # Without the SDK that subprocess exits immediately and the host reports
         # only "CONNECTION_CLOSED" -- so say it here, where the user is looking,
-        # rather than let them discover it as a silent missing tool later.
-        w.note("WARNING: the 'mcp' package is not installed, so the server this "
-               "just wired up cannot start. Fix with: pip install \"agentdescent[mcp]\"")
+        # rather than let them discover it as a silent missing tool later. On
+        # 3.9 the fix is not a pip line, so the reason comes from `cli` rather
+        # than being spelled out again here.
+        w.note("WARNING: the server this just wired up cannot start -- " + why)
     return w.lines
