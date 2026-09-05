@@ -48,6 +48,7 @@ from .evolution import EvolutionResult, RoundInfo
 
 __all__ = [
     "STATES",
+    "serve_http",
     "RunDir",
     "RunStatus",
     "RunStoreError",
@@ -481,3 +482,150 @@ def execute(rd: RunDir, *, budget_usd: Optional[float] = None,
         last_reward=result.final_reward, calls=usage.calls,
         usd=None if usd_per_call is None else round(usage.calls * usd_per_call, 4))
     return result
+
+
+# ---------------------------------------------------------------------------
+# A read-only view over HTTP, for a host's UI to embed
+# ---------------------------------------------------------------------------
+
+#: Where ``agentdescent serve`` listens. Loopback only and read-only: the run
+#: store holds a spec, a diff and a reward curve, and anything that can reach
+#: this port can already read those files. Nothing here mutates a run -- start,
+#: cancel and apply stay on the CLI and the MCP server, where the user is.
+DEFAULT_HTTP_HOST = "127.0.0.1"
+DEFAULT_HTTP_PORT = 8787
+
+_PANEL_HTML = """<!doctype html>
+<meta charset="utf-8"><title>AgentDescent runs</title>
+<style>
+ :root { color-scheme: light dark; --fg:#1a1a1a; --dim:#6b7280; --line:#e5e7eb; --ok:#15803d; --bad:#b91c1c; --run:#1d4ed8; }
+ @media (prefers-color-scheme: dark) { :root { --fg:#e5e7eb; --dim:#9ca3af; --line:#374151; --ok:#4ade80; --bad:#f87171; --run:#60a5fa; } }
+ body { font: 13px/1.5 ui-sans-serif, system-ui, sans-serif; color: var(--fg); margin: 0; padding: 12px; }
+ h1 { font-size: 13px; font-weight: 600; margin: 0 0 10px; }
+ table { border-collapse: collapse; width: 100%; }
+ th { text-align: left; font-weight: 500; color: var(--dim); font-size: 11px; padding: 0 8px 4px 0; }
+ td { padding: 5px 8px 5px 0; border-top: 1px solid var(--line); vertical-align: top; }
+ .id { font-family: ui-monospace, monospace; font-size: 11px; }
+ .target { color: var(--dim); word-break: break-all; }
+ .done { color: var(--ok); } .failed, .cancelled { color: var(--bad); } .running { color: var(--run); }
+ .num { font-variant-numeric: tabular-nums; }
+ .empty { color: var(--dim); }
+</style>
+<h1>AgentDescent runs <span id="n" class="empty"></span></h1>
+<div id="out" class="empty">loading...</div>
+<script>
+const fmt = (v, d) => (v === null || v === undefined) ? d : v;
+async function tick() {
+  let runs;
+  try { runs = await (await fetch('api/runs', {cache: 'no-store'})).json(); }
+  catch (e) { document.getElementById('out').textContent = 'cannot reach the run store'; return; }
+  document.getElementById('n').textContent = runs.length ? '(' + runs.length + ')' : '';
+  if (!runs.length) { document.getElementById('out').innerHTML = '<p class="empty">No runs yet.</p>'; return; }
+  const rows = runs.map(r => {
+    const rounds = r.rounds ? (r.round + '/' + r.rounds) : String(r.round);
+    const best = r.best_reward === null || r.best_reward === undefined ? '-' : r.best_reward.toFixed(3);
+    const usd = r.usd === null || r.usd === undefined ? '' : ' $' + r.usd.toFixed(2);
+    return '<tr><td class="id">' + r.run_id + '</td>' +
+           '<td class="' + r.state + '">' + r.state + '</td>' +
+           '<td class="num">' + rounds + '</td>' +
+           '<td class="num">' + best + '</td>' +
+           '<td class="num">' + fmt(r.calls, 0) + usd + '</td>' +
+           '<td class="target">' + fmt(r.kind, '?') + ': ' + fmt(r.target, '?') + '</td></tr>';
+  }).join('');
+  document.getElementById('out').innerHTML =
+    '<table><tr><th>run</th><th>state</th><th>round</th><th>best</th><th>calls</th><th>target</th></tr>'
+    + rows + '</table>';
+}
+tick(); setInterval(tick, 4000);
+</script>
+"""
+
+
+def _is_loopback_origin(origin: str) -> bool:
+    """Whether ``origin`` is a page served from this machine's loopback.
+
+    The check is on the *host* of the parsed origin, never a prefix match:
+    ``http://127.0.0.1.evil.com`` starts with the right characters and is a
+    remote site.
+    """
+    from urllib.parse import urlparse
+
+    try:
+        parsed = urlparse(origin)
+    except ValueError:
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    return (parsed.hostname or "").lower() in ("127.0.0.1", "::1", "localhost")
+
+
+def _http_handler(store: Optional[str]):
+    from http.server import BaseHTTPRequestHandler
+
+    class Handler(BaseHTTPRequestHandler):
+        server_version = "agentdescent"
+
+        def _send(self, code: int, body: bytes, content_type: str) -> None:
+            self.send_response(code)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            # A host's panel runs on another loopback port (dsh web is :3080),
+            # so it needs CORS to read the list -- but `*` would let any page
+            # the user happens to visit read their run store off localhost.
+            # So the Origin is echoed back only when it is itself loopback,
+            # which no remote page can claim.
+            origin = self.headers.get("Origin")
+            if origin and _is_loopback_origin(origin):
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _json(self, code: int, payload: Any) -> None:
+            self._send(code, json.dumps(payload, default=str).encode(), "application/json")
+
+        def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler's spelling
+            path = self.path.split("?", 1)[0].rstrip("/") or "/"
+            if path in ("/", "/index.html"):
+                return self._send(200, _PANEL_HTML.encode(), "text/html; charset=utf-8")
+            if path == "/api/runs":
+                return self._json(200, [s.to_dict() for s in list_runs(store=store)])
+            if path.startswith("/api/runs/"):
+                run_id = path[len("/api/runs/"):]
+                # The id indexes a directory, so anything with a separator in it
+                # is a traversal attempt rather than a run.
+                if not run_id or "/" in run_id or run_id in (".", ".."):
+                    return self._json(400, {"error": "bad run id"})
+                try:
+                    rd = get(run_id, store=store)
+                    return self._json(200, {**rd.status().to_dict(), "rounds": rd.rounds()})
+                except RunStoreError as e:
+                    return self._json(404, {"error": str(e)})
+            self._json(404, {"error": "not found"})
+
+        def log_message(self, *args: Any) -> None:
+            """Silent: this runs under a host that owns the console."""
+
+    return Handler
+
+
+def serve_http(*, host: str = DEFAULT_HTTP_HOST, port: int = DEFAULT_HTTP_PORT,
+               store: Optional[str] = None, serve_forever: bool = True):
+    """Serve the run store read-only on loopback, for a host UI to embed.
+
+    ``GET /`` is a small self-refreshing page, ``GET /api/runs`` the list and
+    ``GET /api/runs/<id>`` one run with its rounds. Returns the server so a
+    caller (a test) can drive it; with ``serve_forever`` it blocks.
+    """
+    from http.server import ThreadingHTTPServer
+
+    httpd = ThreadingHTTPServer((host, port), _http_handler(store))
+    if serve_forever:
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            httpd.server_close()
+    return httpd

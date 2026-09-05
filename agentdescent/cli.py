@@ -18,6 +18,7 @@ commands on a host with no MCP.
     agentdescent doctor                                             what is installed
     agentdescent install <dsh|claude-code|codex|opencode>           wire a host
     agentdescent mcp                                                serve over stdio
+    agentdescent serve   [--port N]                                 read-only run panel
 
 ``argparse`` only: the CLI is in the core and the core has no dependencies.
 """
@@ -401,6 +402,13 @@ def cmd_install(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_serve(a: argparse.Namespace) -> int:
+    print(f"agentdescent: run panel on http://{a.host}:{a.port}/  (read-only; Ctrl-C to stop)",
+          file=sys.stderr)
+    runstore.serve_http(host=a.host, port=a.port, store=a.store)
+    return 0
+
+
 def cmd_mcp(a: argparse.Namespace) -> int:
     # A host starts this as a subprocess and shows the user nothing but
     # "CONNECTION_CLOSED" when it dies, so the one thing that can go wrong
@@ -502,6 +510,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--dry-run", action="store_true", dest="dry_run")
     s.add_argument("--home", help="the host's home directory (default: the real one)")
     s.set_defaults(fn=cmd_install)
+
+    s = sub.add_parser("serve", help="serve a read-only run panel on loopback, for a host UI")
+    s.add_argument("--host", default=runstore.DEFAULT_HTTP_HOST)
+    s.add_argument("--port", type=int, default=runstore.DEFAULT_HTTP_PORT)
+    s.set_defaults(fn=cmd_serve)
 
     s = sub.add_parser("mcp", help="serve the tools over stdio (needs agentdescent[mcp])")
     s.set_defaults(fn=cmd_mcp)

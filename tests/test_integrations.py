@@ -247,7 +247,7 @@ def test_dsh_plugin_package_declares_the_bundle_field(tmp_path):
     the plugin is inert -- verified against dsh 0.1.2-rc.1."""
     from agentdescent.integrations import dsh_plugin_package, render_dsh_plugin
 
-    assert dsh_plugin_package()["dsh"] == {"bundle": {"patch": "./cordis.patch.yml"}}
+    assert dsh_plugin_package()["dsh"]["bundle"] == {"patch": "./cordis.patch.yml"}
     render_dsh_plugin(str(tmp_path))
     pkg = json.loads(_read(tmp_path / "package.json"))
     assert pkg["type"] == "module" and pkg["main"] == "lib/index.js"
@@ -310,3 +310,62 @@ def test_the_dsh_plugin_registers_a_valid_skill_through_the_real_registry(tmp_pa
     assert out["registered"]["contentLength"] > 500
     assert out["registered"]["contentHead"].startswith("# AgentDescent")
     assert out["disposed"] is True          # ctx.effect captured the disposer
+
+
+def _node_module(name):
+    """Resolve a node module, or None. React is not a dependency of this repo."""
+    node = shutil.which("node")
+    if not node:
+        return None
+    probe = subprocess.run(
+        [node, "-e", f"try{{console.log(require.resolve({name!r}))}}catch(e){{}}"],
+        capture_output=True, text=True, timeout=60,
+        cwd=os.environ.get("AGENTDESCENT_NODE_PROBE") or None)
+    path = probe.stdout.strip()
+    return path or None
+
+
+def test_the_dsh_client_bundle_registers_a_slot_and_renders(tmp_path):
+    """Load the browser half the way dsh's module loader does, with real React.
+
+    Everything but the visual result is checkable here: the loader wrapper, the
+    injected slot name, the registration spec, and that the component renders.
+    Set AGENTDESCENT_NODE_PROBE to a directory with react + react-dom installed
+    to run it; without them it skips."""
+    node = shutil.which("node")
+    react = _node_module("react")
+    react_dom = _node_module("react-dom/server")
+    if not (node and react and react_dom):
+        pytest.skip("needs node with react and react-dom resolvable "
+                    "(set AGENTDESCENT_NODE_PROBE)")
+    from agentdescent.integrations import render_dsh_plugin
+
+    render_dsh_plugin(str(tmp_path))
+    harness = os.path.join(ROOT, "tests", "fixtures", "verify_dsh_client.mjs")
+    proc = subprocess.run(
+        [node, harness, str(tmp_path / "lib" / "client.js"), react, react_dom],
+        capture_output=True, text=True, timeout=120,
+        cwd=os.environ.get("AGENTDESCENT_NODE_PROBE") or None)
+    assert proc.returncode == 0, proc.stderr
+    out = json.loads(proc.stdout)
+    assert out["id"] == "dsh-agentdescent"
+    assert out["inject"] == ["slots"] and out["apply"] == "function"
+    assert out["injectedSlot"] == "conversation.session.header.actions"
+    assert out["slot"]["id"] == "agentdescent-runs"
+    assert out["rendersTrigger"] and out["htmlLength"] > 100
+
+
+def test_the_dsh_client_half_is_declared_where_dsh_looks(tmp_path):
+    """`exports['./client']` and `dsh.client.platform` are how dsh finds it."""
+    from agentdescent.integrations import dsh_plugin_package, render_dsh_plugin
+
+    pkg = dsh_plugin_package()
+    assert pkg["exports"]["./client"] == {"default": "./lib/client.js"}
+    assert pkg["dsh"]["client"] == {"platform": "web"}
+    assert "lib/client.js" in pkg["files"]
+    render_dsh_plugin(str(tmp_path))
+    src = _read(tmp_path / "lib" / "client.js")
+    assert src.startswith("window.__ModuleLoader__.load({")
+    assert "conversation.session.header.actions" in src
+    # the panel it reads is the loopback one `agentdescent serve` provides
+    assert '"http://127.0.0.1:8787/"' in src

@@ -40,6 +40,20 @@ It registers the skill through `ctx.skills.register()` at runtime -- no file to
 install, and it cannot drift from the package -- and its own `cordis.patch.yml`
 adds the MCP row. Use one route or the other, not both.
 
+The plugin also contributes a **runs panel** to the dsh web UI: an `evolve`
+action in the session header showing how many runs are live, and the list
+behind a click. It reads `agentdescent serve`, a read-only loopback view of the
+run store:
+
+```bash
+agentdescent serve &            # http://127.0.0.1:8787/ -- GET only
+```
+
+The panel is a plain browser page as well, so it is useful without dsh. The
+server answers a cross-origin read **only for a loopback `Origin`**, so the dsh
+page on `:3080` can read it and a website you happen to visit cannot; without
+the server running the panel just says how to start it.
+
 Two things a dsh plugin needs that are easy to miss, both found by installing it
 for real: `package.json` must carry `"dsh": {"bundle": {"patch":
 "./cordis.patch.yml"}}` or `dsh plugin add` warns *"declares no dsh.bundle ...
@@ -268,6 +282,8 @@ result = comp.run()            # == evolve(comp.tasks, comp.reward, **comp.kwarg
 
 ## Next
 
+* [Testing the plugins](testing-the-plugins.md) — what to run for each host,
+  and what no test can tell you
 * [Quickstart — evolve a directory](quickstart-directory.md) — the Python call
   the `skill_dir` kind composes
 * [Using the policy slots](policy-guide.md) — what the `policies` block can name

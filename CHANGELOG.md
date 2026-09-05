@@ -69,7 +69,17 @@ All notable changes to AgentDescent are documented here. The format follows
   `isSkillName` validator. Installing it needs
   `"dsh": {"bundle": {"patch": "./cordis.patch.yml"}}` in `package.json` --
   without it `dsh plugin add` warns "declares no dsh.bundle ... not a profile
-  layer" and the plugin is installed but inert.
+  layer" and the plugin is installed but inert. It also contributes a **runs
+  panel** to the dsh web UI -- a header action with the live run count and the
+  list behind it -- as a hand-written client bundle in the shipped
+  `window.__ModuleLoader__.load` shape, verified by loading it the way dsh's
+  loader does and rendering it with real React.
+- **`agentdescent serve`**: a read-only HTTP view of the run store on loopback
+  (`GET /`, `/api/runs`, `/api/runs/<id>`), for a host UI to embed and for
+  looking at runs in a browser. Cross-origin reads are answered only for a
+  loopback `Origin` -- `*` would let any page the user visits read their run
+  store off localhost, and a prefix check would accept
+  `http://127.0.0.1.evil.com`.
 - **Every host manifest is now verified against the real CLI** (dsh 0.1.2-rc.1,
   Claude Code 2.1.261, codex-cli 0.153.4, opencode 1.18.29), which corrected
   three things that documentation research had got wrong:
