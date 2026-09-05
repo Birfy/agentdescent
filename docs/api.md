@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-216 public names across 36 modules.
+220 public names across 36 modules.
 
 ---
 
@@ -423,6 +423,20 @@ SourceSlot(
 
 Mean best-so-far held-out reward over the inner run: how *fast* it rose.
 
+### `compile_policy_source(...)`
+
+Gate `source`, instantiate its `class_name`, and check it fits `slot`.
+
+```python
+compile_policy_source(
+    slot: str,
+    source: str,
+    *,
+    class_name: str = 'Policy',
+    smoke: Optional[Callable[[Any], None]] = None
+) -> Any
+```
+
 ### `compile_priority(source: str) -> Callable[..., float]`
 
 AST-gate `source` and return its `priority` function.
@@ -495,6 +509,21 @@ meta_validate(
 ) -> Dict[str, Dict[str, float]]
 ```
 
+### `policy_source(...)`
+
+The general spec: `slot`'s value is the source of a class satisfying its Protocol.
+
+```python
+policy_source(
+    slot: str,
+    seed: Optional[str] = None,
+    *,
+    class_name: str = 'Policy',
+    smoke: Optional[Callable[[Any], None]] = None,
+    notes: str = ''
+) -> SourceSlot
+```
+
 ### `priority_selection(...)`
 
 The shipped spec for the `selection` slot of a tree search.
@@ -508,6 +537,10 @@ priority_selection(
 ### `rollouts_to(target: float) -> MetaReward`
 
 `1 / (1 + sweeps until the curve first reaches target)`; 0 if never.
+
+### `seed_source(slot: str) -> str`
+
+The engine's default behaviour for `slot`, as candidate source.
 
 ### `slot_reflector(...)`
 
@@ -2301,6 +2334,10 @@ One rollout, described completely enough to run somewhere else.
 ### `SLOTS`
 
 Built-in immutable sequence.
+
+### `SLOT_PROTOCOLS`
+
+dict() -> new empty dictionary dict(mapping) -> new dictionary initialized from a mapping object's (key, value) pairs dict(iterable) -> new dictionary initialized as if via: d = {} for k, v in iterable: d[k] = v dict(**kwargs) -> new dictionary initialized with the name=value pairs in the keyword argument list. For example: dict(one=1, two=2)
 
 ### `SOLVED`
 

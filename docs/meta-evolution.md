@@ -49,7 +49,19 @@ which is where the [central analogy](concepts.md) draws the L0 line.
 | `ParamSlot(factory, params, bounds)` | the numeric constructor keywords of any policy class (`FlatPuct(c_puct, prior_exponent)`, `Beam(k)`, …) | different parameters union-merge; the same one contradicts and is resolved on held-out | unknown names and out-of-bounds values are refused |
 | `SourceSlot(initial_value, validate, build)` | source text compiled by `build` | one slot: every round is a tournament | `validate` raises `ValueError` |
 
-`priority_selection()` is the shipped `SourceSlot` for a tree search: the value
+**`policy_source(slot, seed)` is the general one**: the value is the source of a
+class satisfying the slot's own Protocol (`SLOT_PROTOCOLS`, all
+`runtime_checkable`). The gate refuses imports outside a fixed allowlist, dunder
+access and the calls that reach the interpreter, builds the class in a
+namespace of safe builtins, checks it with `isinstance` against the Protocol,
+and runs a smoke test — shipped for `selection`, `task_sampler` and
+`staleness` (whose default behaviour `seed_source(slot)` provides as source),
+yours via `smoke=` for the slots whose inputs are a `MergeContext` or an
+`Evolvable`. It is the gate SICA and Gödel Agent run their self-edits behind,
+not a sandbox: enough to keep a model's rewrite to *deciding*, not enough for
+code from a stranger.
+
+`priority_selection()` is the narrower, safer `SourceSlot` for a tree search: the value
 is one function, `priority(rank, visits, total, prior, depth, n_nodes)`, seeded
 with upstream ERA's flat PUCT, and `PrioritySelection` is the `SelectionPolicy`
 that runs it — rank normalisation, prior normalisation, the visit reservation up

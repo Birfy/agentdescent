@@ -5,7 +5,7 @@ import json
 import pytest
 
 from agentdescent import Policies, Task, evolve
-from agentdescent.meta import (SLOTS, MetaOutcome, ParamSlot, PrioritySelection,
+from agentdescent.meta import (SLOTS, SLOT_PROTOCOLS, MetaOutcome, ParamSlot, PrioritySelection,
                                PRIORITY_SEED, SourceSlot, auc, compile_priority,
                                evolve_problem, final_reward, meta_evolve,
                                meta_validate, priority_selection, rollouts_to,
@@ -165,3 +165,91 @@ def test_slot_reflector_shows_the_spec_the_value_and_the_outcome():
     propose(PRIORITY_SEED, task, MetaOutcome(curve=[0.1]).to_json(), 0.1)
     assert "SELECTION RULE" in seen["p"] and "def priority" in seen["p"]
     assert json.dumps([0.1]) in seen["p"]
+
+
+# -- the general spec: any slot as class source --------------------------------
+
+
+@pytest.mark.parametrize("slot", ["selection", "task_sampler", "staleness"])
+def test_policy_source_seeds_satisfy_their_protocol(slot):
+    from agentdescent.meta import SLOT_PROTOCOLS, policy_source
+
+    spec = policy_source(slot)
+    value = spec.compile(spec.render(spec.initial()))
+    assert isinstance(value, SLOT_PROTOCOLS[slot])
+    assert "def " in spec.describe() and slot in spec.describe()
+
+
+@pytest.mark.parametrize("source, reason", [
+    ("import os\nclass Policy:\n    def select(self, ctx, n): return [ctx.head]", "not allowed"),
+    ("class Policy:\n    def select(self, ctx, n): return []", "1..n candidates"),
+    ("class Policy:\n    def pick(self, keys, r): return keys[0]", "does not satisfy"),
+    ("class Policy:\n    def select(self, ctx, n): return [ctx.head.__class__]", "dunder"),
+    ("class Policy:\n    def select(self, ctx, n): open('x')", "forbidden call"),
+    ("class Policy:\n    def select(self, ctx, n):\n        import os\n        return [ctx.head]",
+     "not allowed"),
+    ("class Policy:\n    def __init__(self, k): pass\n    def select(self, ctx, n): return [ctx.head]",
+     "failed to build"),
+    ("class Other:\n    def select(self, ctx, n): return [ctx.head]", "exactly one class"),
+])
+def test_the_general_gate_refuses(source, reason):
+    from agentdescent.meta import compile_policy_source
+
+    with pytest.raises(ValueError, match=reason):
+        compile_policy_source("selection", source)
+
+
+def test_a_method_level_import_from_the_allowlist_works():
+    from agentdescent.meta import compile_policy_source
+
+    policy = compile_policy_source("selection", (
+        "class Policy:\n"
+        "    def select(self, ctx, n):\n"
+        "        import random\n"
+        "        rng = random.Random(ctx.round)\n"
+        "        return [rng.choice(list(ctx.candidates)) for _ in range(n)]\n"))
+    from agentdescent.selection import Candidate, SelectionContext
+    rows = (Candidate("a", 0), Candidate("a", 1, parent=0))
+    assert len(policy.select(SelectionContext(head=rows[0], candidates=rows), 2)) == 2
+
+
+def test_meta_evolve_over_class_source_for_the_selection_slot():
+    from agentdescent.meta import policy_source
+
+    spec = policy_source("selection")
+    rewrite = """```python
+class Policy:
+    # greedy: always expand the best-scored candidate
+    def select(self, ctx, n):
+        rows = [c for c in ctx.candidates if c.score is not None] or [ctx.head]
+        best = max(rows, key=lambda c: c.score if c.score is not None else -1.0)
+        return [best] * n
+```"""
+
+    def problem(value, seed):
+        # A curve that rewards a policy which picks the best-scored candidate.
+        from agentdescent.selection import Candidate, SelectionContext
+        rows = (Candidate("a", 0, score=0.2), Candidate("a", 1, score=0.9, parent=0))
+        pick = value.select(SelectionContext(head=rows[0], candidates=rows), 1)[0]
+        base = 0.9 if pick.version == 1 else 0.2
+        return MetaOutcome(curve=[base] * 4, final=base)
+
+    result = meta_evolve({"toy": problem}, slot="selection", spec=spec,
+                         model=lambda prompt: rewrite, seeds=range(6), rounds=2,
+                         n_workers=2, max_concurrency=2)
+    assert result.error is None
+    assert "greedy" in result.rendered
+    assert result.final_reward == pytest.approx(0.9)
+    assert isinstance(spec.compile(result.rendered), SLOT_PROTOCOLS["selection"])
+
+
+def test_unshipped_slots_need_a_seed_and_get_no_default_smoke():
+    from agentdescent.meta import policy_source, seed_source
+
+    with pytest.raises(KeyError, match="no shipped seed"):
+        seed_source("acceptance")
+    seed = ("class Policy:\n"
+            "    def accept(self, ctx):\n"
+            "        return AcceptDecision(accept=ctx.rate(ctx.cand_counts) > ctx.rate(ctx.base_counts))\n")
+    spec = policy_source("acceptance", seed)
+    assert isinstance(spec.compile(seed), SLOT_PROTOCOLS["acceptance"])

@@ -47,6 +47,7 @@ search rule" and "a fit to the training landscape" are two different rows.
 from __future__ import annotations
 
 import ast
+import inspect
 import json
 import math
 import re
@@ -62,8 +63,12 @@ from typing import (
 from .agents import Completion
 from .evolution import EvolutionResult, Task, evolve
 from .evolvable import Diff
-from .policies import Policies
-from .selection import Candidate, SelectionContext, SingleHead
+from .policies import (AcceptancePolicy, AcceptDecision, ConflictPolicy, FusionPolicy,
+                       MergeContext, Policies, Promotion, PromotionPolicy,
+                       ProposalContext, ProposalPolicy)
+from .sampling import TaskSampler
+from .selection import Candidate, SelectionContext, SelectionPolicy, SingleHead
+from .staleness import StaleAction, StalenessPolicy
 from .strategies import SingleSlot
 
 __all__ = [
@@ -77,6 +82,10 @@ __all__ = [
     "PrioritySelection",
     "compile_priority",
     "priority_selection",
+    "SLOT_PROTOCOLS",
+    "compile_policy_source",
+    "policy_source",
+    "seed_source",
     "evolve_problem",
     "auc",
     "final_reward",
@@ -578,6 +587,289 @@ def priority_selection(seed: str = PRIORITY_SEED) -> SourceSlot:
     return SourceSlot(initial_value=seed.strip() + "\n", validate=_priority_source,
                       build=PrioritySelection, description=_PRIORITY_DESCRIPTION)
 
+
+
+# ---------------------------------------------------------------------------
+# The general spec: any slot, as the source of a class satisfying its Protocol
+# ---------------------------------------------------------------------------
+
+
+#: The contract each slot's value must satisfy -- the engine's own Protocols,
+#: all ``runtime_checkable``, so a compiled class is checked structurally.
+SLOT_PROTOCOLS: Dict[str, type] = {
+    "selection": SelectionPolicy,
+    "task_sampler": TaskSampler,
+    "acceptance": AcceptancePolicy,
+    "conflict": ConflictPolicy,
+    "fusion": FusionPolicy,
+    "promotion": PromotionPolicy,
+    "staleness": StalenessPolicy,
+    "proposal": ProposalPolicy,
+}
+
+#: What a candidate class may import, by module name. These are bound into
+#: its namespace, and an ``import`` of anything else is refused at the gate.
+_SOURCE_MODULES: Dict[str, Any] = {
+    "math": math, "statistics": statistics, "json": json, "re": re,
+}
+for _name in ("random", "itertools", "collections", "functools", "dataclasses",
+              "typing", "enum", "heapq", "bisect"):
+    _SOURCE_MODULES[_name] = __import__(_name)
+#: ...and the engine's own value types, so a rule can build what it returns.
+_SOURCE_TYPES: Dict[str, Any] = {
+    "Candidate": Candidate, "SelectionContext": SelectionContext,
+    "StaleAction": StaleAction, "AcceptDecision": AcceptDecision,
+    "MergeContext": MergeContext, "Promotion": Promotion,
+    "ProposalContext": ProposalContext,
+}
+_SOURCE_PACKAGES = {
+    "agentdescent.selection": {"Candidate", "SelectionContext"},
+    "agentdescent.staleness": {"StaleAction"},
+    "agentdescent.policies": {"AcceptDecision", "MergeContext", "Promotion",
+                              "ProposalContext"},
+}
+_SAFE_BUILTINS: Dict[str, Any] = {
+    name: __builtins__[name] if isinstance(__builtins__, dict) else getattr(__builtins__, name)
+    for name in (
+        "abs", "all", "any", "bool", "dict", "divmod", "enumerate", "filter", "float",
+        "frozenset", "int", "isinstance", "iter", "len", "list", "map", "max", "min",
+        "next", "object", "pow", "print", "range", "repr", "reversed", "round", "set",
+        "slice", "sorted", "str", "sum", "tuple", "zip", "True", "False", "None",
+        "Exception", "ValueError", "TypeError", "KeyError", "IndexError",
+        "ZeroDivisionError", "StopIteration", "staticmethod", "classmethod", "property",
+    )
+    if name in (__builtins__ if isinstance(__builtins__, dict) else dir(__builtins__))
+}
+_FORBIDDEN_CALLS = {
+    "exec", "eval", "compile", "open", "__import__", "getattr", "setattr", "delattr",
+    "globals", "locals", "vars", "input", "breakpoint", "exit", "quit", "type",
+    "super", "memoryview", "bytearray", "help", "dir", "id", "hash",
+}
+_SOURCE_MAX_CHARS = 12_000
+
+
+def _gate_source(source: str, class_name: str) -> ast.Module:
+    if not source or len(source) > _SOURCE_MAX_CHARS:
+        raise ValueError("policy source is empty or too long")
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as error:
+        raise ValueError("policy source is not valid Python") from error
+    classes = [n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == class_name]
+    if len(classes) != 1:
+        raise ValueError(f"policy source must define exactly one class named {class_name}")
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name not in _SOURCE_MODULES:
+                    raise ValueError(f"import of {alias.name!r} is not allowed")
+        elif isinstance(node, ast.ImportFrom):
+            allowed = _SOURCE_PACKAGES.get(node.module or "", None)
+            if allowed is None:
+                if (node.module or "") in _SOURCE_MODULES and node.level == 0:
+                    continue
+                raise ValueError(f"import from {node.module!r} is not allowed")
+            for alias in node.names:
+                if alias.name not in allowed:
+                    raise ValueError(f"{node.module}.{alias.name} is not importable here")
+        elif isinstance(node, ast.Name) and node.id.startswith("__"):
+            raise ValueError("dunder names are forbidden")
+        elif isinstance(node, ast.Attribute) and node.attr.startswith("__"):
+            raise ValueError("dunder attributes are forbidden")
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                and node.func.id in _FORBIDDEN_CALLS:
+            raise ValueError(f"forbidden call: {node.func.id}")
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            raise ValueError("global/nonlocal are forbidden")
+    return tree
+
+
+def _smoke_selection(policy: Any) -> None:
+    rows = tuple(Candidate("a", v, score=s, selected=n, parent=p)
+                 for v, s, n, p in [(0, 0.1, 3, None), (1, 0.7, 1, 0), (2, None, 0, 0)])
+    ctx = SelectionContext(head=rows[0], candidates=rows, round=2, n_workers=2)
+    for n in (1, 2):
+        picked = list(policy.select(ctx, n))
+        if not picked or len(picked) > n or any(c not in rows for c in picked):
+            raise ValueError("select() must return 1..n candidates from ctx.candidates")
+    solo = SelectionContext(head=rows[0], candidates=(rows[0],))
+    if list(policy.select(solo, 1)) != [rows[0]]:
+        raise ValueError("select() with one candidate must return it")
+
+
+def _smoke_task_sampler(policy: Any) -> None:
+    keys = ["t0", "t1", "t2"]
+    for round_index in range(4):
+        if policy.pick(keys, round_index) not in keys:
+            raise ValueError("pick() must return one of the keys")
+    policy.record("t1", 0.5)
+
+
+def _smoke_staleness(policy: Any) -> None:
+    for eta, alpha, breaking in [(0, 1, False), (1, 1, False), (5, 1, False), (2, 1, True)]:
+        if not isinstance(policy.decide(eta, alpha, breaking), StaleAction):
+            raise ValueError("decide() must return a StaleAction")
+    if not isinstance(getattr(policy, "name", None), str):
+        raise ValueError("a staleness policy needs a string `name`")
+
+
+_SMOKES: Dict[str, Callable[[Any], None]] = {
+    "selection": _smoke_selection,
+    "task_sampler": _smoke_task_sampler,
+    "staleness": _smoke_staleness,
+}
+
+
+def compile_policy_source(slot: str, source: str, *, class_name: str = "Policy",
+                          smoke: Optional[Callable[[Any], None]] = None) -> Any:
+    """Gate ``source``, instantiate its ``class_name``, and check it fits ``slot``.
+
+    The gate is structural, not semantic: an AST walk that refuses imports
+    outside a fixed allowlist, dunder access, and the calls that reach the
+    interpreter (``exec``, ``open``, ``getattr`` ...); then the class is built
+    in a namespace holding only safe builtins, the allowed modules and the
+    engine's value types, instantiated with no arguments, checked with
+    ``isinstance`` against the slot's Protocol, and run through a smoke test --
+    the shipped one for ``selection``, ``task_sampler`` and ``staleness``, or
+    ``smoke`` for any slot. Everything raises ``ValueError``, which is what the
+    strategy's ``to_diff`` turns into "no diff, counted".
+
+    This is not a sandbox. It is the same gate SICA and Gödel Agent run their
+    self-edits behind: enough to keep a model's rewrite from doing anything but
+    deciding, not enough to run untrusted code from a stranger.
+    """
+    if slot not in SLOT_PROTOCOLS:
+        raise ValueError(f"{slot!r} is not an evolvable slot; choose one of {SLOTS}")
+    tree = _gate_source(source, class_name)
+    builtins = dict(_SAFE_BUILTINS)
+    builtins["__build_class__"] = __builtins__["__build_class__"] if isinstance(__builtins__, dict) \
+        else __builtins__.__build_class__      # `class` statements need it
+
+    def restricted_import(name, globals=None, locals=None, fromlist=(), level=0):
+        # An `import` inside a method reaches here; only the allowlist answers.
+        if level == 0 and name in _SOURCE_MODULES:
+            return _SOURCE_MODULES[name]
+        if level == 0 and name in _SOURCE_PACKAGES and set(fromlist or ()) <= _SOURCE_PACKAGES[name]:
+            return type("_ns", (), {n: _SOURCE_TYPES[n] for n in fromlist})()
+        raise ImportError(f"import of {name!r} is not allowed")
+
+    builtins["__import__"] = restricted_import
+    namespace: Dict[str, Any] = {"__builtins__": builtins, "__name__": "candidate"}
+    namespace.update(_SOURCE_MODULES)
+    namespace.update(_SOURCE_TYPES)
+    try:
+        exec(compile(tree, f"<candidate-{slot}>", "exec"), namespace, namespace)
+        cls = namespace[class_name]
+        policy = cls()
+    except Exception as error:  # noqa: BLE001 - the candidate's failure, reported
+        raise ValueError(f"policy source failed to build: {type(error).__name__}: {error}")
+    if not isinstance(policy, SLOT_PROTOCOLS[slot]):
+        raise ValueError(f"{class_name} does not satisfy {SLOT_PROTOCOLS[slot].__name__}")
+    check = smoke or _SMOKES.get(slot)
+    if check is not None:
+        try:
+            check(policy)
+        except ValueError:
+            raise
+        except Exception as error:  # noqa: BLE001 - the candidate's failure, reported
+            raise ValueError(f"{class_name} failed its smoke test: "
+                             f"{type(error).__name__}: {error}")
+    return policy
+
+
+_SEED_SOURCES: Dict[str, str] = {
+    "selection": """class Policy:
+    # Every worker starts from the current head (the engine's default).
+    def select(self, ctx, n):
+        return [ctx.head] * n
+""",
+    "task_sampler": """class Policy:
+    # Round robin over the shard (the engine's default).
+    def pick(self, keys, round_index):
+        return keys[round_index % len(keys)]
+
+    def record(self, task_id, score):
+        pass
+""",
+    "staleness": """class Policy:
+    # Guarded: fresh diffs pass, a little lag is rebased, more is discarded.
+    name = "guarded"
+
+    def decide(self, eta, alpha, contract_breaking):
+        if eta == 0:
+            return StaleAction.ACCEPT
+        if contract_breaking or eta > alpha:
+            return StaleAction.DISCARD
+        return StaleAction.REBASE
+""",
+}
+
+
+def seed_source(slot: str) -> str:
+    """The engine's default behaviour for ``slot``, as candidate source.
+
+    Shipped for ``selection``, ``task_sampler`` and ``staleness``; the other
+    slots take a :class:`~agentdescent.policies.MergeContext` or a
+    :class:`~agentdescent.evolvable.Evolvable`, so their seed is yours to write
+    (and their smoke test yours to pass to :func:`policy_source`)."""
+    if slot not in _SEED_SOURCES:
+        raise KeyError(f"no shipped seed for {slot!r}; write one satisfying "
+                       f"{SLOT_PROTOCOLS[slot].__name__}")
+    return _SEED_SOURCES[slot]
+
+
+def _protocol_surface(protocol: type) -> str:
+    lines = []
+    for name, member in vars(protocol).items():
+        if name.startswith("_") or not callable(member):
+            continue
+        try:
+            sig = str(inspect.signature(member))
+        except (TypeError, ValueError):
+            sig = "(...)"
+        doc = (inspect.getdoc(member) or "").splitlines()
+        lines.append(f"    def {name}{sig}" + (f"  # {doc[0]}" if doc else ""))
+    return "\n".join(lines)
+
+
+def policy_source(slot: str, seed: Optional[str] = None, *, class_name: str = "Policy",
+                  smoke: Optional[Callable[[Any], None]] = None,
+                  notes: str = "") -> SourceSlot:
+    """The general spec: ``slot``'s value is the source of a class satisfying its Protocol.
+
+    ``seed`` defaults to :func:`seed_source`. The gate is
+    :func:`compile_policy_source`; ``describe()`` shows the reflector the
+    Protocol's method signatures, so it knows what it may change and what it
+    must keep. ``notes`` is appended for whatever the slot needs said -- what
+    the candidates' ``score`` means in this domain, say.
+    """
+    if slot not in SLOT_PROTOCOLS:
+        raise ValueError(f"{slot!r} is not an evolvable slot; choose one of {SLOTS}")
+    seed = seed if seed is not None else seed_source(slot)
+    protocol = SLOT_PROTOCOLS[slot]
+
+    def validate(text: str) -> str:
+        text = (text or "").strip()
+        compile_policy_source(slot, text, class_name=class_name, smoke=smoke)
+        return text + "\n"
+
+    def build(text: str) -> Any:
+        return compile_policy_source(slot, text, class_name=class_name, smoke=smoke)
+
+    description = (
+        f"The value is the Python source of one class named {class_name}, "
+        f"filling the engine's `{slot}` slot. It must satisfy this protocol "
+        f"({protocol.__name__}), with these methods and no constructor arguments:\n"
+        f"{_protocol_surface(protocol)}\n"
+        f"Allowed imports: {', '.join(sorted(_SOURCE_MODULES))}; also available: "
+        f"{', '.join(sorted(_SOURCE_TYPES))}. No file, network, exec, getattr or "
+        f"dunder access. Reply with the complete class in one ```python fence, "
+        f"with a one-line comment saying what changed and why."
+        + (f"\n\n{notes}" if notes else "")
+    )
+    validate(seed)
+    return SourceSlot(initial_value=seed.strip() + "\n", validate=validate, build=build,
+                      description=description)
 
 # ---------------------------------------------------------------------------
 # Inner problems
