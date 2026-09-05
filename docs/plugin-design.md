@@ -3,7 +3,7 @@
 > Status: **design proposal**, nothing here is implemented yet. Written against
 > `main` after the one-call wrappers were removed (`evolve()` is the only entry
 > point) and the policy install hooks landed; it names the exact module each
-> piece lands in. Section 13 lists what changed since the first draft and why.
+> piece lands in. Section 14 lists what changed since the first draft and why.
 
 ## 0. The one-paragraph version
 
@@ -67,7 +67,8 @@ enough for an LLM to author correctly and complete enough to reproduce a run.
 ```jsonc
 {
   "version": 1,
-  "kind": "skill_dir",                 // text | skill_dir | agent_dir | agent_code
+  "kind": "skill_dir",                 // text | skill_dir | agent_dir | agent_code | plugin
+  // "host": "dsh",                    // plugin kind only: dsh | claude_code | codex
   "target": "~/.claude/skills/pdf-audit",
   "name": "pdf-audit",                 // artifact_id; defaults to basename
 
@@ -117,6 +118,7 @@ quickstart shows, so `tests/test_dataset_to_skill.py` and
 | `skill_dir` | `FileTree(load_tree(target), editable, frozen, max_files_per_diff)` | `tree_runner(agent, layout, name, overlay=frozen_files)` | `tree_reflector(reflect, strategy)` | `scorer(score)` | `SKILL_BLAST_RADIUS` | `self_verify=False`, `cheap_eval_tasks=4` |
 | `agent_dir` | same | `tree_runner(..., layout="claude_agent")` | same | same | `HARNESS_BLAST_RADIUS` | same |
 | `agent_code` | `FileTree(..., frozen=["tests/**","conftest.py"] + frozen)` | `code_runner(entrypoint, test_cmd, setup_cmd, overlay=frozen_files)` | `tree_reflector(..., context_files=("**/*.py",))` | `gated_reward(scorer(score))` | `HARNESS_BLAST_RADIUS` | same |
+| `plugin` | `FileTree(..., frozen=PLUGIN_FROZEN[host] + frozen)` | `plugin_runner(host, agent_args, overlay=frozen_files)` (section 8) | `tree_reflector(..., context_files=PLUGIN_CONTEXT[host])` | `gated_reward(scorer(score))` | `HARNESS_BLAST_RADIUS` | same, plus a container sandbox by default |
 
 The two defaults in the last column are the ones the removed wrappers used to
 set and the quickstarts now pass explicitly: a rollout is a real agent call, so
@@ -127,7 +129,8 @@ that has not read the cost model; they remain overridable in `evolve`.
 
 Governance follows from `kind` exactly as it does in the quickstarts, so a user
 cannot accidentally evolve a harness under skill rules. `agent_code` additionally
-requires `entrypoint` and defaults `test_cmd` to `python -m pytest -q`.
+requires `entrypoint` and defaults `test_cmd` to `python -m pytest -q`; `plugin`
+requires `host` and is the subject of section 8.
 
 ### 2.2 Field semantics
 
@@ -436,7 +439,152 @@ on start.
 host is ~30 lines in `agentdescent/integrations/<host>.py` that knows the paths
 and the manifest shape. Adding a host does not touch the core.
 
-## 8. Worker adapters: what the run spawns
+## 8. Evolving the plugins themselves
+
+Everything above evolves *what a host runs*: a skill, an agent folder, a prompt,
+a codebase. A host **plugin** is one level up: the DSH Cordis package that adds
+tools, skills and hooks to `dsh`; the Claude Code plugin directory with its
+skills, commands, agents, hooks and MCP servers; a Codex skills-plus-config
+bundle. Those are the things a team actually maintains, and the
+`dsh-agentdescent` and Claude Code plugins from section 7 are themselves
+examples. So `plugin` is a fifth `kind`, and the question it has to answer is
+the same as for every other kind: what is the state, how does one rollout run,
+what guards it.
+
+### 8.1 What a plugin is, per host
+
+| Host | The tree (`FileTree` keys) | How a rollout loads the *candidate* plugin | Validate gate | Worker command |
+|---|---|---|---|---|
+| DSH | `package.json`, `src/**/*.ts`, `cordis.patch.yml`, `skills/**/SKILL.md`, `hooks.json`, `tests/**` | `HOME=<ws>` already makes `$DSH_HOME` resolve to `<ws>/.dsh`; setup writes `<ws>/.dsh/cordis.patch.yml` referencing the plugin by path (or runs `dsh plugin --profile headless add link:<ws>/plugin`) | `pnpm install --offline`, `pnpm build`, `pnpm test`; then `dsh --profile headless --dump-config` must list the plugin, or the gate fails | `dsh --profile headless "<task>"` |
+| Claude Code | `.claude-plugin/plugin.json`, `skills/**`, `commands/**`, `agents/**`, `hooks/hooks.json`, `.mcp.json` | `claude -p --plugin-dir <ws>/plugin`; `CLAUDE_CONFIG_DIR=<ws>/.claude` so the user's real plugins and settings are not loaded | `claude plugin validate <ws>/plugin` (structure, JSON, referenced files exist) | `claude -p --plugin-dir <ws>/plugin --strict-mcp-config --mcp-config <ws>/.claude/mcp.json "<task>"` |
+| Codex | `.agents/skills/**`, a `config.toml` fragment (MCP servers) | `HOME=<ws>` puts the fragment at `<ws>/.codex/config.toml` | TOML parses; every `mcp_servers.*.command` resolves on PATH | `codex exec "<task>"` |
+
+Two facts make this cheap to build. First, `code_runner` already does
+*materialise, setup, gate, run entrypoint with the task prompt*, and its
+`_child_env` sets `HOME` to the workspace, so the host's home directory **is**
+the workspace for free: `~/.dsh`, `~/.claude`, `~/.codex` all land inside the
+sandbox and the user's real profile is never touched. Second, the Claude Code
+`--plugin-dir` flag and DSH's `link:` install exist precisely for loading an
+uninstalled plugin from a path. So `plugin_runner(host, ...)` is a thin
+per-host table over `code_runner`: which `setup_cmd`, which `test_cmd`, which
+`entrypoint`, which environment variables to forward. Nothing new in the
+engine.
+
+```python
+def plugin_runner(host: str, *, name: str, agent_args=(), env_passthrough=(),
+                  overlay=None, fixtures=None, timeout=900.0, sandbox_pool=None):
+    spec = PLUGIN_HOSTS[host]                  # setup / validate / entrypoint / env per host
+    return code_runner(
+        [*spec.entrypoint, *agent_args], layout=f"plugin/{name}", name=name,
+        setup_cmd=spec.setup, test_cmd=spec.validate, overlay=overlay,
+        fixtures=fixtures, timeout=timeout, sandbox_pool=sandbox_pool,
+        env={**spec.env, **{k: os.environ[k] for k in env_passthrough if k in os.environ}})
+```
+
+`env_passthrough` is necessary because `_child_env` deliberately strips every
+variable but a short allowlist, and a host agent needs its provider key. The
+spec names the variables, never the values, exactly as `SandboxSpec` does; the
+value is read on the worker side at launch.
+
+### 8.2 What "better plugin" means: tasks and reward
+
+A plugin's job is to make the host better at something, so its tasks are
+**end-to-end host tasks run with the plugin loaded**, scored like any other
+run (`scorer`, or a `cmd` grader). Three kinds of task are worth having in
+every plugin's dataset:
+
+* **Capability tasks** exercise what the plugin adds: "total the `amount`
+  column of `data.csv`" for a CSV skill; "list open runs" for the
+  agentdescent plugin. Gold is the answer, `contains`/`exact` scores it.
+* **Regression probes** check the plugin is *present and wired*: a task whose
+  prompt is "which tools do you have?" and whose `cmd` grader greps the answer
+  for `mcp__agentdescent__plan`. A refactor that breaks registration fails
+  these before it fails anything subtle. On DSH, `--dump-config` in the gate
+  covers most of this for free.
+* **Cost probes** read structured output, `claude -p --output-format json`
+  gives `total_cost_usd` and turn count, and a `cmd` grader turns "under N
+  turns and under $X" into a `[0, 1]` score. This is how "the skill works but
+  makes the agent take twelve turns" becomes a gradient instead of an
+  anecdote. Reward stays scalar; a multi-objective plugin run is a task *mix*,
+  and `Beam` or `ParetoFrontier` selection can keep more than one head alive
+  while it settles.
+
+A failed gate (`TEST_FAILURE_MARKER`) scores 0 through `gated_reward`, and
+the failure text is what the reflector reads, so "you broke the build" and
+"the plugin no longer registers its tool" are learning signals rather than
+crashed rounds.
+
+### 8.3 Governance and isolation
+
+A plugin is a harness: it decides what tools the host has and, through hooks,
+what the host may do. So the layer is `HARNESS_BLAST_RADIUS` (L1, every merge
+through the oracle) and four things are **frozen by default**, enforced twice
+as in `agent_code` (the strategy refuses proposals that touch them and the
+runner overlays pristine copies after materialisation):
+
+```python
+PLUGIN_FROZEN = {
+    "dsh":         ["tests/**", "pnpm-lock.yaml", "hooks.json", "**/permission*"],
+    "claude_code": ["hooks/**", ".claude-plugin/marketplace.json", "**/permission*"],
+    "codex":       ["**/permission*"],
+}
+```
+
+`hooks` are frozen because a hook that blocks a tool call is the plugin's own
+L0: an optimizer that could loosen it to score better would be optimising the
+guard away. Lockfiles are frozen because they are regenerated by tooling in
+`setup_cmd`, not authored by a model. Both lists are extendable and, with a
+deliberate `frozen=[]`, overridable.
+
+Isolation is stricter than for the other kinds. Candidate plugin **code runs
+inside the host process**, with the host's tool access, so the `plugin` kind
+defaults to the container provider (`sandbox_container.ContainerProvider`,
+network on because the host needs its API) and `doctor` warns, rather than
+silently downgrading, when no container engine is available. The trimmed
+environment is still applied inside the container.
+
+Cost has one new term: a per-rollout `pnpm install` for DSH plugins. Two
+mitigations, both in the setup step and neither in the engine: a shared pnpm
+store (`npm_config_store_dir` under `workspace_root`) so installs are
+hardlinks after the first, and a build cache keyed by the hash of
+`package.json` plus the lockfile, so a candidate that only touched `SKILL.md`
+reuses the previous `node_modules` and `dist/`. `SharedSandboxPool` is the
+place the cache lives when rollouts span processes.
+
+### 8.4 The plugin evolving itself
+
+The `dsh-agentdescent` Cordis plugin and the Claude Code plugin from section 7
+are `plugin`-kind targets like any other, and the interesting dataset for them
+is **the user requests the skill is supposed to handle**: "evolve
+`~/.claude/skills/pdf-audit` against `eval/cases.jsonl`", with the skill
+directory and cases staged as fixtures. The grader reads the run store and the
+transcript, and all of its checks are mechanical:
+
+* `plan` was called before `start` (the tool sequence in the transcript);
+* the spec `plan` received validates (`agentdescent plan <spec>` exits 0);
+* the host stopped before `apply` and asked (no `apply` call; the last
+  message is a question);
+* cost stayed under the probe's ceiling.
+
+That is a reward for "the skill teaches the host to use the tool correctly",
+which is what a plugin's `SKILL.md` is for, and the same loop then evolves the
+tool descriptions, the `commands/evolve.md` shortcut and the hooks-adjacent
+prose.
+
+Two guards keep this from folding in on itself:
+
+* **A recursion guard.** The worker environment carries
+  `AGENTDESCENT_NESTED=1`. The MCP server's `start` refuses under it and
+  returns a stub run id, so the transcript still shows *that* the host called
+  `start` (which the grader wants) without a nested evolution actually
+  running; `doctor` reports nested mode explicitly.
+* **The controller never hot-swaps itself.** A self-evolved plugin reaches the
+  user's real installation only through `apply`, which is a human decision on
+  a diff, after an L1 oracle gate, with a backup. The loop can improve its own
+  skill text and tool descriptions; it cannot change what is running while it
+  runs.
+
+## 9. Worker adapters: what the run spawns
 
 `agents.claude_code()` and `agents.codex()` exist; `agents.dsh()` is added in
 section 7.2. Two further additions:
@@ -454,7 +602,7 @@ section 7.2. Two further additions:
   so the worker starts clean and cannot read the user's real config, memory or
   MCP servers.
 
-## 9. Security and cost posture
+## 10. Security and cost posture
 
 * **Two trust boundaries, kept apart.** The host session (trusted, has the
   user's keys and config) starts a run. Each worker (semi-trusted, model-driven,
@@ -471,7 +619,7 @@ section 7.2. Two further additions:
   `spec.json` + the ledger; nothing hides in a closure. This is the same reason
   `workspec.py` refuses `cloudpickle`.
 
-## 10. Delivery plan
+## 11. Delivery plan
 
 Ordered so that each step is usable on its own and testable offline (the
 `echo()` agent, `cli_agent(["python", "-c", ...])` as in
@@ -486,14 +634,15 @@ runnable without a key).
 | 4. MCP server (`[mcp]` extra) mirroring the CLI | `agentdescent/mcp.py` | tool schema snapshot; plan → start → status → show with `echo()` |
 | 5. Shared `SKILL.md` + `install dsh` (tier A) + `integrations/claude-code` plugin + marketplace.json | `integrations/`, `agentdescent/integrations/dsh.py` | patch YAML round-trips; skill lands in a discovery root; plugin manifest validates |
 | 6. `install codex` (+ others); `agents.dsh()` + `dsh_skill`/`agents_skill` layouts; structured-output worker adapters | `agentdescent/integrations/`, `agents.py`, `runners.py` | parse fixtures of `claude -p --output-format json` / `codex exec --json`; `tree_runner(layout="dsh_skill")` materialises under `.dsh/skills/` |
-| 7. `stop_when` hook in `evolve()` for a dollar budget | `evolution.py` (the one core change) | a run ends with `stop_reason="budget"`; `on_round` semantics unchanged |
-| 8. Docs page `docs/plugins.md`; README section "Use it from your agent" | docs | `test_docs_links`, `test_docs_examples` |
-| 9. (optional) `dsh-agentdescent` Cordis plugin: one-command install, Web UI runs panel, scheduled re-evolution | separate repo | smoke test against `dsh --dump-config` |
+| 7. `plugin` kind: `plugin_runner` host table, `PLUGIN_FROZEN`, container default, `AGENTDESCENT_NESTED` guard, pnpm store/build cache | `runners.py`, `evolvespec.py`, `mcp.py` | offline: a stub host CLI that echoes its `--plugin-dir` / `$DSH_HOME`; frozen hooks survive a proposal that edits them; nested `start` returns a stub |
+| 8. `stop_when` hook in `evolve()` for a dollar budget | `evolution.py` (the one core change) | a run ends with `stop_reason="budget"`; `on_round` semantics unchanged |
+| 9. Docs page `docs/plugins.md`; README section "Use it from your agent" | docs | `test_docs_links`, `test_docs_examples` |
+| 10. (optional) `dsh-agentdescent` Cordis plugin: one-command install, Web UI runs panel, scheduled re-evolution | separate repo | smoke test against `dsh --dump-config` |
 
-Steps 1 to 4 are the product; 5 to 9 are packaging plus one small engine hook.
+Steps 1 to 4 are the product; 5 to 10 are packaging, the `plugin` kind, and one small engine hook.
 Nothing in the aggregator, ledger, async runtime or governance changes.
 
-## 11. Alternatives considered
+## 12. Alternatives considered
 
 * **Python-only, "just import it".** That is the status quo, and it is why the
   question is being asked: the audience inside an agent session does not want to
@@ -514,7 +663,7 @@ Nothing in the aggregator, ledger, async runtime or governance changes.
 * **Auto-apply on success.** Tempting for a one-shot feel, but the artifact is
   the user's own skill directory and the reward is a proxy. Show the diff, ask.
 
-## 12. DSH facts this design relies on
+## 13. DSH facts this design relies on
 
 Checked on 2026-09-05 against the developer preview; DSH says breaking changes
 are expected, so `install dsh` should verify with `dsh --dump-config` rather
@@ -542,7 +691,7 @@ and `packages/mcp/mcp-client/README.md`;
 [DSH CLI user guide](https://deepseekdocs.com/en/docs/user-guide/cli);
 [awesome-deepseek-harness](https://github.com/Dominic789654/awesome-deepseek-harness).
 
-## 13. What changed since the first draft
+## 14. What changed since the first draft
 
 Two upstream commits landed between the first draft and this one, and both
 moved the design.
@@ -573,3 +722,11 @@ beside `RolloutSpec` and to avoid colliding with the policy guide's own
 "Recipes" table; `plan` is now also a CLI verb; `show` uses
 `write_to(dry_run=True)`; the dollar budget is stated honestly as needing one
 small engine hook rather than pretending `evolve()` has it.
+
+**A fifth kind, `plugin`** (section 8), added on request: the host plugins
+themselves, the `dsh-agentdescent` and Claude Code plugins included, are
+evolvable. It reuses `code_runner` end to end, because `_child_env` already
+makes the workspace the host's home and Claude Code's `--plugin-dir` / DSH's
+`link:` install load an uninstalled plugin from a path. What is new is a
+per-host table, a frozen-by-default list with hooks in it, a container
+default, and a recursion guard for the plugin that evolves itself.
