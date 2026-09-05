@@ -1,92 +1,92 @@
 {
  "seed_source": "class Policy:\n    # Round robin over the shard (the engine's default).\n    def pick(self, keys, round_index):\n        return keys[round_index % len(keys)]\n\n    def record(self, task_id, score):\n        pass\n",
- "evolved_source": "class Policy:\n    # Round robin over the shard (the engine's default).\n    def pick(self, keys, round_index):\n        return keys[round_index % len(keys)]\n\n    def record(self, task_id, score):\n        pass\n",
+ "evolved_source": "class Policy:\n    # Changed: Use UCB-style exploration that balances trying unknown tasks with exploiting known low scores,\n    # and avoid re-picking solved tasks (score >= 1.0) when alternatives exist.\n    def __init__(self):\n        self.scores = {}\n        self.attempts = {}\n    \n    def pick(self, keys, round_index):\n        # Filter out solved tasks if there are alternatives\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if not unsolved:\n            unsolved = keys  # all solved, just pick any\n        \n        # UCB1-style: prioritize low scores and high uncertainty\n        def ucb_key(k):\n            score = self.scores.get(k, 0.5)  # assume 0.5 for unknown\n            attempts = self.attempts.get(k, 0)\n            total_attempts = sum(self.attempts.get(x, 0) for x in unsolved) + 1\n            # Exploration bonus: prefer tasks with fewer attempts\n            exploration = math.sqrt(2 * math.log(total_attempts + 1) / (attempts + 1))\n            # Lower score is better (more likely to improve), so negate\n            return (score - exploration, attempts)\n        \n        return min(unsolved, key=ucb_key)\n    \n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        self.attempts[task_id] = self.attempts.get(task_id, 0) + 1",
  "outer": {
-  "final_reward": 0.75,
+  "final_reward": 0.7583333333333333,
   "rollouts": 12,
   "outcomes": {
-   "oracle-rejected": 6
+   "committed": 2,
+   "oracle-rejected": 4
   },
   "stop_reason": "rounds",
   "error": null,
-  "seconds": 61.88492770599987,
+  "seconds": 450.29385915999956,
   "rounds": 6,
   "workers": 2,
   "seeds": [
    0,
    1,
-   2,
-   3
+   2
   ],
   "proposals": [
    {
-    "source": "Here's my proposed improvement:\n\n```python\nclass Policy:\n    # Track scores and prioritize unsolved tasks, falling back to round-robin among unknowns.\n    def __init__(self):\n        self.scores = {}\n        self.attempts = {}\n    \n    def pick(self, keys, round_index):\n        # First, prefer tasks we haven't tried yet (unknown difficulty)\n        untried = [k for k in keys if k not in self.scores]\n        if untried:\n            # Among untried, use round-robin to spread exploration\n            return untried[round_index % len(untried)]\n        \n        # All tried: pick the one with lowest score (most likely to improve)\n        # Among ties, prefer least attempted\n        def sort_key(k):\n            return (self.scores.get(k, 0), self.attempts.get(k, 0))\n        return min(keys, key=sort_key)\n    \n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        self.attempts[task_id] = self.attempts.get(task_id, 0) + 1\n```",
-    "accepted_by_gate": true,
-    "reason": "",
-    "on_task": "gsmhard-0:0"
-   },
-   {
     "source": "Here's an improved policy that prioritizes exploring unsolved tasks while maintaining some diversity:\n\n```python\nclass Policy:\n    # Changed: prioritize unsolved tasks over solved ones, with round-robin fallback\n    def __init__(self):\n        self.scores = {}  # task_id -> best score seen\n        self.attempts = {}  # task_id -> number of times picked\n\n    def pick(self, keys, round_index):\n        # Filter to tasks we haven't solved yet (score < 1.0)\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if not unsolved:\n            # All solved in this shard, just round-robin\n            return keys[round_index % len(keys)]\n        \n        # Among unsolved, prefer ones we've tried least (exploration)\n        # and ones with lower scores (more room for improvement)\n        def priority(k):\n            attempts = self.attempts.get(k, 0)\n            score = self.scores.get(k, 0)\n            # Lower attempts and lower scores get higher priority\n            return (attempts, score)\n        \n        return min(unsolved, key=priority)\n\n    def record(self, task_id, score):\n        # Keep best score seen\n        if task_id not in self.scores or score > self.scores[task_id]:\n            self.scores[task_id] = score\n        self.attempts[task_id] = self.attempts.get(task_id, 0) + 1\n```",
     "accepted_by_gate": true,
     "reason": "",
     "on_task": "gsmhard-1:0"
    },
    {
-    "source": "Here's an improved policy that prioritizes exploring unsolved tasks while maintaining some diversity:\n\n```python\nclass Policy:\n    # Changed: prioritize unsolved tasks over solved ones to avoid wasting rollouts on completed artifacts\n    def __init__(self):\n        self.scores = {}\n        self.round = 0\n    \n    def pick(self, keys, round_index):\n        self.round = round_index\n        # Separate unsolved and solved tasks\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if unsolved:\n            # Round-robin among unsolved tasks to explore them all\n            return unsolved[round_index % len(unsolved)]\n        # All solved, just pick any (round-robin)\n        return keys[round_index % len(keys)]\n    \n    def record(self, task_id, score):\n        self.scores[task_id] = score\n```",
+    "source": "Here's my proposed improvement:\n\n```python\nclass Policy:\n    # Track scores and prioritize unsolved tasks, falling back to round-robin among unknowns.\n    def __init__(self):\n        self.scores = {}\n        self.attempts = {}\n    \n    def pick(self, keys, round_index):\n        # First, prefer tasks we haven't tried yet (unknown difficulty)\n        untried = [k for k in keys if k not in self.scores]\n        if untried:\n            # Among untried, use round-robin to spread exploration\n            return untried[round_index % len(untried)]\n        \n        # All tried: pick the one with lowest score (most likely to improve)\n        # Among ties, prefer least attempted\n        def sort_key(k):\n            return (self.scores.get(k, 0), self.attempts.get(k, 0))\n        return min(keys, key=sort_key)\n    \n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        self.attempts[task_id] = self.attempts.get(task_id, 0) + 1\n```",
     "accepted_by_gate": true,
     "reason": "",
-    "on_task": "gsmhard-1:1"
+    "on_task": "gsmhard-0:0"
    },
    {
-    "source": "Here's my revised policy that prioritizes exploring unsolved tasks while maintaining diversity:\n\n```python\nclass Policy:\n    # Changed from pure round-robin to prioritize unsolved tasks, then round-robin among them.\n    # This avoids wasting rollouts on already-solved tasks (score >= 1.0) which yield no proposals.\n    def __init__(self):\n        self.scores = {}\n        self.unsolved_order = []\n        self.unsolved_idx = 0\n    \n    def pick(self, keys, round_index):\n        # Filter to unsolved tasks (score < 1.0 or unknown)\n        unsolved = [k for k in keys if self.scores.get(k, 0.0) < 1.0]\n        if not unsolved:\n            # All solved in this shard, fall back to round-robin\n            return keys[round_index % len(keys)]\n        \n        # Round-robin among unsolved tasks, but start from a rotating offset\n        # to avoid always picking the same first task\n        offset = round_index % len(unsolved)\n        return unsolved[offset]\n    \n    def record(self, task_id, score):\n        self.scores[task_id] = score\n```",
+    "source": "I need to improve the policy to better handle the case where we have a mix of solved and unsolved tasks. The current policy prioritizes untried tasks, but once all are tried, it picks the lowest score, which could repeatedly pick solved tasks (score >= 1.0) that yield no new information.\n\nThe key insight: when a task has score >= 1.0, it's solved and picking it again is wasteful. I should avoid picking solved tasks entirely if there are any unsolved ones available, and among unsolved ones, prefer those with lower scores to maximize improvement potential.\n\n```python\nclass Policy:\n    # Changed: avoid picking solved tasks (score>=1.0) when unsolved exist; among unsolved, pick lowest score with least attempts.\n    def __init__(self):\n        self.scores = {}\n        self.attempts = {}\n    \n    def pick(self, keys, round_index):\n        # Separate into unsolved (score < 1.0 or unknown) and solved (score >= 1.0)\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if unsolved:\n            # Among unsolved, prefer untried first, then lowest score, then least attempts\n            untried = [k for k in unsolved if k not in self.scores]\n            if untried:\n                return untried[round_index % len(untried)]\n            def sort_key(k):\n                return (self.scores.get(k, 0), self.attempts.get(k, 0))\n            return min(unsolved, key=sort_key)\n        # All are solved, just pick the least attempted to minimize waste\n        return min(keys, key=lambda k: self.attempts.get(k, 0))\n    \n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        self.attempts[task_id] = self.attempts.get(task_id, 0) + 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-3:0"
+   },
+   {
+    "source": "I need to improve the policy to better handle the exploration-exploitation tradeoff. The current policy explores all untried tasks before exploiting, which wastes rollouts on tasks that might be solved. A better approach is to prioritize tasks that are likely unsolved based on partial information, while still exploring enough to find solvable tasks.\n\n```python\nclass Policy:\n    # Changed: Use UCB-style exploration that balances trying unknown tasks with exploiting known low scores,\n    # and avoid re-picking solved tasks (score >= 1.0) when alternatives exist.\n    def __init__(self):\n        self.scores = {}\n        self.attempts = {}\n    \n    def pick(self, keys, round_index):\n        # Filter out solved tasks if there are alternatives\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if not unsolved:\n            unsolved = keys  # all solved, just pick any\n        \n        # UCB1-style: prioritize low scores and high uncertainty\n        def ucb_key(k):\n            score = self.scores.get(k, 0.5)  # assume 0.5 for unknown\n            attempts = self.attempts.get(k, 0)\n            total_attempts = sum(self.attempts.get(x, 0) for x in unsolved) + 1\n            # Exploration bonus: prefer tasks with fewer attempts\n            exploration = math.sqrt(2 * math.log(total_attempts + 1) / (attempts + 1))\n            # Lower score is better (more likely to improve), so negate\n            return (score - exploration, attempts)\n        \n        return min(unsolved, key=ucb_key)\n    \n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        self.attempts[task_id] = self.attempts.get(task_id, 0) + 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-2:0"
+   },
+   {
+    "source": "I need to improve the policy to better handle the exploration-exploitation tradeoff. The current UCB approach assumes 0.5 for unknown tasks, but this may not be optimal. Let me think about what would work better.\n\nThe key insight is that we want to find tasks that are solvable (score < 1.0) but not yet solved, and we want to focus on tasks where we can make progress. The current policy treats all unknown tasks equally, but we should be more aggressive about trying tasks we haven't attempted yet, since they might be easy wins.\n\nA better approach: prioritize trying completely unknown tasks first (since they might be easy), then fall back to exploiting known low scores. Also, we should avoid tasks that are already solved.\n\n```python\nclass Policy:\n    # Changed: Prioritize trying unknown tasks first (they might be easy wins), \n    # then exploit known low scores, while avoiding solved tasks.\n    def __init__(self):\n        self.scores = {}\n        self.attempts = {}\n    \n    def pick(self, keys, round_index):\n        # Filter out solved tasks if there are alternatives\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if not unsolved:\n            unsolved = keys  # all solved, just pick any\n        \n        # First priority: tasks we've never tried (unknown)\n        unknown = [k for k in unsolved if k not in self.scores]\n        if unknown:\n            # Among unknown, pick randomly to avoid bias\n            return random.choice(unknown)\n        \n        # All remaining are known and unsolved - pick the one with lowest score\n        # (most likely to be improvable), with slight exploration\n        def key(k):\n            score = self.scores[k]\n            attempts = self.attempts[k]\n            # Lower score is better, add small exploration bonus for fewer attempts\n            return (score, attempts)\n        \n        return min(unsolved, key=key)\n    \n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        self.attempts[task_id] = self.attempts.get(task_id, 0) + 1\n```",
     "accepted_by_gate": true,
     "reason": "",
     "on_task": "gsmhard-0:1"
    },
    {
-    "source": "Here's an improved policy that prioritizes exploring unsolved tasks while maintaining some diversity:\n\n```python\nclass Policy:\n    # Changed: prioritize unsolved tasks over solved ones, with round-robin fallback\n    def __init__(self):\n        self.scores = {}  # task_id -> best score seen\n        self.attempts = {}  # task_id -> number of times picked\n\n    def pick(self, keys, round_index):\n        # Filter to tasks we haven't solved yet (score < 1.0)\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if not unsolved:\n            # All solved in this shard, just round-robin\n            return keys[round_index % len(keys)]\n        \n        # Among unsolved, prefer ones we've tried least (exploration)\n        # and ones with lower scores (more room for improvement)\n        def priority(k):\n            attempts = self.attempts.get(k, 0)\n            score = self.scores.get(k, 0)\n            # Lower attempts and lower scores get higher priority\n            return (attempts, score)\n        \n        return min(unsolved, key=priority)\n\n    def record(self, task_id, score):\n        # Keep best score seen\n        if task_id not in self.scores or score > self.scores[task_id]:\n            self.scores[task_id] = score\n        self.attempts[task_id] = self.attempts.get(task_id, 0) + 1\n```",
-    "accepted_by_gate": true,
-    "reason": "",
-    "on_task": "gsmhard-1:0"
-   },
-   {
-    "source": "Here's my proposed improvement:\n\n```python\nclass Policy:\n    # Track scores and prioritize unsolved tasks, falling back to round-robin among unknowns.\n    def __init__(self):\n        self.scores = {}\n        self.attempts = {}\n    \n    def pick(self, keys, round_index):\n        # First, prefer tasks we haven't tried yet (unknown difficulty)\n        untried = [k for k in keys if k not in self.scores]\n        if untried:\n            # Among untried, use round-robin to spread exploration\n            return untried[round_index % len(untried)]\n        \n        # All tried: pick the one with lowest score (most likely to improve)\n        # Among ties, prefer least attempted\n        def sort_key(k):\n            return (self.scores.get(k, 0), self.attempts.get(k, 0))\n        return min(keys, key=sort_key)\n    \n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        self.attempts[task_id] = self.attempts.get(task_id, 0) + 1\n```",
-    "accepted_by_gate": true,
-    "reason": "",
-    "on_task": "gsmhard-0:0"
-   },
-   {
-    "source": "Here's an improved policy that prioritizes exploring unsolved tasks while maintaining some diversity:\n\n```python\nclass Policy:\n    # Changed: prioritize unsolved tasks over solved ones to avoid wasting rollouts on completed artifacts\n    def __init__(self):\n        self.scores = {}\n        self.round = 0\n    \n    def pick(self, keys, round_index):\n        self.round = round_index\n        # Separate unsolved and solved tasks\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if unsolved:\n            # Round-robin among unsolved tasks to explore them all\n            return unsolved[round_index % len(unsolved)]\n        # All solved, just pick any (round-robin)\n        return keys[round_index % len(keys)]\n    \n    def record(self, task_id, score):\n        self.scores[task_id] = score\n```",
+    "source": "I need to improve the policy to better handle the case where most tasks are already solved. The current policy gets stuck picking unsolved tasks but doesn't explore enough when there are many solved tasks.\n\nThe key insight: when most tasks are solved (score >= 1.0), we should focus on the few unsolved ones, but also need to be careful about which unsolved ones to try. The current UCB approach assumes 0.5 for unknown tasks, which may not be aggressive enough.\n\nLet me revise to use a more aggressive exploration strategy for unknown tasks and better handle the solved/unsolved balance.\n\n```python\nclass Policy:\n    # Changed: Use Thompson sampling with Beta priors to better balance exploration of unknown tasks\n    # and exploitation of known low scores, while avoiding solved tasks when alternatives exist.\n    def __init__(self):\n        self.scores = {}\n        self.attempts = {}\n    \n    def pick(self, keys, round_index):\n        # Filter out solved tasks if there are alternatives\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if not unsolved:\n            unsolved = keys  # all solved, just pick any\n        \n        # Thompson sampling: sample from Beta(alpha, beta) where alpha = successes, beta = failures\n        # For unknown tasks, use a prior that encourages exploration (Beta(1,1) = uniform)\n        def thompson_key(k):\n            score = self.scores.get(k, None)\n            attempts = self.attempts.get(k, 0)\n            \n            if score is None:\n                # Unknown task: sample from uniform prior, but add small bonus for being unknown\n                return random.random() * 0.9  # slightly favor unknown tasks\n            else:\n                # Known task: Beta distribution with alpha = successes, beta = failures\n                # Since score is 0..1, treat as success rate\n                alpha = score * attempts + 1\n                beta = (1 - score) * attempts + 1\n                # Sample from Beta distribution - lower sample means more likely to improve\n                return random.betavariate(alpha, beta)\n        \n        return min(unsolved, key=thompson_key)\n    \n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        self.attempts[task_id] = self.attempts.get(task_id, 0) + 1\n```",
     "accepted_by_gate": true,
     "reason": "",
     "on_task": "gsmhard-1:1"
    },
    {
-    "source": "Here's my revised policy that prioritizes exploring unsolved tasks while maintaining diversity:\n\n```python\nclass Policy:\n    # Changed from pure round-robin to prioritize unsolved tasks, then round-robin among them.\n    # This avoids wasting rollouts on already-solved tasks (score >= 1.0) which yield no proposals.\n    def __init__(self):\n        self.scores = {}\n        self.unsolved_order = []\n        self.unsolved_idx = 0\n    \n    def pick(self, keys, round_index):\n        # Filter to unsolved tasks (score < 1.0 or unknown)\n        unsolved = [k for k in keys if self.scores.get(k, 0.0) < 1.0]\n        if not unsolved:\n            # All solved in this shard, fall back to round-robin\n            return keys[round_index % len(keys)]\n        \n        # Round-robin among unsolved tasks, but start from a rotating offset\n        # to avoid always picking the same first task\n        offset = round_index % len(unsolved)\n        return unsolved[offset]\n    \n    def record(self, task_id, score):\n        self.scores[task_id] = score\n```",
-    "accepted_by_gate": true,
-    "reason": "",
-    "on_task": "gsmhard-0:1"
-   },
-   {
-    "source": "Here's an improved policy that prioritizes exploring unsolved tasks while maintaining some diversity:\n\n```python\nclass Policy:\n    # Changed: prioritize unsolved tasks over solved ones, with round-robin fallback\n    def __init__(self):\n        self.scores = {}  # task_id -> best score seen\n        self.attempts = {}  # task_id -> number of times picked\n\n    def pick(self, keys, round_index):\n        # Filter to tasks we haven't solved yet (score < 1.0)\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if not unsolved:\n            # All solved in this shard, just round-robin\n            return keys[round_index % len(keys)]\n        \n        # Among unsolved, prefer ones we've tried least (exploration)\n        # and ones with lower scores (more room for improvement)\n        def priority(k):\n            attempts = self.attempts.get(k, 0)\n            score = self.scores.get(k, 0)\n            # Lower attempts and lower scores get higher priority\n            return (attempts, score)\n        \n        return min(unsolved, key=priority)\n\n    def record(self, task_id, score):\n        # Keep best score seen\n        if task_id not in self.scores or score > self.scores[task_id]:\n            self.scores[task_id] = score\n        self.attempts[task_id] = self.attempts.get(task_id, 0) + 1\n```",
+    "source": "Here's a revised policy that addresses the issue of getting stuck on a single task when multiple tasks are available:\n\n```python\nclass Policy:\n    # Changed: Use round-robin exploration across all unsolved tasks to avoid getting stuck on one task,\n    # and prioritize tasks with lower scores when revisiting.\n    def __init__(self):\n        self.scores = {}\n        self.attempts = {}\n        self.last_pick = None\n    \n    def pick(self, keys, round_index):\n        # Filter out solved tasks if there are alternatives\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if not unsolved:\n            unsolved = keys  # all solved, just pick any\n        \n        # If we have multiple unsolved tasks, prefer ones we haven't tried yet\n        untried = [k for k in unsolved if k not in self.attempts]\n        if untried:\n            # Among untried, pick one we haven't picked recently\n            if self.last_pick in untried and len(untried) > 1:\n                untried.remove(self.last_pick)\n            choice = min(untried, key=lambda k: self.scores.get(k, 0.5))\n        else:\n            # All tried: pick the one with lowest score, but avoid repeating the same one\n            candidates = [k for k in unsolved if k != self.last_pick]\n            if not candidates:\n                candidates = unsolved\n            choice = min(candidates, key=lambda k: (self.scores.get(k, 0.5), self.attempts.get(k, 0)))\n        \n        self.last_pick = choice\n        return choice\n    \n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        self.attempts[task_id] = self.attempts.get(task_id, 0) + 1\n```",
     "accepted_by_gate": true,
     "reason": "",
     "on_task": "gsmhard-1:0"
    },
    {
-    "source": "Here's my proposed improvement:\n\n```python\nclass Policy:\n    # Track scores and prioritize unsolved tasks, falling back to round-robin among unknowns.\n    def __init__(self):\n        self.scores = {}\n        self.attempts = {}\n    \n    def pick(self, keys, round_index):\n        # First, prefer tasks we haven't tried yet (unknown difficulty)\n        untried = [k for k in keys if k not in self.scores]\n        if untried:\n            # Among untried, use round-robin to spread exploration\n            return untried[round_index % len(untried)]\n        \n        # All tried: pick the one with lowest score (most likely to improve)\n        # Among ties, prefer least attempted\n        def sort_key(k):\n            return (self.scores.get(k, 0), self.attempts.get(k, 0))\n        return min(keys, key=sort_key)\n    \n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        self.attempts[task_id] = self.attempts.get(task_id, 0) + 1\n```",
+    "source": "Here's my revised policy:\n\n```python\nclass Policy:\n    # Changed: Use Thompson sampling with Beta distribution to better model uncertainty,\n    # and prioritize tasks with high expected improvement over current best score.\n    def __init__(self):\n        self.scores = {}\n        self.attempts = {}\n        self.best_score = 0.0\n    \n    def pick(self, keys, round_index):\n        # Filter out solved tasks if there are alternatives\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if not unsolved:\n            unsolved = keys  # all solved, just pick any\n        \n        # Thompson sampling: sample from Beta(alpha, beta) where alpha = successes, beta = failures\n        # For unknown tasks, use a prior that's slightly optimistic (Beta(1,1) = uniform)\n        def thompson_key(k):\n            score = self.scores.get(k, None)\n            attempts = self.attempts.get(k, 0)\n            \n            if score is None:\n                # Unknown task: sample from uniform prior, but add small bonus for exploration\n                return random.random() * 0.5  # lower is better, so unknown gets moderate priority\n            else:\n                # Known task: sample from Beta distribution\n                # Treat score as success rate, but weight by attempts to avoid overconfidence\n                alpha = 1 + score * attempts\n                beta = 1 + (1 - score) * attempts\n                sample = random.betavariate(alpha, beta)\n                # Lower sample = higher priority (we want low scores)\n                return sample\n        \n        # Also add a small penalty for tasks that are already above current best\n        def combined_key(k):\n            base = thompson_key(k)\n            score = self.scores.get(k, 0.5)\n            # If task is already better than best, deprioritize it slightly\n            if score > self.best_score:\n                base += 0.1\n            return base\n        \n        return min(unsolved, key=combined_key)\n    \n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        self.attempts[task_id] = self.attempts.get(task_id, 0) + 1\n        self.best_score = max(self.best_score, score)\n```",
     "accepted_by_gate": true,
     "reason": "",
     "on_task": "gsmhard-0:0"
    },
    {
-    "source": "Here's an improved policy that prioritizes exploring unsolved tasks while maintaining some diversity:\n\n```python\nclass Policy:\n    # Changed: prioritize unsolved tasks over solved ones to avoid wasting rollouts on completed artifacts\n    def __init__(self):\n        self.scores = {}\n        self.round = 0\n    \n    def pick(self, keys, round_index):\n        self.round = round_index\n        # Separate unsolved and solved tasks\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if unsolved:\n            # Round-robin among unsolved tasks to explore them all\n            return unsolved[round_index % len(unsolved)]\n        # All solved, just pick any (round-robin)\n        return keys[round_index % len(keys)]\n    \n    def record(self, task_id, score):\n        self.scores[task_id] = score\n```",
+    "source": "Here's a revised policy that addresses a key weakness: the current UCB approach can waste rollouts on tasks that are already solved when there are still unknown tasks available. The fix prioritizes exploring unknown tasks first, then exploits known low scores.\n\n```python\nclass Policy:\n    # Changed: Prioritize unknown tasks over known ones, and only exploit known low scores\n    # when no unknowns remain. This avoids wasting rollouts on solved tasks (score >= 1.0)\n    # when there are still untried tasks that could yield improvements.\n    def __init__(self):\n        self.scores = {}\n        self.attempts = {}\n    \n    def pick(self, keys, round_index):\n        # First priority: tasks we've never tried (unknown score)\n        unknown = [k for k in keys if k not in self.scores]\n        if unknown:\n            # Among unknowns, pick one with fewest attempts (all have 0, so just pick first)\n            return unknown[0]\n        \n        # All known: filter out solved tasks if alternatives exist\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if not unsolved:\n            return keys[0]  # all solved, just pick any\n        \n        # Among unsolved, use UCB1: lower score is better, add exploration bonus\n        def ucb_key(k):\n            score = self.scores.get(k, 0.5)\n            attempts = self.attempts.get(k, 0)\n            total_attempts = sum(self.attempts.get(x, 0) for x in unsolved) + 1\n            exploration = math.sqrt(2 * math.log(total_attempts + 1) / (attempts + 1))\n            return (score - exploration, attempts)\n        \n        return min(unsolved, key=ucb_key)\n    \n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        self.attempts[task_id] = self.attempts.get(task_id, 0) + 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-3:0"
+   },
+   {
+    "source": "I need to improve the policy to better handle the exploration-exploitation tradeoff. The current UCB approach assumes unknown tasks have score 0.5, but this may not be optimal. Let me use a more aggressive exploration strategy that prioritizes trying unknown tasks first, since we have limited rounds and need to discover which tasks are solvable.\n\n```python\nclass Policy:\n    # Changed: Prioritize trying unknown tasks first (they have highest information value),\n    # then among known tasks prefer lower scores. This avoids wasting picks on solved tasks\n    # and ensures we explore the task space before exploiting.\n    def __init__(self):\n        self.scores = {}\n        self.attempts = {}\n    \n    def pick(self, keys, round_index):\n        # First priority: unknown tasks (never tried) - they give us new information\n        unknown = [k for k in keys if k not in self.scores]\n        if unknown:\n            return unknown[0]  # just pick first unknown, order doesn't matter much\n        \n        # All known - filter out solved if possible\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if not unsolved:\n            return keys[0]  # all solved, just pick any\n        \n        # Among unsolved, prefer lowest score (most likely to improve)\n        # Add small exploration bonus for less-tried tasks\n        def key(k):\n            score = self.scores[k]\n            attempts = self.attempts.get(k, 0)\n            # Lower score is better, but add small bonus for less-tried\n            return (score, attempts)\n        \n        return min(unsolved, key=key)\n    \n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        self.attempts[task_id] = self.attempts.get(task_id, 0) + 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-2:0"
+   },
+   {
+    "source": "I need to improve the policy to better handle the case where most tasks are already solved. The current policy gets stuck picking unsolved tasks but doesn't explore enough when there are many solved tasks.\n\nThe key insight: when most tasks are solved (score >= 1.0), we should focus on the few unsolved ones, but also need to be careful about which unsolved ones to try. The current UCB approach assumes 0.5 for unknown tasks, which may not be aggressive enough.\n\nLet me revise to use a more aggressive exploration strategy for unknown tasks and better handle the solved/unsolved balance.\n\n```python\nclass Policy:\n    # Changed: Use Thompson sampling with Beta priors to better balance exploration of unknown tasks\n    # and exploitation of known low scores, while avoiding solved tasks when alternatives exist.\n    def __init__(self):\n        self.scores = {}\n        self.attempts = {}\n    \n    def pick(self, keys, round_index):\n        # Filter out solved tasks if there are alternatives\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if not unsolved:\n            unsolved = keys  # all solved, just pick any\n        \n        # Thompson sampling: sample from Beta(alpha, beta) where alpha = successes, beta = failures\n        # For unknown tasks, use a prior that encourages exploration (Beta(1,1) = uniform)\n        def thompson_key(k):\n            score = self.scores.get(k, None)\n            attempts = self.attempts.get(k, 0)\n            \n            if score is None:\n                # Unknown task: sample from uniform prior, but add small bonus for being unknown\n                return random.random() * 0.9  # slightly favor unknown tasks\n            else:\n                # Known task: Beta distribution with alpha = successes, beta = failures\n                # Since score is 0..1, treat as success rate\n                alpha = score * attempts + 1\n                beta = (1 - score) * attempts + 1\n                # Sample from Beta distribution - lower sample means more likely to improve\n                return random.betavariate(alpha, beta)\n        \n        return min(unsolved, key=thompson_key)\n    \n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        self.attempts[task_id] = self.attempts.get(task_id, 0) + 1\n```",
     "accepted_by_gate": true,
     "reason": "",
     "on_task": "gsmhard-1:1"
    },
    {
-    "source": "Here's my revised policy that prioritizes exploring unsolved tasks while maintaining diversity:\n\n```python\nclass Policy:\n    # Changed from pure round-robin to prioritize unsolved tasks, then round-robin among them.\n    # This avoids wasting rollouts on already-solved tasks (score >= 1.0) which yield no proposals.\n    def __init__(self):\n        self.scores = {}\n        self.unsolved_order = []\n        self.unsolved_idx = 0\n    \n    def pick(self, keys, round_index):\n        # Filter to unsolved tasks (score < 1.0 or unknown)\n        unsolved = [k for k in keys if self.scores.get(k, 0.0) < 1.0]\n        if not unsolved:\n            # All solved in this shard, fall back to round-robin\n            return keys[round_index % len(keys)]\n        \n        # Round-robin among unsolved tasks, but start from a rotating offset\n        # to avoid always picking the same first task\n        offset = round_index % len(unsolved)\n        return unsolved[offset]\n    \n    def record(self, task_id, score):\n        self.scores[task_id] = score\n```",
+    "source": "I need to improve the policy to better handle the exploration-exploitation tradeoff. The current UCB approach assumes 0.5 for unknown tasks, but this may not be optimal. Let me think about what would work better.\n\nThe key insight is that we want to find tasks that are solvable (score < 1.0) but not yet solved, and we want to focus on tasks where we can make progress. The current policy treats all unknown tasks equally, but we should be more aggressive about trying tasks we haven't attempted yet, since they might be easy wins.\n\nA better approach: prioritize trying completely unknown tasks first (since they might be easy), then fall back to exploiting known low scores. Also, we should avoid tasks that are already solved.\n\n```python\nclass Policy:\n    # Changed: Prioritize trying unknown tasks first (they might be easy wins), \n    # then exploit known low scores, while avoiding solved tasks.\n    def __init__(self):\n        self.scores = {}\n        self.attempts = {}\n    \n    def pick(self, keys, round_index):\n        # Filter out solved tasks if there are alternatives\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if not unsolved:\n            unsolved = keys  # all solved, just pick any\n        \n        # First priority: tasks we've never tried (unknown)\n        unknown = [k for k in unsolved if k not in self.scores]\n        if unknown:\n            # Among unknown, pick randomly to avoid bias\n            return random.choice(unknown)\n        \n        # All remaining are known and unsolved - pick the one with lowest score\n        # (most likely to be improvable), with slight exploration\n        def key(k):\n            score = self.scores[k]\n            attempts = self.attempts[k]\n            # Lower score is better, add small exploration bonus for fewer attempts\n            return (score, attempts)\n        \n        return min(unsolved, key=key)\n    \n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        self.attempts[task_id] = self.attempts.get(task_id, 0) + 1\n```",
     "accepted_by_gate": true,
     "reason": "",
     "on_task": "gsmhard-0:1"
@@ -97,25 +97,25 @@
   "history": [
    {
     "round": 0,
-    "held_out_reward": 0.75,
-    "committed": 0,
-    "rejected": 1,
+    "held_out_reward": 0.7416666666666667,
+    "committed": 1,
+    "rejected": 0,
     "reasons": {
-     "oracle-rejected": 1
+     "committed": 1
     }
    },
    {
     "round": 1,
-    "held_out_reward": 0.75,
-    "committed": 0,
-    "rejected": 1,
+    "held_out_reward": 0.7583333333333333,
+    "committed": 1,
+    "rejected": 0,
     "reasons": {
-     "oracle-rejected": 1
+     "committed": 1
     }
    },
    {
     "round": 2,
-    "held_out_reward": 0.75,
+    "held_out_reward": 0.7583333333333333,
     "committed": 0,
     "rejected": 1,
     "reasons": {
@@ -124,7 +124,7 @@
    },
    {
     "round": 3,
-    "held_out_reward": 0.75,
+    "held_out_reward": 0.7583333333333333,
     "committed": 0,
     "rejected": 1,
     "reasons": {
@@ -133,7 +133,7 @@
    },
    {
     "round": 4,
-    "held_out_reward": 0.75,
+    "held_out_reward": 0.7583333333333333,
     "committed": 0,
     "rejected": 1,
     "reasons": {
@@ -142,7 +142,7 @@
    },
    {
     "round": 5,
-    "held_out_reward": 0.75,
+    "held_out_reward": 0.7583333333333333,
     "committed": 0,
     "rejected": 1,
     "reasons": {
@@ -153,16 +153,16 @@
  },
  "validation": {
   "gsmhard-0": {
-   "n": 3,
+   "n": 2,
    "before": 0.625,
-   "after": 0.625,
-   "gain": 0.0,
-   "gain_sd": 0.0,
-   "wins": 0,
+   "after": 0.7124999999999999,
+   "gain": 0.08749999999999997,
+   "gain_sd": 0.012500000000000011,
+   "wins": 2,
    "losses": 0
   },
   "gsmhard-1": {
-   "n": 3,
+   "n": 2,
    "before": 0.875,
    "after": 0.875,
    "gain": 0.0,
@@ -171,25 +171,43 @@
    "losses": 0
   },
   "gsmhard-2": {
-   "n": 3,
+   "n": 2,
    "before": 0.5,
-   "after": 0.5,
-   "gain": 0.0,
-   "gain_sd": 0.0,
-   "wins": 0,
+   "after": 0.5875,
+   "gain": 0.08750000000000002,
+   "gain_sd": 0.08750000000000002,
+   "wins": 1,
    "losses": 0
   },
   "gsmhard-3": {
-   "n": 3,
+   "n": 2,
    "before": 0.875,
-   "after": 0.875,
+   "after": 0.8999999999999999,
+   "gain": 0.024999999999999967,
+   "gain_sd": 0.07500000000000001,
+   "wins": 1,
+   "losses": 1
+  },
+  "gsmhard-4": {
+   "n": 2,
+   "before": 1.0,
+   "after": 1.0,
    "gain": 0.0,
    "gain_sd": 0.0,
    "wins": 0,
    "losses": 0
   },
+  "gsmhard-5": {
+   "n": 2,
+   "before": 0.425,
+   "after": 0.45,
+   "gain": 0.025000000000000022,
+   "gain_sd": 0.04999999999999999,
+   "wins": 1,
+   "losses": 1
+  },
   "gsm8k-0": {
-   "n": 3,
+   "n": 2,
    "before": 1.0,
    "after": 1.0,
    "gain": 0.0,
@@ -198,37 +216,39 @@
    "losses": 0
   },
   "gsm8k-1": {
-   "n": 3,
+   "n": 2,
    "before": 1.0,
-   "after": 1.0,
-   "gain": 0.0,
-   "gain_sd": 0.0,
+   "after": 0.8,
+   "gain": -0.2,
+   "gain_sd": 0.2,
    "wins": 0,
-   "losses": 0
+   "losses": 1
   }
  },
  "by_group": {
   "train": {
    "problems": [
     "gsmhard-0",
-    "gsmhard-1"
-   ],
-   "seed_rule": 0.75,
-   "evolved_rule": 0.75,
-   "gain": 0.0,
-   "wins": 0,
-   "losses": 0
-  },
-  "unseen": {
-   "problems": [
+    "gsmhard-1",
     "gsmhard-2",
     "gsmhard-3"
    ],
-   "seed_rule": 0.6875,
-   "evolved_rule": 0.6875,
-   "gain": 0.0,
-   "wins": 0,
-   "losses": 0
+   "seed_rule": 0.71875,
+   "evolved_rule": 0.7687499999999999,
+   "gain": 0.04999999999999999,
+   "wins": 4,
+   "losses": 1
+  },
+  "unseen": {
+   "problems": [
+    "gsmhard-4",
+    "gsmhard-5"
+   ],
+   "seed_rule": 0.7125,
+   "evolved_rule": 0.725,
+   "gain": 0.012500000000000011,
+   "wins": 1,
+   "losses": 1
   },
   "other": {
    "problems": [
@@ -236,20 +256,19 @@
     "gsm8k-1"
    ],
    "seed_rule": 1.0,
-   "evolved_rule": 1.0,
-   "gain": 0.0,
+   "evolved_rule": 0.9,
+   "gain": -0.1,
    "wins": 0,
-   "losses": 0
+   "losses": 1
   }
  },
  "transfer_ratio": {
-  "unseen": null,
-  "other": null
+  "unseen": 0.2500000000000003,
+  "other": -2.0000000000000004
  },
  "validate_seeds": [
   1000,
-  1001,
-  1002
+  1001
  ],
  "config": {
   "rounds": 5,
@@ -271,16 +290,16 @@
   "outer_seed": 0
  },
  "usage": {
-  "calls": 498,
-  "prompt_tokens": 4605,
-  "completion_tokens": 5168,
-  "total_tokens": 9773,
-  "model_seconds": 401.8056125640869,
+  "calls": 1573,
+  "prompt_tokens": 62762,
+  "completion_tokens": 81646,
+  "total_tokens": 144408,
+  "model_seconds": 6195.815967798233,
   "failures": 0,
-  "wall_seconds": 65.35697280100021,
+  "wall_seconds": 855.0285993469997,
   "completion_cache": {
-   "hits": 422,
-   "misses": 22
+   "hits": 555,
+   "misses": 470
   }
  }
 }
