@@ -121,6 +121,14 @@ class Candidate:
     selected: int = 0
     #: Version this candidate was derived from, for tree-shaped policies.
     parent: Optional[int] = None
+    #: A policy prior -- AlphaZero's ``P(s,a)``, the slot :class:`FlatPuct`
+    #: otherwise fills with a uniform ``1/N``. ``None`` means "no opinion" and
+    #: falls back to uniform, which is what an unrated candidate must get: zero
+    #: would bar it from ever being explored on the strength of a missing
+    #: number. Higher means "worth expanding", not "already good" -- the score
+    #: says how good it is, and the two are different claims about a candidate
+    #: that is slow today because it is a first draft of the right idea.
+    prior: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -507,8 +515,48 @@ class FlatPuct(SingleHead):
     upstream exactly at ``n == 1``.
     """
 
-    def __init__(self, c_puct: float = 1.0) -> None:
+    def __init__(self, c_puct: float = 1.0, prior_exponent: float = 0.0) -> None:
         self.c_puct = c_puct
+        #: How sharply :attr:`Candidate.prior` bends the exploration term.
+        #: ``0.0`` ignores priors entirely and is upstream's uniform ``1/N``;
+        #: ``2.0`` weights by the square, which is what separates a promising
+        #: candidate from a dead-end one rather than merely ordering them.
+        self.prior_exponent = prior_exponent
+
+    def _priors(self, rows: Sequence[Candidate]) -> List[float]:
+        """``P(s,a)``, normalised to sum to 1 so ``c_puct`` keeps its meaning.
+
+        Upstream ERA has no prior: ``futs.py`` uses ``1 / len(nodes)`` for every
+        node, so the exploration budget is spread evenly over a tree in which
+        most nodes are dead ends. With ``prior_exponent == 0`` that is exactly
+        what this returns, to the floating-point bit, and the port stays
+        faithful by default.
+
+        Above zero the priors are raised to that power and renormalised. The
+        power is the point rather than a knob for its own sake: with a prior
+        proportional to the rating, a candidate rated 8 against a mean of 5.5
+        gets 1.45x the exploration term and a dead end rated 2 still gets 0.36x
+        of it. Squared, those become 2.12x and 0.13x -- the difference between
+        widening exploration and *aiming* it.
+
+        A candidate with no prior is given the mean of those that have one, not
+        zero: an unrated node must not be barred from selection by the absence
+        of a number.
+        """
+        rated = [c.prior for c in rows
+                 if c.prior is not None and math.isfinite(c.prior) and c.prior > 0]
+        if self.prior_exponent <= 0.0 or not rated:
+            return [1.0 / len(rows)] * len(rows)
+        fallback = sum(rated) / len(rated)
+        raw = [
+            (c.prior if c.prior is not None and math.isfinite(c.prior) and c.prior > 0
+             else fallback) ** self.prior_exponent
+            for c in rows
+        ]
+        total = sum(raw)
+        if not total or not math.isfinite(total):
+            return [1.0 / len(rows)] * len(rows)
+        return [value / total for value in raw]
 
     @staticmethod
     def _rank_scores(rows: Sequence[Candidate]) -> List[float]:
@@ -528,13 +576,13 @@ class FlatPuct(SingleHead):
         ranks = self._rank_scores(rows)
         visits = [c.selected for c in rows]
         by_version = {c.version: i for i, c in enumerate(rows)}
-        prior = 1.0 / len(rows)
+        priors = self._priors(rows)
         picked: List[Candidate] = []
         for _ in range(n):
             total = sum(visits)
             best, best_puct = 0, -math.inf
             for i, row in enumerate(rows):
-                puct = ranks[i] + self.c_puct * prior * math.sqrt(total) / (
+                puct = ranks[i] + self.c_puct * priors[i] * math.sqrt(total) / (
                     1 + visits[i])
                 if puct > best_puct:
                     best, best_puct = i, puct

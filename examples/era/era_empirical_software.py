@@ -50,6 +50,7 @@ import argparse
 import json
 import math
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -190,6 +191,12 @@ class Node:
     #: The domain's metric, reported under its own name. A node summary that
     #: called every metric `rmse` would misreport the second task as the first.
     metric_key: str = "rmse"
+    #: The model's own rating of how far this direction could go *after tuning*
+    #: -- `P(s,a)` for `FlatPuct`, and `None` when it was not asked or did not
+    #: answer. Deliberately not the score: a first-draft Newton solver is slow
+    #: today and is the right idea, and the tree has no other way to tell that
+    #: apart from a rewrap of the reference that is fast today and finished.
+    promise: Optional[float] = None
 
     def summary(self) -> Dict[str, Any]:
         return {
@@ -201,6 +208,7 @@ class Node:
             "score": _finite(self.score),
             self.metric_key: self.program.metrics.get(self.metric_key),
             "num_visits": self.num_visits,
+            "promise": self.promise,
             "valid": self.program.valid,
             "error": self.program.error,
             "code_chars": len(self.program.code),
@@ -220,6 +228,10 @@ class EraTree:
     """
 
     c_puct: float = 1.0
+    #: Weight on :attr:`Node.promise` in the PUCT prior. ``0.0`` is upstream --
+    #: a uniform ``1/N`` for every node -- and is the default, so the port is
+    #: faithful unless asked otherwise.
+    prior_exponent: float = 0.0
     candidate_limit: Optional[int] = None
     metric_key: str = "rmse"
     nodes: List[Node] = field(default_factory=list)
@@ -228,7 +240,7 @@ class EraTree:
     _policy: FlatPuct = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        self._policy = FlatPuct(self.c_puct)
+        self._policy = FlatPuct(self.c_puct, self.prior_exponent)
 
     def seed(self, program: Program, score: float) -> Node:
         with self._lock:
@@ -259,6 +271,7 @@ class EraTree:
                     score=node.score,
                     selected=node.num_visits,
                     parent=node.parent_index,
+                    prior=node.promise,
                 )
                 for node in self.nodes
             )
@@ -267,13 +280,14 @@ class EraTree:
             self._backpropagate_locked(chosen)
             return iteration, chosen
 
-    def add_node(self, program: Program, score: float, parent_index: Optional[int]) -> Node:
+    def add_node(self, program: Program, score: float, parent_index: Optional[int],
+                 promise: Optional[float] = None) -> Node:
         """Append an expansion. A failed program is a node too, scoring -inf."""
         with self._lock:
             if parent_index is None or not 0 <= parent_index < len(self.nodes):
                 parent_index = 0
             node = Node(len(self.nodes), parent_index, program, score, num_visits=1,
-                        metric_key=self.metric_key)
+                        metric_key=self.metric_key, promise=promise)
             self.nodes.append(node)
             return node
 
@@ -331,7 +345,12 @@ class EraStrategy:
         return state.get("code", self._seed_program)
 
     def keys(self) -> Sequence[str]:
-        return ("code", "program_id", "change_summary", "parent_id", "parent_index")
+        # `promise` is the model's own rating of the direction, carried so the
+        # aggregator can hand it to `FlatPuct` as `P(s,a)`. It is metadata about
+        # the proposal rather than part of the program, and is empty unless
+        # `--prior-exponent` asked for it.
+        return ("code", "program_id", "change_summary", "parent_id",
+                "parent_index", "promise")
 
     def to_diff(
         self,
@@ -365,9 +384,32 @@ class EraStrategy:
                 "parent_id": str(payload.get("parent_id") or ""),
                 "parent_index": str(parent_index),
                 "iteration": str(iteration),
+                "promise": str(payload.get("promise") or ""),
             },
             author=author,
         )
+
+
+_PROMISE = re.compile(r"PROMISE:\s*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE)
+
+
+def _read_promise(reply: str) -> Optional[float]:
+    """The model's own rating of the direction, or ``None`` if it did not give one.
+
+    Read out of the reply the port was already paying for, so a prior costs no
+    extra call. Absent is not zero: an unrated node falls back to the mean of
+    the rated ones in `FlatPuct._priors`, because a missing number must not be
+    the reason a direction is never explored. Measured on AlgoTune's
+    polynomial_real, 25 of 30 replies carried one.
+    """
+    match = _PROMISE.search(reply)
+    if not match:
+        return None
+    try:
+        value = float(match.group(1))
+    except ValueError:
+        return None
+    return value if math.isfinite(value) and value > 0 else None
 
 
 def make_propose(
@@ -377,11 +419,34 @@ def make_propose(
     preview: str = "",
     candidate_timeout: float = 60.0,
     prompt_for: Optional[Callable[[Program], str]] = None,
+    repair: Optional[Callable[[str], Tuple[bool, Dict[str, Any], str]]] = None,
+    repair_prompt: Optional[Callable[[Program, str, str, int], str]] = None,
+    repair_attempts: int = 1,
+    repair_counter: Optional[Dict[str, int]] = None,
 ) -> Callable[[str, Task, str, float], Optional[str]]:
     """`PlaygroundGenerator.__call__`, behind the engine's actor API.
 
     ``prompt_for`` is the domain's mutation prompt; without one this is the
     Kaggle task's, which is what upstream ships.
+
+    ``repair`` turns a single draw into a **fix-it loop**, and is off unless a
+    task asks for it -- upstream appends a program that fails as a node scoring
+    `-inf` and moves on, which is the behaviour the other three tasks keep.
+
+    Why a task would want it: a `-inf` node is a permanent dead end. Its
+    rank_score is 0, `FlatPuct` never selects it again, and the direction it was
+    exploring dies with it -- even when the failure was a missing cast or a step
+    size chosen slightly too large. Measured on AlgoTune's ode_stiff_vanderpol,
+    the direction that wins is *also* the one whose first attempt usually fails
+    (a numba compile error, an accuracy shortfall, a runaway loop), so the search
+    was systematically discarding the only route to the large win. Retrying with
+    the error in hand is what AlgoTuner's agent does between edits, and it costs
+    an evaluation the aggregator would have paid for the failed node anyway --
+    paid on a worker, in parallel, instead of on the merger.
+
+    The check runs on a **scoring** shard. The held-back sets stay unseen: a
+    repair loop that read them would be optimising against the split that is
+    supposed to be the report.
     """
     write_prompt = prompt_for or (
         lambda program: mutation_prompt(
@@ -392,8 +457,33 @@ def make_propose(
         if selection is None:
             return None
         iteration, parent = selection
-        raw = complete(write_prompt(parent.program)).strip()
-        code, summary = extract_program(raw)
+        prompt = write_prompt(parent.program)
+        code, summary, promise = "", "", None
+        for attempt in range(max(1, repair_attempts)):
+            raw = complete(prompt).strip()
+            code, summary = extract_program(raw)
+            promise = _read_promise(raw) if promise is None else promise
+            # The final draw is not checked: there is no retry left to spend on
+            # the answer, and the aggregator evaluates it moments later anyway.
+            last = attempt == max(1, repair_attempts) - 1
+            if repair is None or repair_prompt is None or not code or last:
+                if last and repair is not None and attempt and repair_counter is not None:
+                    repair_counter["gave_up"] = repair_counter.get("gave_up", 0) + 1
+                break
+            if repair_counter is not None:
+                repair_counter["drawn"] = repair_counter.get("drawn", 0) + 1
+            valid, checked, error = repair(code)
+            if valid:
+                if repair_counter is not None and attempt:
+                    repair_counter["repaired"] = repair_counter.get("repaired", 0) + 1
+                break
+            if repair_counter is not None:
+                repair_counter["failed"] = repair_counter.get("failed", 0) + 1
+            # A failure goes back with its error. If the retries run out, the
+            # last draw goes forward and becomes the `-inf` node upstream would
+            # have appended on the first one -- the loop buys attempts, it does
+            # not hide a failure.
+            prompt = repair_prompt(parent.program, code, error, attempt + 1)
         if not code:
             _EMPTY_PROPOSALS["n"] += 1
             if _EMPTY_PROPOSALS["n"] in (1, 5, 25):
@@ -411,6 +501,7 @@ def make_propose(
                 "iteration": iteration,
                 "parent_index": parent.index,
                 "parent_id": parent.program.program_id,
+                "promise": "" if promise is None else repr(promise),
             },
             separators=(",", ":"),
         )
@@ -590,8 +681,13 @@ class EraTreeAggregator(AggregatorProtocol):
             )
             # `float(metrics["score"])` is -inf on failure, which is upstream's
             # own sentinel -- the node is appended either way.
+            raw_promise = ops.get("promise")
+            try:
+                promise = float(raw_promise) if raw_promise not in (None, "") else None
+            except (TypeError, ValueError):
+                promise = None
             self.tree.add_node(program, float(metrics["score"]),
-                               int(ops.get("parent_index", "0")))
+                               int(ops.get("parent_index", "0")), promise=promise)
             valid_candidates += int(valid)
 
         best = self.tree.best()
@@ -791,6 +887,7 @@ def run_agentdescent_era(
     train_rows: int = 0,
     held_out_frac: float = 0.5,
     c_puct: float = 1.0,
+    prior_exponent: float = 0.0,
     candidate_timeout: float = 60.0,
     max_code_length: int = 20_000,
     async_ratio: int = 1,
@@ -802,6 +899,9 @@ def run_agentdescent_era(
     splits: Optional[Splits] = None,
     domain: Optional[Domain] = None,
     eval_concurrency: Optional[int] = None,
+    repair_attempts: int = 1,
+    repair_prompt: Optional[Callable[[Program, str, str, int], str]] = None,
+    repair_counter: Optional[Dict[str, int]] = None,
     verbose: bool = False,
 ) -> EraRun:
     """Run one fixed-expansion-budget serial, sync, or async experiment.
@@ -823,11 +923,19 @@ def run_agentdescent_era(
                              max_code_length=max_code_length,
                              shards=shards, test_shards=test_shards)
     tasks = build_tasks(shards, seed, domain.task_prompt)
-    tree = EraTree(c_puct=c_puct, candidate_limit=iterations,
-                   metric_key=domain.metric_key)
+    tree = EraTree(c_puct=c_puct, prior_exponent=prior_exponent,
+                   candidate_limit=iterations, metric_key=domain.metric_key)
     strategy = EraStrategy(domain)
     run = make_run(evaluate=domain.evaluate)
-    propose = make_propose(tree, complete, prompt_for=domain.prompt)
+    # The repair loop checks a candidate on the *first scoring shard* -- never a
+    # held-back one, which has to stay unseen to be worth reporting.
+    repair = None
+    if repair_attempts > 1 and repair_prompt is not None:
+        repair = lambda code: domain.evaluate(code, (0,))  # noqa: E731
+    propose = make_propose(tree, complete, prompt_for=domain.prompt,
+                           repair=repair, repair_prompt=repair_prompt,
+                           repair_attempts=repair_attempts,
+                           repair_counter=repair_counter)
 
     def factory(ledger, verifier, audit, config, policy):
         aggregator = EraTreeAggregator(

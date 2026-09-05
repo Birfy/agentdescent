@@ -316,24 +316,32 @@ column of each section below says exactly where to look.
   paper's *numerical solution of integrals* — named in the abstract, with no
   released implementation to port — `era_hypergeometric.py` runs
   double-precision evaluation of `2F1`, which the paper does not name at all,
-  and `era_llm_srbench.py` runs
-  [LLM-SRBench](https://arxiv.org/abs/2504.10415) equation discovery. All go
-  through the identical tree, aggregator and sandbox, behind a `Domain`
-  that carries only the seed program, the evaluator, the prompt and the metric
-  name. They are **entry points, not further algorithms**: nothing in this
+  `era_llm_srbench.py` runs
+  [LLM-SRBench](https://arxiv.org/abs/2504.10415) equation discovery, and
+  `era_algotune.py` runs the AlgoTune speedup benchmark, one tree per benchmark
+  task. All go through the identical tree, aggregator and sandbox, behind a
+  `Domain` that carries only the seed program, the evaluator, the prompt and the
+  metric name. They are **entry points, not further algorithms**: nothing in this
   section changes for them, and the fidelity class above is a statement about
-  FUTS, which all four tasks run unmodified. The first two tasks are this
-  port's construction — the integrand families and the 2F1 stress set are not
-  upstream's, since upstream released none — so they are documented as a
-  *faithful search on a constructed task*, with
+  FUTS, which all five tasks run unmodified.
+
+  Two of them are this port's construction — the integrand families and the 2F1
+  stress set are not upstream's, since upstream released none — so they are
+  documented as a *faithful search on a constructed task*, with
   [algo-era.md](algo-era.md#the-second-task-numerical-solution-of-integrals)
   and [its 2F1 section](algo-era.md#the-third-task-2f1-and-what-replaces-a-leaderboard)
   saying which parts are the paper's, which are the literature's, and which are
-  here. LLM-SRBench is the exception and the reason it was added: the problems,
-  the splits and the metrics are somebody else's published work, so nothing
-  about the *task* is this port's choice — only the protocol is, and
+  here. The other two are the opposite case and are the reason they were added.
+  For LLM-SRBench the problems, the splits and the metrics are somebody else's
+  published work, so nothing about the *task* is this port's choice — only the
+  protocol is, and
   [its section](algo-era.md#the-fourth-task-llm-srbench-and-a-benchmark-this-repository-did-not-build)
-  states how that protocol differs from the benchmark's own leaderboard.
+  states how that protocol differs from the benchmark's own leaderboard. For
+  AlgoTune the task, its problem generator, its correctness oracle, its published
+  problem sizes and its speedup metric are all upstream's, so what is constructed
+  there is only the seam — a module-level `solve` rather than a `Solver` class,
+  and generated rather than downloaded instances — which
+  [its section](algo-era.md#the-fifth-task-algotune-and-the-other-axis) names.
 * **The channel is measured, not assumed**: `--reply-attempts` redraws a reply
   that arrived as something other than Python — a hosted GLM-5.2 endpoint
   damaged roughly one reply in five — and never redraws a program that merely

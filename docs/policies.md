@@ -3,7 +3,9 @@
 *Module:* [`agentdescent.policies`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/policies.py)
 
 Every decision `evolve()` makes is an object you can swap, and they all travel
-in one argument:
+in one argument. This page is the catalogue; [the guide](policy-guide.md)
+is the how — where each slot sits, what it is handed, how they compose, and
+how to prove one ran.
 
 ```python
 from agentdescent import Policies, evolve
@@ -25,6 +27,14 @@ each engine declares what it honours, and `Policies.require_supported` raises
 on anything else — a custom acceptance rule either runs or refuses loudly.
 **`None` means today's behaviour**: `Policies()` and passing nothing are the
 same run, so adding a policy never changes an existing measurement.
+
+Each field is independent: swap one and the other seven stay at their defaults.
+The one deliberate pair is `conflict` + `fusion` for model merging, which is why
+`reflective_merge()` returns both. A wrapper that defers to a shipped default —
+`AdvantageConflict()`, `AdvantageAcceptance()` — needs nothing from you: the
+aggregator hands the engine's verifier and config to any policy exposing the
+optional `bind(verifier)` / `configure(config)` hooks
+([details](acceptance-policies.md#installing-a-policy-the-two-optional-hooks)).
 
 ## Which seam is my mechanism?
 

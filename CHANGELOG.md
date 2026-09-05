@@ -6,6 +6,58 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Removed
+
+- **The one-call wrappers: `evolve()` is the only entry point.** `evolve_skill`,
+  `evolve_skill_dir`, `evolve_agent_dir` and `evolve_agent_code` (and the
+  `agentdescent.skill` / `agentdescent.skilldir` modules) are gone. Each was
+  thirty lines of wiring plus a set of defaults, and each was a second signature
+  to learn, document and keep in step with the first. What they assembled is
+  now public building blocks that go straight into `evolve()`: `tasks_from` and
+  the new `scorer()` / `SCORERS` (moved to `agentdescent.rewards`) for a
+  dataset, `SingleSlot` + `reflector` for an instruction, `load_tree` +
+  `FileTree` + `tree_runner` / `code_runner` + `tree_reflector` for a directory,
+  the new `runners.gated_reward` for a test-gated code run, and
+  `governance.SKILL_BLAST_RADIUS` / `HARNESS_BLAST_RADIUS` for the layer. The
+  two defaults the wrappers set for a real-agent workload
+  (`self_verify=False`, `cheap_eval_tasks=4`) are now passed explicitly, and
+  every doc page and the directory example show the full call. Migration is
+  mechanical; the quickstarts are the template.
+
+### Added
+
+- **A systematic guide to the policy slots**, `docs/policy-guide.md`: where
+  each of the eight slots sits in a round, what it is handed and must return,
+  the five composition rules the engine enforces, the three ways to fill a
+  slot (shipped, wrap, replace), the per-slot contract with its one common
+  mistake, the `bind` / `configure` install hooks, how to prove a policy ran,
+  a recipe table, and the pitfalls in the order people meet them. Linked from
+  the policies catalogue and the nav.
+
+### Fixed
+
+- **A wrapper around a default policy can now be installed through `Policies`
+  alone.** `DefaultConflict` and `DefaultFusion` take the verifier through an
+  optional `bind(verifier)` hook, `DefaultAcceptance` and `DefaultPromotion`
+  take their thresholds through `configure(config)` (or the pinned
+  `from_config(cfg)`), and the aggregator now offers both hooks to every
+  installed merge-side policy — previously only fusion was bound, so
+  `Policies(conflict=AdvantageConflict(DefaultConflict(...)))` type-checked,
+  installed, and died with `'NoneType' has no attribute 'cheap_eval'` on the
+  first contradiction that reached the inner rule; the repository's own tests
+  had to route it through an `aggregator_factory`. The wrappers
+  (`AdvantageConflict`, `AdvantageAcceptance`, `StableDistanceAcceptance`)
+  forward the hooks and default their `inner` to the shipped rule, so
+  `AdvantageAcceptance()` reads the run's `agg_config=` instead of a hand-copied
+  `DefaultAcceptance(0.5, 64, 4000)` that silently diverged from it. A default
+  used without being installed raises `PolicyUnboundError` naming the missing
+  piece. New: `agentdescent.aggregator.install_policy`,
+  `tests/test_policy_install.py`; docs on
+  [acceptance](docs/acceptance-policies.md) and
+  [conflict](docs/conflict-policies.md) policies.
+
+## [0.4.6] — 2026-08-28
+
 ### Added
 
 - **ERA runs LLM-SRBench — a benchmark this repository did not build.**
@@ -50,6 +102,114 @@ All notable changes to AgentDescent are documented here. The format follows
   check runs before the judge and settles what it can, putting a floor under the
   metric that depends on no model. The judge is whatever `--model` names and not
   the paper's GPT-4o, which the output file states.
+- **A fourth ERA task: AlgoTune, scored in speedup rather than accuracy.**
+  `examples/era/era_algotune.py` runs the *same* flat-PUCT search, aggregator,
+  sandbox and governance layer as the other three ERA entry points over
+  [AlgoTune](https://github.com/oripress/AlgoTune)
+  ([arXiv:2507.15887](https://arxiv.org/abs/2507.15887)) — 147 of its 154 tasks,
+  **one tree per task**, with the task's own reference implementation as the root
+  node and its own `is_solution` as the correctness oracle.
+
+  Every ERA task so far optimised accuracy. This one holds accuracy fixed and
+  optimises time: a candidate is scored by how much faster than the reference it
+  is, and a solution the checker rejects scores nothing at all, however fast —
+  AlgoTune's own rule, and what keeps the benchmark about speed. The baseline is
+  not a strawman: it is `scipy.linalg.eig`, `scipy.integrate.solve_ivp`,
+  `scipy.signal.upfirdn`, `scipy.spatial.Delaunay`.
+
+  Three things make the number mean something. The root node *is* the reference,
+  lifted out of its `Task` class into a runnable program by an AST transform that
+  raises rather than guesses when it cannot (`_algotune_tasks.derive_seed_program`),
+  and a test checks the lifted program computes what the class computed. The
+  problem sizes are **upstream's published ones**, read from AlgoTune's own
+  `reports/generation.json`, so two runs are comparable without either
+  calibrating against its host. And the reference is re-timed inside the sandbox
+  beside the candidate, on the same problem, reference first — a baseline
+  measured once on the host and reused would make the score move when the
+  machine got busy rather than when the program got faster.
+
+  147 rather than 154 because two want `os.urandom`, two do not lift out of
+  their class, `lqr`'s own checker rejects its own baseline, and two need a
+  dependency this repository does not carry. It was 72 until AlgoTune's own
+  pinned dependency set went in (OR-Tools, networkx, scikit-learn, jax, SymPy,
+  POT, PySAT, faiss, mpmath, hdbscan, cryptography); the gap had never been the
+  benchmark, only this port's environment. Their
+  reference does not lift out of its class. `lqr` clears both filters and is
+  still excluded, and the reason is upstream's: its own `is_solution` calls
+  `float()` on a 1×1 array, which NumPy has refused since 1.25, so the reference
+  is invalid by the task's own oracle.
+
+  `python -m examples.era.era_algotune --list-tasks` prints the runnable set;
+  `--tasks all` runs it. Notes in [`docs/algo-era.md`](docs/algo-era.md), offline
+  tests in `tests/test_era_algotune.py`.
+
+  **Measured** on the eight tasks AlphaEvolve, MetaEvolve and OpenEvolve all
+  publish, one run each against deepseek-v4-flash with 45 expansions per tree:
+  harmonic-mean held-back speedup **2.195x**, against AlphaEvolve's 1.392x and
+  MetaEvolve's 2.045x on the same eight, ahead on five of eight against each.
+  The largest are algorithm changes rather than flag-twiddling: 540.172x on
+  `polynomial_real` (a numba Aberth iteration for `np.roots`'s companion-matrix
+  eigenvalue solve), 5.019x on `fft_cmplx_scipy_fftpack`, 3.995x on
+  `psd_cone_projection` (`eigh` and a broadcast for `eig` and a materialised
+  `np.diag`). One is not: `lu_factorization`'s 4.464x skips the reference's
+  three `.tolist()` calls, which is legal and is 132.5 ms of its 183.2 ms, but
+  is not a better factorisation — discounting it gives 1.782x. Two tasks finish
+  *below* 1.0x on the held-back sets after improving on the sets they could see,
+  which is what the split is for. Table, caveats and the per-task comparison in
+  [`docs/algo-era.md`](docs/algo-era.md#measured-results--algotune) and
+  [`bench/results/era-algotune-model-prior.md`](bench/results/era-algotune-model-prior.md).
+
+- **A model prior in PUCT's `P(s,a)`, in place of ERA's uniform `1/N`.**
+  `--prior-exponent` (default `0.0`, which is upstream to the floating-point
+  bit) asks the mutation reply for a `PROMISE: <n>` line rating the *approach
+  after tuning* 1–10, and uses `p^k / Σp^k` as the prior. The question is
+  deliberately about the approach rather than this draft: asked the other way
+  the rating collapses into the score the evaluator already produces, and what a
+  prior is for here is separating "slow today, right idea" from "fine today,
+  finished". It is read out of the reply the port was already paying for, so it
+  costs no extra call, and a missing line takes the mean of the rated candidates
+  rather than zero.
+
+  It is predictive. Over 250 rated nodes, 60 of the 137 rated ≥8 reached 2x
+  against 3 of the 93 rated ≤6 — Fisher one-sided p=2.2e-13, 92.3% recall at
+  43.8% precision on a 26.0% base rate. Against *validity* it is worth nothing
+  (Spearman 0.046): the model can say how fast an idea would be if it worked,
+  not whether its own code runs, which is the right division of labour when the
+  sandbox already measures correctness. Visits follow it (Spearman 0.49) and
+  mean tree depth goes from 8.0 to 12.3.
+
+  On AlgoTune's eight most-published tasks it takes the harmonic mean from
+  1.440x to 2.195x, against AlphaEvolve's 1.392x and MetaEvolve's 2.045x on the
+  same eight. It is not a general accelerator: on tasks gated by `is_solution`
+  rather than by speed it aims the budget at the wall, leaving 3 valid nodes of
+  46 on `least_squares` against a uniform prior's 20, and half as many on
+  `affine_transform_2d` across three seeds. Per-task comparison and the caveats
+  in [`bench/results/era-algotune-model-prior.md`](bench/results/era-algotune-model-prior.md).
+
+### Fixed
+
+- **The AlgoTune sandbox pinned the reference's threads and not the
+  candidate's.** `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`,
+  `NUMEXPR_NUM_THREADS` and `VECLIB_MAXIMUM_THREADS` were all set to `1`, so the
+  reference's LAPACK calls ran on one core — but none of them reach numba, which
+  reads `NUMBA_NUM_THREADS` and defaults it to the core count. A candidate
+  compiled `@njit(parallel=True)` was therefore timed on every core against a
+  one-core reference.
+
+  Capping numba as well would have been the wrong repair: writing a parallel
+  implementation *is* an optimisation, and AlgoTune sets no thread policy at
+  all. So neither side is capped now, and `--cpu-seconds` is multiplied by the
+  core count, since `RLIMIT_CPU` sums CPU seconds over threads and would
+  otherwise kill a parallel candidate for using what it was given.
+
+- **A rejected answer could be told its numbers were correct.** The note
+  attached to an `is_solution` rejection flattens both sides before comparing,
+  so a solver returning the right values in the wrong container looked identical
+  to it. `affine_transform_2d` checks `proposed.shape != image.shape` before it
+  compares a value, so a flat list of the correct 20000 pixels was rejected and
+  the model was told "off by 0.000e+00, 0x the tolerance" — 13 of 29 rejections
+  in one run. The note now describes the container when it differs, and says so
+  explicitly when every number agrees and `is_solution` still refused.
 
 ## [0.4.5] — 2026-08-19
 
@@ -2841,7 +3001,8 @@ First public release on PyPI as **`agentdescent`**.
   discrete-space `Aggregator`, staleness policies, DP/TP/PP parallelism, layered
   governance, and the provider-agnostic `agentdescent.agents` completion layer.
 
-[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.4.5...HEAD
+[Unreleased]: https://github.com/Birfy/agentdescent/compare/v0.4.6...HEAD
+[0.4.6]: https://github.com/Birfy/agentdescent/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/Birfy/agentdescent/compare/v0.4.2...v0.4.5
 [0.4.2]: https://github.com/Birfy/agentdescent/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/Birfy/agentdescent/compare/v0.4.0...v0.4.1
