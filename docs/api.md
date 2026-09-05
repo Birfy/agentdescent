@@ -1496,6 +1496,10 @@ EvolveSpec(
 ) -> None
 ```
 
+| method | what it does |
+|---|---|
+| `absolutise(base: Optional[str] = None) -> 'EvolveSpec'` | A copy whose file paths are absolute, resolved against `base` (cwd). |
+
 ### `SpecError`
 
 A spec that cannot be composed, and the field that is wrong.
@@ -1517,7 +1521,7 @@ compose(
 ) -> Composition
 ```
 
-### `load_spec(path: str) -> EvolveSpec`
+### `load_spec(path: str, *, absolutise: bool = True) -> EvolveSpec`
 
 Read a spec from a JSON file.
 
