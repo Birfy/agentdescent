@@ -142,3 +142,20 @@ def test_dry_run_touches_nothing(monkeypatch, capsys):
     assert bench.main(["--dry-run"]) == 0
     out = capsys.readouterr().out
     assert "[dry-run]" in out and "task_sampler" in out and "gsmhard" in out
+
+
+def test_every_shared_flag_is_honoured_or_refused(monkeypatch):
+    """A flag the parser declares and nothing reads is the defect this checks."""
+    import inspect
+
+    source = inspect.getsource(bench)
+    for dest, read_by in (("max_seconds", "max_seconds=args.max_seconds"),
+                          ("budget_rollouts", "args.budget_rollouts"),
+                          ("eval_concurrency", "eval_concurrency=args.eval_concurrency"),
+                          ("seed", "outer_seed=args.seed"),
+                          ("serial", "worker_count(")):
+        assert read_by in source, f"--{dest.replace('_', '-')} is declared and never read"
+    with pytest.raises(SystemExit, match="not supported"):
+        bench.main(["--async"])
+    with pytest.raises(SystemExit, match="not supported"):
+        bench.main(["--pipelined-gate"])

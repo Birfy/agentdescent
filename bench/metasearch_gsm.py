@@ -187,7 +187,9 @@ def run_experiment(complete: Callable[[str], str], *, train: Dict[str, Problem],
                    validate: Dict[str, Problem], groups: Dict[str, List[str]],
                    seeds: Sequence[int], validate_seeds: Sequence[int], rounds: int,
                    workers: int, outer_seed: int = 0,
-                   usage: Optional[Usage] = None) -> Dict[str, Any]:
+                   usage: Optional[Usage] = None, max_seconds: Optional[float] = None,
+                   max_rollouts: Optional[int] = None,
+                   eval_concurrency: Optional[int] = None) -> Dict[str, Any]:
     """Evolve the sampler on ``train``, then score seed vs evolved on everything."""
     if set(train) & set(validate):
         raise ValueError(f"train and validate share problems: {sorted(set(train) & set(validate))}")
@@ -199,7 +201,9 @@ def run_experiment(complete: Callable[[str], str], *, train: Dict[str, Problem],
     result = meta_evolve(train, slot="task_sampler", spec=spec,
                          propose=slot_reflector(complete, spec), seeds=list(seeds),
                          rounds=rounds, n_workers=workers, max_concurrency=workers,
-                         held_out_frac=0.5, eval_concurrency=max(1, workers),
+                         held_out_frac=0.5,
+                         eval_concurrency=eval_concurrency or max(1, workers),
+                         max_seconds=max_seconds, max_rollouts=max_rollouts,
                          seed=outer_seed, usage=usage,
                          on_round=progress('gsm'))
     outer_seconds = time.monotonic() - started
@@ -297,6 +301,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[Iterable[str]] = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.asynchronous or args.pipelined_gate:
+        # An outer rollout here is a whole inner `evolve()`, and the barrier-free
+        # runtime's staleness is defined over artifact versions the merger moved
+        # -- honouring it would need a second design, not a flag. Refused rather
+        # than accepted and ignored, which is how a port grows a switch nobody
+        # reads.
+        raise SystemExit("--async / --pipelined-gate are not supported by the "
+                         "meta loop; the outer runtime is the synchronous one")
     workers = worker_count(args, args.workers)
     seeds = list(range(args.seeds))
     validate_seeds = list(range(1_000, 1_000 + args.validate_seeds))
@@ -316,7 +328,9 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     print(f"Validate  : {args.unseen_windows} unseen {args.source} + {args.other_windows} "
           f"{args.other} window(s), {len(validate_seeds)} fresh seed(s) "
           f"-> {validations} inner runs")
-    print(f"Outer     : rounds={args.rounds} workers={workers} blast_radius=0.6 (L1)")
+    print(f"Outer     : rounds={args.rounds} workers={workers} blast_radius=0.6 (L1)"
+          + (f" budget={args.budget_rollouts} rollouts" if args.budget_rollouts else "")
+          + f" max_seconds={args.max_seconds:.0f}")
     print(f"Model     : {args.provider}/{args.model} temperature={args.temperature} "
           f"thinking={args.thinking}")
     if args.dry_run:
@@ -342,7 +356,9 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     payload = run_experiment(complete, train=train, validate=validate, groups=groups,
                              seeds=seeds, validate_seeds=validate_seeds,
                              rounds=args.rounds, workers=workers, outer_seed=args.seed,
-                             usage=usage)
+                             usage=usage, max_seconds=args.max_seconds,
+                             max_rollouts=args.budget_rollouts or None,
+                             eval_concurrency=args.eval_concurrency)
     payload["config"] = {**inner, "source": args.source, "other": args.other,
                          "window_size": args.window_size, "data_seed": args.data_seed,
                          "model": args.model, "provider": args.provider,

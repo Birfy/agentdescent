@@ -108,7 +108,9 @@ def run_experiment(complete: Callable[[str], str], *,
                    train: Dict[str, Problem], validate: Dict[str, Problem],
                    seeds: Sequence[int], validate_seeds: Sequence[int],
                    rounds: int, workers: int, outer_seed: int = 0,
-                   usage: Optional[Usage] = None) -> Dict[str, Any]:
+                   usage: Optional[Usage] = None, max_seconds: Optional[float] = None,
+                   max_rollouts: Optional[int] = None,
+                   eval_concurrency: Optional[int] = None) -> Dict[str, Any]:
     """The whole experiment over prepared problems; the result file's payload."""
     if set(train) & set(validate):
         raise ValueError(f"train and validate share tasks: {sorted(set(train) & set(validate))}")
@@ -120,7 +122,9 @@ def run_experiment(complete: Callable[[str], str], *,
     result = meta_evolve(train, slot="selection", spec=spec,
                          propose=slot_reflector(complete, spec), seeds=list(seeds),
                          rounds=rounds, n_workers=workers, max_concurrency=workers,
-                         held_out_frac=0.4, eval_concurrency=max(1, workers),
+                         held_out_frac=0.4,
+                         eval_concurrency=eval_concurrency or max(1, workers),
+                         max_seconds=max_seconds, max_rollouts=max_rollouts,
                          seed=outer_seed, usage=usage,
                          on_round=progress('algotune'))
     outer_seconds = time.monotonic() - started
@@ -204,6 +208,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[Iterable[str]] = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.asynchronous or args.pipelined_gate:
+        raise SystemExit("--async / --pipelined-gate are not supported by the "
+                         "meta loop; the outer runtime is the synchronous one")
     workers = worker_count(args, args.workers)
     train = _tasks_arg(args.train_tasks, TRAIN_TASKS)
     validate = _tasks_arg(args.validate_tasks, VALIDATE_TASKS)
@@ -238,7 +245,11 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         complete, train={t: problems[t] for t in train},
         validate={t: problems[t] for t in validate}, seeds=seeds,
         validate_seeds=validate_seeds, rounds=args.rounds, workers=workers,
-        outer_seed=args.seed, usage=usage)
+        outer_seed=args.seed, usage=usage,
+        # The inner search gets its own `max_seconds`; this one bounds the outer
+        # loop, which is the run the operator is waiting on.
+        max_seconds=args.max_seconds, max_rollouts=args.budget_rollouts or None,
+        eval_concurrency=args.eval_concurrency)
     payload["config"] = {**inner, "model": args.model, "provider": args.provider,
                          "temperature": args.temperature, "outer_seed": args.seed}
     payload["usage"] = {"calls": usage.calls, "input_tokens": usage.input_tokens,
