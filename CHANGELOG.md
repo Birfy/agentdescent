@@ -6,6 +6,55 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **AgentDescent as a plugin for DeepSeek Harness, Claude Code and Codex.** A
+  shared `SKILL.md` teaches the host agent when to call it; an MCP server
+  (`agentdescent mcp`, `pip install "agentdescent[mcp]"`) exposes `doctor`,
+  `plan`, `start`, `status`, `show`, `apply`, `cancel`, `resume`; and a CLI
+  (`agentdescent`) mirrors them verb for verb. `agentdescent install
+  <dsh|claude-code|codex>` writes the skill and each host's manifest -- for
+  DeepSeek Harness an `mcp-client` entry and the `hooks-claude-code` bridge in
+  `cordis.patch.yml` with provider keys forwarded explicitly (dsh scrubs them);
+  for Claude Code a plugin directory, also published through
+  `.claude-plugin/marketplace.json`; for Codex a `config.toml` entry.
+  Guide: [docs/plugins.md](docs/plugins.md); design record:
+  [docs/plugin-design.md](docs/plugin-design.md).
+- **`EvolveSpec`: an `evolve()` call as data** (`agentdescent.evolvespec`). A
+  JSON spec names the artifact (`kind`: `text` / `skill_dir` / `agent_dir` /
+  `agent_code` / `plugin`), the data, the scorer, the agent and, optionally, a
+  `policies` block and `agg_config`; `compose()` turns it into the `evolve()`
+  call the quickstarts show and is tested against them field for field, so it
+  is a wire format for callers that are not Python, not a second entry point.
+  Agents, scorers and policies are `Ref`s resolved inside the `workspec`
+  allowlist; a spec carries no code and no secrets. The `policies` block is
+  possible because every shipped policy is now constructible from JSON scalars
+  and installed by the aggregator through `bind` / `configure`.
+- **A run store** (`agentdescent.runstore`): a run is a directory under
+  `~/.agentdescent/runs/<id>/` plus a detached process. `status.json` is
+  replaced atomically from `on_round`, `resume` re-launches on the same ledger,
+  `cancel` signals the process group so worker CLIs die with the run.
+- **`kind: plugin` -- the host plugins themselves are evolvable.**
+  `runners.plugin_runner` is a per-host table over `code_runner`: the candidate
+  plugin is loaded into an isolated copy of the host that lives inside the
+  workspace (`dsh plugin add link:`, `claude -p --plugin-dir`, Codex's skills
+  directory), validated (`pnpm test` + `--dump-config`, `claude plugin
+  validate`), then the host runs the task. `PLUGIN_FROZEN` freezes hooks,
+  permission config, lockfiles and tests by default; the layer is L1.
+- **`evolve(stop_when=)` / `async_evolve(stop_when=)`**: the caller's own budget
+  -- dollars from a shared `Usage`, a deadline, a kill file -- asked after
+  `on_round` at the same point as `max_seconds` / `max_calls`, ending the run
+  between rounds with `stop_reason="stop_when"`.
+- **`rewards.command_scorer`**: grade with any program (task JSON on stdin,
+  `$ANSWER` in the environment, a number in `[0, 1]` on stdout); a failing
+  grader raises `GraderError` rather than teaching the optimiser zeros.
+- **`agents.dsh()`**: DeepSeek Harness's headless profile as a worker;
+  `dsh_skill` and `agents_skill` layouts. **`agents.worker_env()`**: every
+  `cli_agent` child drops the host session's markers (`CLAUDECODE`,
+  `CLAUDE_CODE_*`, `CODEX_*`, `DSH_*`), is marked `AGENTDESCENT_NESTED=1`, and
+  gets `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `DSH_HOME` inside its workspace, so
+  a worker cannot recurse into the host session or this package's MCP server.
+
 ### Removed
 
 - **The one-call wrappers: `evolve()` is the only entry point.** `evolve_skill`,

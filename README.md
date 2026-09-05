@@ -153,6 +153,7 @@ Full docs live in [`docs/`](https://github.com/Birfy/agentdescent/tree/main/docs
 |  [Run everything, and extend it](https://github.com/Birfy/agentdescent/blob/main/docs/usage.md) | Every demo with its output, config reference, **plugging in your own `Evolvable` domain** |
 | [Evolving anything](https://github.com/Birfy/agentdescent/blob/main/docs/evolution.md) | The general engine — evolve any artifact by writing its `Strategy` + `run`/`reward`/`propose` |
 | [Connecting agents & LLMs](https://github.com/Birfy/agentdescent/blob/main/docs/agents.md) | The provider-agnostic completion layer |
+| [Use it from your agent](https://github.com/Birfy/agentdescent/blob/main/docs/plugins.md) | The plugin: DeepSeek Harness, Claude Code, Codex — spec, CLI, MCP server, evolving plugins themselves |
 | [Loading datasets](https://github.com/Birfy/agentdescent/blob/main/docs/dataloader.md) | The `agentdescent.dataloader` data layer — HF datasets-server + raw-file fetch, cached, dependency-free |
 | [Customizable parallelism](https://github.com/Birfy/agentdescent/blob/main/docs/parallelism.md) | Pluggable DP / TP / PP strategies — or write your own |
 | [Where rollouts run](https://github.com/Birfy/agentdescent/blob/main/docs/execution.md) | The executor seam: threads, supervised worker processes, and describing a rollout as data |
@@ -259,6 +260,41 @@ python -m examples.skill_dir_evolution        # offline, no API key
 
 Guide: [evolving a directory](https://github.com/Birfy/agentdescent/blob/main/docs/directory-evolution.md)
 · [design record](https://github.com/Birfy/agentdescent/blob/main/docs/design-directory-evolution.md).
+
+## Use it from your agent — DeepSeek Harness, Claude Code, Codex
+
+The same engine as a **plugin**: a shared skill teaches the host agent when to
+call it, an MCP server exposes `doctor / plan / start / status / show / apply`,
+and a CLI mirrors them so a run started from an agent can be inspected from a
+shell. Say *"evolve this skill against these examples"* inside the agent; it
+writes a spec, shows you the plan and the cost, runs in the background, shows
+you the diff, and asks before it applies.
+
+```bash
+pip install "agentdescent[mcp]"
+agentdescent doctor                    # which agent CLIs and keys are here
+agentdescent install dsh               # or: claude-code, codex
+```
+
+The spec is an `evolve()` call as data — every field is an ordinary argument or
+a public building block, so there is no second API to learn:
+
+```json
+{"kind": "skill_dir", "target": "~/.claude/skills/pdf-audit",
+ "data": {"path": "eval/cases.jsonl", "prompt": "question", "gold": "answer"},
+ "score": "contains",
+ "agent": {"ref": "claude_code", "extra_args": ["--permission-mode", "acceptEdits"]},
+ "reflect": {"ref": "openai_compatible", "model": "deepseek-v4-flash"}}
+```
+
+`kind` is `text`, `skill_dir`, `agent_dir`, `agent_code` — or **`plugin`**: the
+host plugins themselves (a DSH Cordis package, a Claude Code plugin directory)
+are evolvable, loaded into an isolated copy of the host per rollout, with hooks
+and permission config frozen and a recursion guard so a plugin evolving itself
+cannot start a nested run.
+
+Guide: [use it from your agent](https://github.com/Birfy/agentdescent/blob/main/docs/plugins.md)
+· [design record](https://github.com/Birfy/agentdescent/blob/main/docs/plugin-design.md).
 
 ## Ports of the latest self-evolution algorithms
 

@@ -152,6 +152,8 @@ run = tree_runner(claude_code(), layout="claude_skill", name="pdf-audit")
 | `claude_skill` | `.claude/skills/<name>/` |
 | `skill_library` | `.claude/skills/` (a directory *of* skills) |
 | `claude_agent` | `.claude/agents/` |
+| `dsh_skill` | `.dsh/skills/<name>/` (DeepSeek Harness project skill) |
+| `agents_skill` | `.agents/skills/<name>/` (the Agent Skills standard; dsh and Codex both read it) |
 | `root` | the workspace itself |
 
 Any literal prefix works too. Per rollout the runner makes a fresh workspace,

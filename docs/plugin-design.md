@@ -1,9 +1,12 @@
 # Design: AgentDescent as a plugin for DeepSeek Harness, Claude Code, Codex and other agents
 
-> Status: **design proposal**, nothing here is implemented yet. Written against
-> `main` after the one-call wrappers were removed (`evolve()` is the only entry
-> point) and the policy install hooks landed; it names the exact module each
-> piece lands in. Section 14 lists what changed since the first draft and why.
+> Status: **design record; steps 1 to 9 of the delivery plan are implemented**
+> (`evolvespec.py`, `runstore.py`, `cli.py`, `mcp.py`, `integrations/`,
+> `plugin_runner`, `stop_when`). The user-facing guide is
+> [Use it from your agent](plugins.md); this page keeps the reasoning. Written
+> against `main` after the one-call wrappers were removed (`evolve()` is the
+> only entry point) and the policy install hooks landed. Section 14 lists what
+> changed since the first draft and why.
 
 ## 0. The one-paragraph version
 

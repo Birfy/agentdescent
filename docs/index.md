@@ -111,6 +111,11 @@ pip install agentdescent
     A skill folder, an agent folder, or its code — evolved by an agent that reads
     the files.
 
+-   :material-power-plug: **[Use it from your agent](plugins.md)**
+
+    The plugin for DeepSeek Harness, Claude Code and Codex: say "evolve this"
+    inside the agent. Also evolves the plugins themselves.
+
 -   :material-star-four-points: **[The `evolve` method](evolution.md)**
 
     The one entry point underneath. Every capability is a plug-in to one

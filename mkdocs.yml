@@ -37,6 +37,7 @@ nav:
     - Quickstart — dataset to skill: quickstart-skill.md
     - Quickstart — evolve a directory: quickstart-directory.md
     - Quickstart — evolve an agent's code: quickstart-agent-code.md
+    - Use it from your agent (DSH / Claude Code / Codex): plugins.md
   - Core concepts:
     - Concepts: concepts.md
     - Architecture: architecture.md
@@ -108,7 +109,6 @@ nav:
   - Design records:
     - Evolving a directory: design-directory-evolution.md
     - Plugin for DSH, Claude Code, Codex and other agents: plugin-design.md
-  - Use it from your agent: plugins.md
 
 markdown_extensions:
   - admonition
