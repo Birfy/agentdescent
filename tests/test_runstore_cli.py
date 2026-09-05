@@ -286,3 +286,25 @@ def test_module_entry_point_runs_as_a_subprocess():
     proc = subprocess.run([sys.executable, "-m", "agentdescent.cli", "--help"],
                           capture_output=True, text=True, cwd=ROOT)
     assert proc.returncode == 0 and "evolve" in proc.stdout
+
+
+def test_a_detached_run_started_with_relative_paths_finds_its_data(store, tmp_path, monkeypatch):
+    """The regression: the child's cwd is the run directory, not the caller's.
+
+    A spec with `data.path: cases.jsonl` planned cleanly in the parent and then
+    died in the detached child with "cases.jsonl does not exist"."""
+    path, spec = _spec_file(tmp_path)
+    d = spec.to_dict()
+    d["target"] = os.path.relpath(d["target"], str(tmp_path))
+    d["data"] = {**d["data"], "path": os.path.relpath(d["data"]["path"], str(tmp_path))}
+    with open(path, "w") as fh:
+        json.dump(d, fh)
+    monkeypatch.chdir(tmp_path)
+
+    code, out = _cli("--store", store, "--json", "evolve", "spec.json", "--detach")
+    assert code == 0, out
+    rd = runstore.get(json.loads(out)["run_id"], store=store)
+    st = _wait(rd)
+    assert st.state == "done", rd.log_tail()
+    # the stored spec is the absolute one, so the run is re-runnable from anywhere
+    assert os.path.isabs(rd.spec_dict()["data"]["path"])

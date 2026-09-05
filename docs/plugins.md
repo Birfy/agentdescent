@@ -118,6 +118,12 @@ The other fields:
 `agentdescent init <path>` writes a starter spec with `kind` guessed from what
 the path is.
 
+Relative paths (`target`, `data.path`, a `cmd` grader) are resolved **when the
+spec is read**, not when it runs: the detached run has the run directory as its
+working directory and an MCP server has whatever the host launched it in, so a
+relative path would otherwise mean three different files. The spec stored beside
+the run holds the resolved paths and is re-runnable from anywhere.
+
 ## Where a run lives
 
 ```

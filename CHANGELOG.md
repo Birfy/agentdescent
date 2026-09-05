@@ -33,7 +33,11 @@ All notable changes to AgentDescent are documented here. The format follows
 - **A run store** (`agentdescent.runstore`): a run is a directory under
   `~/.agentdescent/runs/<id>/` plus a detached process. `status.json` is
   replaced atomically from `on_round`, `resume` re-launches on the same ledger,
-  `cancel` signals the process group so worker CLIs die with the run.
+  `cancel` signals the process group so worker CLIs die with the run. Relative
+  paths in a spec (`target`, `data.path`, a `cmd` grader) are resolved where the
+  spec is *read*, because the process that runs it is a different one with a
+  different working directory; the copy stored beside the run is therefore
+  re-runnable from anywhere.
 - **`kind: plugin` -- the host plugins themselves are evolvable.**
   `runners.plugin_runner` is a per-host table over `code_runner`: the candidate
   plugin is loaded into an isolated copy of the host that lives inside the

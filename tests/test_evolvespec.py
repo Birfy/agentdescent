@@ -399,3 +399,47 @@ def make_model():
         skill, _, q = prompt.partition("\n\n")
         return q[::-1] if "reversed" in skill else q
     return model
+
+
+# ---------------------------------------------------------------------------
+# relative paths: resolved once, where the spec was read
+# ---------------------------------------------------------------------------
+
+
+def test_absolutise_resolves_target_data_and_a_cmd_grader(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "skill").mkdir()
+    (tmp_path / "cases.jsonl").write_text('{"prompt": "q", "gold": "a"}\n')
+    (tmp_path / "grade.sh").write_text("#!/bin/sh\necho 1\n")
+    spec = EvolveSpec(kind="skill_dir", target="./skill", agent="echo",
+                      data={"path": "cases.jsonl"}, score={"cmd": "./grade.sh --strict"})
+    out = spec.absolutise()
+    assert out.target == str(tmp_path / "skill")
+    assert out.data["path"] == str(tmp_path / "cases.jsonl")
+    assert out.score["cmd"] == [str(tmp_path / "grade.sh"), "--strict"]
+    assert spec.target == "./skill"                      # the original is untouched
+    # a grader that is a program on PATH is left alone
+    assert EvolveSpec(kind="skill_dir", target="./skill", agent="echo", data={"inline": [{}]},
+                      score={"cmd": "grep -q x"}).absolutise().score["cmd"] == "grep -q x"
+
+
+def test_absolutise_leaves_a_text_target_that_is_not_a_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    spec = EvolveSpec(kind="text", target="You are a helpful assistant.", agent="echo",
+                      data={"inline": [{"prompt": "q", "gold": "a"}]})
+    assert spec.absolutise().target == "You are a helpful assistant."
+    (tmp_path / "p.md").write_text("Be terse.")
+    got = EvolveSpec(kind="text", target="p.md", agent="echo",
+                     data={"inline": [{"prompt": "q", "gold": "a"}]}).absolutise()
+    assert got.target == str(tmp_path / "p.md")
+
+
+def test_load_spec_absolutises_by_default(tmp_path, monkeypatch):
+    spec = _dir_spec(str(tmp_path))
+    d = spec.to_dict()
+    d["data"] = {**d["data"], "path": os.path.relpath(d["data"]["path"], str(tmp_path))}
+    path = tmp_path / "spec.json"
+    path.write_text(json.dumps(d))
+    monkeypatch.chdir(tmp_path)
+    assert os.path.isabs(load_spec("spec.json").data["path"])
+    assert not os.path.isabs(load_spec("spec.json", absolutise=False).data["path"])

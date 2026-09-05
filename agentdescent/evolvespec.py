@@ -37,7 +37,8 @@ from __future__ import annotations
 import csv
 import json
 import os
-from dataclasses import dataclass, field, asdict
+import shlex
+from dataclasses import dataclass, field, asdict, replace
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 from .agents import Completion, Usage, WorkspaceAgent
@@ -226,11 +227,55 @@ class EvolveSpec:
     def allowed_prefixes(self) -> Tuple[str, ...]:
         return tuple(DEFAULT_ALLOWED_PREFIXES) + tuple(self.allow)
 
+    def absolutise(self, base: Optional[str] = None) -> "EvolveSpec":
+        """A copy whose file paths are absolute, resolved against ``base`` (cwd).
 
-def load_spec(path: str) -> EvolveSpec:
-    """Read a spec from a JSON file."""
+        A spec is written by one process and run by another: the CLI validates it
+        where you typed the command, then a detached child runs it from the run
+        directory, and an MCP server's cwd is wherever the host happened to
+        launch it. A relative ``data.path`` therefore names a different file in
+        each of them -- which showed up as a run that planned cleanly and then
+        failed on its first line with "cases.jsonl does not exist".
+
+        So relative paths are resolved **once, where the spec was read**, and the
+        copy stored beside the run is unambiguous: it is also what makes the
+        stored spec re-runnable from anywhere, which is the point of keeping it.
+        Only paths are touched -- ``target``, ``data.path`` and a ``score.cmd``
+        that names a file (``./grade.sh``, ``tools/grade.py``) rather than a
+        program on ``PATH``.
+        """
+        base = os.path.abspath(base or os.getcwd())
+
+        def resolve(p: str) -> str:
+            expanded = os.path.expanduser(p)
+            return expanded if os.path.isabs(expanded) else os.path.normpath(
+                os.path.join(base, expanded))
+
+        # `text` is the one kind whose target may be the instruction itself
+        # rather than a path, so it is resolved only when it names a real file.
+        target = self.target
+        if self.kind != "text" or os.path.isfile(resolve(self.target)):
+            target = resolve(self.target)
+        out = replace(self, target=target)
+        if isinstance(self.data, Mapping) and "path" in self.data:
+            out.data = {**self.data, "path": resolve(str(self.data["path"]))}
+        if isinstance(self.score, Mapping) and "cmd" in self.score:
+            cmd = self.score["cmd"]
+            argv = shlex.split(cmd) if isinstance(cmd, str) else list(cmd)
+            if argv and (os.sep in argv[0] or argv[0].startswith(".")):
+                out.score = {**self.score, "cmd": [resolve(argv[0]), *argv[1:]]}
+        return out
+
+
+def load_spec(path: str, *, absolutise: bool = True) -> EvolveSpec:
+    """Read a spec from a JSON file.
+
+    Relative paths in it are resolved against the current directory (see
+    :meth:`EvolveSpec.absolutise`), because the process that *runs* the spec is
+    usually not this one. Pass ``absolutise=False`` to read it verbatim."""
     with open(os.path.expanduser(path), encoding="utf-8") as fh:
-        return EvolveSpec.from_dict(json.load(fh))
+        spec = EvolveSpec.from_dict(json.load(fh))
+    return spec.absolutise() if absolutise else spec
 
 
 # ---------------------------------------------------------------------------

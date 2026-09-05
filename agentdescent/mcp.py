@@ -93,7 +93,10 @@ class Tools:
 
     def plan(self, spec: Dict[str, Any], usd_per_call: Optional[float] = None) -> Dict[str, Any]:
         try:
-            return plan_payload(EvolveSpec.from_dict(spec), usd_per_call=usd_per_call)
+            # Relative paths mean "where this server was launched"; the detached
+            # run has a different cwd, so they are resolved here, once.
+            return plan_payload(EvolveSpec.from_dict(spec).absolutise(),
+                                usd_per_call=usd_per_call)
         except SpecError as e:
             return {"ok": False, "error": str(e)}
 
@@ -114,7 +117,7 @@ class Tools:
     def start(self, spec: Dict[str, Any], budget_usd: Optional[float] = None,
               usd_per_call: Optional[float] = None) -> Dict[str, Any]:
         try:
-            es = EvolveSpec.from_dict(spec)
+            es = EvolveSpec.from_dict(spec).absolutise()
             compose(es)                       # fail here, with the field, not in the child
         except SpecError as e:
             return {"ok": False, "error": str(e)}
