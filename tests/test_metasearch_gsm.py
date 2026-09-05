@@ -251,3 +251,61 @@ def test_the_meta_reward_reaches_both_the_outer_loop_and_the_validation(monkeypa
                          validate_seeds=[9], rounds=1, workers=1, meta_reward=reward)
     assert seen["evolve"] is reward is seen["validate"], (
         "the gate and the report must score an inner run the same way")
+
+
+def test_cached_completion_makes_a_flaky_model_reproducible(tmp_path):
+    """The property the paired comparison rests on, pinned.
+
+    Validating the seed sampler against itself reported a gain of -0.0625 on a
+    live window because the rollouts were fresh model calls and the endpoint
+    was not perfectly deterministic. A prompt cache is what closes that.
+    """
+    answers = iter(["first", "second", "third"])
+    calls = {"n": 0}
+
+    def flaky(prompt: str) -> str:
+        calls["n"] += 1
+        return next(answers)
+
+    cached = bench.cached_completion(flaky, str(tmp_path / "c"), key_extra="m|0")
+    assert [cached("same prompt") for _ in range(3)] == ["first"] * 3
+    assert calls["n"] == 1
+    assert cached.stats == {"hits": 2, "misses": 1}
+    # A different prompt, or a different request shape, is a different entry.
+    assert cached("other prompt") == "second"
+    other = bench.cached_completion(flaky, str(tmp_path / "c"), key_extra="m|0.7")
+    assert other("same prompt") == "third", "temperature must not share an entry"
+    # A half-written entry is a miss, not a crash.
+    import glob
+    path = sorted(glob.glob(str(tmp_path / "c" / "*.json")))[0]
+    open(path, "w").write("{ truncated")
+    assert bench.cached_completion(lambda p: "recomputed", str(tmp_path / "c"),
+                                   key_extra="m|0")("same prompt") in {"recomputed", "first"}
+
+
+def test_an_inner_run_is_a_function_of_the_sampler_when_completions_are_cached(tmp_path):
+    """Two runs of the same sampler must give the same curve, even if the model
+    answers differently the second time."""
+    tasks = bench.windows("gsmhard", 1, 8, pool=40)["gsmhard-0"]
+    seq = {"n": 0}
+
+    def drifting(prompt: str) -> str:
+        # Answers correctly only on the first pass, so an uncached second run
+        # would produce a different curve.
+        seq["n"] += 1
+        if "improve" in prompt.lower() or "propose" in prompt.lower():
+            return "Add one to the number in the problem and state the result."
+        number = [int(w) for w in prompt.replace("?", " ").split() if w.isdigit()]
+        if not number:
+            return "0"
+        base = number[0] + 1 if "Add one" in prompt else number[0]
+        return str(base if seq["n"] % 2 else base + 100)
+
+    cached = bench.cached_completion(drifting, str(tmp_path / "c"), key_extra="k")
+    problem = bench.gsm_problem(tasks, cached, rounds=2, workers=1)
+    spec = policy_source("task_sampler")
+    sampler = spec.render(spec.initial())
+    first = problem(spec.compile(sampler), 0)
+    second = problem(spec.compile(sampler), 0)
+    assert first.curve == second.curve, "the inner run is not a function of the sampler"
+    assert cached.stats["hits"] > 0

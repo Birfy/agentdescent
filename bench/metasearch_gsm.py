@@ -32,8 +32,12 @@ the gate as evidence, and expect the cost to rise with it.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import random
+import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -67,6 +71,68 @@ TEMPLATE = "System instruction:\n{skill}\n\nUser problem:\n{prompt}"
 
 DEFAULT_OUTPUT = Path("bench/results/metasearch-gsm.json")
 
+
+# ---------------------------------------------------------------------------
+# Determinism: the inner run must be a function of the slot value
+# ---------------------------------------------------------------------------
+
+
+def cached_completion(complete: Callable[[str], str], directory: str, *,
+                      key_extra: str = "") -> Callable[[str], str]:
+    """``prompt -> text``, memoised on disk. Makes an inner run reproducible.
+
+    A :class:`~agentdescent.meta.Problem` is documented as
+    ``(value, seed) -> MetaOutcome``, and the paired comparison
+    :func:`~agentdescent.meta.meta_validate` makes rests on that: score the seed
+    rule and the evolved rule on the same problem and seed, and the difference
+    is the rule. The engine's ``eval_cache`` memoises the *gate*, and nothing
+    memoised the **rollouts** -- so two runs of the same sampler could take
+    different proposals and land on different instructions.
+
+    Measured, and the reason this exists: validating the seed rule against
+    **itself**, byte for byte, reported a gain of -0.0625 on one 20-task
+    GSM-Hard window (one seed better, one worse). A noise floor that size sits
+    on top of any effect the outer loop could find, and under L1 governance
+    every tie is an oracle veto -- which is exactly what the first two live runs
+    produced: three sweeps, `{'oracle-rejected': 3}`, nothing committed.
+
+    Deterministic sampling (``temperature=0``) is necessary and was not
+    sufficient: the endpoint returned the same text for the same prompt most of
+    the time, not always. Caching the call is what closes it.
+
+    The key covers the prompt and whatever ``key_extra`` names about the
+    request (model, temperature, token budget) -- change any of those and the
+    old entries are simply not found rather than silently reused.
+    """
+    os.makedirs(directory, exist_ok=True)
+    lock = threading.Lock()
+    stats = {"hits": 0, "misses": 0}
+
+    def complete_cached(prompt: str) -> str:
+        digest = hashlib.sha256(f"{key_extra}\0{prompt}".encode("utf-8")).hexdigest()
+        path = os.path.join(directory, f"{digest}.json")
+        if os.path.exists(path):
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    with lock:
+                        stats["hits"] += 1
+                    return json.load(handle)["response"]
+            except (OSError, ValueError, KeyError):
+                pass          # a half-written entry is a miss, not a failure
+        response = complete(prompt)
+        with lock:
+            stats["misses"] += 1
+        # Written whole then renamed: a concurrent reader never sees a partial
+        # entry, which is the failure the `except` above would otherwise absorb
+        # silently on every call.
+        fd, tmp = tempfile.mkstemp(dir=directory, suffix=".partial")
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump({"response": response}, handle)
+        os.replace(tmp, path)
+        return response
+
+    complete_cached.stats = stats          # type: ignore[attr-defined]
+    return complete_cached
 
 # ---------------------------------------------------------------------------
 # Data: disjoint windows of one benchmark, each a whole inner problem
@@ -182,23 +248,23 @@ def build_problems(complete: Callable[[str], str], *, source: str, other: str,
 #: The meta-rewards this script offers, and the one thing to know about each.
 META_REWARDS: Dict[str, Callable[[float], MetaReward]] = {
     # Mean best-so-far: what a decision rule controls in general, and the
-    # library default. Measured here first and it **saturated**: on 20-task
-    # GSM-Hard windows at five inner sweeps the seed sampler already scored
-    # 0.875, candidates tied, and L1 governance turns a tie into a veto
-    # (`force_oracle` on an L1 artifact rejects unless the candidate strictly
-    # beats the base on the full held-out set), so three outer sweeps ran and
-    # committed nothing. A saturated reward and a strict gate is a null result
-    # about the configuration, not about the sampler.
+    # library default. It reads high on this domain (0.875 on some 20-task
+    # windows), and a tie under L1 governance is an oracle veto -- but the
+    # first two live runs' `{'oracle-rejected': 3}` was **not** that: it was
+    # the inner run not being reproducible, which `cached_completion` fixes.
+    # With the run deterministic a tie means the two samplers behaved the same,
+    # which is a finding rather than an artefact.
     "auc": lambda target: auc,
     # The inner run's own final score. Least sensitive to *speed*, which is the
     # thing a sampler actually changes.
     "final": lambda target: final_reward,
     # Time to quality: 1/(1+sweeps until the inner curve first reaches `target`).
-    # Spread over {1, 0.5, 0.33, 0.25, 0}, so ties are rare and a rule that finds
-    # the informative task one sweep earlier is visibly better. The right default
-    # here as long as `target` sits above the seed instruction's own score (0.500
-    # on GSM-Hard through this wrapper) -- below it every run scores 1.0 and this
-    # saturates the same way `auc` did.
+    # Spread over {1, 0.5, 0.33, 0.25, 0}, so a rule that finds the informative
+    # task one sweep earlier is visibly better -- but only if `target` sits above
+    # what the inner run scores at sweep 0. Measured: at 0.75 on 20-task windows
+    # the outer held-out read a flat 1.000, because an 8-task inner held-out set
+    # puts several windows' seed instruction at 6/8 before anything is learned.
+    # Pick the target against the inner baseline, not against the benchmark's.
     "time-to-quality": rollouts_to,
 }
 
@@ -330,11 +396,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rounds", type=int, default=3, help="outer rounds")
     parser.add_argument("--workers", type=int, default=2, help="outer workers")
     parser.add_argument("--inner-rounds", type=int, default=5)
-    parser.add_argument("--meta-reward", default="time-to-quality",
-                        choices=sorted(META_REWARDS),
-                        help=("what one inner run is worth to the outer loop. "
-                              "`auc` is the library default and saturated on this "
-                              "domain (see META_REWARDS)"))
+    parser.add_argument("--meta-reward", default="auc", choices=sorted(META_REWARDS),
+                        help=("what one inner run is worth to the outer loop; see "
+                              "META_REWARDS for what each one saturates on"))
+    parser.add_argument("--completion-cache", default="",
+                        help=("memoise prompt -> text here, which is what makes an "
+                              "inner run reproducible and so a paired comparison "
+                              "meaningful. Defaults to <--eval-cache>/completions"))
     parser.add_argument("--quality-target", type=float, default=0.75,
                         help=("the bar --meta-reward time-to-quality measures the "
                               "time to. Must sit above the seed instruction's own "
@@ -365,6 +433,12 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         raise SystemExit("--async / --pipelined-gate are not supported by the "
                          "meta loop; the outer runtime is the synchronous one")
     workers = worker_count(args, args.workers)
+    # The completion cache is what makes an inner run a function of the sampler
+    # (see `cached_completion`); it lives beside the gate cache and is on
+    # whenever that is, because a paired comparison without it measures noise.
+    completion_cache = (args.completion_cache
+                        or (os.path.join(args.eval_cache, "completions")
+                            if args.eval_cache else ""))
     seeds = list(range(args.seeds))
     validate_seeds = list(range(1_000, 1_000 + args.validate_seeds))
     inner = {"rounds": args.inner_rounds, "workers": 1,
@@ -392,6 +466,9 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
           + f" max_seconds={args.max_seconds:.0f}")
     print(f"Model     : {args.provider}/{args.model} temperature={args.temperature} "
           f"thinking={args.thinking}")
+    print("Caches    : gate=" + (args.eval_cache or "off") + "  completions="
+          + (completion_cache or "OFF -- inner runs will not be reproducible, "
+                                 "so a paired gain measures noise"))
     if args.dry_run:
         print("[dry-run] no API call and no dataset fetch.")
         return 0
@@ -406,6 +483,10 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                        timeout=args.api_timeout, temperature=args.temperature,
                        retries=1, **options),
         attempts=4, backoff=3.0)
+    if completion_cache:
+        complete = cached_completion(
+            complete, completion_cache,
+            key_extra=f"{args.model}|{args.temperature}|{args.max_tokens}|{args.thinking}")
     train, validate, groups = build_problems(
         complete, source=args.source, other=args.other,
         train_windows=args.train_windows, unseen_windows=args.unseen_windows,
@@ -433,7 +514,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     # have (they are the Anthropic SDK's names), and the AttributeError landed
     # on the last line of an hour-long run -- after every measurement was taken
     # and before any of it was written.
-    payload["usage"] = {**usage_dict(usage), "wall_seconds": time.monotonic() - started}
+    payload["usage"] = {**usage_dict(usage), "wall_seconds": time.monotonic() - started,
+                        "completion_cache": getattr(complete, "stats", None)}
     print("[evolved sampler]\n" + payload["evolved_source"])
     print(format_report(payload))
     args.output.parent.mkdir(parents=True, exist_ok=True)
