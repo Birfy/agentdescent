@@ -123,7 +123,10 @@ from .filetree import (
     tree_summary,
 )
 from .treestrategy import EDIT_PROTOCOL, FileTree, parse_edits, tree_reflector
-from .runners import LAYOUTS, TEST_FAILURE_MARKER, code_runner, gated_reward, tree_runner
+from .runners import (
+    LAYOUTS, PLUGIN_FROZEN, PLUGIN_HOSTS, TEST_FAILURE_MARKER, PluginHost, code_runner,
+    gated_reward, plugin_runner, tree_runner,
+)
 from .orchestrator import AgentDescent, RoundStat, run_fork_baseline
 from .agents import (
     AgentError,
@@ -140,7 +143,7 @@ from .agents import (
     openai_compatible,
     with_retries,
 )
-from .agents import WorkspaceAgent
+from .agents import WorkspaceAgent, worker_env
 from .evolution import (
     Agent,
     LLMAgent,
@@ -370,6 +373,11 @@ __all__ = [
     "code_runner",
     "tree_runner",
     "gated_reward",
+    "plugin_runner",
+    "PluginHost",
+    "PLUGIN_HOSTS",
+    "PLUGIN_FROZEN",
+    "worker_env",
     "async_evolve",
     "claude_agent",
     "rule_id",

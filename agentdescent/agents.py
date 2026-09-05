@@ -26,7 +26,7 @@ import subprocess
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Optional, Protocol, Sequence, runtime_checkable
+from typing import Callable, Dict, Mapping, Optional, Protocol, Sequence, Tuple, runtime_checkable
 
 Completion = Callable[[str], str]
 
@@ -142,29 +142,75 @@ class WorkspaceAgent(Protocol):
     def in_workspace(self, path: str) -> Completion: ...
 
 
+#: Environment variables a host agent sets in its own session and its children
+#: inherit. A worker that sees them believes it is *inside* that session:
+#: Claude Code refuses to start, DSH loads the parent's profile, and a worker
+#: whose host runs this package's MCP server would call it recursively.
+SESSION_MARKERS: Tuple[str, ...] = (
+    "CLAUDECODE", "CLAUDE_CODE_", "CLAUDE_CONFIG_DIR", "CODEX_", "DSH_",
+    "OPENAI_AGENT_", "MCP_",
+)
+
+#: Set for every worker so a tool the worker reaches (this package's own MCP
+#: server, when the plugin that hosts it is being evolved) can tell it is inside
+#: a run and refuse to start another. See ``agentdescent.mcp``.
+NESTED_MARKER = "AGENTDESCENT_NESTED"
+
+
+def worker_env(workspace: Optional[str], extra: Optional[Mapping[str, str]] = None,
+               *, isolate: bool = True) -> Dict[str, str]:
+    """The environment a worker agent CLI runs with.
+
+    Starts from the caller's environment (a worker needs its provider keys and
+    PATH), drops every :data:`SESSION_MARKERS` variable, marks the process as
+    nested, and -- when there is a workspace -- points each host's config
+    directory *inside* it (``CLAUDE_CONFIG_DIR``, ``CODEX_HOME``, ``DSH_HOME``),
+    so the worker starts clean and cannot read the user's real plugins, memory or
+    MCP servers. ``extra`` wins over all of it. ``isolate=False`` keeps only the
+    nested marker, for callers who want the worker to see the user's setup.
+    """
+    env = {k: v for k, v in os.environ.items()
+           if not (isolate and any(k == m.rstrip("_") or k.startswith(m)
+                                   for m in SESSION_MARKERS))}
+    env[NESTED_MARKER] = "1"
+    if isolate and workspace:
+        home = os.path.join(workspace, ".agentdescent-worker")
+        env.setdefault("CLAUDE_CONFIG_DIR", os.path.join(home, "claude"))
+        env.setdefault("CODEX_HOME", os.path.join(home, "codex"))
+        env.setdefault("DSH_HOME", os.path.join(home, "dsh"))
+    if extra:
+        env.update(extra)
+    return env
+
+
 class _CliAgent:
     """A command-line agent: a Completion that can be rebound to a workspace."""
 
     def __init__(self, command, *, workspace=None, via_stdin=False,
-                 timeout=600.0, env=None, usage=None) -> None:
+                 timeout=600.0, env=None, usage=None, isolate=True) -> None:
         if not command:
             raise ValueError("cli_agent needs a non-empty command")
         self.command, self.workspace, self.via_stdin = list(command), workspace, via_stdin
-        self.timeout, self.env, self.usage = timeout, env, usage
+        self.timeout, self.env, self.usage, self.isolate = timeout, env, usage, isolate
 
     def in_workspace(self, path: str) -> "Completion":
         return _CliAgent(self.command, workspace=path, via_stdin=self.via_stdin,
-                         timeout=self.timeout, env=self.env, usage=self.usage)
+                         timeout=self.timeout, env=self.env, usage=self.usage,
+                         isolate=self.isolate)
 
     def __call__(self, prompt: str) -> str:
         argv = list(self.command) if self.via_stdin else [*self.command, prompt]
         t0 = time.time()
+        env = worker_env(self.workspace, self.env, isolate=self.isolate)
+        if self.workspace:
+            for key in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "DSH_HOME"):
+                if env.get(key, "").startswith(self.workspace):
+                    os.makedirs(env[key], exist_ok=True)
         try:
             proc = subprocess.run(
                 argv, input=prompt if self.via_stdin else None,
                 capture_output=True, text=True, timeout=self.timeout,
-                cwd=self.workspace,
-                env={**os.environ, **self.env} if self.env else None,
+                cwd=self.workspace, env=env,
             )
         except FileNotFoundError as e:
             raise AgentError(
@@ -184,7 +230,7 @@ class _CliAgent:
 def cli_agent(command: Sequence[str], *, workspace: Optional[str] = None,
               via_stdin: bool = False, timeout: float = 600.0,
               env: Optional[Dict[str, str]] = None,
-              usage: Optional[Usage] = None) -> "WorkspaceAgent":
+              usage: Optional[Usage] = None, isolate: bool = True) -> "WorkspaceAgent":
     """Run any **command-line** coding agent as a :data:`Completion`.
 
     ``command`` is the argv prefix; the prompt is appended as the final argument,
@@ -201,9 +247,14 @@ def cli_agent(command: Sequence[str], *, workspace: Optional[str] = None,
     stall the round it belongs to (see ``evolve(round_timeout=)``). Failures raise
     :class:`AgentError` carrying the agent's own stderr rather than a bare exit
     code.
+
+    The child runs with :func:`worker_env`: the host session's markers dropped,
+    ``AGENTDESCENT_NESTED=1`` set, and each host's config directory pointed inside
+    the workspace. ``isolate=False`` keeps the caller's environment as it is
+    (bar the nested marker) for a worker that should see the user's own setup.
     """
     return _CliAgent(command, workspace=workspace, via_stdin=via_stdin,
-                     timeout=timeout, env=env, usage=usage)
+                     timeout=timeout, env=env, usage=usage, isolate=isolate)
 
 
 def claude_code(*, workspace: Optional[str] = None, extra_args: Sequence[str] = (),
