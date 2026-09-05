@@ -11,9 +11,7 @@
 > 落地的模块：`agentdescent/meta.py`（§3 全部）、`examples/era/era_empirical_software.py`
 > 的两处注入口（§3.5）、`examples/metasearch/`（§4 的 stage 0）。
 > **未做**：SWE-bench-Science / Terminal-Bench-Science 的 `HarborDomain` 适配器（§4.3，
-> 需要容器与 agent，离线测试无法覆盖）；`acceptance` / `conflict` / `fusion` / `promotion`
-> / `proposal` 五个插槽的内置冒烟测试与默认种子（§3.3，需要构造 `MergeContext` /
-> `Evolvable`，留给使用方传 `smoke=`）。
+> 需要容器与 agent，离线测试无法覆盖）；AlgoTune 在线跑批（P4，需要 API 与沙箱）。
 
 ---
 
@@ -169,13 +167,19 @@ def describe(self) -> str                    # 告诉反思模型这个面是什
    无参实例化；
 3. **`isinstance(obj, SLOT_PROTOCOLS[slot])`**——协议是 `runtime_checkable`，这是结构性
    检查；
-4. **冒烟**：`selection` / `task_sampler` / `staleness` 内置（`select` 必须返回 1..n 个
-   来自候选池的对象、单候选时必须返回它；`pick` 必须返回 keys 之一；`decide` 必须返回
-   `StaleAction`）；其余五个插槽的输入是 `MergeContext` / `Evolvable`，冒烟由使用方
-   `smoke=` 传入。
+4. **冒烟**：八个插槽各有一个内置冒烟（`select` 必须返回 1..n 个来自候选池的对象、
+   单候选时必须返回它；`pick` 必须返回 keys 之一；`decide` 必须返回 `StaleAction`；
+   `resolve` 必须至少保留一张卡且保留的卡两两不矛盾；`select`(fusion) 不得发明任何 diff
+   都没提的 key；`accept` / `observe` / `propose` 必须返回正确类型），`smoke=` 可替换。
+   合并侧的冒烟用一个最小 `Evolvable`（`_SmokeArtifact`）和三张卡（两张矛盾、一张不相交）
+   构造 `MergeContext` / `MergeReport` / `ProposalContext`。
 
-`seed_source(slot)` 为前三个插槽提供引擎默认行为的源码版本；`describe()` 用 `inspect`
-列出 Protocol 的方法签名，反思模型知道什么必须保留。
+`seed_source(slot)` 为八个插槽都提供起点：能转写引擎默认规则的转写（`selection` /
+`task_sampler` / `staleness` / `fusion` / `promotion`）；默认规则要读 verifier 或
+Beta 后验的给最简单的合规规则并在注释里说明（`acceptance` / `conflict`）；`proposal`
+是占位形状（引擎默认是 actor 自己的 `propose`，不是策略对象）。`tests/test_meta.py`
+把每个种子装进一次真实的内层 `evolve()` 跑通，证明引擎确实安装并调用了它。
+`describe()` 用 `inspect` 列出 Protocol 的方法签名，反思模型知道什么必须保留。
 
 **边界必须说清楚**：这是 SICA / Gödel Agent 自改代码用的同一级门控，够把模型的重写
 限制在"做决策"上，**不是沙箱**，不能跑陌生人的代码。要隔离，用 `ProcessExecutor` /
@@ -315,11 +319,11 @@ runner 和一个 agent，离线套件跑不了，所以没进仓库；边界写�
 |---|---|---|
 | P0 | `EraTree(policy=)` / `run_agentdescent_era(selection=)` 注入口，默认不变 | ✅ |
 | P1 | `agentdescent/meta.py`：`MetaOutcome` / `Problem` / `auc` 等 / `ParamSlot` / `SourceSlot` / `priority_selection` / `PrioritySelection` / `meta_evolve` / `meta_validate` / `transfer_ratio` | ✅ |
-| P2 | `policy_source(slot, seed)` 通用门 + `seed_source` + `SLOT_PROTOCOLS` | ✅（三个插槽有内置冒烟与种子） |
+| P2 | `policy_source(slot, seed)` 通用门 + `seed_source` + `SLOT_PROTOCOLS` | ✅ |
 | P3 | `examples/metasearch/`：合成地形、离线端到端、`--dry-run`、加入 PORTS 契约 | ✅ |
 | P4 | AlgoTune 在线跑：3 seed × {seed 规则, 演化规则} × 8 任务，写入 `bench/results/` | 待跑（接口已开，需 API 与沙箱） |
 | P5 | `HarborDomain` 适配器（§4.3）+ SWE-bench-Science / TB-Science 验证 | 待做（需容器 + agent） |
-| P6 | 其余五个插槽的内置冒烟与默认种子 | 待做 |
+| P6 | 其余五个插槽的内置冒烟与默认种子，每个种子在真实内层 `evolve()` 里跑通 | ✅ |
 | P7 | 多插槽联合演化（`ParamSlot` 的 key 空间天然支持；`SourceSlot` 需要多槽 Strategy） | 开放 |
 
 测试：`tests/test_meta.py`（库）、`tests/test_metasearch.py`（示例）、
@@ -352,7 +356,6 @@ runner 和一个 agent，离线套件跑不了，所以没进仓库；边界写�
 | **门≠沙箱**：`policy_source` 执行模型写的类 | 文档明说；要隔离就把 `Problem` 整个放进 `ProcessExecutor` / 容器；`priority_selection` 是更安全的窄面 |
 | **过拟合训练地形** | `meta_validate` 用不相交实例；读迁移比；目标上直接演化的规则作上限对照 |
 | **AUC 对内层噪声敏感** | 内层 seed 确定；多 seed 配对；Beta 后验 gate 本身吸收噪声 |
-| **五个插槽无内置冒烟** | 明确要求 `smoke=`；`isinstance(Protocol)` 仍然生效；P6 补齐 |
 | **API 页非确定**（已踩）：`validate=staticmethod(lambda…)`、`meta_reward=auc` 作默认值时，生成的 api.md 每次带不同内存地址 | 默认值改为 `None`，函数内回退；`tests/test_api_reference` 守住 |
 | **外层 `held_out_frac` 切的是问题实例**，不是内层数据 | 内层数据切分由 `Problem` 自己负责；文档在 `meta_evolve` 的 `seeds` 参数处说明 |
 | 反思模型不遵守类/函数形状 | 不合格即无 diff 并计数（`invalid_proposals`）；`describe()` 给出 Protocol 签名；示例报告拒绝率 |

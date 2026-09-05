@@ -55,10 +55,13 @@ class satisfying the slot's own Protocol (`SLOT_PROTOCOLS`, all
 `runtime_checkable`). The gate refuses imports outside a fixed allowlist, dunder
 access and the calls that reach the interpreter, builds the class in a
 namespace of safe builtins, checks it with `isinstance` against the Protocol,
-and runs a smoke test — shipped for `selection`, `task_sampler` and
-`staleness` (whose default behaviour `seed_source(slot)` provides as source),
-yours via `smoke=` for the slots whose inputs are a `MergeContext` or an
-`Evolvable`. It is the gate SICA and Gödel Agent run their self-edits behind,
+and runs a smoke test — one shipped per slot, replaceable via `smoke=`.
+`seed_source(slot)` provides a starting value for every slot: the engine's
+default rule transcribed where a seed can carry it (`selection`,
+`task_sampler`, `staleness`, `fusion`, `promotion`), the simplest contract-
+satisfying rule where the default reads the verifier or a posterior
+(`acceptance`, `conflict`), and a placeholder shape for `proposal`. It is the
+gate SICA and Gödel Agent run their self-edits behind,
 not a sandbox: enough to keep a model's rewrite to *deciding*, not enough for
 code from a stranger.
 

@@ -503,7 +503,7 @@ priority_selection(
 
 ### `seed_source(slot: str) -> str`
 
-The engine's default behaviour for `slot`, as candidate source.
+A valid starting value for `slot`, as candidate source.
 
 ### `slot_reflector(...)`
 

@@ -62,7 +62,7 @@ from typing import (
 
 from .agents import Completion
 from .evolution import EvolutionResult, Task, evolve
-from .evolvable import Diff
+from .evolvable import Diff, EvidenceCard
 from .policies import (AcceptancePolicy, AcceptDecision, ConflictPolicy, FusionPolicy,
                        MergeContext, Policies, Promotion, PromotionPolicy,
                        ProposalContext, ProposalPolicy)
@@ -616,17 +616,25 @@ for _name in ("random", "itertools", "collections", "functools", "dataclasses",
               "typing", "enum", "heapq", "bisect"):
     _SOURCE_MODULES[_name] = __import__(_name)
 #: ...and the engine's own value types, so a rule can build what it returns.
+def _aggregator_helpers() -> Dict[str, Any]:
+    # Imported lazily: aggregator imports policies, which this module imports.
+    from .aggregator import diffs_contradict, fuse_diffs
+    return {"diffs_contradict": diffs_contradict, "fuse_diffs": fuse_diffs}
+
+
 _SOURCE_TYPES: Dict[str, Any] = {
     "Candidate": Candidate, "SelectionContext": SelectionContext,
     "StaleAction": StaleAction, "AcceptDecision": AcceptDecision,
     "MergeContext": MergeContext, "Promotion": Promotion,
-    "ProposalContext": ProposalContext,
+    "ProposalContext": ProposalContext, "Diff": Diff, "EvidenceCard": EvidenceCard,
 }
 _SOURCE_PACKAGES = {
     "agentdescent.selection": {"Candidate", "SelectionContext"},
     "agentdescent.staleness": {"StaleAction"},
     "agentdescent.policies": {"AcceptDecision", "MergeContext", "Promotion",
                               "ProposalContext"},
+    "agentdescent.evolvable": {"Diff", "EvidenceCard"},
+    "agentdescent.aggregator": {"diffs_contradict", "fuse_diffs"},
 }
 _SAFE_BUILTINS: Dict[str, Any] = {
     name: __builtins__[name] if isinstance(__builtins__, dict) else getattr(__builtins__, name)
@@ -713,10 +721,106 @@ def _smoke_staleness(policy: Any) -> None:
         raise ValueError("a staleness policy needs a string `name`")
 
 
+class _SmokeArtifact:
+    """The least an Evolvable can be, for a smoke test that needs one."""
+
+    id = "smoke"
+    version = 3
+    blast_radius = 0.2
+
+    def __init__(self, state: Optional[Dict[str, str]] = None) -> None:
+        self.state = dict(state or {"a": "1"})
+
+    def apply(self, diff: Diff) -> "_SmokeArtifact":
+        return _SmokeArtifact({**self.state, **diff.ops})
+
+    def diff(self, other: Any) -> Diff:
+        return Diff("smoke-diff", self.id, dict(getattr(other, "state", {})))
+
+    def evidence_eval(self, evidence: EvidenceCard) -> float:
+        return 0.0
+
+
+def _smoke_cards() -> List[EvidenceCard]:
+    diffs = [Diff("d1", "smoke", {"a": "2"}, author="w1"),
+             Diff("d2", "smoke", {"a": "3"}, author="w2"),      # contradicts d1
+             Diff("d3", "smoke", {"b": "1"}, author="w3")]      # disjoint
+    return [EvidenceCard(d, {"smoke": 3}, ["smoke"], trajectory_refs=[]) for d in diffs]
+
+
+def _smoke_acceptance(policy: Any) -> None:
+    art = _SmokeArtifact()
+    for base, cand in [((8.0, 2.0), (9.0, 1.0)), ((5.0, 5.0), (2.0, 8.0)), ((0.0, 0.0), (0.0, 0.0))]:
+        ctx = MergeContext(artifact=art, candidate=art.apply(_smoke_cards()[0].diff),
+                           cards=_smoke_cards()[:1], base_counts=base, cand_counts=cand,
+                           diff=_smoke_cards()[0].diff)
+        decision = policy.accept(ctx)
+        if not isinstance(decision, AcceptDecision):
+            raise ValueError("accept() must return an AcceptDecision")
+
+
+def _smoke_conflict(policy: Any) -> None:
+    from .aggregator import diffs_contradict
+
+    cards = _smoke_cards()
+    result = policy.resolve(_SmokeArtifact(), cards)
+    if not (isinstance(result, tuple) and len(result) == 2):
+        raise ValueError("resolve() must return (kept_cards, dropped_count)")
+    kept, dropped = result
+    kept = list(kept)
+    if not kept or any(c not in cards for c in kept) or not isinstance(dropped, int):
+        raise ValueError("resolve() must keep at least one of the given cards and count the drops")
+    for i, x in enumerate(kept):
+        for y in kept[i + 1:]:
+            if diffs_contradict(x.diff, y.diff):
+                raise ValueError("resolve() must not keep two contradicting cards")
+    single = list(policy.resolve(_SmokeArtifact(), cards[:1])[0])
+    if single != cards[:1]:
+        raise ValueError("resolve() of one card must keep it")
+
+
+def _smoke_fusion(policy: Any) -> None:
+    art = _SmokeArtifact()
+    disjoint = [_smoke_cards()[0].diff, _smoke_cards()[2].diff]
+    for diffs in (disjoint, disjoint[:1]):
+        result = policy.select(art, list(diffs))
+        if not (isinstance(result, tuple) and len(result) == 3):
+            raise ValueError("select() must return (diff, candidate, fused)")
+        chosen, candidate, fused = result
+        if not isinstance(chosen, Diff) or not isinstance(fused, bool) \
+                or not hasattr(candidate, "apply"):
+            raise ValueError("select() must return a Diff, an Evolvable and a bool")
+        if not set(chosen.ops) <= {k for d in diffs for k in d.ops}:
+            raise ValueError("select() must not invent keys none of the diffs proposed")
+
+
+def _smoke_promotion(policy: Any) -> None:
+    from .aggregator import MergeReport
+
+    quiet = MergeReport("smoke", None, False, 1, 1, 0, 0, 0.5, None, "", "below-threshold")
+    committed = MergeReport("smoke", _smoke_cards()[0].diff, False, 1, 1, 0, 0, 0.9, 4, "", "committed")
+    for reports in ([], [quiet], [committed], [quiet] * 3):
+        out = list(policy.observe(reports))
+        if any(not isinstance(p, Promotion) for p in out):
+            raise ValueError("observe() must return Promotions")
+
+
+def _smoke_proposal(policy: Any) -> None:
+    ctx = ProposalContext(rendered="# playbook", task=None, output="42", reward=0.0)
+    out = policy.propose(ctx)
+    if isinstance(out, str) or any(not isinstance(p, str) for p in out):
+        raise ValueError("propose() must return a sequence of strings")
+
+
 _SMOKES: Dict[str, Callable[[Any], None]] = {
     "selection": _smoke_selection,
     "task_sampler": _smoke_task_sampler,
     "staleness": _smoke_staleness,
+    "acceptance": _smoke_acceptance,
+    "conflict": _smoke_conflict,
+    "fusion": _smoke_fusion,
+    "promotion": _smoke_promotion,
+    "proposal": _smoke_proposal,
 }
 
 
@@ -730,9 +834,9 @@ def compile_policy_source(slot: str, source: str, *, class_name: str = "Policy",
     in a namespace holding only safe builtins, the allowed modules and the
     engine's value types, instantiated with no arguments, checked with
     ``isinstance`` against the slot's Protocol, and run through a smoke test --
-    the shipped one for ``selection``, ``task_sampler`` and ``staleness``, or
-    ``smoke`` for any slot. Everything raises ``ValueError``, which is what the
-    strategy's ``to_diff`` turns into "no diff, counted".
+    one is shipped for every slot, and ``smoke`` replaces it. Everything raises
+    ``ValueError``, which is what the strategy's ``to_diff`` turns into "no
+    diff, counted".
 
     This is not a sandbox. It is the same gate SICA and Gödel Agent run their
     self-edits behind: enough to keep a model's rewrite from doing anything but
@@ -750,13 +854,15 @@ def compile_policy_source(slot: str, source: str, *, class_name: str = "Policy",
         if level == 0 and name in _SOURCE_MODULES:
             return _SOURCE_MODULES[name]
         if level == 0 and name in _SOURCE_PACKAGES and set(fromlist or ()) <= _SOURCE_PACKAGES[name]:
-            return type("_ns", (), {n: _SOURCE_TYPES[n] for n in fromlist})()
+            pool = {**_SOURCE_TYPES, **_aggregator_helpers()}
+            return type("_ns", (), {n: pool[n] for n in fromlist})()
         raise ImportError(f"import of {name!r} is not allowed")
 
     builtins["__import__"] = restricted_import
     namespace: Dict[str, Any] = {"__builtins__": builtins, "__name__": "candidate"}
     namespace.update(_SOURCE_MODULES)
     namespace.update(_SOURCE_TYPES)
+    namespace.update(_aggregator_helpers())
     try:
         exec(compile(tree, f"<candidate-{slot}>", "exec"), namespace, namespace)
         cls = namespace[class_name]
@@ -802,16 +908,86 @@ _SEED_SOURCES: Dict[str, str] = {
             return StaleAction.DISCARD
         return StaleAction.REBASE
 """,
+    "acceptance": """class Policy:
+    # Commit when the candidate's full held-out rate beats the base's.
+    # (The engine default also draws a Beta posterior against an annealed
+    # threshold; this is the simplest rule that satisfies the contract.)
+    def accept(self, ctx):
+        base = MergeContext.rate(ctx.base_counts)
+        cand = MergeContext.rate(ctx.cand_counts)
+        if cand > base:
+            return AcceptDecision(True, "committed", "", 1.0, cand - base)
+        return AcceptDecision(False, "below-threshold",
+                              "held-out did not improve", 0.0, cand - base)
+""",
+    "conflict": """class Policy:
+    # First come, first kept: a card that contradicts a kept one is dropped.
+    # (The engine default scores the pair on the cheap layer and keeps the
+    # better one; that needs the verifier, which bind(verifier) would hand you.)
+    def resolve(self, artifact, cards):
+        kept, dropped = [], 0
+        for card in cards:
+            if any(diffs_contradict(card.diff, k.diff) for k in kept):
+                dropped += 1
+            else:
+                kept.append(card)
+        return kept, dropped
+""",
+    "fusion": """class Policy:
+    # The union of the surviving diffs goes to the gate (the engine default).
+    def select(self, artifact, diffs):
+        if len(diffs) == 1:
+            return diffs[0], artifact.apply(diffs[0]), False
+        union = fuse_diffs(list(diffs))
+        return union, artifact.apply(union), True
+""",
+    "promotion": """class Policy:
+    # Promote dev -> stable after K regression-free rounds; a commit or an
+    # oracle rejection restarts the clock (the engine default's rule).
+    def __init__(self):
+        self.k = 3
+        self.survival = {}
+
+    def configure(self, config):
+        self.k = int(config.promote_after_k)
+
+    def observe(self, reports):
+        by_id = {r.artifact_id: r for r in reports}
+        out = []
+        for aid in set(self.survival) | set(by_id):
+            rep = by_id.get(aid)
+            if rep is not None and (rep.committed_version is not None
+                                    or rep.category == "oracle-rejected"):
+                self.survival[aid] = 0
+                continue
+            self.survival[aid] = self.survival.get(aid, 0) + 1
+            if self.survival[aid] >= self.k:
+                out.append(Promotion(aid, str(self.survival[aid]) + " rounds survived"))
+        return out
+""",
+    "proposal": """class Policy:
+    # Propose nothing on a success; on a failure, one rule restating what the
+    # grader wanted. A placeholder shape: the actor's own propose is the default.
+    def propose(self, ctx):
+        if ctx.reward >= 1.0:
+            return []
+        return ["On a task like this one, check the answer against the "
+                "grader before finishing; the last attempt scored "
+                + str(round(ctx.reward, 2)) + "."]
+""",
 }
 
 
 def seed_source(slot: str) -> str:
-    """The engine's default behaviour for ``slot``, as candidate source.
+    """A valid starting value for ``slot``, as candidate source.
 
-    Shipped for ``selection``, ``task_sampler`` and ``staleness``; the other
-    slots take a :class:`~agentdescent.policies.MergeContext` or a
-    :class:`~agentdescent.evolvable.Evolvable`, so their seed is yours to write
-    (and their smoke test yours to pass to :func:`policy_source`)."""
+    ``selection``, ``task_sampler``, ``staleness``, ``fusion`` and ``promotion``
+    are the engine's default rule transcribed. ``acceptance`` and ``conflict``
+    are the simplest rule that satisfies the contract -- the defaults read the
+    verifier or a Beta posterior, which a seed cannot carry -- and the source
+    says so in its comment, so a reflector starts from an honest description.
+    ``proposal`` is a placeholder shape: the engine's default is the actor's
+    own ``propose``, which is not a policy object."""
     if slot not in _SEED_SOURCES:
         raise KeyError(f"no shipped seed for {slot!r}; write one satisfying "
                        f"{SLOT_PROTOCOLS[slot].__name__}")

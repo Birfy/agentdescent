@@ -243,13 +243,63 @@ class Policy:
     assert isinstance(spec.compile(result.rendered), SLOT_PROTOCOLS["selection"])
 
 
-def test_unshipped_slots_need_a_seed_and_get_no_default_smoke():
+@pytest.mark.parametrize("slot", SLOTS)
+def test_every_slot_ships_a_seed_that_passes_its_own_gate(slot):
     from agentdescent.meta import policy_source, seed_source
 
-    with pytest.raises(KeyError, match="no shipped seed"):
-        seed_source("acceptance")
-    seed = ("class Policy:\n"
-            "    def accept(self, ctx):\n"
-            "        return AcceptDecision(accept=ctx.rate(ctx.cand_counts) > ctx.rate(ctx.base_counts))\n")
-    spec = policy_source("acceptance", seed)
-    assert isinstance(spec.compile(seed), SLOT_PROTOCOLS["acceptance"])
+    spec = policy_source(slot)
+    assert spec.render(spec.initial()).strip() == seed_source(slot).strip()
+    assert isinstance(spec.compile(seed_source(slot)), SLOT_PROTOCOLS[slot])
+
+
+@pytest.mark.parametrize("slot", [s for s in SLOTS if s != "proposal"])
+def test_every_seed_runs_inside_a_real_inner_evolve(slot):
+    """The seeds are not only shaped right: the engine installs and honours them."""
+    from agentdescent.meta import policy_source
+
+    problem = evolve_problem(_inner_tasks(), lambda t, o: 1.0 if "yes" in o else 0.0,
+                             slot=slot,
+                             run=lambda r, t: "yes" if "yes" in r else "no",
+                             propose=lambda r, t, o, w: "yes",
+                             rounds=3, n_workers=2)
+    spec = policy_source(slot)
+    outcome = problem(spec.compile(spec.render(spec.initial())), seed=0)
+    assert outcome.curve and outcome.detail["error"] is None
+    assert outcome.final == 1.0
+
+
+def test_the_proposal_seed_drives_an_inner_evolve_on_its_own():
+    from agentdescent.meta import policy_source
+
+    # The proposal policy replaces the actor's propose entirely, so the inner
+    # run's only proposals are the seed's placeholder rule.
+    seen = []
+    problem = evolve_problem(_inner_tasks(), lambda t, o: 1.0 if "grader" in o else 0.0,
+                             slot="proposal",
+                             run=lambda r, t: seen.append(r) or ("grader" if "grader" in r else "no"),
+                             propose=lambda r, t, o, w: "never used",
+                             rounds=2, n_workers=2)
+    spec = policy_source("proposal")
+    outcome = problem(spec.compile(spec.render(spec.initial())), seed=0)
+    assert outcome.detail["error"] is None and outcome.final == 1.0
+
+
+@pytest.mark.parametrize("slot, source, reason", [
+    ("conflict", "class Policy:\n    def resolve(self, artifact, cards):\n        return [], 0",
+     "at least one"),
+    ("conflict", "class Policy:\n    def resolve(self, artifact, cards):\n        return list(cards), 0",
+     "contradicting"),
+    ("fusion", "class Policy:\n    def select(self, artifact, diffs):\n"
+               "        return Diff('x', 'smoke', {'zzz': '1'}), artifact, True", "invent keys"),
+    ("acceptance", "class Policy:\n    def accept(self, ctx):\n        return True",
+     "AcceptDecision"),
+    ("promotion", "class Policy:\n    def observe(self, reports):\n        return ['smoke']",
+     "Promotions"),
+    ("proposal", "class Policy:\n    def propose(self, ctx):\n        return 'one string'",
+     "sequence of strings"),
+])
+def test_the_merge_side_smokes_catch_shape_errors(slot, source, reason):
+    from agentdescent.meta import compile_policy_source
+
+    with pytest.raises(ValueError, match=reason):
+        compile_policy_source(slot, source)
