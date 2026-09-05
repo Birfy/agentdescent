@@ -1,13 +1,16 @@
-"""The one-call path: dataset in, evolved skill out.
+"""The dataset path: rows in, evolved instruction out -- through ``evolve()``.
 
-It must stay a *thin* wrapper -- same engine, same result object, every default
-overridable -- or it becomes a second system with its own semantics.
+There used to be a one-call wrapper for this (`evolve_skill`). It was removed so
+the package has one entry point; what it assembled is now three public building
+blocks -- `tasks_from` for the rows, `scorer` for the reward, `SingleSlot` +
+`reflector` for the artifact and its reflection -- and this file is the proof
+that they add up to the same run.
 """
 import pytest
 
-from agentdescent import evolve_skill
+from agentdescent import SingleSlot, evolve, reflector, scorer, tasks_from
 from agentdescent.agents import echo
-from agentdescent.evolution import EvolutionResult, SingleSlot, Task
+from agentdescent.evolution import EvolutionResult, Task
 
 ROWS = [{"q": f"value {i}", "a": str(i * 100)} for i in range(1, 13)]
 
@@ -18,11 +21,21 @@ def _model(prompt):
     return str(n * 100) if "cents" in prompt else str(n)
 
 
-def _evolve(**kw):
+def _evolve(tasks=None, *, model=None, template="{skill}\n\n{prompt}", **kw):
+    """The dataset path, spelled out: what the removed wrapper used to build."""
+    model = model or echo(_model)
+    tasks = tasks if tasks is not None else tasks_from(ROWS, prompt="q", gold="a")
+
+    def run(rendered, task):
+        return model(template.format(skill=rendered, prompt=task.prompt))
+
+    kw.setdefault("run", run)
     kw.setdefault("propose", lambda r, t, o, s: "answer in cents")
-    kw.setdefault("score", "last_number")
-    kw.setdefault("instruction", "answer plainly")
-    return evolve_skill(ROWS, model=echo(_model), prompt="q", gold="a", **kw)
+    kw.setdefault("strategy", SingleSlot(initial_value="answer plainly"))
+    for key, value in (("held_out_frac", 0.3), ("rounds", 8), ("n_workers", 4),
+                       ("max_concurrency", 4), ("patience", 3), ("target_reward", 0.98)):
+        kw.setdefault(key, value)
+    return evolve(tasks, scorer(kw.pop("score", "last_number")), **kw)
 
 
 def test_a_dataset_of_dicts_is_enough():
@@ -30,23 +43,13 @@ def test_a_dataset_of_dicts_is_enough():
     assert isinstance(res, EvolutionResult)
     assert res.final_reward == 1.0
     assert "cents" in res.rendered
-
-
-def test_it_returns_the_same_result_object_as_evolve():
-    """Not a different system -- outcomes(), save(), error all still work."""
-    res = _evolve()
-    assert res.outcomes()
-    assert res.error is None
-    assert res.history
+    assert res.outcomes() and res.error is None and res.history
 
 
 def test_ready_made_tasks_are_accepted():
     tasks = [Task(id=str(i), prompt=f"value {i}", meta={"gold": str(i * 100)})
              for i in range(1, 13)]
-    res = evolve_skill(tasks, model=echo(_model), score="last_number",
-                       instruction="answer plainly",
-                       propose=lambda r, t, o, s: "answer in cents")
-    assert res.final_reward == 1.0
+    assert _evolve(tasks).final_reward == 1.0
 
 
 def test_a_callable_scorer_is_accepted():
@@ -54,25 +57,18 @@ def test_a_callable_scorer_is_accepted():
     assert isinstance(res, EvolutionResult)
 
 
-def test_every_default_is_overridable():
-    res = _evolve(rounds=2, n_workers=1, max_concurrency=1, held_out_frac=0.5)
-    assert len(res.history) <= 2
+def test_the_shipped_reflector_is_the_default_proposer():
+    """`reflector(model)` is what the wrapper installed; it must still produce a
+    proposal the strategy accepts."""
+    res = _evolve(propose=reflector(echo(lambda p: "answer in cents")))
+    assert "cents" in res.rendered
 
 
-def test_the_caller_can_replace_the_actors():
-    """run=/propose=/strategy= must win over the ones it builds."""
-    seen = []
-    res = _evolve(run=lambda rendered, task: seen.append(rendered) or "0",
-                  strategy=SingleSlot(initial_value="mine"))
-    assert seen and seen[0] == "mine"
-    assert isinstance(res, EvolutionResult)
-
-
-def test_the_async_path_works_and_is_not_handed_a_rejected_knob():
+def test_the_async_path_takes_the_same_pieces():
     import warnings
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
-        res = _evolve(asynchronous=True, max_seconds=5.0)
+        res = _evolve(asynchronous=True, max_seconds=5.0, max_concurrency=1)
     assert isinstance(res, EvolutionResult)
     assert not [x for x in w if "ignores max_concurrency" in str(x.message)]
 
@@ -85,27 +81,26 @@ def test_template_decides_where_the_skill_lands():
         captured.append(prompt)
         return "0"
 
-    evolve_skill(ROWS, model=echo(spy), prompt="q", gold="a", score="last_number",
-                 instruction="BE BRIEF", rounds=1,
-                 template="Question: {prompt}\n\nGuidance: {skill}",
-                 propose=lambda r, t, o, s: None)
+    _evolve(model=echo(spy), rounds=1, strategy=SingleSlot(initial_value="BE BRIEF"),
+            template="Question: {prompt}\n\nGuidance: {skill}",
+            propose=lambda r, t, o, s: None)
     assert captured and captured[0].startswith("Question: ")
     assert captured[0].rstrip().endswith("BE BRIEF")
 
 
-def test_a_template_missing_its_placeholders_is_rejected():
-    with pytest.raises(ValueError, match=r"\{skill\}"):
-        _evolve(template="no placeholders here")
-
-
 def test_unknown_scorer_names_the_alternatives():
     with pytest.raises(ValueError, match="last_number"):
-        _evolve(score="fuzzy-match")
+        scorer("fuzzy-match")
 
 
-def test_empty_data_is_rejected_clearly():
-    with pytest.raises(ValueError, match="no data"):
-        evolve_skill([], model=echo(_model))
+def test_the_named_scorers_are_the_reward_module():
+    from agentdescent import SCORERS
+    from agentdescent.rewards import contains, exact_match, last_number, numeric_close
+    assert SCORERS == {"last_number": last_number, "exact": exact_match,
+                       "contains": contains, "numeric_close": numeric_close}
+    assert callable(scorer("exact"))
+    own = lambda t, o: 1.0                                        # noqa: E731
+    assert scorer(own) is own
 
 
 # --- the scorers, and the trap that made a working model look broken -----------

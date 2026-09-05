@@ -31,8 +31,11 @@ import shutil
 import sys
 import tempfile
 
-from agentdescent import evolve_skill_dir
+from agentdescent import (
+    AggregatorConfig, FileTree, evolve, load_tree, scorer, tree_reflector, tree_runner,
+)
 from agentdescent.agents import claude_code, cli_agent, codex, openai_compatible
+from agentdescent.governance import SKILL_BLAST_RADIUS
 
 SKILL_NAME = "csv-total"
 
@@ -133,6 +136,32 @@ def offline_reflector():
 
 
 # ---------------------------------------------------------------------------
+# The run: a directory handed to evolve()
+# ---------------------------------------------------------------------------
+
+
+def evolve_directory(path, tasks, *, agent, reflect_with, score="contains", **kw):
+    """Everything a skill directory needs before ``evolve()`` -- spelled out.
+
+    ``load_tree`` turns the directory into artifact state, ``FileTree`` makes
+    file paths the keys the aggregator merges on, ``tree_runner`` materialises
+    each candidate into a fresh workspace and runs the agent there, and
+    ``tree_reflector`` asks the reflection model for multi-file edits. Two
+    engine defaults are flipped because a rollout here is a real agent call:
+    no self-verify re-run, and a four-task cheap layer for ranking.
+    """
+    name = os.path.basename(path)
+    tree = load_tree(path)
+    strategy = FileTree(tree, max_files_per_diff=2)
+    run = tree_runner(agent, layout="claude_skill", name=name,
+                      overlay=strategy.frozen_files(tree))
+    for key, value in (("self_verify", False), ("cheap_eval_tasks", 4),
+                       ("held_out_frac", 0.3), ("patience", 3), ("target_reward", 0.98),
+                       ("agg_config", AggregatorConfig(batch_trigger=2, max_wait_rounds=1))):
+        kw.setdefault(key, value)
+    return evolve(tasks, scorer(score), run=run, strategy=strategy, artifact_id=name,
+                  propose=tree_reflector(reflect_with, strategy=strategy),
+                  blast_radius=SKILL_BLAST_RADIUS, **kw)
 
 
 def main() -> None:
@@ -166,9 +195,8 @@ def main() -> None:
     print(f"Reflector: {args.model or ('stub' if args.agent == 'offline' else args.agent)}")
     print(f"Start    : rules.md = {_RULES_MD.strip()!r}  (wrong column)\n")
 
-    result = evolve_skill_dir(
-        path, to_tasks(make_rows(args.tasks)),
-        agent=agent, reflect_with=reflect, score="contains",
+    result = evolve_directory(
+        path, to_tasks(make_rows(args.tasks)), agent=agent, reflect_with=reflect,
         rounds=args.rounds, n_workers=args.workers, max_concurrency=args.workers,
         verbose=True)
 

@@ -51,6 +51,7 @@ __all__ = [
     "code_runner",
     "layout_prefix",
     "tree_runner",
+    "gated_reward",
 ]
 
 #: Where the tree is written inside the workspace. ``{name}`` is the artifact's
@@ -362,3 +363,19 @@ def code_runner(entrypoint: Sequence[str], *, layout: str = "root",
         return (proc.stdout or "").strip()
 
     return run
+
+
+def gated_reward(reward: Callable[[Task, str], float]) -> Callable[[Task, str], float]:
+    """``reward``, with a failed :func:`code_runner` gate scoring 0.
+
+    The gate speaks in-band -- a failing ``test_cmd`` makes the rollout's output
+    ``TEST_FAILURE_MARKER`` plus the captured text, so the reflector can read
+    what broke. Scoring that as an ordinary answer would let a candidate "pass"
+    by echoing the marker; this is the wrapper every ``code_runner`` run needs
+    around its reward, and the reason ``evolve()`` is handed this rather than
+    ``reward`` directly."""
+    def gated(task: Task, output: str) -> float:
+        if isinstance(output, str) and output.startswith(TEST_FAILURE_MARKER):
+            return 0.0
+        return reward(task, output)
+    return gated

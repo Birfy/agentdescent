@@ -20,7 +20,8 @@ from __future__ import annotations
 import re
 from typing import Callable, Optional
 
-__all__ = ["exact_match", "contains", "last_number", "numeric_close"]
+__all__ = ["exact_match", "contains", "last_number", "numeric_close",
+           "SCORERS", "scorer"]
 
 _NUMBER = re.compile(r"-?\d[\d,]*\.?\d*")
 
@@ -119,3 +120,27 @@ def _to_float(text: str) -> Optional[float]:
         return float(str(text).replace(",", "").lstrip("$£€").strip())
     except (TypeError, ValueError):
         return None
+
+
+#: Named scorers accepted by :func:`scorer`. Pass a callable for anything else.
+SCORERS = {
+    "last_number": last_number,
+    "exact": exact_match,
+    "contains": contains,
+    "numeric_close": numeric_close,
+}
+
+
+def scorer(score) -> Callable:
+    """Resolve ``score`` -- a name from :data:`SCORERS` or a ``(task, output) ->
+    float`` callable -- into the reward ``evolve()`` takes.
+
+    The one line of glue every dataset-driven run used to write for itself;
+    the names are the common cases, the callable is everything else."""
+    if callable(score):
+        return score
+    if score in SCORERS:
+        return SCORERS[score]()
+    raise ValueError(
+        f"unknown score={score!r}; use one of {sorted(SCORERS)} or pass a "
+        "callable (task, output) -> float")

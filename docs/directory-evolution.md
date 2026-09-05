@@ -7,17 +7,26 @@ small codebase that *is* the agent — where each rollout is performed by a **re
 agent** that reads those files off disk with its own tools.
 
 ```python
-from agentdescent import evolve_skill_dir
+from agentdescent import FileTree, evolve, load_tree, scorer, tree_reflector, tree_runner
 from agentdescent.agents import claude_code, openai_compatible
+from agentdescent.governance import SKILL_BLAST_RADIUS
 
-result = evolve_skill_dir(
-    "~/.claude/skills/pdf-audit", rows,
-    agent=claude_code(extra_args=["--permission-mode", "acceptEdits"]),
-    reflect_with=openai_compatible(model="deepseek-v4-flash"),
-    prompt="question", gold="answer", score="contains")
+path = "~/.claude/skills/pdf-audit"
+tree = load_tree(path)                                   # the directory as artifact state
+strategy = FileTree(tree, max_files_per_diff=2)          # file paths are the keys
+run = tree_runner(claude_code(extra_args=["--permission-mode", "acceptEdits"]),
+                  layout="claude_skill", name="pdf-audit",
+                  overlay=strategy.frozen_files(tree))
+
+result = evolve(tasks, scorer("contains"), run=run, strategy=strategy,
+                propose=tree_reflector(openai_compatible(model="deepseek-v4-flash"),
+                                       strategy=strategy),
+                artifact_id="pdf-audit", blast_radius=SKILL_BLAST_RADIUS,
+                self_verify=False, cheap_eval_tasks=4,
+                rounds=6, n_workers=4, max_concurrency=4, held_out_frac=0.3)
 
 print(result.final_reward, result.outcomes())
-result.write_to("~/.claude/skills/pdf-audit")     # opt in; backs up first
+result.write_to(path)     # opt in; backs up first
 ```
 
 The design record — why it is built this way, and the three problems found while
@@ -173,32 +182,43 @@ so it is conservative: `backup=True` (default) copies the directory to
 reported as `extra` and **left alone** unless `prune=True`; `dry_run=True` returns
 the plan without touching anything. The run itself never writes to your directory.
 
-## The three entry points
+## The three workloads
 
-| function | governance | what makes it different |
-|---|---|---|
-| `evolve_skill_dir(path, data, agent=…)` | L2 (`blast_radius=0.2`) | merges on held-out reward alone |
-| `evolve_agent_dir(path, data, agent=…)` | L1 (`0.6`) | an agent definition is a harness: every merge additionally passes the oracle |
-| `evolve_agent_code(path, data, entrypoint=…)` | L1 + test gate | the tree is **executed**; a frozen test suite guards it |
+One call, three settings. What differs is governance and what guards the tree:
+
+| workload | `blast_radius=` | runner / reward | what makes it different |
+|---|---|---|---|
+| a skill folder | `SKILL_BLAST_RADIUS` (`0.2`, L2) | `tree_runner(layout="claude_skill")`, `scorer(…)` | merges on held-out reward alone |
+| an agent folder | `HARNESS_BLAST_RADIUS` (`0.6`, L1) | `tree_runner(layout="claude_agent")`, `scorer(…)` | an agent definition is a harness: every merge additionally passes the oracle |
+| agent code | `HARNESS_BLAST_RADIUS` + test gate | `code_runner(entrypoint, test_cmd=…)`, `gated_reward(scorer(…))` | the tree is **executed**; a frozen test suite guards it |
+
+Both constants live in `agentdescent.governance`, next to the L1/L2 boundary
+they are chosen against.
 
 ### Evolving agent code
 
 ```python
-from agentdescent import evolve_agent_code
+from agentdescent import code_runner, gated_reward
+from agentdescent.governance import HARNESS_BLAST_RADIUS
 
-result = evolve_agent_code(
-    "./my-agent", rows,
-    entrypoint=["python", "main.py"],          # + task.prompt as the last argv
-    test_cmd=["python", "-m", "pytest", "-q"],
-    frozen=["tests/**", "conftest.py"],        # the default
-    reflect_with=openai_compatible(model="deepseek-v4-flash"))
+tree = load_tree("./my-agent")
+strategy = FileTree(tree, frozen=["tests/**", "conftest.py"], max_files_per_diff=2)
+run = code_runner(["python", "main.py"], name="my-agent",     # + task.prompt as the last argv
+                  test_cmd=["python", "-m", "pytest", "-q"],
+                  overlay=strategy.frozen_files(tree))
+
+result = evolve(tasks, gated_reward(scorer("contains")), run=run, strategy=strategy,
+                propose=tree_reflector(openai_compatible(model="deepseek-v4-flash"),
+                                       strategy=strategy, context_files=("**/*.py",)),
+                artifact_id="my-agent", blast_radius=HARNESS_BLAST_RADIUS,
+                self_verify=False, cheap_eval_tasks=4)
 ```
 
 Each rollout materialises the candidate, **overwrites every frozen path with its
 pristine content**, runs `setup_cmd` then `test_cmd`, and only then executes the
 entrypoint. A failing gate is not an exception: the output becomes
-`TEST_FAILURE_MARKER` plus the captured output, which scores 0 and gives the
-reflector something concrete to fix.
+`TEST_FAILURE_MARKER` plus the captured output; `gated_reward` scores that 0
+and the reflector gets something concrete to fix.
 
 !!! danger "Isolation, not a sandbox"
     Candidate code runs in a throwaway workspace, with a trimmed environment
@@ -248,8 +268,8 @@ One rollout is one real agent invocation. Count them per round:
 | source | calls per round | knob |
 |---|---|---|
 | worker rollouts | `n_workers` | — |
-| self-verify re-run | `n_workers` | `self_verify=False` **(default here)** |
-| conflict resolution + fusion tournament ranking | `candidates × cheap set` | `cheap_eval_tasks=4` **(default here)** |
+| self-verify re-run | `n_workers` | `self_verify=False` **(pass it)** |
+| conflict resolution + fusion tournament ranking | `candidates × cheap set` | `cheap_eval_tasks=4` **(pass it)** |
 | Beta acceptance test (winner: base + candidate) | `1 × |held_out|` | — (this is the commit gate) |
 | L1 oracle gate | **0** | see below |
 
@@ -263,8 +283,8 @@ Two counter-intuitive points, both verified against the engine:
 2. **The plain-engine defaults are the expensive ones.** With
    `cheap_eval_tasks=None` the cheap layer is pinned to the whole held-out set,
    which makes *ranking* the dominant cost when `eval_fn` runs an agent; and
-   `self_verify=True` adds a second rollout per proposal. The three
-   `evolve_*_dir` wrappers flip both, because getting them wrong costs money
+   `self_verify=True` adds a second rollout per proposal. Every directory
+   example in these pages flips both, because getting them wrong costs money
    rather than a warning.
 
 Bound a rollout with the agent's own timeout (`cli_agent(timeout=...)`, which

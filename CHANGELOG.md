@@ -6,6 +6,24 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Removed
+
+- **The one-call wrappers: `evolve()` is the only entry point.** `evolve_skill`,
+  `evolve_skill_dir`, `evolve_agent_dir` and `evolve_agent_code` (and the
+  `agentdescent.skill` / `agentdescent.skilldir` modules) are gone. Each was
+  thirty lines of wiring plus a set of defaults, and each was a second signature
+  to learn, document and keep in step with the first. What they assembled is
+  now public building blocks that go straight into `evolve()`: `tasks_from` and
+  the new `scorer()` / `SCORERS` (moved to `agentdescent.rewards`) for a
+  dataset, `SingleSlot` + `reflector` for an instruction, `load_tree` +
+  `FileTree` + `tree_runner` / `code_runner` + `tree_reflector` for a directory,
+  the new `runners.gated_reward` for a test-gated code run, and
+  `governance.SKILL_BLAST_RADIUS` / `HARNESS_BLAST_RADIUS` for the layer. The
+  two defaults the wrappers set for a real-agent workload
+  (`self_verify=False`, `cheap_eval_tasks=4`) are now passed explicitly, and
+  every doc page and the directory example show the full call. Migration is
+  mechanical; the quickstarts are the template.
+
 ### Added
 
 - **A systematic guide to the policy slots**, `docs/policy-guide.md`: where
