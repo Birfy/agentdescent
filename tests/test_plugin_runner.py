@@ -15,7 +15,7 @@ import sys
 import pytest
 
 from agentdescent import EvolveSpec, SpecError, Task, compose, plugin_runner
-from agentdescent.agents import NESTED_MARKER, SESSION_MARKERS, cli_agent, worker_env
+from agentdescent.agents import NESTED_MARKER, cli_agent, worker_env
 from agentdescent.runners import (
     PLUGIN_CONTEXT, PLUGIN_FROZEN, PLUGIN_HOSTS, TEST_FAILURE_MARKER, PluginHost,
 )

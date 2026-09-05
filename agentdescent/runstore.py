@@ -42,7 +42,7 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass, field, asdict
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, List, Optional
 
 from .evolution import EvolutionResult, RoundInfo
 
@@ -425,7 +425,7 @@ def execute(rd: RunDir, *, budget_usd: Optional[float] = None,
     the materialised tree are written at the end whatever the outcome.
     """
     from .agents import Usage
-    from .evolvespec import EvolveSpec, compose, estimate
+    from .evolvespec import EvolveSpec, compose
     from .filetree import materialize
 
     spec = EvolveSpec.from_dict(rd.spec_dict())
@@ -463,7 +463,6 @@ def execute(rd: RunDir, *, budget_usd: Optional[float] = None,
     try:
         comp = compose(spec, usage=usage, on_round=on_round, repo_path=rd.ledger_path,
                        **overrides)
-        est = estimate(comp, usd_per_call=usd_per_call)
         rd.update_status(rounds=comp.kwargs.get("rounds"), notes=comp.notes,
                          usd=None if usd_per_call is None else 0.0)
         result = comp.run()

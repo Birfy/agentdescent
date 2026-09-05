@@ -9,7 +9,6 @@ import json
 import os
 import re
 import sys
-import tempfile
 
 import pytest
 
@@ -27,7 +26,7 @@ from agentdescent.sampling import DifficultyWeighted
 from agentdescent.selection import Beam
 from agentdescent.staleness import FullStaleness
 from agentdescent.treestrategy import FileTree
-from agentdescent.workspec import Ref, RefError
+from agentdescent.workspec import Ref
 
 # ---------------------------------------------------------------------------
 # fixtures: a skill directory, a dataset, a stub agent and reflector

@@ -2,7 +2,6 @@
 
 import warnings
 
-import pytest
 
 from agentdescent import AppendRules, Task, evolve
 
