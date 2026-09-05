@@ -39,6 +39,7 @@ from examples.evoskill import evoskill_skill_discovery as evoskill
 from examples.gepa import gepa_prompt_evolution as gepa
 from examples.openevolve import openevolve_program_evolution as openevolve
 from examples.skillopt import skillopt_skill_training as skillopt
+from examples.metasearch import evolve_search_policy as metasearch
 from examples import _TEMPLATE as port_template
 from examples import _common as common
 from examples._common import add_standard_args
@@ -103,6 +104,13 @@ PORTS = (
     # `prepare_suite` is the boundary a dry-run must not cross.
     Port(era_algotune, "iterations", "glm-5.2", 1800.0, "prepare_suite",
          provider="openai", async_ratio=1, budget_is_iterations=True),
+    # The meta-level port: the search rule is the artifact and one rollout is a
+    # whole inner search, so a lag budget of one, and `--rounds` is the outer
+    # loop's own count with `--budget-rollouts` beside it. Its inner domain is
+    # synthetic, so the boundary a dry-run must not cross is the outer run
+    # itself.
+    Port(metasearch, "rounds", "deepseek-v4-flash", 1800.0, "run_outer",
+         provider="openai", async_ratio=1),
 )
 
 # ERA's fourth task, equation discovery on LLM-SRBench. Same deviations again,

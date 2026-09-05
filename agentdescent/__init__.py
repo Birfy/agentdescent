@@ -113,6 +113,11 @@ from .supervisor import ProcessExecutor
 from .workspec import Ref, RefError, RolloutSpec
 from . import rewards                      # agentdescent.rewards.last_number(...)
 from .skill import evolve_skill
+from .meta import (
+    SLOTS, MetaOutcome, ParamSlot, PrioritySelection, PRIORITY_SEED, SlotSpec,
+    SourceSlot, auc, compile_priority, evolve_problem, final_reward, meta_evolve,
+    meta_validate, priority_selection, rollouts_to, slot_reflector, transfer_ratio,
+)
 from .filetree import (
     TreeError,
     TreeSpec,
@@ -344,6 +349,23 @@ __all__ = [
     "RoundInfo",
     "evolve",
     "evolve_skill",
+    "meta_evolve",
+    "meta_validate",
+    "evolve_problem",
+    "MetaOutcome",
+    "SlotSpec",
+    "ParamSlot",
+    "SourceSlot",
+    "PrioritySelection",
+    "PRIORITY_SEED",
+    "SLOTS",
+    "auc",
+    "final_reward",
+    "rollouts_to",
+    "slot_reflector",
+    "transfer_ratio",
+    "compile_priority",
+    "priority_selection",
     "TreeError",
     "TreeSpec",
     "canonical",

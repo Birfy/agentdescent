@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-199 public names across 35 modules.
+216 public names across 36 modules.
 
 ---
 
@@ -348,6 +348,191 @@ evolve_skill(
 | `template` | `str` | `'{skill}\n\n{prompt}'` | How the skill meets the question. Must contain `{skill}` and `{prompt}` -- change it to put the skill somewhere else (a suffix, a section header, inside a larger scaffold). |
 | `reflect_with` | `Optional[Completion]` | `None` | The model that proposes improvements. Defaults to `model`; a cheap reflector for an expensive agent is a good trade. |
 | `**evolve_kwargs` | `Any` |  | Passed to `evolve` and override the defaults chosen here (`asynchronous=True`, a different `strategy=`, an `aggregator_factory=`, ...). `shuffle=True` is worth knowing about: rows arrive in dataset order and the train/held-out split is positional, so grouped data otherwise holds out one end of the file. |
+
+---
+
+## Meta-evolution
+
+Evolve a decision slot of `evolve()` itself, and validate it elsewhere. &nbsp;·&nbsp; `agentdescent.meta` &nbsp;·&nbsp; [guide](meta-evolution.md)
+
+### `MetaOutcome(...)`
+
+What one inner run did under a candidate slot value.
+
+```python
+MetaOutcome(
+    curve: List[float] = <factory>,
+    final: float = 0.0,
+    rollouts: int = 0,
+    detail: Dict[str, Any] = <factory>
+) -> None
+```
+
+| method | what it does |
+|---|---|
+| `from_result(result: EvolutionResult, **detail: Any) -> 'MetaOutcome'` | Read an inner `EvolutionResult`. |
+
+### `ParamSlot(...)`
+
+The numeric hyper-parameters of any policy class, one key each.
+
+```python
+ParamSlot(
+    factory: Callable[..., Any],
+    params: Mapping[str, float],
+    bounds: Mapping[str, Tuple[float, float]] = <factory>,
+    title: str = '# Policy parameters',
+    invalid_proposals: int = 0,
+    _lock: threading.Lock = <factory>
+) -> None
+```
+
+### `PrioritySelection(...)`
+
+A `SelectionPolicy` driven by a `priority` rule.
+
+```python
+PrioritySelection(
+    source: str = 'def priority(rank, visits, total, prior, depth, n_nodes):\n    # Flat PUCT (ERA, futs.py): exploit by rank, explore by visit count.\n    c = 1.0\n    return rank + c * (1.0 / n_nodes) * math.sqrt(total) / (1 + visits)\n'
+) -> None
+```
+
+### `SlotSpec`
+
+A `Strategy` that also compiles.
+
+### `SourceSlot(...)`
+
+One slot of validated source, compiled by `build`.
+
+```python
+SourceSlot(
+    initial_value: str = '',
+    key: str = 'value',
+    empty_render: str = '(no instruction yet)',
+    min_chars: int = 1,
+    validate: Optional[Callable[[str], str]] = None,
+    build: Optional[Callable[[str], Any]] = None,
+    description: str = 'The value is source text; reply with the complete revised text.',
+    invalid_proposals: int = 0,
+    _lock: threading.Lock = <factory>
+) -> None
+```
+
+### `auc(outcome: MetaOutcome) -> float`
+
+Mean best-so-far held-out reward over the inner run: how *fast* it rose.
+
+### `compile_priority(source: str) -> Callable[..., float]`
+
+AST-gate `source` and return its `priority` function.
+
+### `evolve_problem(...)`
+
+An inner `evolve()` as a `Problem`.
+
+```python
+evolve_problem(
+    tasks: Sequence[Task],
+    reward: Callable[[Task, str], float],
+    *,
+    slot: str,
+    base: Optional[Policies] = None,
+    **evolve_kwargs: Any
+) -> Problem
+```
+
+### `final_reward(outcome: MetaOutcome) -> float`
+
+The inner run's own final held-out reward, clipped to `[0, 1]`.
+
+### `meta_evolve(...)`
+
+Evolve one decision slot of the engine against a set of inner problems.
+
+```python
+meta_evolve(
+    problems: Union[Sequence[Problem], Mapping[str, Problem]],
+    *,
+    slot: str,
+    spec: SlotSpec,
+    propose: Optional[Callable[[str, Task, str, float], Optional[str]]] = None,
+    model: Optional[Completion] = None,
+    meta_reward: Optional[MetaReward] = None,
+    seeds: Sequence[int] = (0,),
+    blast_radius: float = 0.6,
+    artifact_id: str = 'policy-slot',
+    **evolve_kwargs: Any
+) -> EvolutionResult
+```
+
+| parameter | type | default | what it is |
+|---|---|---|---|
+| `problems` | `Union[Sequence[Problem], Mapping[str, Problem]]` | *required* | The inner problems, each `(value, seed) -> MetaOutcome` -- a list, or a mapping from a name to a problem (the name appears in task ids and in the reflector's prompt). `evolve_problem` builds one from the arguments of an inner `evolve()`. |
+| `slot` | `str` | *required* | Which `Policies` field the value fills; one of `SLOTS`. Recorded, and checked -- machinery fields refuse. |
+| `spec` | `SlotSpec` | *required* | How a value is represented, gated and compiled -- a `SlotSpec` such as `priority_selection` or a `ParamSlot`. |
+| `propose` | `Optional[Callable[[str, Task, str, float], Optional[str]]]` | `None` | The reflector. Pass `propose` directly, or `model` to get `slot_reflector` over the spec. One of the two is required. |
+| `model` | `Optional[Completion]` | `None` | As `propose`. |
+| `meta_reward` | `Optional[MetaReward]` | `None` | `MetaOutcome` to `[0, 1]`; `None` is `auc`. |
+| `seeds` | `Sequence[int]` | `(0,)` | Inner seeds per problem; each `(problem, seed)` pair is one outer task, so `len(problems) * len(seeds)` tasks in all, split into train and held-out by `held_out_frac` as `evolve()` always does. |
+| `blast_radius` | `float` | `0.6` | Governance. `0.6` is L1: the value is a harness and every merge also passes the oracle. |
+| `artifact_id` | `str` | `'policy-slot'` | As `blast_radius`. |
+| `**evolve_kwargs` | `Any` |  | Everything else `evolve` takes -- `rounds`, `n_workers`, `max_concurrency`, `held_out_frac`, `max_rollouts` ... `strategy`, `run` and `reward` are this function's and cannot be passed. Returns the ordinary `EvolutionResult`; `spec.compile(result.rendered)` is the evolved value, and `result.rendered` is what to hand `meta_validate`. |
+
+### `meta_validate(...)`
+
+Score `before` and `after` on problems the outer loop never saw.
+
+```python
+meta_validate(
+    spec: SlotSpec,
+    before: str,
+    after: str,
+    problems: Union[Sequence[Problem], Mapping[str, Problem]],
+    *,
+    seeds: Sequence[int] = (0,),
+    meta_reward: Optional[MetaReward] = None
+) -> Dict[str, Dict[str, float]]
+```
+
+### `priority_selection(...)`
+
+The shipped spec for the `selection` slot of a tree search.
+
+```python
+priority_selection(
+    seed: str = 'def priority(rank, visits, total, prior, depth, n_nodes):\n    # Flat PUCT (ERA, futs.py): exploit by rank, explore by visit count.\n    c = 1.0\n    return rank + c * (1.0 / n_nodes) * math.sqrt(total) / (1 + visits)\n'
+) -> SourceSlot
+```
+
+### `rollouts_to(target: float) -> MetaReward`
+
+`1 / (1 + sweeps until the curve first reaches target)`; 0 if never.
+
+### `slot_reflector(...)`
+
+A `propose` for `meta_evolve`: one model call per failing rollout.
+
+```python
+slot_reflector(
+    complete: Completion,
+    spec: SlotSpec,
+    *,
+    max_outcome_chars: int = 2000
+) -> Callable[[str, Task, str, float], Optional[str]]
+```
+
+### `transfer_ratio(...)`
+
+Gain on `target` over gain on `source`, from a `meta_validate` report.
+
+```python
+transfer_ratio(
+    report: Mapping[str, Mapping[str, float]],
+    source: str,
+    target: str
+) -> Optional[float]
+```
 
 ---
 
@@ -2069,6 +2254,10 @@ In-process, single-flight, counted.
 
 Everything an `AcceptancePolicy` is allowed to look at.
 
+### `PRIORITY_SEED`
+
+str(object='') -> str str(bytes_or_buffer[, encoding[, errors]]) -> str
+
 ### `Policies`
 
 Every replaceable piece, in one argument.
@@ -2108,6 +2297,10 @@ What one rollout produced, or why it did not.
 ### `RolloutSpec`
 
 One rollout, described completely enough to run somewhere else.
+
+### `SLOTS`
+
+Built-in immutable sequence.
 
 ### `SOLVED`
 

@@ -1,0 +1,787 @@
+"""Meta-evolution: the decision slots of `evolve()` as the artifact.
+
+`evolve()` makes eight replaceable decisions -- which candidate the next batch
+starts from, which task a rollout spends, whether a merged candidate commits,
+and so on -- and each is a field of :class:`~agentdescent.policies.Policies`.
+Every algorithm port plugs its mechanism into one of those fields (or, for a
+tree search, into the ``aggregator_factory`` exit that wraps one). This module
+lets a run evolve *the field itself*::
+
+    result = meta_evolve(
+        problems,                      # inner problems: (slot value, seed) -> MetaOutcome
+        slot="selection",              # which decision evolves
+        spec=priority_selection(),     # how a value is represented, gated, compiled
+        propose=slot_reflector(model, priority_selection()),
+        rounds=6, n_workers=4)
+    policy = priority_selection().compile(result.rendered)   # -> Policies(selection=policy)
+
+The shape is the ordinary engine applied one level up, and every piece of it is
+the same object it always was:
+
+* the **artifact** is the slot's value, held by a :class:`SlotSpec` -- a
+  :class:`~agentdescent.strategies.Strategy` that also knows how to *compile* its
+  rendered text into the object ``Policies`` takes (a ``SelectionPolicy``, a
+  ``TaskSampler``, an ``AcceptancePolicy`` ...);
+* a **task** is one inner :class:`Problem`: run a whole inner search or inner
+  ``evolve()`` with the candidate value installed, at a fixed budget, from a
+  seed, and return what happened as a :class:`MetaOutcome`;
+* the **reward** is a function of that outcome -- :func:`auc` by default,
+  because a decision rule cannot make a better answer exist, only find one
+  sooner, and the final score at a fixed budget barely separates rules;
+* **propose** reads the value and the outcome and rewrites the value;
+* **governance** is L1: a slot value changes how *everything downstream* is
+  searched, so every merge also passes the oracle.
+
+Which slots may evolve is a governance decision, and it is drawn where the
+central analogy draws it: the decision plane is the algorithm and may change;
+the machinery -- verifier, ledger, executor, sandbox -- is the training code,
+and is not self-modifiable. :data:`SLOTS` is that line.
+
+Validation is the other half of the design. A rule that wins on the problems it
+was evolved on has shown nothing yet; :func:`meta_validate` scores the value
+before and after on problems the outer loop never saw -- other instances, or a
+different benchmark entirely -- and reports the gain on both, so "a better
+search rule" and "a fit to the training landscape" are two different rows.
+"""
+
+from __future__ import annotations
+
+import ast
+import json
+import math
+import re
+import statistics
+import threading
+from dataclasses import dataclass, field
+from types import FunctionType
+from typing import (
+    Any, Callable, Dict, List, Mapping, Optional, Protocol, Sequence, Set, Tuple,
+    Union, runtime_checkable,
+)
+
+from .agents import Completion
+from .evolution import EvolutionResult, Task, evolve
+from .evolvable import Diff
+from .policies import Policies
+from .selection import Candidate, SelectionContext, SingleHead
+from .strategies import SingleSlot
+
+__all__ = [
+    "SLOTS",
+    "MetaOutcome",
+    "Problem",
+    "SlotSpec",
+    "ParamSlot",
+    "SourceSlot",
+    "PRIORITY_SEED",
+    "PrioritySelection",
+    "compile_priority",
+    "priority_selection",
+    "evolve_problem",
+    "auc",
+    "final_reward",
+    "rollouts_to",
+    "slot_reflector",
+    "meta_evolve",
+    "meta_validate",
+    "transfer_ratio",
+]
+
+
+#: The decision plane -- the `Policies` fields a run may evolve. The machinery
+#: fields (`verifier`, `ledger`, `executor`, `evaluator`, `eval_cache`,
+#: `aggregator_factory`, `sandbox_*`) are the training code and stay frozen.
+SLOTS: Tuple[str, ...] = (
+    "selection", "task_sampler", "acceptance", "conflict", "fusion",
+    "promotion", "staleness", "proposal",
+)
+
+
+# ---------------------------------------------------------------------------
+# What an inner run reports, and how it becomes a number
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class MetaOutcome:
+    """What one inner run did under a candidate slot value.
+
+    ``curve`` is the inner held-out reward after each sweep, in order -- the
+    x-axis of every meta-reward here. ``final`` is what the inner run reported
+    at the end, ``rollouts`` what it spent, and ``detail`` whatever the problem
+    wants the reflector to see (a tree summary, the outcomes, an error).
+    """
+
+    curve: List[float] = field(default_factory=list)
+    final: float = 0.0
+    rollouts: int = 0
+    detail: Dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_result(cls, result: EvolutionResult, **detail: Any) -> "MetaOutcome":
+        """Read an inner :class:`~agentdescent.evolution.EvolutionResult`."""
+        info = {"outcomes": result.outcomes(), "stop_reason": result.stop_reason,
+                "error": result.error}
+        info.update(detail)
+        return cls(curve=[float(h.held_out_reward) for h in result.history],
+                   final=float(result.final_reward), rollouts=int(result.rollouts),
+                   detail=info)
+
+    def best_so_far(self) -> List[float]:
+        out, best = [], -math.inf
+        for value in self.curve:
+            best = max(best, value)
+            out.append(best)
+        return out
+
+    def to_json(self) -> str:
+        return json.dumps({"curve": self.curve, "final": self.final,
+                           "rollouts": self.rollouts, "detail": self.detail},
+                          separators=(",", ":"), default=str)
+
+    @classmethod
+    def from_json(cls, text: str) -> "MetaOutcome":
+        payload = json.loads(text)
+        return cls(curve=[float(v) for v in payload.get("curve", [])],
+                   final=float(payload.get("final", 0.0)),
+                   rollouts=int(payload.get("rollouts", 0)),
+                   detail=dict(payload.get("detail", {})))
+
+
+#: One inner problem: ``(compiled slot value, seed) -> MetaOutcome``. An inner
+#: ``evolve()`` with the value installed (:func:`evolve_problem`), an ERA tree
+#: search with ``selection=`` set, a synthetic landscape -- anything that runs a
+#: whole search under the value and says how it went.
+Problem = Callable[[Any, int], MetaOutcome]
+
+MetaReward = Callable[[MetaOutcome], float]
+
+
+def auc(outcome: MetaOutcome) -> float:
+    """Mean best-so-far held-out reward over the inner run: how *fast* it rose.
+
+    The default meta-reward. At a fixed budget two selection rules usually end
+    at the same best; the area under the best-so-far curve is what the rule
+    actually controlled. Zero when the run recorded no sweep."""
+    curve = outcome.best_so_far()
+    value = sum(curve) / len(curve) if curve else 0.0
+    return min(1.0, max(0.0, value))
+
+
+def final_reward(outcome: MetaOutcome) -> float:
+    """The inner run's own final held-out reward, clipped to ``[0, 1]``."""
+    return min(1.0, max(0.0, outcome.final))
+
+
+def rollouts_to(target: float) -> MetaReward:
+    """``1 / (1 + sweeps until the curve first reaches target)``; 0 if never.
+
+    A time-to-quality reward: a rule that reaches the bar in one sweep scores
+    0.5, in three sweeps 0.25, and one that never reaches it scores 0."""
+
+    def reward(outcome: MetaOutcome) -> float:
+        for index, value in enumerate(outcome.best_so_far()):
+            if value >= target:
+                return 1.0 / (1.0 + index)
+        return 0.0
+
+    return reward
+
+
+# ---------------------------------------------------------------------------
+# How a slot value is represented, gated, and compiled
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class SlotSpec(Protocol):
+    """A :class:`~agentdescent.strategies.Strategy` that also compiles.
+
+    ``compile(rendered)`` returns the object ``Policies(<slot>=...)`` takes, and
+    must raise ``ValueError`` for a rendering it cannot turn into one -- that is
+    the single validation point, and ``to_diff`` must apply the same rule so an
+    unusable proposal never becomes a diff. ``describe()`` tells a reflector
+    what the surface is and what shape a proposal must have.
+    """
+
+    def initial(self) -> Dict[str, str]: ...
+    def render(self, state: Dict[str, str]) -> str: ...
+    def to_diff(self, state: Dict[str, str], proposal: str, author: str,
+                base_version: int, target: str) -> Optional[Diff]: ...
+    def compile(self, rendered: str) -> Any: ...
+    def describe(self) -> str: ...
+
+
+_PARAM_LINE = re.compile(r"^\s*([A-Za-z_]\w*)\s*[:=]\s*([-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)\s*$")
+
+
+@dataclass
+class ParamSlot:
+    """The numeric hyper-parameters of any policy class, one key each.
+
+    ``FlatPuct(c_puct=1.0, prior_exponent=0.0)``, ``Beam(k=1)``,
+    ``DifficultyWeighted(temperature=...)`` -- a value is the constructor
+    keywords, held as ``{name: number}``. A proposal is lines of ``name: value``;
+    unknown names and out-of-bounds values are refused (counted, no diff).
+    Two workers moving *different* parameters union-merge without a model
+    call, and the same parameter twice contradicts and is resolved on
+    held-out score -- the ordinary key-space argument.
+
+    ``factory`` is called with the parsed keywords; ``bounds`` is optional and
+    per parameter, ``(low, high)`` inclusive.
+    """
+
+    factory: Callable[..., Any]
+    params: Mapping[str, float]
+    bounds: Mapping[str, Tuple[float, float]] = field(default_factory=dict)
+    title: str = "# Policy parameters"
+    invalid_proposals: int = 0
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    def keys(self) -> Sequence[str]:
+        return list(self.params)
+
+    def initial(self) -> Dict[str, str]:
+        return {name: repr(float(value)) for name, value in self.params.items()}
+
+    def render(self, state: Dict[str, str]) -> str:
+        return "\n".join([self.title] + [f"{k}: {state[k]}" for k in sorted(state)])
+
+    def _parse(self, text: str) -> Dict[str, str]:
+        ops: Dict[str, str] = {}
+        for line in (text or "").splitlines():
+            match = _PARAM_LINE.match(line)
+            if not match:
+                continue
+            name, raw = match.group(1), match.group(2)
+            if name not in self.params:
+                raise ValueError(f"unknown parameter {name!r}")
+            value = float(raw)
+            if not math.isfinite(value):
+                raise ValueError(f"{name} is not finite")
+            low, high = self.bounds.get(name, (-math.inf, math.inf))
+            if not low <= value <= high:
+                raise ValueError(f"{name}={value} is outside [{low}, {high}]")
+            ops[name] = repr(value)
+        return ops
+
+    def to_diff(self, state, proposal, author, base_version, target) -> Optional[Diff]:
+        try:
+            ops = {k: v for k, v in self._parse(proposal).items() if state.get(k) != v}
+        except ValueError:
+            ops = {}
+        if not ops:
+            with self._lock:
+                self.invalid_proposals += 1
+            return None
+        key = "+".join(sorted(ops))
+        return Diff(diff_id=f"{author}:{key}:{base_version}", target=target,
+                    ops=ops, author=author)
+
+    def compile(self, rendered: str) -> Any:
+        values = self._parse(rendered)
+        missing = [name for name in self.params if name not in values]
+        if missing:
+            raise ValueError(f"rendering lacks {missing}")
+        return self.factory(**{name: float(values[name]) for name in self.params})
+
+    def describe(self) -> str:
+        lines = [f"- {name} (currently {value}"
+                 + (f", within [{self.bounds[name][0]}, {self.bounds[name][1]}]"
+                    if name in self.bounds else "") + ")"
+                 for name, value in self.params.items()]
+        return ("The value is a set of numeric parameters:\n" + "\n".join(lines)
+                + "\nReply with one `name: value` line per parameter you change.")
+
+
+def _unfence(text: str) -> str:
+    """One fenced ``python`` block if there is one, else the text."""
+    marker = "```"
+    if marker not in (text or ""):
+        return (text or "").strip()
+    chunks = text.split(marker)
+    for index in range(1, len(chunks), 2):
+        block = chunks[index].strip()
+        if block.lower().startswith("python"):
+            return block[6:].lstrip("\r\n ")
+    return chunks[1].strip()
+
+
+@dataclass
+class SourceSlot(SingleSlot):
+    """One slot of validated source, compiled by ``build``.
+
+    The general form: the slot's value is text, ``validate(text) -> text`` is
+    the gate (raise ``ValueError`` to refuse), and ``build(text)`` turns the
+    accepted text into the policy object. A code fence in a proposal is
+    stripped. Contradicting proposals -- two rewrites of the one slot -- are
+    resolved on held-out score, so every outer round is a tournament.
+    """
+
+    #: ``None`` means "strip whitespace and accept" and "the text is the value".
+    #: Not callables, deliberately: a function-valued default renders with a
+    #: memory address in the generated API reference, which then differs on
+    #: every run.
+    validate: Optional[Callable[[str], str]] = None
+    build: Optional[Callable[[str], Any]] = None
+    description: str = "The value is source text; reply with the complete revised text."
+    invalid_proposals: int = 0
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    def _validate(self, text: str) -> str:
+        return self.validate(text) if self.validate is not None else text.strip()
+
+    def to_diff(self, state, proposal, author, base_version, target) -> Optional[Diff]:
+        try:
+            value = self._validate(_unfence(proposal or ""))
+        except ValueError:
+            value = ""
+        if not value:
+            with self._lock:
+                self.invalid_proposals += 1
+            return None
+        return super().to_diff(state, value, author, base_version, target)
+
+    def compile(self, rendered: str) -> Any:
+        value = self._validate(rendered)
+        return self.build(value) if self.build is not None else value
+
+    def describe(self) -> str:
+        return self.description
+
+
+# ---------------------------------------------------------------------------
+# The shipped selection spec: a tree search's priority rule as gated source
+# ---------------------------------------------------------------------------
+
+
+_PRIORITY_FUNCTION = "priority"
+_PRIORITY_ARGS = ("rank", "visits", "total", "prior", "depth", "n_nodes")
+
+#: Upstream ERA's flat PUCT -- ``rank + c * P(s,a) * sqrt(N) / (1 + n)`` with
+#: ``c = 1`` and a uniform prior. :class:`PrioritySelection` on this source
+#: expands the same node as ``FlatPuct(c_puct=1.0)`` at every step.
+PRIORITY_SEED = """def priority(rank, visits, total, prior, depth, n_nodes):
+    # Flat PUCT (ERA, futs.py): exploit by rank, explore by visit count.
+    c = 1.0
+    return rank + c * (1.0 / n_nodes) * math.sqrt(total) / (1 + visits)
+"""
+
+_PRIORITY_MAX_CHARS = 2_500
+
+_PRIORITY_NODES = (
+    ast.Module, ast.FunctionDef, ast.arguments, ast.arg, ast.Return,
+    ast.Assign, ast.AugAssign, ast.AnnAssign, ast.Expr,
+    ast.If, ast.IfExp, ast.BoolOp, ast.And, ast.Or, ast.Not,
+    ast.Compare, ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE,
+    ast.BinOp, ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow,
+    ast.UnaryOp, ast.USub, ast.UAdd,
+    ast.Call, ast.Attribute, ast.Name, ast.Load, ast.Store, ast.Constant,
+)
+_PRIORITY_CALLS = {"min", "max", "abs", "float", "int"}
+_PRIORITY_MATH = {"sqrt", "log", "log1p", "exp", "tanh", "pow"}
+
+#: The grid every candidate must survive: the root before any expansion
+#: (``visits=0, total=0``), a lone node, deep nodes, unrated priors.
+_PRIORITY_GRID = [
+    (0.5, 0, 0, 1.0, 0, 1),
+    (0.0, 0, 1, 0.5, 0, 2),
+    (1.0, 3, 7, 0.25, 1, 4),
+    (0.33, 12, 40, 0.01, 6, 25),
+    (0.9, 1, 300, 0.0, 12, 120),
+]
+
+
+def compile_priority(source: str) -> Callable[..., float]:
+    """AST-gate ``source`` and return its ``priority`` function.
+
+    Accepts exactly one function of the six named arguments made of
+    arithmetic, comparisons, conditionals, locals, ``min``/``max``/``abs`` and
+    ``math.sqrt/log/log1p/exp/tanh/pow``; refuses everything else, and refuses
+    a rule that is not a finite number everywhere on a fixed grid of inputs
+    that includes the root before any expansion. A rule that divides by
+    ``visits`` is refused at proposal time rather than at the root.
+    """
+    if not source or len(source) > _PRIORITY_MAX_CHARS:
+        raise ValueError("policy source is empty or too long")
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as error:
+        raise ValueError("policy source is not valid Python") from error
+    functions = [node for node in tree.body if isinstance(node, ast.FunctionDef)]
+    if len(functions) != 1 or functions[0].name != _PRIORITY_FUNCTION:
+        raise ValueError(f"policy source must define exactly one function, {_PRIORITY_FUNCTION}")
+    if any(not isinstance(node, ast.FunctionDef) for node in tree.body):
+        raise ValueError("only the function may appear at module level")
+    function = functions[0]
+    if tuple(a.arg for a in function.args.args) != _PRIORITY_ARGS or function.args.vararg \
+            or function.args.kwarg or function.args.kwonlyargs or function.args.defaults:
+        raise ValueError(f"{_PRIORITY_FUNCTION} must take exactly {_PRIORITY_ARGS}")
+    for node in ast.walk(tree):
+        if not isinstance(node, _PRIORITY_NODES):
+            raise ValueError(f"forbidden syntax: {type(node).__name__}")
+        if isinstance(node, ast.Attribute):
+            if not (isinstance(node.value, ast.Name) and node.value.id == "math"
+                    and node.attr in _PRIORITY_MATH):
+                raise ValueError("only math.sqrt/log/log1p/exp/tanh/pow may be used")
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Name):
+                if func.id not in _PRIORITY_CALLS:
+                    raise ValueError(f"forbidden call: {func.id}")
+            elif not isinstance(func, ast.Attribute):
+                raise ValueError("forbidden call")
+        if isinstance(node, ast.Name) and node.id.startswith("__"):
+            raise ValueError("dunder names are forbidden")
+    namespace: Dict[str, object] = {
+        "__builtins__": {"min": min, "max": max, "abs": abs, "float": float, "int": int},
+        "math": math,
+    }
+    exec(compile(tree, "<candidate-priority>", "exec"), namespace, namespace)
+    compiled = namespace.get(_PRIORITY_FUNCTION)
+    if not isinstance(compiled, FunctionType):
+        raise ValueError(f"{_PRIORITY_FUNCTION} did not compile to a function")
+    for point in _PRIORITY_GRID:
+        try:
+            value = compiled(*point)
+        except Exception as error:  # noqa: BLE001 - reported as a shape failure
+            raise ValueError(
+                f"{_PRIORITY_FUNCTION}{point} raised {type(error).__name__}: {error}")
+        if not isinstance(value, (int, float)) or isinstance(value, bool) \
+                or not math.isfinite(float(value)):
+            raise ValueError(
+                f"{_PRIORITY_FUNCTION}{point} returned {value!r}, not a finite number")
+    return compiled  # type: ignore[return-value]
+
+
+class PrioritySelection(SingleHead):
+    """A :class:`~agentdescent.selection.SelectionPolicy` driven by a ``priority`` rule.
+
+    The evolvable surface of a tree search is *which node is expanded next*,
+    and this class is the fixed part around it: rank normalisation, prior
+    normalisation, depth, the visit reservation up the parent chain, and the
+    tie-break are its own; the rule is the compiled function's. A whole
+    ``select`` would be able to return a dead node forever or skip the
+    reservation and starve the root; a function of six numbers can only be
+    wrong about priority, which is the thing being searched for.
+
+    With :data:`PRIORITY_SEED` it is ``FlatPuct(c_puct=1.0, prior_exponent=0.0)``
+    to the floating-point bit. The rule is handed the *rated* prior, normalised
+    to sum to one (uniform when nobody is rated), so a candidate rule may use
+    it; the seed does not, which is upstream's choice.
+    """
+
+    def __init__(self, source: str = PRIORITY_SEED) -> None:
+        self.source = source
+        self.priority = compile_priority(source)
+
+    @staticmethod
+    def _ranks(rows: Sequence[Candidate]) -> List[float]:
+        if len(rows) == 1:
+            return [0.5]
+        scores = [-math.inf if c.score is None else c.score for c in rows]
+        order = sorted(range(len(rows)), key=lambda i: scores[i])
+        ranks = [0.0] * len(rows)
+        for rank, index in enumerate(order):
+            ranks[index] = rank / (len(rows) - 1)
+        return ranks
+
+    @staticmethod
+    def _priors(rows: Sequence[Candidate]) -> List[float]:
+        rated = [c.prior for c in rows
+                 if c.prior is not None and math.isfinite(c.prior) and c.prior > 0]
+        if not rated:
+            return [1.0 / len(rows)] * len(rows)
+        fallback = sum(rated) / len(rated)
+        raw = [(c.prior if c.prior is not None and math.isfinite(c.prior) and c.prior > 0
+                else fallback) for c in rows]
+        total = sum(raw)
+        return [v / total for v in raw] if total else [1.0 / len(rows)] * len(rows)
+
+    @staticmethod
+    def _depths(rows: Sequence[Candidate]) -> List[int]:
+        by_version = {c.version: i for i, c in enumerate(rows)}
+        depths: List[int] = []
+        for row in rows:
+            depth, seen, node = 0, set(), row
+            while node.parent is not None and node.parent in by_version \
+                    and node.parent not in seen:
+                seen.add(node.parent)
+                node = rows[by_version[node.parent]]
+                depth += 1
+            depths.append(depth)
+        return depths
+
+    def select(self, ctx: SelectionContext, n: int) -> Sequence[Candidate]:
+        rows = list(ctx.candidates)
+        if len(rows) <= 1:
+            return super().select(ctx, n)
+        ranks, priors, depths = self._ranks(rows), self._priors(rows), self._depths(rows)
+        visits = [c.selected for c in rows]
+        by_version = {c.version: i for i, c in enumerate(rows)}
+        picked: List[Candidate] = []
+        for _ in range(n):
+            total = sum(visits)
+            best, best_value = 0, -math.inf
+            for i in range(len(rows)):
+                value = float(self.priority(ranks[i], visits[i], total, priors[i],
+                                            depths[i], len(rows)))
+                if value > best_value:
+                    best, best_value = i, value
+            picked.append(rows[best])
+            seen: Set[int] = set()
+            node: Optional[int] = best
+            while node is not None and node not in seen:
+                seen.add(node)
+                visits[node] += 1
+                parent = rows[node].parent
+                node = by_version.get(parent) if parent is not None else None
+        return picked
+
+
+_PRIORITY_DESCRIPTION = f"""The value is the SELECTION RULE of a flat tree search over candidates
+(flat PUCT, as in ERA / AlphaZero without a policy network). The tree holds
+every node ever expanded; on each iteration the node with the highest priority
+is expanded once into a child, and a child may be a dead end (invalid, ranked
+last forever). Visits are back-propagated to every ancestor.
+
+Arguments, per node:
+- rank: the node's score rank among all nodes, normalised to [0, 1] (1 = best);
+- visits: expansions of this node's subtree so far (0 for a fresh node);
+- total: sum of visits over all nodes;
+- prior: an external rating of this node's promise, normalised to sum to 1
+  across nodes (uniform when nobody is rated);
+- depth: distance from the root;
+- n_nodes: how many nodes the tree holds.
+
+Keep exactly:
+    def {_PRIORITY_FUNCTION}({", ".join(_PRIORITY_ARGS)}):
+using only arithmetic, comparisons, if/else, local variables, min/max/abs and
+math.sqrt/log/log1p/exp/tanh/pow. No imports, loops, or other functions. The
+rule must return a finite number for every input, including visits=0 and
+total=0. Reply with only the function in one ```python fence, with a one-line
+comment saying what changed and why."""
+
+
+def _priority_source(text: str) -> str:
+    source = (text or "").strip()
+    compile_priority(source)
+    return source + "\n"
+
+
+def priority_selection(seed: str = PRIORITY_SEED) -> SourceSlot:
+    """The shipped spec for the ``selection`` slot of a tree search.
+
+    A :class:`SourceSlot` whose gate is :func:`compile_priority` and whose
+    ``build`` is :class:`PrioritySelection`; ``seed`` defaults to upstream
+    ERA's flat PUCT."""
+    return SourceSlot(initial_value=seed.strip() + "\n", validate=_priority_source,
+                      build=PrioritySelection, description=_PRIORITY_DESCRIPTION)
+
+
+# ---------------------------------------------------------------------------
+# Inner problems
+# ---------------------------------------------------------------------------
+
+
+def evolve_problem(tasks: Sequence[Task], reward: Callable[[Task, str], float], *,
+                   slot: str, base: Optional[Policies] = None,
+                   **evolve_kwargs: Any) -> Problem:
+    """An inner ``evolve()`` as a :class:`Problem`.
+
+    Everything you would pass to :func:`~agentdescent.evolution.evolve` goes
+    here; the candidate value is installed at ``Policies(<slot>=value)`` on top
+    of ``base`` and the run's ``seed`` is the problem seed. ``verbose`` is
+    forced off -- an inner run's round log inside an outer round log is noise.
+    """
+    if slot not in SLOTS:
+        raise ValueError(f"{slot!r} is not an evolvable slot; choose one of {SLOTS}")
+    base = base or Policies()
+    kwargs = dict(evolve_kwargs)
+    kwargs["verbose"] = False
+
+    def problem(value: Any, seed: int) -> MetaOutcome:
+        result = evolve(list(tasks), reward, seed=seed,
+                        policies=base.merged_with(**{slot: value}), **kwargs)
+        return MetaOutcome.from_result(result)
+
+    return problem
+
+
+# ---------------------------------------------------------------------------
+# The outer loop
+# ---------------------------------------------------------------------------
+
+
+def slot_reflector(complete: Completion, spec: SlotSpec,
+                   *, max_outcome_chars: int = 2_000) -> Callable[[str, Task, str, float], Optional[str]]:
+    """A ``propose`` for :func:`meta_evolve`: one model call per failing rollout.
+
+    The prompt is the spec's own :meth:`SlotSpec.describe`, the current value,
+    the inner outcome and its reward; the reply is handed to the spec's gate.
+    """
+
+    def propose(rendered: str, task: Task, output: str, reward: float) -> Optional[str]:
+        prompt = (
+            "You are improving one decision rule of a search algorithm.\n\n"
+            f"{spec.describe()}\n\n"
+            f"Current value:\n```python\n{rendered}\n```\n\n"
+            f"Inner problem: {task.prompt}\n"
+            f"What the current value did there (JSON; `curve` is held-out reward "
+            f"after each sweep):\n{output[:max_outcome_chars]}\n\n"
+            f"Its meta-reward on this problem was {reward:.3f} (higher is better, "
+            "1.0 is the ceiling).\n\n"
+            "Propose ONE revised value that would raise that reward on problems "
+            "like this one -- not on this instance alone."
+        )
+        return complete(prompt)
+
+    return propose
+
+
+def _outer_tasks(problems: Union[Sequence[Problem], Mapping[str, Problem]],
+                 seeds: Sequence[int]) -> Tuple[List[Task], Dict[str, Problem]]:
+    named: Dict[str, Problem] = (dict(problems) if isinstance(problems, Mapping)
+                                 else {f"p{i}": p for i, p in enumerate(problems)})
+    if not named:
+        raise ValueError("meta_evolve() got no problems")
+    tasks = [Task(id=f"{name}:{seed}", prompt=f"{name} (seed {seed})",
+                  meta={"problem": name, "seed": seed})
+             for name in named for seed in seeds]
+    return tasks, named
+
+
+def meta_evolve(
+    problems: Union[Sequence[Problem], Mapping[str, Problem]],
+    *,
+    slot: str,
+    spec: SlotSpec,
+    propose: Optional[Callable[[str, Task, str, float], Optional[str]]] = None,
+    model: Optional[Completion] = None,
+    meta_reward: Optional[MetaReward] = None,
+    seeds: Sequence[int] = (0,),
+    blast_radius: float = 0.6,
+    artifact_id: str = "policy-slot",
+    **evolve_kwargs: Any,
+) -> EvolutionResult:
+    """Evolve one decision slot of the engine against a set of inner problems.
+
+    Parameters
+    ----------
+    problems:
+        The inner problems, each ``(value, seed) -> MetaOutcome`` -- a list, or a
+        mapping from a name to a problem (the name appears in task ids and in
+        the reflector's prompt). :func:`evolve_problem` builds one from the
+        arguments of an inner ``evolve()``.
+    slot:
+        Which :class:`~agentdescent.policies.Policies` field the value fills;
+        one of :data:`SLOTS`. Recorded, and checked -- machinery fields refuse.
+    spec:
+        How a value is represented, gated and compiled -- a :class:`SlotSpec`
+        such as :func:`priority_selection` or a :class:`ParamSlot`.
+    propose, model:
+        The reflector. Pass ``propose`` directly, or ``model`` to get
+        :func:`slot_reflector` over the spec. One of the two is required.
+    meta_reward:
+        :class:`MetaOutcome` to ``[0, 1]``; ``None`` is :func:`auc`.
+    seeds:
+        Inner seeds per problem; each ``(problem, seed)`` pair is one outer
+        task, so ``len(problems) * len(seeds)`` tasks in all, split into train
+        and held-out by ``held_out_frac`` as ``evolve()`` always does.
+    blast_radius, artifact_id:
+        Governance. ``0.6`` is L1: the value is a harness and every merge also
+        passes the oracle.
+    **evolve_kwargs:
+        Everything else :func:`~agentdescent.evolution.evolve` takes --
+        ``rounds``, ``n_workers``, ``max_concurrency``, ``held_out_frac``,
+        ``max_rollouts`` ... ``strategy``, ``run`` and ``reward`` are this
+        function's and cannot be passed.
+
+    Returns the ordinary :class:`~agentdescent.evolution.EvolutionResult`;
+    ``spec.compile(result.rendered)`` is the evolved value, and
+    ``result.rendered`` is what to hand :func:`meta_validate`.
+    """
+    if slot not in SLOTS:
+        raise ValueError(f"{slot!r} is not an evolvable slot; choose one of {SLOTS}")
+    for taken in ("strategy", "run", "reward", "agent"):
+        if taken in evolve_kwargs:
+            raise TypeError(f"meta_evolve() sets {taken}= itself")
+    if propose is None:
+        if model is None:
+            raise ValueError("meta_evolve() needs propose= or model=")
+        propose = slot_reflector(model, spec)
+    tasks, named = _outer_tasks(problems, seeds)
+    score = meta_reward or auc
+    spec.compile(spec.render(spec.initial()))      # the seed must pass its own gate
+
+    def run(rendered: str, task: Task) -> str:
+        try:
+            value = spec.compile(rendered)
+        except ValueError as error:
+            return MetaOutcome(detail={"error": f"compile: {error}"}).to_json()
+        outcome = named[task.meta["problem"]](value, int(task.meta["seed"]))
+        return outcome.to_json()
+
+    def reward(task: Task, output: str) -> float:
+        try:
+            return float(score(MetaOutcome.from_json(output)))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return 0.0
+
+    evolve_kwargs.setdefault("self_verify", False)
+    evolve_kwargs.setdefault("solved_threshold", 1.1)
+    return evolve(tasks, reward, run=run, propose=propose, strategy=spec,
+                  blast_radius=blast_radius, artifact_id=artifact_id,
+                  initial_state=spec.initial(), **evolve_kwargs)
+
+
+def meta_validate(
+    spec: SlotSpec,
+    before: str,
+    after: str,
+    problems: Union[Sequence[Problem], Mapping[str, Problem]],
+    *,
+    seeds: Sequence[int] = (0,),
+    meta_reward: Optional[MetaReward] = None,
+) -> Dict[str, Dict[str, float]]:
+    """Score ``before`` and ``after`` on problems the outer loop never saw.
+
+    Paired by ``(problem, seed)``; per problem: the mean reward of each value,
+    the mean paired gain, its standard deviation, and wins / losses. Pass the
+    seed value's rendering as ``before`` and ``result.rendered`` as ``after``;
+    pass problems and seeds disjoint from the outer run's, or the row measures
+    the training set.
+    """
+    named = (dict(problems) if isinstance(problems, Mapping)
+             else {f"p{i}": p for i, p in enumerate(problems)})
+    old, new = spec.compile(before), spec.compile(after)
+    score = meta_reward or auc
+    report: Dict[str, Dict[str, float]] = {}
+    for name, problem in named.items():
+        base = [score(problem(old, s)) for s in seeds]
+        cand = [score(problem(new, s)) for s in seeds]
+        deltas = [b - a for a, b in zip(base, cand)]
+        report[name] = {
+            "n": len(seeds),
+            "before": statistics.fmean(base),
+            "after": statistics.fmean(cand),
+            "gain": statistics.fmean(deltas),
+            "gain_sd": statistics.pstdev(deltas) if len(deltas) > 1 else 0.0,
+            "wins": sum(d > 0 for d in deltas),
+            "losses": sum(d < 0 for d in deltas),
+        }
+    return report
+
+
+def transfer_ratio(report: Mapping[str, Mapping[str, float]], source: str,
+                   target: str) -> Optional[float]:
+    """Gain on ``target`` over gain on ``source``, from a :func:`meta_validate` report.
+
+    Near 1 is a better rule; near 0 with a positive source gain is a fit to the
+    problems it was evolved on; negative is a rule that traded generality for
+    them. ``None`` when the source gain is nil -- nothing over nothing is not a
+    transfer result."""
+    src = report[source]["gain"]
+    if abs(src) < 1e-9:
+        return None
+    return report[target]["gain"] / src
