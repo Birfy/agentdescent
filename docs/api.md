@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-198 public names across 33 modules.
+206 public names across 34 modules.
 
 ---
 
@@ -403,6 +403,10 @@ codex(
     **kwargs
 ) -> Completion
 ```
+
+### `dsh(*, workspace: Optional[str] = None, extra_args: Sequence[str] = (), **kwargs) -> Completion`
+
+DeepSeek Harness (`dsh`) headless profile, as a `Completion`.
 
 ### `echo(transform: Optional[Callable[[str], str]] = None) -> Completion`
 
@@ -1406,6 +1410,74 @@ split_dataset(
 
 ---
 
+## An evolve() call as data
+
+The JSON spec a host agent writes and the CLI / MCP server run. &nbsp;·&nbsp; `agentdescent.evolvespec` &nbsp;·&nbsp; [guide](plugins.md)
+
+### `EvolveSpec(...)`
+
+What to evolve, against what, scored how, by whom -- as data.
+
+```python
+EvolveSpec(
+    kind: str,
+    target: str,
+    data: Dict[str, Any],
+    score: Union[str, Dict[str, Any]] = 'contains',
+    agent: Optional[Union[str, Dict[str, Any]]] = None,
+    reflect: Optional[Union[str, Dict[str, Any]]] = None,
+    name: Optional[str] = None,
+    template: str = '{skill}\n\n{prompt}',
+    layout: Optional[str] = None,
+    prompt_template: Optional[str] = None,
+    editable: Sequence[str] = ('**',),
+    frozen: Sequence[str] = (),
+    max_files_per_diff: int = 2,
+    entrypoint: Sequence[str] = (),
+    setup_cmd: Sequence[str] = (),
+    test_cmd: Sequence[str] = ('python', '-m', 'pytest', '-q'),
+    timeout: float = 120.0,
+    host: Optional[str] = None,
+    env_passthrough: Sequence[str] = (),
+    policies: Dict[str, Any] = <factory>,
+    agg_config: Dict[str, Any] = <factory>,
+    evolve: Dict[str, Any] = <factory>,
+    allow: Sequence[str] = (),
+    version: int = 1
+) -> None
+```
+
+### `SpecError`
+
+A spec that cannot be composed, and the field that is wrong.
+
+### `compose(...)`
+
+Turn a spec into the `evolve()` call the quickstarts would write.
+
+```python
+compose(
+    spec: EvolveSpec,
+    *,
+    usage: Optional[Usage] = None,
+    on_round: Optional[Callable] = None,
+    repo_path: Optional[str] = None,
+    workspace_root: Optional[str] = None,
+    sandbox_pool: Any = None,
+    **overrides: Any
+) -> Composition
+```
+
+### `load_spec(path: str) -> EvolveSpec`
+
+Read a spec from a JSON file.
+
+### `run_spec(spec: EvolveSpec, **hooks: Any) -> EvolutionResult`
+
+Compose and run. `hooks` are `compose`'s keyword arguments.
+
+---
+
 ## Barrier-free evolution
 
 `evolve()` without the round barrier. &nbsp;·&nbsp; `agentdescent.async_evolve` &nbsp;·&nbsp; [guide](async.md)
@@ -1696,6 +1768,23 @@ A dependency-free `grep`/`read` ReAct loop over the document.
 
 The reward functions everyone writes, with the details right. &nbsp;·&nbsp; `agentdescent.rewards` &nbsp;·&nbsp; [guide](rewards.md)
 
+### `GraderError`
+
+A `command_scorer` command failed or printed something that is not a score.
+
+### `command_scorer(...)`
+
+Grade with **any program**: the task as JSON on stdin, a float on stdout.
+
+```python
+command_scorer(
+    cmd: Union[str, Sequence[str]],
+    *,
+    timeout: float = 60.0,
+    cwd: Optional[str] = None
+) -> Callable
+```
+
 ### `contains(gold_key: str = 'gold', *, normalise: bool = True) -> Callable`
 
 1.0 when the gold answer appears anywhere in the output.
@@ -1936,7 +2025,7 @@ One entry per *category*: competing proposals contradict and are resolved.
 
 ### `LAYOUTS`
 
-Where a runner writes the evolving tree inside a workspace (`claude_skill`, `skill_library`, `claude_agent`, `root`).
+Where a runner writes the evolving tree inside a workspace (`claude_skill`, `skill_library`, `claude_agent`, `dsh_skill`, `agents_skill`, `root`).
 
 ### `LedgerFailure`
 

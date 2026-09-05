@@ -112,7 +112,7 @@ from .sandbox_shared import SharedSandboxPool
 from .supervisor import ProcessExecutor
 from .workspec import Ref, RefError, RolloutSpec
 from . import rewards                      # agentdescent.rewards.last_number(...)
-from .rewards import SCORERS, scorer
+from .rewards import SCORERS, scorer, command_scorer, GraderError
 from .filetree import (
     TreeError,
     TreeSpec,
@@ -135,6 +135,7 @@ from .agents import (
     claude_code,
     cli_agent,
     codex,
+    dsh,
     metered,
     openai_compatible,
     with_retries,
@@ -162,6 +163,7 @@ from .evolution import (
     rule_id,
 )
 from .async_evolve import async_evolve
+from .evolvespec import EvolveSpec, SpecError, compose, load_spec, run_spec
 from .async_runtime import AsyncAgentDescent, AsyncConfig, AsyncStats
 from . import baselines                     # agentdescent.baselines.merge_of_n(...)
 from .parallel import (
@@ -315,6 +317,7 @@ __all__ = [
     "shard_round_robin",
     "Completion",
     "codex",
+    "dsh",
     "claude_code",
     "cli_agent",
     "WorkspaceAgent",
@@ -344,6 +347,13 @@ __all__ = [
     "evolve",
     "SCORERS",
     "scorer",
+    "command_scorer",
+    "GraderError",
+    "EvolveSpec",
+    "SpecError",
+    "compose",
+    "load_spec",
+    "run_spec",
     "TreeError",
     "TreeSpec",
     "canonical",

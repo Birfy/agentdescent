@@ -60,6 +60,8 @@ LAYOUTS: Dict[str, str] = {
     "claude_skill": ".claude/skills/{name}",   # project-scoped Claude Code skill
     "claude_agent": ".claude/agents",          # project-scoped subagent definitions
     "skill_library": ".claude/skills",         # a directory OF skills, one dir each
+    "dsh_skill": ".dsh/skills/{name}",         # DeepSeek Harness project skill
+    "agents_skill": ".agents/skills/{name}",   # Agent Skills standard; dsh and Codex both read it
     "root": "",                                # the tree *is* the working directory
 }
 

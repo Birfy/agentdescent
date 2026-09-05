@@ -108,6 +108,7 @@ nav:
   - Design records:
     - Evolving a directory: design-directory-evolution.md
     - Plugin for DSH, Claude Code, Codex and other agents: plugin-design.md
+  - Use it from your agent: plugins.md
 
 markdown_extensions:
   - admonition

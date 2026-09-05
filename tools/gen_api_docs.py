@@ -85,6 +85,9 @@ SECTIONS: List[Tuple[str, str, str, str]] = [
     ("agentdescent.dataloader", "The data layer",
      "Datasets, splits, and cached fetches from HuggingFace or raw URLs.",
      "dataloader.md"),
+    ("agentdescent.evolvespec", "An evolve() call as data",
+     "The JSON spec a host agent writes and the CLI / MCP server run.",
+     "plugins.md"),
 
     ("agentdescent.async_evolve", "Barrier-free evolution",
      "`evolve()` without the round barrier.", "async.md"),
@@ -103,7 +106,8 @@ CONSTANTS: Dict[str, str] = {
     "FAST_MAX": "The L2/L1 blast-radius boundary (`0.30`).",
     "FROZEN_IDS": "Artifact ids the loop may read but never mutate (L0).",
     "LAYOUTS": "Where a runner writes the evolving tree inside a workspace "
-               "(`claude_skill`, `skill_library`, `claude_agent`, `root`).",
+               "(`claude_skill`, `skill_library`, `claude_agent`, `dsh_skill`, "
+               "`agents_skill`, `root`).",
     "TEST_FAILURE_MARKER": "Prefix of the output `code_runner` produces when the "
                            "frozen gate fails, so the failure scores 0 and the "
                            "reflector can read it.",

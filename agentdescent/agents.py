@@ -218,6 +218,19 @@ def codex(*, workspace: Optional[str] = None, extra_args: Sequence[str] = (),
     return cli_agent(["codex", "exec", *extra_args], workspace=workspace, **kwargs)
 
 
+def dsh(*, workspace: Optional[str] = None, extra_args: Sequence[str] = (),
+        **kwargs) -> Completion:
+    """DeepSeek Harness (``dsh``) headless profile, as a :data:`Completion`.
+
+    ``dsh --profile headless "<task>"`` runs one persisted session and prints the
+    last assistant message to stdout, which is exactly the shape
+    :func:`cli_agent` wants. Pass ``extra_args`` for ``--patch`` overlays or a
+    different profile.
+    """
+    return cli_agent(["dsh", "--profile", "headless", *extra_args],
+                     workspace=workspace, **kwargs)
+
+
 def from_callable(fn: Completion) -> Completion:
     """Identity adapter -- documents that any ``prompt -> text`` callable works."""
     return fn
