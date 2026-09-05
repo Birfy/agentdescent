@@ -275,6 +275,34 @@ def meta_reward_for(name: str, target: float) -> MetaReward:
     return META_REWARDS[name](target)
 
 
+def recording_reflector(complete: Callable[[str], str], spec: Any
+                        ) -> Tuple[Callable[..., Optional[str]], List[Dict[str, Any]]]:
+    """The slot reflector, plus a log of every proposal it made.
+
+    A run that commits nothing is a legitimate result and an illegible one
+    unless it can say *what it tried*: the first four live runs here reported
+    `{'oracle-rejected': 3}` and could not distinguish "the reflector proposed
+    three samplers that genuinely did not beat round-robin" from "it proposed
+    three that did not compile". Each entry records the raw text, whether the
+    gate accepted it, and the reason when it did not.
+    """
+    proposals: List[Dict[str, Any]] = []
+    inner = slot_reflector(complete, spec)
+    lock = threading.Lock()
+
+    def propose(rendered: str, task: Any, output: str, reward: float) -> Optional[str]:
+        text = inner(rendered, task, output, reward)
+        # `spec.accepts` rather than a second copy of the gate: the copy this
+        # replaced forgot that `to_diff` strips a code fence, so every accepted
+        # proposal was logged as refused.
+        accepted, reason = spec.accepts(text or "")
+        with lock:
+            proposals.append({"source": text, "accepted_by_gate": accepted,
+                              "reason": reason, "on_task": getattr(task, "id", "")})
+        return text
+
+    return propose, proposals
+
 def progress(label: str) -> Callable[[Any], None]:
     """One line per outer sweep. A run that reports nothing until its summary
     cannot be told from a stalled one, and an outer sweep here is minutes of
@@ -309,9 +337,10 @@ def run_experiment(complete: Callable[[str], str], *, train: Dict[str, Problem],
         raise ValueError("validation seeds must not overlap the outer run's seeds")
     spec = policy_source("task_sampler")
     seed_rule = spec.render(spec.initial())
+    propose, proposals = recording_reflector(complete, spec)
     started = time.monotonic()
     result = meta_evolve(train, slot="task_sampler", spec=spec,
-                         propose=slot_reflector(complete, spec), seeds=list(seeds),
+                         propose=propose, seeds=list(seeds),
                          rounds=rounds, n_workers=workers, max_concurrency=workers,
                          held_out_frac=0.5,
                          eval_concurrency=eval_concurrency or max(1, workers),
@@ -348,6 +377,12 @@ def run_experiment(complete: Callable[[str], str], *, train: Dict[str, Problem],
                   "outcomes": result.outcomes(), "stop_reason": result.stop_reason,
                   "error": result.error, "seconds": outer_seconds, "rounds": rounds,
                   "workers": workers, "seeds": list(seeds),
+                  # What the search actually tried, so a run that commits
+                  # nothing still says why.
+                  "proposals": proposals,
+                  "proposals_rejected_by_gate": sum(
+                      1 for p in proposals if not p["accepted_by_gate"]),
+                  "invalid_proposals": int(getattr(spec, "invalid_proposals", 0)),
                   "history": [{"round": h.round, "held_out_reward": h.held_out_reward,
                                "committed": h.committed, "rejected": h.rejected,
                                "reasons": h.reasons} for h in result.history]},
@@ -516,6 +551,10 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     # and before any of it was written.
     payload["usage"] = {**usage_dict(usage), "wall_seconds": time.monotonic() - started,
                         "completion_cache": getattr(complete, "stats", None)}
+    outer = payload["outer"]
+    print(f"[proposals] {len(outer['proposals'])} made, "
+          f"{outer['proposals_rejected_by_gate']} refused by the gate, "
+          f"{outer['invalid_proposals']} produced no diff")
     print("[evolved sampler]\n" + payload["evolved_source"])
     print(format_report(payload))
     args.output.parent.mkdir(parents=True, exist_ok=True)

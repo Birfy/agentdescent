@@ -355,6 +355,25 @@ class SourceSlot(SingleSlot):
         value = self._validate(rendered)
         return self.build(value) if self.build is not None else value
 
+    def accepts(self, proposal: str) -> Tuple[bool, str]:
+        """Would :meth:`to_diff` take this proposal? ``(accepted, reason)``.
+
+        Side-effect free: it neither counts an invalid proposal nor builds a
+        diff. It exists so a caller that wants to *report* on proposals -- a
+        benchmark explaining why a run committed nothing -- does not have to
+        re-implement the gate. One that did, and forgot the fence stripping
+        `to_diff` does, reported every accepted proposal as rejected.
+        """
+        try:
+            value = self._validate(_unfence(proposal or ""))
+        except ValueError as error:
+            return False, str(error)
+        except Exception as error:  # noqa: BLE001 - a proposal must not raise past here
+            return False, f"{type(error).__name__}: {error}"
+        if not value:
+            return False, "empty after validation"
+        return True, ""
+
     def describe(self) -> str:
         return self.description
 

@@ -309,3 +309,41 @@ def test_an_inner_run_is_a_function_of_the_sampler_when_completions_are_cached(t
     second = problem(spec.compile(sampler), 0)
     assert first.curve == second.curve, "the inner run is not a function of the sampler"
     assert cached.stats["hits"] > 0
+
+
+def test_a_run_that_commits_nothing_still_says_what_it_tried():
+    """The gap the first four live runs had: `{'oracle-rejected': 3}` could not
+    distinguish three samplers that lost from three that never compiled."""
+    from agentdescent.evolution import Task
+    from agentdescent.meta import policy_source
+
+    spec = policy_source("task_sampler")
+    good = ("class Policy:\n"
+            "    def pick(self, keys, round_index): return keys[0]\n"
+            "    def record(self, task_id, score): pass\n")
+    task = Task(id="p0:0", prompt="a problem")
+    propose, log = bench.recording_reflector(lambda prompt: good, spec)
+    assert propose("rendered", task, "{}", 0.0) == good
+    assert log == [{"source": good, "accepted_by_gate": True, "reason": "",
+                    "on_task": "p0:0"}]
+
+    propose, log = bench.recording_reflector(lambda prompt: "import os", spec)
+    propose("rendered", task, "{}", 0.0)
+    assert log[0]["accepted_by_gate"] is False and log[0]["reason"]
+
+
+def test_the_payload_carries_the_proposals(monkeypatch, tmp_path):
+    import json
+
+    monkeypatch.setattr(bench, "completion_for",
+                        lambda *a, **k: (lambda prompt: PROPOSAL))
+    monkeypatch.setattr(bench, "build_problems", lambda complete, **kw: (
+        {"t0": _sampler_sensitive(0.2), "t1": _sampler_sensitive(0.2)},
+        {"u0": _flat(0.4)}, {"train": ["t0", "t1"], "unseen": ["u0"], "other": []}))
+    out = tmp_path / "r.json"
+    assert bench.main(["--yes", "--rounds", "2", "--workers", "2", "--seeds", "2",
+                       "--validate-seeds", "1", "--output", str(out)]) == 0
+    outer = json.loads(out.read_text())["outer"]
+    assert outer["proposals"] and all(p["accepted_by_gate"] for p in outer["proposals"])
+    assert outer["proposals_rejected_by_gate"] == 0
+    assert "invalid_proposals" in outer

@@ -382,6 +382,10 @@ SourceSlot(
 ) -> None
 ```
 
+| method | what it does |
+|---|---|
+| `accepts(proposal: str) -> Tuple[bool, str]` | Would `to_diff` take this proposal? `(accepted, reason)`. |
+
 ### `auc(outcome: MetaOutcome) -> float`
 
 Mean best-so-far held-out reward over the inner run: how *fast* it rose.

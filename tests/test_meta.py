@@ -303,3 +303,26 @@ def test_the_merge_side_smokes_catch_shape_errors(slot, source, reason):
 
     with pytest.raises(ValueError, match=reason):
         compile_policy_source(slot, source)
+
+
+def test_accepts_answers_the_gate_without_side_effects():
+    """A reporter must be able to ask "would this be taken?" without counting it.
+
+    Written after a benchmark re-implemented the check, forgot that `to_diff`
+    strips a code fence, and logged every accepted proposal as refused.
+    """
+    from agentdescent.meta import policy_source
+
+    spec = policy_source("task_sampler")
+    fenced = ("```python\nclass Policy:\n"
+              "    def pick(self, keys, round_index): return keys[0]\n"
+              "    def record(self, task_id, score): pass\n```")
+    assert spec.accepts(fenced) == (True, "")
+    ok, reason = spec.accepts("import os")
+    assert ok is False and reason
+    assert spec.accepts("") == (False, "policy source is empty or too long")
+    assert spec.invalid_proposals == 0, "accepts() must not count anything"
+    # ...and it agrees with the gate it reports on.
+    assert spec.to_diff(spec.initial(), fenced, "w", 0, "a") is not None
+    assert spec.to_diff(spec.initial(), "import os", "w", 0, "a") is None
+    assert spec.invalid_proposals == 1
