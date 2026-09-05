@@ -48,6 +48,7 @@ from agentdescent.rewards import last_number
 from agentdescent.strategies import SingleSlot
 
 from examples._common import add_standard_args, completion_for, confirm, worker_count
+from examples._measure import usage_dict
 
 
 #: The instruction every inner run starts from. Deliberately the plain one the
@@ -373,9 +374,12 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                          "temperature": args.temperature, "thinking": args.thinking,
                          "template": TEMPLATE, "seed_instruction": SEED_INSTRUCTION,
                          "outer_seed": args.seed}
-    payload["usage"] = {"calls": usage.calls, "input_tokens": usage.input_tokens,
-                        "output_tokens": usage.output_tokens,
-                        "wall_seconds": time.monotonic() - started}
+    # `usage_dict` rather than a fourth hand-rolled copy: three of them in this
+    # repository used `input_tokens`/`output_tokens`, which `Usage` does not
+    # have (they are the Anthropic SDK's names), and the AttributeError landed
+    # on the last line of an hour-long run -- after every measurement was taken
+    # and before any of it was written.
+    payload["usage"] = {**usage_dict(usage), "wall_seconds": time.monotonic() - started}
     print("[evolved sampler]\n" + payload["evolved_source"])
     print(format_report(payload))
     args.output.parent.mkdir(parents=True, exist_ok=True)

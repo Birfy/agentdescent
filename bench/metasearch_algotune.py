@@ -39,6 +39,7 @@ from agentdescent.meta import (MetaOutcome, Problem, meta_evolve, meta_validate,
                                priority_selection, slot_reflector, transfer_ratio)
 
 from examples._common import add_standard_args, completion_for, confirm, worker_count
+from examples._measure import usage_dict
 from examples.era._era_algotune import TASKS, prepare_suite
 from examples.era._era_support import sandbox_backend, with_intact_replies
 from examples.era.era_algotune import algotune_domain, geometric_mean
@@ -252,8 +253,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         eval_concurrency=args.eval_concurrency)
     payload["config"] = {**inner, "model": args.model, "provider": args.provider,
                          "temperature": args.temperature, "outer_seed": args.seed}
-    payload["usage"] = {"calls": usage.calls, "input_tokens": usage.input_tokens,
-                        "output_tokens": usage.output_tokens}
+    payload["usage"] = usage_dict(usage)
     print("[evolved rule]\n" + payload["evolved_source"])
     print(format_report(payload))
     args.output.parent.mkdir(parents=True, exist_ok=True)

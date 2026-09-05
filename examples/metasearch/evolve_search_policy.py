@@ -59,6 +59,7 @@ from agentdescent.meta import transfer_ratio as _transfer_ratio
 
 from examples._common import (add_standard_args, budget_kwargs, completion_for,
                               confirm, worker_count)
+from examples._measure import usage_dict
 from examples.metasearch._landscape import FAMILIES, SOURCE, TARGET, Family, search
 from examples.metasearch._policy_source import (FUNCTION, SEED_SOURCE,
                                                 EvolvedSelection)
@@ -246,8 +247,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "evolved_source": result.rendered, "final_reward": result.final_reward,
         "outcomes": result.outcomes(), "rollouts": result.rollouts,
         "validation": report, "transfer_ratio": transfer_ratio(report),
-        "usage": {"calls": usage.calls, "input_tokens": usage.input_tokens,
-                  "output_tokens": usage.output_tokens},
+        "usage": usage_dict(usage),
     }
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)

@@ -159,3 +159,54 @@ def test_every_shared_flag_is_honoured_or_refused(monkeypatch):
         bench.main(["--async"])
     with pytest.raises(SystemExit, match="not supported"):
         bench.main(["--pipelined-gate"])
+
+
+def test_main_writes_a_complete_result_file(monkeypatch, tmp_path):
+    """The payload path, end to end -- the one the tests above did not cover.
+
+    `main()` assembled its own usage dict with the Anthropic SDK's field names,
+    which `Usage` does not have. Every assertion in this file passed and the
+    AttributeError landed on the last line of a live run, after an hour of
+    measurement and before any of it was written. So this test drives `main()`
+    itself, with only the model and the problems replaced.
+    """
+    import json
+
+    from agentdescent.agents import Usage
+    from agentdescent.meta import MetaOutcome
+
+    calls = {"n": 0}
+
+    def fake_completion(*a, **k):
+        usage = k.get("usage")
+
+        def complete(prompt: str) -> str:
+            calls["n"] += 1
+            if usage is not None:
+                usage.record(prompt_tokens=7, completion_tokens=3, seconds=0.01)
+            return PROPOSAL
+        return complete
+
+    def fake_build(complete, **kwargs):
+        train = {"t0": _sampler_sensitive(0.2)}
+        validate = {"u0": _sampler_sensitive(0.1), "o0": _flat(0.4)}
+        return train, validate, {"train": ["t0"], "unseen": ["u0"], "other": ["o0"]}
+
+    monkeypatch.setattr(bench, "completion_for", fake_completion)
+    monkeypatch.setattr(bench, "build_problems", fake_build)
+    out = tmp_path / "result.json"
+    assert bench.main(["--yes", "--rounds", "2", "--workers", "2", "--seeds", "4",
+                       "--validate-seeds", "2", "--output", str(out)]) == 0
+    payload = json.loads(out.read_text())
+    # `calls` counts the engine's own rollout accounting too, so it is only
+    # bounded below; the token counts come from the adapter alone.
+    assert payload["usage"]["calls"] >= calls["n"] > 0
+    assert payload["usage"]["prompt_tokens"] == 7 * calls["n"]
+    assert payload["usage"]["completion_tokens"] == 3 * calls["n"]
+    assert payload["usage"]["total_tokens"] == 10 * calls["n"]
+    assert payload["usage"]["wall_seconds"] > 0
+    assert set(payload["by_group"]) == {"train", "unseen", "other"}
+    assert set(payload["transfer_ratio"]) == {"unseen", "other"}
+    assert payload["config"]["template"] == bench.TEMPLATE
+    assert payload["outer"]["error"] is None and payload["evolved_source"]
+    assert isinstance(Usage().calls, int)      # the field the bug got wrong
