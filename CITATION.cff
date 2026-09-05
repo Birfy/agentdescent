@@ -18,7 +18,7 @@ abstract: >-
 authors:
   - family-names: Chen
     given-names: Danyang
-    # orcid: "https://orcid.org/0000-0000-0000-0000"   # add yours
+    orcid: "https://orcid.org/0000-0002-5622-1545"
 repository-code: "https://github.com/Birfy/agentdescent"
 url: "https://birfy.github.io/agentdescent/"
 license: MIT
@@ -39,6 +39,7 @@ preferred-citation:
   authors:
     - family-names: Chen
       given-names: Danyang
+      orcid: "https://orcid.org/0000-0002-5622-1545"
   year: 2026
-  url: "https://github.com/Birfy/agentdescent/blob/paper/paper/main.pdf"
-  # doi: "10.5281/zenodo.XXXXXXX"   # fill in once the Zenodo preprint record is minted
+  doi: "10.5281/zenodo.22348027"
+  url: "https://doi.org/10.5281/zenodo.22348027"

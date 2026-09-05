@@ -4,7 +4,7 @@
 > framework for self-evolving agents (skills, prompts, harnesses) where **diffs
 > are the gradients** and **the aggregator is the optimizer**.
 
-[![paper](https://img.shields.io/badge/paper-PDF-b31b1b)](https://github.com/Birfy/agentdescent/blob/paper/paper/main.pdf)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22348027.svg)](https://doi.org/10.5281/zenodo.22348027)
 [![PyPI](https://img.shields.io/pypi/v/agentdescent)](https://pypi.org/project/agentdescent/)
 [![tests](https://github.com/Birfy/agentdescent/actions/workflows/tests.yml/badge.svg)](https://github.com/Birfy/agentdescent/actions/workflows/tests.yml)
 [![docs](https://img.shields.io/badge/docs-mkdocs--material-1f6feb)](https://birfy.github.io/agentdescent/)
@@ -13,7 +13,7 @@
 [![license](https://img.shields.io/badge/license-MIT-3fb950)](https://github.com/Birfy/agentdescent/blob/main/LICENSE)
 
 📄 **Paper:** [*AgentDescent: Asynchronous Parallel Self-Evolution of LLM Agents by Merging
-Conflicting Edits*](https://github.com/Birfy/agentdescent/blob/paper/paper/main.pdf) — the design, the closed-form condition under which
+Conflicting Edits*](https://doi.org/10.5281/zenodo.22348027) — the design, the closed-form condition under which
 merging can fire at all, and a live-model evaluation with every generating script named.
 LaTeX source and the compiled PDF live on the [`paper`](https://github.com/Birfy/agentdescent/tree/paper/paper) branch, not here: the write-up and the code change on different clocks, and a wording fix should not re-run the test matrix or put a binary diff in a code release. Per-result raw data is in [`bench/results/`](bench/results/) for most results, including the reflective-merge ablation; the merge-versus-selection sweeps are re-measurable from the command the paper names rather than recomputable, because their per-run data was not retained.
 
