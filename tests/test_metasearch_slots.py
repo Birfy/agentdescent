@@ -1,4 +1,4 @@
-"""bench/metasearch_gsm: evolving the task_sampler on GSM word problems, offline.
+"""bench/metasearch_slots: evolving a decision slot on a real dataset, offline.
 
 No network and no model: the row loaders are replaced by synthetic arithmetic
 and the completion is scripted. The engine, the inner `evolve()`, the slot
@@ -10,7 +10,7 @@ import pytest
 from agentdescent.meta import MetaOutcome, SLOT_PROTOCOLS, policy_source
 from agentdescent.sampling import DifficultyWeighted
 
-from bench import metasearch_gsm as bench
+from bench import metasearch_slots as bench
 
 
 def _rows(n, offset=0):
@@ -20,8 +20,13 @@ def _rows(n, offset=0):
 
 @pytest.fixture(autouse=True)
 def offline(monkeypatch):
-    monkeypatch.setitem(bench.LOADERS, "gsmhard", lambda limit: _rows(limit))
-    monkeypatch.setitem(bench.LOADERS, "gsm8k", lambda limit: _rows(limit, offset=10_000))
+    import dataclasses
+
+    def fake(name, offset=0):
+        return dataclasses.replace(bench.BENCHMARKS[name], load=lambda limit: _rows(limit, offset))
+
+    monkeypatch.setitem(bench.BENCHMARKS, "gsmhard", fake("gsmhard"))
+    monkeypatch.setitem(bench.BENCHMARKS, "gsm8k", fake("gsm8k", 10_000))
 
 
 def test_windows_are_disjoint_and_named(monkeypatch):
@@ -32,7 +37,9 @@ def test_windows_are_disjoint_and_named(monkeypatch):
     assert all(t.meta["gold"].startswith("#### ") for t in got["gsmhard-0"])
     # `pool` is a floor on what is fetched, not a cap: the guard fires when the
     # benchmark itself is smaller than the request, as GSM-Hard's 1319 rows are.
-    monkeypatch.setitem(bench.LOADERS, "small", lambda limit: _rows(min(limit, 10)))
+    import dataclasses
+    monkeypatch.setitem(bench.BENCHMARKS, "small", dataclasses.replace(
+        bench.BENCHMARKS["gsmhard"], name="small", load=lambda limit: _rows(min(limit, 10))))
     with pytest.raises(ValueError, match="tasks requested"):
         bench.windows("small", 3, 5)
 
@@ -49,7 +56,7 @@ def _scripted(prompt: str) -> str:
 
 def test_gsm_problem_runs_an_inner_evolve_with_the_candidate_sampler():
     tasks = bench.windows("gsmhard", 1, 10, pool=40)["gsmhard-0"]
-    problem = bench.gsm_problem(tasks, _scripted, rounds=2, workers=1)
+    problem = bench.inner_problem(tasks, _scripted, benchmark=bench.BENCHMARKS["gsmhard"], rounds=2, workers=1)
     spec = policy_source("task_sampler")
     seed_sampler = spec.compile(spec.render(spec.initial()))
     assert isinstance(seed_sampler, SLOT_PROTOCOLS["task_sampler"])
@@ -215,7 +222,7 @@ def test_main_writes_a_complete_result_file(monkeypatch, tmp_path):
     assert payload["usage"]["wall_seconds"] > 0
     assert set(payload["by_group"]) == {"train", "unseen", "other"}
     assert set(payload["transfer_ratio"]) == {"unseen", "other"}
-    assert payload["config"]["template"] == bench.TEMPLATE
+    assert payload["config"]["template"] == bench.BENCHMARKS["gsmhard"].template
     assert payload["outer"]["error"] is None and payload["evolved_source"]
     assert isinstance(Usage().calls, int)      # the field the bug got wrong
 
@@ -310,7 +317,7 @@ def test_an_inner_run_is_a_function_of_the_sampler_when_completions_are_cached(t
         return str(base if seq["n"] % 2 else base + 100)
 
     cached = bench.cached_completion(drifting, str(tmp_path / "c"), key_extra="k")
-    problem = bench.gsm_problem(tasks, cached, rounds=2, workers=1)
+    problem = bench.inner_problem(tasks, cached, benchmark=bench.BENCHMARKS["gsmhard"], rounds=2, workers=1)
     spec = policy_source("task_sampler")
     sampler = spec.render(spec.initial())
     first = problem(spec.compile(sampler), 0)
@@ -379,8 +386,9 @@ def test_hard_rows_keeps_only_what_the_seed_gets_wrong():
 def test_build_problems_can_take_the_hard_subset_for_the_other_benchmark(monkeypatch):
     seen = {}
 
-    def fake_hard(rows, complete, *, keep, pool):
+    def fake_hard(rows, complete, *, keep, pool, benchmark=None):
         seen["keep"], seen["pool"] = keep, pool
+        seen["benchmark"] = benchmark.name if benchmark else None
         return list(rows)[:keep]
 
     monkeypatch.setattr(bench, "hard_rows", fake_hard)
@@ -388,7 +396,7 @@ def test_build_problems_can_take_the_hard_subset_for_the_other_benchmark(monkeyp
         _scripted, source="gsmhard", other="gsm8k", train_windows=1, unseen_windows=1,
         other_windows=1, size=6, data_seed=0, inner={"rounds": 1, "workers": 1},
         hard_other=True, hard_pool=50)
-    assert seen == {"keep": 6, "pool": 50}
+    assert seen == {"keep": 6, "pool": 50, "benchmark": "gsm8k"}
     assert groups["other"] == ["gsm8k-0"] and "gsm8k-0" in validate
     # ...and off by default, so the plain path is unchanged.
     seen.clear()

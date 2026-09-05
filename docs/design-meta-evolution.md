@@ -258,7 +258,7 @@ rounds × n_workers                     # 外层 rollouts，每个是一整个�
 | 阶段 | 内层域 | 一次内层搜索的代价 | 证明什么 |
 |---|---|---|---|
 | 0 离线（已实现） | `examples/metasearch/_landscape.py`：seed 确定的合成地形，`SOURCE` 用来演化，`TARGET`（更高维、更崎岖、死胡同更多）外层从未见过；树是真实的 `EraTree` | 毫秒 | 机制成立；在分布内赢的规则是否在分布外也赢 |
-| 1a 在线最便宜（已跑，`bench/metasearch_gsm.py`） | **GSM-Hard / GSM8K 上的指令演进**：一次内层 rollout 是一次完整的内层 `evolve()`，演进的插槽是 `task_sampler`。不需要沙箱、不需要 numpy、不需要容器——只有模型调用 | ~1 分钟、~50–80 次调用 | 元层机制在真实模型与真实数据上成立；采样器在同基准的未见切片与另一个基准上是否迁移 |
+| 1a 在线最便宜（已跑，`bench/metasearch_slots.py`） | **GSM-Hard / GSM8K 上的指令演进**：一次内层 rollout 是一次完整的内层 `evolve()`，演进的插槽是 `task_sampler`。不需要沙箱、不需要 numpy、不需要容器——只有模型调用 | ~1 分钟、~50–80 次调用 | 元层机制在真实模型与真实数据上成立；采样器在同基准的未见切片与另一个基准上是否迁移 |
 | 1b 在线便宜（脚本已就绪，`bench/metasearch_algotune.py`） | AlgoTune（arXiv 2507.15887，155 任务，沙箱计时的加速比；`bench/results/era-algotune-model-prior.md` 已有基线） | 分钟 | 在真实程序搜索、近期难基准上演化出的规则 |
 | 2 验证（已设计，未实现） | SWE-bench-Science、Terminal-Bench-Science，作为 ERA `Domain` | 每次扩展一个容器化 agent 运行 | 规则能否迁移到它从没见过的科研 agent 工作 |
 
@@ -355,7 +355,7 @@ patch、在那里跑 agent、`git diff`，模型不用自己排版 diff）；两
 | P1 | `agentdescent/meta.py`：`MetaOutcome` / `Problem` / `auc` 等 / `ParamSlot` / `SourceSlot` / `priority_selection` / `PrioritySelection` / `meta_evolve` / `meta_validate` / `transfer_ratio` | ✅ |
 | P2 | `policy_source(slot, seed)` 通用门 + `seed_source` + `SLOT_PROTOCOLS` | ✅ |
 | P3 | `examples/metasearch/`：合成地形、离线端到端、`--dry-run`、加入 PORTS 契约 | ✅ |
-| P4a | GSM 跑批脚本 `bench/metasearch_gsm.py`：演进 `task_sampler`，内层是完整的内层 `evolve()`，报告分三组（演进过的 / 同基准未见切片 / 另一个基准）各自的迁移比 | ✅ 脚本 + 离线测试 + **在线跑出结果**（`bench/results/metasearch-gsm.md`） |
+| P4a | GSM 跑批脚本 `bench/metasearch_slots.py`：演进 `task_sampler`，内层是完整的内层 `evolve()`，报告分三组（演进过的 / 同基准未见切片 / 另一个基准）各自的迁移比 | ✅ 脚本 + 离线测试 + **在线跑出结果**（`bench/results/metasearch-gsm.md`） |
 | P4b | AlgoTune 跑批脚本 `bench/metasearch_algotune.py`（训练/验证任务不相交、新 seed 验证、迁移比、结果 JSON） | ✅ 脚本 + 插桩测试；**在线跑待做**（需 numpy/scipy 沙箱） |
 | P5 | Harbor 适配器 `_harbor.py`（§4.3）+ SWE-bench-Science / TB-Science 验证 | ✅ 适配器 + `LocalRunner` 离线端到端；`DockerRunner.verify` 已写未在线跑；**基准验证待做**（需 API + Docker + 任务数据） |
 | P6 | 其余五个插槽的内置冒烟与默认种子，每个种子在真实内层 `evolve()` 里跑通 | ✅ |

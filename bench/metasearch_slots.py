@@ -1,32 +1,35 @@
-"""Evolve the engine's ``task_sampler`` on GSM word problems, validate where it never ran.
+"""Evolve one of `evolve()`'s decision slots, on a real dataset, and validate the transfer.
 
-The cheap half of stage 1 (`docs/design-meta-evolution.md`, §4): an inner
-problem here is a whole **inner `evolve()`** -- a run that evolves one
-instruction against a slice of GSM8K or GSM-Hard -- and the outer artifact is
-the ``task_sampler`` policy that decides which task each inner rollout spends.
+An inner problem here is a whole **inner `evolve()`** -- a run that evolves
+one instruction against a slice of a benchmark -- and the outer artifact is a
+`Policies` field that decides something about how that run is conducted.
+Two axes, both registries in this file:
 
-Why that slot, and why this domain. The engine requests a proposal only from a
-rollout that **failed** (``score >= solved_threshold`` is a pass and produces
-nothing), so on a fixed rollout budget the sampler decides how many proposals
-the run gets at all, and how informative they are. That makes "which task next"
-a real optimisation target rather than a knob, and it needs no sandbox, no
-numpy and no container -- only model calls, which is the whole reason this
-exists beside the AlgoTune script.
+* **which benchmark** the inner run works on (:data:`BENCHMARKS`): the slice,
+  the scorer, the wrapper the instruction meets a question through, and the
+  instruction every inner run starts from;
+* **which slot** evolves (:data:`SLOT_NOTES`): `task_sampler` decides which
+  task each rollout spends, `acceptance` decides whether a candidate
+  instruction commits. Both change the inner run's curve, which is what the
+  meta-reward reads.
 
-The transfer question is the same one: a sampler evolved on a few slices of one
-benchmark is validated on slices it never saw *and* on the other benchmark,
-and the run reports the gain on each plus the ratio between them.
+None of it needs a sandbox, numpy or a container -- only model calls, which is
+why this exists beside the AlgoTune and Harbor scripts.
+
+The transfer question is the same for every cell: a rule evolved on a few
+slices of one benchmark is validated on slices it never saw *and* on another
+benchmark, and the run reports the gain on each plus the ratio between them.
 
 Sizing, before running it. The outer gate scores every candidate on the outer
-**held-out** tasks, and an outer task is a whole inner run: at
-``--train-windows 2 --seeds 3`` the gate rests on three of them, which the
-engine warns about and which is the noisiest part of the run. The number that
-carries a claim here is the paired validation below, not the outer
-``final_reward`` -- raise ``--seeds`` (or ``--train-windows``) before reading
-the gate as evidence, and expect the cost to rise with it.
+**held-out** tasks, and an outer task is a whole inner run. The gate is also
+the thing a narrow configuration breaks: measured, an effect worth +0.034 mean
+across four windows was invisible to a gate holding out two of them, and under
+L1 a tie is an oracle veto -- so `--train-windows` buys resolution, not just
+data. The number that carries a claim is the paired validation, not the outer
+`final_reward`.
 
-    python -m bench.metasearch_gsm --dry-run
-    python -m bench.metasearch_gsm --model deepseek-v4-flash --rounds 3 --yes
+    python -m bench.metasearch_slots --dry-run
+    python -m bench.metasearch_slots --slot acceptance --benchmark aime --yes
 """
 
 from __future__ import annotations
@@ -39,6 +42,7 @@ import random
 import tempfile
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -50,40 +54,182 @@ from agentdescent.meta import (MetaReward, Problem, auc, evolve_problem, final_r
                                meta_evolve, meta_validate, policy_source, rollouts_to,
                                slot_reflector)
 from agentdescent.policies import Policies
-from agentdescent.rewards import last_number
+from agentdescent.rewards import scorer as make_scorer
 from agentdescent.strategies import SingleSlot
 
 from examples._common import add_standard_args, completion_for, confirm, worker_count
 from examples._measure import usage_dict
 
 
-#: The instruction every inner run starts from. Deliberately the plain one the
-#: GSM ports were measured with -- a seed written to fail would manufacture the
-#: headroom this experiment is supposed to measure.
-SEED_INSTRUCTION = ("Solve the math word problem. Return only the final answer.")
+@dataclass(frozen=True)
+class Benchmark:
+    """One dataset in the four terms an inner run needs.
 
-#: How a candidate instruction meets a question -- `examples._gsmhard_domain`'s
-#: own framing, kept because the wrapper is worth 0.08-0.23 on this benchmark
-#: (that module's ablation table) and choosing a different one would change the
-#: headroom the experiment measures. Measured here on 24 GSM-Hard items with
+    ``template`` is not decoration. `examples._gsmhard_domain`'s ablation puts
+    0.08-0.23 on the wrapper alone, so changing it changes the headroom the
+    experiment measures; each one here is recorded with the baseline it was
+    measured at rather than chosen freshly.
+    """
+
+    name: str
+    load: Callable[[int], List[dict]]
+    #: A name in :data:`agentdescent.rewards.SCORERS`.
+    scorer: str
+    template: str
+    seed_instruction: str
+    #: What the seed instruction scores here, measured; for choosing a target
+    #: and for noticing a saturated benchmark before it is used as one.
+    measured_baseline: str = ""
+
+
+#: `examples._gsmhard_domain`'s own framing. Measured on 24 GSM-Hard items with
 #: `deepseek-v4-flash` at temperature 0: this wrapper 0.500, the unlabelled
-#: `"{skill}\n\nProblem:\n{prompt}"` 0.583.
-TEMPLATE = "System instruction:\n{skill}\n\nUser problem:\n{prompt}"
+#: `"{skill}\n\nProblem:\n{prompt}"` 0.583 -- so this one, for the headroom.
+LABELLED = "System instruction:\n{skill}\n\nUser problem:\n{prompt}"
 
-DEFAULT_OUTPUT = Path("bench/results/metasearch-gsm.json")
+MATH_SEED = "Solve the math word problem. Return only the final answer."
+COMP_SEED = ("Solve the competition mathematics problem. The answer is an "
+             "integer; return only that integer.")
+QA_SEED = ("Answer the question using the passages provided. Return only the "
+           "answer, as few words as possible.")
 
+DEFAULT_OUTPUT = Path("bench/results/metasearch-slots.json")
+
+
+def _gsm8k_rows(limit: int) -> List[dict]:
+    from agentdescent.dataloader import hf_rows
+
+    rows = hf_rows("openai/gsm8k", "test", config="main", limit=limit)
+    return [{"question": r["question"], "answer": r["answer"]} for r in rows]
+
+
+def _gsmhard_rows(limit: int) -> List[dict]:
+    from examples._gsmhard_domain import load_rows
+
+    return [{"question": r["input"], "answer": str(r["target"])} for r in load_rows()[:limit]]
+
+
+def _aime_rows(limit: int) -> List[dict]:
+    """Every AIME problem 1983-2024. Integer answers, so `last_number` grades it.
+
+    Chosen over MATH-500 for the reason `examples._gsmhard_domain` gives for
+    rejecting it: MATH-500's answers are LaTeX and comparing them needs a
+    symbolic comparator written here, which would put the grader in this
+    repository's hands. An AIME answer is an integer in [0, 999].
+    """
+    from agentdescent.dataloader import hf_rows
+
+    rows = hf_rows("gneubig/aime-1983-2024", "train", limit=limit)
+    return [{"question": r["Question"], "answer": str(r["Answer"])} for r in rows]
+
+
+def _hotpotqa_rows(limit: int) -> List[dict]:
+    """HotpotQA distractor: multi-hop QA, so the answer is words rather than a
+    number and the scorer is `contains`. A different modality from the maths
+    sets, which is the point of having it -- a sampler that only works on
+    arithmetic is not a sampler."""
+    from agentdescent.dataloader import hf_rows
+
+    rows = hf_rows("hotpotqa/hotpot_qa", "validation", config="distractor", limit=limit)
+    out = []
+    for row in rows:
+        context = row.get("context") or {}
+        titles = context.get("title") or []
+        sentences = context.get("sentences") or []
+        passages = "\n".join(f"[{t}] {''.join(s)}" for t, s in zip(titles, sentences))
+        out.append({"question": f"{passages}\n\nQuestion: {row['question']}",
+                    "answer": row["answer"]})
+    return out
+
+
+BENCHMARKS: Dict[str, Benchmark] = {
+    "gsmhard": Benchmark("gsmhard", _gsmhard_rows, "last_number", LABELLED, MATH_SEED,
+                         "0.500 on 24 items (deepseek-v4-flash, temperature 0)"),
+    "gsm8k": Benchmark("gsm8k", _gsm8k_rows, "last_number", LABELLED, MATH_SEED,
+                       "1.000 on the windows used -- SATURATED, use --hard-other"),
+    "aime": Benchmark("aime", _aime_rows, "last_number", LABELLED, COMP_SEED,
+                      "measured by the run plan"),
+    "hotpotqa": Benchmark("hotpotqa", _hotpotqa_rows, "contains", LABELLED, QA_SEED,
+                          "measured by the run plan"),
+}
+
+
+def windows(benchmark: str, count: int, size: int, *, seed: int = 0,
+            pool: int = 400, rows: Optional[Sequence[dict]] = None) -> Dict[str, List[Task]]:
+    """``count`` disjoint slices of ``size`` tasks each, named ``<benchmark>-<i>``.
+
+    Disjoint by construction: one shuffle of the pool, then consecutive slices.
+    Two windows therefore never share a question, which is what lets one be
+    evolved on while another validates."""
+    rows = list(rows) if rows is not None else BENCHMARKS[benchmark].load(max(pool, count * size))
+    order = list(range(len(rows)))
+    random.Random(seed * 7919 + 13).shuffle(order)
+    if count * size > len(order):
+        raise ValueError(f"{benchmark}: {count} x {size} tasks requested, pool holds {len(order)}")
+    out: Dict[str, List[Task]] = {}
+    for index in range(count):
+        chunk = order[index * size:(index + 1) * size]
+        out[f"{benchmark}-{index}"] = [
+            Task(id=f"{benchmark}:{i}", prompt=str(rows[i]["question"]).strip(),
+                 meta={"gold": rows[i]["answer"]})
+            for i in chunk
+        ]
+    return out
+
+
+def hard_rows(rows: Sequence[dict], complete: Callable[[str], str], *,
+              keep: int, pool: int, benchmark: Optional[Benchmark] = None) -> List[dict]:
+    """The rows the seed instruction gets **wrong** -- headroom from a saturated set.
+
+    Measured, and the reason this exists: on two GSM8K windows the seed
+    instruction scored **1.000**, so the only move available to an evolved
+    sampler was down, and the -0.100 that run reported was a property of the
+    validation set rather than of the sampler. `select_hard` is the repository's
+    own lever for exactly this.
+
+    Its docstring warns that one noisy baseline pass selects the *unlucky*
+    answers, which then regress to the mean. That warning does not bite here and
+    it is worth saying why: `cached_completion` makes the baseline a function of
+    the prompt, so an item scored wrong once is scored wrong every time, and
+    `passes=1` is the whole measurement rather than a sample of it.
+
+    **A hard subset is a different benchmark.** Numbers from it are not
+    comparable with numbers from the full split, and the run plan says which
+    was used.
+    """
+    benchmark = benchmark or BENCHMARKS["gsm8k"]
+    score = make_scorer(benchmark.scorer)
+    scanned = list(rows)[:pool]
+
+    def wrong(row: dict) -> float:
+        task = Task(id="probe", prompt=str(row["question"]).strip(),
+                    meta={"gold": row["answer"]})
+        return score(task, complete(benchmark.template.format(
+            skill=benchmark.seed_instruction, prompt=task.prompt)))
+
+    # `min_items=1`, deliberately: `select_hard` tops a short result up with the
+    # items the baseline **solved**, which is the saturation this call exists to
+    # remove. Refusing loudly is the only useful answer when the pool is too easy.
+    kept = select_hard(scanned, wrong, keep=keep, min_items=1, passes=1)
+    if len(kept) < keep or len(kept) == len(scanned):
+        raise ValueError(
+            f"only {len(kept)} of {len(scanned)} rows are hard for the seed "
+            f"instruction, {keep} needed -- raise --hard-pool"
+            + (" (nothing failed at all, so the pool is fully solved)"
+               if len(kept) == len(scanned) else ""))
+    return kept
 
 # ---------------------------------------------------------------------------
-# Determinism: the inner run must be a function of the slot value
+# Determinism, and what the engine asks of each slot
 # ---------------------------------------------------------------------------
 
 
-#: What the engine imposes on this slot beyond the Protocol signature, stated
-#: for the reflector. Not a hint about *which* sampler to write -- it is the
-#: calling convention any implementer would be told, and every proposal the
-#: first live runs produced violated it: each kept per-task state and answered
-#: from its own memory, which the engine turns into a KeyError two rounds in.
-SAMPLER_NOTES = """How the engine calls this, which is stricter than the signature:
+#: What the engine imposes on each slot beyond its Protocol signature, stated
+#: for the reflector. Not hints about *which* rule to write -- they are the
+#: calling conventions any implementer would be told, and every proposal the
+#: first live runs produced violated the sampler one.
+SLOT_NOTES: Dict[str, str] = {
+    "task_sampler": """How the engine calls this, which is stricter than the signature:
 
 - `keys` is ONE WORKER'S SHARD for this round, not the whole task set, and it
   CHANGES between calls. The id you return is looked up in that round's tasks,
@@ -96,7 +242,26 @@ SAMPLER_NOTES = """How the engine calls this, which is stricter than the signatu
   score is known only after it has been spent at least once. `score >= 1.0`
   means the artifact already solves that task -- and the engine asks for no
   proposal from a rollout that passed, so a pick that lands on a solved task
-  buys nothing."""
+  buys nothing.""",
+    "acceptance": """How the engine calls this, and what the numbers mean:
+
+- `ctx.base_counts` and `ctx.cand_counts` are `(successes, failures)` over the
+  WHOLE held-out set -- not `(successes, trials)`. `MergeContext.rate(counts)`
+  turns either into a rate; dividing by the second element gives a number that
+  is wrong and plausible.
+- `ctx.base_cheap` / `ctx.cand_cheap` are a SUB-SAMPLE. Ranking may use them.
+  Deciding to commit may not: a gate that reads the cheap layer judges a
+  regression from a handful of tasks.
+- Return `AcceptDecision(accept, category, detail, p_improve, observed_delta)`.
+  `category` is a stable bucket -- "committed" when you accept, and something
+  like "below-threshold" when you do not -- because it is counted across rounds.
+- You are the last gate before a commit, and this artifact is L1: an oracle has
+  already vetoed anything that does not strictly beat the base on ground truth,
+  so accepting everything does not make more things commit. Being too strict
+  commits nothing and the run learns nothing; being too loose commits noise.""",
+}
+
+
 def cached_completion(complete: Callable[[str], str], directory: str, *,
                       key_extra: str = "") -> Callable[[str], str]:
     """``prompt -> text``, memoised on disk. Makes an inner run reproducible.
@@ -154,100 +319,17 @@ def cached_completion(complete: Callable[[str], str], directory: str, *,
     complete_cached.stats = stats          # type: ignore[attr-defined]
     return complete_cached
 
-# ---------------------------------------------------------------------------
-# Data: disjoint windows of one benchmark, each a whole inner problem
-# ---------------------------------------------------------------------------
-
-
-def _gsm8k_rows(limit: int) -> List[dict]:
-    from agentdescent.dataloader import hf_rows
-
-    rows = hf_rows("openai/gsm8k", "test", config="main", limit=limit)
-    return [{"question": r["question"], "answer": r["answer"]} for r in rows]
-
-
-def _gsmhard_rows(limit: int) -> List[dict]:
-    from examples._gsmhard_domain import load_rows
-
-    return [{"question": r["input"], "answer": str(r["target"])} for r in load_rows()[:limit]]
-
-
-LOADERS: Dict[str, Callable[[int], List[dict]]] = {"gsm8k": _gsm8k_rows, "gsmhard": _gsmhard_rows}
-
-
-def windows(benchmark: str, count: int, size: int, *, seed: int = 0,
-            pool: int = 400, rows: Optional[Sequence[dict]] = None) -> Dict[str, List[Task]]:
-    """``count`` disjoint slices of ``size`` tasks each, named ``<benchmark>-<i>``.
-
-    Disjoint by construction: one shuffle of the pool, then consecutive slices.
-    Two windows therefore never share a question, which is what lets one be
-    evolved on while another validates."""
-    rows = list(rows) if rows is not None else LOADERS[benchmark](max(pool, count * size))
-    order = list(range(len(rows)))
-    random.Random(seed * 7919 + 13).shuffle(order)
-    if count * size > len(order):
-        raise ValueError(f"{benchmark}: {count} x {size} tasks requested, pool holds {len(order)}")
-    out: Dict[str, List[Task]] = {}
-    for index in range(count):
-        chunk = order[index * size:(index + 1) * size]
-        out[f"{benchmark}-{index}"] = [
-            Task(id=f"{benchmark}:{i}", prompt=str(rows[i]["question"]).strip(),
-                 meta={"gold": rows[i]["answer"]})
-            for i in chunk
-        ]
-    return out
-
-
-def hard_rows(rows: Sequence[dict], complete: Callable[[str], str], *,
-              keep: int, pool: int) -> List[dict]:
-    """The rows the seed instruction gets **wrong** -- headroom from a saturated set.
-
-    Measured, and the reason this exists: on two GSM8K windows the seed
-    instruction scored **1.000**, so the only move available to an evolved
-    sampler was down, and the -0.100 that run reported was a property of the
-    validation set rather than of the sampler. `select_hard` is the repository's
-    own lever for exactly this.
-
-    Its docstring warns that one noisy baseline pass selects the *unlucky*
-    answers, which then regress to the mean. That warning does not bite here and
-    it is worth saying why: `cached_completion` makes the baseline a function of
-    the prompt, so an item scored wrong once is scored wrong every time, and
-    `passes=1` is the whole measurement rather than a sample of it.
-
-    **A hard subset is a different benchmark.** Numbers from it are not
-    comparable with numbers from the full split, and the run plan says which
-    was used.
-    """
-    score = last_number()
-    scanned = list(rows)[:pool]
-
-    def wrong(row: dict) -> float:
-        task = Task(id="probe", prompt=str(row["question"]).strip(),
-                    meta={"gold": row["answer"]})
-        return score(task, complete(TEMPLATE.format(skill=SEED_INSTRUCTION,
-                                                    prompt=task.prompt)))
-
-    # `min_items=1`, deliberately: `select_hard` tops a short result up with the
-    # items the baseline **solved**, which is the saturation this call exists to
-    # remove. Refusing loudly is the only useful answer when the pool is too easy.
-    kept = select_hard(scanned, wrong, keep=keep, min_items=1, passes=1)
-    if len(kept) < keep or len(kept) == len(scanned):
-        raise ValueError(
-            f"only {len(kept)} of {len(scanned)} rows are hard for the seed "
-            f"instruction, {keep} needed -- raise --hard-pool"
-            + (" (nothing failed at all, so the pool is fully solved)"
-               if len(kept) == len(scanned) else ""))
-    return kept
 
 # ---------------------------------------------------------------------------
-# The inner problem: one whole evolve() with the candidate sampler installed
+# The inner problem: one whole evolve() with the candidate rule installed
 # ---------------------------------------------------------------------------
 
 
-def gsm_problem(tasks: Sequence[Task], complete: Callable[[str], str], *,
-                rounds: int = 4, workers: int = 1, held_out_frac: float = 0.4,
-                cache_dir: str = "", usage: Optional[Usage] = None) -> Problem:
-    """``(task_sampler, seed) -> MetaOutcome``: an inner instruction-evolution run.
+def inner_problem(tasks: Sequence[Task], complete: Callable[[str], str], *,
+                  benchmark: Benchmark, slot: str = "task_sampler",
+                  rounds: int = 4, workers: int = 1, held_out_frac: float = 0.4,
+                  cache_dir: str = "", usage: Optional[Usage] = None) -> Problem:
+    """``(slot value, seed) -> MetaOutcome``: an inner instruction-evolution run.
 
     ``workers=1`` on purpose: a sampler learns from ``record(task_id, score)``
     between picks, and with concurrent rollouts half the picks are made before
@@ -261,11 +343,12 @@ def gsm_problem(tasks: Sequence[Task], complete: Callable[[str], str], *,
     """
     base = Policies(eval_cache=FileCache(cache_dir)) if cache_dir else Policies()
     return evolve_problem(
-        list(tasks), last_number(),
-        slot="task_sampler", base=base,
-        run=lambda rendered, task: complete(TEMPLATE.format(skill=rendered, prompt=task.prompt)),
+        list(tasks), make_scorer(benchmark.scorer),
+        slot=slot, base=base,
+        run=lambda rendered, task: complete(
+            benchmark.template.format(skill=rendered, prompt=task.prompt)),
         propose=reflector(complete),
-        strategy=SingleSlot(initial_value=SEED_INSTRUCTION),
+        strategy=SingleSlot(initial_value=benchmark.seed_instruction),
         rounds=rounds, n_workers=workers, max_concurrency=workers,
         held_out_frac=held_out_frac, eval_concurrency=8, self_verify=False,
         usage=usage,
@@ -299,14 +382,16 @@ def build_problems(complete: Callable[[str], str], *, source: str, other: str,
         if hard_other:
             # Only the rows the seed instruction fails, so the group has room to
             # move in both directions rather than only down.
-            rows = hard_rows(LOADERS[other](hard_pool), complete,
-                             keep=other_windows * size, pool=hard_pool)
+            rows = hard_rows(BENCHMARKS[other].load(hard_pool), complete,
+                             keep=other_windows * size, pool=hard_pool,
+                             benchmark=BENCHMARKS[other])
         cross = windows(other, other_windows, size, seed=data_seed, rows=rows)
         groups["other"] = list(cross)
         every.update(cross)
     else:
         groups["other"] = []
-    built = {name: gsm_problem(tasks, complete, usage=usage, **inner)
+    built = {name: inner_problem(tasks, complete, usage=usage,
+                                 benchmark=BENCHMARKS[name.rsplit("-", 1)[0]], **inner)
              for name, tasks in every.items()}
     train = {n: built[n] for n in groups["train"]}
     validate = {n: built[n] for n in groups["unseen"] + groups["other"]}
@@ -392,7 +477,8 @@ def run_experiment(complete: Callable[[str], str], *, train: Dict[str, Problem],
                    usage: Optional[Usage] = None, max_seconds: Optional[float] = None,
                    max_rollouts: Optional[int] = None,
                    eval_concurrency: Optional[int] = None,
-                   meta_reward: Optional[MetaReward] = None) -> Dict[str, Any]:
+                   meta_reward: Optional[MetaReward] = None,
+                   slot: str = "task_sampler") -> Dict[str, Any]:
     """Evolve the sampler on ``train``, then score seed vs evolved on everything.
 
     ``meta_reward`` is what an inner run is worth; ``None`` is
@@ -403,11 +489,11 @@ def run_experiment(complete: Callable[[str], str], *, train: Dict[str, Problem],
         raise ValueError(f"train and validate share problems: {sorted(set(train) & set(validate))}")
     if set(seeds) & set(validate_seeds):
         raise ValueError("validation seeds must not overlap the outer run's seeds")
-    spec = policy_source("task_sampler", notes=SAMPLER_NOTES)
+    spec = policy_source(slot, notes=SLOT_NOTES[slot])
     seed_rule = spec.render(spec.initial())
     propose, proposals = recording_reflector(complete, spec)
     started = time.monotonic()
-    result = meta_evolve(train, slot="task_sampler", spec=spec,
+    result = meta_evolve(train, slot=slot, spec=spec,
                          propose=propose, seeds=list(seeds),
                          rounds=rounds, n_workers=workers, max_concurrency=workers,
                          held_out_frac=0.5,
@@ -485,9 +571,12 @@ def build_parser() -> argparse.ArgumentParser:
     add_standard_args(parser, model_default="deepseek-v4-flash", max_seconds_default=3600.0,
                       eval_concurrency_default=None, include_val_cap=False)
     parser.set_defaults(provider="openai", async_ratio=1)
-    parser.add_argument("--source", default="gsmhard", choices=sorted(LOADERS),
-                        help="the benchmark the sampler is evolved on")
-    parser.add_argument("--other", default="gsm8k", choices=sorted(LOADERS),
+    parser.add_argument("--slot", default="task_sampler", choices=sorted(SLOT_NOTES),
+                        help="which decision of the inner run evolves")
+    parser.add_argument("--source", "--benchmark", dest="source", default="gsmhard",
+                        choices=sorted(BENCHMARKS),
+                        help="the benchmark the rule is evolved on")
+    parser.add_argument("--other", default="gsm8k", choices=sorted(BENCHMARKS),
                         help="the benchmark it is validated on but never evolved on")
     parser.add_argument("--train-windows", type=int, default=2)
     parser.add_argument("--unseen-windows", type=int, default=2)
@@ -507,6 +596,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rounds", type=int, default=3, help="outer rounds")
     parser.add_argument("--workers", type=int, default=2, help="outer workers")
     parser.add_argument("--inner-rounds", type=int, default=5)
+    parser.add_argument("--inner-workers", type=int, default=1,
+                        help=("workers inside one inner run. 1 is the setting the "
+                              "sequential slots are about -- a sampler learns from "
+                              "`record` between picks, and with concurrent rollouts "
+                              "half the picks are made before any score comes back. "
+                              "Raise it to make `conflict`/`fusion` live at all: "
+                              "with one worker a merge has one diff, so there is "
+                              "nothing to resolve or fuse"))
     parser.add_argument("--meta-reward", default="auc", choices=sorted(META_REWARDS),
                         help=("what one inner run is worth to the outer loop; see "
                               "META_REWARDS for what each one saturates on"))
@@ -552,17 +649,21 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                             if args.eval_cache else ""))
     seeds = list(range(args.seeds))
     validate_seeds = list(range(1_000, 1_000 + args.validate_seeds))
-    inner = {"rounds": args.inner_rounds, "workers": 1,
+    inner = {"rounds": args.inner_rounds, "workers": args.inner_workers,
+             "slot": args.slot,
              "held_out_frac": args.inner_held_out_frac,
              # `--eval-cache` is the shared flag; here it memoises the *inner*
              # gate, where the seed instruction is re-scored by every inner run.
              "cache_dir": args.eval_cache}
     outer_tasks = args.train_windows * len(seeds)
     validations = 2 * (args.train_windows + args.unseen_windows + args.other_windows) * len(validate_seeds)
-    print("Algorithm : meta_evolve over the engine's task_sampler slot (policy_source)")
-    print(f"Inner     : one whole evolve() per rollout -- {args.inner_rounds} sweeps, one "
-          f"worker, {args.window_size} tasks split {1 - args.inner_held_out_frac:.0%}/"
-          f"{args.inner_held_out_frac:.0%}, instruction evolution from the seed")
+    print(f"Algorithm : meta_evolve over the engine's `{args.slot}` slot (policy_source)")
+    bench_src = BENCHMARKS[args.source]
+    print(f"Inner     : one whole evolve() per rollout -- {args.inner_rounds} sweeps, "
+          f"{args.inner_workers} worker(s), {args.window_size} tasks split "
+          f"{1 - args.inner_held_out_frac:.0%}/{args.inner_held_out_frac:.0%}, "
+          f"instruction evolution scored by `{bench_src.scorer}`")
+    print(f"Baseline  : {bench_src.name} seed instruction -- {bench_src.measured_baseline}")
     print(f"Train     : {args.train_windows} x {args.source} window(s) x {len(seeds)} seed(s) "
           f"= {outer_tasks} outer tasks")
     print(f"Validate  : {args.unseen_windows} unseen {args.source} + {args.other_windows} "
@@ -612,7 +713,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                              max_rollouts=args.budget_rollouts or None,
                              eval_concurrency=args.eval_concurrency,
                              meta_reward=meta_reward_for(args.meta_reward,
-                                                         args.quality_target))
+                                                         args.quality_target),
+                             slot=args.slot)
     payload["config"] = {**inner, "source": args.source, "other": args.other,
                          "window_size": args.window_size, "data_seed": args.data_seed,
                          "model": args.model, "provider": args.provider,
@@ -620,7 +722,9 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                          "hard_other": args.hard_other,
                          "meta_reward": args.meta_reward,
                          "quality_target": args.quality_target,
-                         "template": TEMPLATE, "seed_instruction": SEED_INSTRUCTION,
+                         "slot": args.slot,
+                         "template": BENCHMARKS[args.source].template,
+                         "seed_instruction": BENCHMARKS[args.source].seed_instruction,
                          "outer_seed": args.seed}
     # `usage_dict` rather than a fourth hand-rolled copy: three of them in this
     # repository used `input_tokens`/`output_tokens`, which `Usage` does not

@@ -6,7 +6,7 @@ an instruction against a 20-task slice of GSM-Hard, five sweeps, one worker,
 `deepseek-v4-flash` at temperature 0 with thinking disabled. The meta-reward is
 the inner run's AUC (mean best-so-far held-out reward). Governance is L1, so
 every merge also passes the oracle. Produced by
-[`bench/metasearch_gsm.py`](../metasearch_gsm.py); raw record in
+[`bench/metasearch_slots.py`](../metasearch_slots.py); raw record in
 [`metasearch-gsm.json`](metasearch-gsm.json).
 
 Four GSM-Hard windows to evolve on (3 seeds each = 12 outer tasks, 6 held out),
@@ -86,8 +86,8 @@ them**, and under L1 a tie is a veto, so a narrow gate reads as "nothing works".
 ## Run it
 
 ```bash
-python -m bench.metasearch_gsm --dry-run
-python -m bench.metasearch_gsm --model deepseek-v4-flash \
+python -m bench.metasearch_slots --dry-run
+python -m bench.metasearch_slots --model deepseek-v4-flash \
     --rounds 6 --workers 2 --seeds 3 --validate-seeds 2 \
     --train-windows 4 --unseen-windows 2 --other-windows 2 \
     --eval-cache .cache/metasearch --yes
