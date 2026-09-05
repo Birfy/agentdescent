@@ -41,8 +41,9 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tupl
 from agentdescent.agents import Usage, with_retries
 from agentdescent.evalcache import FileCache
 from agentdescent.evolution import Task, reflector
-from agentdescent.meta import (Problem, evolve_problem, meta_evolve, meta_validate,
-                               policy_source, slot_reflector)
+from agentdescent.meta import (MetaReward, Problem, auc, evolve_problem, final_reward,
+                               meta_evolve, meta_validate, policy_source, rollouts_to,
+                               slot_reflector)
 from agentdescent.policies import Policies
 from agentdescent.rewards import last_number
 from agentdescent.strategies import SingleSlot
@@ -178,6 +179,36 @@ def build_problems(complete: Callable[[str], str], *, source: str, other: str,
     return train, validate, groups
 
 
+#: The meta-rewards this script offers, and the one thing to know about each.
+META_REWARDS: Dict[str, Callable[[float], MetaReward]] = {
+    # Mean best-so-far: what a decision rule controls in general, and the
+    # library default. Measured here first and it **saturated**: on 20-task
+    # GSM-Hard windows at five inner sweeps the seed sampler already scored
+    # 0.875, candidates tied, and L1 governance turns a tie into a veto
+    # (`force_oracle` on an L1 artifact rejects unless the candidate strictly
+    # beats the base on the full held-out set), so three outer sweeps ran and
+    # committed nothing. A saturated reward and a strict gate is a null result
+    # about the configuration, not about the sampler.
+    "auc": lambda target: auc,
+    # The inner run's own final score. Least sensitive to *speed*, which is the
+    # thing a sampler actually changes.
+    "final": lambda target: final_reward,
+    # Time to quality: 1/(1+sweeps until the inner curve first reaches `target`).
+    # Spread over {1, 0.5, 0.33, 0.25, 0}, so ties are rare and a rule that finds
+    # the informative task one sweep earlier is visibly better. The right default
+    # here as long as `target` sits above the seed instruction's own score (0.500
+    # on GSM-Hard through this wrapper) -- below it every run scores 1.0 and this
+    # saturates the same way `auc` did.
+    "time-to-quality": rollouts_to,
+}
+
+
+def meta_reward_for(name: str, target: float) -> MetaReward:
+    if name not in META_REWARDS:
+        raise SystemExit(f"unknown --meta-reward {name!r}; choose from {sorted(META_REWARDS)}")
+    return META_REWARDS[name](target)
+
+
 def progress(label: str) -> Callable[[Any], None]:
     """One line per outer sweep. A run that reports nothing until its summary
     cannot be told from a stalled one, and an outer sweep here is minutes of
@@ -198,8 +229,14 @@ def run_experiment(complete: Callable[[str], str], *, train: Dict[str, Problem],
                    workers: int, outer_seed: int = 0,
                    usage: Optional[Usage] = None, max_seconds: Optional[float] = None,
                    max_rollouts: Optional[int] = None,
-                   eval_concurrency: Optional[int] = None) -> Dict[str, Any]:
-    """Evolve the sampler on ``train``, then score seed vs evolved on everything."""
+                   eval_concurrency: Optional[int] = None,
+                   meta_reward: Optional[MetaReward] = None) -> Dict[str, Any]:
+    """Evolve the sampler on ``train``, then score seed vs evolved on everything.
+
+    ``meta_reward`` is what an inner run is worth; ``None`` is
+    :func:`~agentdescent.meta.auc`. See :func:`meta_reward_for` for why the
+    default is not always the right one here.
+    """
     if set(train) & set(validate):
         raise ValueError(f"train and validate share problems: {sorted(set(train) & set(validate))}")
     if set(seeds) & set(validate_seeds):
@@ -213,11 +250,11 @@ def run_experiment(complete: Callable[[str], str], *, train: Dict[str, Problem],
                          held_out_frac=0.5,
                          eval_concurrency=eval_concurrency or max(1, workers),
                          max_seconds=max_seconds, max_rollouts=max_rollouts,
-                         seed=outer_seed, usage=usage,
+                         meta_reward=meta_reward, seed=outer_seed, usage=usage,
                          on_round=progress('gsm'))
     outer_seconds = time.monotonic() - started
     report = meta_validate(spec, seed_rule, result.rendered, {**train, **validate},
-                           seeds=list(validate_seeds))
+                           seeds=list(validate_seeds), meta_reward=meta_reward)
     by_group: Dict[str, Dict[str, float]] = {}
     for group, names in groups.items():
         rows = [report[n] for n in names if n in report]
@@ -293,6 +330,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rounds", type=int, default=3, help="outer rounds")
     parser.add_argument("--workers", type=int, default=2, help="outer workers")
     parser.add_argument("--inner-rounds", type=int, default=5)
+    parser.add_argument("--meta-reward", default="time-to-quality",
+                        choices=sorted(META_REWARDS),
+                        help=("what one inner run is worth to the outer loop. "
+                              "`auc` is the library default and saturated on this "
+                              "domain (see META_REWARDS)"))
+    parser.add_argument("--quality-target", type=float, default=0.75,
+                        help=("the bar --meta-reward time-to-quality measures the "
+                              "time to. Must sit above the seed instruction's own "
+                              "score or every run scores 1.0"))
     parser.add_argument("--inner-held-out-frac", type=float, default=0.4)
     parser.add_argument("--max-tokens", type=int, default=1200)
     parser.add_argument("--temperature", type=float, default=0.0)
@@ -337,6 +383,10 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     print(f"Validate  : {args.unseen_windows} unseen {args.source} + {args.other_windows} "
           f"{args.other} window(s), {len(validate_seeds)} fresh seed(s) "
           f"-> {validations} inner runs")
+    print(f"Reward    : {args.meta_reward}"
+          + (f" @ {args.quality_target}" if args.meta_reward == "time-to-quality" else "")
+          + "  (L1: a candidate that only ties the seed on the outer held-out set "
+            "is vetoed by the oracle, so a saturated reward commits nothing)")
     print(f"Outer     : rounds={args.rounds} workers={workers} blast_radius=0.6 (L1)"
           + (f" budget={args.budget_rollouts} rollouts" if args.budget_rollouts else "")
           + f" max_seconds={args.max_seconds:.0f}")
@@ -367,11 +417,15 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                              rounds=args.rounds, workers=workers, outer_seed=args.seed,
                              usage=usage, max_seconds=args.max_seconds,
                              max_rollouts=args.budget_rollouts or None,
-                             eval_concurrency=args.eval_concurrency)
+                             eval_concurrency=args.eval_concurrency,
+                             meta_reward=meta_reward_for(args.meta_reward,
+                                                         args.quality_target))
     payload["config"] = {**inner, "source": args.source, "other": args.other,
                          "window_size": args.window_size, "data_seed": args.data_seed,
                          "model": args.model, "provider": args.provider,
                          "temperature": args.temperature, "thinking": args.thinking,
+                         "meta_reward": args.meta_reward,
+                         "quality_target": args.quality_target,
                          "template": TEMPLATE, "seed_instruction": SEED_INSTRUCTION,
                          "outer_seed": args.seed}
     # `usage_dict` rather than a fourth hand-rolled copy: three of them in this

@@ -1,0 +1,175 @@
+{
+ "seed_source": "class Policy:\n    # Round robin over the shard (the engine's default).\n    def pick(self, keys, round_index):\n        return keys[round_index % len(keys)]\n\n    def record(self, task_id, score):\n        pass\n",
+ "evolved_source": "class Policy:\n    # Round robin over the shard (the engine's default).\n    def pick(self, keys, round_index):\n        return keys[round_index % len(keys)]\n\n    def record(self, task_id, score):\n        pass\n",
+ "outer": {
+  "final_reward": 0.875,
+  "rollouts": 6,
+  "outcomes": {
+   "oracle-rejected": 3
+  },
+  "stop_reason": "rounds",
+  "error": null,
+  "seconds": 631.1916781,
+  "rounds": 3,
+  "workers": 2,
+  "seeds": [
+   0,
+   1,
+   2
+  ],
+  "history": [
+   {
+    "round": 0,
+    "held_out_reward": 0.875,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "oracle-rejected": 1
+    }
+   },
+   {
+    "round": 1,
+    "held_out_reward": 0.875,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "oracle-rejected": 1
+    }
+   },
+   {
+    "round": 2,
+    "held_out_reward": 0.875,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "oracle-rejected": 1
+    }
+   }
+  ]
+ },
+ "validation": {
+  "gsmhard-0": {
+   "n": 2,
+   "before": 0.6375,
+   "after": 0.625,
+   "gain": -0.012500000000000011,
+   "gain_sd": 0.012500000000000011,
+   "wins": 0,
+   "losses": 1
+  },
+  "gsmhard-1": {
+   "n": 2,
+   "before": 0.875,
+   "after": 0.875,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "gsmhard-2": {
+   "n": 2,
+   "before": 0.5,
+   "after": 0.5,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "gsmhard-3": {
+   "n": 2,
+   "before": 0.875,
+   "after": 0.7875000000000001,
+   "gain": -0.08749999999999997,
+   "gain_sd": 0.012500000000000011,
+   "wins": 0,
+   "losses": 2
+  },
+  "gsm8k-0": {
+   "n": 2,
+   "before": 0.9125,
+   "after": 1.0,
+   "gain": 0.08750000000000002,
+   "gain_sd": 0.08750000000000002,
+   "wins": 1,
+   "losses": 0
+  },
+  "gsm8k-1": {
+   "n": 2,
+   "before": 1.0,
+   "after": 0.75,
+   "gain": -0.25,
+   "gain_sd": 0.25,
+   "wins": 0,
+   "losses": 1
+  }
+ },
+ "by_group": {
+  "train": {
+   "problems": [
+    "gsmhard-0",
+    "gsmhard-1"
+   ],
+   "seed_rule": 0.75625,
+   "evolved_rule": 0.75,
+   "gain": -0.0062500000000000056,
+   "wins": 0,
+   "losses": 1
+  },
+  "unseen": {
+   "problems": [
+    "gsmhard-2",
+    "gsmhard-3"
+   ],
+   "seed_rule": 0.6875,
+   "evolved_rule": 0.64375,
+   "gain": -0.04374999999999998,
+   "wins": 0,
+   "losses": 2
+  },
+  "other": {
+   "problems": [
+    "gsm8k-0",
+    "gsm8k-1"
+   ],
+   "seed_rule": 0.95625,
+   "evolved_rule": 0.875,
+   "gain": -0.08124999999999999,
+   "wins": 1,
+   "losses": 1
+  }
+ },
+ "transfer_ratio": {
+  "unseen": 6.999999999999991,
+  "other": 12.999999999999988
+ },
+ "validate_seeds": [
+  1000,
+  1001
+ ],
+ "config": {
+  "rounds": 5,
+  "workers": 1,
+  "held_out_frac": 0.4,
+  "cache_dir": "/tmp/claude-0/-home-user-agentdescent/11f5938a-d37f-5fc2-bc0a-9c4c1833f52c/scratchpad/evalcache-run",
+  "source": "gsmhard",
+  "other": "gsm8k",
+  "window_size": 20,
+  "data_seed": 0,
+  "model": "deepseek-v4-flash",
+  "provider": "openai",
+  "temperature": 0.0,
+  "thinking": "disabled",
+  "template": "System instruction:\n{skill}\n\nUser problem:\n{prompt}",
+  "seed_instruction": "Solve the math word problem. Return only the final answer.",
+  "outer_seed": 0
+ },
+ "usage": {
+  "calls": 1354,
+  "prompt_tokens": 76558,
+  "completion_tokens": 116858,
+  "total_tokens": 193416,
+  "model_seconds": 7418.866477966309,
+  "failures": 1,
+  "wall_seconds": 1376.3379753590007
+ }
+}

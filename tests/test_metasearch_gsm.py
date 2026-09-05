@@ -210,3 +210,44 @@ def test_main_writes_a_complete_result_file(monkeypatch, tmp_path):
     assert payload["config"]["template"] == bench.TEMPLATE
     assert payload["outer"]["error"] is None and payload["evolved_source"]
     assert isinstance(Usage().calls, int)      # the field the bug got wrong
+
+
+def test_meta_reward_choices_and_their_shapes():
+    from agentdescent.meta import MetaOutcome
+
+    rising = MetaOutcome(curve=[0.4, 0.5, 0.8, 0.8], final=0.8)
+    flat = MetaOutcome(curve=[0.9, 0.9, 0.9, 0.9], final=0.9)
+    ttq = bench.meta_reward_for("time-to-quality", 0.75)
+    assert ttq(rising) == pytest.approx(1 / 3)      # reached at the third sweep
+    assert ttq(MetaOutcome(curve=[0.4, 0.4], final=0.4)) == 0.0
+    # The saturation this option exists for: a bar below the seed's own score
+    # gives every run 1.0, which is the failure mode `auc` hit on this domain.
+    assert bench.meta_reward_for("time-to-quality", 0.3)(rising) == 1.0
+    assert bench.meta_reward_for("auc", 0.0)(flat) == pytest.approx(0.9)
+    assert bench.meta_reward_for("final", 0.0)(rising) == 0.8
+    with pytest.raises(SystemExit, match="unknown --meta-reward"):
+        bench.meta_reward_for("nope", 0.5)
+
+
+def test_the_meta_reward_reaches_both_the_outer_loop_and_the_validation(monkeypatch):
+    seen = {}
+    real_evolve, real_validate = bench.meta_evolve, bench.meta_validate
+
+    def spy_evolve(problems, **kw):
+        seen["evolve"] = kw.get("meta_reward")
+        return real_evolve(problems, **kw)
+
+    def spy_validate(spec, before, after, problems, **kw):
+        seen["validate"] = kw.get("meta_reward")
+        return real_validate(spec, before, after, problems, **kw)
+
+    monkeypatch.setattr(bench, "meta_evolve", spy_evolve)
+    monkeypatch.setattr(bench, "meta_validate", spy_validate)
+    reward = bench.meta_reward_for("time-to-quality", 0.5)
+    bench.run_experiment(lambda p: PROPOSAL,
+                         train={"t0": _sampler_sensitive(0.2), "t1": _sampler_sensitive(0.2)},
+                         validate={"v": _flat(0.4)},
+                         groups={"train": ["t0", "t1"], "unseen": ["v"]}, seeds=[0, 1],
+                         validate_seeds=[9], rounds=1, workers=1, meta_reward=reward)
+    assert seen["evolve"] is reward is seen["validate"], (
+        "the gate and the report must score an inner run the same way")
