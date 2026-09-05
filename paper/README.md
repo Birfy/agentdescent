@@ -14,7 +14,7 @@ compile from source — no external image files.
 - `main.tex` — the paper (structure, figures, tables)
 - `arxiv.sty` — NeurIPS-derived single-column preprint style; it loads
   `geometry` and `fancyhdr` itself, so `main.tex` requests neither
-- `references.bib` — bibliography (47 entries)
+- `references.bib` — bibliography (51 entries)
 - `main.pdf` — compiled output (19 pages)
 
 ## Build
@@ -42,6 +42,8 @@ Every measured number in the paper names the script that produced it; the
 Reproducibility section lists them per result, and the raw per-seed JSON for the
 merge experiments is in `bench/results/`.
 
-Note: a few bibliography entries for very recent preprints (Agent0, ROLL
-Flash) lack arXiv identifiers; their author lists and IDs are worth verifying
-against the sources before the paper is circulated.
+Note: every bibliography entry now carries an author list and an arXiv
+identifier. The three that did not — Agent0 (arXiv:2511.16043), ROLL Flash
+(arXiv:2510.11345) and CoEvoSkills (arXiv:2604.01687) — were filled in from
+their arXiv abstract pages; Agent0's key was `xue2025agent0` against a first
+author of Xia, and is now `xia2025agent0`.

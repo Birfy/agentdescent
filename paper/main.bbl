@@ -1,26 +1,9 @@
-\begin{thebibliography}{45}
+\begin{thebibliography}{46}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
 \expandafter\ifx\csname urlstyle\endcsname\relax
   \providecommand{\doi}[1]{doi: #1}\else
   \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
-
-\bibitem[rol(2025)]{roll2025flash}
-{ROLL Flash}: Accelerating {RLVR} and agentic training with asynchrony.
-\newblock arXiv preprint, 2025.
-\newblock Preprint; identifier omitted pending verification.
-
-\bibitem[xue(2025)]{xue2025agent0}
-{Agent0}: Unleashing self-evolving agents from zero data via tool-integrated
-  reasoning.
-\newblock arXiv preprint, 2025.
-\newblock Preprint; identifier omitted pending verification.
-
-\bibitem[coe(2026)]{coevoskills2026}
-Self-evolving agent skills via co-evolutionary verification ({CoEvoSkills}).
-\newblock \url{https://arxiv.org/abs/2604.01687}, 2026.
-\newblock Concurrent work; author list unverified, official code unreleased at
-  the time of writing.
 
 \bibitem[Agrawal et~al.(2025)Agrawal, Tan, Soylu, Ziems, Khare, Opsahl-Ong,
   Singhvi, Shandilya, Ryan, Jiang, et~al.]{agrawal2025gepa}
@@ -30,6 +13,15 @@ Lakshya~A Agrawal, Shangyin Tan, Dilara Soylu, Noah Ziems, Rishi Khare, Krista
 \newblock {GEPA}: Reflective prompt evolution can outperform reinforcement
   learning.
 \newblock \emph{arXiv preprint arXiv:2507.19457}, 2025.
+
+\bibitem[Ayg{\"u}n et~al.(2025)Ayg{\"u}n, Belyaeva, Comanici, Coram, Cui,
+  Garrison, Kast, McLean, Norgaard, Shamsi, et~al.]{aygun2025era}
+Eser Ayg{\"u}n, Anastasiya Belyaeva, Gheorghe Comanici, Marc Coram, Hao Cui,
+  Jake Garrison, Anton Kast, Cory~Y. McLean, Peter Norgaard, Zahra Shamsi,
+  et~al.
+\newblock An {AI} system to help scientists write expert-level empirical
+  software.
+\newblock \emph{arXiv preprint arXiv:2509.06503}, 2025.
 
 \bibitem[Cobbe et~al.(2021)Cobbe, Kosaraju, Bavarian, Chen, Jun, Kaiser,
   Plappert, Tworek, Hilton, Nakano, et~al.]{cobbe2021gsm8k}
@@ -146,6 +138,14 @@ Lefteris Loukas, Manos Fergadiotis, Ilias Chalkidis, Eirini Spyropoulou,
 \newblock {FiNER}: Financial numeric entity recognition for {XBRL} tagging.
 \newblock In \emph{Proceedings of ACL}, 2022.
 
+\bibitem[Lu et~al.(2025)Lu, Liu, Xiong, He, Gao, Wu, Wang, Liu, Li, Zhao,
+  et~al.]{roll2025flash}
+Han Lu, Zichen Liu, Shaopan Xiong, Yancheng He, Wei Gao, Yanan Wu, Weixun Wang,
+  Jiashun Liu, Yang Li, Haizhou Zhao, et~al.
+\newblock Part {II}: {ROLL Flash} --- accelerating {RLVR} and agentic training
+  with asynchrony.
+\newblock \emph{arXiv preprint arXiv:2510.11345}, 2025.
+
 \bibitem[Madaan et~al.(2023)Madaan, Tandon, Gupta, Hallinan, Gao, Wiegreffe,
   Alon, Dziri, Prabhumoye, Yang, et~al.]{madaan2023selfrefine}
 Aman Madaan, Niket Tandon, Prakhar Gupta, Skyler Hallinan, Luyu Gao, Sarah
@@ -259,6 +259,14 @@ Mitchell Wortsman, Gabriel Ilharco, Samir~Ya Gadre, Rebecca Roelofs, Raphael
 \newblock In \emph{International Conference on Machine Learning}, pages
   23965--23998, 2022.
 
+\bibitem[Xia et~al.(2025)Xia, Zeng, Liu, Qin, Wu, Zhou, Xiong, and
+  Yao]{xia2025agent0}
+Peng Xia, Kaide Zeng, Jiaqi Liu, Can Qin, Fang Wu, Yiyang Zhou, Caiming Xiong,
+  and Huaxiu Yao.
+\newblock {Agent0}: Unleashing self-evolving agents from zero data via
+  tool-integrated reasoning.
+\newblock \emph{arXiv preprint arXiv:2511.16043}, 2025.
+
 \bibitem[Yang et~al.(2024)Yang, Wang, Lu, Liu, Le, Zhou, and
   Chen]{yang2024opro}
 Chengrun Yang, Xuezhi Wang, Yifeng Lu, Hanxiao Liu, Quoc~V Le, Denny Zhou, and
@@ -294,6 +302,15 @@ Mert Yuksekgonul, Federico Bianchi, Joseph Boen, Sheng Liu, Zhi Huang, Carlos
   Guestrin, and James Zou.
 \newblock {TextGrad}: Automatic ``differentiation'' via text.
 \newblock \emph{arXiv preprint arXiv:2406.07496}, 2024.
+
+\bibitem[Zhang et~al.(2026)Zhang, Fan, Zou, Chen, Wang, Zhou, Li, Huang, Yao,
+  Zheng, et~al.]{coevoskills2026}
+Hanrong Zhang, Shicheng Fan, Henry~Peng Zou, Yankai Chen, Zhenting Wang, Jiayu
+  Zhou, Chengze Li, Wei-Chieh Huang, Yifei Yao, Kening Zheng, et~al.
+\newblock {CoEvoSkills}: Self-evolving agent skills via co-evolutionary
+  verification.
+\newblock \emph{arXiv preprint arXiv:2604.01687}, 2026.
+\newblock Concurrent work; official code unreleased at the time of writing.
 
 \bibitem[Zhang et~al.(2025{\natexlab{a}})Zhang, Hu, Lu, Lange, and
   Clune]{zhang2025dgm}
