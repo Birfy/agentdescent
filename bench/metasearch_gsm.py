@@ -17,6 +17,14 @@ The transfer question is the same one: a sampler evolved on a few slices of one
 benchmark is validated on slices it never saw *and* on the other benchmark,
 and the run reports the gain on each plus the ratio between them.
 
+Sizing, before running it. The outer gate scores every candidate on the outer
+**held-out** tasks, and an outer task is a whole inner run: at
+``--train-windows 2 --seeds 3`` the gate rests on three of them, which the
+engine warns about and which is the noisiest part of the run. The number that
+carries a claim here is the paired validation below, not the outer
+``final_reward`` -- raise ``--seeds`` (or ``--train-windows``) before reading
+the gate as evidence, and expect the cost to rise with it.
+
     python -m bench.metasearch_gsm --dry-run
     python -m bench.metasearch_gsm --model deepseek-v4-flash --rounds 3 --yes
 """
