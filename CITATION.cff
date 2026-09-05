@@ -41,4 +41,4 @@ preferred-citation:
       given-names: Danyang
   year: 2026
   url: "https://github.com/Birfy/agentdescent/blob/paper/paper/main.pdf"
-  # doi: "10.36227/techrxiv.XXXXXXX"   # fill in once TechRxiv mints the preprint DOI
+  # doi: "10.5281/zenodo.XXXXXXX"   # fill in once the Zenodo preprint record is minted
