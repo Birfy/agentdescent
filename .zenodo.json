@@ -1,0 +1,29 @@
+{
+  "upload_type": "software",
+  "access_right": "open",
+  "license": "mit",
+  "title": "AgentDescent: a parallel, asynchronous framework for self-evolving LLM agents",
+  "creators": [
+    {
+      "name": "Chen, Danyang"
+    }
+  ],
+  "description": "<p><strong>AgentDescent</strong> puts the distributed deep-learning training stack on top of agent self-evolution. The &quot;parameters&quot; are a library of evolvable artifacts (skills, prompts, harness modules, verifiers); the &quot;gradients&quot; are diffs carrying evidence cards; and the &quot;optimizer step&quot; is a merge decision. <em>N</em> workers propose diffs in parallel and a barrier-free asynchronous aggregator merges them into a shared, version-controlled artifact library.</p><p>The one place the analogy must break defines the system: <strong>gradients add and diffs do not</strong>, so aggregation is not averaging but conflict resolution, fusion, statistical acceptance and transactional commit. When an artifact is held in a single key every concurrent pair conflicts and merge-of-<em>N</em> degenerates into best-of-<em>N</em> selection at best-of-<em>N</em> validation cost. <em>Reflective merge</em> &mdash; a model asked to write the union of the contradicting proposals, gated by the same acceptance test as any other candidate &mdash; is what removes that degeneracy.</p><p>Nineteen published self-evolution algorithms (among them ACE, GEPA, ADAS, DGM, OpenEvolve, ERA, Voyager, Reflexion, PromptBreeder and AFlow) run as plug-ins over eight named policy slots, under serial, synchronous and barrier-free schedulers, without modifying the engine. The core engine has no required dependencies and needs only Python 3.9 or later.</p><p>Accompanying paper: <em>AgentDescent: Asynchronous Parallel Self-Evolution of LLM Agents by Merging Conflicting Edits</em>.</p>",
+  "keywords": [
+    "self-evolving agents",
+    "recursive self-improvement",
+    "LLM agents",
+    "parallel and asynchronous execution",
+    "diff aggregation",
+    "bounded staleness",
+    "prompt optimization",
+    "skill learning",
+    "evolutionary algorithms"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://birfy.github.io/agentdescent/",
+      "relation": "isDocumentedBy"
+    }
+  ]
+}
