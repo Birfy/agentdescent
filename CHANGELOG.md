@@ -6,8 +6,32 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **An OpenCode worker read the user's real config; the other three hosts did
+  not.** `worker_env()` redirected `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and
+  `DSH_HOME` into the rollout workspace and had no OpenCode entry, so an
+  `opencode` worker started with the user's model, credentials, plugins and MCP
+  servers -- not a policy difference, a host that was missed.
+  `OPENCODE_CONFIG_DIR` is now redirected with the rest, and `OPENCODE_CONFIG`
+  and `OPENCODE_CONFIG_CONTENT` are dropped, because redirecting the directory
+  alone is not isolation: measured against opencode 1.18, a config named by
+  `OPENCODE_CONFIG` still supplied its MCP servers with the directory pointed
+  at an empty one. `OPENCODE_API_KEY` survives -- it is a provider credential,
+  and a worker needs its keys.
+
 ### Added
 
+- **Documented which model a run actually uses.** A worker is the host CLI as a
+  subprocess with its config directory redirected, so it inherits environment
+  keys but not the user's model choice or subscription login. The two switches
+  that change that -- `extra_args: ["--model", ...]` to pin a model with
+  isolation intact, and `isolate: false` to hand the worker the user's real
+  setup -- existed but appeared in no document. Both are now in
+  [docs/plugins.md](docs/plugins.md) with a worked "no provider key at all"
+  spec that points `agent` *and* `reflect` at a host CLI, and in the shipped
+  `SKILL.md`, so an agent that sees `doctor` report no key offers that instead
+  of stopping.
 - **`pip install "agentdescent[mcp]"` no longer fails the whole install on
   Python 3.9.** Every published `mcp` requires >= 3.10 while this project
   supports 3.9, and the unmarked extra meant the line every install doc gives

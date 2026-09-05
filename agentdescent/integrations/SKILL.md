@@ -61,6 +61,23 @@ Agents by short name: `claude_code`, `codex`, `dsh`, `opencode`,
 `openai_compatible`, `claude`. A cheap `reflect` model behind an expensive `agent` is the usual
 trade. For `kind: plugin`, set `host` to `dsh`, `claude_code`, `codex` or `opencode`.
 
+**Which model runs.** A worker is the host CLI as a subprocess, started with its
+config directory redirected into the rollout workspace -- so it inherits
+environment keys but *not* the user's model choice or subscription login. Two
+fields change that, and the user should be told which one you used:
+
+- `"extra_args": ["--model", "..."]` pins a model, isolation intact. The flag is
+  the host's own (`claude --model`, `codex -m`, `opencode run -m provider/model`);
+  `dsh` has none -- its model comes from the profile.
+- `"isolate": false` gives the worker the user's real setup: their configured
+  model, their login, their plugins. Say so when you use it, and do not use it
+  for `kind: plugin` -- the run would load the plugin it is rewriting.
+
+If `doctor` reports no provider key, that is not a dead end: point **both**
+`agent` and `reflect` at a host CLI with `"isolate": false` and every call goes
+through the CLI's own authentication, no key needed. Offer this rather than
+stopping.
+
 ## Guardrails
 
 - Never edit the target directory yourself while a run is in progress.

@@ -149,6 +149,14 @@ class WorkspaceAgent(Protocol):
 SESSION_MARKERS: Tuple[str, ...] = (
     "CLAUDECODE", "CLAUDE_CODE_", "CLAUDE_CONFIG_DIR", "CODEX_", "DSH_",
     "OPENAI_AGENT_", "MCP_",
+    # OpenCode reads three of these, and redirecting only the directory is not
+    # isolation: `OPENCODE_CONFIG` (a file) and `OPENCODE_CONFIG_CONTENT`
+    # (inline JSON) both win over `OPENCODE_CONFIG_DIR` -- measured, a config
+    # named by `OPENCODE_CONFIG` still supplied its MCP servers with the dir
+    # pointed at an empty directory. They are dropped by name rather than by an
+    # "OPENCODE_" prefix on purpose: `OPENCODE_API_KEY` is a provider
+    # credential, and a worker needs its keys.
+    "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG", "OPENCODE_CONFIG_CONTENT",
 )
 
 #: Set for every worker so a tool the worker reaches (this package's own MCP
@@ -164,7 +172,8 @@ def worker_env(workspace: Optional[str], extra: Optional[Mapping[str, str]] = No
     Starts from the caller's environment (a worker needs its provider keys and
     PATH), drops every :data:`SESSION_MARKERS` variable, marks the process as
     nested, and -- when there is a workspace -- points each host's config
-    directory *inside* it (``CLAUDE_CONFIG_DIR``, ``CODEX_HOME``, ``DSH_HOME``),
+    directory *inside* it (``CLAUDE_CONFIG_DIR``, ``CODEX_HOME``, ``DSH_HOME``,
+    ``OPENCODE_CONFIG_DIR``),
     so the worker starts clean and cannot read the user's real plugins, memory or
     MCP servers. ``extra`` wins over all of it. ``isolate=False`` keeps only the
     nested marker, for callers who want the worker to see the user's setup.
@@ -178,6 +187,7 @@ def worker_env(workspace: Optional[str], extra: Optional[Mapping[str, str]] = No
         env.setdefault("CLAUDE_CONFIG_DIR", os.path.join(home, "claude"))
         env.setdefault("CODEX_HOME", os.path.join(home, "codex"))
         env.setdefault("DSH_HOME", os.path.join(home, "dsh"))
+        env.setdefault("OPENCODE_CONFIG_DIR", os.path.join(home, "opencode"))
     if extra:
         env.update(extra)
     return env

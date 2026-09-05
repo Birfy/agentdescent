@@ -208,6 +208,65 @@ The other fields:
   import allowlist, with keyword arguments beside it. `"call": false` names a
   callable rather than a factory. A cheap `reflect` behind an expensive `agent`
   is the usual trade.
+
+### Which model a run uses
+
+A worker agent *is* the host CLI as a subprocess (`claude -p …`, `codex exec …`,
+`dsh --profile headless …`, `opencode run …`), so the question "does it use the
+model my agent is configured with" has a precise answer: **not by default, and
+on purpose.**
+
+`agents.worker_env()` inherits the environment — so provider keys in
+`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` reach the worker —
+but points each host's config directory *inside the rollout workspace*
+(`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `DSH_HOME`, `OPENCODE_CONFIG_DIR`). The
+worker therefore starts clean: it cannot read your plugins, your memory, your
+MCP servers — or your model choice and your subscription login, which live in
+those directories. That isolation is what makes a rollout reproducible, and it
+is what keeps a plugin evolving *itself* from reading the copy being rewritten.
+
+Two switches, both ordinary spec fields:
+
+```json
+"agent":   {"ref": "claude_code", "extra_args": ["--model", "haiku"]},
+"reflect": {"ref": "claude_code", "extra_args": ["--model", "opus"]}
+```
+
+**`extra_args` pins a model** without giving up isolation — the flag is the
+host's own: `claude --model`, `codex exec -m/--model`, `opencode run -m/--model`
+(as `provider/model`). `dsh` has **no** `--model`: its model comes from the
+profile, so select it with `--patch` or a prepared `DSH_HOME`.
+
+```json
+"agent": {"ref": "claude_code", "isolate": false}
+```
+
+**`isolate: false` hands the worker your real setup** — your configured model,
+your subscription login, your plugins. This is the literal answer to *"use the
+model my main agent is configured with"*, and the reason it is not the default:
+the worker now sees state you can change between rounds, and a `kind: plugin`
+run would load the very plugin it is rewriting.
+
+Either switch works for `reflect` as well as `agent`, and pointing **both** at a
+host CLI is the way to run with **no provider key at all** — every call goes
+through the CLI's own authentication:
+
+```json
+{
+  "kind": "skill_dir",
+  "target": "~/.claude/skills/pdf-audit",
+  "data": {"path": "eval/cases.jsonl", "prompt": "question", "gold": "answer"},
+  "score": "contains",
+  "agent":   {"ref": "claude_code", "extra_args": ["--permission-mode", "acceptEdits"], "isolate": false},
+  "reflect": {"ref": "claude_code", "isolate": false}
+}
+```
+
+What is **not** available: MCP *sampling* (`sampling/createMessage`), where the
+server asks the host to run a completion on the session's own model. The server
+does not implement it, so there is no zero-configuration "just follow the
+host" — the two switches above are the whole story.
+
 * **`policies`**: one reference per slot (`selection`, `task_sampler`,
   `acceptance`, `conflict`, `fusion`, `promotion`, `proposal`, `staleness`),
   built from JSON scalars alone because the aggregator installs them through

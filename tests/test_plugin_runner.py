@@ -208,3 +208,40 @@ def test_plugin_spec_needs_a_known_host(tmp_path):
                       data={"inline": [{"prompt": "q", "gold": "q"}] * 4})
     with pytest.raises(SpecError, match="host"):
         compose(spec)
+
+
+# ---------------------------------------------------------------------------
+# Worker isolation covers OpenCode too
+# ---------------------------------------------------------------------------
+
+
+def test_a_worker_does_not_inherit_the_users_opencode_config(monkeypatch, tmp_path):
+    """Three hosts were redirected and OpenCode was not, so an OpenCode worker
+    read the user's real `~/.config/opencode` -- its model, its credentials, its
+    MCP servers -- while the other three started clean. That is not a policy
+    difference, it is a host that was missed.
+
+    `OPENCODE_CONFIG` and `OPENCODE_CONFIG_CONTENT` are dropped as well because
+    redirecting only the directory is not isolation: measured against opencode
+    1.18, a config named by `OPENCODE_CONFIG` still supplied its MCP servers
+    with `OPENCODE_CONFIG_DIR` pointed at an empty directory.
+    """
+    from agentdescent.agents import worker_env
+
+    monkeypatch.setenv("OPENCODE_CONFIG_DIR", "/home/me/.config/opencode")
+    monkeypatch.setenv("OPENCODE_CONFIG", "/home/me/opencode.jsonc")
+    monkeypatch.setenv("OPENCODE_CONFIG_CONTENT", '{"mcp": {}}')
+    monkeypatch.setenv("OPENCODE_API_KEY", "sk-provider-key")
+
+    env = worker_env(str(tmp_path))
+    assert env["OPENCODE_CONFIG_DIR"].startswith(str(tmp_path))
+    assert "OPENCODE_CONFIG" not in env
+    assert "OPENCODE_CONFIG_CONTENT" not in env
+    # ...but a credential is not a session marker: a worker needs its keys, so
+    # these are dropped by name rather than by an "OPENCODE_" prefix.
+    assert env["OPENCODE_API_KEY"] == "sk-provider-key"
+
+    # And `isolate=False` still means what it says: the user's own setup.
+    plain = worker_env(str(tmp_path), isolate=False)
+    assert plain["OPENCODE_CONFIG_DIR"] == "/home/me/.config/opencode"
+    assert plain["OPENCODE_CONFIG"] == "/home/me/opencode.jsonc"
