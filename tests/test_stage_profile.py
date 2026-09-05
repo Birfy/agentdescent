@@ -59,9 +59,19 @@ def _run(rendered, task):
 
 def _slow_gate_run(rendered, task):
     """Fast rollouts, slow evaluations. Sleeping releases the GIL, so this is
-    the same shape as a real backend where the gate is the expensive stage."""
+    the same shape as a real backend where the gate is the expensive stage.
+
+    The sleep is 50 ms rather than the 20 ms it started at, because the two
+    `gate_share() > 0.5` assertions below were flaking. Measured at 20 ms over
+    eight runs, the share spanned 0.508-0.853: the threshold sat inside the
+    noise, so a loaded machine failed it. What inflates on a loaded machine is
+    the merger's *fixed* per-sweep cost -- draining the buffer, bucketing,
+    ledger I/O -- which does not scale with the sleep, so the fix is to make the
+    gate decisively the larger term rather than to move the threshold, which
+    would delete the signal instead of stabilising it. At 50 ms over fifteen
+    runs the share spanned 0.676-0.996 with a median of 0.994."""
     if task.id in HELD_OUT_IDS:
-        time.sleep(0.02)
+        time.sleep(0.05)
     return _run(rendered, task)
 
 
@@ -208,9 +218,12 @@ def test_a_slow_gate_starves_the_workers_on_the_async_path():
     finished card. If this ever reads 0, evaluation is no longer on the merger's
     critical path and issue #151 is done.
     """
-    r = _async(run=_slow_gate_run, async_ratio=1, max_seconds=1.5)
+    r = _async(run=_slow_gate_run, async_ratio=1, max_seconds=2.5)
     assert r.worker_starved_seconds > 0.0
-    # And the gate is where the merger's time went, not the merging.
+    # And the gate is where the merger's time went, not the merging. This is a
+    # supporting observation, not the discriminator: `_slow_rollout_run`, whose
+    # gate costs nothing, measures 0.990-0.993 on the same ratio because its
+    # merging is cheap too. Starvation above is what separates the two.
     assert r.gate_share() > 0.5
 
 
@@ -258,7 +271,7 @@ def test_narrowing_the_gates_own_pool_still_starves_workers():
     Quoted as observed ranges, not as an effect size -- three runs of one
     configuration of this engine can span 1.5x (see docs/efficiency.md).
     """
-    r = _async(run=_slow_gate_run, async_ratio=1, max_seconds=1.5,
+    r = _async(run=_slow_gate_run, async_ratio=1, max_seconds=2.5,
                eval_concurrency=1)
     assert _starved_share(r) > 0.0
     assert r.gate_share() > 0.5
