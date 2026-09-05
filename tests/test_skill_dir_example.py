@@ -10,6 +10,7 @@ import os
 
 from examples.skill_dir_evolution import (
     SKILL_NAME,
+    evolve_directory,
     make_rows,
     make_skill_dir,
     offline_agent,
@@ -17,14 +18,14 @@ from examples.skill_dir_evolution import (
     to_tasks,
 )
 
-from agentdescent import evolve_skill_dir, load_tree
+from agentdescent import load_tree
 
 
 def _run(**kwargs):
     path = make_skill_dir()
-    result = evolve_skill_dir(
+    result = evolve_directory(
         path, to_tasks(make_rows(12)), agent=offline_agent(),
-        reflect_with=offline_reflector(), score="contains",
+        reflect_with=offline_reflector(),
         rounds=3, n_workers=2, max_concurrency=1, **kwargs)
     return path, result
 
@@ -42,9 +43,9 @@ def test_the_skill_is_what_moved_the_score_not_the_agent():
     # still wrong: if the directory were not being read these would agree.
     path = make_skill_dir()
     tasks = to_tasks(make_rows(12))
-    before = evolve_skill_dir(
+    before = evolve_directory(
         path, tasks, agent=offline_agent(), reflect_with=lambda p: "",
-        score="contains", rounds=1, n_workers=1, max_concurrency=1)
+        rounds=1, n_workers=1, max_concurrency=1)
     assert before.final_reward == 0.0          # wrong column, nothing proposed
 
     _, after = _run()

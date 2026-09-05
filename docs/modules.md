@@ -30,8 +30,7 @@ and *how*, that is *what*.
 |---|---|---|
 | `evolution` | `evolve()`, the artifact, the actor, the result | [The `evolve` method](evolution.md) |
 | `evolvable` | `Evolvable`, `Diff`, `EvidenceCard`, `Contract` — the data model | [Data model](data-model.md) |
-| `skill` | `evolve_skill()` — dataset in, instruction out | [Quickstart](quickstart-skill.md) |
-| `skilldir` | `evolve_skill_dir()` / `_agent_dir()` / `_agent_code()` | [Directory evolution](directory-evolution.md) |
+| `rewards` | the named scorers, and `scorer()` — a dataset's reward in one call | [Quickstart](quickstart-skill.md) |
 | `async_evolve` | the same loop without the round barrier | [Async](async.md) |
 | `orchestrator`, `async_runtime`, `domains.router` | the reference domain the results were measured with — adapters over the engine above, not a second loop | [Orchestrator](orchestrator.md) |
 
@@ -149,7 +148,7 @@ Nothing in the framework imports a provider SDK at module level, and the core
 imports nothing outside the standard library:
 
 ```
-evolvable ── ledger ── aggregator ── evolution ── skill / skilldir
+evolvable ── ledger ── aggregator ── evolution ── rewards
     │           │          │             │
 governance   verifier  staleness    parallel · sampling · scheduler
                                           │

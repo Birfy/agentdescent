@@ -45,6 +45,15 @@ class Layer(IntEnum):
 #: by radius, so one threshold is all there is.
 FAST_MAX = 0.30
 
+#: L2: a skill is local, so its changes merge on held-out reward alone. The
+#: ``blast_radius=`` to pass ``evolve()`` for a skill directory or instruction.
+SKILL_BLAST_RADIUS = 0.2
+#: L1: an agent definition or its code is a harness -- every merge is forced
+#: through the oracle by :meth:`~agentdescent.scheduler.AuditScheduler.force_oracle`.
+#: Free, as it happens: the oracle scores the same artifact on the same held-out
+#: set that the acceptance test just scored, and the evaluation cache serves it.
+HARNESS_BLAST_RADIUS = 0.6
+
 #: Artifacts the loop may read but never mutate. An id list rather than a radius,
 #: because "this is the oracle" is structural (see the module docstring). Names
 #: here are reserved: ``evolve(artifact_id="oracle")`` is refused up front.
