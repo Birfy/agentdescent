@@ -306,6 +306,31 @@ patch、在那里跑 agent、`git diff`，模型不用自己排版 diff）；两
 4. **读迁移比，不读增益**。离线实例跑出的就是"第二种"：更贪的规则源地形 +0.008
    （11/4），目标 +0.000，迁移比 0.06。
 
+### 4.5 第一个在线结果（P4a，`bench/results/metasearch-gsm.md`）
+
+`task_sampler` 在 4 个 GSM-Hard 窗口上演进，12 次外层 rollout，L1 下提交 2 次：
+
+| 组 | 种子 | 演进后 | 增益 | 胜/负 |
+|---|---|---:|---:|---:|
+| 演进过的 4 个窗口 | 0.719 | **0.769** | **+0.050** | 4/1 |
+| 同基准未见的 2 个窗口 | 0.713 | 0.725 | +0.013 | 1/1 |
+| GSM8K 的 2 个窗口 | 1.000 | 0.900 | −0.100 | 0/1 |
+
+演进出的规则是 UCB 式探索 + **跳过已解出的任务**——引擎不向通过的 rollout 索要提案，
+所以落在已解出的题上买不到提案，这正是这个插槽该学的东西。
+
+三行必须分开读。**训练行是站得住的**（配对 seed，内层确定，4 胜 1 负）。**未见行 +0.013、
+一胜一负，更像是对训练窗口的拟合而不是更好的采样器**，迁移比 0.25 就是这个样子。
+**跨基准那行读不出迁移**：种子规则在两个 GSM8K 窗口上已经是 1.000，唯一能动的方向是往下——
+这是验证集选择的缺陷，不是发现，下一轮要把 GSM8K 换成还有空间的基准。手写参照
+（"重试失败题"）是 0.784，说明 12 次 rollout 的搜索拿到了可得增益的约四分之三。
+
+**七次空结果各有各的原因**（详见结果页的表）：usage 字段名写错、内层不可复现、
+空结果不可读、任务列表按问题分组导致位置切分把训练和评判分到不同问题、
+冒烟测试用固定 keys 放过了必崩的采样器、外层 gate 只 hold out 两个窗口。最后一条最值得
+带到别的插槽：**只在跨问题平均后才显现的效应，无法被只看一两个问题的 gate 提交**，
+而 L1 下打平即否决，于是窄 gate 读起来就像"什么都不work"。
+
 ---
 
 ## 5. 与主分支近期改动的关系
@@ -330,7 +355,7 @@ patch、在那里跑 agent、`git diff`，模型不用自己排版 diff）；两
 | P1 | `agentdescent/meta.py`：`MetaOutcome` / `Problem` / `auc` 等 / `ParamSlot` / `SourceSlot` / `priority_selection` / `PrioritySelection` / `meta_evolve` / `meta_validate` / `transfer_ratio` | ✅ |
 | P2 | `policy_source(slot, seed)` 通用门 + `seed_source` + `SLOT_PROTOCOLS` | ✅ |
 | P3 | `examples/metasearch/`：合成地形、离线端到端、`--dry-run`、加入 PORTS 契约 | ✅ |
-| P4a | GSM 跑批脚本 `bench/metasearch_gsm.py`：演进 `task_sampler`，内层是完整的内层 `evolve()`，报告分三组（演进过的 / 同基准未见切片 / 另一个基准）各自的迁移比 | ✅ 脚本 + 离线测试 + **在线跑通** |
+| P4a | GSM 跑批脚本 `bench/metasearch_gsm.py`：演进 `task_sampler`，内层是完整的内层 `evolve()`，报告分三组（演进过的 / 同基准未见切片 / 另一个基准）各自的迁移比 | ✅ 脚本 + 离线测试 + **在线跑出结果**（`bench/results/metasearch-gsm.md`） |
 | P4b | AlgoTune 跑批脚本 `bench/metasearch_algotune.py`（训练/验证任务不相交、新 seed 验证、迁移比、结果 JSON） | ✅ 脚本 + 插桩测试；**在线跑待做**（需 numpy/scipy 沙箱） |
 | P5 | Harbor 适配器 `_harbor.py`（§4.3）+ SWE-bench-Science / TB-Science 验证 | ✅ 适配器 + `LocalRunner` 离线端到端；`DockerRunner.verify` 已写未在线跑；**基准验证待做**（需 API + Docker + 任务数据） |
 | P6 | 其余五个插槽的内置冒烟与默认种子，每个种子在真实内层 `evolve()` 里跑通 | ✅ |
