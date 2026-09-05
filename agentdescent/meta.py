@@ -352,7 +352,11 @@ class SourceSlot(SingleSlot):
         return super().to_diff(state, value, author, base_version, target)
 
     def compile(self, rendered: str) -> Any:
-        value = self._validate(rendered)
+        # Unfenced first, like `to_diff` and `accepts`: without it a caller who
+        # asked `accepts(text)`, was told yes, and then compiled the same text
+        # got a ValueError -- the two answered different questions about one
+        # string. A rendered artifact carries no fence, so this is a no-op there.
+        value = self._validate(_unfence(rendered))
         return self.build(value) if self.build is not None else value
 
     def accepts(self, proposal: str) -> Tuple[bool, str]:

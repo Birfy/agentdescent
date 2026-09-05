@@ -395,3 +395,19 @@ def test_the_shipped_samplers_pass_the_stricter_smoke():
     for policy in (RoundRobin(), DifficultyWeighted()):
         _smoke_task_sampler(policy)
     assert compile_policy_source("task_sampler", seed_source("task_sampler"))
+
+
+def test_accepts_and_compile_answer_the_same_question():
+    """`accepts` said yes and `compile` then raised on the same string, because
+    only one of them stripped the code fence a proposal arrives in."""
+    from agentdescent.meta import SLOT_PROTOCOLS, policy_source
+
+    spec = policy_source("task_sampler")
+    fenced = ("```python\nclass Policy:\n"
+              "    def pick(self, keys, round_index): return keys[0]\n"
+              "    def record(self, task_id, score): pass\n```")
+    assert spec.accepts(fenced)[0] is True
+    assert isinstance(spec.compile(fenced), SLOT_PROTOCOLS["task_sampler"])
+    # ...and the unfenced form, which is what a rendered artifact looks like.
+    assert isinstance(spec.compile(spec.render(spec.initial())),
+                      SLOT_PROTOCOLS["task_sampler"])
