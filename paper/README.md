@@ -39,8 +39,11 @@ GitHub with no build step. To submit it anywhere, send `main.tex`, `arxiv.sty`,
 stock TeX Live tree, and most servers do not re-run BibTeX.
 
 Every measured number in the paper names the script that produced it; the
-Reproducibility section lists them per result, and the raw per-seed JSON for the
-merge experiments is in `bench/results/`.
+Reproducibility section lists them per result. The raw per-seed JSON for the
+reflective-merge ablation is in `bench/results/`; for the merge-versus-selection
+comparison the workload, the sweeps and the fusion counters ship with the code,
+but the per-run data those runs emitted was not retained, so those rows are
+re-measurable rather than recomputable. The paper says so too.
 
 Note: every bibliography entry now carries an author list and an arXiv
 identifier. The three that did not — Agent0 (arXiv:2511.16043), ROLL Flash
