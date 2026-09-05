@@ -26,6 +26,14 @@ on anything else — a custom acceptance rule either runs or refuses loudly.
 **`None` means today's behaviour**: `Policies()` and passing nothing are the
 same run, so adding a policy never changes an existing measurement.
 
+Each field is independent: swap one and the other seven stay at their defaults.
+The one deliberate pair is `conflict` + `fusion` for model merging, which is why
+`reflective_merge()` returns both. A wrapper that defers to a shipped default —
+`AdvantageConflict()`, `AdvantageAcceptance()` — needs nothing from you: the
+aggregator hands the engine's verifier and config to any policy exposing the
+optional `bind(verifier)` / `configure(config)` hooks
+([details](acceptance-policies.md#installing-a-policy-the-two-optional-hooks)).
+
 ## Which seam is my mechanism?
 
 An algorithm's distinctive mechanism lives in exactly one of three layers:

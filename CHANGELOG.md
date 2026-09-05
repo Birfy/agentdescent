@@ -6,6 +6,28 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A wrapper around a default policy can now be installed through `Policies`
+  alone.** `DefaultConflict` and `DefaultFusion` take the verifier through an
+  optional `bind(verifier)` hook, `DefaultAcceptance` and `DefaultPromotion`
+  take their thresholds through `configure(config)` (or the pinned
+  `from_config(cfg)`), and the aggregator now offers both hooks to every
+  installed merge-side policy — previously only fusion was bound, so
+  `Policies(conflict=AdvantageConflict(DefaultConflict(...)))` type-checked,
+  installed, and died with `'NoneType' has no attribute 'cheap_eval'` on the
+  first contradiction that reached the inner rule; the repository's own tests
+  had to route it through an `aggregator_factory`. The wrappers
+  (`AdvantageConflict`, `AdvantageAcceptance`, `StableDistanceAcceptance`)
+  forward the hooks and default their `inner` to the shipped rule, so
+  `AdvantageAcceptance()` reads the run's `agg_config=` instead of a hand-copied
+  `DefaultAcceptance(0.5, 64, 4000)` that silently diverged from it. A default
+  used without being installed raises `PolicyUnboundError` naming the missing
+  piece. New: `agentdescent.aggregator.install_policy`,
+  `tests/test_policy_install.py`; docs on
+  [acceptance](docs/acceptance-policies.md) and
+  [conflict](docs/conflict-policies.md) policies.
+
 ## [0.4.6] — 2026-08-28
 
 ### Added

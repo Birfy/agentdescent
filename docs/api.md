@@ -1385,11 +1385,11 @@ AdaptiveTrustRegion(
 |---|---|
 | `observe(outcome: str) -> TrustRegion` | Record one merge outcome and return the region for the next merge. |
 
-### `AdvantageAcceptance(inner, strength: float = 1.0) -> None`
+### `AdvantageAcceptance(inner = None, strength: float = 1.0) -> None`
 
 Shift the acceptance prior by how well a proposal did against its group.
 
-### `AdvantageConflict(inner, margin: float = 0.5) -> None`
+### `AdvantageConflict(inner = None, margin: float = 0.5) -> None`
 
 Break a contradiction by group-relative advantage, not raw score.
 
@@ -1402,7 +1402,7 @@ Standardise a rollout's reward against the group it belongs to.
 | `key(base_version: int, cluster: str = '') -> str` | The group a rollout belongs to. Same base, same cluster. |
 | `observe(key: str, reward: float) -> Optional[float]` | Record a reward and return its advantage, or `None` if unknown yet. |
 
-### `StableDistanceAcceptance(inner, strength: float = 0.1) -> None`
+### `StableDistanceAcceptance(inner = None, strength: float = 0.1) -> None`
 
 Penalise candidates that drift far from the confirmed branch.
 

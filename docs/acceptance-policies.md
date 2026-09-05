@@ -24,8 +24,31 @@ cap diff size before cards ever reach the gate.
 
 ```python
 evolve(tasks, reward, agent=agent, policies=Policies(
-    acceptance=AdvantageAcceptance(DefaultAcceptance(0.5, 64, 4000))))
+    acceptance=AdvantageAcceptance()))          # wraps the shipped gate
 ```
+
+`AdvantageAcceptance()` and `StableDistanceAcceptance()` wrap the shipped
+`DefaultAcceptance` when given no `inner`. Its three thresholds
+(`base_delta`, `anneal_half_life`, `accept_samples`) are left unset and the
+aggregator fills them from the run's `AggregatorConfig` when the policy is
+installed — so the wrapped gate and `agg_config=` cannot disagree, which they
+silently could when the example above read
+`DefaultAcceptance(0.5, 64, 4000)`. Pass a value to pin one:
+`AdvantageAcceptance(DefaultAcceptance(base_delta=0.3))` keeps `0.3` and takes
+the other two from the run. `DefaultAcceptance.from_config(cfg)` is the fully
+pinned form.
+
+## Installing a policy: the two optional hooks
+
+A policy may need two things only the engine has: the verifier, for anything
+that ranks, and the aggregator's config, for anything that reads a threshold.
+When a policy is installed the aggregator offers both through two *optional*
+methods — `bind(verifier)` and `configure(config)` — and every shipped wrapper
+forwards them to its `inner` rule. A policy with neither is left alone. A
+shipped default used **without** having been installed (driven by hand, outside
+`evolve()`) raises `PolicyUnboundError` naming the missing piece rather than
+failing on a `None` in the middle of a merge; call the hook yourself, or use
+`install_policy(policy, verifier, config)` from `agentdescent.aggregator`.
 
 ## What the default knows that a replacement must be told
 
