@@ -90,6 +90,20 @@ def algotune_problem(task: str, complete: Callable[[str], str], *,
     return problem
 
 
+def progress(label: str) -> Callable[[Any], None]:
+    """One line per outer sweep. A run that reports nothing until its summary
+    cannot be told from a stalled one, and an outer sweep here is minutes of
+    inner searches -- the same reason `examples._method_runner` prints one."""
+
+    def on_round(info: Any) -> None:
+        print(f"[{label} sweep {info.round}] held_out={info.held_out_reward:.3f} "
+              f"committed={info.committed} rejected={info.rejected} "
+              f"reasons={info.reasons} elapsed={info.elapsed_s:.0f}s "
+              f"rollouts={info.rollouts}", flush=True)
+
+    return on_round
+
+
 def run_experiment(complete: Callable[[str], str], *,
                    train: Dict[str, Problem], validate: Dict[str, Problem],
                    seeds: Sequence[int], validate_seeds: Sequence[int],
@@ -107,7 +121,8 @@ def run_experiment(complete: Callable[[str], str], *,
                          propose=slot_reflector(complete, spec), seeds=list(seeds),
                          rounds=rounds, n_workers=workers, max_concurrency=workers,
                          held_out_frac=0.4, eval_concurrency=max(1, workers),
-                         seed=outer_seed, usage=usage)
+                         seed=outer_seed, usage=usage,
+                         on_round=progress('algotune'))
     outer_seconds = time.monotonic() - started
     report = meta_validate(spec, seed_rule, result.rendered, {**train, **validate},
                            seeds=list(validate_seeds))
