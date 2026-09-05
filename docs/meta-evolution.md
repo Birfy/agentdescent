@@ -2,6 +2,7 @@
 
 *Module:* [`agentdescent.meta`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/meta.py)
 · *Example:* [`examples/metasearch/`](https://github.com/Birfy/agentdescent/tree/main/examples/metasearch)
+· *Design record:* [design-meta-evolution.md](design-meta-evolution.md)
 
 Every decision `evolve()` makes is a field of [`Policies`](policies.md), and
 every algorithm port plugs its mechanism into one of those fields — a tree

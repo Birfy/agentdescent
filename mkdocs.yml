@@ -108,6 +108,7 @@ nav:
     - Gödel Agent — self-modification: algo-godel-agent.md
   - Design records:
     - Evolving a directory: design-directory-evolution.md
+    - Meta-evolution — evolving the slots: design-meta-evolution.md
 
 markdown_extensions:
   - admonition
