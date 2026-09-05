@@ -1,4 +1,4 @@
-# Design: AgentDescent as a plugin for Claude Code, Codex and other agents
+# Design: AgentDescent as a plugin for DeepSeek Harness, Claude Code, Codex and other agents
 
 > Status: **design proposal**, nothing here is implemented yet. It is written
 > against the code as of `0.4.6` and names the exact module each piece lands in.
@@ -26,9 +26,9 @@ shells:
                  │  `agentdescent evolve …` `agentdescent-mcp`   │
                  └───┬──────────────┬──────────────┬────────────┘
                      │              │              │
-        Claude Code plugin     Codex skill +    Gemini ext / OpenCode /
-        (.claude-plugin)       config.toml      Cursor rules (+MCP)
-        skill+cmd+mcp+hook     mcp_servers      all reuse the same SKILL.md
+        DSH: ~/.dsh/skills +   Claude Code      Codex skill +   Gemini / OpenCode /
+        cordis.patch.yml       plugin           config.toml     Cursor (+MCP)
+        (mcp-client, hooks)    (.claude-plugin) mcp_servers     all reuse the same SKILL.md
 ```
 
 The **Recipe** is the new central abstraction: a declarative JSON/YAML
@@ -254,7 +254,102 @@ and `--strict-mcp-config` plus an empty MCP config, so the worker does *not*
 see the agentdescent server (no recursion) or the user's other servers (no
 surprise side effects).
 
-### 7.2 Codex (`integrations/codex/`)
+### 7.2 DeepSeek Harness (`integrations/dsh/`)
+
+DSH is the host that fits this design most naturally, because it *is* a plugin
+system: models, tools, skills, hooks, sessions and the UI are all Cordis plugins
+composed by a profile. Verified against the current developer preview:
+
+| DSH mechanism | What it is | How AgentDescent uses it |
+|---|---|---|
+| Skills (`skill-filesystem`) | `SKILL.md` bundles, kebab-case names, discovered from `<project>/.dsh/skills`, `<project>/.agents/skills`, `~/.dsh/skills`, `~/.agents/skills`, plus `customSkillDirs` | the shared `SKILL.md` is copied to `~/.dsh/skills/agentdescent/SKILL.md` (or `.agents/skills`, which Codex also reads) |
+| MCP (`@deepseek-ai/dsh-mcp-client`) | one plugin instance per server in `cordis.patch.yml`; tools appear as `mcp__<serverName>__<tool>` | one entry pointing at `agentdescent mcp` |
+| Hooks (`hooks-claude-code`) | consumes **Claude Code's `hooks.json` format** (`SessionStart`, `PreToolUse`, `Stop`, ...) | the same `hooks/hooks.json` the Claude Code plugin ships, unchanged |
+| Headless profile | `dsh --profile headless "task"` runs one session and prints the last assistant text to stdout | the **worker**: `cli_agent(["dsh", "--profile", "headless"])` |
+| Profiles + `$DSH_HOME/cordis.patch.yml` | layered YAML config; `dsh plugin --profile <p> add github:owner/repo#main` installs a plugin via pnpm | tier A edits the patch file; tier B is an installable plugin |
+
+**Tier A, config only (ships first).** `agentdescent install dsh` writes:
+
+```
+~/.dsh/skills/agentdescent/SKILL.md          the shared skill
+~/.dsh/cordis.patch.yml                      appended (if absent):
+```
+
+```yaml
+- id: mcp-agentdescent
+  name: '@deepseek-ai/dsh-mcp-client'
+  config:
+    serverName: agentdescent
+    transport: stdio
+    command: agentdescent
+    args: ['mcp']
+    toolCallTimeoutMs: 120000
+    env:
+      # dsh scrubs any ambient variable matching KEY|PASSWORD|SECRET|TOKEN
+      # before starting an MCP server, so provider keys must be forwarded here.
+      DEEPSEEK_API_KEY: !!js process.env.DEEPSEEK_API_KEY
+      OPENAI_API_KEY:   !!js process.env.OPENAI_API_KEY
+- id: hooks-agentdescent
+  name: '@deepseek-ai/dsh-hooks-claude-code'
+  config:
+    configPath: ~/.dsh/skills/agentdescent/hooks.json
+```
+
+The env block is not optional and is the one DSH-specific trap: without it the
+MCP server starts with no provider credentials, `doctor` reports every reflector
+as unavailable, and nothing else explains why. `install dsh` therefore prints the
+variables it forwarded and `doctor` checks for the scrubbed set explicitly.
+
+The tools land as `mcp__agentdescent__plan`, `mcp__agentdescent__start`, etc.
+(DSH's namespacing, so the tool names in the MCP server drop the
+`agentdescent_` prefix and the other hosts get it back via their own
+namespacing.)
+
+**Tier B, native Cordis plugin `dsh-agentdescent` (later, optional).** A small
+TypeScript package installable with
+`dsh plugin --profile web add github:Birfy/dsh-agentdescent#main` that does what
+config alone cannot:
+
+* registers the skill through `ctx.skills.registerProvider()` and the MCP
+  server through the same `mcp-client` plugin, so one `add` installs everything;
+* a **Web UI panel** listing runs from `~/.agentdescent/runs` with live round
+  progress and the diff, reading the `agentdescent://runs` MCP resources. DSH is
+  web-first, and a run that takes an hour deserves a progress view rather than
+  a polling model;
+* an optional **loop plugin**: DSH's loop/scheduling plugins already run
+  auto-research style cycles, and "re-evolve this skill nightly against the
+  cases that failed this week" is exactly a scheduled recipe. The recipe file
+  makes this a one-line job definition.
+
+Tier B contains **no optimisation logic**; it calls the same CLI/MCP surface as
+everything else, which keeps the promise that adding a host never touches the
+core.
+
+**DSH as the worker.** Add `agents.dsh()` beside `claude_code()` and `codex()`:
+
+```python
+def dsh(*, workspace=None, extra_args=(), **kwargs) -> Completion:
+    """DeepSeek Harness headless profile as a Completion."""
+    return cli_agent(["dsh", "--profile", "headless", *extra_args],
+                     workspace=workspace, **kwargs)
+```
+
+and two layouts in `runners.LAYOUTS` so an evolved skill is materialised where
+the worker actually looks for it:
+
+```python
+"dsh_skill":    ".dsh/skills/{name}",     # DeepSeek Harness project skill
+"agents_skill": ".agents/skills/{name}",  # Agent Skills standard; DSH and Codex both read it
+```
+
+A DSH-hosted run whose recipe says `agent: {"ref": "dsh"}` therefore evolves a
+skill with DSH grading DSH, no other vendor in the loop; the reflector can still
+be `openai_compatible(model="deepseek-v4-...")` for cost. Session hygiene for the
+worker drops `DSH_*` from the environment and points `DSH_HOME` at an empty
+directory inside the workspace, so the worker does not load the user's profile,
+plugins, or this very MCP server.
+
+### 7.3 Codex (`integrations/codex/`)
 
 Codex reads skills from `~/.codex/skills/<name>/SKILL.md` (and project
 `.agents/skills/`) and MCP servers from `~/.codex/config.toml`:
@@ -271,35 +366,33 @@ workspace. Codex has no hooks; the "surface in-progress runs" behaviour comes
 from a line in `AGENTS.md` telling the model to run `agentdescent status --brief`
 on start.
 
-### 7.3 Other hosts
+### 7.4 Other hosts
 
 | Host | Skill location | MCP config | Worker command |
 |---|---|---|---|
 | Gemini CLI | `gemini-extension.json` + `GEMINI.md` + `skills/` | in the extension manifest | `gemini -p` |
-| OpenCode | `.opencode/skills/` | `opencode.json → mcp` | `opencode run` |
-| Cursor | `.cursor/rules/agentdescent.mdc` (rule wraps the skill text) | `.cursor/mcp.json` | not a worker; use `claude_code`/`codex`/API |
+| OpenCode | `.opencode/skills/` | `opencode.json -> mcp` | `opencode run` |
+| Cursor | `.cursor/rules/agentdescent.mdc` (rule wraps the skill text) | `.cursor/mcp.json` | not a worker; use `dsh`/`claude_code`/`codex`/API |
 
 `agentdescent install <host>` is the single entry point for all of them; each
 host is ~30 lines in `agentdescent/integrations/<host>.py` that knows the paths
 and the manifest shape. Adding a host does not touch the core.
 
-**Note on "DSH":** the request named DSH alongside Codex and Claude Code. I
-could not identify which product this is (OpenCode? Gemini CLI? a typo?). The
-table above covers the common hosts; if DSH is another MCP-speaking agent, it
-slots in as one more `install` target with the same `SKILL.md`.
-
 ## 8. Worker adapters: what the run spawns
 
-`agents.claude_code()` and `agents.codex()` exist. Two additions:
+`agents.claude_code()` and `agents.codex()` exist; `agents.dsh()` is added in
+section 7.2. Two further additions:
 
 * **Structured output.** `claude -p --output-format json` yields the answer and
   the exact token/cost figures; parsing it feeds `Usage` with real numbers
   instead of wall-clock estimates. Same for `codex exec --json`. Add
   `claude_code(structured=True)` and read `total_cost_usd`; this is what makes
-  `budget_usd` honest.
+  `budget_usd` honest. DSH's headless profile prints text only; its `sdk`
+  profile (JSON-RPC over stdio) is the route to token counts there, and is
+  deferred until the preview's protocol settles.
 * **Session hygiene.** A `_worker_env()` in `agents.py` that drops
-  `CLAUDECODE`, `CLAUDE_CODE_*`, `CODEX_*`, `OPENAI_AGENT_*`, and points
-  `CLAUDE_CONFIG_DIR`/`CODEX_HOME` at an empty directory inside the workspace,
+  `CLAUDECODE`, `CLAUDE_CODE_*`, `CODEX_*`, `OPENAI_AGENT_*`, `DSH_*`, and points
+  `CLAUDE_CONFIG_DIR`/`CODEX_HOME`/`DSH_HOME` at an empty directory inside the workspace,
   so the worker starts clean and cannot read the user's real config, memory or
   MCP servers.
 
@@ -330,9 +423,10 @@ Ordered so that each step is usable on its own and testable offline (the
 | 2. Run store + detached runner + `status.json` from `on_round` | `agentdescent/runstore.py`, `cli.py` | start with `echo()` agent, poll, cancel, resume |
 | 3. CLI verbs (`init/evolve/status/show/apply/cancel/resume/doctor`) | `cli.py`, `[project.scripts]` | `subprocess` tests against the offline domain |
 | 4. MCP server (`[mcp]` extra) mirroring the CLI | `agentdescent/mcp.py` | tool schema snapshot; start→status→show with `echo()` |
-| 5. Shared `SKILL.md` + `integrations/claude-code` plugin + marketplace.json | `integrations/` | plugin manifest validates; `/agentdescent:evolve` reaches the skill |
-| 6. `install codex` (+ others); structured-output worker adapters | `agentdescent/integrations/`, `agents.py` | parse fixtures of `claude -p --output-format json` / `codex exec --json` |
+| 5. Shared `SKILL.md` + `install dsh` (tier A) + `integrations/claude-code` plugin + marketplace.json | `integrations/`, `agentdescent/integrations/dsh.py` | patch YAML round-trips; skill lands in a discovery root; plugin manifest validates |
+| 6. `install codex` (+ others); `agents.dsh()` + `dsh_skill`/`agents_skill` layouts; structured-output worker adapters | `agentdescent/integrations/`, `agents.py`, `runners.py` | parse fixtures of `claude -p --output-format json` / `codex exec --json`; `tree_runner(layout="dsh_skill")` materialises under `.dsh/skills/` |
 | 7. Docs page `docs/plugins.md`; README section "Use it from your agent" | docs | `test_docs_links` |
+| 8. (optional) `dsh-agentdescent` Cordis plugin: one-command install, Web UI runs panel, scheduled re-evolution | separate repo | smoke test against `dsh --dump-config` |
 
 Steps 1 to 4 are the product; 5 to 7 are packaging. Nothing in the aggregator,
 ledger, async runtime or governance changes.
@@ -352,3 +446,31 @@ ledger, async runtime or governance changes.
   optional.
 * **Auto-apply on success.** Tempting for a one-shot feel, but the artifact is
   the user's own skill directory and the reward is a proxy. Show the diff, ask.
+
+## 12. DSH facts this design relies on
+
+Checked on 2026-09-05 against the developer preview; DSH says breaking changes
+are expected, so `install dsh` should verify with `dsh --dump-config` rather
+than assume.
+
+* Headless one-off run: `dsh --profile headless "task"`, final assistant text on
+  stdout (the old `dsh run` subcommand was removed). `$DSH_HOME` defaults to
+  `~/.dsh`; profiles live under `$DSH_HOME/profiles/<name>`.
+* Skill discovery roots and ranks: `.dsh/skills` (100), `.agents/skills` (200),
+  `customSkillDirs` (300), `~/.dsh/skills` (400), `~/.agents/skills` (500),
+  bundled (600). Names must match `^[a-z0-9]+(?:-[a-z0-9]+)*$`.
+* MCP: one `@deepseek-ai/dsh-mcp-client` entry per server; stdio or
+  streamable-http; tools named `mcp__<serverName>__<tool>`; ambient env matching
+  `KEY|PASSWORD|SECRET|TOKEN` and `DSH_*` is scrubbed before the server starts.
+* Hooks: `hooks-claude-code` plugin reads Claude Code's `hooks.json`
+  (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`;
+  exit code 2 denies).
+* Plugins: `dsh plugin --profile <p> add "github:owner/repo#main"` (or
+  `link:/path`), forwarded to pnpm; a plugin is a Cordis package with a
+  `cordis.patch.yml`; the community topic is `dsh-plugin`.
+
+Sources: [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness),
+its `docs/config-catalog.md`, `docs/subsystems/skills.md`, `apps/cli/README.md`
+and `packages/mcp/mcp-client/README.md`;
+[DSH CLI user guide](https://deepseekdocs.com/en/docs/user-guide/cli);
+[awesome-deepseek-harness](https://github.com/Dominic789654/awesome-deepseek-harness).

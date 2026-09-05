@@ -106,7 +106,7 @@ nav:
     - Gödel Agent — self-modification: algo-godel-agent.md
   - Design records:
     - Evolving a directory: design-directory-evolution.md
-    - Plugin for Claude Code, Codex and other agents: plugin-design.md
+    - Plugin for DSH, Claude Code, Codex and other agents: plugin-design.md
 
 markdown_extensions:
   - admonition
