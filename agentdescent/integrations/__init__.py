@@ -93,31 +93,40 @@ class _Writer:
 
 
 def dsh_patch_block() -> str:
-    """The two ``cordis.patch.yml`` entries: the MCP server and the hooks bridge.
+    """The two ``cordis.patch.yml`` rows: the MCP server and the hooks bridge.
 
-    The ``env`` block is not optional: dsh scrubs every ambient variable matching
-    ``KEY|PASSWORD|SECRET|TOKEN`` before starting an MCP server, so without it
-    the server has no provider credentials and ``doctor`` reports every reflector
-    as unavailable with nothing else to explain why.
+    Wrapped in ``- insert:`` because a dsh patch file **overrides existing rows
+    by id** -- a bare list of new rows is read as an override of ids that do not
+    exist, and dsh says so (``patch: entry "mcp-agentdescent" not found``) and
+    then composes without them. ``insert`` is how ``dsh-base`` itself adds its
+    rows; verified against dsh 0.1.2-rc.1 with ``dsh --profile headless
+    --dump-config``.
+
+    The ``env`` block is not optional either: dsh scrubs every ambient variable
+    matching ``KEY|PASSWORD|SECRET|TOKEN`` before starting an MCP server, so
+    without it the server has no provider credentials and ``doctor`` reports
+    every reflector as unavailable with nothing else to explain why.
     """
-    env = "\n".join(f"      {k}: !!js process.env.{k}" for k in DSH_FORWARDED_KEYS)
+    env = "\n".join(f"          {k}: !!js process.env.{k}" for k in DSH_FORWARDED_KEYS)
     return (
         "# --- agentdescent (written by `agentdescent install dsh`) ---\n"
-        "- id: mcp-agentdescent\n"
-        "  name: '@deepseek-ai/dsh-mcp-client'\n"
-        "  config:\n"
-        f"    serverName: {MCP_COMMAND}\n"
-        "    transport: stdio\n"
-        f"    command: {MCP_COMMAND}\n"
-        f"    args: {json.dumps(MCP_ARGS)}\n"
-        "    toolCallTimeoutMs: 120000\n"
-        "    env:\n"
-        "      # dsh scrubs KEY|PASSWORD|SECRET|TOKEN from the ambient env; forward explicitly\n"
+        "# `insert` adds rows; a bare row would be read as an override by id.\n"
+        "- insert:\n"
+        "    - id: mcp-agentdescent\n"
+        "      name: '@deepseek-ai/dsh-mcp-client'\n"
+        "      config:\n"
+        f"        serverName: {MCP_COMMAND}\n"
+        "        transport: stdio\n"
+        f"        command: {MCP_COMMAND}\n"
+        f"        args: {json.dumps(MCP_ARGS)}\n"
+        "        toolCallTimeoutMs: 120000\n"
+        "        env:\n"
+        "          # dsh scrubs KEY|PASSWORD|SECRET|TOKEN from the ambient env\n"
         f"{env}\n"
-        "- id: hooks-agentdescent\n"
-        "  name: '@deepseek-ai/dsh-hooks-claude-code'\n"
-        "  config:\n"
-        "    configPath: ~/.dsh/skills/agentdescent/hooks.json\n"
+        "    - id: hooks-agentdescent\n"
+        "      name: '@deepseek-ai/dsh-hooks-claude-code'\n"
+        "      config:\n"
+        "        configPath: ~/.dsh/skills/agentdescent/hooks.json\n"
     )
 
 
@@ -219,10 +228,57 @@ def install_codex(home: str, w: _Writer) -> None:
            "session` to AGENTS.md if you want in-progress runs surfaced.")
 
 
+# ---------------------------------------------------------------------------
+# OpenCode
+# ---------------------------------------------------------------------------
+
+
+def opencode_mcp_entry() -> Dict[str, object]:
+    """The ``mcp`` entry, in the shape ``opencode mcp add`` itself writes.
+
+    Verified by running ``opencode mcp add agentdescent -- agentdescent mcp``
+    against opencode 1.18 and reading the file back: ``type: "local"``, the
+    command as one array (not command + args), and ``environment`` for env vars.
+    """
+    return {"type": "local", "command": [MCP_COMMAND, *MCP_ARGS]}
+
+
+def install_opencode(home: str, w: _Writer) -> None:
+    config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config")
+    root = os.path.join(config_home, "opencode")
+    # `{skill,skills}/**/SKILL.md` -- both spellings are accepted; `skill` is
+    # what the sibling `agent` / `command` directories are named.
+    w.write(os.path.join(root, "skill", "agentdescent", "SKILL.md"), skill_text())
+
+    path = os.path.join(root, "opencode.jsonc")
+    current, raw = {}, ""
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as fh:
+            raw = fh.read()
+        try:
+            current = json.loads(raw) if raw.strip() else {}
+        except json.JSONDecodeError:
+            # JSONC allows comments, which json cannot read. Merging by hand
+            # would corrupt the file, so say what to add instead of guessing.
+            w.note("NOTE: could not parse opencode.jsonc (comments?); add this "
+                   "under \"mcp\" yourself: "
+                   + json.dumps({"agentdescent": opencode_mcp_entry()}))
+            return
+    if (current.get("mcp") or {}).get("agentdescent"):
+        w.lines.append(f"kept {path} (mcp entry already present)")
+        return
+    merged = dict(current)
+    merged.setdefault("$schema", "https://opencode.ai/config.json")
+    merged["mcp"] = {**(current.get("mcp") or {}), "agentdescent": opencode_mcp_entry()}
+    w.write(path, json.dumps(merged, indent=2) + "\n")
+    w.note("verify: opencode mcp list")
+
+
 HOSTS: Dict[str, Callable[[str, _Writer], None]] = {
     "dsh": install_dsh,
     "claude-code": install_claude_code,
     "codex": install_codex,
+    "opencode": install_opencode,
 }
 
 

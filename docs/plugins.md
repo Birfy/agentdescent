@@ -1,8 +1,8 @@
-# Use it from your agent — DeepSeek Harness, Claude Code, Codex
+# Use it from your agent — DeepSeek Harness, Claude Code, Codex, OpenCode
 
 Everything else in these docs is Python: you write a dozen lines and hand them
 to `evolve()`. This page is for the other audience — a person sitting *inside*
-an agent (DeepSeek Harness, Claude Code, Codex) who wants to say *"evolve this
+an agent (DeepSeek Harness, Claude Code, Codex, OpenCode) who wants to say *"evolve this
 skill against these examples"* and have the agent do it. It is also for the
 agent: the same surface is what the agent calls.
 
@@ -14,7 +14,7 @@ The design record — why it is shaped this way and what was considered — is
 ```bash
 pip install "agentdescent[mcp]"        # the CLI works without [mcp]; the MCP server needs it
 agentdescent doctor                    # which agent CLIs, keys and optional pieces are here
-agentdescent install dsh               # or: claude-code, codex
+agentdescent install dsh               # or: claude-code, codex, opencode
 ```
 
 `install` writes the shared skill and the host's manifest, and nothing else:
@@ -23,10 +23,13 @@ agentdescent install dsh               # or: claude-code, codex
 |---|---|---|
 | `dsh` | `~/.dsh/skills/agentdescent/SKILL.md` + `hooks.json`; an `@deepseek-ai/dsh-mcp-client` entry and the `hooks-claude-code` bridge appended to `~/.dsh/cordis.patch.yml` | restart `dsh`; check with `dsh --profile web --dump-config \| grep agentdescent` |
 | `claude-code` | a plugin directory at `~/.agentdescent/plugins/claude-code/` (`plugin.json`, skill, `/agentdescent:evolve`, `.mcp.json`, a `SessionStart` hook) | `claude --plugin-dir ~/.agentdescent/plugins/claude-code`, or `/plugin marketplace add Birfy/agentdescent` then `/plugin install agentdescent@agentdescent` |
-| `codex` | `~/.codex/skills/agentdescent/SKILL.md`; an `[mcp_servers.agentdescent]` block appended to `~/.codex/config.toml` | restart Codex |
+| `codex` | `~/.codex/skills/agentdescent/SKILL.md`; an `[mcp_servers.agentdescent]` block appended to `~/.codex/config.toml` | restart Codex; check with `codex mcp list` |
+| `opencode` | `~/.config/opencode/skill/agentdescent/SKILL.md`; an `mcp.agentdescent` entry merged into `~/.config/opencode/opencode.jsonc` | restart OpenCode; check with `opencode mcp list` |
 
-It is idempotent (`--dry-run` shows what it would do) and honours `DSH_HOME` /
-`CODEX_HOME`.
+It is idempotent (`--dry-run` shows what it would do) and honours `DSH_HOME`,
+`CODEX_HOME` and `XDG_CONFIG_HOME`. Every manifest here was verified by writing
+it and having the host read it back (dsh 0.1.2-rc.1, Claude Code 2.1.261,
+codex-cli 0.153.4, opencode 1.18.29).
 
 !!! warning "DeepSeek Harness scrubs provider keys"
     Before starting an MCP server, dsh removes every ambient variable matching
@@ -65,6 +68,7 @@ allowlist them or write a probe that greps for one (verified against Claude Code
 | a Claude Code **plugin** (what `install claude-code` writes) | `mcp__plugin_agentdescent_agentdescent__doctor` — `mcp__plugin_<plugin>_<server>__<tool>` |
 | a plain MCP server entry in your own `.mcp.json` | `mcp__agentdescent__doctor` |
 | a dsh `mcp-client` entry (what `install dsh` writes) | `mcp__agentdescent__doctor` — `mcp__<serverName>__<tool>` |
+| a Codex or OpenCode server entry | `agentdescent`'s tools under that server's name |
 
 In an interactive session you approve the tools when they are first called. In
 headless use (`claude -p`) nothing prompts, so pass the names explicitly:
@@ -119,7 +123,7 @@ The other fields:
   task as JSON on stdin, the answer in `$ANSWER`, a number in `[0, 1]` on
   stdout — a linter, a compiler, a golden-file diff); or `{"ref": "pkg.mod:fn"}`.
 * **`agent` / `reflect`**: a short name (`claude_code`, `codex`, `dsh`,
-  `openai_compatible`, `claude`, `echo`), or `module:attribute` inside the
+  `opencode`, `openai_compatible`, `claude`, `echo`), or `module:attribute` inside the
   import allowlist, with keyword arguments beside it. `"call": false` names a
   callable rather than a factory. A cheap `reflect` behind an expensive `agent`
   is the usual trade.
@@ -189,7 +193,8 @@ validate gate, then runs the host CLI on the task:
 |---|---|---|---|
 | `dsh` | `dsh plugin --profile headless add link:<plugin>` after `pnpm install && pnpm build` | `pnpm test`; `dsh --profile headless --dump-config` composes | `dsh --profile headless "<task>"` |
 | `claude_code` | `claude -p --plugin-dir <plugin> --strict-mcp-config` | `claude plugin validate <plugin>` | the same command |
-| `codex` | skills copied to `.agents/skills/`, `config.toml` to `.codex/` | the TOML parses | `codex exec --full-auto "<task>"` |
+| `codex` | skills copied to `.agents/skills/`, `config.toml` to `.codex/` | the TOML parses | `codex exec --sandbox workspace-write --skip-git-repo-check "<task>"` |
+| `opencode` | skills copied to `.opencode/skills/`, `opencode.jsonc` to `.config/opencode/` | the JSON parses | `opencode run "<task>"` |
 
 A failing gate scores 0 in-band and its text is what the reflector reads, so
 "the plugin no longer registers its tool" is a learning signal, not a crashed

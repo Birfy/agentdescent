@@ -57,9 +57,9 @@ rounds already committed are kept).
 }
 ```
 
-Agents by short name: `claude_code`, `codex`, `dsh`, `openai_compatible`,
-`claude`. A cheap `reflect` model behind an expensive `agent` is the usual
-trade. For `kind: plugin`, set `host` to `dsh`, `claude_code` or `codex`.
+Agents by short name: `claude_code`, `codex`, `dsh`, `opencode`,
+`openai_compatible`, `claude`. A cheap `reflect` model behind an expensive `agent` is the usual
+trade. For `kind: plugin`, set `host` to `dsh`, `claude_code`, `codex` or `opencode`.
 
 ## Guardrails
 

@@ -282,6 +282,17 @@ def dsh(*, workspace: Optional[str] = None, extra_args: Sequence[str] = (),
                      workspace=workspace, **kwargs)
 
 
+def opencode(*, workspace: Optional[str] = None, extra_args: Sequence[str] = (),
+             **kwargs) -> Completion:
+    """OpenCode's non-interactive ``run`` mode, as a :data:`Completion`.
+
+    ``opencode run "<task>"`` answers one message and exits, using the working
+    directory as the project -- which is what :func:`cli_agent`'s ``workspace``
+    binding gives it. Verified against opencode 1.18.
+    """
+    return cli_agent(["opencode", "run", *extra_args], workspace=workspace, **kwargs)
+
+
 def from_callable(fn: Completion) -> Completion:
     """Identity adapter -- documents that any ``prompt -> text`` callable works."""
     return fn

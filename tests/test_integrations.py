@@ -46,7 +46,7 @@ def test_the_skill_names_every_tool_kind_and_verb_that_exists():
     verbs = set(re.findall(r"^agentdescent (\w+)", text, re.M))
     real = set(next(a for a in cli.build_parser()._actions if a.dest == "cmd").choices)
     assert verbs <= real, f"skill shows CLI verbs that do not exist: {sorted(verbs - real)}"
-    agents = set(re.findall(r"`(claude_code|codex|dsh|openai_compatible|claude)`", text))
+    agents = set(re.findall(r"`(claude_code|codex|dsh|opencode|openai_compatible|claude)`", text))
     assert agents <= set(SHORT_REFS), f"unknown agent short names: {sorted(agents - set(SHORT_REFS))}"
 
 
@@ -61,6 +61,11 @@ def test_install_dsh_writes_skill_hooks_and_patch(tmp_path, monkeypatch):
     for key in DSH_FORWARDED_KEYS:
         assert f"{key}: !!js process.env.{key}" in patch      # the scrubbing workaround
     assert "dsh-hooks-claude-code" in patch
+    # A dsh patch file OVERRIDES rows by id; new rows must be under `insert:` or
+    # dsh warns `patch: entry "mcp-agentdescent" not found` and composes without
+    # them (verified against dsh 0.1.2-rc.1 with --dump-config).
+    assert "- insert:" in patch
+    assert patch.index("- insert:") < patch.index("id: mcp-agentdescent")
     assert any("dump-config" in l for l in lines)
     # idempotent: a second install keeps the patch file as it is
     before = patch
@@ -101,10 +106,42 @@ def test_install_claude_code_renders_a_loadable_plugin_dir(tmp_path):
     assert any("--plugin-dir" in l for l in lines)
 
 
+def test_install_opencode_writes_the_shape_opencode_itself_writes(tmp_path, monkeypatch):
+    """`opencode mcp add` writes {type: local, command: [...]} into opencode.jsonc."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    install("opencode", home=str(tmp_path))
+    root = tmp_path / "cfg" / "opencode"
+    assert (root / "skill" / "agentdescent" / "SKILL.md").exists()
+    cfg = json.loads(_read(root / "opencode.jsonc"))
+    assert cfg["mcp"]["agentdescent"] == {"type": "local",
+                                          "command": ["agentdescent", "mcp"]}
+    assert cfg["$schema"].startswith("https://opencode.ai")
+    # merging keeps what was already there, and is idempotent
+    cfg["model"] = "anthropic/claude"
+    cfg["mcp"]["other"] = {"type": "local", "command": ["x"]}
+    (root / "opencode.jsonc").write_text(json.dumps(cfg))
+    install("opencode", home=str(tmp_path))
+    again = json.loads(_read(root / "opencode.jsonc"))
+    assert again["model"] == "anthropic/claude" and "other" in again["mcp"]
+
+
+def test_install_opencode_does_not_corrupt_a_commented_config(tmp_path, monkeypatch):
+    """opencode.jsonc may hold comments, which json cannot parse: say what to add."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    root = tmp_path / "cfg" / "opencode"
+    root.mkdir(parents=True)
+    original = '{\n  // my notes\n  "model": "x"\n}\n'
+    (root / "opencode.jsonc").write_text(original)
+    lines = install("opencode", home=str(tmp_path))
+    assert _read(root / "opencode.jsonc") == original      # untouched
+    assert any(l.startswith("NOTE:") and "mcp" in l for l in lines), lines
+
+
 def test_dry_run_writes_nothing(tmp_path):
     for host in HOSTS:
         lines = install(host, dry_run=True, home=str(tmp_path))
-        assert lines and all(l.startswith(("would", "kept", "forwarded", "verify", "load", "or,", "Codex"))
+        assert lines and all(l.startswith(("would", "kept", "forwarded", "verify", "load",
+                                           "or,", "Codex", "NOTE", "WARNING"))
                              for l in lines), lines
     assert not any(p.name.startswith(".") for p in tmp_path.iterdir())
 

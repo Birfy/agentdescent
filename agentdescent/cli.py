@@ -16,7 +16,7 @@ commands on a host with no MCP.
     agentdescent cancel  <run_id>
     agentdescent resume  <run_id>
     agentdescent doctor                                             what is installed
-    agentdescent install <dsh|claude-code|codex>                    wire a host
+    agentdescent install <dsh|claude-code|codex|opencode>           wire a host
     agentdescent mcp                                                serve over stdio
 
 ``argparse`` only: the CLI is in the core and the core has no dependencies.
@@ -111,7 +111,8 @@ def starter_spec(path: str, *, kind: Optional[str] = None, data: Optional[str] =
 
 def doctor_report() -> Dict[str, Any]:
     """What this machine can run: agent CLIs, provider keys, optional pieces."""
-    clis = {name: shutil.which(name) for name in ("claude", "codex", "dsh", "git", "node", "pnpm")}
+    clis = {name: shutil.which(name)
+            for name in ("claude", "codex", "dsh", "opencode", "git", "node", "pnpm")}
     keys = {name: bool(os.environ.get(name)) for name in (
         "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "DEEPSEEK_API_KEY")}
     optional: Dict[str, bool] = {}
@@ -129,8 +130,8 @@ def doctor_report() -> Dict[str, Any]:
     problems: List[str] = []
     if not clis["git"]:
         problems.append("git is not on PATH; the ledger needs it")
-    if not any(clis[c] for c in ("claude", "codex", "dsh")):
-        problems.append("no worker agent CLI on PATH (claude / codex / dsh); "
+    if not any(clis[c] for c in ("claude", "codex", "dsh", "opencode")):
+        problems.append("no worker agent CLI on PATH (claude / codex / dsh / opencode); "
                         "directory kinds need one")
     if not (keys["ANTHROPIC_API_KEY"] or keys["OPENAI_API_KEY"] or keys["DEEPSEEK_API_KEY"]):
         problems.append("no provider key in the environment; a reflector needs one "
@@ -497,7 +498,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_doctor)
 
     s = sub.add_parser("install", help="wire the skill and MCP server into a host")
-    s.add_argument("host", choices=("dsh", "claude-code", "codex"))
+    s.add_argument("host", choices=("dsh", "claude-code", "codex", "opencode"))
     s.add_argument("--dry-run", action="store_true", dest="dry_run")
     s.add_argument("--home", help="the host's home directory (default: the real one)")
     s.set_defaults(fn=cmd_install)

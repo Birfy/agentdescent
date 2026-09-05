@@ -437,7 +437,7 @@ on start.
 | Host | Skill location | MCP config | Worker command |
 |---|---|---|---|
 | Gemini CLI | `gemini-extension.json` + `GEMINI.md` + `skills/` | in the extension manifest | `gemini -p` |
-| OpenCode | `.opencode/skills/` | `opencode.json -> mcp` | `opencode run` |
+| ~~OpenCode~~ | **implemented and verified** -- `~/.config/opencode/skill/`, `mcp` in `opencode.jsonc`, `opencode run`; see plugins.md | | |
 | Cursor | `.cursor/rules/agentdescent.mdc` (rule wraps the skill text) | `.cursor/mcp.json` | not a worker; use `dsh`/`claude_code`/`codex`/API |
 
 `agentdescent install <host>` is the single entry point for all of them; each

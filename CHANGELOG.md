@@ -52,6 +52,24 @@ All notable changes to AgentDescent are documented here. The format follows
 - **`rewards.command_scorer`**: grade with any program (task JSON on stdin,
   `$ANSWER` in the environment, a number in `[0, 1]` on stdout); a failing
   grader raises `GraderError` rather than teaching the optimiser zeros.
+- **OpenCode is a fourth host.** `agentdescent install opencode` writes the
+  skill to `~/.config/opencode/skill/agentdescent/SKILL.md` and merges an
+  `mcp.agentdescent` entry into `~/.config/opencode/opencode.jsonc` in the shape
+  `opencode mcp add` itself writes (`type: "local"`, the command as one array),
+  preserving anything already in the file and refusing to touch one it cannot
+  parse. Also `agents.opencode()` (`opencode run`), an `opencode_skill` layout,
+  and an `opencode` entry in `PLUGIN_HOSTS`.
+- **Every host manifest is now verified against the real CLI** (dsh 0.1.2-rc.1,
+  Claude Code 2.1.261, codex-cli 0.153.4, opencode 1.18.29), which corrected
+  three things that documentation research had got wrong:
+  a dsh `cordis.patch.yml` **overrides rows by id**, so the new rows have to sit
+  under `- insert:` -- without it dsh warned `patch: entry "mcp-agentdescent"
+  not found` and composed without the server; `codex exec` has **no
+  `--full-auto`** flag (the real ones are `--sandbox workspace-write` and
+  `--skip-git-repo-check`, the latter needed because a rollout workspace is not
+  a git repo); and a Claude Code **plugin** namespaces its MCP tools
+  `mcp__plugin_<plugin>_<server>__<tool>`, not `mcp__<server>__<tool>`, so an
+  allowlist or a probe built from the documented name never matched.
 - **`agents.dsh()`**: DeepSeek Harness's headless profile as a worker;
   `dsh_skill` and `agents_skill` layouts. **`agents.worker_env()`**: every
   `cli_agent` child drops the host session's markers (`CLAUDECODE`,

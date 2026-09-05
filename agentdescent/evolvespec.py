@@ -95,6 +95,7 @@ SHORT_REFS: Dict[str, str] = {
     "claude_code": "agentdescent.agents:claude_code",
     "codex": "agentdescent.agents:codex",
     "dsh": "agentdescent.agents:dsh",
+    "opencode": "agentdescent.agents:opencode",
     "cli_agent": "agentdescent.agents:cli_agent",
     "openai_compatible": "agentdescent.agents:openai_compatible",
     "claude": "agentdescent.agents:claude",

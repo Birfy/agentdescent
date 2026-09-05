@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-211 public names across 34 modules.
+212 public names across 34 modules.
 
 ---
 
@@ -439,6 +439,19 @@ openai_compatible(
     usage: Optional[Usage] = None,
     retries: int = 3,
     **create_kwargs
+) -> Completion
+```
+
+### `opencode(...)`
+
+OpenCode's non-interactive `run` mode, as a `Completion`.
+
+```python
+opencode(
+    *,
+    workspace: Optional[str] = None,
+    extra_args: Sequence[str] = (),
+    **kwargs
 ) -> Completion
 ```
 

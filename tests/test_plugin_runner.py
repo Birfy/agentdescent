@@ -157,9 +157,9 @@ def test_env_passthrough_forwards_named_variables_only(tmp_path, monkeypatch):
 
 def test_the_host_table_is_complete():
     assert set(PLUGIN_HOSTS) == set(PLUGIN_FROZEN) == set(PLUGIN_CONTEXT) == {
-        "dsh", "claude_code", "codex"}
+        "dsh", "claude_code", "codex", "opencode"}
     for name, host in PLUGIN_HOSTS.items():
-        assert host.entrypoint[0] in ("dsh", "claude", "codex")
+        assert host.entrypoint[0] in ("dsh", "claude", "codex", "opencode")
         rendered = host.render("plugin/x", "x")
         assert not any("{plugin_dir}" in c for c in rendered.entrypoint)
     assert "hooks/**" in PLUGIN_FROZEN["claude_code"]
@@ -167,6 +167,12 @@ def test_the_host_table_is_complete():
     assert "--plugin-dir" in PLUGIN_HOSTS["claude_code"].entrypoint
     assert "--strict-mcp-config" in PLUGIN_HOSTS["claude_code"].entrypoint
     assert PLUGIN_HOSTS["dsh"].entrypoint == ["dsh", "--profile", "headless"]
+    assert PLUGIN_HOSTS["opencode"].entrypoint == ["opencode", "run"]
+    # `--full-auto` does not exist in codex-cli 0.153; these are the real flags
+    codex = PLUGIN_HOSTS["codex"].entrypoint
+    assert "--full-auto" not in codex
+    assert codex[:2] == ["codex", "exec"] and "--skip-git-repo-check" in codex
+    assert "workspace-write" in codex
 
 
 # ---------------------------------------------------------------------------

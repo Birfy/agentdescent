@@ -67,7 +67,8 @@ LAYOUTS: Dict[str, str] = {
     "claude_agent": ".claude/agents",          # project-scoped subagent definitions
     "skill_library": ".claude/skills",         # a directory OF skills, one dir each
     "dsh_skill": ".dsh/skills/{name}",         # DeepSeek Harness project skill
-    "agents_skill": ".agents/skills/{name}",   # Agent Skills standard; dsh and Codex both read it
+    "agents_skill": ".agents/skills/{name}",   # Agent Skills standard; dsh, Codex and OpenCode read it
+    "opencode_skill": ".opencode/skills/{name}",   # OpenCode project skill
     "root": "",                                # the tree *is* the working directory
 }
 
@@ -450,7 +451,12 @@ PLUGIN_HOSTS: Dict[str, PluginHost] = {
     # config.toml fragment, copied to where Codex reads them under HOME.
     "codex": PluginHost(
         "codex",
-        entrypoint=["codex", "exec", "--full-auto"],
+        # `--full-auto` does not exist (checked against codex-cli 0.153.4).
+        # `workspace-write` is the sandbox that lets the agent edit its
+        # workspace, and a rollout workspace is a temp dir, not a git repo, so
+        # the repo check has to be skipped or codex refuses to start.
+        entrypoint=["codex", "exec", "--sandbox", "workspace-write",
+                    "--skip-git-repo-check"],
         setup=["sh", "-c", "mkdir -p .agents/skills .codex && "
                            "if [ -d {plugin_dir}/skills ]; then cp -r {plugin_dir}/skills/. .agents/skills/; fi && "
                            "if [ -f {plugin_dir}/config.toml ]; then cp {plugin_dir}/config.toml .codex/config.toml; fi"],
@@ -459,6 +465,22 @@ PLUGIN_HOSTS: Dict[str, PluginHost] = {
                               "{plugin_dir}/config.toml; fi"],
     ),
 }
+
+PLUGIN_HOSTS["opencode"] = PluginHost(
+    "opencode",
+    # `opencode run` answers one message from the working directory. HOME is the
+    # workspace, so the config it reads is <ws>/.config/opencode/opencode.jsonc
+    # and the project skills are <ws>/.opencode/skills -- both inside the sandbox.
+    entrypoint=["opencode", "run"],
+    setup=["sh", "-c", "mkdir -p .opencode .config/opencode && "
+                       "if [ -d {plugin_dir}/skills ]; then cp -r {plugin_dir}/skills .opencode/; fi && "
+                       "if [ -f {plugin_dir}/opencode.jsonc ]; then "
+                       "cp {plugin_dir}/opencode.jsonc .config/opencode/opencode.jsonc; fi"],
+    validate=["sh", "-c", "if [ -f {plugin_dir}/opencode.jsonc ]; then "
+                          "node -e 'JSON.parse(require(\"fs\").readFileSync(process.argv[1],\"utf8\"))' "
+                          "{plugin_dir}/opencode.jsonc; fi"],
+)
+
 
 #: Frozen by default for each host, on top of whatever the spec freezes. Hooks
 #: and permission config are the plugin's own L0: a hook that blocks a tool call
@@ -470,6 +492,7 @@ PLUGIN_FROZEN: Dict[str, Sequence[str]] = {
     "dsh": ("tests/**", "pnpm-lock.yaml", "package-lock.json", "hooks.json", "**/permission*"),
     "claude_code": ("hooks/**", ".claude-plugin/marketplace.json", "**/permission*"),
     "codex": ("**/permission*",),
+    "opencode": ("**/permission*",),
 }
 
 #: What the reflector is shown from a plugin tree, per host.
@@ -478,6 +501,7 @@ PLUGIN_CONTEXT: Dict[str, Sequence[str]] = {
     "claude_code": (".claude-plugin/plugin.json", "**/SKILL.md", "commands/**/*.md",
                     "agents/**/*.md", ".mcp.json", "*.md"),
     "codex": ("**/SKILL.md", "config.toml", "*.md"),
+    "opencode": ("**/SKILL.md", "opencode.jsonc", "*.md"),
 }
 
 
