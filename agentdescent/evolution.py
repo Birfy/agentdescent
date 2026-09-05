@@ -1202,7 +1202,8 @@ class EvolutionResult:
     #: from "died".
     error: Optional[str] = None
     #: Why the run ended -- ``"target_reward"`` / ``"patience"`` / ``"rounds"`` /
-    #: ``"max_seconds"`` / ``"max_iters"`` / ``"max_rollouts"`` / ``"max_calls"``
+    #: ``"max_seconds"`` / ``"max_iters"`` / ``"max_rollouts"`` / ``"max_calls"`` /
+    #: ``"stop_when"`` (the caller's own budget, see ``evolve(stop_when=)``)
     #: / ``"error"``. Without it a budget
     #: expiry is indistinguishable from convergence: ``error`` is ``None`` for
     #: both, ``history`` has entries for both, and the only other clue is
@@ -1655,6 +1656,7 @@ class _Engine:
                      history: List["RoundInfo"], early: "EarlyStop",
                      on_round: Optional[Callable[["RoundInfo"], None]],
                      extra_reasons: Optional[Dict[str, int]] = None,
+                     stop_when: Optional[Callable[["RoundInfo"], bool]] = None,
                      ) -> Tuple["RoundInfo", Optional[str]]:
         """Close out one round: record it, ask whether to stop, tell the caller.
 
@@ -1699,6 +1701,17 @@ class _Engine:
         history.append(info)
         stop_reason = early.observe(info.held_out_reward)
         notify(on_round, info)
+        if stop_reason is None and stop_when is not None:
+            # The caller's own budget -- dollars, an external deadline, a
+            # kill file -- asked at the same point the built-in ones are, so it
+            # stops between rounds and never mid-merge. An exception here is a
+            # caller bug and is reported like on_round's, not fatal.
+            try:
+                if stop_when(info):
+                    stop_reason = "stop_when"
+            except Exception as e:  # noqa: BLE001
+                warnings.warn(f"stop_when callback raised: {type(e).__name__}: {e}",
+                              RuntimeWarning, stacklevel=2)
         return info, stop_reason
 
     def cleanup(self) -> None:
@@ -2099,6 +2112,7 @@ def evolve(
     shuffle: bool = False,
     seed: int = 0,
     on_round: Optional[Callable[["RoundInfo"], None]] = None,
+    stop_when: Optional[Callable[["RoundInfo"], bool]] = None,
     verbose: bool = False,
     #: Share one `Usage` with your model adapters (`claude(usage=u)`) and the
     #: result's token counts become real; without it only calls and seconds
@@ -2349,6 +2363,14 @@ def evolve(
         Called with each :class:`RoundInfo` as the round completes -- progress
         for a long run, which otherwise reports nothing until it returns. An
         exception raised here is reported but does not abort the run.
+    stop_when:
+        Called after ``on_round`` with the same :class:`RoundInfo`; return
+        ``True`` to end the run with ``stop_reason="stop_when"``. This is the
+        seam for a budget the engine does not know how to count -- dollars
+        from a shared :class:`~agentdescent.agents.Usage`, an external deadline,
+        a kill file. It is asked where ``max_seconds`` / ``max_calls`` are, so
+        it stops between rounds and never mid-merge, and the run keeps what it
+        has committed. An exception raised here is reported, not fatal.
     usage:
         Share one :class:`~agentdescent.agents.Usage` with your model adapters
         (``claude(usage=u)``, ``openai_compatible(usage=u)``) and the result's
@@ -2451,7 +2473,8 @@ def evolve(
             max_worker_errors=max_worker_errors,
             eval_concurrency=eval_concurrency,
             pipelined_gate=pipelined_gate, gate_workers=gate_workers,
-            on_round=on_round, verbose=verbose, usage=usage, policies=policies)
+            on_round=on_round, stop_when=stop_when, verbose=verbose, usage=usage,
+            policies=policies)
 
     if pipelined_gate:
         # The mirror of the block above, and the same reasoning: a knob accepted
@@ -2864,7 +2887,8 @@ def evolve(
         # are the same three steps in both loops; only "what is a round" differs.
         info, early_stop = eng.record_round(
             index=r, reward=round_reward, n_items=len(dev.state), reports=reports,
-            history=history, early=early, on_round=on_round, extra_reasons=extra)
+            history=history, early=early, on_round=on_round, extra_reasons=extra,
+            stop_when=stop_when)
         if verbose:
             print(f"round {r:>3}  reward={info.held_out_reward:.3f} on "
                   f"{len(held_out)}  size={info.n_items}  "
@@ -2875,6 +2899,7 @@ def evolve(
                 print(f"round {r:>3}  "
                       + (f"target_reward={target_reward} reached, stopping"
                          if early_stop == "target_reward" else
+                         "stop_when asked to stop" if early_stop == "stop_when" else
                          f"no improvement for {early.stalled} rounds, stopping"))
             break
 

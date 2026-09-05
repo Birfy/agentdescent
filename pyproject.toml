@@ -39,6 +39,10 @@ version = { attr = "agentdescent.__version__" }
 [tool.setuptools.packages.find]
 include = ["agentdescent*"]
 
+[tool.setuptools.package-data]
+# The shared skill and hooks the `install` command writes into a host.
+agentdescent = ["integrations/*.md", "integrations/*.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

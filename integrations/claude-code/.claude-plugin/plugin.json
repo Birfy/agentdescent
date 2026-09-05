@@ -1,0 +1,15 @@
+{
+  "name": "agentdescent",
+  "description": "Evolve skills, agents, prompts, code and plugins against examples with a parallel, merge-based optimiser.",
+  "version": "0.4.6",
+  "author": {
+    "name": "AgentDescent"
+  },
+  "homepage": "https://github.com/Birfy/agentdescent",
+  "keywords": [
+    "evolution",
+    "skills",
+    "optimisation",
+    "self-improvement"
+  ]
+}

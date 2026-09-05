@@ -448,9 +448,18 @@ def execute(rd: RunDir, *, budget_usd: Optional[float] = None,
         rd.update_status(**changes)
 
     overrides: Dict[str, Any] = {}
-    if budget_usd is not None and usd_per_call:
-        # Until evolve() grows a stop_when hook, a dollar budget is a call budget.
-        overrides["max_calls"] = max(1, int(budget_usd / usd_per_call))
+    if budget_usd is not None:
+        if not usd_per_call:
+            raise RunStoreError("budget_usd needs usd_per_call: the engine counts calls, "
+                                "and a tool-using agent's price per call is not known "
+                                "in advance")
+
+        def stop_when(info: RoundInfo) -> bool:
+            # Asked between rounds, where max_calls is; the run overshoots by at
+            # most one round and reports the spend it actually incurred.
+            return usage.calls * usd_per_call >= budget_usd
+
+        overrides["stop_when"] = stop_when
     try:
         comp = compose(spec, usage=usage, on_round=on_round, repo_path=rd.ledger_path,
                        **overrides)

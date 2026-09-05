@@ -97,6 +97,7 @@ def async_evolve(
     straggler_factor: float = 3.0,
     task_sampler: Optional["TaskSampler"] = None,
     on_round: Optional[Callable[[RoundInfo], None]] = None,
+    stop_when: Optional[Callable[[RoundInfo], bool]] = None,
     verbose: bool = False,
     #: Share one `Usage` with your model adapters (`claude(usage=u)`) and the
     #: result's token counts become real; without it only calls and seconds are
@@ -270,6 +271,11 @@ def async_evolve(
         Called with each :class:`~agentdescent.evolution.RoundInfo` as a merger
         sweep completes -- progress for a long run. It runs on the merger thread
         and must be cheap and thread-safe; an exception is reported, not fatal.
+    stop_when:
+        Asked after ``on_round`` with the same ``RoundInfo``; ``True`` ends the
+        run with ``stop_reason="stop_when"`` -- the caller's own budget (dollars,
+        a deadline, a kill file), checked between merger sweeps like the built-in
+        bounds. Same thread and the same rules as ``on_round``.
     usage:
         Share one :class:`~agentdescent.agents.Usage` with your model adapters
         (``claude(usage=u)``, ``openai_compatible(usage=u)``) and the result's
@@ -804,7 +810,8 @@ def async_evolve(
         # here and a barrier there, which is the only part that differs.
         _info, early_stop = eng.record_round(
             index=len(history), reward=r, n_items=len(dev.state),
-            reports=reports, history=history, early=early, on_round=on_round)
+            reports=reports, history=history, early=early, on_round=on_round,
+            stop_when=stop_when)
         # A stalled pipeline: cards keep arriving and none of them commits. Under
         # Guarded with async_ratio > alpha that is a livelock, not slow progress.
         # Counted per sweep **that had cards or reports** -- a poll with neither
