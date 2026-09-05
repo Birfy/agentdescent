@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from agentdescent.agents import Usage, with_retries
+from agentdescent.dataloader import select_hard
 from agentdescent.evalcache import FileCache
 from agentdescent.evolution import Task, reflector
 from agentdescent.meta import (MetaReward, Problem, auc, evolve_problem, final_reward,
@@ -175,13 +176,13 @@ LOADERS: Dict[str, Callable[[int], List[dict]]] = {"gsm8k": _gsm8k_rows, "gsmhar
 
 
 def windows(benchmark: str, count: int, size: int, *, seed: int = 0,
-            pool: int = 400) -> Dict[str, List[Task]]:
+            pool: int = 400, rows: Optional[Sequence[dict]] = None) -> Dict[str, List[Task]]:
     """``count`` disjoint slices of ``size`` tasks each, named ``<benchmark>-<i>``.
 
     Disjoint by construction: one shuffle of the pool, then consecutive slices.
     Two windows therefore never share a question, which is what lets one be
     evolved on while another validates."""
-    rows = LOADERS[benchmark](max(pool, count * size))
+    rows = list(rows) if rows is not None else LOADERS[benchmark](max(pool, count * size))
     order = list(range(len(rows)))
     random.Random(seed * 7919 + 13).shuffle(order)
     if count * size > len(order):
@@ -196,6 +197,47 @@ def windows(benchmark: str, count: int, size: int, *, seed: int = 0,
         ]
     return out
 
+
+def hard_rows(rows: Sequence[dict], complete: Callable[[str], str], *,
+              keep: int, pool: int) -> List[dict]:
+    """The rows the seed instruction gets **wrong** -- headroom from a saturated set.
+
+    Measured, and the reason this exists: on two GSM8K windows the seed
+    instruction scored **1.000**, so the only move available to an evolved
+    sampler was down, and the -0.100 that run reported was a property of the
+    validation set rather than of the sampler. `select_hard` is the repository's
+    own lever for exactly this.
+
+    Its docstring warns that one noisy baseline pass selects the *unlucky*
+    answers, which then regress to the mean. That warning does not bite here and
+    it is worth saying why: `cached_completion` makes the baseline a function of
+    the prompt, so an item scored wrong once is scored wrong every time, and
+    `passes=1` is the whole measurement rather than a sample of it.
+
+    **A hard subset is a different benchmark.** Numbers from it are not
+    comparable with numbers from the full split, and the run plan says which
+    was used.
+    """
+    score = last_number()
+    scanned = list(rows)[:pool]
+
+    def wrong(row: dict) -> float:
+        task = Task(id="probe", prompt=str(row["question"]).strip(),
+                    meta={"gold": row["answer"]})
+        return score(task, complete(TEMPLATE.format(skill=SEED_INSTRUCTION,
+                                                    prompt=task.prompt)))
+
+    # `min_items=1`, deliberately: `select_hard` tops a short result up with the
+    # items the baseline **solved**, which is the saturation this call exists to
+    # remove. Refusing loudly is the only useful answer when the pool is too easy.
+    kept = select_hard(scanned, wrong, keep=keep, min_items=1, passes=1)
+    if len(kept) < keep or len(kept) == len(scanned):
+        raise ValueError(
+            f"only {len(kept)} of {len(scanned)} rows are hard for the seed "
+            f"instruction, {keep} needed -- raise --hard-pool"
+            + (" (nothing failed at all, so the pool is fully solved)"
+               if len(kept) == len(scanned) else ""))
+    return kept
 
 # ---------------------------------------------------------------------------
 # The inner problem: one whole evolve() with the candidate sampler installed
@@ -238,7 +280,8 @@ def gsm_problem(tasks: Sequence[Task], complete: Callable[[str], str], *,
 def build_problems(complete: Callable[[str], str], *, source: str, other: str,
                    train_windows: int, unseen_windows: int, other_windows: int,
                    size: int, data_seed: int, inner: Dict[str, Any],
-                   usage: Optional[Usage] = None,
+                   usage: Optional[Usage] = None, hard_other: bool = False,
+                   hard_pool: int = 400,
                    ) -> Tuple[Dict[str, Problem], Dict[str, Problem], Dict[str, List[str]]]:
     """Three groups of inner problems: evolved on, unseen, other benchmark.
 
@@ -252,7 +295,13 @@ def build_problems(complete: Callable[[str], str], *, source: str, other: str,
     groups = {"train": names[:train_windows], "unseen": names[train_windows:]}
     every = dict(same)
     if other_windows:
-        cross = windows(other, other_windows, size, seed=data_seed)
+        rows = None
+        if hard_other:
+            # Only the rows the seed instruction fails, so the group has room to
+            # move in both directions rather than only down.
+            rows = hard_rows(LOADERS[other](hard_pool), complete,
+                             keep=other_windows * size, pool=hard_pool)
+        cross = windows(other, other_windows, size, seed=data_seed, rows=rows)
         groups["other"] = list(cross)
         every.update(cross)
     else:
@@ -443,6 +492,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--train-windows", type=int, default=2)
     parser.add_argument("--unseen-windows", type=int, default=2)
     parser.add_argument("--other-windows", type=int, default=2)
+    parser.add_argument("--hard-other", action="store_true",
+                        help=("keep only the rows of --other that the seed "
+                              "instruction gets wrong. A saturated group can only "
+                              "move down: measured, the seed rule scored 1.000 on "
+                              "both plain GSM8K windows. A hard subset is a "
+                              "different benchmark -- say which you used"))
+    parser.add_argument("--hard-pool", type=int, default=400,
+                        help="rows of --other to scan for the hard subset")
     parser.add_argument("--window-size", type=int, default=20, help="tasks per inner problem")
     parser.add_argument("--data-seed", type=int, default=0)
     parser.add_argument("--seeds", type=int, default=2, help="inner seeds per train problem")
@@ -509,8 +566,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     print(f"Train     : {args.train_windows} x {args.source} window(s) x {len(seeds)} seed(s) "
           f"= {outer_tasks} outer tasks")
     print(f"Validate  : {args.unseen_windows} unseen {args.source} + {args.other_windows} "
-          f"{args.other} window(s), {len(validate_seeds)} fresh seed(s) "
-          f"-> {validations} inner runs")
+          f"{args.other}{' (HARD subset -- a different benchmark)' if args.hard_other else ''} "
+          f"window(s), {len(validate_seeds)} fresh seed(s) -> {validations} inner runs")
     print(f"Reward    : {args.meta_reward}"
           + (f" @ {args.quality_target}" if args.meta_reward == "time-to-quality" else "")
           + "  (L1: a candidate that only ties the seed on the outer held-out set "
@@ -545,7 +602,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         complete, source=args.source, other=args.other,
         train_windows=args.train_windows, unseen_windows=args.unseen_windows,
         other_windows=args.other_windows, size=args.window_size,
-        data_seed=args.data_seed, inner=inner, usage=usage)
+        data_seed=args.data_seed, inner=inner, usage=usage,
+        hard_other=args.hard_other, hard_pool=args.hard_pool)
     started = time.monotonic()
     payload = run_experiment(complete, train=train, validate=validate, groups=groups,
                              seeds=seeds, validate_seeds=validate_seeds,
@@ -559,6 +617,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                          "window_size": args.window_size, "data_seed": args.data_seed,
                          "model": args.model, "provider": args.provider,
                          "temperature": args.temperature, "thinking": args.thinking,
+                         "hard_other": args.hard_other,
                          "meta_reward": args.meta_reward,
                          "quality_target": args.quality_target,
                          "template": TEMPLATE, "seed_instruction": SEED_INSTRUCTION,

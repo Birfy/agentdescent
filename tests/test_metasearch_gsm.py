@@ -355,3 +355,44 @@ def test_the_payload_carries_the_proposals(monkeypatch, tmp_path):
     assert outer["proposals"] and all(p["accepted_by_gate"] for p in outer["proposals"])
     assert outer["proposals_rejected_by_gate"] == 0
     assert "invalid_proposals" in outer
+
+
+def test_hard_rows_keeps_only_what_the_seed_gets_wrong():
+    """A saturated validation group can only move down -- measured, the seed
+    instruction scored 1.000 on both plain GSM8K windows."""
+    rows = [{"question": f"What is {i} plus 1?", "answer": f"#### {i + 1}"}
+            for i in range(20)]
+
+    def solver(prompt):
+        # Right on the even numbers, wrong on the odd ones.
+        n = [int(w) for w in prompt.replace("?", " ").split() if w.isdigit()][0]
+        return str(n + 1) if n % 2 == 0 else "0"
+
+    kept = bench.hard_rows(rows, solver, keep=5, pool=20)
+    assert len(kept) == 5
+    assert all(int(r["answer"].split()[-1]) % 2 == 0 for r in kept), \
+        "the kept rows must be the ones the seed answered wrongly"
+    with pytest.raises(ValueError, match="are hard for the seed"):
+        bench.hard_rows(rows, solver, keep=15, pool=20)
+
+
+def test_build_problems_can_take_the_hard_subset_for_the_other_benchmark(monkeypatch):
+    seen = {}
+
+    def fake_hard(rows, complete, *, keep, pool):
+        seen["keep"], seen["pool"] = keep, pool
+        return list(rows)[:keep]
+
+    monkeypatch.setattr(bench, "hard_rows", fake_hard)
+    train, validate, groups = bench.build_problems(
+        _scripted, source="gsmhard", other="gsm8k", train_windows=1, unseen_windows=1,
+        other_windows=1, size=6, data_seed=0, inner={"rounds": 1, "workers": 1},
+        hard_other=True, hard_pool=50)
+    assert seen == {"keep": 6, "pool": 50}
+    assert groups["other"] == ["gsm8k-0"] and "gsm8k-0" in validate
+    # ...and off by default, so the plain path is unchanged.
+    seen.clear()
+    bench.build_problems(_scripted, source="gsmhard", other="gsm8k", train_windows=1,
+                         unseen_windows=1, other_windows=1, size=6, data_seed=0,
+                         inner={"rounds": 1, "workers": 1})
+    assert seen == {}
