@@ -3,7 +3,9 @@
 *Module:* [`agentdescent.policies`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/policies.py)
 
 Every decision `evolve()` makes is an object you can swap, and they all travel
-in one argument:
+in one argument. This page is the catalogue; [the guide](policy-guide.md)
+is the how — where each slot sits, what it is handed, how they compose, and
+how to prove one ran.
 
 ```python
 from agentdescent import Policies, evolve
