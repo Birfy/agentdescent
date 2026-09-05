@@ -73,10 +73,17 @@ fields change that, and the user should be told which one you used:
   model, their login, their plugins. Say so when you use it, and do not use it
   for `kind: plugin` -- the run would load the plugin it is rewriting.
 
-If `doctor` reports no provider key, that is not a dead end: point **both**
-`agent` and `reflect` at a host CLI with `"isolate": false` and every call goes
-through the CLI's own authentication, no key needed. Offer this rather than
-stopping.
+If `doctor` reports no provider key, that is not a dead end. Two routes, neither
+needing one:
+
+- `"reflect": {"ref": "host_model"}` runs the reflection on **this session's own
+  model** over MCP sampling. `start` replies with `host_model_available`; if it
+  is false, `host_model_unavailable` says why and you must fall back. The run
+  only lives as long as this session, so say that before starting a long one.
+- Point **both** `agent` and `reflect` at a host CLI with `"isolate": false`:
+  every call then goes through the CLI's own authentication.
+
+Offer one of these rather than stopping.
 
 ## Guardrails
 

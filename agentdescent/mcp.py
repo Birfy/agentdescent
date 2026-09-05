@@ -85,6 +85,17 @@ class Tools:
 
     def __init__(self, store: Optional[str] = None) -> None:
         self.store = store
+        #: Set by :func:`build_server` on the first tool call, once there is a
+        #: live session to borrow. Stays None on a host without sampling, and
+        #: `host_model` then fails with a message that says which case it is.
+        self.bridge: Any = None
+        #: Why there is no bridge, for the `start` payload. Silence here reads
+        #: as "the run learned nothing" instead of "it could not ask".
+        self.bridge_error: Optional[str] = None
+
+    def sampling_env(self) -> Dict[str, str]:
+        """What a launched run needs to reach the host's model, if it can."""
+        return self.bridge.env() if self.bridge is not None else {}
 
     # -- read-only -------------------------------------------------------------
 
@@ -131,11 +142,21 @@ class Tools:
                             "evolution run, so no nested run was started."}
         rd = runstore.create(es.to_dict(), store=self.store)
         try:
-            st = runstore.launch(rd, budget_usd=budget_usd, usd_per_call=usd_per_call)
+            # The run is a detached process, so a `host_model` reference in the
+            # spec resolves there, not here -- it needs the bridge's address in
+            # its environment or it has no session to borrow.
+            st = runstore.launch(rd, budget_usd=budget_usd, usd_per_call=usd_per_call,
+                                 env=self.sampling_env())
         except runstore.RunStoreError as e:
             return {"ok": False, "error": str(e), "run_id": rd.run_id, "dir": rd.path}
         return {"ok": True, "run_id": rd.run_id, "state": st.state, "pid": st.pid,
-                "dir": rd.path, "notes": rd.status().notes}
+                "dir": rd.path, "notes": rd.status().notes,
+                # Whether a `host_model` reference in this spec can work. A run
+                # that silently could not borrow the session's model would
+                # otherwise just look like one that proposed nothing.
+                "host_model_available": self.bridge is not None,
+                **({} if self.bridge is not None
+                   else {"host_model_unavailable": self.bridge_error})}
 
     def apply(self, run_id: str, to: Optional[str] = None, dry_run: bool = False,
               backup: bool = True) -> Dict[str, Any]:
@@ -153,8 +174,11 @@ class Tools:
     def resume(self, run_id: str, budget_usd: Optional[float] = None,
                usd_per_call: Optional[float] = None) -> Dict[str, Any]:
         try:
+            # A resumed run gets the *current* bridge: the session that started
+            # it is likely gone, and its address with it.
             return runstore.resume(run_id, store=self.store, budget_usd=budget_usd,
-                                   usd_per_call=usd_per_call).to_dict()
+                                   usd_per_call=usd_per_call,
+                                   env=self.sampling_env()).to_dict()
         except runstore.RunStoreError as e:
             return {"error": str(e)}
 
@@ -170,6 +194,22 @@ class Tools:
                               default=str)
         except runstore.RunStoreError as e:
             return json.dumps({"error": str(e)})
+
+
+def _context_class():
+    """The SDK's ``Context``, whose *annotation* is how a tool asks for a session.
+
+    Injection is by type, not by name: a parameter annotated ``Any`` stays in
+    the tool's input schema, and the calling model then sees -- and tries to
+    fill -- an argument that is meant to be invisible. Measured: with
+    ``ctx: Any`` the `start` schema advertised ``ctx`` alongside ``spec``.
+    """
+    try:
+        from mcp.server.mcpserver import Context  # mcp >= 2
+        return Context
+    except ImportError:
+        from mcp.server.fastmcp import Context  # mcp 1.x
+        return Context
 
 
 def _server_class():
@@ -198,6 +238,33 @@ def build_server(store: Optional[str] = None, *, name: str = "agentdescent"):
         "show -> ask -> apply."))
     t = Tools(store)
 
+    def attach_bridge(ctx: Any, loop: Any) -> None:
+        """Stand up the sampling bridge the first time a launching tool runs.
+
+        Not at construction: there is no session until a client connects, and
+        the capability that decides whether a bridge is worth having is one the
+        client declares at initialise. A tool call is the first moment both
+        exist.
+
+        ``loop`` is passed in rather than looked up, because the lookup has to
+        happen where a loop is actually running. A **sync** tool body does not
+        qualify -- the SDK runs those on a worker thread, where
+        ``asyncio.get_running_loop()`` raises "no running event loop" and the
+        bridge silently never attached.
+        """
+        if t.bridge is not None or ctx is None:
+            return
+        try:
+            from .host_sampling import bridge_for_session
+
+            t.bridge = bridge_for_session(ctx.session, loop)
+            if t.bridge is None:
+                t.bridge_error = "this host did not declare the sampling capability"
+        except Exception as e:  # noqa: BLE001 - sampling is a bonus, never a failure
+            # Kept, not discarded: a run whose reflector cannot reach the host
+            # proposes nothing and looks like a run that simply learned nothing.
+            t.bridge, t.bridge_error = None, f"{type(e).__name__}: {e}"
+
     @server.tool(description=TOOL_DESCRIPTIONS["doctor"])
     def doctor() -> Dict[str, Any]:
         return t.doctor()
@@ -206,10 +273,25 @@ def build_server(store: Optional[str] = None, *, name: str = "agentdescent"):
     def plan(spec: Dict[str, Any], usd_per_call: Optional[float] = None) -> Dict[str, Any]:
         return t.plan(spec, usd_per_call)
 
-    @server.tool(description=TOOL_DESCRIPTIONS["start"])
-    def start(spec: Dict[str, Any], budget_usd: Optional[float] = None,
-              usd_per_call: Optional[float] = None) -> Dict[str, Any]:
-        return t.start(spec, budget_usd, usd_per_call)
+    # `start` and `resume` are the two tools that launch a process, so they are
+    # the two that take a Context. The annotation is set after the definition
+    # and the decorator applied by hand, because the SDK is imported lazily and
+    # `Context` cannot be a module-level name here.
+    context_cls = _context_class()
+
+    async def start(spec: Dict[str, Any], ctx, budget_usd: Optional[float] = None,
+                    usd_per_call: Optional[float] = None) -> Dict[str, Any]:
+        import asyncio
+
+        import anyio.to_thread
+
+        attach_bridge(ctx, asyncio.get_running_loop())
+        # The body forks a process, so it stays off the loop the bridge needs.
+        return await anyio.to_thread.run_sync(
+            lambda: t.start(spec, budget_usd, usd_per_call))
+
+    start.__annotations__["ctx"] = context_cls
+    server.tool(description=TOOL_DESCRIPTIONS["start"])(start)
 
     @server.tool(description=TOOL_DESCRIPTIONS["status"])
     def status(run_id: Optional[str] = None) -> Any:
@@ -228,10 +310,18 @@ def build_server(store: Optional[str] = None, *, name: str = "agentdescent"):
     def cancel(run_id: str) -> Dict[str, Any]:
         return t.cancel(run_id)
 
-    @server.tool(description=TOOL_DESCRIPTIONS["resume"])
-    def resume(run_id: str, budget_usd: Optional[float] = None,
-               usd_per_call: Optional[float] = None) -> Dict[str, Any]:
-        return t.resume(run_id, budget_usd, usd_per_call)
+    async def resume(run_id: str, ctx, budget_usd: Optional[float] = None,
+                     usd_per_call: Optional[float] = None) -> Dict[str, Any]:
+        import asyncio
+
+        import anyio.to_thread
+
+        attach_bridge(ctx, asyncio.get_running_loop())
+        return await anyio.to_thread.run_sync(
+            lambda: t.resume(run_id, budget_usd, usd_per_call))
+
+    resume.__annotations__["ctx"] = context_cls
+    server.tool(description=TOOL_DESCRIPTIONS["resume"])(resume)
 
     @server.resource("agentdescent://runs", mime_type="application/json",
                      description="Every run in the store, newest first, with its status.")

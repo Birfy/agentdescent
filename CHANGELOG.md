@@ -6,6 +6,26 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`host_model`: run on the model the agent session is already using.** MCP's
+  `sampling/createMessage` lets a server ask its client for a completion, so
+  `{"reflect": {"ref": "host_model"}}` reflects on the host session's own model
+  -- its authentication, its policy, no key and no model name in the spec.
+  The obstacle was structural: `start` returns in milliseconds and the run
+  proceeds in a **detached process** with no MCP session and no way to get one.
+  `agentdescent.host_sampling` bridges that gap -- a token-authenticated
+  loopback endpoint in the server process holding the live session, whose
+  address the server puts in the environment of the runs it launches, turning
+  each request back into `create_message` on the server's event loop.
+  `start` now reports `host_model_available` and, when false,
+  `host_model_unavailable`: a run whose reflector could not ask otherwise looks
+  exactly like a run that learned nothing. Verified end to end through the real
+  SDK -- a detached run reflecting on a model only the client holds, reaching
+  reward 1.0. **Sampling is deprecated at the protocol level as of MCP revision
+  2026-07-28 (SEP-2577)**; the shape is unchanged and the SDK still ships it, so
+  this is the convenient route, not the durable one.
+
 ### Fixed
 
 - **An OpenCode worker read the user's real config; the other three hosts did

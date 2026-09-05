@@ -98,6 +98,9 @@ SHORT_REFS: Dict[str, str] = {
     "opencode": "agentdescent.agents:opencode",
     "cli_agent": "agentdescent.agents:cli_agent",
     "openai_compatible": "agentdescent.agents:openai_compatible",
+    # The model of the agent session that started the run, over MCP sampling.
+    # Only resolvable inside a run the MCP server launched; see agentdescent.host_sampling.
+    "host_model": "agentdescent.host_sampling:host_model",
     "claude": "agentdescent.agents:claude",
     "echo": "agentdescent.agents:echo",
     # selection

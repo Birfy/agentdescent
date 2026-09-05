@@ -204,7 +204,7 @@ The other fields:
   task as JSON on stdin, the answer in `$ANSWER`, a number in `[0, 1]` on
   stdout — a linter, a compiler, a golden-file diff); or `{"ref": "pkg.mod:fn"}`.
 * **`agent` / `reflect`**: a short name (`claude_code`, `codex`, `dsh`,
-  `opencode`, `openai_compatible`, `claude`, `echo`), or `module:attribute` inside the
+  `opencode`, `openai_compatible`, `claude`, `host_model`, `echo`), or `module:attribute` inside the
   import allowlist, with keyword arguments beside it. `"call": false` names a
   callable rather than a factory. A cheap `reflect` behind an expensive `agent`
   is the usual trade.
@@ -262,10 +262,46 @@ through the CLI's own authentication:
 }
 ```
 
-What is **not** available: MCP *sampling* (`sampling/createMessage`), where the
-server asks the host to run a completion on the session's own model. The server
-does not implement it, so there is no zero-configuration "just follow the
-host" — the two switches above are the whole story.
+#### Borrowing the session's own model: `host_model`
+
+The third route needs no model name and no key at all. MCP's
+`sampling/createMessage` lets a **server** ask its **client** to run a
+completion, so the model is the one your agent session is already running, with
+the session's authentication and the host's own policy:
+
+```json
+"agent":   {"ref": "claude_code"},
+"reflect": {"ref": "host_model"}
+```
+
+That is the common shape — rollouts in the host CLI, reflection on the session's
+model — and the whole run then needs no provider key.
+
+It works across a gap worth understanding, because the gap decides when you can
+use it. `start` returns in milliseconds and the run proceeds in a **detached
+process** that outlives the tool call: it has no MCP session and cannot get one.
+So the server stands up a loopback bridge holding the live session, hands its
+address to the run it launches, and turns each request back into
+`create_message` on the server's event loop.
+
+Three consequences, all structural rather than unfinished work:
+
+* **The run is tied to the session.** Close the agent and the bridge goes with
+  it; calls then fail saying exactly that. An evolution meant to run for hours
+  in the background should name a model instead.
+* **The host must implement sampling.** Many do not. `start` reports
+  `host_model_available`, and `host_model_unavailable` with the reason — without
+  it, a run whose reflector could not ask looks identical to one that learned
+  nothing.
+* **Throughput is the host's.** Every reflection is a request through one
+  session, so eight workers do not get eight streams.
+
+!!! warning "Deprecated at the protocol level"
+    Sampling is marked deprecated as of MCP revision **2026-07-28 (SEP-2577)**,
+    along with `roots` and `logging`. The shape is unchanged and the Python SDK
+    still ships it — this works today, and calling it emits an
+    `MCPDeprecationWarning`. Treat `host_model` as the convenient route, not the
+    durable one; `extra_args` and `isolate` do not depend on it.
 
 * **`policies`**: one reference per slot (`selection`, `task_sampler`,
   `acceptance`, `conflict`, `fusion`, `promotion`, `proposal`, `staleness`),
