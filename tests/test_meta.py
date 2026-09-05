@@ -326,3 +326,19 @@ def test_accepts_answers_the_gate_without_side_effects():
     assert spec.to_diff(spec.initial(), fenced, "w", 0, "a") is not None
     assert spec.to_diff(spec.initial(), "import os", "w", 0, "a") is None
     assert spec.invalid_proposals == 1
+
+
+def test_outer_tasks_interleave_so_a_positional_split_sees_every_problem():
+    """`evolve()` cuts train/held-out by position, so grouping by problem would
+    train on one problem and gate on another -- measured, and the reason the
+    order here is seed-major."""
+    from agentdescent.meta import _outer_tasks
+
+    tasks, named = _outer_tasks({"a": _scripted_problem, "b": _scripted_problem},
+                                seeds=[0, 1, 2, 3])
+    assert set(named) == {"a", "b"} and len(tasks) == 8
+    assert [t.meta["problem"] for t in tasks] == ["a", "b"] * 4
+    cut = len(tasks) // 2
+    train = {t.meta["problem"] for t in tasks[:cut]}
+    held_out = {t.meta["problem"] for t in tasks[cut:]}
+    assert train == held_out == {"a", "b"}, "a positional split must see both problems"

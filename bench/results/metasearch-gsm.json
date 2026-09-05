@@ -3,14 +3,14 @@
  "evolved_source": "class Policy:\n    # Round robin over the shard (the engine's default).\n    def pick(self, keys, round_index):\n        return keys[round_index % len(keys)]\n\n    def record(self, task_id, score):\n        pass\n",
  "outer": {
   "final_reward": 0.875,
-  "rollouts": 6,
+  "rollouts": 12,
   "outcomes": {
-   "oracle-rejected": 3
+   "oracle-rejected": 6
   },
   "stop_reason": "rounds",
   "error": null,
-  "seconds": 105.33822600199994,
-  "rounds": 3,
+  "seconds": 2.4395730259998345,
+  "rounds": 6,
   "workers": 2,
   "seeds": [
    0,
@@ -18,6 +18,82 @@
    2,
    3
   ],
+  "proposals": [
+   {
+    "source": "```python\nclass Policy:\n    # Changed from round-robin to UCB1-style exploration to focus on promising tasks\n    # while still exploring, which helps when some tasks are easier than others.\n    def __init__(self):\n        self.counts = {}  # task_id -> number of times picked\n        self.scores = {}  # task_id -> sum of scores\n        self.total_picks = 0\n\n    def pick(self, keys, round_index):\n        # If any task never tried, try it first (exploration)\n        untried = [k for k in keys if k not in self.counts]\n        if untried:\n            return untried[0]\n        # UCB1: pick task with highest upper confidence bound\n        total = self.total_picks\n        best_key = None\n        best_ucb = -float('inf')\n        for k in keys:\n            n = self.counts[k]\n            avg = self.scores[k] / n\n            # exploration bonus: sqrt(2*ln(total)/n)\n            ucb = avg + math.sqrt(2 * math.log(total) / n)\n            if ucb > best_ucb:\n                best_ucb = ucb\n                best_key = k\n        return best_key\n\n    def record(self, task_id, score):\n        if task_id not in self.counts:\n            self.counts[task_id] = 0\n            self.scores[task_id] = 0.0\n        self.counts[task_id] += 1\n        self.scores[task_id] += score\n        self.total_picks += 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-0:0"
+   },
+   {
+    "source": "```python\nclass Policy:\n    # Changed from round-robin to UCB1-style exploration to focus on promising tasks\n    # while still exploring, which helps when tasks have varying difficulty.\n    def __init__(self):\n        self.counts = {}\n        self.rewards = {}\n        self.total = 0\n\n    def pick(self, keys, round_index):\n        import math\n        # First visit each task once to get initial data\n        for k in keys:\n            if k not in self.counts:\n                return k\n        # UCB1: pick task with highest upper confidence bound\n        best_key = None\n        best_ucb = -float('inf')\n        for k in keys:\n            n = self.counts[k]\n            avg = self.rewards[k] / n if n > 0 else 0.0\n            # exploration bonus: sqrt(2*ln(total)/n)\n            bonus = math.sqrt(2 * math.log(self.total + 1) / n) if n > 0 else float('inf')\n            ucb = avg + bonus\n            if ucb > best_ucb:\n                best_ucb = ucb\n                best_key = k\n        return best_key\n\n    def record(self, task_id, score):\n        if task_id not in self.counts:\n            self.counts[task_id] = 0\n            self.rewards[task_id] = 0.0\n        self.counts[task_id] += 1\n        self.rewards[task_id] += score\n        self.total += 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-0:1"
+   },
+   {
+    "source": "```python\nclass Policy:\n    # Changed from pure round-robin to round-robin with a recency-weighted\n    # preference for tasks that have shown high scores, to exploit promising tasks\n    # while still exploring all keys.\n    def __init__(self):\n        self.scores = {}  # task_id -> list of recent scores\n        self.max_history = 10\n\n    def pick(self, keys, round_index):\n        # If we have no data, fall back to round-robin\n        if not self.scores:\n            return keys[round_index % len(keys)]\n        \n        # Compute a score for each key: average of recent scores (or 0 if unseen)\n        # plus a small exploration bonus for unseen tasks\n        best_key = None\n        best_val = -1\n        for i, key in enumerate(keys):\n            hist = self.scores.get(key, [])\n            if hist:\n                avg = sum(hist) / len(hist)\n            else:\n                avg = 0.0\n            # Add a small recency bonus: more recent scores count more\n            # and a tiny exploration bonus for unseen tasks\n            val = avg + (0.01 if not hist else 0.0)\n            # Slight preference for earlier keys to break ties (round-robin flavor)\n            val += 1e-6 * (len(keys) - i)\n            if val > best_val:\n                best_val = val\n                best_key = key\n        return best_key\n\n    def record(self, task_id, score):\n        if task_id not in self.scores:\n            self.scores[task_id] = []\n        self.scores[task_id].append(score)\n        # Keep only recent history\n        if len(self.scores[task_id]) > self.max_history:\n            self.scores[task_id] = self.scores[task_id][-self.max_history:]\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-0:2"
+   },
+   {
+    "source": "```python\nclass Policy:\n    # Changed from pure round-robin to round-robin with a recency bias:\n    # after each recorded score, we remember the best task so far and\n    # alternate between trying the next unseen task and re-picking the\n    # current best, which helps when some tasks are consistently easier.\n    def __init__(self):\n        self.best_task = None\n        self.best_score = -1.0\n        self.attempts = 0\n\n    def pick(self, keys, round_index):\n        # If we have a best task and we've tried at least one full cycle,\n        # occasionally re-pick the best to exploit it.\n        if self.best_task is not None and self.attempts >= len(keys):\n            # Alternate: even rounds try next, odd rounds exploit best\n            if round_index % 2 == 1:\n                return self.best_task\n        return keys[round_index % len(keys)]\n\n    def record(self, task_id, score):\n        self.attempts += 1\n        if score > self.best_score:\n            self.best_score = score\n            self.best_task = task_id\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-0:3"
+   },
+   {
+    "source": "```python\nclass Policy:\n    # Changed from round-robin to UCB1-style exploration to focus on promising tasks\n    # while still exploring, which helps when some tasks are easier than others.\n    def __init__(self):\n        self.counts = {}  # task_id -> number of times picked\n        self.scores = {}  # task_id -> sum of scores\n        self.total_picks = 0\n\n    def pick(self, keys, round_index):\n        # If any task never tried, try it first (exploration)\n        untried = [k for k in keys if k not in self.counts]\n        if untried:\n            return untried[0]\n        # UCB1: pick task with highest upper confidence bound\n        total = self.total_picks\n        best_key = None\n        best_ucb = -float('inf')\n        for k in keys:\n            n = self.counts[k]\n            avg = self.scores[k] / n\n            # exploration bonus: sqrt(2*ln(total)/n)\n            ucb = avg + math.sqrt(2 * math.log(total) / n)\n            if ucb > best_ucb:\n                best_ucb = ucb\n                best_key = k\n        return best_key\n\n    def record(self, task_id, score):\n        if task_id not in self.counts:\n            self.counts[task_id] = 0\n            self.scores[task_id] = 0.0\n        self.counts[task_id] += 1\n        self.scores[task_id] += score\n        self.total_picks += 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-0:0"
+   },
+   {
+    "source": "```python\nclass Policy:\n    # Changed from round-robin to UCB1-style exploration to focus on promising tasks\n    # while still exploring, which helps when tasks have varying difficulty.\n    def __init__(self):\n        self.counts = {}\n        self.rewards = {}\n        self.total = 0\n\n    def pick(self, keys, round_index):\n        import math\n        # First visit each task once to get initial data\n        for k in keys:\n            if k not in self.counts:\n                return k\n        # UCB1: pick task with highest upper confidence bound\n        best_key = None\n        best_ucb = -float('inf')\n        for k in keys:\n            n = self.counts[k]\n            avg = self.rewards[k] / n if n > 0 else 0.0\n            # exploration bonus: sqrt(2*ln(total)/n)\n            bonus = math.sqrt(2 * math.log(self.total + 1) / n) if n > 0 else float('inf')\n            ucb = avg + bonus\n            if ucb > best_ucb:\n                best_ucb = ucb\n                best_key = k\n        return best_key\n\n    def record(self, task_id, score):\n        if task_id not in self.counts:\n            self.counts[task_id] = 0\n            self.rewards[task_id] = 0.0\n        self.counts[task_id] += 1\n        self.rewards[task_id] += score\n        self.total += 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-0:1"
+   },
+   {
+    "source": "```python\nclass Policy:\n    # Changed from pure round-robin to round-robin with a recency bias:\n    # after each recorded score, we remember the best task so far and\n    # alternate between trying the next unseen task and re-picking the\n    # current best, which helps when some tasks are consistently easier.\n    def __init__(self):\n        self.best_task = None\n        self.best_score = -1.0\n        self.attempts = 0\n\n    def pick(self, keys, round_index):\n        # If we have a best task and we've tried at least one full cycle,\n        # occasionally re-pick the best to exploit it.\n        if self.best_task is not None and self.attempts >= len(keys):\n            # Alternate: even rounds try next, odd rounds exploit best\n            if round_index % 2 == 1:\n                return self.best_task\n        return keys[round_index % len(keys)]\n\n    def record(self, task_id, score):\n        self.attempts += 1\n        if score > self.best_score:\n            self.best_score = score\n            self.best_task = task_id\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-0:3"
+   },
+   {
+    "source": "```python\nclass Policy:\n    # Changed from pure round-robin to round-robin with a recency-weighted\n    # preference for tasks that have shown high scores, to exploit promising tasks\n    # while still exploring all keys.\n    def __init__(self):\n        self.scores = {}  # task_id -> list of recent scores\n        self.max_history = 10\n\n    def pick(self, keys, round_index):\n        # If we have no data, fall back to round-robin\n        if not self.scores:\n            return keys[round_index % len(keys)]\n        \n        # Compute a score for each key: average of recent scores (or 0 if unseen)\n        # plus a small exploration bonus for unseen tasks\n        best_key = None\n        best_val = -1\n        for i, key in enumerate(keys):\n            hist = self.scores.get(key, [])\n            if hist:\n                avg = sum(hist) / len(hist)\n            else:\n                avg = 0.0\n            # Add a small recency bonus: more recent scores count more\n            # and a tiny exploration bonus for unseen tasks\n            val = avg + (0.01 if not hist else 0.0)\n            # Slight preference for earlier keys to break ties (round-robin flavor)\n            val += 1e-6 * (len(keys) - i)\n            if val > best_val:\n                best_val = val\n                best_key = key\n        return best_key\n\n    def record(self, task_id, score):\n        if task_id not in self.scores:\n            self.scores[task_id] = []\n        self.scores[task_id].append(score)\n        # Keep only recent history\n        if len(self.scores[task_id]) > self.max_history:\n            self.scores[task_id] = self.scores[task_id][-self.max_history:]\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-0:2"
+   },
+   {
+    "source": "```python\nclass Policy:\n    # Changed from round-robin to UCB1-style exploration to focus on promising tasks\n    # while still exploring, which helps when tasks have varying difficulty.\n    def __init__(self):\n        self.counts = {}\n        self.rewards = {}\n        self.total = 0\n\n    def pick(self, keys, round_index):\n        import math\n        # First visit each task once to get initial data\n        for k in keys:\n            if k not in self.counts:\n                return k\n        # UCB1: pick task with highest upper confidence bound\n        best_key = None\n        best_ucb = -float('inf')\n        for k in keys:\n            n = self.counts[k]\n            avg = self.rewards[k] / n if n > 0 else 0.0\n            # exploration bonus: sqrt(2*ln(total)/n)\n            bonus = math.sqrt(2 * math.log(self.total + 1) / n) if n > 0 else float('inf')\n            ucb = avg + bonus\n            if ucb > best_ucb:\n                best_ucb = ucb\n                best_key = k\n        return best_key\n\n    def record(self, task_id, score):\n        if task_id not in self.counts:\n            self.counts[task_id] = 0\n            self.rewards[task_id] = 0.0\n        self.counts[task_id] += 1\n        self.rewards[task_id] += score\n        self.total += 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-0:1"
+   },
+   {
+    "source": "```python\nclass Policy:\n    # Changed from round-robin to UCB1-style exploration to focus on promising tasks\n    # while still exploring, which helps when some tasks are easier than others.\n    def __init__(self):\n        self.counts = {}  # task_id -> number of times picked\n        self.scores = {}  # task_id -> sum of scores\n        self.total_picks = 0\n\n    def pick(self, keys, round_index):\n        # If any task never tried, try it first (exploration)\n        untried = [k for k in keys if k not in self.counts]\n        if untried:\n            return untried[0]\n        # UCB1: pick task with highest upper confidence bound\n        total = self.total_picks\n        best_key = None\n        best_ucb = -float('inf')\n        for k in keys:\n            n = self.counts[k]\n            avg = self.scores[k] / n\n            # exploration bonus: sqrt(2*ln(total)/n)\n            ucb = avg + math.sqrt(2 * math.log(total) / n)\n            if ucb > best_ucb:\n                best_ucb = ucb\n                best_key = k\n        return best_key\n\n    def record(self, task_id, score):\n        if task_id not in self.counts:\n            self.counts[task_id] = 0\n            self.scores[task_id] = 0.0\n        self.counts[task_id] += 1\n        self.scores[task_id] += score\n        self.total_picks += 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-0:0"
+   },
+   {
+    "source": "```python\nclass Policy:\n    # Changed from pure round-robin to round-robin with a recency bias:\n    # after each recorded score, we remember the best task so far and\n    # alternate between trying the next unseen task and re-picking the\n    # current best, which helps when some tasks are consistently easier.\n    def __init__(self):\n        self.best_task = None\n        self.best_score = -1.0\n        self.attempts = 0\n\n    def pick(self, keys, round_index):\n        # If we have a best task and we've tried at least one full cycle,\n        # occasionally re-pick the best to exploit it.\n        if self.best_task is not None and self.attempts >= len(keys):\n            # Alternate: even rounds try next, odd rounds exploit best\n            if round_index % 2 == 1:\n                return self.best_task\n        return keys[round_index % len(keys)]\n\n    def record(self, task_id, score):\n        self.attempts += 1\n        if score > self.best_score:\n            self.best_score = score\n            self.best_task = task_id\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-0:3"
+   },
+   {
+    "source": "```python\nclass Policy:\n    # Changed from pure round-robin to round-robin with a recency-weighted\n    # preference for tasks that have shown high scores, to exploit promising tasks\n    # while still exploring all keys.\n    def __init__(self):\n        self.scores = {}  # task_id -> list of recent scores\n        self.max_history = 10\n\n    def pick(self, keys, round_index):\n        # If we have no data, fall back to round-robin\n        if not self.scores:\n            return keys[round_index % len(keys)]\n        \n        # Compute a score for each key: average of recent scores (or 0 if unseen)\n        # plus a small exploration bonus for unseen tasks\n        best_key = None\n        best_val = -1\n        for i, key in enumerate(keys):\n            hist = self.scores.get(key, [])\n            if hist:\n                avg = sum(hist) / len(hist)\n            else:\n                avg = 0.0\n            # Add a small recency bonus: more recent scores count more\n            # and a tiny exploration bonus for unseen tasks\n            val = avg + (0.01 if not hist else 0.0)\n            # Slight preference for earlier keys to break ties (round-robin flavor)\n            val += 1e-6 * (len(keys) - i)\n            if val > best_val:\n                best_val = val\n                best_key = key\n        return best_key\n\n    def record(self, task_id, score):\n        if task_id not in self.scores:\n            self.scores[task_id] = []\n        self.scores[task_id].append(score)\n        # Keep only recent history\n        if len(self.scores[task_id]) > self.max_history:\n            self.scores[task_id] = self.scores[task_id][-self.max_history:]\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-0:2"
+   }
+  ],
+  "proposals_rejected_by_gate": 0,
+  "invalid_proposals": 0,
   "history": [
    {
     "round": 0,
@@ -39,6 +115,33 @@
    },
    {
     "round": 2,
+    "held_out_reward": 0.875,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "oracle-rejected": 1
+    }
+   },
+   {
+    "round": 3,
+    "held_out_reward": 0.875,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "oracle-rejected": 1
+    }
+   },
+   {
+    "round": 4,
+    "held_out_reward": 0.875,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "oracle-rejected": 1
+    }
+   },
+   {
+    "round": 5,
     "held_out_reward": 0.875,
     "committed": 0,
     "rejected": 1,
@@ -168,16 +271,16 @@
   "outer_seed": 0
  },
  "usage": {
-  "calls": 574,
-  "prompt_tokens": 12533,
-  "completion_tokens": 15458,
-  "total_tokens": 27991,
-  "model_seconds": 1077.8340911865234,
+  "calls": 464,
+  "prompt_tokens": 0,
+  "completion_tokens": 0,
+  "total_tokens": 0,
+  "model_seconds": 4.512300252914429,
   "failures": 0,
-  "wall_seconds": 221.312913149,
+  "wall_seconds": 5.9388701190000575,
   "completion_cache": {
-   "hits": 354,
-   "misses": 95
+   "hits": 432,
+   "misses": 0
   }
  }
 }

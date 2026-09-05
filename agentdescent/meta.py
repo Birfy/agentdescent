@@ -1132,9 +1132,16 @@ def _outer_tasks(problems: Union[Sequence[Problem], Mapping[str, Problem]],
                                  else {f"p{i}": p for i, p in enumerate(problems)})
     if not named:
         raise ValueError("meta_evolve() got no problems")
+    # Seed-major, not problem-major, and this is not cosmetic: `evolve()` splits
+    # train from held-out **by position**, so a list grouped by problem hands the
+    # whole of the first problem to train and the whole of the last to the gate --
+    # the search then never rolls out on the problem it is judged on. Measured on
+    # two GSM-Hard windows x four seeds: every one of twelve rollouts landed on
+    # `gsmhard-0`, and every acceptance decision was made on `gsmhard-1`.
+    # Interleaving puts every problem on both sides of any positional cut.
     tasks = [Task(id=f"{name}:{seed}", prompt=f"{name} (seed {seed})",
                   meta={"problem": name, "seed": seed})
-             for name in named for seed in seeds]
+             for seed in seeds for name in named]
     return tasks, named
 
 
