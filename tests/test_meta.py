@@ -342,3 +342,56 @@ def test_outer_tasks_interleave_so_a_positional_split_sees_every_problem():
     train = {t.meta["problem"] for t in tasks[:cut]}
     held_out = {t.meta["problem"] for t in tasks[cut:]}
     assert train == held_out == {"a", "b"}, "a positional split must see both problems"
+
+
+# -- the task_sampler contract the engine actually imposes --------------------
+
+
+STALE_KEY_SAMPLER = """class Policy:
+    def __init__(self):
+        self.counts = {}
+
+    def pick(self, keys, round_index):
+        untried = [k for k in keys if k not in self.counts]
+        if untried:
+            return untried[0]
+        return max(self.counts, key=lambda k: self.counts[k])
+
+    def record(self, task_id, score):
+        self.counts[task_id] = self.counts.get(task_id, 0) + 1
+"""
+
+MUTATING_SAMPLER = """class Policy:
+    def pick(self, keys, round_index):
+        keys.sort()
+        return keys[0]
+
+    def record(self, task_id, score):
+        pass
+"""
+
+
+@pytest.mark.parametrize("source, reason", [
+    (STALE_KEY_SAMPLER, "not in the keys it was given"),
+    (MUTATING_SAMPLER, "must not mutate"),
+])
+def test_the_sampler_smoke_walks_a_changing_shard(source, reason):
+    """The engine hands each worker its own shard, so `keys` changes between
+    calls -- and every sampler a live reflector proposed kept per-task state and
+    returned a stale id, which the engine turns into a KeyError two rounds in.
+    A fixed key list could not see it; the smoke test now walks the branches.
+    """
+    from agentdescent.meta import compile_policy_source
+
+    with pytest.raises(ValueError, match=reason):
+        compile_policy_source("task_sampler", source)
+
+
+def test_the_shipped_samplers_pass_the_stricter_smoke():
+    """A gate that rejects the engine's own policies would be wrong, not strict."""
+    from agentdescent.meta import _smoke_task_sampler, compile_policy_source, seed_source
+    from agentdescent.sampling import DifficultyWeighted, RoundRobin
+
+    for policy in (RoundRobin(), DifficultyWeighted()):
+        _smoke_task_sampler(policy)
+    assert compile_policy_source("task_sampler", seed_source("task_sampler"))

@@ -725,11 +725,37 @@ def _smoke_selection(policy: Any) -> None:
 
 
 def _smoke_task_sampler(policy: Any) -> None:
-    keys = ["t0", "t1", "t2"]
-    for round_index in range(4):
-        if policy.pick(keys, round_index) not in keys:
-            raise ValueError("pick() must return one of the keys")
-    policy.record("t1", 0.5)
+    """`pick` must answer with a key from the list it was **just** handed.
+
+    The first version of this checked one fixed key list, and that is not the
+    contract: the engine hands a worker its own shard, so the list changes
+    between calls, and a sampler that remembers a key and returns it later gets
+    a `KeyError` out of the engine's `by_id` lookup. Measured -- every sampler
+    a reflector proposed for this slot kept per-task state and returned a stale
+    id, the inner run died after two rounds, and the gate had passed all of
+    them because the ids never changed under the old smoke test.
+    """
+    #: Shards a worker could plausibly be handed, in an order that walks every
+    #: branch a stateful sampler has: fresh keys, a disjoint shard, a shard whose
+    #: keys it has **all** seen and scored (the fallback branch, and the one that
+    #: crashed), and a shard it has never seen at all.
+    #: Deliberately not in sorted order: a sampler that sorts the caller's list
+    #: in place is mutating the engine's shard, and with a sorted fixture that
+    #: is invisible.
+    shards = [["t2", "t0", "t1"], ["t4", "t3"], ["t2", "t0", "t1"],
+              ["t3"], ["u1", "u0"]]
+    for round_index, keys in enumerate(shards):
+        frozen = list(keys)
+        for _ in range(len(frozen) + 1):     # several picks inside one shard
+            choice = policy.pick(keys, round_index)
+            if choice not in frozen:
+                raise ValueError(
+                    f"pick() returned {choice!r}, which is not in the keys it was "
+                    f"given ({frozen}) -- the engine looks that id up in this "
+                    "round's tasks and raises KeyError")
+            if list(keys) != frozen:
+                raise ValueError("pick() must not mutate the keys it is given")
+            policy.record(choice, 1.0 if round_index % 2 else 0.0)
 
 
 def _smoke_staleness(policy: Any) -> None:

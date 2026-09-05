@@ -82,17 +82,25 @@ def _sampler_sensitive(bonus):
     return problem
 
 
+#: A correct greedy sampler. The first version of this fixture answered from
+#: its own memory (`min(self.seen, ...)`) rather than from `keys`, which is the
+#: stale-id bug every live reflector proposal had -- and the stricter smoke test
+#: in `agentdescent.meta` caught the fixture too, which is the gate working.
 PROPOSAL = """```python
 class Policy:
     greedy = True
 
+    def __init__(self):
+        self.seen = {}
+
     def pick(self, keys, round_index):
-        return min(self.seen, key=self.seen.get) if self.seen else keys[0]
+        unseen = [k for k in keys if k not in self.seen]
+        if unseen:
+            return unseen[0]
+        return min(keys, key=lambda k: self.seen.get(k, 0.0))
 
     def record(self, task_id, score):
         self.seen[task_id] = score
-
-    seen = {}
 ```"""
 
 
