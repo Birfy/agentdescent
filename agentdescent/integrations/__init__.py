@@ -258,6 +258,12 @@ def install_codex(home: str, w: _Writer) -> None:
                     codex_config_block(), what="mcp_servers entry")
     w.note("Codex has no hooks; add `run agentdescent status --brief at the start of a "
            "session` to AGENTS.md if you want in-progress runs surfaced.")
+    # Codex reads the same plugin format as Claude Code, and installing the
+    # plugin brings the MCP server with it -- one command instead of the two
+    # edits above. Verified against codex-cli 0.153.4.
+    w.note("or, in one command instead of the two edits above: "
+           "codex plugin marketplace add Birfy/agentdescent && "
+           "codex plugin add agentdescent@agentdescent")
 
 
 # ---------------------------------------------------------------------------

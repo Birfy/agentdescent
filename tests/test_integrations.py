@@ -369,3 +369,42 @@ def test_the_dsh_client_half_is_declared_where_dsh_looks(tmp_path):
     assert "conversation.session.header.actions" in src
     # the panel it reads is the loopback one `agentdescent serve` provides
     assert '"http://127.0.0.1:8787/"' in src
+
+
+def test_codex_installs_the_same_plugin_as_claude_code(tmp_path):
+    """Codex reads the Claude Code plugin format and marketplace.
+
+    The plugin brings the MCP server with it, so the file route is the
+    alternative rather than the only way -- verified against codex-cli
+    0.153.4, which resolves .claude-plugin/marketplace.json and lists the
+    plugin at integrations/claude-code."""
+    codex = shutil.which("codex")
+    if not codex:
+        pytest.skip("needs the codex CLI")
+    env = {**os.environ, "CODEX_HOME": str(tmp_path / "codex")}
+    os.makedirs(env["CODEX_HOME"])
+
+    add = subprocess.run([codex, "plugin", "marketplace", "add", ROOT],
+                         capture_output=True, text=True, timeout=180, env=env)
+    assert add.returncode == 0, add.stderr
+    listed = subprocess.run([codex, "plugin", "list"],
+                            capture_output=True, text=True, timeout=180, env=env)
+    assert listed.returncode == 0, listed.stderr
+    assert "agentdescent@agentdescent" in listed.stdout, listed.stdout
+    assert os.path.join("integrations", "claude-code") in listed.stdout
+
+    install_ = subprocess.run([codex, "plugin", "add", "agentdescent@agentdescent"],
+                              capture_output=True, text=True, timeout=300, env=env)
+    assert install_.returncode == 0, install_.stderr
+    # the server the plugin declares is live without anything in mcp_servers
+    cfg = _read(os.path.join(env["CODEX_HOME"], "config.toml"))
+    assert "[mcp_servers.agentdescent]" not in cfg
+    mcp = subprocess.run([codex, "mcp", "list"],
+                         capture_output=True, text=True, timeout=180, env=env)
+    assert "agentdescent" in mcp.stdout and "enabled" in mcp.stdout, mcp.stdout
+
+
+def test_the_codex_installer_points_at_the_plugin_route(tmp_path):
+    lines = install("codex", dry_run=True, home=str(tmp_path))
+    assert any("codex plugin marketplace add" in l and "codex plugin add" in l
+               for l in lines), lines

@@ -23,8 +23,42 @@ agentdescent install dsh               # or: claude-code, codex, opencode
 |---|---|---|
 | `dsh` | `~/.dsh/skills/agentdescent/SKILL.md` + `hooks.json`; an `@deepseek-ai/dsh-mcp-client` entry and the `hooks-claude-code` bridge appended to `~/.dsh/cordis.patch.yml` | restart `dsh`; check with `dsh --profile web --dump-config \| grep agentdescent` |
 | `claude-code` | a plugin directory at `~/.agentdescent/plugins/claude-code/` (`plugin.json`, skill, `/agentdescent:evolve`, `.mcp.json`, a `SessionStart` hook) | `claude --plugin-dir ~/.agentdescent/plugins/claude-code`, or `/plugin marketplace add Birfy/agentdescent` then `/plugin install agentdescent@agentdescent` |
-| `codex` | `~/.codex/skills/agentdescent/SKILL.md`; an `[mcp_servers.agentdescent]` block appended to `~/.codex/config.toml` | restart Codex; check with `codex mcp list` |
+| `codex` | `~/.codex/skills/agentdescent/SKILL.md`; an `[mcp_servers.agentdescent]` block appended to `~/.codex/config.toml` | restart Codex; check with `codex mcp list`. **Or skip `install` entirely** and use the plugin — see below |
 | `opencode` | `~/.config/opencode/skill/agentdescent/SKILL.md`; an `mcp.agentdescent` entry merged into `~/.config/opencode/opencode.jsonc` | restart OpenCode; check with `opencode mcp list` |
+
+### Codex: the same plugin as Claude Code
+
+Codex reads the Claude Code plugin format, marketplace and all, so the package
+this repository already publishes installs there in one command — and brings
+the MCP server with it, so none of the file edits above are needed:
+
+```bash
+codex plugin marketplace add Birfy/agentdescent      # or a local checkout path
+codex plugin add agentdescent@agentdescent
+codex plugin list                                    # installed, enabled
+codex mcp list                                       # agentdescent ... enabled
+```
+
+Verified against codex-cli 0.153.4: `codex plugin list` reads
+`.claude-plugin/marketplace.json` and resolves the plugin at
+`integrations/claude-code`, and the server it declares shows up in
+`codex mcp list` with nothing written into `mcp_servers` by hand.
+
+### Why OpenCode is configuration and not a plugin
+
+OpenCode has a plugin system too, but it is a different thing: a plugin is a JS
+module (`@opencode-ai/plugin`) whose `Hooks` are interception points —
+`tool.execute.before` / `.after`, `chat.message`, `chat.params`,
+`permission.ask`, `event`, `auth`, and a `config` hook that can mutate the
+loaded config.
+
+It *could* therefore inject the MCP server programmatically. It is not worth it
+for what AgentDescent contributes: a skill and an MCP server are both plain
+configuration in OpenCode, so the plugin would add an npm package, a publish
+step and a version to keep in step, to arrive at the same two entries
+`install opencode` writes directly. A plugin would earn its place only for
+behaviour configuration cannot express — intercepting tool calls, or pushing
+run status into the chat — which is not what this integration does.
 
 ### DeepSeek Harness: a native plugin, or the files
 

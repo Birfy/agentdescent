@@ -80,6 +80,16 @@ All notable changes to AgentDescent are documented here. The format follows
   loopback `Origin` -- `*` would let any page the user visits read their run
   store off localhost, and a prefix check would accept
   `http://127.0.0.1.evil.com`.
+- **Codex installs the same plugin as Claude Code.** Codex reads the Claude
+  Code plugin format and marketplace, so `codex plugin marketplace add
+  Birfy/agentdescent && codex plugin add agentdescent@agentdescent` installs the
+  package this repository already publishes, and the MCP server comes with it --
+  verified with `codex plugin list` and `codex mcp list` against codex-cli
+  0.153.4. `agentdescent install codex` still writes the files for anyone who
+  would rather not use a marketplace, and now prints the one-command
+  alternative. (OpenCode's plugins are a different thing -- a JS hook API for
+  intercepting tools and chat -- so its skill and MCP server stay plain
+  configuration; see docs/plugins.md.)
 - **Every host manifest is now verified against the real CLI** (dsh 0.1.2-rc.1,
   Claude Code 2.1.261, codex-cli 0.153.4, opencode 1.18.29), which corrected
   three things that documentation research had got wrong:
