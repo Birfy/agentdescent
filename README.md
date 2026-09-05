@@ -39,23 +39,29 @@ Quality is claimed only where the design can support it. The
 
 ## How it works
 
-```mermaid
-flowchart TD
-    W[N workers<br/>roll out a task against a ledger snapshot] --> P[propose<br/>a natural-language edit]
-    P --> D[strategy.to_diff<br/>a keyed diff + an evidence card]
-    D --> S1[1 · staleness filter<br/>keep, rebase, or discard a lagging card]
-    S1 --> S2[2 · conflict resolution<br/>which contradicting diffs survive]
-    S2 --> S3[3 · fusion / reflective merge<br/>one candidate out of the survivors]
-    S3 --> S4[4 · audit + Beta-posterior acceptance<br/>measured on a held-out split]
-    S4 --> S5[5 · commit<br/>compare-and-swap onto dev]
-    S5 --> L[git-backed ledger<br/>dev, promoted to stable after K clean rounds]
-    L -->|snapshot refresh, bounded by the lag budget| W
-```
+![AgentDescent architecture: N workers roll out against ledger snapshots and emit
+diffs with evidence cards into a buffer; a single aggregator thread runs the
+five-stage merge pipeline and commits to a git-backed ledger; four pluggable
+seams sit under the components they select; the L0 governance layer gates the
+audit step.](docs/assets/architecture.png)
 
-Steps 1–5 are the **aggregator**: one optimizer step over a discrete space.
-Whether it has anything to do at all is decided upstream, by the **key space**
-your strategy writes — edits on disjoint keys fuse, edits on the same key
-conflict. That is why the table above starts with a one-key artifact.
+**Solid, top:** the fixed data path. *N* workers roll out tasks against ledger
+snapshots and emit diffs with evidence cards; one aggregator thread runs the
+five-stage merge and commits winners; the green edge is the only feedback path,
+bounded by the lag budget.
+
+**Dashed, bottom:** the seams, each selected by one keyword argument of
+`evolve()`. **Red:** the governance layer, deliberately *not* a seam — a
+self-modifying system must not be able to replace its own evaluator.
+
+Stages 1–5 are one optimizer step over a discrete space. Whether that step has
+anything to do at all is decided upstream, by the **key space** your strategy
+writes — edits on disjoint keys fuse, edits on the same key conflict. That is
+why the table above starts with a one-key artifact.
+
+The figure is the paper's, rendered from its TikZ source by
+[`tools/gen_architecture_figure.py`](tools/gen_architecture_figure.py) so it
+cannot drift from what the paper shows.
 
 ## Install and run something in 30 seconds
 
