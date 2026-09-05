@@ -77,6 +77,25 @@ DEFAULT_OUTPUT = Path("bench/results/metasearch-gsm.json")
 # ---------------------------------------------------------------------------
 
 
+#: What the engine imposes on this slot beyond the Protocol signature, stated
+#: for the reflector. Not a hint about *which* sampler to write -- it is the
+#: calling convention any implementer would be told, and every proposal the
+#: first live runs produced violated it: each kept per-task state and answered
+#: from its own memory, which the engine turns into a KeyError two rounds in.
+SAMPLER_NOTES = """How the engine calls this, which is stricter than the signature:
+
+- `keys` is ONE WORKER'S SHARD for this round, not the whole task set, and it
+  CHANGES between calls. The id you return is looked up in that round's tasks,
+  so it must come from the `keys` you were just handed -- never from a set you
+  remembered earlier. Returning a remembered id raises KeyError and kills the run.
+- You may keep state across calls (a dict of task_id -> score is normal), but
+  use it only to CHOOSE AMONG the current `keys`.
+- Do not mutate `keys`; it belongs to the caller.
+- `record(task_id, score)` arrives after the rollout you picked, so a task's
+  score is known only after it has been spent at least once. `score >= 1.0`
+  means the artifact already solves that task -- and the engine asks for no
+  proposal from a rollout that passed, so a pick that lands on a solved task
+  buys nothing."""
 def cached_completion(complete: Callable[[str], str], directory: str, *,
                       key_extra: str = "") -> Callable[[str], str]:
     """``prompt -> text``, memoised on disk. Makes an inner run reproducible.
@@ -335,7 +354,7 @@ def run_experiment(complete: Callable[[str], str], *, train: Dict[str, Problem],
         raise ValueError(f"train and validate share problems: {sorted(set(train) & set(validate))}")
     if set(seeds) & set(validate_seeds):
         raise ValueError("validation seeds must not overlap the outer run's seeds")
-    spec = policy_source("task_sampler")
+    spec = policy_source("task_sampler", notes=SAMPLER_NOTES)
     seed_rule = spec.render(spec.initial())
     propose, proposals = recording_reflector(complete, spec)
     started = time.monotonic()
