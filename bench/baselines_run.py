@@ -22,9 +22,11 @@ when that split says so, and the fork arm *selects* on it -- so reporting it
 would be reporting a training score twice over. `test_eval` scores `ds.test`,
 which no gate in any arm ever sees.
 
-Cost is the reason the defaults are small. Three arms x three seeds is nine runs,
-and the fork arm is N runs by itself, so `--width 4 --seeds 0,1,2` is 33 runs of
-`--budget-rollouts` rollouts each. Print `--plan` first.
+Cost is the reason the defaults are small. Three arms x three seeds is nine
+*results*, but a fork arm is N runs by itself, so the run count is what
+`runs = len(seeds) * sum(width if a == "fork" else 1 for a in arms)` says below:
+`--width 4 --seeds 0,1,2` is 18 runs of `--budget-rollouts` rollouts each, not
+nine. Print `--plan` first.
 """
 
 from __future__ import annotations

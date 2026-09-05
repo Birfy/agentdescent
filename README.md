@@ -15,7 +15,7 @@
 📄 **Paper:** [*AgentDescent: Asynchronous Parallel Self-Evolution of LLM Agents by Merging
 Conflicting Edits*](paper/main.pdf) — the design, the closed-form condition under which
 merging can fire at all, and a live-model evaluation with every generating script named.
-Source and per-result raw data are in [`paper/`](paper/) and [`bench/results/`](bench/results/).
+Source is in [`paper/`](paper/). Per-result raw data is in [`bench/results/`](bench/results/) for most results, including the reflective-merge ablation; the merge-versus-selection sweeps are re-measurable from the command the paper names rather than recomputable, because their per-run data was not retained.
 
 AgentDescent puts the deep-learning **training stack** on top of agents. The
 "parameters" are a **library of evolvable artifacts** (skills, prompts, harness
