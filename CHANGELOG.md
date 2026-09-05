@@ -8,6 +8,20 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- **`agentdescent demo` -- a complete evolution with no API key.** Every other
+  entry point needs a worker agent on `PATH`, a provider key and a dataset with
+  known answers, so the first thing a newcomer saw was an error about a missing
+  file. `demo` builds a skill directory whose `references/rules.md` names the
+  wrong column, twelve CSVs with known totals, and a spec pointing at the two
+  public callables `agentdescent.demo:offline_agent` (a subprocess bound to the
+  workspace, which really reads the candidate skill off disk) and
+  `offline_reflector` -- then runs the real loop and prints what it learned.
+  Nothing is mocked but the model, so staging, the layout, the ledger, the
+  parallel workers, the merge and the held-out gate all run as they do against
+  Claude Code. Any spec can point at the same pair to rehearse before spending
+  anything. `agentdescent init` now says what to do next when the cases file
+  does not exist yet. Beginner path:
+  [docs/plugin-quickstart.md](docs/plugin-quickstart.md).
 - **AgentDescent as a plugin for DeepSeek Harness, Claude Code and Codex.** A
   shared `SKILL.md` teaches the host agent when to call it; an MCP server
   (`agentdescent mcp`, `pip install "agentdescent[mcp]"`) exposes `doctor`,

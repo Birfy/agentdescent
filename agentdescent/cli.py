@@ -6,6 +6,7 @@ Claude Code or DeepSeek Harness can be inspected from a shell and a run started
 from a shell can be picked up by an agent. The skill file falls back to these
 commands on a host with no MCP.
 
+    agentdescent demo                                               run one, offline, no key
     agentdescent init    <path> [--kind ...] [--data cases.jsonl]   write a starter spec
     agentdescent plan    <spec.json>                                validate + cost, no run
     agentdescent evolve  <spec.json> [--detach] [--budget USD]      start a run
@@ -168,6 +169,61 @@ def _tree_diff(before: Dict[str, str], after: Dict[str, str]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def cmd_demo(a: argparse.Namespace) -> int:
+    """Build a complete example and run it, so the first thing seen works."""
+    import tempfile
+
+    from . import demo as demo_mod
+
+    root = os.path.abspath(os.path.expanduser(a.dir)) if a.dir else tempfile.mkdtemp(
+        prefix="agentdescent-demo-")
+    os.makedirs(root, exist_ok=True)
+    spec_dict = demo_mod.build(root)
+    skill = os.path.join(root, demo_mod.DEMO_SKILL)
+    rules = os.path.join(skill, "references", "rules.md")
+
+    print(f"A skill that totals a column of a CSV, in {root}")
+    print(f"  {demo_mod.DEMO_SKILL}/references/rules.md  ->  "
+          f"{open(rules).read().strip()!r}   (wrong: `id` is a row number)")
+    print("  cases.jsonl                        ->  12 CSVs with known totals")
+    print("  the agent is a local program, so this costs nothing and needs no key\n")
+
+    spec = EvolveSpec.from_dict(spec_dict)
+    comp = compose(spec)
+    est = estimate(comp)
+    print(f"plan: {len(comp.tasks)} tasks, "
+          f"{comp.kwargs['rounds']} rounds x {comp.kwargs['n_workers']} workers, "
+          f"up to {est['agent_calls_upper_bound']} agent calls\n")
+
+    rd = runstore.create(spec.to_dict(), store=a.store)
+    print(f"running ({rd.run_id})...")
+    result = runstore.execute(rd)
+    for info in result.history:
+        print(f"  round {info.round:>2}  reward={info.held_out_reward:.3f}  "
+              f"+{info.committed}/-{info.rejected}")
+
+    print(f"\nheld-out reward: {result.final_reward:.3f}   outcomes: {result.outcomes()}")
+    print(f"what it learned:  rules.md -> "
+          f"{result.state.get('references/rules.md', '').strip()!r}")
+    if result.final_reward < 1.0:
+        print("\n(that is lower than expected for the demo; the run store has the detail:")
+        print(f" {rd.path})")
+        return 1
+    print(f"""
+The skill on disk is untouched -- an evolved artifact only lands when you say so:
+
+  agentdescent show  {rd.run_id}          the diff
+  agentdescent apply {rd.run_id} --dry-run  what it would write
+
+Your own run is the same spec with three things changed -- your directory, your
+cases.jsonl, and a real agent instead of the offline one:
+
+  agentdescent init <your-skill-dir> --data <your-cases.jsonl>
+  agentdescent doctor        # what is missing before a real run
+  agentdescent plan spec.json""")
+    return 0
+
+
 def cmd_init(a: argparse.Namespace) -> int:
     spec = starter_spec(a.path, kind=a.kind, data=a.data, agent=a.agent)
     out = a.out or os.path.join(".agentdescent", f"{os.path.basename(a.path.rstrip('/')) or 'spec'}.evolve.json")
@@ -175,7 +231,12 @@ def cmd_init(a: argparse.Namespace) -> int:
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(spec, fh, indent=2)
     print(f"wrote {out}")
-    print("edit data.path (your cases), score, and agent; then: agentdescent plan " + out)
+    data = spec["data"]["path"]
+    if not os.path.exists(os.path.expanduser(data)):
+        print(f"next: create {data} -- one JSON object per line, "
+              '{"prompt": "...", "gold": "..."}')
+        print("      (`agentdescent demo` runs a complete example, offline, to copy from)")
+    print(f"then: agentdescent plan {out}")
     return 0
 
 
@@ -442,6 +503,10 @@ def build_parser() -> argparse.ArgumentParser:
                                     "or $AGENTDESCENT_HOME/runs)")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("demo", help="build a complete example and run it, offline")
+    s.add_argument("--dir", help="where to build it (default: a temp directory)")
+    s.set_defaults(fn=cmd_demo)
 
     s = sub.add_parser("init", help="write a starter spec for a path")
     s.add_argument("path")

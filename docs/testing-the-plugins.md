@@ -10,7 +10,7 @@ The short version:
 pip install -e ".[dev,mcp]"
 pytest tests/test_evolvespec.py tests/test_runstore_cli.py tests/test_mcp.py \
        tests/test_plugin_runner.py tests/test_integrations.py \
-       tests/test_run_panel.py tests/test_stop_when.py
+       tests/test_run_panel.py tests/test_stop_when.py tests/test_demo.py
 ```
 
 That is the whole plugin surface, offline, in about a minute. Everything below
@@ -28,6 +28,7 @@ No credentials, no host installed, no network.
 | `test_plugin_runner.py` | `kind: plugin` against a stub host CLI: isolated host home, the validate gate, frozen hooks surviving a candidate that rewrites them, `env_passthrough` |
 | `test_integrations.py` | every host manifest, the checked-in plugin packages matching their renderers, and the skill naming only tools/kinds/verbs that exist |
 | `test_run_panel.py` | the HTTP panel, and that it refuses path traversal and non-loopback CORS |
+| `test_demo.py` | `agentdescent demo` — the skill really is wrong, the offline agent really obeys the one on disk, and the run fixes it without touching your files |
 
 Two of them reach further when the tools are present, and skip cleanly when not:
 
@@ -52,43 +53,37 @@ Every "problem" line it prints is something that will make a real run fail.
 
 ## 3. The offline end-to-end run
 
-This is the fastest way to see the whole loop without spending anything. It
-uses a stub agent that really reads the skill off disk, so staging, the
-workspace, the ledger, the merge and `write_to` all run.
+The fastest way to see the whole loop without spending anything, and the first
+thing to try when something is wrong — if this fails, the problem is the
+install, not the host.
 
 ```bash
-mkdir -p /tmp/ad-demo/csv-total/references && cd /tmp/ad-demo
-cat > csv-total/SKILL.md <<'EOF'
-# csv-total
-Read `references/rules.md` for which column of `data.csv` to total.
-Reply with only the number.
-EOF
-echo "COLUMN: id" > csv-total/references/rules.md      # wrong on purpose
+agentdescent demo --dir /tmp/ad-demo
+```
 
-python - <<'EOF'
-import json, random
-rng = random.Random(0)
-rows = []
-for _ in range(10):
-    amounts = [rng.randint(1, 99) for _ in range(4)]
-    csv = "id,amount\n" + "\n".join(f"{i+1},{a}" for i, a in enumerate(amounts))
-    rows.append({"prompt": "What is the total?", "gold": str(sum(amounts)),
-                 "fixtures": {"data.csv": csv}})
-open("cases.jsonl", "w").write("\n".join(json.dumps(r) for r in rows) + "\n")
-EOF
+It writes a skill whose `references/rules.md` names the wrong column, twelve
+CSVs with known totals, and a spec pointing at
+`agentdescent.demo:offline_agent` — a subprocess that reads the skill off disk,
+so staging, the workspace, the ledger, the merge and the held-out gate all run
+for real. Only the model is replaced.
 
-agentdescent init ./csv-total --data cases.jsonl --out spec.json
-# point it at an offline stub instead of a real agent: see docs/plugins.md
-agentdescent plan spec.json
-agentdescent evolve spec.json --detach
+Expected: `round 0 reward=1.000 +1/-0`, `held-out reward: 1.000`, and
+`what it learned: rules.md -> 'COLUMN: amount'`. Anything less and the exit
+status is 1 and the run directory is named for you to open.
+
+Then the verbs an agent would call, against that same run:
+
+```bash
 agentdescent status
 agentdescent show <run_id>          # the diff: COLUMN: id -> COLUMN: amount
 agentdescent apply <run_id> --dry-run
 ```
 
-A successful run ends `done`, `best=1.000`, and `show` prints a diff that fixes
-`rules.md`. `apply` without `--dry-run` writes it back and leaves a backup at
-`csv-total.bak-0`.
+`apply` without `--dry-run` writes it back and leaves a backup at
+`csv-total.bak-0`. To rehearse *your own* spec against the same free pair, point
+its `agent` and `reflect` at `agentdescent.demo:offline_agent` and
+`{"ref": "agentdescent.demo:offline_reflector", "call": false}` — both are
+public and inside the ref allowlist.
 
 ## 4. Each host
 

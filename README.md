@@ -153,6 +153,7 @@ Full docs live in [`docs/`](https://github.com/Birfy/agentdescent/tree/main/docs
 |  [Run everything, and extend it](https://github.com/Birfy/agentdescent/blob/main/docs/usage.md) | Every demo with its output, config reference, **plugging in your own `Evolvable` domain** |
 | [Evolving anything](https://github.com/Birfy/agentdescent/blob/main/docs/evolution.md) | The general engine — evolve any artifact by writing its `Strategy` + `run`/`reward`/`propose` |
 | [Connecting agents & LLMs](https://github.com/Birfy/agentdescent/blob/main/docs/agents.md) | The provider-agnostic completion layer |
+| [Start here — the plugin in three commands](https://github.com/Birfy/agentdescent/blob/main/docs/plugin-quickstart.md) | Install, `agentdescent demo`, then the plugin inside your agent |
 | [Use it from your agent](https://github.com/Birfy/agentdescent/blob/main/docs/plugins.md) | The plugin: DeepSeek Harness, Claude Code, Codex — spec, CLI, MCP server, evolving plugins themselves |
 | [Loading datasets](https://github.com/Birfy/agentdescent/blob/main/docs/dataloader.md) | The `agentdescent.dataloader` data layer — HF datasets-server + raw-file fetch, cached, dependency-free |
 | [Customizable parallelism](https://github.com/Birfy/agentdescent/blob/main/docs/parallelism.md) | Pluggable DP / TP / PP strategies — or write your own |
@@ -272,9 +273,16 @@ you the diff, and asks before it applies.
 
 ```bash
 pip install "agentdescent[mcp]"
+agentdescent demo                      # a real evolution, offline, no key
 agentdescent doctor                    # which agent CLIs and keys are here
-agentdescent install dsh               # or: claude-code, codex
+agentdescent install dsh               # or: claude-code, codex, opencode
 ```
+
+`demo` is the answer to *"show me it working"*: it builds a skill that is wrong
+on purpose, twelve cases with known answers, and an agent that is a local
+program — then runs the real loop and reports what it learned. No key, no cost,
+nothing written to your own files. New here? Start with
+[the plugin in three commands](https://github.com/Birfy/agentdescent/blob/main/docs/plugin-quickstart.md).
 
 The spec is an `evolve()` call as data — every field is an ordinary argument or
 a public building block, so there is no second API to learn:

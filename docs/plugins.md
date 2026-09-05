@@ -13,9 +13,16 @@ The design record — why it is shaped this way and what was considered — is
 
 ```bash
 pip install "agentdescent[mcp]"        # the CLI works without [mcp]; the MCP server needs it
+agentdescent demo                      # a complete evolution, offline, no key
 agentdescent doctor                    # which agent CLIs, keys and optional pieces are here
 agentdescent install dsh               # or: claude-code, codex, opencode
 ```
+
+If you have never run one, do `demo` before `install`: it builds a skill that is
+wrong on purpose, twelve cases with known answers and a local program as the
+agent, then runs the real loop — same staging, ledger, workers, merge and
+held-out gate, only the model replaced. [Start here — the plugin in three
+commands](plugin-quickstart.md) walks the whole path.
 
 `install` writes the shared skill and the host's manifest, and nothing else:
 
