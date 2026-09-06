@@ -404,3 +404,29 @@ def test_build_problems_can_take_the_hard_subset_for_the_other_benchmark(monkeyp
                          unseen_windows=1, other_windows=1, size=6, data_seed=0,
                          inner={"rounds": 1, "workers": 1})
     assert seen == {}
+
+
+def test_every_benchmark_in_the_registry_is_well_formed():
+    """Offline guard on the registry itself: a benchmark whose template is
+    missing a placeholder, or whose scorer name does not exist, fails at the
+    first live rollout rather than at import."""
+    from agentdescent.rewards import SCORERS, scorer as make_scorer
+
+    assert len(bench.BENCHMARKS) >= 8
+    for name, b in bench.BENCHMARKS.items():
+        assert b.name == name, f"{name}: registry key and Benchmark.name disagree"
+        assert b.scorer in SCORERS, f"{name}: unknown scorer {b.scorer!r}"
+        assert callable(make_scorer(b.scorer))
+        assert "{skill}" in b.template and "{prompt}" in b.template, f"{name}: bad template"
+        assert b.seed_instruction.strip(), f"{name}: no seed instruction"
+        assert b.measured_baseline.strip(), (
+            f"{name}: no measured baseline -- a saturated benchmark used as a "
+            "transfer target can only move down, which is how GSM8K got in")
+        assert callable(b.load)
+
+
+def test_the_saturated_benchmark_says_so():
+    """GSM8K is kept because the first run used it, and its note has to carry
+    the reason it is not a transfer target."""
+    note = bench.BENCHMARKS["gsm8k"].measured_baseline
+    assert "1.000" in note and "SATURATED" in note

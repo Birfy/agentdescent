@@ -142,15 +142,107 @@ def _hotpotqa_rows(limit: int) -> List[dict]:
     return out
 
 
+MCQ_SEED = ("Answer the multiple-choice question. Return only the number of the "
+            "correct option.")
+BBH_SEED = ("Answer the question. Return only the letter of the correct option in "
+            "parentheses, like (A).")
+
+
+def _mgsm_zh_rows(limit: int) -> List[dict]:
+    """MGSM's Chinese split -- the same arithmetic task in another language.
+
+    Fetched from the URL `examples/adas` already uses. It is here to ask whether
+    a rule evolved on English word problems is a rule about *search* or about
+    English: the task type is identical, so a sampler that transfers between
+    GSM-Hard and this one has generalised over something real.
+    """
+    from agentdescent.dataloader import fetch_text
+
+    text = fetch_text(
+        "https://raw.githubusercontent.com/ShengranHu/ADAS/main/dataset/mgsm/mgsm_zh.tsv",
+        cache_subdir="mgsm", filename="mgsm_zh.tsv")
+    rows = []
+    for line in text.splitlines():
+        if "\t" not in line:
+            continue
+        question, answer = line.split("\t", 1)
+        rows.append({"question": question.strip(), "answer": answer.strip()})
+    return rows[:limit]
+
+
+def _gpqa_rows(limit: int) -> List[dict]:
+    """GPQA Diamond -- PhD-level science, four options, graded on the option NUMBER.
+
+    Upstream (and `examples/adas`) letters the options; numbering them instead
+    lets `last_number` grade the reply exactly, which keeps the grader out of
+    this repository's hands. The option order is shuffled per row from a fixed
+    seed, so the gold number is stable across runs but is not always the same
+    position.
+    """
+    import csv
+    import io
+
+    from agentdescent.dataloader import fetch_text
+
+    raw = list(csv.DictReader(io.StringIO(fetch_text(
+        "https://raw.githubusercontent.com/ShengranHu/ADAS/main/dataset/gpqa_diamond.csv",
+        cache_subdir="gpqa", filename="gpqa_diamond.csv"))))
+    rows = []
+    for index, row in enumerate(raw[:limit]):
+        options = [row["Correct Answer"], row["Incorrect Answer 1"],
+                   row["Incorrect Answer 2"], row["Incorrect Answer 3"]]
+        order = list(range(4))
+        random.Random(index).shuffle(order)
+        shown = "\n".join(f"{position + 1}. {options[choice]}"
+                           for position, choice in enumerate(order))
+        rows.append({"question": f"{row['Question'].strip()}\n\nOptions:\n{shown}",
+                     "answer": str(order.index(0) + 1)})
+    return rows
+
+
+def _triviaqa_rows(limit: int) -> List[dict]:
+    """TriviaQA without its passages -- closed-book recall.
+
+    The counterpart to HotpotQA in the set: both are `contains`-scored QA, and
+    one has the evidence in the prompt while the other does not. A sampler that
+    behaves the same on both is not keying on retrieval.
+    """
+    from agentdescent.dataloader import hf_rows
+
+    rows = hf_rows("mandarjoshi/trivia_qa", "validation", config="rc.nocontext",
+                   limit=limit)
+    return [{"question": r["question"], "answer": (r["answer"] or {}).get("value", "")}
+            for r in rows if (r["answer"] or {}).get("value")]
+
+
+def _bbh_rows(limit: int) -> List[dict]:
+    """BIG-Bench Hard, `date_understanding` -- symbolic reasoning, not arithmetic.
+
+    The prompt already carries its options and the gold is `(B)`-shaped, so
+    `contains` grades it without a grader written here.
+    """
+    from agentdescent.dataloader import hf_rows
+
+    rows = hf_rows("lukaemon/bbh", "test", config="date_understanding", limit=limit)
+    return [{"question": r["input"], "answer": r["target"]} for r in rows]
+
 BENCHMARKS: Dict[str, Benchmark] = {
     "gsmhard": Benchmark("gsmhard", _gsmhard_rows, "last_number", LABELLED, MATH_SEED,
                          "0.500 on 24 items (deepseek-v4-flash, temperature 0)"),
     "gsm8k": Benchmark("gsm8k", _gsm8k_rows, "last_number", LABELLED, MATH_SEED,
                        "1.000 on the windows used -- SATURATED, use --hard-other"),
     "aime": Benchmark("aime", _aime_rows, "last_number", LABELLED, COMP_SEED,
-                      "measured by the run plan"),
+                      "0.708 on 24 items (deepseek-v4-flash, temperature 0)"),
     "hotpotqa": Benchmark("hotpotqa", _hotpotqa_rows, "contains", LABELLED, QA_SEED,
-                          "measured by the run plan"),
+                          "0.750 on 24 items (deepseek-v4-flash, temperature 0)"),
+    "mgsm_zh": Benchmark("mgsm_zh", _mgsm_zh_rows, "last_number", LABELLED, MATH_SEED,
+                         "0.625 on 24 items (deepseek-v4-flash, temperature 0)"),
+    "gpqa": Benchmark("gpqa", _gpqa_rows, "last_number", LABELLED, MCQ_SEED,
+                      "0.375 on 24 items -- the hardest here, and the most headroom"),
+    "triviaqa": Benchmark("triviaqa", _triviaqa_rows, "contains", LABELLED, QA_SEED,
+                          "0.667 on 24 items (deepseek-v4-flash, temperature 0)"),
+    "bbh": Benchmark("bbh", _bbh_rows, "contains", LABELLED, BBH_SEED,
+                     "0.542 on 24 items (deepseek-v4-flash, temperature 0)"),
 }
 
 
