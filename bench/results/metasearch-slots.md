@@ -7,35 +7,40 @@ saw, and one window of another benchmark. `deepseek-v4-flash`, temperature 0,
 thinking disabled, inner runs deterministic (see *Determinism* below).
 Produced by [`bench/metasearch_slots.py`](../metasearch_slots.py).
 
-## The corrected result: fix the inner budget and the transfer sign flips
+## The corrected matrix: seven cells at an adequate inner budget
 
-The seven-cell matrix below ran at **4 rollouts per inner run**, which the next
-section shows is too few for the slot to express anything. Re-run at **12**, with
-everything else held fixed:
+Every cell re-run at **12 rollouts per inner run** instead of 4, everything else
+held fixed. The last column is what the same cell reported at the old budget.
 
-| cell | inner rollouts | train gain | **unseen gain (transfer)** | other benchmark |
-|---|---:|---:|---:|---:|
-| `task_sampler` x GSM-Hard | 4 | +0.047 (1/2) | **−0.141** (0/2) | −0.031 (aime) |
-| `task_sampler` x GSM-Hard | **12** | +0.029 (2/0) | **+0.042** (1/0) | −0.052 (aime) |
-| `task_sampler` x HotpotQA | 4 | +0.016 (2/0) | **−0.031** (1/1) | +0.062 (gsmhard) |
-| `task_sampler` x HotpotQA | **12** | +0.029 (3/0) | **+0.031** (1/1) | +0.062 (gsmhard) |
-| `task_sampler` x AIME | 4 | +0.000 | +0.000 | +0.000 (gsmhard) |
-| `task_sampler` x AIME | **12** | +0.000 | +0.000 | +0.000 (gsmhard) |
+| slot | evolved on | train gain | **unseen gain** | other benchmark | committed | unseen @ 4 rollouts |
+|---|---|---:|---:|---:|---:|---:|
+| `task_sampler` | gsmhard | +0.029 (2/0) | **+0.042 (1/0)** | -0.052 (0/1) (aime) | 1/3 | −0.141 (0/2) |
+| `task_sampler` | hotpotqa | +0.029 (3/0) | **+0.031 (1/1)** | +0.062 (1/0) (gsmhard) | 1/3 | −0.031 (1/1) |
+| `task_sampler` | bbh | +0.023 (2/0) | **+0.021 (1/0)** | +0.000 (0/0) (triviaqa) | 1/3 | +0.000 (0/0) |
+| `task_sampler` | gpqa | +0.026 (1/0) | **+0.000 (0/0)** | +0.000 (0/0) (bbh) | 1/3 | +0.000 (0/0) |
+| `task_sampler` | aime | +0.000 (0/0) | **+0.000 (0/0)** | +0.000 (0/0) (gsmhard) | 0/3 | +0.000 (0/0) |
+| `task_sampler` | mgsm_zh | +0.000 (0/0) | **+0.000 (0/0)** | +0.000 (0/0) (gsmhard) | 0/3 | −0.094 (0/2) |
+| `acceptance` | gsmhard | +0.000 (0/0) | **+0.000 (0/0)** | +0.000 (0/0) (aime) | 0/3 | +0.000 (0/0) |
 
-**Both cells that commit anything flip the transfer column from negative to
-positive**, and their train rows go from 1 win / 2 losses to 2-3 wins / 0 losses.
-AIME does not move at either budget, so its null is a property of that cell
-rather than of the budget.
+**No cell transfers negatively any more.** At 4 rollouts the three cells that
+committed all lost on their unseen windows (−0.141, −0.094, −0.031); at 12,
+four cells commit and their unseen gains are +0.042, +0.031, +0.021 and +0.000 —
+none negative, and every train row is 1-3 wins with no losses. Transfer ratios
+where a train gain exists: 1.45, 1.09, 0.89, 0.00.
 
-That is the answer to why the matrix looked flat: **it was measured at a budget
-where the slot could not act.** Reading below this line, treat the seven-cell
-table as the four-rollout arm of this comparison.
+**Three cells still commit nothing, for three different reasons.** AIME finds no
+rule that beats round-robin at either budget, so its null is a property of that
+cell. MGSM-zh's unseen windows sit at **0.958** on the meta-reward before
+anything is evolved — no headroom to move into. And `acceptance` does not beat
+the engine's own gate: a Beta posterior against an annealed threshold, which no
+LLM-written rule displaced in six rollouts, at either budget.
 
-Two things this does *not* establish. One validation seed per problem, so each
-cell is a handful of paired comparisons, and the `other` column disagrees with
-the `unseen` column on GSM-Hard (−0.052 against +0.042). And the gain is small
-in absolute terms — +0.03 to +0.04 of AUC — against a hand-written reference
-that reaches +0.065 on the same windows.
+**What is still small.** The gains are +0.02 to +0.04 of AUC, against a
+hand-written "retry the tasks that failed" sampler that reaches +0.065 on the
+GSM-Hard windows. One validation seed per problem, so each cell is a handful of
+paired comparisons. And on GSM-Hard the cross-benchmark column (−0.052)
+disagrees with the unseen column (+0.042) — within a benchmark the rule holds
+up, across benchmarks this evidence does not say so.
 
 ### Reflective merge changed nothing here
 
@@ -53,65 +58,6 @@ artifact already solves*. On this domain the slot has about one discoverable
 degree of freedom, which is also why a deliberately degenerate sampler captured
 it by accident at the small budget. Merging two expressions of one idea has
 nothing to add.
-
-## The four-rollout matrix (superseded above)
-
-| slot | evolved on | item baseline | train gain | unseen gain | other benchmark | committed | proposals |
-|---|---|---:|---:|---:|---:|---:|---|
-| `task_sampler` | gsmhard | 0.500 | +0.047 (1/2) | -0.141 (0/2) | -0.031 (0/1) (aime) | 2/3 | 6, 0 refused |
-| `task_sampler` | aime | 0.708 | +0.000 (0/0) | +0.000 (0/0) | +0.000 (0/0) (gsmhard) | 0/3 | 6, 0 refused |
-| `task_sampler` | hotpotqa | 0.750 | +0.016 (2/0) | -0.031 (1/1) | +0.062 (1/0) (gsmhard) | 1/3 | 6, 0 refused |
-| `task_sampler` | mgsm_zh | 0.625 | +0.000 (0/0) | -0.094 (0/2) | +0.062 (1/0) (gsmhard) | 1/3 | 6, 1 refused |
-| `task_sampler` | gpqa | 0.375 | +0.000 (0/0) | +0.000 (0/0) | +0.000 (0/0) (bbh) | 0/3 | 6, 0 refused |
-| `task_sampler` | bbh | 0.542 | +0.000 (0/0) | +0.000 (0/0) | +0.000 (0/0) (triviaqa) | 0/3 | 6, 0 refused |
-| `acceptance` | gsmhard | 0.500 | +0.000 (0/0) | +0.000 (0/0) | +0.000 (0/0) (aime) | 0/3 | 6, 0 refused |
-
-`(w/l)` counts paired wins and losses over the windows in the group. **One
-validation seed per problem**, so every `sd` in the raw files is 0.000 by
-construction and no cell carries a variance estimate — that is a budget choice,
-not a measurement.
-
-## What this says, sober
-
-**Four of seven cells committed nothing at all.** On AIME, GPQA, BBH and the
-`acceptance` slot every proposal was valid and every merge was oracle-rejected:
-under L1 a candidate must strictly beat the base on ground truth, and none did.
-For `acceptance` that is a result about the engine's own default too — a Beta
-posterior against an annealed threshold was not beaten by an LLM-written rule in
-six rollouts.
-
-**Not one cell transferred.** Every cell that committed something lost on the
-unseen windows of its own benchmark: −0.141 on GSM-Hard, −0.094 on MGSM-zh,
-−0.031 on HotpotQA. Three for three, in the same direction. The two positive
-`other` figures (+0.062, both on a single GSM-Hard window at one seed) are one
-paired comparison each and carry no weight against that.
-
-**Where a train gain exists, one window carries it.** GSM-Hard's +0.047 is
-gsmhard-2 moving +0.250 while the other three windows do not move or move down
-(1 win, 2 losses). MGSM-zh's train row is +0.000 across all four windows even
-though the run committed — the rule it found changed nothing where it was
-evolved and hurt where it was not.
-
-**And a single configuration proves nothing.** The GSM-Hard cell at *twelve*
-outer rollouts with two validation seeds (the deep dive below) reads +0.050 with
-4 wins on train and +0.013 on unseen. The same cell at six rollouts with one
-seed reads +0.047 with 1 win and −0.141 on unseen. Same code, same model, same
-windows.
-
-The honest summary over seven cells, six benchmarks and two slots: **at this
-budget, evolving a decision slot yields occasional small gains on the problems
-it was evolved on, and those gains do not generalise — not to unseen windows of
-the same benchmark, and not across benchmarks.** Every rule it found belongs to
-one family (prefer the tasks the artifact has not solved), which is the
-mechanism the slot is about; the search finds it and then fails to show it is
-worth anything off the training windows.
-
-**A caveat that limits several cells.** The meta-reward is the inner run's AUC,
-and some windows sit at 1.000 on it before anything is evolved — a whole BBH
-group, two MGSM-zh windows, GPQA's transfer window. An inner run that starts at
-the ceiling cannot show a sampler doing anything, so those rows are not evidence
-either way. Choosing windows by their *inner AUC* rather than by their item
-baseline is the fix, and it is not done here.
 
 ## Why the matrix is flat: the inner budget was too small to measure a sampler
 

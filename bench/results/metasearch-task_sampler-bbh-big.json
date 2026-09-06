@@ -1,0 +1,234 @@
+{
+ "seed_source": "class Policy:\n    # Round robin over the shard (the engine's default).\n    def pick(self, keys, round_index):\n        return keys[round_index % len(keys)]\n\n    def record(self, task_id, score):\n        pass\n",
+ "evolved_source": "class Policy:\n    # Track scores and prioritize unsolved tasks, falling back to round-robin for unknown tasks.\n    def __init__(self):\n        self.scores = {}\n        self.picks = 0\n\n    def pick(self, keys, round_index):\n        # Prefer tasks we haven't tried yet (unknown scores) over known-solved ones\n        unknown = [k for k in keys if k not in self.scores]\n        if unknown:\n            # Round-robin among unknown tasks to explore them all\n            return unknown[round_index % len(unknown)]\n        # All known: pick the one with lowest score (most likely to improve)\n        return min(keys, key=lambda k: self.scores.get(k, 0))\n\n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        self.picks += 1",
+ "outer": {
+  "final_reward": 0.9036458333333334,
+  "rollouts": 6,
+  "outcomes": {
+   "committed": 1,
+   "oracle-rejected": 2
+  },
+  "stop_reason": "rounds",
+  "error": null,
+  "seconds": 201.01424058500015,
+  "rounds": 3,
+  "workers": 2,
+  "seeds": [
+   0,
+   1
+  ],
+  "proposals": [
+   {
+    "source": "Here's a revised policy that should improve performance on problems like this one:\n\n```python\nclass Policy:\n    # Track scores and prioritize unsolved tasks, falling back to round-robin for unknown tasks.\n    def __init__(self):\n        self.scores = {}\n        self.picks = 0\n\n    def pick(self, keys, round_index):\n        # Prefer tasks we haven't tried yet (unknown scores) over known-solved ones\n        unknown = [k for k in keys if k not in self.scores]\n        if unknown:\n            # Round-robin among unknown tasks to explore them all\n            return unknown[round_index % len(unknown)]\n        # All known: pick the one with lowest score (most likely to improve)\n        return min(keys, key=lambda k: self.scores.get(k, 0))\n\n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        self.picks += 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "bbh-0:0"
+   },
+   {
+    "source": "Here's a revised policy that uses a simple exploration strategy: it tracks which tasks have been solved and prioritizes unsolved ones, while still cycling through the shard to ensure coverage.\n\n```python\nclass Policy:\n    # Changed: prioritize unsolved tasks in the shard, fall back to round-robin for solved ones.\n    def __init__(self):\n        self.solved = set()\n        self.scores = {}\n\n    def pick(self, keys, round_index):\n        # Find unsolved tasks in the current shard\n        unsolved = [k for k in keys if k not in self.solved]\n        if unsolved:\n            # Cycle through unsolved tasks to ensure all get tried\n            return unsolved[round_index % len(unsolved)]\n        # All solved, just round-robin (won't help but keeps protocol)\n        return keys[round_index % len(keys)]\n\n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        if score >= 1.0:\n            self.solved.add(task_id)\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "bbh-1:0"
+   },
+   {
+    "source": "Here's my proposed revision:\n\n```python\nclass Policy:\n    # Changed: use UCB-style exploration to balance trying unknown tasks with exploiting known low scores\n    def __init__(self):\n        self.scores = {}\n        self.counts = {}\n        self.total_picks = 0\n\n    def pick(self, keys, round_index):\n        # If any unknown tasks exist, try them first (exploration)\n        unknown = [k for k in keys if k not in self.scores]\n        if unknown:\n            # Among unknown, prefer ones we've seen in fewer shards (more likely to be new)\n            return min(unknown, key=lambda k: self.counts.get(k, 0))\n        \n        # All known: UCB1-style selection, favoring low scores and under-explored tasks\n        import math\n        log_total = math.log(self.total_picks + 1)\n        def ucb_score(k):\n            score = self.scores[k]\n            count = self.counts[k]\n            # Lower score is better, so negate it; add exploration bonus\n            return -score + math.sqrt(2 * log_total / count)\n        return min(keys, key=ucb_score)\n\n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        self.counts[task_id] = self.counts.get(task_id, 0) + 1\n        self.total_picks += 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "bbh-3:0"
+   },
+   {
+    "source": "I'll improve the policy to better handle the exploration-exploitation tradeoff, particularly when we have limited rounds and need to avoid wasting picks on solved tasks.\n\n```python\nclass Policy:\n    # Changed: Use UCB-style exploration that balances trying unknown tasks with exploiting known low scores,\n    # and avoid re-picking solved tasks (score >= 1.0) unless no alternatives exist.\n    def __init__(self):\n        self.scores = {}\n        self.picks = 0\n        self.counts = {}\n\n    def pick(self, keys, round_index):\n        # Filter out solved tasks if we have alternatives\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if unsolved:\n            keys = unsolved\n        \n        # UCB1-style: prefer tasks with high uncertainty (low count) or low score\n        def ucb_value(k):\n            if k not in self.scores:\n                # Unknown task: high exploration bonus\n                return float('inf') if self.counts.get(k, 0) == 0 else 1.0 / (self.counts[k] + 1)\n            score = self.scores[k]\n            count = self.counts.get(k, 0)\n            # Exploitation term (lower score = higher priority) + exploration bonus\n            return (1.0 - score) + math.sqrt(2 * math.log(self.picks + 1) / (count + 1))\n        \n        return max(keys, key=ucb_value)\n\n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        self.counts[task_id] = self.counts.get(task_id, 0) + 1\n        self.picks += 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "bbh-2:0"
+   },
+   {
+    "source": "Here's my proposed revision:\n\n```python\nclass Policy:\n    # Changed: use UCB-style exploration to balance trying unknown tasks with exploiting known low scores\n    def __init__(self):\n        self.scores = {}\n        self.counts = {}\n        self.total_picks = 0\n\n    def pick(self, keys, round_index):\n        # If any unknown tasks exist, prioritize them but use round-robin to spread exploration\n        unknown = [k for k in keys if k not in self.scores]\n        if unknown:\n            # Round-robin among unknown tasks to explore them all\n            return unknown[round_index % len(unknown)]\n        \n        # All known: use UCB1 to balance exploitation (low score) with exploration (few visits)\n        # This helps when some tasks are solved (score=1) but others are close to solved\n        import math\n        def ucb_score(k):\n            score = self.scores[k]\n            count = self.counts[k]\n            # If solved, heavily penalize (never pick if alternatives exist)\n            if score >= 1.0:\n                return float('inf')\n            # UCB1: lower score is better, but add exploration bonus for less-visited tasks\n            return score - math.sqrt(2 * math.log(self.total_picks + 1) / (count + 1))\n        \n        return min(keys, key=ucb_score)\n\n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        self.counts[task_id] = self.counts.get(task_id, 0) + 1\n        self.total_picks += 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "bbh-1:0"
+   },
+   {
+    "source": "Here's a revised policy that addresses a key weakness: when all tasks in the current shard are known, it picks the minimum score, but this can repeatedly pick a solved task (score=1.0) if it's the minimum in a shard where all are solved. The fix is to avoid solved tasks entirely when possible, and only fall back to them if the shard contains nothing else.\n\n```python\nclass Policy:\n    # Changed: avoid picking solved tasks (score>=1.0) when any unsolved/unknown exist in the shard\n    def __init__(self):\n        self.scores = {}\n        self.picks = 0\n\n    def pick(self, keys, round_index):\n        # Split into categories: unknown, unsolved-known, solved\n        unknown = [k for k in keys if k not in self.scores]\n        unsolved = [k for k in keys if k in self.scores and self.scores[k] < 1.0]\n        solved = [k for k in keys if k in self.scores and self.scores[k] >= 1.0]\n        \n        # Priority: unknown > unsolved > solved (only if nothing else)\n        if unknown:\n            # Round-robin among unknown to explore all\n            return unknown[round_index % len(unknown)]\n        if unsolved:\n            # Among unsolved, pick the one with lowest score (most room for improvement)\n            return min(unsolved, key=lambda k: self.scores[k])\n        # All solved in this shard \u2014 pick the one with lowest score (least solved)\n        return min(solved, key=lambda k: self.scores[k])\n\n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        self.picks += 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "bbh-0:0"
+   }
+  ],
+  "reflective_merge": false,
+  "proposals_rejected_by_gate": 0,
+  "invalid_proposals": 0,
+  "history": [
+   {
+    "round": 0,
+    "held_out_reward": 0.9036458333333334,
+    "committed": 1,
+    "rejected": 0,
+    "reasons": {
+     "committed": 1
+    }
+   },
+   {
+    "round": 1,
+    "held_out_reward": 0.9036458333333334,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "oracle-rejected": 1
+    }
+   },
+   {
+    "round": 2,
+    "held_out_reward": 0.9036458333333334,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "oracle-rejected": 1
+    }
+   }
+  ]
+ },
+ "validation": {
+  "bbh-0": {
+   "n": 1,
+   "before": 1.0,
+   "after": 1.0,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "bbh-1": {
+   "n": 1,
+   "before": 1.0,
+   "after": 1.0,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "bbh-2": {
+   "n": 1,
+   "before": 0.6041666666666666,
+   "after": 0.65625,
+   "gain": 0.05208333333333337,
+   "gain_sd": 0.0,
+   "wins": 1,
+   "losses": 0
+  },
+  "bbh-3": {
+   "n": 1,
+   "before": 0.9166666666666666,
+   "after": 0.9583333333333334,
+   "gain": 0.04166666666666674,
+   "gain_sd": 0.0,
+   "wins": 1,
+   "losses": 0
+  },
+  "bbh-4": {
+   "n": 1,
+   "before": 1.0,
+   "after": 1.0,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "bbh-5": {
+   "n": 1,
+   "before": 0.9166666666666666,
+   "after": 0.9583333333333334,
+   "gain": 0.04166666666666674,
+   "gain_sd": 0.0,
+   "wins": 1,
+   "losses": 0
+  },
+  "triviaqa-0": {
+   "n": 1,
+   "before": 0.625,
+   "after": 0.625,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  }
+ },
+ "by_group": {
+  "train": {
+   "problems": [
+    "bbh-0",
+    "bbh-1",
+    "bbh-2",
+    "bbh-3"
+   ],
+   "seed_rule": 0.8802083333333333,
+   "evolved_rule": 0.9036458333333334,
+   "gain": 0.023437500000000028,
+   "wins": 2,
+   "losses": 0
+  },
+  "unseen": {
+   "problems": [
+    "bbh-4",
+    "bbh-5"
+   ],
+   "seed_rule": 0.9583333333333333,
+   "evolved_rule": 0.9791666666666667,
+   "gain": 0.02083333333333337,
+   "wins": 1,
+   "losses": 0
+  },
+  "other": {
+   "problems": [
+    "triviaqa-0"
+   ],
+   "seed_rule": 0.625,
+   "evolved_rule": 0.625,
+   "gain": 0.0,
+   "wins": 0,
+   "losses": 0
+  }
+ },
+ "transfer_ratio": {
+  "unseen": 0.8888888888888894,
+  "other": 0.0
+ },
+ "validate_seeds": [
+  1000
+ ],
+ "config": {
+  "rounds": 12,
+  "workers": 1,
+  "slot": "task_sampler",
+  "held_out_frac": 0.4,
+  "cache_dir": "/tmp/claude-0/-home-user-agentdescent/11f5938a-d37f-5fc2-bc0a-9c4c1833f52c/scratchpad/evalcache-run",
+  "source": "bbh",
+  "other": "triviaqa",
+  "window_size": 20,
+  "data_seed": 0,
+  "model": "deepseek-v4-flash",
+  "provider": "openai",
+  "temperature": 0.0,
+  "thinking": "disabled",
+  "hard_other": false,
+  "reflective_merge": false,
+  "meta_reward": "auc",
+  "quality_target": 0.75,
+  "template": "System instruction:\n{skill}\n\nUser problem:\n{prompt}",
+  "seed_instruction": "Answer the question. Return only the letter of the correct option in parentheses, like (A).",
+  "outer_seed": 0
+ },
+ "usage": {
+  "calls": 839,
+  "prompt_tokens": 18940,
+  "completion_tokens": 15140,
+  "total_tokens": 34080,
+  "model_seconds": 1212.6132571697235,
+  "failures": 0,
+  "wall_seconds": 314.7793252870001,
+  "completion_cache": {
+   "hits": 587,
+   "misses": 109
+  }
+ }
+}
