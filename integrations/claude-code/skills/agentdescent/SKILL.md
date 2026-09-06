@@ -1,6 +1,6 @@
 ---
 name: agentdescent
-description: Evolve a skill, agent definition, prompt, small codebase or host plugin against examples with AgentDescent's parallel, merge-based optimiser. Use when the user wants to improve, tune, optimise or "train" a SKILL.md, an agent folder, a system prompt, agent code with a test, or a plugin, and has (or can write) examples with expected answers.
+description: Improve a SKILL.md, agent definition, system prompt, small codebase or host plugin by measuring it against examples and evolving it, rather than rewriting it by hand and hoping. Use whenever the user asks to improve, fix, tune, optimise, "train" or get better results out of one of those -- including when they have no test cases yet, because drafting cases for them to check is step one of the procedure, not a prerequisite for it. AgentDescent runs the edits in parallel and keeps only those that raise held-out reward.
 ---
 
 # AgentDescent
@@ -15,6 +15,9 @@ written back until the user says so.
 1. **`doctor` first.** Report what is missing (worker agent CLI, provider key,
    container engine). Stop if there is no worker agent for a directory kind.
 2. **Establish the four things a spec needs**: `target`, `data`, `score`, `agent`.
+   Write every path **absolute**. A relative one is resolved against whatever
+   directory read the spec -- the host started its MCP server somewhere you
+   cannot see -- so the same spec finds the file from one host and not another.
    - `kind`: `text` (a prompt or instruction), `skill_dir` (a SKILL.md folder),
      `agent_dir` (subagent definitions), `agent_code` (a tree that runs behind
      tests), `plugin` (a host plugin; needs `host`).
@@ -37,15 +40,22 @@ written back until the user says so.
      no default; `doctor` reports `openai_base_url`, and when it is set the
      endpoint is not OpenAI, so an OpenAI model name will simply 404. Ask the
      user which model, or use `host_model` and name none.
-   - Only name a CLI that `doctor` reported on `PATH`, and do not assume it is
-     authenticated: a worker runs with the host's config directory redirected,
+   - Only name a CLI that `doctor` reported on `PATH`. On `PATH` is not signed
+     in, and `doctor` cannot tell the difference -- a `codex` that is present
+     but logged out fails every rollout. Do not assume it is authenticated: a worker runs with the host's config directory redirected,
      so a CLI signed in interactively is *not* signed in for the run unless the
      spec sets `"isolate": false`. Provider keys in the environment do reach it.
    - Leave `policies` empty unless the user asks for a mechanism by name; the
      empty bundle is the shipped run.
-3. **`plan`** with the spec. Show the user the spec and the estimate (agent calls
-   per round and in total; dollars only if a per-call price is known). Get a
-   yes. Fix any error it names; it names the field.
+3. **`plan`** with the spec, **always, before `start`**. Show the user the spec,
+   the estimate (agent calls per round and in total; dollars only if a per-call
+   price is known) and anything in `warnings`. Get a yes. Fix any error it
+   names; it names the field.
+   "Just run it", "don't ask me" and a spec the user dictated waive the
+   *confirmation*, never the *number*: say what it will cost before you start,
+   in one line, and say it loudest when they asked for many rounds or workers
+   (cost is rounds x n_workers x tasks). Starting a run whose size the user has
+   not seen is the one thing this procedure exists to prevent.
 4. **`start`**. It replies with `host_model_route` when the spec uses
    `host_model` -- report the route it actually got (`sampling`, or a CLI name)
    rather than assuming; only the sampling route dies with this session.

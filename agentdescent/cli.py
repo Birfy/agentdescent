@@ -277,6 +277,12 @@ def cmd_init(a: argparse.Namespace) -> int:
     return 0
 
 
+#: Which environment key an isolated worker of each CLI would need, having been
+#: pointed away from the config directory its interactive login lives in.
+_CLI_PROVIDER_KEY = {"claude_code": "ANTHROPIC_API_KEY", "codex": "OPENAI_API_KEY",
+                     "dsh": "DEEPSEEK_API_KEY", "opencode": "OPENAI_API_KEY"}
+
+
 def _unusable_refs(spec: EvolveSpec) -> List[str]:
     """Warnings for agents this machine cannot actually run.
 
@@ -309,6 +315,18 @@ def _unusable_refs(spec: EvolveSpec) -> List[str]:
             binary = {"claude_code": "claude"}.get(ref, ref)
             if not clis.get(binary):
                 out.append(f"{field}: `{ref}` needs `{binary}` on PATH")
+            elif block.get("isolate") is not False and not keys.get(
+                    _CLI_PROVIDER_KEY.get(ref, ""), False):
+                # The trap that ate a 60-round run: `codex` was on PATH, so
+                # nothing complained, but a worker runs with the host's config
+                # directory redirected -- an interactive login does not carry
+                # over -- and there was no key in the environment either. Every
+                # rollout failed. Being present is not being usable.
+                out.append(
+                    f"{field}: `{ref}` is on PATH but a worker runs isolated, so an "
+                    f"interactive login does not carry over; set "
+                    f'"isolate": false to use the signed-in CLI, or put '
+                    f"{_CLI_PROVIDER_KEY.get(ref, 'a provider key')} in the environment")
     return out
 
 

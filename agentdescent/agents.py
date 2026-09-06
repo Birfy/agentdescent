@@ -157,12 +157,41 @@ SESSION_MARKERS: Tuple[str, ...] = (
     # "OPENCODE_" prefix on purpose: `OPENCODE_API_KEY` is a provider
     # credential, and a worker needs its keys.
     "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG", "OPENCODE_CONFIG_CONTENT",
+    # Dropped so the redirect below can take: `setdefault` cannot override a
+    # value the parent already exported, and this one usually is exported.
+    # It is broader than the others -- every XDG-respecting tool the worker
+    # runs sees the workspace copy -- which is the point of an isolated worker.
+    "XDG_CONFIG_HOME",
 )
 
 #: Set for every worker so a tool the worker reaches (this package's own MCP
 #: server, when the plugin that hosts it is being evolved) can tell it is inside
 #: a run and refuse to start another. See ``agentdescent.mcp``.
 NESTED_MARKER = "AGENTDESCENT_NESTED"
+
+
+#: Each host's config-directory variable, and where an isolated worker's copy
+#: goes inside the rollout workspace. One mapping because there are two things
+#: to do with it -- set it, and *create* it -- and they were separate lists that
+#: drifted: OpenCode was added to the first and not the second, and a missing
+#: `OPENCODE_CONFIG_DIR` does not fail, it silently falls back to the user's
+#: real config, so the isolation read as working and was not.
+WORKER_CONFIG_DIRS: Dict[str, str] = {
+    "CLAUDE_CONFIG_DIR": "claude",
+    "CODEX_HOME": "codex",
+    "DSH_HOME": "dsh",
+    # OpenCode needs both, and the second is the one that works. Measured
+    # against opencode 1.18: `OPENCODE_CONFIG_DIR` supplies a config only when
+    # the user has none -- with a real `~/.config/opencode/opencode.jsonc`
+    # present, a worker pointed at another directory still saw the user's MCP
+    # servers, config file or no config file in the redirected one. OpenCode
+    # resolves its config under XDG, so `XDG_CONFIG_HOME` is what actually
+    # moves it: with that redirected the same worker sees "No MCP servers
+    # configured". `OPENCODE_CONFIG_DIR` stays for the case where XDG is
+    # honoured differently by a future version.
+    "OPENCODE_CONFIG_DIR": "opencode",
+    "XDG_CONFIG_HOME": "xdg",
+}
 
 
 def worker_env(workspace: Optional[str], extra: Optional[Mapping[str, str]] = None,
@@ -184,10 +213,8 @@ def worker_env(workspace: Optional[str], extra: Optional[Mapping[str, str]] = No
     env[NESTED_MARKER] = "1"
     if isolate and workspace:
         home = os.path.join(workspace, ".agentdescent-worker")
-        env.setdefault("CLAUDE_CONFIG_DIR", os.path.join(home, "claude"))
-        env.setdefault("CODEX_HOME", os.path.join(home, "codex"))
-        env.setdefault("DSH_HOME", os.path.join(home, "dsh"))
-        env.setdefault("OPENCODE_CONFIG_DIR", os.path.join(home, "opencode"))
+        for var, leaf in WORKER_CONFIG_DIRS.items():
+            env.setdefault(var, os.path.join(home, leaf))
     if extra:
         env.update(extra)
     return env
@@ -213,7 +240,11 @@ class _CliAgent:
         t0 = time.time()
         env = worker_env(self.workspace, self.env, isolate=self.isolate)
         if self.workspace:
-            for key in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "DSH_HOME"):
+            # Created, not merely pointed at. `codex` refuses to start when
+            # CODEX_HOME does not exist ("Error finding codex home"), and
+            # `opencode` does something worse -- it falls back to the user's
+            # real config, so isolation silently does not happen.
+            for key in WORKER_CONFIG_DIRS:
                 if env.get(key, "").startswith(self.workspace):
                     os.makedirs(env[key], exist_ok=True)
         try:

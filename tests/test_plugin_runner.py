@@ -215,6 +215,27 @@ def test_plugin_spec_needs_a_known_host(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+def test_every_isolated_config_dir_is_created_not_only_pointed_at(tmp_path):
+    """`codex` refuses to start when CODEX_HOME does not exist, and `opencode`
+    does something worse -- it falls back to the user's real config, so the
+    isolation reads as working and is not. The set that is created was a second
+    list beside the set that is pointed at, and OpenCode was added to one only.
+    """
+    from agentdescent.agents import WORKER_CONFIG_DIRS, cli_agent, worker_env
+
+    env = worker_env(str(tmp_path))
+    for var in WORKER_CONFIG_DIRS:
+        assert env[var].startswith(str(tmp_path)), var
+
+    # The agent creates them on the way to running its command; a command that
+    # does not exist still gets that far.
+    agent = cli_agent(["definitely-not-a-real-binary"], workspace=str(tmp_path))
+    with pytest.raises(Exception):
+        agent("x")
+    for var, leaf in WORKER_CONFIG_DIRS.items():
+        assert os.path.isdir(os.path.join(str(tmp_path), ".agentdescent-worker", leaf)), var
+
+
 def test_a_worker_does_not_inherit_the_users_opencode_config(monkeypatch, tmp_path):
     """Three hosts were redirected and OpenCode was not, so an OpenCode worker
     read the user's real `~/.config/opencode` -- its model, its credentials, its
@@ -233,10 +254,17 @@ def test_a_worker_does_not_inherit_the_users_opencode_config(monkeypatch, tmp_pa
     monkeypatch.setenv("OPENCODE_CONFIG_CONTENT", '{"mcp": {}}')
     monkeypatch.setenv("OPENCODE_API_KEY", "sk-provider-key")
 
+    monkeypatch.setenv("XDG_CONFIG_HOME", "/home/me/.config")
+
     env = worker_env(str(tmp_path))
     assert env["OPENCODE_CONFIG_DIR"].startswith(str(tmp_path))
     assert "OPENCODE_CONFIG" not in env
     assert "OPENCODE_CONFIG_CONTENT" not in env
+    # The one that actually moves OpenCode's config, and the reason this test
+    # used to pass while the isolation did nothing: `OPENCODE_CONFIG_DIR` is
+    # ignored when the user has a real `~/.config/opencode`, so a worker kept
+    # reading it. Asserting the variable was set proved only that.
+    assert env["XDG_CONFIG_HOME"].startswith(str(tmp_path))
     # ...but a credential is not a session marker: a worker needs its keys, so
     # these are dropped by name rather than by an "OPENCODE_" prefix.
     assert env["OPENCODE_API_KEY"] == "sk-provider-key"
@@ -245,3 +273,4 @@ def test_a_worker_does_not_inherit_the_users_opencode_config(monkeypatch, tmp_pa
     plain = worker_env(str(tmp_path), isolate=False)
     assert plain["OPENCODE_CONFIG_DIR"] == "/home/me/.config/opencode"
     assert plain["OPENCODE_CONFIG"] == "/home/me/opencode.jsonc"
+    assert plain["XDG_CONFIG_HOME"] == "/home/me/.config"

@@ -40,6 +40,43 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- **OpenCode worker isolation did not work, and its test passed anyway.** The
+  previous entry claimed `OPENCODE_CONFIG_DIR` isolated an OpenCode worker like
+  the other three hosts. Measured against opencode 1.18 by running the real CLI
+  with a worker's environment: it does not. That variable supplies a config only
+  when the user has none -- with a real `~/.config/opencode/opencode.jsonc`
+  present, a worker still saw the user's MCP servers, with or without a config
+  file in the redirected directory. The test asserted the variable was *set*,
+  which was true and meant nothing. `XDG_CONFIG_HOME` is what moves OpenCode's
+  config, and with it redirected the same worker reports "No MCP servers
+  configured"; it is now set (and dropped from the parent, since `setdefault`
+  cannot override an exported value) alongside the others.
+- **Isolated config directories were pointed at but not all created.** The set
+  that gets created was a second list beside the set that gets set, and OpenCode
+  was added to one only. `codex` refuses to start when `CODEX_HOME` does not
+  exist ("Error finding codex home"); OpenCode silently falls back. Both lists
+  are now one mapping.
+- **`plan` did not warn that a CLI on `PATH` may not be signed in.** An isolated
+  worker runs with the host's config directory redirected, so an interactive
+  login does not carry over. Measured: a run with `codex` -- present, logged out,
+  no key -- was priced without complaint and then failed every rollout, 35 calls
+  in. `plan` now says so and names the fix (`"isolate": false`, or a provider key).
+- **The skill did not fire for "make this skill better" when no test cases
+  existed** -- the state most users start in, and the one its own procedure has
+  a step for. The description ended "and has (or can write) examples with
+  expected answers", which reads as a precondition. Reworded to lead with the
+  user's words and say outright that drafting cases is step one. It now surfaces
+  in that case; a bare "make it better" with no data still often gets a hand
+  rewrite instead, which is honest to record rather than force.
+- **The skill's example spec used a relative `data.path`.** It resolves against
+  whichever directory read the spec -- the host's MCP server cwd, which the
+  agent cannot see -- so the same spec found the file from one directory and
+  not another. The skill now says to write every path absolute.
+- **The skill let "just run it, don't ask" skip the cost estimate.** Asked for
+  60 rounds and 32 workers with blanket permission, it started immediately
+  without quoting a number. Pre-authorisation now waives the confirmation and
+  never the estimate.
+
 - **The shipped `SKILL.md` never said how to choose an `agent`, and `plan` did
   not check the choice.** Driving the skill in plain language against a real
   Claude Code session, three separate wrong answers came out of that gap: it
