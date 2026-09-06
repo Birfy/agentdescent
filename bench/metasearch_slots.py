@@ -50,6 +50,7 @@ from agentdescent.agents import Usage, with_retries
 from agentdescent.dataloader import select_hard
 from agentdescent.evalcache import FileCache
 from agentdescent.evolution import Task, reflector
+from agentdescent.fusion import reflective_merge
 from agentdescent.meta import (MetaReward, Problem, auc, evolve_problem, final_reward,
                                meta_evolve, meta_validate, policy_source, rollouts_to,
                                slot_reflector)
@@ -574,7 +575,8 @@ def run_experiment(complete: Callable[[str], str], *, train: Dict[str, Problem],
                    max_rollouts: Optional[int] = None,
                    eval_concurrency: Optional[int] = None,
                    meta_reward: Optional[MetaReward] = None,
-                   slot: str = "task_sampler") -> Dict[str, Any]:
+                   slot: str = "task_sampler",
+                   reflective: bool = False) -> Dict[str, Any]:
     """Evolve the sampler on ``train``, then score seed vs evolved on everything.
 
     ``meta_reward`` is what an inner run is worth; ``None`` is
@@ -588,6 +590,22 @@ def run_experiment(complete: Callable[[str], str], *, train: Dict[str, Problem],
     spec = policy_source(slot, notes=SLOT_NOTES[slot])
     seed_rule = spec.render(spec.initial())
     propose, proposals = recording_reflector(complete, spec)
+    # Model-merging the OUTER loop. Two workers produce two candidate rules per
+    # round, both writing the one slot, so they contradict and the default
+    # policy ranks them and **throws one away** -- half the proposals a round
+    # bought, discarded before the gate sees them. `reflective_merge` keeps the
+    # contradiction and asks a model to synthesise one rule from both instead.
+    #
+    # `validate=` is not optional here: a synthesised value reaches the ledger
+    # WITHOUT passing `to_diff`, so without the spec's own gate a merged class
+    # that does not compile becomes the head and every rollout after it dies.
+    # `examples/_method_runner` hands its strategy's validator over for exactly
+    # this reason; anything the gate rejects falls back to ranking.
+    #
+    # It does nothing for the INNER run, which has one worker and therefore one
+    # diff per merge -- there is no contradiction to synthesise.
+    engine = (Policies(**reflective_merge(complete, validate=spec._validate))
+              if reflective else None)
     started = time.monotonic()
     result = meta_evolve(train, slot=slot, spec=spec,
                          propose=propose, seeds=list(seeds),
@@ -596,7 +614,7 @@ def run_experiment(complete: Callable[[str], str], *, train: Dict[str, Problem],
                          eval_concurrency=eval_concurrency or max(1, workers),
                          max_seconds=max_seconds, max_rollouts=max_rollouts,
                          meta_reward=meta_reward, seed=outer_seed, usage=usage,
-                         on_round=progress('gsm'))
+                         policies=engine, on_round=progress(slot))
     outer_seconds = time.monotonic() - started
     report = meta_validate(spec, seed_rule, result.rendered, {**train, **validate},
                            seeds=list(validate_seeds), meta_reward=meta_reward)
@@ -630,6 +648,7 @@ def run_experiment(complete: Callable[[str], str], *, train: Dict[str, Problem],
                   # What the search actually tried, so a run that commits
                   # nothing still says why.
                   "proposals": proposals,
+                  "reflective_merge": bool(reflective),
                   "proposals_rejected_by_gate": sum(
                       1 for p in proposals if not p["accepted_by_gate"]),
                   "invalid_proposals": int(getattr(spec, "invalid_proposals", 0)),
@@ -781,6 +800,11 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
           + (f" @ {args.quality_target}" if args.meta_reward == "time-to-quality" else "")
           + "  (L1: a candidate that only ties the seed on the outer held-out set "
             "is vetoed by the oracle, so a saturated reward commits nothing)")
+    print(f"Merging   : " + ("reflective (a model synthesises one rule from the "
+                              "round's contradicting candidates, gated by the slot's "
+                              "validator)" if args.reflective_merge else
+                              "default (contradicting candidates are ranked and the "
+                              "loser is discarded)"))
     print(f"Outer     : rounds={args.rounds} workers={workers} blast_radius=0.6 (L1)"
           + (f" budget={args.budget_rollouts} rollouts" if args.budget_rollouts else "")
           + f" max_seconds={args.max_seconds:.0f}")
@@ -822,12 +846,13 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                              eval_concurrency=args.eval_concurrency,
                              meta_reward=meta_reward_for(args.meta_reward,
                                                          args.quality_target),
-                             slot=args.slot)
+                             slot=args.slot, reflective=args.reflective_merge)
     payload["config"] = {**inner, "source": args.source, "other": args.other,
                          "window_size": args.window_size, "data_seed": args.data_seed,
                          "model": args.model, "provider": args.provider,
                          "temperature": args.temperature, "thinking": args.thinking,
                          "hard_other": args.hard_other,
+                         "reflective_merge": args.reflective_merge,
                          "meta_reward": args.meta_reward,
                          "quality_target": args.quality_target,
                          "slot": args.slot,

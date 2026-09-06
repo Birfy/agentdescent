@@ -430,3 +430,45 @@ def test_the_saturated_benchmark_says_so():
     the reason it is not a transfer target."""
     note = bench.BENCHMARKS["gsm8k"].measured_baseline
     assert "1.000" in note and "SATURATED" in note
+
+
+def test_reflective_merge_is_installed_with_the_slot_gate(monkeypatch):
+    """A synthesised value reaches the ledger without passing `to_diff`, so the
+    spec's own gate must travel with it -- otherwise a merged class that does
+    not compile becomes the head and every rollout after it dies."""
+    seen = {}
+    real = bench.meta_evolve
+
+    def spy(problems, **kw):
+        seen["policies"] = kw.get("policies")
+        return real(problems, **kw)
+
+    monkeypatch.setattr(bench, "meta_evolve", spy)
+    args = dict(train={"t0": _sampler_sensitive(0.2), "t1": _sampler_sensitive(0.2)},
+                validate={"v": _flat(0.4)},
+                groups={"train": ["t0", "t1"], "unseen": ["v"]},
+                seeds=[0, 1], validate_seeds=[9], rounds=1, workers=2)
+
+    bench.run_experiment(lambda p: PROPOSAL, reflective=False, **args)
+    assert seen["policies"] is None, "default merging must install nothing"
+
+    payload = bench.run_experiment(lambda p: PROPOSAL, reflective=True, **args)
+    installed = seen["policies"]
+    assert installed is not None
+    # The pair, not just the fusion: conflict resolution runs first and would
+    # hand a lone diff to the fusion policy, making it a no-op.
+    assert installed.fusion is not None and installed.conflict is not None
+    assert getattr(installed.fusion, "validate", None) is not None, \
+        "the synthesised value must be put through the slot's gate"
+    assert payload["outer"]["reflective_merge"] is True
+
+
+def test_the_shared_reflective_flag_is_the_one_that_is_read():
+    """`--reflective-merge` comes from add_standard_args; declaring a second one
+    here is how a port grows a flag nobody reads."""
+    import inspect
+
+    parser = bench.build_parser()
+    dests = [a.dest for a in parser._actions]
+    assert dests.count("reflective_merge") == 1
+    assert "reflective=args.reflective_merge" in inspect.getsource(bench.main)
