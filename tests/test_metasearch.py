@@ -180,3 +180,39 @@ def test_dry_run_touches_nothing(capsys):
     assert "[dry-run]" in out and "blast_radius=0.6" in out
     assert port.main(["--dry-run", "--serial"]) == 0
     assert "mode=serial" in capsys.readouterr().out
+
+
+def test_reference_rules_score_and_rank_as_the_report_claims():
+    """The ceiling column. `worst-first` is in `REFERENCE_RULES` precisely so a
+    run that reports nothing can still be told from one whose measurement is
+    broken: if a deliberately bad rule does not come last, the column is not
+    measuring what it says."""
+    scored = port.score_rules({"seed": SEED_SOURCE, **port.REFERENCE_RULES},
+                              seeds=range(300, 340), budget=24)
+    assert set(scored) == {"seed", *port.REFERENCE_RULES}
+    for family in ("source", "target"):
+        ranked = sorted(scored, key=lambda k: scored[k][family])
+        assert ranked[0] == "worst-first (deliberately bad)"
+        assert scored["worst-first (deliberately bad)"][family] < scored["seed"][family]
+    # The transfer family is the harder one, for every rule.
+    assert all(row["target"] < row["source"] for row in scored.values())
+
+
+def test_main_writes_a_complete_result_file(tmp_path, monkeypatch):
+    """`main()` end to end against a scripted endpoint -- the path a unit test of
+    `run_outer` does not reach, and where the usage-serialisation bug that ended
+    one live run on its last line actually lived."""
+    monkeypatch.setattr(port, "completion_for", lambda args, **kw: lambda prompt: PROPOSAL)
+    out = tmp_path / "run.json"
+    assert port.main(["--rounds", "2", "--workers", "2", "--tasks", "10",
+                      "--inner-budget", "12", "--validate-seeds", "6",
+                      "--out", str(out), "--yes"]) == 0
+    payload = json.loads(out.read_text())
+    assert set(payload["validation"]) == {"source", "target"}
+    assert payload["model"]["inner_budget"] == 12
+    assert set(payload["reference"]) >= set(port.REFERENCE_RULES)
+    # Both meters serialise, and they are not the same object: the engine meters
+    # `propose` with zero tokens, so only the API meter may carry tokens.
+    for meter in ("usage", "engine_usage"):
+        assert set(payload[meter]) >= {"calls", "prompt_tokens", "completion_tokens"}
+    assert payload["engine_usage"]["prompt_tokens"] == 0

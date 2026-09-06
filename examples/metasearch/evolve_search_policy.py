@@ -263,8 +263,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.set_defaults(provider="openai", async_ratio=1)
     parser.add_argument("--rounds", type=int, default=6)
     parser.add_argument("--workers", type=int, default=4)
-    parser.add_argument("--tasks", type=int, default=20,
-                        help="source landscape instances the outer loop trains and gates on")
+    parser.add_argument("--tasks", type=int, default=150,
+                        help=("source landscape instances the outer loop trains and "
+                              "gates on. Large for the same reason --validate-seeds "
+                              "is: the model is called once per *rollout*, and "
+                              "rollouts are rounds x workers whatever this is, so "
+                              "every extra task is free. It buys the gate's held-out "
+                              "set (tasks x held_out_frac), and that set is what "
+                              "decides every merge -- at 24 tasks it is 9 instances, "
+                              "where the paired per-instance sd of 0.04-0.06 puts the "
+                              "standard error at 0.013-0.018, wider than the whole "
+                              "gain available on this landscape. 150 tasks is 60 "
+                              "instances, 0.005-0.008, and costs 0.3s per gate"))
     parser.add_argument("--inner-budget", type=int, default=DEFAULT_INNER_BUDGET,
                         help="expansions per inner search")
     parser.add_argument("--validate-seeds", type=int, default=200,
@@ -317,12 +327,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
     if not confirm(args):
         return 0
+    # Two meters, not one. The engine wraps `propose` in its own metric and
+    # records a zero-token call for every invocation, so a single shared Usage
+    # reports `calls` as (API calls + metered wrappers + cache hits) with the
+    # tokens of only the first -- 514 "calls" carrying 19k prompt tokens on one
+    # run, which reads as a 37-token reflector prompt and is not one. `api` is
+    # what the endpoint actually served; `usage` is what the engine spent.
+    api = Usage()
     usage = Usage()
     options: Dict[str, object] = {}
     if args.thinking != "default":
         options["thinking"] = {"type": args.thinking}
     complete = with_retries(
-        completion_for(args, usage=usage, max_tokens=args.max_tokens,
+        completion_for(args, usage=api, max_tokens=args.max_tokens,
                        timeout=args.api_timeout, temperature=args.temperature,
                        retries=1, **options),
         attempts=4, backoff=3.0)
@@ -361,7 +378,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "model": {"provider": args.provider, "model": args.model,
                   "temperature": args.temperature, "max_tokens": args.max_tokens,
                   "thinking": args.thinking, "inner_budget": args.inner_budget},
-        "usage": usage_dict(usage),
+        "usage": usage_dict(api), "engine_usage": usage_dict(usage),
     }
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
