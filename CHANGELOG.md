@@ -28,6 +28,25 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- **`agentdescent install dsh` could stop dsh from starting at all.** Both
+  cordis patch files wrote the forwarded provider keys one `!!js
+  process.env.X` per line. `env` is validated as `{[key: string]: string}` and
+  an unset variable is `undefined`, so with no keys exported dsh rejected the
+  entry -- and it fails the *whole plugin tree* on a bad entry, so dsh would
+  not boot until the user edited the file by hand. `--dump-config` composed it
+  happily, which is why it was missed: only loading the plugin tree
+  (`dsh --profile headless`) shows it. Both files now share one quoted `!!js`
+  expression that filters unset keys (quoted because the `": "` inside it is
+  otherwise read as a nested YAML mapping). Reproduced and fixed against dsh
+  0.1.2-rc.1; the suite now boots real dsh through both the `install` and the
+  native-plugin routes.
+- **`install` could add its dsh block but never repair it.** The check was
+  "is this marker present", so an install that had written the broken entry
+  above reported "already present" and changed nothing. The block is now
+  delimited and rewritten when its content is out of date -- including blocks
+  written before the end marker existed -- while the user's own rows are left
+  alone.
+
 - **An OpenCode worker read the user's real config; the other three hosts did
   not.** `worker_env()` redirected `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and
   `DSH_HOME` into the rollout workspace and had no OpenCode entry, so an

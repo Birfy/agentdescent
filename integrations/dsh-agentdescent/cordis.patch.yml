@@ -14,7 +14,4 @@
         toolCallTimeoutMs: 120000
         env:
           # dsh scrubs KEY|PASSWORD|SECRET|TOKEN from the ambient env
-          DEEPSEEK_API_KEY: !!js process.env.DEEPSEEK_API_KEY
-          OPENAI_API_KEY: !!js process.env.OPENAI_API_KEY
-          OPENAI_BASE_URL: !!js process.env.OPENAI_BASE_URL
-          ANTHROPIC_API_KEY: !!js process.env.ANTHROPIC_API_KEY
+          !!js 'Object.fromEntries(Object.entries({DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY, OPENAI_API_KEY: process.env.OPENAI_API_KEY, OPENAI_BASE_URL: process.env.OPENAI_BASE_URL, ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY}).filter(([, v]) => v != null))'

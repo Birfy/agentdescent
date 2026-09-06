@@ -115,6 +115,47 @@ class _Writer:
                 fh.write(block)
         self.lines.append(f"{verb} {path} ({what})")
 
+    def sync_block(self, path: str, start: str, end: str, block: str, *,
+                   what: str) -> None:
+        """Append our block, or bring an existing one up to date.
+
+        `append_unless` could only ever add: once a marker was in the file it
+        said "already present" and left whatever was there. That is wrong for a
+        block whose *content* is a bug fix -- an install that had written a
+        broken dsh entry could never repair it, and dsh refuses to start at all
+        on a bad entry, so the user's only route back was editing the file by
+        hand.
+
+        A block written before the end marker existed has no end marker, and
+        was always appended last, so it runs to the end of the file: that is
+        what gets replaced, and the caller is told it happened.
+        """
+        current = ""
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as fh:
+                current = fh.read()
+        wanted = f"{start}\n{block.rstrip()}\n{end}\n"
+        if start not in current:
+            verb = "would append to" if self.dry_run else "appended to"
+            new_text = (current + ("" if not current or current.endswith("\n") else "\n")
+                        + wanted)
+            note = f"{verb} {path} ({what})"
+        else:
+            head = current[:current.index(start)]
+            rest = current[current.index(start):]
+            tail = rest[rest.index(end) + len(end):] if end in rest else ""
+            new_text = head + wanted + tail.lstrip("\n")
+            if new_text == current:
+                self.lines.append(f"kept {path} ({what} already up to date)")
+                return
+            verb = "would rewrite" if self.dry_run else "rewrote"
+            note = f"{verb} {path} ({what} were out of date)"
+        if not self.dry_run:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(new_text)
+        self.lines.append(note)
+
     def note(self, text: str) -> None:
         self.lines.append(text)
 
@@ -122,6 +163,38 @@ class _Writer:
 # ---------------------------------------------------------------------------
 # DeepSeek Harness
 # ---------------------------------------------------------------------------
+
+
+#: Delimiters for the block `install dsh` owns in `cordis.patch.yml`. The start
+#: marker is the one older installs wrote, so it still finds them; the end marker
+#: is what lets a later install rewrite the block without eating the rest of the
+#: file. See `_Writer.sync_block`.
+DSH_BLOCK_START = "# --- agentdescent (written by `agentdescent install dsh`) ---"
+DSH_BLOCK_END = "# --- end agentdescent ---"
+
+
+def _dsh_env_expression() -> str:
+    """The ``env:`` value both dsh patch files use.
+
+    One quoted ``!!js`` expression that drops unset variables, and it has to be
+    all three of those things:
+
+    * **one expression**, because ``env`` is validated as
+      ``{[key: string]: string}`` and ``process.env.X`` for an unset variable is
+      ``undefined``. Per-key lines therefore made dsh reject the entry -- and it
+      fails the *whole plugin tree* on a bad entry, so an install left dsh
+      unable to start for anyone without those keys exported;
+    * **filtered**, for the same reason: the keys that are missing must not
+      appear at all;
+    * **quoted**, because the expression contains ``": "`` and YAML would read
+      ``OPENAI_API_KEY: process.env...`` inside it as a nested mapping entry
+      ("bad indentation of a mapping entry") and refuse the file.
+
+    Reproduced and fixed against dsh 0.1.2-rc.1 with no provider keys set.
+    """
+    pairs = ", ".join(f"{k}: process.env.{k}" for k in DSH_FORWARDED_KEYS)
+    return ("!!js 'Object.fromEntries(Object.entries({" + pairs +
+            "}).filter(([, v]) => v != null))'")
 
 
 def dsh_patch_block() -> str:
@@ -138,10 +211,20 @@ def dsh_patch_block() -> str:
     matching ``KEY|PASSWORD|SECRET|TOKEN`` before starting an MCP server, so
     without it the server has no provider credentials and ``doctor`` reports
     every reflector as unavailable with nothing else to explain why.
+
+    It is **one** ``!!js`` expression that filters unset keys, rather than one
+    line per key, and that is not a style choice. ``env`` is validated as
+    ``{[key: string]: string}``, and ``process.env.X`` for a variable that is
+    not set is ``undefined``, which is not a string. Writing the keys one per
+    line therefore made dsh reject the entry -- and dsh does not skip a bad
+    entry, it fails the whole plugin tree, so `install dsh` left dsh unable to
+    start at all for anyone without those variables set. (The error even prints
+    the offending object as ``"env":{}``, because JSON.stringify drops the
+    undefined values that are the actual problem.) Reproduced and fixed against
+    dsh 0.1.2-rc.1 with no provider keys in the environment.
     """
-    env = "\n".join(f"          {k}: !!js process.env.{k}" for k in DSH_FORWARDED_KEYS)
+    env = "          " + _dsh_env_expression()
     return (
-        "# --- agentdescent (written by `agentdescent install dsh`) ---\n"
         "# `insert` adds rows; a bare row would be read as an override by id.\n"
         "- insert:\n"
         "    - id: mcp-agentdescent\n"
@@ -167,8 +250,9 @@ def install_dsh(home: str, w: _Writer) -> None:
     skill_dir = os.path.join(dsh_home, "skills", "agentdescent")
     w.write(os.path.join(skill_dir, "SKILL.md"), skill_text())
     w.write(os.path.join(skill_dir, "hooks.json"), hooks_text())
-    w.append_unless(os.path.join(dsh_home, "cordis.patch.yml"), "serverName: agentdescent",
-                    dsh_patch_block(), what="mcp-client + hooks entries")
+    w.sync_block(os.path.join(dsh_home, "cordis.patch.yml"),
+                 DSH_BLOCK_START, DSH_BLOCK_END, dsh_patch_block(),
+                 what="mcp-client + hooks entries")
     w.note(f"forwarded into the MCP server env: {', '.join(DSH_FORWARDED_KEYS)}")
     w.note("verify: dsh --profile web --dump-config | grep -n agentdescent")
 
@@ -555,8 +639,7 @@ def dsh_plugin_source() -> str:
 
 def dsh_plugin_patch() -> str:
     """The plugin's own ``cordis.patch.yml``: itself, plus the MCP server row."""
-    env = "\n".join("          %s: !!js process.env.%s" % (k, k)
-                    for k in DSH_FORWARDED_KEYS)
+    env = "          " + _dsh_env_expression()
     return (
         "# Rows this plugin contributes. `insert` adds rows; a bare row would be\n"
         "# read as an override of an id that does not exist, which dsh reports as\n"

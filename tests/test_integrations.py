@@ -61,7 +61,10 @@ def test_install_dsh_writes_skill_hooks_and_patch(tmp_path, monkeypatch):
     assert "name: '@deepseek-ai/dsh-mcp-client'" in patch
     assert "serverName: agentdescent" in patch and "args: [\"mcp\"]" in patch
     for key in DSH_FORWARDED_KEYS:
-        assert f"{key}: !!js process.env.{key}" in patch      # the scrubbing workaround
+        # Each key is forwarded past dsh's scrubbing -- but as part of one
+        # filtered !!js expression, never as its own entry: unset, it would be
+        # `undefined`, and dsh refuses the whole plugin tree over it.
+        assert f"{key}: process.env.{key}" in patch
     assert "dsh-hooks-claude-code" in patch
     # A dsh patch file OVERRIDES rows by id; new rows must be under `insert:` or
     # dsh warns `patch: entry "mcp-agentdescent" not found` and composes without
@@ -73,7 +76,9 @@ def test_install_dsh_writes_skill_hooks_and_patch(tmp_path, monkeypatch):
     before = patch
     lines = install("dsh", home=str(tmp_path))
     assert _read(tmp_path / ".dsh" / "cordis.patch.yml") == before
-    assert any("already present" in l for l in lines)
+    # "up to date" rather than "present": the check is now on the block's
+    # *content*, so a stale one is repaired instead of kept (see the repair test).
+    assert any("already up to date" in l for l in lines)
 
 
 def test_install_dsh_honours_dsh_home(tmp_path, monkeypatch):
@@ -264,7 +269,9 @@ def test_dsh_plugin_patch_inserts_itself_and_the_mcp_row(tmp_path):
     assert patch.lstrip().startswith("#") and "- insert:" in patch
     assert "id: dsh-agentdescent" in patch and "id: mcp-agentdescent" in patch
     for key in DSH_FORWARDED_KEYS:
-        assert f"{key}: !!js process.env.{key}" in patch
+        # In the shared filtered expression, not one entry per key -- an
+        # unset key would be `undefined` and dsh would refuse the tree.
+        assert f"{key}: process.env.{key}" in patch
 
 
 def test_dsh_plugin_embeds_the_shared_skill_without_frontmatter(tmp_path):
@@ -450,3 +457,124 @@ def test_an_old_interpreter_is_told_the_truth_not_a_pip_line(monkeypatch):
     assert any("3.10" in p for p in cli.doctor_report()["problems"])
     lines = install("claude-code", dry_run=True, home="/tmp/ad-py39-probe")
     assert any("3.10" in ln and "WARNING" in ln for ln in lines)
+
+
+# ---------------------------------------------------------------------------
+# The dsh patch has to survive dsh, not just look right
+# ---------------------------------------------------------------------------
+#
+# `--dump-config` composes the profile but does not validate an entry's config,
+# so it passed while `dsh --profile headless` failed on the same file: the env
+# block wrote one `!!js process.env.X` per key, and a variable that is not set
+# is `undefined`, which is not the `string` the schema wants. dsh does not skip
+# a bad entry -- it fails the whole plugin tree -- so `install dsh` left dsh
+# unable to start at all for anyone without those keys exported.
+
+
+def test_neither_dsh_patch_can_produce_undefined_env_values():
+    """One filtered expression, not one line per key -- in *both* patch files.
+
+    `install dsh` and the native plugin package each write a cordis patch, and
+    only the first was fixed at first; the plugin route carried the same broken
+    env block until they were made to share one generator.
+    """
+    from agentdescent.integrations import dsh_patch_block, dsh_plugin_patch
+
+    for name, block in (("install", dsh_patch_block()), ("plugin", dsh_plugin_patch())):
+        assert "filter(" in block and "!= null" in block, name
+        for key in ("DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY"):
+            assert f"\n          {key}: !!js" not in block, (
+                f"{name}: {key} is written as its own YAML entry again; unset it "
+                "becomes undefined and dsh refuses the whole plugin tree")
+
+
+def test_the_dsh_env_expression_is_quoted_so_yaml_reads_one_scalar():
+    """`OPENAI_API_KEY: process.env...` inside the expression is a mapping entry
+    to a YAML parser -- unquoted, dsh rejects the file before composing."""
+    import yaml
+
+    from agentdescent.integrations import dsh_patch_block, dsh_plugin_patch
+
+    for block in (dsh_patch_block(), dsh_plugin_patch()):
+        doc = yaml.safe_load(block.replace("!!js ", ""))
+        rows = doc[0]["insert"]
+        env = next(r for r in rows if r["id"] == "mcp-agentdescent")["config"]["env"]
+        assert isinstance(env, str) and env.startswith("Object.fromEntries"), env
+
+
+def test_install_dsh_repairs_a_block_it_wrote_before(tmp_path, monkeypatch):
+    """An install that wrote a broken entry could never fix it: the check was
+    "is a marker present", so the second install said "already present" and left
+    dsh unable to start. The only route back was editing the file by hand."""
+    from agentdescent.integrations import DSH_BLOCK_START
+
+    monkeypatch.setenv("DSH_HOME", str(tmp_path / "dsh"))
+    patch = tmp_path / "dsh" / "cordis.patch.yml"
+    patch.parent.mkdir(parents=True)
+    patch.write_text(
+        "- id: something-of-the-users\n  name: keep-me\n"
+        + DSH_BLOCK_START + "\n- insert:\n    - id: mcp-agentdescent\n"
+        "      config:\n        env:\n"
+        "          DEEPSEEK_API_KEY: !!js process.env.DEEPSEEK_API_KEY\n",
+        encoding="utf-8")
+
+    lines = install("dsh", home=str(tmp_path))
+    text = patch.read_text(encoding="utf-8")
+    assert any("rewrote" in l and "out of date" in l for l in lines), lines
+    assert "filter(" in text                       # the fixed expression
+    assert "keep-me" in text                       # the user's own rows survive
+    assert text.count(DSH_BLOCK_START) == 1        # not stacked
+
+    # ...and a second run changes nothing.
+    again = install("dsh", home=str(tmp_path))
+    assert any("already up to date" in l for l in again), again
+    assert patch.read_text(encoding="utf-8") == text
+
+
+def test_dsh_actually_boots_with_the_patch_installed(tmp_path, monkeypatch):
+    """The check that would have caught it: load the plugin tree, not the config.
+
+    Skips without dsh. `MISSING_CREDENTIAL` is a pass -- that is dsh reaching
+    its provider, having loaded every plugin including ours.
+    """
+    if not shutil.which("dsh"):
+        pytest.skip("needs an installed dsh")
+    home = tmp_path / "home"
+    monkeypatch.delenv("DSH_HOME", raising=False)
+    install("dsh", home=str(home))
+    out = subprocess.run(["dsh", "--profile", "headless", "say ok"],
+                         capture_output=True, text=True, timeout=300,
+                         env={**os.environ, "DSH_HOME": str(home / ".dsh"),
+                              "HOME": str(home)}, cwd=str(tmp_path))
+    combined = out.stdout + out.stderr
+    for fatal in ("failed to parse patches", "plugin tree failed to load",
+                  "invalid config", "YAMLException"):
+        assert fatal not in combined, combined[:2000]
+
+
+def test_the_native_dsh_plugin_also_boots(tmp_path):
+    """The plugin route writes its own patch, and had the same broken env block.
+
+    Skips without dsh and pnpm. As above, `MISSING_CREDENTIAL` is a pass.
+    """
+    if not (shutil.which("dsh") and shutil.which("pnpm")):
+        pytest.skip("needs an installed dsh and pnpm")
+    from agentdescent.integrations import render_dsh_plugin
+
+    pkg = tmp_path / "pkg"
+    render_dsh_plugin(str(pkg))
+    home = tmp_path / "home"
+    (home / ".dsh").mkdir(parents=True)
+    env = {**os.environ, "DSH_HOME": str(home / ".dsh"), "HOME": str(home)}
+    add = subprocess.run(["dsh", "plugin", "--profile", "headless", "add",
+                          f"link:{pkg}"], capture_output=True, text=True,
+                         timeout=300, env=env, cwd=str(tmp_path))
+    assert "declares no dsh.bundle" not in add.stdout + add.stderr
+    out = subprocess.run(["dsh", "--profile", "headless", "--dump-config"],
+                         capture_output=True, text=True, timeout=300,
+                         env=env, cwd=str(tmp_path))
+    combined = out.stdout + out.stderr
+    for fatal in ("failed to parse patches", "plugin tree failed to load",
+                  "invalid config", "YAMLException", "not found"):
+        assert fatal not in combined, combined[:2000]
+    assert "id: dsh-agentdescent" in combined and "id: mcp-agentdescent" in combined
