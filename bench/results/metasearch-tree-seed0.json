@@ -1,0 +1,73 @@
+{
+ "plan": "metasearch: evolve priority() on 150 x source instances (inner budget 60), rounds=24 workers=6 mode=sync blast_radius=0.6 (L1); validate on 200 fresh instances of source and target; openai/deepseek-v4-flash temperature=1.0 thinking=disabled",
+ "seed": 0,
+ "mode": "sync",
+ "wall_seconds": 161.89050229099985,
+ "evolved_source": "def priority(rank, visits, total, prior, depth, n_nodes):\n    # Increase exploration (c=1.0), weaken depth penalty to explore deeper promising branches\n    c = 1.0\n    explore = (1.0 / (1.0 + n_nodes)) * math.sqrt(total) / (1 + visits)\n    explore *= 1.0 / (1.0 + 0.5 * depth)\n    return rank + c * explore",
+ "final_reward": 0.7702038569003858,
+ "outcomes": {
+  "committed": 2,
+  "oracle-rejected": 16,
+  "below-threshold": 6
+ },
+ "rollouts": 144,
+ "validation": {
+  "source": {
+   "n": 200,
+   "seed_rule": 0.7443629470113272,
+   "evolved_rule": 0.7656180162853548,
+   "gain": 0.021255069274027535,
+   "gain_sd": 0.04045232524506111,
+   "wins": 140,
+   "losses": 55
+  },
+  "target": {
+   "n": 200,
+   "seed_rule": 0.3658278084403239,
+   "evolved_rule": 0.37455966918000877,
+   "gain": 0.008731860739684873,
+   "gain_sd": 0.05938735386220722,
+   "wins": 118,
+   "losses": 78
+  }
+ },
+ "transfer_ratio": 0.4108130924962311,
+ "reference": {
+  "evolved": {
+   "source": 0.7656180162853548,
+   "target": 0.37455966918000877
+  },
+  "seed (flat-PUCT c=1)": {
+   "source": 0.7443629470113272,
+   "target": 0.3658278084403239
+  },
+  "PUCT c=0.25 (best hand-written)": {
+   "source": 0.7645174821199064,
+   "target": 0.376117786644
+  },
+  "greedy (rank only)": {
+   "source": 0.7657904043177716,
+   "target": 0.3702442609366955
+  },
+  "worst-first (deliberately bad)": {
+   "source": 0.37755746342234175,
+   "target": 0.1808945342022923
+  }
+ },
+ "model": {
+  "provider": "openai",
+  "model": "deepseek-v4-flash",
+  "temperature": 1.0,
+  "max_tokens": 4096,
+  "thinking": "disabled",
+  "inner_budget": 60
+ },
+ "usage": {
+  "calls": 3218,
+  "prompt_tokens": 114848,
+  "completion_tokens": 15803,
+  "total_tokens": 130651,
+  "model_seconds": 1209.0660018920898,
+  "failures": 0
+ }
+}

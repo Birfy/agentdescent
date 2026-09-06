@@ -165,9 +165,29 @@ Terminal-Bench-Science's). Stated here rather than hidden, as every port's is.
 ```bash
 python -m examples.metasearch.evolve_search_policy --dry-run
 python -m examples.metasearch.evolve_search_policy --provider openai \
-    --model deepseek-v4-flash --rounds 6 --workers 4 --tasks 20 --yes --out out/metasearch.json
+    --model deepseek-v4-flash --thinking disabled \
+    --rounds 24 --workers 6 --tasks 150 --validate-seeds 200 \
+    --completion-cache .cache/metasearch-tree --yes --out out/metasearch.json
 python -m examples.metasearch.evolve_search_policy --serial --rounds 12 --yes   # the control
 ```
+
+Three flags in that line are not cosmetic, and each was paid for by a run
+(results: [`bench/results/metasearch-tree.md`](../../bench/results/metasearch-tree.md)):
+
+* `--thinking disabled` — without it the endpoint spends minutes on a reasoning
+  preamble for a one-function rewrite, and two runs died at the wall-clock limit
+  with **no model call having returned**. It changes the reply as well as the
+  latency, so it is printed in the plan line and recorded in the result JSON.
+* `--tasks 150` — the outer gate holds out `tasks x held_out_frac`, and that set
+  decides every merge. At 24 tasks it is 9 instances, where the paired
+  per-instance sd of 0.04-0.06 puts the standard error at 0.013-0.018 — wider
+  than the whole gain available on this landscape. One seed's gate duly accepted
+  a rule that loses 88/109 on the family it was evolved on. Held-out instances
+  are free: the model is called once per *rollout*, and rollouts are
+  `rounds x workers` whatever this is.
+* `--completion-cache` — the inner search is already deterministic; this makes
+  the *outer* loop resumable, so a run cut short continues instead of paying for
+  the same proposals again.
 
 Offline tests: `pytest tests/test_metasearch.py` — the gate, the seed rule's
 bit-for-bit equivalence with `FlatPuct` on both the upstream-style trace and the

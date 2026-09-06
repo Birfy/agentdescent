@@ -84,16 +84,29 @@ ARTIFACT_ID = "search-policy"
 DEFAULT_INNER_BUDGET = 60
 
 #: What a hand-written rule reaches on this landscape, as the ceiling the search
-#: is measured against. Scanned over `c` at budget 60, 80 instances per family:
-#: the seed's `c_puct = 1` is too explorative, `c = 0.25` is best on **both**
-#: families at +0.021 each, and `c = 2` is worse than the seed by 0.05-0.07. So
-#: there is a known, transferable direction here -- explore less -- and a search
-#: that finds it should transfer, which is what makes this a fair test.
+#: is measured against. The seed is upstream ERA's flat-PUCT `c = 1`, and a sweep
+#: of `c` over the same 200 instances per family that `--validate-seeds` uses
+#: shows the seed is on the wrong side of both optima:
+#:
+#:     c        0.0     0.1    0.25     0.5     1.0     2.0
+#:     source +.0214  +.0214  +.0202  +.0157   0.000  -.0552
+#:     target +.0044  +.0044  +.0103  +.0147   0.000  -.0434
+#:
+#: **The two families do not want the same rule.** Source is maximised as
+#: `c -> 0` (pure greedy; every value below 0.25 is indistinguishable), target
+#: peaks around `c = 0.5` and greedy gives up two thirds of the gain there. So
+#: "explore less" is the direction, and *how much* less is the transfer
+#: question -- which is what makes this a fair test of a search that only ever
+#: sees `SOURCE`, and why the reference set below spans the trade-off rather
+#: than naming one winner.
 REFERENCE_RULES: Dict[str, str] = {
-    "PUCT c=0.25 (best hand-written)":
+    "PUCT c=0.5 (best on target)":
+        "def priority(rank, visits, total, prior, depth, n_nodes):\n"
+        "    return rank + 0.5 * (1.0 / n_nodes) * math.sqrt(total) / (1 + visits)\n",
+    "PUCT c=0.25 (good on both)":
         "def priority(rank, visits, total, prior, depth, n_nodes):\n"
         "    return rank + 0.25 * (1.0 / n_nodes) * math.sqrt(total) / (1 + visits)\n",
-    "greedy (rank only)":
+    "greedy (best on source, c->0)":
         "def priority(rank, visits, total, prior, depth, n_nodes):\n    return rank\n",
     "worst-first (deliberately bad)":
         "def priority(rank, visits, total, prior, depth, n_nodes):\n    return -rank\n",
