@@ -40,6 +40,21 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Fixed
 
+- **The shipped `SKILL.md` never said how to choose an `agent`, and `plan` did
+  not check the choice.** Driving the skill in plain language against a real
+  Claude Code session, three separate wrong answers came out of that gap: it
+  picked `codex` (a file-editing CLI) to evolve a *prompt*, which is one agent
+  session per case to answer a question a model answers in one call; then it
+  invented `"model": "gpt-4o-mini"` for an OpenAI-*compatible* endpoint that
+  serves nothing of the sort; then it named `claude` calling it "the local
+  Claude CLI, no API key needed" -- `claude` is the Anthropic SDK completion,
+  the CLI is `claude_code`, and neither the package nor the key was present.
+  The skill now says which agent each `kind` wants, never to invent a model
+  name, and what `claude` actually is; `doctor` reports `openai_base_url`
+  itself rather than only that one is set; and `plan` returns `warnings` when
+  a named agent or reflector cannot run on this machine, so the cost quote is
+  not for a run that fails on its first call.
+
 - **`agentdescent install dsh` could stop dsh from starting at all.** Both
   cordis patch files wrote the forwarded provider keys one `!!js
   process.env.X` per line. `env` is validated as `{[key: string]: string}` and

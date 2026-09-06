@@ -578,3 +578,76 @@ def test_the_native_dsh_plugin_also_boots(tmp_path):
                   "invalid config", "YAMLException", "not found"):
         assert fatal not in combined, combined[:2000]
     assert "id: dsh-agentdescent" in combined and "id: mcp-agentdescent" in combined
+
+
+# ---------------------------------------------------------------------------
+# `plan` is the step that exists so nobody spends a run finding out
+# ---------------------------------------------------------------------------
+#
+# Driving the skill in plain language against a real host, an agent wrote
+# `"agent": {"ref": "claude"}` describing it as "the local Claude CLI, no API
+# key needed". It is the Anthropic SDK completion; the CLI is `claude_code`.
+# `plan` accepted it and priced 72 calls on a machine with neither the
+# `anthropic` package nor a key, and the first call would have failed. Shape is
+# not the same as "will run here".
+
+
+def test_plan_warns_when_the_named_agent_cannot_run_here(monkeypatch, tmp_path):
+    from agentdescent.cli import plan_payload
+    from agentdescent.evolvespec import EvolveSpec
+
+    cases = tmp_path / "cases.jsonl"
+    cases.write_text('{"prompt": "q", "gold": "a"}\n', encoding="utf-8")
+    target = tmp_path / "prompt.txt"
+    target.write_text("hi\n", encoding="utf-8")
+
+    def spec_for(ref):
+        return EvolveSpec.from_dict({
+            "kind": "text", "target": str(target),
+            "data": {"path": str(cases), "prompt": "prompt", "gold": "gold"},
+            "score": "contains", "agent": {"ref": ref, "model": "m"}})
+
+    for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+
+    warnings = plan_payload(spec_for("claude"))["warnings"]
+    assert any("Anthropic SDK" in w and "claude_code" in w for w in warnings), warnings
+
+    warnings = plan_payload(spec_for("openai_compatible"))["warnings"]
+    assert any("OPENAI_API_KEY" in w for w in warnings), warnings
+
+    # And a usable one is quiet: no warning just because a ref was named.
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    assert plan_payload(spec_for("openai_compatible"))["warnings"] == []
+
+
+def test_doctor_reports_the_base_url_not_just_that_one_is_set():
+    """Given only "OPENAI_API_KEY: true", an agent wrote `"model": "gpt-4o-mini"`
+    against an endpoint that serves nothing of the sort. The URL is not a
+    secret, and it is the only clue that the provider is not OpenAI."""
+    import os
+
+    from agentdescent.cli import doctor_report
+
+    before = os.environ.get("OPENAI_BASE_URL")
+    os.environ["OPENAI_BASE_URL"] = "https://example.invalid/v3"
+    try:
+        report = doctor_report()
+        assert report["openai_base_url"] == "https://example.invalid/v3"
+        assert any("model names are its own" in p for p in report["problems"])
+    finally:
+        if before is None:
+            os.environ.pop("OPENAI_BASE_URL", None)
+        else:
+            os.environ["OPENAI_BASE_URL"] = before
+
+
+def test_the_skill_says_how_to_choose_an_agent():
+    """The skill listed `agent` as one of the four things a spec needs and never
+    said how to pick one. Driven in plain language, an agent chose a CLI coding
+    agent to evolve a *prompt* -- one whole agent session per case to answer a
+    question a model answers in one call."""
+    text = skill_text()
+    assert "Never a CLI coding" in text          # for kind: text
+    assert "Never invent a model name" in text   # it guessed gpt-4o-mini
+    assert "Anthropic SDK" in text               # `claude` is not `claude_code`

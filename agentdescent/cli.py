@@ -142,6 +142,12 @@ def doctor_report() -> Dict[str, Any]:
             for name in ("claude", "codex", "dsh", "opencode", "git", "node", "pnpm")}
     keys = {name: bool(os.environ.get(name)) for name in (
         "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "DEEPSEEK_API_KEY")}
+    # The *value* of the base URL, not just its presence: it is a URL and not a
+    # secret, and without it a caller writing a spec cannot tell that
+    # `OPENAI_API_KEY` points at some other provider entirely. Measured: an
+    # agent given only "OPENAI_API_KEY: true" wrote `"model": "gpt-4o-mini"`
+    # against an endpoint that serves nothing of the sort.
+    base_url = os.environ.get("OPENAI_BASE_URL")
     optional: Dict[str, bool] = {}
     for mod in ("anthropic", "mcp"):
         try:
@@ -160,6 +166,11 @@ def doctor_report() -> Dict[str, Any]:
     if not any(clis[c] for c in ("claude", "codex", "dsh", "opencode")):
         problems.append("no worker agent CLI on PATH (claude / codex / dsh / opencode); "
                         "directory kinds need one")
+    if base_url:
+        problems.append(
+            f"OPENAI_BASE_URL is {base_url} -- an OpenAI-compatible endpoint that "
+            "is not OpenAI, so its model names are its own; ask the user which "
+            "model to name in a spec rather than assuming an OpenAI one")
     if not (keys["ANTHROPIC_API_KEY"] or keys["OPENAI_API_KEY"] or keys["DEEPSEEK_API_KEY"]):
         problems.append("no provider key in the environment; a reflector needs one "
                         "(under dsh, forward keys in the mcp-client env block)")
@@ -169,6 +180,7 @@ def doctor_report() -> Dict[str, Any]:
     return {
         "python": sys.version.split()[0],
         "agent_clis": clis, "provider_keys_present": keys,
+        "openai_base_url": base_url,
         "optional": optional, "container_engine": container,
         "nested": bool(os.environ.get(NESTED_ENV)),
         "run_store": runstore.root(),
@@ -265,9 +277,46 @@ def cmd_init(a: argparse.Namespace) -> int:
     return 0
 
 
+def _unusable_refs(spec: EvolveSpec) -> List[str]:
+    """Warnings for agents this machine cannot actually run.
+
+    `plan` is the step that exists so nobody spends a run finding out, and it
+    was only checking the spec's *shape*: a spec naming `claude` -- the Anthropic
+    SDK completion, not the CLI -- passed and was priced at 72 calls on a machine
+    with neither the `anthropic` package nor a key, and would have failed on the
+    first one. Shape is not the same as "will run here".
+    """
+    report = doctor_report()
+    keys, clis = report["provider_keys_present"], report["agent_clis"]
+    out: List[str] = []
+    for field in ("agent", "reflect"):
+        block = getattr(spec, field, None)
+        ref = (block or {}).get("ref") if isinstance(block, dict) else None
+        if not ref:
+            continue
+        if ref == "claude":
+            missing = []
+            if not report["optional"].get("anthropic"):
+                missing.append("the `anthropic` package")
+            if not keys.get("ANTHROPIC_API_KEY"):
+                missing.append("ANTHROPIC_API_KEY")
+            if missing:
+                out.append(f"{field}: `claude` is the Anthropic SDK completion (the "
+                           f"CLI is `claude_code`) and needs {' and '.join(missing)}")
+        elif ref == "openai_compatible" and not keys.get("OPENAI_API_KEY"):
+            out.append(f"{field}: `openai_compatible` needs OPENAI_API_KEY")
+        elif ref in ("claude_code", "codex", "dsh", "opencode"):
+            binary = {"claude_code": "claude"}.get(ref, ref)
+            if not clis.get(binary):
+                out.append(f"{field}: `{ref}` needs `{binary}` on PATH")
+    return out
+
+
 def plan_payload(spec: EvolveSpec, *, usd_per_call: Optional[float] = None) -> Dict[str, Any]:
     comp = compose(spec)
+    warnings = _unusable_refs(spec)
     return {"ok": True, "spec": spec.to_dict(), "tasks": len(comp.tasks),
+            "warnings": warnings,
             "artifact_id": spec.artifact_id(),
             "evolve_kwargs": {k: (v if isinstance(v, (int, float, str, bool, type(None)))
                                   else type(v).__name__)

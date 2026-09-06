@@ -24,12 +24,32 @@ written back until the user says so.
    - No obvious score? Prefer `"contains"` or `"exact"`; offer
      `{"cmd": "./grade.sh"}` when the answer is a file, code, or a format check
      (task JSON on stdin, `$ANSWER` in the env, a number in [0, 1] on stdout).
+   - **`agent` follows from `kind`, and getting it wrong wastes the run:**
+     - `text` -- the agent *is the model being prompted*, so name a model:
+       `openai_compatible` (with `model`) or `host_model`. **Never a CLI coding
+       agent here**: `claude_code` / `codex` / `dsh` / `opencode` are
+       file-editing agents, and pointing one at a prompt costs a whole agent
+       session per case to answer a question a model answers in one call.
+     - `skill_dir` / `agent_dir` / `agent_code` / `plugin` -- the agent has to
+       read and edit files, so it must be a CLI agent, and `reflect` is where a
+       cheap model goes.
+   - **Never invent a model name.** `openai_compatible` needs one and there is
+     no default; `doctor` reports `openai_base_url`, and when it is set the
+     endpoint is not OpenAI, so an OpenAI model name will simply 404. Ask the
+     user which model, or use `host_model` and name none.
+   - Only name a CLI that `doctor` reported on `PATH`, and do not assume it is
+     authenticated: a worker runs with the host's config directory redirected,
+     so a CLI signed in interactively is *not* signed in for the run unless the
+     spec sets `"isolate": false`. Provider keys in the environment do reach it.
    - Leave `policies` empty unless the user asks for a mechanism by name; the
      empty bundle is the shipped run.
 3. **`plan`** with the spec. Show the user the spec and the estimate (agent calls
    per round and in total; dollars only if a per-call price is known). Get a
    yes. Fix any error it names; it names the field.
-4. **`start`**. Then poll **`status`** about once per round, not more. Summarise
+4. **`start`**. It replies with `host_model_route` when the spec uses
+   `host_model` -- report the route it actually got (`sampling`, or a CLI name)
+   rather than assuming; only the sampling route dies with this session.
+   Then poll **`status`** about once per round, not more. Summarise
    round deltas (reward, commits, refusal reasons), not raw JSON.
 5. When done, **`show`** with `diff=true`. Explain what changed and why using
    the `outcomes` histogram (`committed`, `below-threshold`, `oracle-rejected`
@@ -57,9 +77,13 @@ rounds already committed are kept).
 }
 ```
 
-Agents by short name: `claude_code`, `codex`, `dsh`, `opencode`,
-`openai_compatible`, `claude`. A cheap `reflect` model behind an expensive `agent` is the usual
-trade. For `kind: plugin`, set `host` to `dsh`, `claude_code`, `codex` or `opencode`.
+Agents by short name. The CLI agents, which edit files: `claude_code` (the
+`claude` binary), `codex`, `dsh`, `opencode`. The plain models: `host_model`
+(this host's, no key), `openai_compatible` (needs `model` and `OPENAI_API_KEY`),
+and `claude` -- which is the **Anthropic SDK**, not the Claude CLI, and needs
+the `anthropic` package plus `ANTHROPIC_API_KEY`. `plan` warns when a spec names
+something this machine cannot run; read its `warnings` before quoting a cost.
+A cheap `reflect` model behind an expensive `agent` is the usual trade. For `kind: plugin`, set `host` to `dsh`, `claude_code`, `codex` or `opencode`.
 
 **Which model runs.** A worker is the host CLI as a subprocess, started with its
 config directory redirected into the rollout workspace -- so it inherits
