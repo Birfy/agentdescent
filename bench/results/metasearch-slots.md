@@ -7,6 +7,55 @@ saw, and one window of another benchmark. `deepseek-v4-flash`, temperature 0,
 thinking disabled, inner runs deterministic (see *Determinism* below).
 Produced by [`bench/metasearch_slots.py`](../metasearch_slots.py).
 
+## The corrected result: fix the inner budget and the transfer sign flips
+
+The seven-cell matrix below ran at **4 rollouts per inner run**, which the next
+section shows is too few for the slot to express anything. Re-run at **12**, with
+everything else held fixed:
+
+| cell | inner rollouts | train gain | **unseen gain (transfer)** | other benchmark |
+|---|---:|---:|---:|---:|
+| `task_sampler` x GSM-Hard | 4 | +0.047 (1/2) | **−0.141** (0/2) | −0.031 (aime) |
+| `task_sampler` x GSM-Hard | **12** | +0.029 (2/0) | **+0.042** (1/0) | −0.052 (aime) |
+| `task_sampler` x HotpotQA | 4 | +0.016 (2/0) | **−0.031** (1/1) | +0.062 (gsmhard) |
+| `task_sampler` x HotpotQA | **12** | +0.029 (3/0) | **+0.031** (1/1) | +0.062 (gsmhard) |
+| `task_sampler` x AIME | 4 | +0.000 | +0.000 | +0.000 (gsmhard) |
+| `task_sampler` x AIME | **12** | +0.000 | +0.000 | +0.000 (gsmhard) |
+
+**Both cells that commit anything flip the transfer column from negative to
+positive**, and their train rows go from 1 win / 2 losses to 2-3 wins / 0 losses.
+AIME does not move at either budget, so its null is a property of that cell
+rather than of the budget.
+
+That is the answer to why the matrix looked flat: **it was measured at a budget
+where the slot could not act.** Reading below this line, treat the seven-cell
+table as the four-rollout arm of this comparison.
+
+Two things this does *not* establish. One validation seed per problem, so each
+cell is a handful of paired comparisons, and the `other` column disagrees with
+the `unseen` column on GSM-Hard (−0.052 against +0.042). And the gain is small
+in absolute terms — +0.03 to +0.04 of AUC — against a hand-written reference
+that reaches +0.065 on the same windows.
+
+### Reflective merge changed nothing here
+
+The outer loop's two workers produce two contradicting candidate rules per
+round, and by default one is ranked out and discarded. Running the corrected
+GSM-Hard cell with `--reflective-merge` — a model synthesising one rule from
+both, gated by the slot's own validator — gives **identical numbers**: +0.029
+train, +0.042 unseen, −0.052 other. Both runs had six distinct proposals, so
+there was something to fuse; the two evolved rules differ in text and score
+identically on all seven validation problems.
+
+The reason is visible in the rules themselves: every one this search finds is
+the same idea worded differently — *do not spend a rollout on a task the
+artifact already solves*. On this domain the slot has about one discoverable
+degree of freedom, which is also why a deliberately degenerate sampler captured
+it by accident at the small budget. Merging two expressions of one idea has
+nothing to add.
+
+## The four-rollout matrix (superseded above)
+
 | slot | evolved on | item baseline | train gain | unseen gain | other benchmark | committed | proposals |
 |---|---|---:|---:|---:|---:|---:|---|
 | `task_sampler` | gsmhard | 0.500 | +0.047 (1/2) | -0.141 (0/2) | -0.031 (0/1) (aime) | 2/3 | 6, 0 refused |
