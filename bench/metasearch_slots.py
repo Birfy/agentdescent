@@ -691,7 +691,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--validate-seeds", type=int, default=2)
     parser.add_argument("--rounds", type=int, default=3, help="outer rounds")
     parser.add_argument("--workers", type=int, default=2, help="outer workers")
-    parser.add_argument("--inner-rounds", type=int, default=5)
+    parser.add_argument("--inner-rounds", type=int, default=12,
+                        help=("rollouts inside one inner run, and the single "
+                              "setting that decides whether the sampler slot has "
+                              "any leverage. Measured on two 20-task GSM-Hard "
+                              "windows (12 train tasks each): at 4 rollouts a "
+                              "deliberately degenerate sampler -- always pick "
+                              "keys[0] -- TIED FOR BEST, because a sampler that "
+                              "learns from `record` cannot pay for the failure it "
+                              "needs to see before the budget is gone. At 12 the "
+                              "same sampler is last and the spread between rules "
+                              "roughly doubles (0.125 -> 0.208 on one window). "
+                              "Below about one rollout per train task this "
+                              "experiment measures luck"))
     parser.add_argument("--inner-workers", type=int, default=1,
                         help=("workers inside one inner run. 1 is the setting the "
                               "sequential slots are about -- a sampler learns from "

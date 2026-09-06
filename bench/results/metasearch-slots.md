@@ -64,6 +64,37 @@ the ceiling cannot show a sampler doing anything, so those rows are not evidence
 either way. Choosing windows by their *inner AUC* rather than by their item
 baseline is the fix, and it is not done here.
 
+## Why the matrix is flat: the inner budget was too small to measure a sampler
+
+The seven cells above ran at **4 rollouts per inner run over 12 train tasks**,
+and that is not enough for the slot to express anything. Instrumented on one
+window, round-robin spent **three of its four rollouts on tasks the artifact had
+already solved** — and the engine asks no proposal from a rollout that passed, so
+the run bought one proposal out of four. A sampler that learns from `record`
+cannot do better, because it has to spend a rollout to discover a failure and the
+budget is gone before it can act on what it learned.
+
+The consequence is worse than noise. Four samplers on two windows, the same
+inner problem at two budgets:
+
+| window | rollouts | round-robin | repeat-failures | skip-solved | **always-first (degenerate)** | spread |
+|---|---:|---:|---:|---:|---:|---:|
+| gsmhard-0 | 4 | 0.625 | 0.719 | 0.688 | **0.719 — tied best** | 0.094 |
+| gsmhard-2 | 4 | 0.500 | 0.500 | 0.625 | 0.500 | 0.125 |
+| gsmhard-0 | 12 | 0.625 | 0.740 | 0.729 | 0.740 | 0.115 |
+| gsmhard-2 | 12 | 0.625 | 0.573 | **0.708** | **0.500 — last** | 0.208 |
+
+`always-first` picks `keys[0]` every time and is there to be bad. **At four
+rollouts it ties for best; at twelve it is last.** A budget that inverts the
+ranking of a deliberately broken rule is not measuring the rule, and the flat
+matrix above is substantially that artifact rather than a property of the
+method.
+
+So the table above should be read as: *at a budget too small for the slot to
+matter, nothing was learned and nothing transferred* — which is a fact about the
+configuration. The default is now 12 rollouts, and the rule of thumb the
+measurement supports is **at least one rollout per train task**.
+
 ## What the matrix did establish
 
 - The machinery runs end to end on four datasets and two slots, with the inner
