@@ -1,3 +1,7 @@
+---
+description: Evolve any artifact with AgentDescent: describe what evolves with a Strategy and the rules of evolution with run, reward and propose.
+---
+
 # The `evolve` method
 
 `evolve()` is the **one entry point** to the framework. You describe *what

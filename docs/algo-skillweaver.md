@@ -1,3 +1,7 @@
+---
+description: A runnable reproduction of SkillWeaver web-agent API synthesis with a self-verifying reward model. Environment analogue over a settings site, measured over three seeds.
+---
+
 # SkillWeaver — Web agent API synthesis
 
 > **API-library self-evolution.** Propose, practise, verify and hone reusable

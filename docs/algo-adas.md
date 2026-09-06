@@ -1,3 +1,7 @@
+---
+description: A runnable reproduction of ADAS (Meta Agent Search): evolve the agentic system itself. Benchmark-faithful port, and an honest account of why it reports no lift number.
+---
+
 # ADAS — Meta Agent Search
 
 > **Harness self-evolution.** Evolve the *agentic system itself* — the control

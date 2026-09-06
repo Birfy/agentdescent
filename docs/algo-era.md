@@ -1,3 +1,7 @@
+---
+description: A runnable reproduction of ERA, Google Research's empirical-software search with a flat-PUCT tree. Measured on its own Kaggle task: test RMSE 0.7297 to 0.5913.
+---
+
 # ERA — Empirical-software search (Flat UCB tree search)
 
 > **Program search, tree-shaped.** A Python solution to a scientific-computing

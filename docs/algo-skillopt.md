@@ -1,3 +1,7 @@
+---
+description: A runnable reproduction of SkillOpt (ReflACT) skill-document editing under a strict acceptance gate. Measured on a hard SearchQA subset: 3 of 43 edits accepted.
+---
+
 # SkillOpt — ReflACT
 
 > **Skill-document self-evolution.** Train a single markdown skill doc as the

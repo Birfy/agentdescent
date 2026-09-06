@@ -11,3 +11,5 @@ venv/
 .DS_Store
 *.log
 site/
+# mkdocs-material's social-card cache; 12 MB of regenerable PNGs
+.cache/

@@ -1,9 +1,26 @@
 site_name: AgentDescent
-site_description: A parallel, self-evolving framework for accelerating RSI
+# Written for search, not for us: "RSI" is jargon nobody types into a search box,
+# and the phrases people do type -- self-evolving agents, an implementation of a
+# named method -- were in none of these pages' metadata.
+site_description: >-
+  A parallel, asynchronous framework for self-evolving LLM agents, with runnable
+  reproductions of nineteen published self-evolution algorithms.
+# Required for canonical URLs, an absolute-URL sitemap, and the social cards
+# below -- without it mkdocs emits neither, and the social plugin warns.
+site_url: https://birfy.github.io/agentdescent/
 repo_url: https://github.com/Birfy/agentdescent
 repo_name: Birfy/agentdescent
 docs_dir: docs
 site_dir: site
+
+plugins:
+  # `search` is listed explicitly because declaring any plugin replaces the
+  # default set, and dropping it silently removes the docs site's own search.
+  - search
+  # Renders an og:image per page, so a link shared anywhere shows the page title
+  # instead of a bare URL. Needs mkdocs-material[imaging]; the docs workflow
+  # installs it and the cairo library it loads at runtime.
+  - social
 
 theme:
   name: material

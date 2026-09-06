@@ -1,3 +1,7 @@
+---
+description: A runnable reproduction of EvoSkill automated skill discovery: learn reusable SKILL.md files from execution failures under a bounded top-K frontier. Measured on FinQA.
+---
+
 # EvoSkill — Automated Skill Discovery
 
 > **Skill-library self-evolution.** Discover reusable `SKILL.md` skills from

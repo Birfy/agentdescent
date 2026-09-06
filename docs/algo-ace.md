@@ -1,3 +1,7 @@
+---
+description: A runnable reproduction of ACE (Agentic Context Engineering): evolve a playbook of lessons instead of weights. Benchmark-faithful port with measured FiNER-139 results.
+---
+
 # ACE — Agentic Context Engineering
 
 > **Skill / context self-evolution.** Evolve a *playbook of lessons* (the model's

@@ -1,3 +1,7 @@
+---
+description: A runnable reproduction of Reflexion verbal reinforcement with bounded episodic memory. Mechanism microport on GSM-Hard, reported against that domain's noise floor.
+---
+
 # Reflexion — Verbal reinforcement / episodic memory
 
 > **Memory self-evolution.** Turn a failed trajectory into a verbal reflection,
