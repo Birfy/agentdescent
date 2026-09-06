@@ -48,13 +48,15 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import statistics
 import time
 from typing import Callable, Dict, Iterable, List, Optional, Sequence
 
-from agentdescent.agents import Completion, Usage
+from agentdescent.agents import Completion, Usage, with_retries
 from agentdescent.evolution import EvolutionResult, Task
-from agentdescent.meta import (MetaOutcome, Problem, auc, meta_evolve, meta_validate,
-                               priority_selection, slot_reflector)
+from agentdescent.meta import (MetaOutcome, Problem, auc, cached_completion,
+                               meta_evolve, meta_validate, priority_selection,
+                               slot_reflector)
 from agentdescent.meta import transfer_ratio as _transfer_ratio
 
 from examples._common import (add_standard_args, budget_kwargs, completion_for,
@@ -66,7 +68,36 @@ from examples.metasearch._policy_source import (FUNCTION, SEED_SOURCE,
 
 
 ARTIFACT_ID = "search-policy"
-DEFAULT_INNER_BUDGET = 24
+
+#: Expansions per inner search. 60, not 24, and the difference is measured.
+#: Four priority rules over 60 landscape instances, spread between best and
+#: worst rule:
+#:
+#:     budget      12     24     60    120
+#:     source   0.130  0.255  0.413  0.474
+#:     target   0.023  0.065  0.203  0.349
+#:
+#: At 24 the transfer family separates rules by 0.065, which is thin enough that
+#: a real difference can hide in it; at 60 it is 0.203. (Unlike the task_sampler
+#: experiment in `bench/metasearch_slots.py`, no budget here *inverts* the
+#: ranking -- a deliberately bad rule, `return -rank`, comes last at every one.)
+DEFAULT_INNER_BUDGET = 60
+
+#: What a hand-written rule reaches on this landscape, as the ceiling the search
+#: is measured against. Scanned over `c` at budget 60, 80 instances per family:
+#: the seed's `c_puct = 1` is too explorative, `c = 0.25` is best on **both**
+#: families at +0.021 each, and `c = 2` is worse than the seed by 0.05-0.07. So
+#: there is a known, transferable direction here -- explore less -- and a search
+#: that finds it should transfer, which is what makes this a fair test.
+REFERENCE_RULES: Dict[str, str] = {
+    "PUCT c=0.25 (best hand-written)":
+        "def priority(rank, visits, total, prior, depth, n_nodes):\n"
+        "    return rank + 0.25 * (1.0 / n_nodes) * math.sqrt(total) / (1 + visits)\n",
+    "greedy (rank only)":
+        "def priority(rank, visits, total, prior, depth, n_nodes):\n    return rank\n",
+    "worst-first (deliberately bad)":
+        "def priority(rank, visits, total, prior, depth, n_nodes):\n    return -rank\n",
+}
 
 
 def build_tasks(family: Family, count: int, *, first_seed: int = 0) -> List[Task]:
@@ -130,6 +161,20 @@ def era_auc(history: Iterable) -> float:
                                   for row in history]))
 
 
+def score_rules(rules: Dict[str, str], *, seeds: Sequence[int], budget: int,
+                families: Sequence[Family] = (SOURCE, TARGET)) -> Dict[str, Dict[str, float]]:
+    """Mean AUC per family for each named rule -- the reference column.
+
+    Free: an inner search is pure Python, so this costs wall-clock and no model
+    calls at all."""
+    out: Dict[str, Dict[str, float]] = {}
+    for label, source in rules.items():
+        policy = EvolvedSelection(source)
+        out[label] = {f.name: statistics.fmean(search(policy, f, s, budget).auc for s in seeds)
+                      for f in families}
+    return out
+
+
 def validate(seed_source: str, evolved_source: str, *, seeds: Sequence[int],
              budget: int = DEFAULT_INNER_BUDGET,
              families: Sequence[Family] = (SOURCE, TARGET)) -> Dict[str, Dict[str, float]]:
@@ -164,6 +209,20 @@ def format_report(report: Dict[str, Dict[str, float]]) -> str:
     return "\n".join(lines)
 
 
+def progress() -> Callable[[object], None]:
+    """One line per outer sweep. An outer sweep here is a model call plus
+    `tasks` whole inner searches, so a run that reports nothing until its
+    summary cannot be told from one that stalled on the endpoint."""
+
+    def on_round(info: object) -> None:
+        print(f"[sweep {info.round}] held_out={info.held_out_reward:.3f} "
+              f"committed={info.committed} rejected={info.rejected} "
+              f"reasons={info.reasons} elapsed={info.elapsed_s:.0f}s "
+              f"rollouts={info.rollouts}", flush=True)
+
+    return on_round
+
+
 def run_outer(complete: Completion, *, rounds: int, workers: int, tasks: int,
               seed: int, inner_budget: int, mode: str, max_seconds: float,
               async_ratio: int, usage: Optional[Usage] = None,
@@ -183,6 +242,7 @@ def run_outer(complete: Completion, *, rounds: int, workers: int, tasks: int,
         seed=seed,
         usage=usage,
         max_seconds=max_seconds,
+        on_round=progress(),
         **(extra or {}),
     )
     problems = {SOURCE.name: landscape_problem(SOURCE, inner_budget)}
@@ -207,9 +267,36 @@ def build_parser() -> argparse.ArgumentParser:
                         help="source landscape instances the outer loop trains and gates on")
     parser.add_argument("--inner-budget", type=int, default=DEFAULT_INNER_BUDGET,
                         help="expansions per inner search")
-    parser.add_argument("--validate-seeds", type=int, default=40,
-                        help="fresh instances per family for the final report")
+    parser.add_argument("--validate-seeds", type=int, default=200,
+                        help=("fresh instances per family for the final report. "
+                              "Large because an inner search here is pure Python "
+                              "and costs nothing -- the model is only the outer "
+                              "reflector, so statistics are free and there is no "
+                              "reason to report a handful of paired runs"))
+    parser.add_argument("--no-reference", action="store_true",
+                        help=("skip scoring the hand-written rules. They are what "
+                              "says whether the search found the available gain or "
+                              "a fraction of it"))
+    parser.add_argument("--thinking", choices=("disabled", "enabled", "default"),
+                        default="default",
+                        help=("send `thinking` in the request body. The reflector "
+                              "call here is one short function rewrite, and a "
+                              "reasoning preamble costs minutes of wall-clock for "
+                              "it; `disabled` is accepted by Ark/Volcengine. Part "
+                              "of the reported configuration, not just a speed "
+                              "knob -- it changes the reply, so it has to be the "
+                              "same across arms of a comparison"))
+    parser.add_argument("--max-tokens", type=int, default=4096)
+    parser.add_argument("--temperature", type=float, default=1.0)
+    parser.add_argument("--api-timeout", type=float, default=180.0,
+                        help="seconds per model call before it is retried")
     parser.add_argument("--out", default="", help="write the full result here as JSON")
+    parser.add_argument("--completion-cache", default="",
+                        help=("memoise the reflector's prompt -> text here. The "
+                              "inner search is already deterministic; this makes "
+                              "the *outer* loop resumable, so a run cut short by a "
+                              "wall-clock limit continues from where it stopped "
+                              "instead of paying for the same proposals again"))
     return parser
 
 
@@ -220,7 +307,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     plan = (f"metasearch: evolve {FUNCTION}() on {args.tasks} x {SOURCE.name} instances "
             f"(inner budget {args.inner_budget}), rounds={args.rounds} workers={workers} "
             f"mode={mode} blast_radius=0.6 (L1); validate on {args.validate_seeds} fresh "
-            f"instances of {SOURCE.name} and {TARGET.name}")
+            f"instances of {SOURCE.name} and {TARGET.name}; "
+            f"{args.provider}/{args.model} temperature={args.temperature} "
+            f"thinking={args.thinking}")
     print(plan)
     if args.dry_run:
         print("[dry-run] no model API was accessed; nothing was fetched -- the inner "
@@ -229,7 +318,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if not confirm(args):
         return 0
     usage = Usage()
-    complete = completion_for(args, usage=usage)
+    options: Dict[str, object] = {}
+    if args.thinking != "default":
+        options["thinking"] = {"type": args.thinking}
+    complete = with_retries(
+        completion_for(args, usage=usage, max_tokens=args.max_tokens,
+                       timeout=args.api_timeout, temperature=args.temperature,
+                       retries=1, **options),
+        attempts=4, backoff=3.0)
+    if args.completion_cache:
+        complete = cached_completion(
+            complete, args.completion_cache,
+            key_extra=f"{args.model}|{args.temperature}|{args.max_tokens}|{args.thinking}")
     started = time.monotonic()
     result = run_outer(complete, rounds=args.rounds, workers=workers, tasks=args.tasks,
                        seed=args.seed, inner_budget=args.inner_budget, mode=mode,
@@ -242,11 +342,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     fresh = range(10_000_000 + args.seed * 1_000, 10_000_000 + args.seed * 1_000 + args.validate_seeds)
     report = validate(SEED_SOURCE, result.rendered, seeds=list(fresh), budget=args.inner_budget)
     print(format_report(report))
+    reference = {}
+    if not args.no_reference:
+        reference = score_rules({"evolved": result.rendered, "seed (flat-PUCT c=1)": SEED_SOURCE,
+                                 **REFERENCE_RULES},
+                                seeds=list(fresh), budget=args.inner_budget)
+        base = reference["seed (flat-PUCT c=1)"]
+        print(f"\n{'rule':<34} " + "  ".join(f"{f:>8}" for f in base) + "     vs seed")
+        for label, per in reference.items():
+            deltas = "  ".join(f"{per[f] - base[f]:+8.4f}" for f in base)
+            print(f"{label:<34} " + "  ".join(f"{per[f]:>8.4f}" for f in base) + f"   {deltas}")
     payload = {
         "plan": plan, "seed": args.seed, "mode": mode, "wall_seconds": time.monotonic() - started,
         "evolved_source": result.rendered, "final_reward": result.final_reward,
         "outcomes": result.outcomes(), "rollouts": result.rollouts,
         "validation": report, "transfer_ratio": transfer_ratio(report),
+        "reference": reference,
+        "model": {"provider": args.provider, "model": args.model,
+                  "temperature": args.temperature, "max_tokens": args.max_tokens,
+                  "thinking": args.thinking, "inner_budget": args.inner_budget},
         "usage": usage_dict(usage),
     }
     if args.out:

@@ -47,11 +47,14 @@ search rule" and "a fit to the training landscape" are two different rows.
 from __future__ import annotations
 
 import ast
+import hashlib
 import inspect
 import json
 import math
+import os
 import re
 import statistics
+import tempfile
 import threading
 from dataclasses import dataclass, field
 from types import FunctionType
@@ -87,6 +90,7 @@ __all__ = [
     "policy_source",
     "seed_source",
     "evolve_problem",
+    "cached_completion",
     "auc",
     "final_reward",
     "rollouts_to",
@@ -1095,6 +1099,64 @@ def policy_source(slot: str, seed: Optional[str] = None, *, class_name: str = "P
     validate(seed)
     return SourceSlot(initial_value=seed.strip() + "\n", validate=validate, build=build,
                       description=description)
+
+def cached_completion(complete: Callable[[str], str], directory: str, *,
+                      key_extra: str = "") -> Callable[[str], str]:
+    """``prompt -> text``, memoised on disk. Makes an inner run reproducible.
+
+    A :class:`~agentdescent.meta.Problem` is documented as
+    ``(value, seed) -> MetaOutcome``, and the paired comparison
+    :func:`~agentdescent.meta.meta_validate` makes rests on that: score the seed
+    rule and the evolved rule on the same problem and seed, and the difference
+    is the rule. The engine's ``eval_cache`` memoises the *gate*, and nothing
+    memoised the **rollouts** -- so two runs of the same sampler could take
+    different proposals and land on different instructions.
+
+    Measured, and the reason this exists: validating the seed rule against
+    **itself**, byte for byte, reported a gain of -0.0625 on one 20-task
+    GSM-Hard window (one seed better, one worse). A noise floor that size sits
+    on top of any effect the outer loop could find, and under L1 governance
+    every tie is an oracle veto -- which is exactly what the first two live runs
+    produced: three sweeps, `{'oracle-rejected': 3}`, nothing committed.
+
+    Deterministic sampling (``temperature=0``) is necessary and was not
+    sufficient: the endpoint returned the same text for the same prompt most of
+    the time, not always. Caching the call is what closes it.
+
+    The key covers the prompt and whatever ``key_extra`` names about the
+    request (model, temperature, token budget) -- change any of those and the
+    old entries are simply not found rather than silently reused.
+    """
+    os.makedirs(directory, exist_ok=True)
+    lock = threading.Lock()
+    stats = {"hits": 0, "misses": 0}
+
+    def complete_cached(prompt: str) -> str:
+        digest = hashlib.sha256(f"{key_extra}\0{prompt}".encode("utf-8")).hexdigest()
+        path = os.path.join(directory, f"{digest}.json")
+        if os.path.exists(path):
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    with lock:
+                        stats["hits"] += 1
+                    return json.load(handle)["response"]
+            except (OSError, ValueError, KeyError):
+                pass          # a half-written entry is a miss, not a failure
+        response = complete(prompt)
+        with lock:
+            stats["misses"] += 1
+        # Written whole then renamed: a concurrent reader never sees a partial
+        # entry, which is the failure the `except` above would otherwise absorb
+        # silently on every call.
+        fd, tmp = tempfile.mkstemp(dir=directory, suffix=".partial")
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump({"response": response}, handle)
+        os.replace(tmp, path)
+        return response
+
+    complete_cached.stats = stats          # type: ignore[attr-defined]
+    return complete_cached
+
 
 # ---------------------------------------------------------------------------
 # Inner problems
