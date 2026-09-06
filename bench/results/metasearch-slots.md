@@ -1,18 +1,21 @@
 # Evolving a decision slot: a benchmark x slot matrix
 
-Each cell evolves one `Policies` field against four 20-task windows of one
+Seven cells. Each evolves one `Policies` field against four 20-task windows of one
 benchmark (2 inner seeds, 3 outer sweeps = **6 outer rollouts**), then scores the
 seed rule and the evolved rule paired on the same windows, two windows it never
 saw, and one window of another benchmark. `deepseek-v4-flash`, temperature 0,
 thinking disabled, inner runs deterministic (see *Determinism* below).
 Produced by [`bench/metasearch_slots.py`](../metasearch_slots.py).
 
-| slot | evolved on | train gain | unseen gain | other benchmark | committed | proposals |
-|---|---|---:|---:|---:|---:|---|
-| `task_sampler` | gsmhard | +0.047 (1/2) | -0.141 (0/2) | -0.031 (0/1) (aime) | 2/3 | 6, 0 refused |
-| `task_sampler` | aime | +0.000 (0/0) | +0.000 (0/0) | +0.000 (0/0) (gsmhard) | 0/3 | 6, 0 refused |
-| `task_sampler` | hotpotqa | +0.016 (2/0) | -0.031 (1/1) | +0.062 (1/0) (gsmhard) | 1/3 | 6, 0 refused |
-| `acceptance` | gsmhard | +0.000 (0/0) | +0.000 (0/0) | +0.000 (0/0) (aime) | 0/3 | 6, 0 refused |
+| slot | evolved on | item baseline | train gain | unseen gain | other benchmark | committed | proposals |
+|---|---|---:|---:|---:|---:|---:|---|
+| `task_sampler` | gsmhard | 0.500 | +0.047 (1/2) | -0.141 (0/2) | -0.031 (0/1) (aime) | 2/3 | 6, 0 refused |
+| `task_sampler` | aime | 0.708 | +0.000 (0/0) | +0.000 (0/0) | +0.000 (0/0) (gsmhard) | 0/3 | 6, 0 refused |
+| `task_sampler` | hotpotqa | 0.750 | +0.016 (2/0) | -0.031 (1/1) | +0.062 (1/0) (gsmhard) | 1/3 | 6, 0 refused |
+| `task_sampler` | mgsm_zh | 0.625 | +0.000 (0/0) | -0.094 (0/2) | +0.062 (1/0) (gsmhard) | 1/3 | 6, 1 refused |
+| `task_sampler` | gpqa | 0.375 | +0.000 (0/0) | +0.000 (0/0) | +0.000 (0/0) (bbh) | 0/3 | 6, 0 refused |
+| `task_sampler` | bbh | 0.542 | +0.000 (0/0) | +0.000 (0/0) | +0.000 (0/0) (triviaqa) | 0/3 | 6, 0 refused |
+| `acceptance` | gsmhard | 0.500 | +0.000 (0/0) | +0.000 (0/0) | +0.000 (0/0) (aime) | 0/3 | 6, 0 refused |
 
 `(w/l)` counts paired wins and losses over the windows in the group. **One
 validation seed per problem**, so every `sd` in the raw files is 0.000 by
@@ -21,30 +24,45 @@ not a measurement.
 
 ## What this says, sober
 
-**Two of four cells learned nothing at all.** On AIME and on the `acceptance`
-slot every proposal was valid and every merge was oracle-rejected: under L1 a
-candidate must strictly beat the base on ground truth, and none did. The
-engine's default acceptance rule — a Beta posterior against an annealed
-threshold — was not beaten by an LLM-written rule in six rollouts, which is a
-result about that default as much as about the search.
+**Four of seven cells committed nothing at all.** On AIME, GPQA, BBH and the
+`acceptance` slot every proposal was valid and every merge was oracle-rejected:
+under L1 a candidate must strictly beat the base on ground truth, and none did.
+For `acceptance` that is a result about the engine's own default too — a Beta
+posterior against an annealed threshold was not beaten by an LLM-written rule in
+six rollouts.
 
-**No cell transferred.** Both cells that committed something lost on the unseen
-windows of their own benchmark: −0.141 on GSM-Hard, −0.031 on HotpotQA. The
-HotpotQA row's +0.062 on the other benchmark is a single paired comparison on
-one window, and the 4.00 ratio beside it is arithmetic on two small numbers, not
-a finding.
+**Not one cell transferred.** Every cell that committed something lost on the
+unseen windows of its own benchmark: −0.141 on GSM-Hard, −0.094 on MGSM-zh,
+−0.031 on HotpotQA. Three for three, in the same direction. The two positive
+`other` figures (+0.062, both on a single GSM-Hard window at one seed) are one
+paired comparison each and carry no weight against that.
 
-**The GSM-Hard train gain is carried by one window.** +0.047 mean, and 1 win
-against 2 losses: gsmhard-2 moved +0.250 and the other three did not move or
-moved down.
+**Where a train gain exists, one window carries it.** GSM-Hard's +0.047 is
+gsmhard-2 moving +0.250 while the other three windows do not move or move down
+(1 win, 2 losses). MGSM-zh's train row is +0.000 across all four windows even
+though the run committed — the rule it found changed nothing where it was
+evolved and hurt where it was not.
 
-**And it is not stable across budget.** The same cell at *twelve* outer rollouts
-and two validation seeds (recorded below) read +0.050 with 4 wins and 1 loss on
-train and +0.013 on unseen. At six rollouts and one seed it reads +0.047 with 1
-win and 2 losses on train and −0.141 on unseen. A single configuration of this
-experiment does not establish anything about the method; the honest summary is
-that **small train-set gains appear, they are window-dependent, and they do not
-generalise at this budget**.
+**And a single configuration proves nothing.** The GSM-Hard cell at *twelve*
+outer rollouts with two validation seeds (the deep dive below) reads +0.050 with
+4 wins on train and +0.013 on unseen. The same cell at six rollouts with one
+seed reads +0.047 with 1 win and −0.141 on unseen. Same code, same model, same
+windows.
+
+The honest summary over seven cells, six benchmarks and two slots: **at this
+budget, evolving a decision slot yields occasional small gains on the problems
+it was evolved on, and those gains do not generalise — not to unseen windows of
+the same benchmark, and not across benchmarks.** Every rule it found belongs to
+one family (prefer the tasks the artifact has not solved), which is the
+mechanism the slot is about; the search finds it and then fails to show it is
+worth anything off the training windows.
+
+**A caveat that limits several cells.** The meta-reward is the inner run's AUC,
+and some windows sit at 1.000 on it before anything is evolved — a whole BBH
+group, two MGSM-zh windows, GPQA's transfer window. An inner run that starts at
+the ceiling cannot show a sampler doing anything, so those rows are not evidence
+either way. Choosing windows by their *inner AUC* rather than by their item
+baseline is the fix, and it is not done here.
 
 ## What the matrix did establish
 

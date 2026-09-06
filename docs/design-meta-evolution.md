@@ -308,23 +308,33 @@ patch、在那里跑 agent、`git diff`，模型不用自己排版 diff）；两
 
 ### 4.5 在线结果矩阵（P4a，`bench/results/metasearch-slots.md`）
 
-四格：`task_sampler` × {GSM-Hard, AIME, HotpotQA} 和 `acceptance` × GSM-Hard，
-每格 4 个 20 题窗口、6 次外层 rollout、1 个验证 seed。**结论是保守的**：
-两格什么都没提交（AIME 与 `acceptance`——所有提案合法，L1 下没有一个严格胜过基线，
-引擎默认的 Beta 后验门在这个预算下没被 LLM 写的规则打败）；提交了的两格
-**在同基准未见窗口上都是负的**（GSM-Hard −0.141，HotpotQA −0.031）。
-GSM-Hard 的 train +0.047 由单个窗口撑着（1 胜 2 负）。
+**七格**：`task_sampler` × {GSM-Hard, AIME, HotpotQA, MGSM-zh, GPQA, BBH} 和
+`acceptance` × GSM-Hard，每格 4 个 20 题窗口、6 次外层 rollout、1 个验证 seed。
+六个基准的逐题基线：GPQA 0.375、GSM-Hard 0.500、BBH 0.542、MGSM-zh 0.625、
+TriviaQA 0.667、AIME 0.708、HotpotQA 0.750（GSM8K 1.000，饱和，已弃用为迁移目标）。
 
-**而且结果对预算不稳定**：同一格在 12 次 rollout、2 个验证 seed 下是 train +0.050（4 胜 1 负）、
-unseen +0.013；在 6 次 rollout、1 个 seed 下是 train +0.047（1 胜 2 负）、unseen −0.141。
-单一配置不足以对方法下结论；诚实的总结是**小幅训练集增益会出现、依赖具体窗口、
-在这个预算下不泛化**。
+**结论是清楚的否定**：
 
-另外两条：加 AIME（0.708）和 HotpotQA（0.750）是因为第一个迁移目标没用——
-GSM8K 的种子指令就是 1.000，只能往下走；`acceptance` 的提案最初 6 个里 3 个被拒
-（自己除 `(successes, failures)` 而不调 `MergeContext.rate` 导致 ZeroDivisionError、
-把 cheap 层的浮点当元组解包导致 TypeError），把这条契约写进 notes 后变成 6 个全合法、
-但依然一个都没提交——这就把"反思器写不出来"和"它写出来的规则赢不了"分开了。
+- **七格里四格什么都没提交**（AIME、GPQA、BBH、`acceptance`）。所有提案合法，L1 下
+  没有一个严格胜过基线。对 `acceptance` 而言这同时是关于引擎默认门的结论——
+  Beta 后验加退火阈值，在 6 次 rollout 内没被 LLM 写的规则打败。
+- **没有一格迁移成功**。三个有提交的格子，在**同基准未见窗口上全部为负**：
+  GSM-Hard −0.141、MGSM-zh −0.094、HotpotQA −0.031。三比零，方向一致。
+  两个正的 other 值（各 +0.062）都是单窗口单 seed 的一次配对比较，不足以对抗上面三个。
+- **有 train 增益的地方，由单个窗口撑着**。GSM-Hard 的 +0.047 是 gsmhard-2 的 +0.250
+  加上另外三个窗口不动或下跌（1 胜 2 负）。MGSM-zh 提交了却在四个训练窗口上全部持平——
+  演进出的规则在它被演进的地方没改变什么，在没见过的地方反而变差。
+- **单一配置证明不了任何事**：同一格在 12 次 rollout / 2 seed 下是 train +0.050（4 胜）、
+  unseen +0.013；在 6 次 rollout / 1 seed 下是 train +0.047（1 胜）、unseen −0.141。
+
+诚实的总结：**在这个预算下，演进决策插槽能偶尔在演进过的问题上拿到小幅增益，
+但这些增益不泛化——既不泛化到同基准的未见窗口，也不跨基准。**
+它找到的规则始终属于同一族（优先未解出的任务），这正是这个插槽该学的机制；
+搜索找得到它，却证明不了它在训练窗口之外值钱。
+
+**一条限制多格的注意事项**：meta-reward 是内层 AUC，而有些窗口在演进之前就已经是 1.000
+（整个 BBH 组、两个 MGSM-zh 窗口、GPQA 的迁移窗口）。从天花板起步的内层运行看不出采样器
+做了什么，这些行两个方向都不算证据。正确做法是按**内层 AUC** 而非逐题基线来挑窗口，本轮未做。
 
 ### 4.6 第一次深入的单格结果（12 次 rollout）
 

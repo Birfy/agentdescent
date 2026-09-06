@@ -1,0 +1,233 @@
+{
+ "seed_source": "class Policy:\n    # Round robin over the shard (the engine's default).\n    def pick(self, keys, round_index):\n        return keys[round_index % len(keys)]\n\n    def record(self, task_id, score):\n        pass\n",
+ "evolved_source": "class Policy:\n    # Track scores; prefer unsolved tasks in the current shard, round-robin among them.\n    def __init__(self):\n        self.scores = {}\n        self.counter = 0\n\n    def pick(self, keys, round_index):\n        # Filter to unsolved tasks (score < 1.0 or unknown)\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if not unsolved:\n            unsolved = list(keys)  # all solved, just pick any\n        # Round-robin among unsolved, using a persistent counter\n        idx = self.counter % len(unsolved)\n        self.counter += 1\n        return unsolved[idx]\n\n    def record(self, task_id, score):\n        self.scores[task_id] = score",
+ "outer": {
+  "final_reward": 0.84375,
+  "rollouts": 6,
+  "outcomes": {
+   "committed": 1,
+   "oracle-rejected": 1,
+   "below-threshold": 1
+  },
+  "stop_reason": "rounds",
+  "error": null,
+  "seconds": 259.958313751,
+  "rounds": 3,
+  "workers": 2,
+  "seeds": [
+   0,
+   1
+  ],
+  "proposals": [
+   {
+    "source": "Here's an improved policy that balances exploration of unknown tasks with exploitation of known high-scoring ones:\n\n```python\nclass Policy:\n    # Changed: Use UCB-style exploration to prioritize untested tasks while\n    # avoiding solved ones, since solved tasks yield no new proposals.\n    def __init__(self):\n        self.scores = {}  # task_id -> list of scores\n        self.counts = {}  # task_id -> number of times picked\n\n    def pick(self, keys, round_index):\n        import math\n        # Filter out solved tasks (score >= 1.0) since they buy nothing\n        candidates = [k for k in keys if not (k in self.scores and max(self.scores[k]) >= 1.0)]\n        if not candidates:\n            candidates = list(keys)  # fallback if all solved\n        \n        # UCB1: prioritize untested tasks, then high mean + exploration bonus\n        total_picks = sum(self.counts.get(k, 0) for k in candidates)\n        best_key = None\n        best_ucb = -float('inf')\n        for k in candidates:\n            if k not in self.counts:\n                # Untested: infinite exploration bonus\n                return k\n            mean = sum(self.scores[k]) / len(self.scores[k])\n            ucb = mean + math.sqrt(2 * math.log(total_picks + 1) / self.counts[k])\n            if ucb > best_ucb:\n                best_ucb = ucb\n                best_key = k\n        return best_key\n\n    def record(self, task_id, score):\n        if task_id not in self.scores:\n            self.scores[task_id] = []\n            self.counts[task_id] = 0\n        self.scores[task_id].append(score)\n        self.counts[task_id] += 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "mgsm_zh-1:0"
+   },
+   {
+    "source": "We need to improve the policy to avoid picking already-solved tasks, since those buy nothing. The current round-robin may waste rollouts on solved tasks. Let's track scores and prefer unsolved tasks, falling back to round-robin among unsolved ones.\n\n```python\nclass Policy:\n    # Track scores; prefer unsolved tasks in the current shard, round-robin among them.\n    def __init__(self):\n        self.scores = {}\n        self.counter = 0\n\n    def pick(self, keys, round_index):\n        # Filter to unsolved tasks (score < 1.0 or unknown)\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if not unsolved:\n            unsolved = list(keys)  # all solved, just pick any\n        # Round-robin among unsolved, using a persistent counter\n        idx = self.counter % len(unsolved)\n        self.counter += 1\n        return unsolved[idx]\n\n    def record(self, task_id, score):\n        self.scores[task_id] = score\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "mgsm_zh-0:0"
+   },
+   {
+    "source": "Here's an improved policy that prioritizes exploring unknown tasks first, then focuses on unsolved tasks with the lowest scores, and only falls back to solved tasks when necessary:\n\n```python\nclass Policy:\n    # Changed: prioritize unknown tasks first, then lowest-scoring unsolved tasks, to maximize information gain and avoid wasting rollouts on solved tasks.\n    def __init__(self):\n        self.scores = {}\n        self.counter = 0\n\n    def pick(self, keys, round_index):\n        # Separate tasks by status\n        unknown = [k for k in keys if k not in self.scores]\n        unsolved = [k for k in keys if k in self.scores and self.scores[k] < 1.0]\n        solved = [k for k in keys if k in self.scores and self.scores[k] >= 1.0]\n        \n        # Priority: unknown > unsolved (lowest score first) > solved\n        if unknown:\n            # Round-robin among unknown tasks to explore broadly\n            idx = self.counter % len(unknown)\n            self.counter += 1\n            return unknown[idx]\n        elif unsolved:\n            # Pick the unsolved task with the lowest score (most room for improvement)\n            return min(unsolved, key=lambda k: self.scores[k])\n        else:\n            # All solved, just pick any (round-robin to be fair)\n            idx = self.counter % len(keys)\n            self.counter += 1\n            return keys[idx]\n\n    def record(self, task_id, score):\n        self.scores[task_id] = score\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "mgsm_zh-2:0"
+   },
+   {
+    "source": "Here's an improved policy that addresses the key weakness: when all tasks in the shard are solved, the current policy wastes picks. Instead, we should prioritize tasks that are *close* to solved (high but not perfect scores) since they're more likely to yield useful proposals, and avoid wasting picks on already-solved tasks.\n\n```python\nclass Policy:\n    # Changed: when all tasks in shard are solved, pick the one with highest score below 1.0\n    # (most likely to yield a useful proposal) instead of round-robin wasting picks.\n    def __init__(self):\n        self.scores = {}\n        self.counter = 0\n\n    def pick(self, keys, round_index):\n        # Filter to unsolved tasks (score < 1.0 or unknown)\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if unsolved:\n            # Round-robin among unsolved, but prefer higher-scoring ones (closer to solved)\n            # by sorting descending by score, then round-robin within that order\n            unsolved.sort(key=lambda k: self.scores.get(k, 0), reverse=True)\n            idx = self.counter % len(unsolved)\n            self.counter += 1\n            return unsolved[idx]\n        else:\n            # All solved in this shard \u2013 pick the one with highest score (most promising)\n            # to maximize chance of getting a useful proposal from a near-solved task\n            return max(keys, key=lambda k: self.scores.get(k, 0))\n```",
+    "accepted_by_gate": false,
+    "reason": "Policy does not satisfy TaskSampler",
+    "on_task": "mgsm_zh-3:0"
+   },
+   {
+    "source": "```python\nclass Policy:\n    # Changed: prefer tasks with lowest known score (most likely to be unsolved and valuable),\n    # and use round-robin only as tiebreaker among equal-score tasks.\n    def __init__(self):\n        self.scores = {}\n        self.counter = 0\n\n    def pick(self, keys, round_index):\n        # Get score for each key (unknown = 0.0, so unsolved tasks are prioritized)\n        scored = [(self.scores.get(k, 0.0), k) for k in keys]\n        # Sort by score ascending (lowest first), then by counter for round-robin among ties\n        scored.sort(key=lambda x: (x[0], (self.counter + keys.index(x[1])) % len(keys)))\n        # Pick the first (lowest score) task\n        self.counter += 1\n        return scored[0][1]\n\n    def record(self, task_id, score):\n        self.scores[task_id] = score\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "mgsm_zh-0:0"
+   },
+   {
+    "source": "Here's an improved policy that addresses the key weakness: when all tasks in the shard are solved, the current policy wastes a rollout. Instead, we should prioritize tasks that are *close* to solved (high score but < 1.0) since they're most likely to be improved by a proposal, and avoid wasting rollouts on already-solved tasks.\n\n```python\nclass Policy:\n    # Changed: when all tasks in shard are solved, pick the one with highest score below 1.0\n    # (most likely to be improvable) instead of round-robin wasting rollouts on solved tasks.\n    def __init__(self):\n        self.scores = {}\n        self.counter = 0\n\n    def pick(self, keys, round_index):\n        # Filter to unsolved tasks (score < 1.0 or unknown)\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if not unsolved:\n            # All solved in this shard \u2014 pick the one with highest score (closest to solved)\n            # since it's most likely to be improvable, rather than wasting on solved ones.\n            if keys:\n                return max(keys, key=lambda k: self.scores.get(k, 0))\n            return keys[0]  # fallback (shouldn't happen)\n        # Round-robin among unsolved, using a persistent counter\n        idx = self.counter % len(unsolved)\n        self.counter += 1\n        return unsolved[idx]\n\n    def record(self, task_id, score):\n        self.scores[task_id] = score\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "mgsm_zh-1:0"
+   }
+  ],
+  "proposals_rejected_by_gate": 1,
+  "invalid_proposals": 1,
+  "history": [
+   {
+    "round": 0,
+    "held_out_reward": 0.84375,
+    "committed": 1,
+    "rejected": 0,
+    "reasons": {
+     "committed": 1
+    }
+   },
+   {
+    "round": 1,
+    "held_out_reward": 0.84375,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "oracle-rejected": 1
+    }
+   },
+   {
+    "round": 2,
+    "held_out_reward": 0.84375,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "below-threshold": 1
+    }
+   }
+  ]
+ },
+ "validation": {
+  "mgsm_zh-0": {
+   "n": 1,
+   "before": 1.0,
+   "after": 1.0,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "mgsm_zh-1": {
+   "n": 1,
+   "before": 0.8125,
+   "after": 0.8125,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "mgsm_zh-2": {
+   "n": 1,
+   "before": 0.5,
+   "after": 0.5,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "mgsm_zh-3": {
+   "n": 1,
+   "before": 0.875,
+   "after": 0.875,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "mgsm_zh-4": {
+   "n": 1,
+   "before": 1.0,
+   "after": 0.9375,
+   "gain": -0.0625,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 1
+  },
+  "mgsm_zh-5": {
+   "n": 1,
+   "before": 0.75,
+   "after": 0.625,
+   "gain": -0.125,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 1
+  },
+  "gsmhard-0": {
+   "n": 1,
+   "before": 0.625,
+   "after": 0.6875,
+   "gain": 0.0625,
+   "gain_sd": 0.0,
+   "wins": 1,
+   "losses": 0
+  }
+ },
+ "by_group": {
+  "train": {
+   "problems": [
+    "mgsm_zh-0",
+    "mgsm_zh-1",
+    "mgsm_zh-2",
+    "mgsm_zh-3"
+   ],
+   "seed_rule": 0.796875,
+   "evolved_rule": 0.796875,
+   "gain": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "unseen": {
+   "problems": [
+    "mgsm_zh-4",
+    "mgsm_zh-5"
+   ],
+   "seed_rule": 0.875,
+   "evolved_rule": 0.78125,
+   "gain": -0.09375,
+   "wins": 0,
+   "losses": 2
+  },
+  "other": {
+   "problems": [
+    "gsmhard-0"
+   ],
+   "seed_rule": 0.625,
+   "evolved_rule": 0.6875,
+   "gain": 0.0625,
+   "wins": 1,
+   "losses": 0
+  }
+ },
+ "transfer_ratio": {
+  "unseen": null,
+  "other": null
+ },
+ "validate_seeds": [
+  1000
+ ],
+ "config": {
+  "rounds": 4,
+  "workers": 1,
+  "slot": "task_sampler",
+  "held_out_frac": 0.4,
+  "cache_dir": "/tmp/claude-0/-home-user-agentdescent/11f5938a-d37f-5fc2-bc0a-9c4c1833f52c/scratchpad/evalcache-run",
+  "source": "mgsm_zh",
+  "other": "gsmhard",
+  "window_size": 20,
+  "data_seed": 0,
+  "model": "deepseek-v4-flash",
+  "provider": "openai",
+  "temperature": 0.0,
+  "thinking": "disabled",
+  "hard_other": false,
+  "meta_reward": "auc",
+  "quality_target": 0.75,
+  "template": "System instruction:\n{skill}\n\nUser problem:\n{prompt}",
+  "seed_instruction": "Solve the math word problem. Return only the final answer.",
+  "outer_seed": 0
+ },
+ "usage": {
+  "calls": 852,
+  "prompt_tokens": 37499,
+  "completion_tokens": 56361,
+  "total_tokens": 93860,
+  "model_seconds": 3244.757794857025,
+  "failures": 0,
+  "wall_seconds": 388.136758612,
+  "completion_cache": {
+   "hits": 120,
+   "misses": 351
+  }
+ }
+}
