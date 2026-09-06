@@ -442,8 +442,14 @@ def execute(rd: RunDir, *, budget_usd: Optional[float] = None,
             round=info.round + 1, last_reward=info.held_out_reward,
             best_reward=max(best), calls=usage.calls)
         st = rd.status()
+        # `committed` is per round and accumulates; `rollouts` is already a
+        # running total ("Rollouts completed by the end of this round,
+        # cumulative" -- RoundInfo), so adding it summed a sum. Measured on a
+        # 630-round run: 1,270 calls and a reported 397,530 rollouts, which is
+        # 630x631 -- the triangular number, growing quadratically with rounds.
+        # A number in `status` is read by a person deciding whether to cancel.
         changes["committed"] = st.committed + info.committed
-        changes["rollouts"] = st.rollouts + info.rollouts
+        changes["rollouts"] = info.rollouts
         if usd_per_call is not None:
             changes["usd"] = round(usage.calls * usd_per_call, 4)
         rd.update_status(**changes)

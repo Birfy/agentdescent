@@ -308,3 +308,28 @@ def test_a_detached_run_started_with_relative_paths_finds_its_data(store, tmp_pa
     assert st.state == "done", rd.log_tail()
     # the stored spec is the absolute one, so the run is re-runnable from anywhere
     assert os.path.isabs(rd.spec_dict()["data"]["path"])
+
+
+def test_the_rollout_counter_is_not_a_sum_of_sums(tmp_path):
+    """`RoundInfo.rollouts` is cumulative by definition, and the run store was
+    adding it to the previous total. Measured on a 630-round run: 1,270 calls
+    and 397,530 rollouts -- 630x631, the triangular number. It is one of four
+    numbers `status` shows someone deciding whether to cancel.
+    """
+    from agentdescent import runstore
+    from agentdescent.demo import build
+
+    spec = build(str(tmp_path))          # writes the skill and the cases too
+    spec["evolve"] = {"rounds": 6, "n_workers": 2, "seed": 0,
+                      "target_reward": 2.0, "patience": 99}
+    rd = runstore.create(spec, store=str(tmp_path / "store"))
+    runstore.execute(rd)
+
+    rounds = rd.rounds()
+    assert rounds, "the run recorded no rounds"
+    st = rd.status()
+    # The last round's cumulative count is the run's count -- not the sum of
+    # every round's running total.
+    assert st.rollouts == rounds[-1]["rollouts"], (
+        st.rollouts, [r["rollouts"] for r in rounds])
+    assert st.rollouts <= st.calls, (st.rollouts, st.calls)

@@ -277,10 +277,23 @@ def cmd_init(a: argparse.Namespace) -> int:
     return 0
 
 
-#: Which environment key an isolated worker of each CLI would need, having been
+#: What an isolated worker of each CLI can fall back on, once it has been
 #: pointed away from the config directory its interactive login lives in.
-_CLI_PROVIDER_KEY = {"claude_code": "ANTHROPIC_API_KEY", "codex": "OPENAI_API_KEY",
-                     "dsh": "DEEPSEEK_API_KEY", "opencode": "OPENAI_API_KEY"}
+#:
+#: Only `dsh` is confirmed: its own error names the variable ("or export
+#: DEEPSEEK_API_KEY in the launching environment"). `codex` is confirmed to be
+#: the opposite -- measured against codex-cli 0.153, with OPENAI_API_KEY and
+#: OPENAI_BASE_URL both set it ignored the base URL, went to api.openai.com and
+#: sent no credentials at all ("Missing bearer or basic authentication in
+#: header"). The other two are unverified, so they get the mechanism and not a
+#: promise: claiming a key would fix it is the false assurance this warning
+#: exists to remove.
+_CLI_ENV_FALLBACK = {"dsh": "DEEPSEEK_API_KEY"}
+_CLI_ENV_USELESS = {
+    "codex": ("an environment key is not a substitute here: measured, `codex` "
+              "ignored OPENAI_API_KEY and OPENAI_BASE_URL and called "
+              "api.openai.com unauthenticated"),
+}
 
 
 def _unusable_refs(spec: EvolveSpec) -> List[str]:
@@ -316,17 +329,20 @@ def _unusable_refs(spec: EvolveSpec) -> List[str]:
             if not clis.get(binary):
                 out.append(f"{field}: `{ref}` needs `{binary}` on PATH")
             elif block.get("isolate") is not False and not keys.get(
-                    _CLI_PROVIDER_KEY.get(ref, ""), False):
+                    _CLI_ENV_FALLBACK.get(ref, ""), False):
                 # The trap that ate a 60-round run: `codex` was on PATH, so
                 # nothing complained, but a worker runs with the host's config
                 # directory redirected -- an interactive login does not carry
-                # over -- and there was no key in the environment either. Every
-                # rollout failed. Being present is not being usable.
+                # over. Every rollout failed. Being present is not being usable.
+                remedy = _CLI_ENV_USELESS.get(ref) or (
+                    f"or export {_CLI_ENV_FALLBACK[ref]}"
+                    if ref in _CLI_ENV_FALLBACK else
+                    "whether a provider key in the environment is enough instead "
+                    "is untested for this CLI")
                 out.append(
                     f"{field}: `{ref}` is on PATH but a worker runs isolated, so an "
-                    f"interactive login does not carry over; set "
-                    f'"isolate": false to use the signed-in CLI, or put '
-                    f"{_CLI_PROVIDER_KEY.get(ref, 'a provider key')} in the environment")
+                    f'interactive login does not carry over. Set "isolate": false '
+                    f"to use the signed-in CLI -- {remedy}")
     return out
 
 
@@ -453,8 +469,15 @@ def show_payload(run_id: str, *, store: Optional[str] = None, diff: bool = True,
     payload.update(final_reward=result.final_reward, outcomes=result.outcomes(),
                    rounds=len(result.history))
     spec = EvolveSpec.from_dict(rd.spec_dict())
+    # What `apply` would overwrite, on every kind. Without it the caller can see
+    # the evolved artifact and still not know which file it belongs to -- and an
+    # agent that cannot name the file it is about to overwrite is right to
+    # refuse, which is what happened.
+    payload.update(kind=spec.kind, target=spec.target)
     if spec.kind == "text":
         payload["rendered"] = result.rendered[:max_chars]
+        payload["apply_plan"] = {"would_write": os.path.expanduser(spec.target),
+                                 "chars": len(result.rendered)}
         return payload
     payload["files"] = sorted(result.state)
     if diff:
