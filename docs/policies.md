@@ -1,3 +1,7 @@
+---
+description: The decision plane of AgentDescent: eight named policy slots covering selection, sampling, proposal, staleness, conflict, fusion, acceptance and promotion.
+---
+
 # Choosing policies — the decision plane
 
 *Module:* [`agentdescent.policies`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/policies.py)

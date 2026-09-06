@@ -28,7 +28,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install "mkdocs-material>=9.5"
+      # cairosvg loads libcairo at runtime; the social plugin needs it to
+      # render the per-page cards, and the build fails without it.
+      - run: sudo apt-get update && sudo apt-get install -y libcairo2
+      - run: pip install "mkdocs-material[imaging]>=9.5"
       - run: mkdocs build --clean --strict
       - uses: actions/upload-pages-artifact@v3
         with:

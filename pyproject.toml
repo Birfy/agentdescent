@@ -20,7 +20,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
-docs = ["mkdocs-material>=9.5"]
+docs = ["mkdocs-material[imaging]>=9.5"]   # [imaging] builds the social cards
 
 [project.urls]
 Homepage = "https://github.com/Birfy/agentdescent"

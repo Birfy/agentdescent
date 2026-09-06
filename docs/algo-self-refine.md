@@ -1,3 +1,7 @@
+---
+description: A runnable reproduction of Self-Refine iterative feedback refinement: generate, self-critique, refine. Mechanism microport with measured GSM8K results and call costs.
+---
+
 # Self-Refine — Iterative feedback refinement
 
 > **Feedback-loop self-evolution.** One model generates, critiques its own

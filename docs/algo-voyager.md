@@ -1,3 +1,7 @@
+---
+description: A runnable reproduction of Voyager's embodied skill library with a self-verification critic and difficulty-weighted sampling. Environment analogue over a crafting world.
+---
+
 # Voyager — Embodied skill-library agent
 
 > **Skill-library self-evolution.** Grow a library of executable skills from a

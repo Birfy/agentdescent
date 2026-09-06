@@ -1,3 +1,7 @@
+---
+description: A runnable reproduction of GEPA (Reflective Prompt Evolution) with per-instance Pareto parent selection. Benchmark-faithful port, measured on HotpotQA against a serial control.
+---
+
 # GEPA — Reflective Prompt Evolution
 
 > **Skill / prompt self-evolution.** Evolve an instruction prompt with a genetic,
