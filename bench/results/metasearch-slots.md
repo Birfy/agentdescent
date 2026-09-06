@@ -1,4 +1,86 @@
-# Evolving the engine's `task_sampler`, and what it transfers to
+# Evolving a decision slot: a benchmark x slot matrix
+
+Each cell evolves one `Policies` field against four 20-task windows of one
+benchmark (2 inner seeds, 3 outer sweeps = **6 outer rollouts**), then scores the
+seed rule and the evolved rule paired on the same windows, two windows it never
+saw, and one window of another benchmark. `deepseek-v4-flash`, temperature 0,
+thinking disabled, inner runs deterministic (see *Determinism* below).
+Produced by [`bench/metasearch_slots.py`](../metasearch_slots.py).
+
+| slot | evolved on | train gain | unseen gain | other benchmark | committed | proposals |
+|---|---|---:|---:|---:|---:|---|
+| `task_sampler` | gsmhard | +0.047 (1/2) | -0.141 (0/2) | -0.031 (0/1) (aime) | 2/3 | 6, 0 refused |
+| `task_sampler` | aime | +0.000 (0/0) | +0.000 (0/0) | +0.000 (0/0) (gsmhard) | 0/3 | 6, 0 refused |
+| `task_sampler` | hotpotqa | +0.016 (2/0) | -0.031 (1/1) | +0.062 (1/0) (gsmhard) | 1/3 | 6, 0 refused |
+| `acceptance` | gsmhard | +0.000 (0/0) | +0.000 (0/0) | +0.000 (0/0) (aime) | 0/3 | 6, 0 refused |
+
+`(w/l)` counts paired wins and losses over the windows in the group. **One
+validation seed per problem**, so every `sd` in the raw files is 0.000 by
+construction and no cell carries a variance estimate — that is a budget choice,
+not a measurement.
+
+## What this says, sober
+
+**Two of four cells learned nothing at all.** On AIME and on the `acceptance`
+slot every proposal was valid and every merge was oracle-rejected: under L1 a
+candidate must strictly beat the base on ground truth, and none did. The
+engine's default acceptance rule — a Beta posterior against an annealed
+threshold — was not beaten by an LLM-written rule in six rollouts, which is a
+result about that default as much as about the search.
+
+**No cell transferred.** Both cells that committed something lost on the unseen
+windows of their own benchmark: −0.141 on GSM-Hard, −0.031 on HotpotQA. The
+HotpotQA row's +0.062 on the other benchmark is a single paired comparison on
+one window, and the 4.00 ratio beside it is arithmetic on two small numbers, not
+a finding.
+
+**The GSM-Hard train gain is carried by one window.** +0.047 mean, and 1 win
+against 2 losses: gsmhard-2 moved +0.250 and the other three did not move or
+moved down.
+
+**And it is not stable across budget.** The same cell at *twelve* outer rollouts
+and two validation seeds (recorded below) read +0.050 with 4 wins and 1 loss on
+train and +0.013 on unseen. At six rollouts and one seed it reads +0.047 with 1
+win and 2 losses on train and −0.141 on unseen. A single configuration of this
+experiment does not establish anything about the method; the honest summary is
+that **small train-set gains appear, they are window-dependent, and they do not
+generalise at this budget**.
+
+## What the matrix did establish
+
+- The machinery runs end to end on four datasets and two slots, with the inner
+  run deterministic, so every paired number above is exact rather than noisy.
+- The proposal record makes each null legible: `acceptance` first produced 3
+  refused and 3 no-diff proposals out of 6 — two `ZeroDivisionError` from
+  dividing `(successes, failures)` by hand instead of calling
+  `MergeContext.rate`, and one `TypeError` from unpacking the cheap-layer float
+  as a pair. Saying so in the slot's notes took it to 6 valid proposals with
+  nothing refused, and the cell still committed nothing — which separates "the
+  reflector cannot write this" from "the rules it writes do not win".
+- Two benchmarks were added because the first validation target was useless:
+  plain GSM8K scores **1.000** for the seed instruction, so it can only move
+  down. AIME 1983-2024 (0.708) and HotpotQA (0.750) both leave real headroom,
+  and HotpotQA is a different modality — a sampler that only works on arithmetic
+  is not a sampler.
+
+## Operational note: background runs do not survive an idle session
+
+A four-cell matrix launched with `nohup` advanced for eight minutes and then
+stopped: the parent shell and the child were both gone, with no failure line
+between them, while disk, memory and the endpoint were all fine. In this remote
+container a background job only progresses while the session is active. The
+completion cache turns that from a loss into a pause — a re-run repeats the same
+deterministic calls and hits cache — so the cells above were run one at a time
+in the foreground.
+
+---
+## The deep dive: one cell at twelve rollouts
+
+Everything above is six outer rollouts per cell. This section is the same
+`task_sampler` x GSM-Hard cell run at **twelve**, with two validation seeds, and
+it is where the mechanism was worked out. Its numbers are more favourable than
+the matrix row and that difference is the point: read the two together, not
+either alone.
 
 The outer artifact is the `task_sampler` policy — which task each rollout of an
 **inner** `evolve()` spends. One outer rollout is one whole inner run: evolving
@@ -43,7 +125,7 @@ budget into proposals.
 
 ## Read the three rows apart, not down
 
-**The train row is the claim that holds.** +0.050 across four windows, four
+**The train row is the claim that holds *in this configuration*.** +0.050 across four windows, four
 wins and one loss on paired seeds, and the inner runs are deterministic (see
 below), so the pairing is exact rather than noisy.
 

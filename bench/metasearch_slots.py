@@ -246,12 +246,16 @@ SLOT_NOTES: Dict[str, str] = {
     "acceptance": """How the engine calls this, and what the numbers mean:
 
 - `ctx.base_counts` and `ctx.cand_counts` are `(successes, failures)` over the
-  WHOLE held-out set -- not `(successes, trials)`. `MergeContext.rate(counts)`
-  turns either into a rate; dividing by the second element gives a number that
-  is wrong and plausible.
-- `ctx.base_cheap` / `ctx.cand_cheap` are a SUB-SAMPLE. Ranking may use them.
-  Deciding to commit may not: a gate that reads the cheap layer judges a
-  regression from a handful of tasks.
+  WHOLE held-out set -- not `(successes, trials)`. Dividing by the second
+  element gives a number that is wrong and plausible.
+- USE `MergeContext.rate(counts)` TO TURN A PAIR INTO A RATE. It guards the
+  empty pair `(0.0, 0.0)`; `successes / (successes + failures)` written by hand
+  raises ZeroDivisionError there and the gate refuses the policy for it. This
+  is the single most common way a proposal for this slot is thrown out.
+- `ctx.base_cheap` / `ctx.cand_cheap` are single FLOATS, not pairs -- a
+  sub-sample score each. Unpacking one as a tuple is a TypeError. Ranking may
+  use them; deciding to commit may not, because a gate that reads the cheap
+  layer judges a regression from a handful of tasks.
 - Return `AcceptDecision(accept, category, detail, p_improve, observed_delta)`.
   `category` is a stable bucket -- "committed" when you accept, and something
   like "below-threshold" when you do not -- because it is counted across rounds.

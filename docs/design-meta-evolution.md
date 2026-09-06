@@ -306,7 +306,27 @@ patch、在那里跑 agent、`git diff`，模型不用自己排版 diff）；两
 4. **读迁移比，不读增益**。离线实例跑出的就是"第二种"：更贪的规则源地形 +0.008
    （11/4），目标 +0.000，迁移比 0.06。
 
-### 4.5 第一个在线结果（P4a，`bench/results/metasearch-gsm.md`）
+### 4.5 在线结果矩阵（P4a，`bench/results/metasearch-slots.md`）
+
+四格：`task_sampler` × {GSM-Hard, AIME, HotpotQA} 和 `acceptance` × GSM-Hard，
+每格 4 个 20 题窗口、6 次外层 rollout、1 个验证 seed。**结论是保守的**：
+两格什么都没提交（AIME 与 `acceptance`——所有提案合法，L1 下没有一个严格胜过基线，
+引擎默认的 Beta 后验门在这个预算下没被 LLM 写的规则打败）；提交了的两格
+**在同基准未见窗口上都是负的**（GSM-Hard −0.141，HotpotQA −0.031）。
+GSM-Hard 的 train +0.047 由单个窗口撑着（1 胜 2 负）。
+
+**而且结果对预算不稳定**：同一格在 12 次 rollout、2 个验证 seed 下是 train +0.050（4 胜 1 负）、
+unseen +0.013；在 6 次 rollout、1 个 seed 下是 train +0.047（1 胜 2 负）、unseen −0.141。
+单一配置不足以对方法下结论；诚实的总结是**小幅训练集增益会出现、依赖具体窗口、
+在这个预算下不泛化**。
+
+另外两条：加 AIME（0.708）和 HotpotQA（0.750）是因为第一个迁移目标没用——
+GSM8K 的种子指令就是 1.000，只能往下走；`acceptance` 的提案最初 6 个里 3 个被拒
+（自己除 `(successes, failures)` 而不调 `MergeContext.rate` 导致 ZeroDivisionError、
+把 cheap 层的浮点当元组解包导致 TypeError），把这条契约写进 notes 后变成 6 个全合法、
+但依然一个都没提交——这就把"反思器写不出来"和"它写出来的规则赢不了"分开了。
+
+### 4.6 第一次深入的单格结果（12 次 rollout）
 
 `task_sampler` 在 4 个 GSM-Hard 窗口上演进，12 次外层 rollout，L1 下提交 2 次：
 
@@ -355,7 +375,7 @@ patch、在那里跑 agent、`git diff`，模型不用自己排版 diff）；两
 | P1 | `agentdescent/meta.py`：`MetaOutcome` / `Problem` / `auc` 等 / `ParamSlot` / `SourceSlot` / `priority_selection` / `PrioritySelection` / `meta_evolve` / `meta_validate` / `transfer_ratio` | ✅ |
 | P2 | `policy_source(slot, seed)` 通用门 + `seed_source` + `SLOT_PROTOCOLS` | ✅ |
 | P3 | `examples/metasearch/`：合成地形、离线端到端、`--dry-run`、加入 PORTS 契约 | ✅ |
-| P4a | GSM 跑批脚本 `bench/metasearch_slots.py`：演进 `task_sampler`，内层是完整的内层 `evolve()`，报告分三组（演进过的 / 同基准未见切片 / 另一个基准）各自的迁移比 | ✅ 脚本 + 离线测试 + **在线跑出结果**（`bench/results/metasearch-gsm.md`） |
+| P4a | GSM 跑批脚本 `bench/metasearch_slots.py`：演进 `task_sampler`，内层是完整的内层 `evolve()`，报告分三组（演进过的 / 同基准未见切片 / 另一个基准）各自的迁移比 | ✅ 脚本 + 离线测试 + **在线跑出结果**（`bench/results/metasearch-slots.md`） |
 | P4b | AlgoTune 跑批脚本 `bench/metasearch_algotune.py`（训练/验证任务不相交、新 seed 验证、迁移比、结果 JSON） | ✅ 脚本 + 插桩测试；**在线跑待做**（需 numpy/scipy 沙箱） |
 | P5 | Harbor 适配器 `_harbor.py`（§4.3）+ SWE-bench-Science / TB-Science 验证 | ✅ 适配器 + `LocalRunner` 离线端到端；`DockerRunner.verify` 已写未在线跑；**基准验证待做**（需 API + Docker + 任务数据） |
 | P6 | 其余五个插槽的内置冒烟与默认种子，每个种子在真实内层 `evolve()` 里跑通 | ✅ |

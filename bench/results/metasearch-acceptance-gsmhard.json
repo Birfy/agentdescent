@@ -1,0 +1,231 @@
+{
+ "seed_source": "class Policy:\n    # Commit when the candidate's full held-out rate beats the base's.\n    # (The engine default also draws a Beta posterior against an annealed\n    # threshold; this is the simplest rule that satisfies the contract.)\n    def accept(self, ctx):\n        base = MergeContext.rate(ctx.base_counts)\n        cand = MergeContext.rate(ctx.cand_counts)\n        if cand > base:\n            return AcceptDecision(True, \"committed\", \"\", 1.0, cand - base)\n        return AcceptDecision(False, \"below-threshold\",\n                              \"held-out did not improve\", 0.0, cand - base)\n",
+ "evolved_source": "class Policy:\n    # Commit when the candidate's full held-out rate beats the base's.\n    # (The engine default also draws a Beta posterior against an annealed\n    # threshold; this is the simplest rule that satisfies the contract.)\n    def accept(self, ctx):\n        base = MergeContext.rate(ctx.base_counts)\n        cand = MergeContext.rate(ctx.cand_counts)\n        if cand > base:\n            return AcceptDecision(True, \"committed\", \"\", 1.0, cand - base)\n        return AcceptDecision(False, \"below-threshold\",\n                              \"held-out did not improve\", 0.0, cand - base)\n",
+ "outer": {
+  "final_reward": 0.71875,
+  "rollouts": 6,
+  "outcomes": {
+   "oracle-rejected": 3
+  },
+  "stop_reason": "rounds",
+  "error": null,
+  "seconds": 12.26516557299999,
+  "rounds": 3,
+  "workers": 2,
+  "seeds": [
+   0,
+   1
+  ],
+  "proposals": [
+   {
+    "source": "Here's a revised policy that adds a minimum improvement threshold to avoid committing noise while still accepting clear improvements:\n\n```python\nclass Policy:\n    # Require a minimum absolute improvement to avoid committing marginal noise,\n    # while still accepting clear wins. Uses rate() for safe empty-pair handling.\n    def accept(self, ctx):\n        base = MergeContext.rate(ctx.base_counts)\n        cand = MergeContext.rate(ctx.cand_counts)\n        delta = cand - base\n        # Small epsilon to avoid committing on tiny floating-point differences\n        # that are likely noise given the held-out set size.\n        min_gain = 0.01\n        if delta > min_gain:\n            return AcceptDecision(True, \"committed\", f\"gain={delta:.3f}\", 1.0, delta)\n        return AcceptDecision(False, \"below-threshold\",\n                              f\"gain={delta:.3f} below min\", 0.0, delta)\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-1:0"
+   },
+   {
+    "source": "Here's a revised policy that addresses the issue of being too conservative when the candidate shows improvement but the base rate is already high:\n\n```python\nclass Policy:\n    # Changed: Use a relative improvement threshold instead of absolute comparison,\n    # and incorporate cheap scores as a tiebreaker when held-out rates are close.\n    # This prevents rejecting candidates that show meaningful relative gains,\n    # especially when base performance is already high.\n    def accept(self, ctx):\n        base = MergeContext.rate(ctx.base_counts)\n        cand = MergeContext.rate(ctx.cand_counts)\n        \n        # If candidate clearly beats base, accept\n        if cand > base:\n            return AcceptDecision(True, \"committed\", \"\", 1.0, cand - base)\n        \n        # If candidate is close, check if cheap scores suggest improvement\n        # and if the relative gap is small enough to warrant acceptance\n        if cand >= base * 0.95:  # within 5% relative\n            # Use cheap scores as a secondary signal (not for final decision,\n            # but to break ties when held-out is close)\n            if ctx.cand_cheap > ctx.base_cheap:\n                return AcceptDecision(True, \"committed-close\", \n                                    \"close held-out but cheap improves\", \n                                    0.6, cand - base)\n        \n        return AcceptDecision(False, \"below-threshold\",\n                              \"held-out did not improve enough\", 0.0, cand - base)\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-0:0"
+   },
+   {
+    "source": "Here's a revised policy that adds a minimum improvement threshold to avoid committing noise while still accepting clear improvements:\n\n```python\nclass Policy:\n    # Require a minimum improvement margin to avoid committing noise,\n    # while still accepting genuine improvements that beat the base.\n    def accept(self, ctx):\n        base = MergeContext.rate(ctx.base_counts)\n        cand = MergeContext.rate(ctx.cand_counts)\n        delta = cand - base\n        # Small positive margin to filter out near-ties and noise\n        if delta > 0.02:\n            return AcceptDecision(True, \"committed\", \"\", 1.0, delta)\n        return AcceptDecision(False, \"below-threshold\",\n                              \"improvement too small\", 0.0, delta)\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-2:0"
+   },
+   {
+    "source": "I need to be more selective about when to commit, since the oracle already filters for strict improvement. The current rule commits on any improvement, but with small sample sizes, noise can cause false improvements. I should require a minimum improvement margin to avoid committing noise.\n\n```python\nclass Policy:\n    # Require a minimum improvement margin to avoid committing noise\n    # from small sample sizes, since oracle already ensures strict gain.\n    def accept(self, ctx):\n        base = MergeContext.rate(ctx.base_counts)\n        cand = MergeContext.rate(ctx.cand_counts)\n        # Require at least 0.05 absolute improvement to commit\n        if cand - base >= 0.05:\n            return AcceptDecision(True, \"committed\", \"\", 1.0, cand - base)\n        return AcceptDecision(False, \"below-threshold\",\n                              \"improvement too small\", 0.0, cand - base)\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-3:0"
+   },
+   {
+    "source": "Here's a revised policy that adds a minimum improvement threshold to avoid committing noise while still accepting clear improvements:\n\n```python\nclass Policy:\n    # Require a minimum absolute improvement to avoid committing marginal noise,\n    # while still accepting clear wins. Uses rate() for safe empty-pair handling.\n    def accept(self, ctx):\n        base = MergeContext.rate(ctx.base_counts)\n        cand = MergeContext.rate(ctx.cand_counts)\n        delta = cand - base\n        # Small epsilon to avoid committing on tiny floating-point differences\n        # that are likely noise given the held-out set size.\n        min_gain = 0.01\n        if delta > min_gain:\n            return AcceptDecision(True, \"committed\", f\"gain={delta:.3f}\", 1.0, delta)\n        return AcceptDecision(False, \"below-threshold\",\n                              f\"gain={delta:.3f} below min\", 0.0, delta)\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-1:0"
+   },
+   {
+    "source": "Here's a revised policy that addresses the issue of being too conservative when the candidate shows improvement but the base rate is already high:\n\n```python\nclass Policy:\n    # Changed: Use a relative improvement threshold instead of absolute comparison,\n    # and incorporate cheap scores as a tiebreaker when held-out rates are close.\n    # This prevents rejecting candidates that show meaningful relative gains,\n    # especially when base performance is already high.\n    def accept(self, ctx):\n        base = MergeContext.rate(ctx.base_counts)\n        cand = MergeContext.rate(ctx.cand_counts)\n        \n        # If candidate clearly beats base, accept\n        if cand > base:\n            return AcceptDecision(True, \"committed\", \"\", 1.0, cand - base)\n        \n        # If candidate is close, check if cheap scores suggest improvement\n        # and if the relative gap is small enough to warrant acceptance\n        if cand >= base * 0.95:  # within 5% relative\n            # Use cheap scores as a secondary signal (not for final decision,\n            # but to break ties when held-out is close)\n            if ctx.cand_cheap > ctx.base_cheap:\n                return AcceptDecision(True, \"committed-close\", \n                                    \"close held-out but cheap improves\", \n                                    0.6, cand - base)\n        \n        return AcceptDecision(False, \"below-threshold\",\n                              \"held-out did not improve enough\", 0.0, cand - base)\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-0:0"
+   }
+  ],
+  "proposals_rejected_by_gate": 0,
+  "invalid_proposals": 0,
+  "history": [
+   {
+    "round": 0,
+    "held_out_reward": 0.71875,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "oracle-rejected": 1
+    }
+   },
+   {
+    "round": 1,
+    "held_out_reward": 0.71875,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "oracle-rejected": 1
+    }
+   },
+   {
+    "round": 2,
+    "held_out_reward": 0.71875,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "oracle-rejected": 1
+    }
+   }
+  ]
+ },
+ "validation": {
+  "gsmhard-0": {
+   "n": 1,
+   "before": 0.625,
+   "after": 0.625,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "gsmhard-1": {
+   "n": 1,
+   "before": 0.875,
+   "after": 0.875,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "gsmhard-2": {
+   "n": 1,
+   "before": 0.5,
+   "after": 0.5,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "gsmhard-3": {
+   "n": 1,
+   "before": 0.875,
+   "after": 0.875,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "gsmhard-4": {
+   "n": 1,
+   "before": 1.0,
+   "after": 1.0,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "gsmhard-5": {
+   "n": 1,
+   "before": 0.40625,
+   "after": 0.40625,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "aime-0": {
+   "n": 1,
+   "before": 0.78125,
+   "after": 0.78125,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  }
+ },
+ "by_group": {
+  "train": {
+   "problems": [
+    "gsmhard-0",
+    "gsmhard-1",
+    "gsmhard-2",
+    "gsmhard-3"
+   ],
+   "seed_rule": 0.71875,
+   "evolved_rule": 0.71875,
+   "gain": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "unseen": {
+   "problems": [
+    "gsmhard-4",
+    "gsmhard-5"
+   ],
+   "seed_rule": 0.703125,
+   "evolved_rule": 0.703125,
+   "gain": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "other": {
+   "problems": [
+    "aime-0"
+   ],
+   "seed_rule": 0.78125,
+   "evolved_rule": 0.78125,
+   "gain": 0.0,
+   "wins": 0,
+   "losses": 0
+  }
+ },
+ "transfer_ratio": {
+  "unseen": null,
+  "other": null
+ },
+ "validate_seeds": [
+  1000
+ ],
+ "config": {
+  "rounds": 4,
+  "workers": 1,
+  "slot": "acceptance",
+  "held_out_frac": 0.4,
+  "cache_dir": "/tmp/claude-0/-home-user-agentdescent/11f5938a-d37f-5fc2-bc0a-9c4c1833f52c/scratchpad/evalcache-run",
+  "source": "gsmhard",
+  "other": "aime",
+  "window_size": 20,
+  "data_seed": 0,
+  "model": "deepseek-v4-flash",
+  "provider": "openai",
+  "temperature": 0.0,
+  "thinking": "disabled",
+  "hard_other": false,
+  "meta_reward": "auc",
+  "quality_target": 0.75,
+  "template": "System instruction:\n{skill}\n\nUser problem:\n{prompt}",
+  "seed_instruction": "Solve the math word problem. Return only the final answer.",
+  "outer_seed": 0
+ },
+ "usage": {
+  "calls": 230,
+  "prompt_tokens": 3204,
+  "completion_tokens": 857,
+  "total_tokens": 4061,
+  "model_seconds": 41.69293141365051,
+  "failures": 0,
+  "wall_seconds": 13.323332364000066,
+  "completion_cache": {
+   "hits": 196,
+   "misses": 4
+  }
+ }
+}

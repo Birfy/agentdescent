@@ -1,0 +1,232 @@
+{
+ "seed_source": "class Policy:\n    # Round robin over the shard (the engine's default).\n    def pick(self, keys, round_index):\n        return keys[round_index % len(keys)]\n\n    def record(self, task_id, score):\n        pass\n",
+ "evolved_source": "class Policy:\n    # Track scores and prefer unsolved tasks; fall back to round-robin among unsolved.\n    def __init__(self):\n        self.scores = {}\n        self.counter = 0\n\n    def pick(self, keys, round_index):\n        # Filter to unsolved tasks (score < 1.0 or unknown)\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if unsolved:\n            # Round-robin among unsolved to ensure exploration\n            return unsolved[self.counter % len(unsolved)]\n        # All solved in shard, just pick round-robin\n        return keys[round_index % len(keys)]\n\n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        self.counter += 1",
+ "outer": {
+  "final_reward": 0.796875,
+  "rollouts": 6,
+  "outcomes": {
+   "committed": 1,
+   "oracle-rejected": 2
+  },
+  "stop_reason": "rounds",
+  "error": null,
+  "seconds": 112.90991742999995,
+  "rounds": 3,
+  "workers": 2,
+  "seeds": [
+   0,
+   1
+  ],
+  "proposals": [
+   {
+    "source": "Here's my revised policy:\n\n```python\nclass Policy:\n    # Track scores and use UCB-style exploration to focus on uncertain tasks\n    def __init__(self):\n        self.scores = {}  # task_id -> list of scores\n        self.counts = {}  # task_id -> number of times picked\n    \n    def pick(self, keys, round_index):\n        # First time seeing a task: pick it to get a score\n        unseen = [k for k in keys if k not in self.scores]\n        if unseen:\n            return unseen[0]\n        \n        # For known tasks, use UCB1: pick highest (avg_score + exploration_bonus)\n        # Exploration bonus shrinks with more visits, so we focus on uncertain ones\n        total_visits = sum(self.counts.get(k, 0) for k in keys)\n        best_key = None\n        best_ucb = -float('inf')\n        for k in keys:\n            avg = sum(self.scores[k]) / len(self.scores[k])\n            # UCB1 formula: avg + sqrt(2 * ln(total_visits) / count)\n            count = self.counts.get(k, 0)\n            if count == 0:\n                ucb = float('inf')  # never seen, always explore\n            else:\n                ucb = avg + math.sqrt(2 * math.log(total_visits + 1) / count)\n            if ucb > best_ucb:\n                best_ucb = ucb\n                best_key = k\n        return best_key\n    \n    def record(self, task_id, score):\n        if task_id not in self.scores:\n            self.scores[task_id] = []\n            self.counts[task_id] = 0\n        self.scores[task_id].append(score)\n        self.counts[task_id] += 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "hotpotqa-0:0"
+   },
+   {
+    "source": "We need to improve on round-robin by using recorded scores to prioritize unsolved tasks. The key insight is that solved tasks (score >= 1.0) waste rollouts, so we should avoid them when possible.\n\n```python\nclass Policy:\n    # Track scores and prefer unsolved tasks; fall back to round-robin among unsolved.\n    def __init__(self):\n        self.scores = {}\n        self.counter = 0\n\n    def pick(self, keys, round_index):\n        # Filter to unsolved tasks (score < 1.0 or unknown)\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if unsolved:\n            # Round-robin among unsolved to ensure exploration\n            return unsolved[self.counter % len(unsolved)]\n        # All solved in shard, just pick round-robin\n        return keys[round_index % len(keys)]\n\n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        self.counter += 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "hotpotqa-1:0"
+   },
+   {
+    "source": "Here's my revised policy:\n\n```python\nclass Policy:\n    # Changed: use UCB-style exploration to balance trying unsolved tasks with \n    # exploiting known high-scoring ones, instead of pure round-robin.\n    def __init__(self):\n        self.scores = {}\n        self.counts = {}\n        self.total = 0\n\n    def pick(self, keys, round_index):\n        import math\n        # Filter to unsolved tasks (score < 1.0 or unknown)\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if not unsolved:\n            return keys[round_index % len(keys)]\n        \n        # UCB1: prefer tasks with high average score and high uncertainty\n        best_key = None\n        best_ucb = -float('inf')\n        for k in unsolved:\n            n = self.counts.get(k, 0)\n            if n == 0:\n                # Never tried: infinite exploration bonus\n                return k\n            avg = self.scores.get(k, 0.0)\n            # UCB = avg + sqrt(2*ln(total)/n)\n            ucb = avg + math.sqrt(2 * math.log(self.total + 1) / n)\n            if ucb > best_ucb:\n                best_ucb = ucb\n                best_key = k\n        return best_key\n\n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        self.counts[task_id] = self.counts.get(task_id, 0) + 1\n        self.total += 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "hotpotqa-3:0"
+   },
+   {
+    "source": "```python\nclass Policy:\n    # Changed: use UCB-style exploration that balances trying unsolved tasks with \n    # exploiting tasks that are close to solved (high but not perfect scores),\n    # rather than pure round-robin which wastes rollouts on already-solved tasks.\n    def __init__(self):\n        self.scores = {}  # task_id -> best score seen\n        self.counts = {}  # task_id -> number of times picked\n        self.total_picks = 0\n\n    def pick(self, keys, round_index):\n        # Only consider tasks we haven't solved (score < 1.0)\n        candidates = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if not candidates:\n            # All solved in shard \u2014 just pick first (won't buy anything anyway)\n            return keys[0]\n        \n        # UCB1-style: prefer tasks with high uncertainty (few picks) and \n        # high current score (close to solved, likely to cross threshold)\n        import math\n        best_key = None\n        best_ucb = -float('inf')\n        for k in candidates:\n            n = self.counts.get(k, 0)\n            score = self.scores.get(k, 0.0)\n            # Exploration term: prefer tasks we haven't tried much\n            if n == 0:\n                ucb = float('inf')  # always try untried tasks first\n            else:\n                # Exploitation: score is the best we've seen; exploration: sqrt(2*ln(total)/n)\n                ucb = score + math.sqrt(2 * math.log(self.total_picks + 1) / n)\n            if ucb > best_ucb:\n                best_ucb = ucb\n                best_key = k\n        \n        return best_key\n\n    def record(self, task_id, score):\n        # Keep the best score (since we only care if it ever reaches 1.0)\n        if task_id not in self.scores or score > self.scores[task_id]:\n            self.scores[task_id] = score\n        self.counts[task_id] = self.counts.get(task_id, 0) + 1\n        self.total_picks += 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "hotpotqa-2:0"
+   },
+   {
+    "source": "Here's my revised policy:\n\n```python\nclass Policy:\n    # Changed: use UCB-style exploration to balance trying unsolved tasks with \n    # exploiting known good ones, instead of pure round-robin which wastes \n    # rollouts on tasks that may be near-solved but not yet confirmed.\n    def __init__(self):\n        self.scores = {}\n        self.counts = {}\n        self.total = 0\n\n    def pick(self, keys, round_index):\n        import math\n        # Filter to unsolved tasks (score < 1.0 or unknown)\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if not unsolved:\n            return keys[0]\n        \n        # UCB1: prefer tasks with high uncertainty (low count) or high score\n        best_key = None\n        best_ucb = -float('inf')\n        for k in unsolved:\n            count = self.counts.get(k, 0)\n            score = self.scores.get(k, 0.5)  # optimistic prior for unknown\n            if count == 0:\n                # Never tried - high exploration bonus\n                ucb = float('inf')\n            else:\n                # Exploitation + exploration bonus\n                ucb = score + math.sqrt(2 * math.log(self.total + 1) / count)\n            if ucb > best_ucb:\n                best_ucb = ucb\n                best_key = k\n        return best_key\n\n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        self.counts[task_id] = self.counts.get(task_id, 0) + 1\n        self.total += 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "hotpotqa-1:0"
+   },
+   {
+    "source": "Here's my revised policy:\n\n```python\nclass Policy:\n    # Changed: use UCB-style exploration to balance known-good tasks vs untested ones,\n    # and avoid wasting picks on solved tasks by tracking attempts per task.\n    def __init__(self):\n        self.scores = {}\n        self.attempts = {}\n        self.total_attempts = 0\n\n    def pick(self, keys, round_index):\n        # Filter to unsolved tasks (score < 1.0 or unknown)\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if not unsolved:\n            return keys[round_index % len(keys)]\n        \n        # UCB1: prefer tasks with high average score but also explore untested ones\n        import math\n        best_key = None\n        best_ucb = -float('inf')\n        for k in unsolved:\n            n = self.attempts.get(k, 0)\n            if n == 0:\n                # Untested: high exploration bonus\n                ucb = float('inf')\n            else:\n                avg = self.scores.get(k, 0) / n\n                # Exploration term: sqrt(2*ln(total)/n)\n                ucb = avg + math.sqrt(2 * math.log(self.total_attempts + 1) / n)\n            if ucb > best_ucb:\n                best_ucb = ucb\n                best_key = k\n        return best_key\n\n    def record(self, task_id, score):\n        self.scores[task_id] = self.scores.get(task_id, 0) + score\n        self.attempts[task_id] = self.attempts.get(task_id, 0) + 1\n        self.total_attempts += 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "hotpotqa-0:0"
+   }
+  ],
+  "proposals_rejected_by_gate": 0,
+  "invalid_proposals": 0,
+  "history": [
+   {
+    "round": 0,
+    "held_out_reward": 0.796875,
+    "committed": 1,
+    "rejected": 0,
+    "reasons": {
+     "committed": 1
+    }
+   },
+   {
+    "round": 1,
+    "held_out_reward": 0.796875,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "oracle-rejected": 1
+    }
+   },
+   {
+    "round": 2,
+    "held_out_reward": 0.796875,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "oracle-rejected": 1
+    }
+   }
+  ]
+ },
+ "validation": {
+  "hotpotqa-0": {
+   "n": 1,
+   "before": 0.75,
+   "after": 0.78125,
+   "gain": 0.03125,
+   "gain_sd": 0.0,
+   "wins": 1,
+   "losses": 0
+  },
+  "hotpotqa-1": {
+   "n": 1,
+   "before": 0.625,
+   "after": 0.625,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "hotpotqa-2": {
+   "n": 1,
+   "before": 0.90625,
+   "after": 0.90625,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "hotpotqa-3": {
+   "n": 1,
+   "before": 0.84375,
+   "after": 0.875,
+   "gain": 0.03125,
+   "gain_sd": 0.0,
+   "wins": 1,
+   "losses": 0
+  },
+  "hotpotqa-4": {
+   "n": 1,
+   "before": 0.84375,
+   "after": 0.875,
+   "gain": 0.03125,
+   "gain_sd": 0.0,
+   "wins": 1,
+   "losses": 0
+  },
+  "hotpotqa-5": {
+   "n": 1,
+   "before": 0.71875,
+   "after": 0.625,
+   "gain": -0.09375,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 1
+  },
+  "gsmhard-0": {
+   "n": 1,
+   "before": 0.625,
+   "after": 0.6875,
+   "gain": 0.0625,
+   "gain_sd": 0.0,
+   "wins": 1,
+   "losses": 0
+  }
+ },
+ "by_group": {
+  "train": {
+   "problems": [
+    "hotpotqa-0",
+    "hotpotqa-1",
+    "hotpotqa-2",
+    "hotpotqa-3"
+   ],
+   "seed_rule": 0.78125,
+   "evolved_rule": 0.796875,
+   "gain": 0.015625,
+   "wins": 2,
+   "losses": 0
+  },
+  "unseen": {
+   "problems": [
+    "hotpotqa-4",
+    "hotpotqa-5"
+   ],
+   "seed_rule": 0.78125,
+   "evolved_rule": 0.75,
+   "gain": -0.03125,
+   "wins": 1,
+   "losses": 1
+  },
+  "other": {
+   "problems": [
+    "gsmhard-0"
+   ],
+   "seed_rule": 0.625,
+   "evolved_rule": 0.6875,
+   "gain": 0.0625,
+   "wins": 1,
+   "losses": 0
+  }
+ },
+ "transfer_ratio": {
+  "unseen": -2.0,
+  "other": 4.0
+ },
+ "validate_seeds": [
+  1000
+ ],
+ "config": {
+  "rounds": 4,
+  "workers": 1,
+  "slot": "task_sampler",
+  "held_out_frac": 0.4,
+  "cache_dir": "/tmp/claude-0/-home-user-agentdescent/11f5938a-d37f-5fc2-bc0a-9c4c1833f52c/scratchpad/evalcache-run",
+  "source": "hotpotqa",
+  "other": "gsmhard",
+  "window_size": 20,
+  "data_seed": 0,
+  "model": "deepseek-v4-flash",
+  "provider": "openai",
+  "temperature": 0.0,
+  "thinking": "disabled",
+  "hard_other": false,
+  "meta_reward": "auc",
+  "quality_target": 0.75,
+  "template": "System instruction:\n{skill}\n\nUser problem:\n{prompt}",
+  "seed_instruction": "Answer the question using the passages provided. Return only the answer, as few words as possible.",
+  "outer_seed": 0
+ },
+ "usage": {
+  "calls": 716,
+  "prompt_tokens": 315583,
+  "completion_tokens": 8647,
+  "total_tokens": 324230,
+  "model_seconds": 1565.923401594162,
+  "failures": 0,
+  "wall_seconds": 197.78980464800009,
+  "completion_cache": {
+   "hits": 192,
+   "misses": 245
+  }
+ }
+}
