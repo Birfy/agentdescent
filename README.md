@@ -43,7 +43,7 @@ Quality is claimed only where the design can support it. The
 diffs with evidence cards into a buffer; a single aggregator thread runs the
 five-stage merge pipeline and commits to a git-backed ledger; four pluggable
 seams sit under the components they select; the L0 governance layer gates the
-audit step.](docs/assets/architecture.png)
+audit step.](https://raw.githubusercontent.com/Birfy/agentdescent/main/docs/assets/architecture.png)
 
 **Solid, top:** the fixed data path. *N* workers roll out tasks against ledger
 snapshots and emit diffs with evidence cards; one aggregator thread runs the
@@ -80,16 +80,14 @@ pip install -e ".[dev]"
 python -m examples.run_demo      # no API key, no network
 ```
 
-```
-round  dev_acc   stable  commit  fused  stale  confl  oracle
-    0    0.604    0.000       1      1      0      0       0
-    1    0.707    0.707       1      1      0      0       0
-    2    1.000    1.000       1      1      2      0       0
-    3    1.000    1.000       0      0      0      0       0
-```
+![A terminal recording of python -m examples.run_demo: the evolution loop runs to
+completion in under half a second, printing a per-round table of held-out
+accuracy and the aggregator's commit, fused, stale and conflict
+counters.](https://raw.githubusercontent.com/Birfy/agentdescent/main/docs/assets/demo.svg)
 
-Three rounds commit, then the gate stops accepting because there is nothing left
-to improve — `commit`, `fused`, `stale` and `confl` are the aggregator's own
+That is the whole run — no API key, no network, **under half a second**. Three
+rounds commit, then the gate stops accepting because there is nothing left to
+improve; `commit`, `fused`, `stale` and `confl` are the aggregator's own
 counters, and every run prints them.
 
 ## Quickstart — a dataset to an evolved skill
