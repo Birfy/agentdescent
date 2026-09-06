@@ -76,10 +76,11 @@ fields change that, and the user should be told which one you used:
 If `doctor` reports no provider key, that is not a dead end. Two routes, neither
 needing one:
 
-- `"reflect": {"ref": "host_model"}` runs the reflection on **this session's own
-  model** over MCP sampling. `start` replies with `host_model_available`; if it
-  is false, `host_model_unavailable` says why and you must fall back. The run
-  only lives as long as this session, so say that before starting a long one.
+- `"reflect": {"ref": "host_model"}` reflects on **this host's model** -- the
+  live session's over MCP sampling where the host supports it, otherwise the
+  host's own CLI with the user's configuration. `start` replies with
+  `host_model_available` and `host_model_route`; report the route, and if it is
+  unavailable `host_model_unavailable` says why and you must fall back.
 - Point **both** `agent` and `reflect` at a host CLI with `"isolate": false`:
   every call then goes through the CLI's own authentication.
 

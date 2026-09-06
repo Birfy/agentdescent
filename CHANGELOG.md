@@ -8,6 +8,18 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- **`host_model` works on every host, not only ones that implement sampling.**
+  Measured by logging what each host sends at `initialize`: Claude Code 2.1.261
+  declares `roots` and `elicitation`, OpenCode 1.18.29 declares `roots`, and
+  dsh's `dsh-mcp-client` declares nothing -- **none of them supports sampling**,
+  so a `host_model` that only spoke sampling would have been a feature nobody
+  could use. It now falls back to running that host's own CLI (`claude`,
+  `codex`, `dsh`, `opencode`) with the user's real configuration
+  (`isolate=False`), chosen from the client name and only when it is on `PATH`.
+  A bridge that dies mid-run -- the session closed -- falls back the same way
+  instead of failing. `start` reports `host_model_route` so the caller knows
+  which one it got. Verified end to end: a run started from a real Claude Code
+  session, reflecting through `claude`, producing evidence cards and a commit.
 - **`host_model`: run on the model the agent session is already using.** MCP's
   `sampling/createMessage` lets a server ask its client for a completion, so
   `{"reflect": {"ref": "host_model"}}` reflects on the host session's own model

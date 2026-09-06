@@ -55,11 +55,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Dict, Optional
 
 __all__ = [
+    "HOST_CLIS",
+    "HOST_CLI_ENV",
     "SAMPLING_TOKEN_ENV",
     "SAMPLING_URL_ENV",
     "SamplingBridge",
     "SamplingError",
     "bridge_for_session",
+    "host_cli_for_client",
     "host_model",
 ]
 
@@ -68,6 +71,29 @@ __all__ = [
 #: would be stale the moment the server restarted.
 SAMPLING_URL_ENV = "AGENTDESCENT_SAMPLING_URL"
 SAMPLING_TOKEN_ENV = "AGENTDESCENT_SAMPLING_TOKEN"
+
+#: Which host is on the other end of this server, when sampling is unavailable.
+#: Also set by the MCP server on the runs it launches.
+HOST_CLI_ENV = "AGENTDESCENT_HOST_CLI"
+
+#: `clientInfo.name` -> the factory in `agentdescent.agents` that runs that
+#: host's CLI. The names are what each host actually sends at `initialize`,
+#: captured from a logging shim rather than guessed:
+#:
+#:     claude-code      2.1.261    caps: roots, elicitation
+#:     opencode         1.18.29    caps: roots
+#:     dsh-mcp-client   0.0.1      caps: (none)
+#:
+#: None of the three declares sampling, which is the whole reason this fallback
+#: exists. Codex is matched on a substring because it never opens a session for
+#: `codex mcp list`, so its name could not be captured the same way.
+HOST_CLIS: Dict[str, str] = {
+    "claude-code": "claude_code",
+    "opencode": "opencode",
+    "dsh-mcp-client": "dsh",
+    "dsh": "dsh",
+    "codex": "codex",
+}
 
 #: A single sampling call's ceiling. Sampling goes through the host's UI and
 #: often its approval flow, so a request that hangs must not hang a rollout for
@@ -84,10 +110,28 @@ class SamplingError(RuntimeError):
 # ---------------------------------------------------------------------------
 
 
+def host_cli_for_client(client_name: Optional[str]) -> Optional[str]:
+    """Which `agentdescent.agents` factory runs *this* host's CLI, if any.
+
+    Exact match first, then a substring, so a host that renames itself
+    ``codex-cli`` or ``opencode-nightly`` still resolves.
+    """
+    name = (client_name or "").strip().lower()
+    if not name:
+        return None
+    if name in HOST_CLIS:
+        return HOST_CLIS[name]
+    for key, factory in HOST_CLIS.items():
+        if key in name:
+            return factory
+    return None
+
+
 def host_model(*, max_tokens: int = 4096, system: Optional[str] = None,
                timeout: float = DEFAULT_TIMEOUT,
                url: Optional[str] = None,
-               token: Optional[str] = None) -> Callable[[str], str]:
+               token: Optional[str] = None,
+               cli: Optional[str] = None) -> Callable[[str], str]:
     """The host agent's own model, as a :data:`~agentdescent.agents.Completion`.
 
     Usable anywhere a model is -- ``agent`` for a ``text`` kind, or ``reflect``
@@ -98,21 +142,53 @@ def host_model(*, max_tokens: int = 4096, system: Optional[str] = None,
         {"agent":   {"ref": "claude_code"},
          "reflect": {"ref": "host_model"}}
 
-    ``url`` and ``token`` default to the environment the MCP server sets on the
-    runs it launches, so a spec normally passes neither. Raises
-    :class:`SamplingError` when there is no bridge -- a run started from the
-    shell has no session to borrow, and saying so beats a connection error.
+    Two routes, tried in order, because **no host measured so far implements
+    sampling** -- Claude Code, OpenCode and DeepSeek Harness all connect without
+    it, so a `host_model` that only spoke sampling would have been a feature
+    nobody could use:
+
+    1. **the live session**, over sampling, when the host supports it. The model
+       is the one running the session, with its authentication and policy;
+    2. **the host's own CLI**, otherwise -- `claude`, `codex`, `dsh` or
+       `opencode`, whichever host started this server, run with the user's real
+       configuration (``isolate=False``) so it uses the model and login they
+       have set up.
+
+    The second is not the first: it starts a fresh CLI process rather than
+    borrowing the session, so it follows the user's *configured* model rather
+    than whatever the session switched to, and it costs what that CLI costs.
+    It is, though, the thing people mean by "use my agent's model", and it needs
+    no key either.
+
+    ``url``, ``token`` and ``cli`` default to the environment the MCP server
+    sets on the runs it launches, so a spec normally passes none of them. Raises
+    :class:`SamplingError` when neither route is available -- a run started from
+    the shell has no host at all, and saying so beats a connection error.
     """
     endpoint = url or os.environ.get(SAMPLING_URL_ENV)
     secret = token or os.environ.get(SAMPLING_TOKEN_ENV, "")
+    fallback = cli or os.environ.get(HOST_CLI_ENV)
+
+    def via_cli(prompt: str) -> str:
+        from . import agents
+
+        factory = getattr(agents, fallback, None)
+        if factory is None:
+            raise SamplingError(f"{HOST_CLI_ENV}={fallback!r} names no known host CLI")
+        # isolate=False on purpose: the point is the user's configured model and
+        # their login, both of which live in the config directory an isolated
+        # worker is pointed away from.
+        return factory(isolate=False)(prompt)
 
     def complete(prompt: str) -> str:
         if not endpoint:
+            if fallback:
+                return via_cli(prompt)
             raise SamplingError(
-                "no MCP sampling bridge in this process: `host_model` borrows the "
-                "model of the agent session that started the run, so it works "
-                "only for a run launched by the MCP server from a host that "
-                "supports sampling. From a shell, name a model instead "
+                "no host to borrow a model from in this process: `host_model` "
+                "uses the agent session that started the run -- its model over "
+                "MCP sampling, or its CLI -- so it works only for a run launched "
+                "by the MCP server. From a shell, name a model instead "
                 "(`claude_code`, `openai_compatible`, ...).")
         body = json.dumps({"prompt": prompt, "max_tokens": max_tokens,
                            "system": system}).encode()
@@ -128,7 +204,10 @@ def host_model(*, max_tokens: int = 4096, system: Optional[str] = None,
             raise SamplingError(f"the host refused the sampling request "
                                 f"(HTTP {e.code}): {detail}") from None
         except urllib.error.URLError as e:
-            # The overwhelmingly likely cause, and one no retry will fix.
+            # The session outliving the run is the expected end of a bridge. If
+            # the host also has a CLI, that is a better answer than failing.
+            if fallback:
+                return via_cli(prompt)
             raise SamplingError(
                 f"the sampling bridge at {endpoint} is gone -- the agent session "
                 f"that started this run has probably closed. ({e.reason})") from None

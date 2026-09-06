@@ -92,10 +92,25 @@ class Tools:
         #: Why there is no bridge, for the `start` payload. Silence here reads
         #: as "the run learned nothing" instead of "it could not ask".
         self.bridge_error: Optional[str] = None
+        #: The host's own CLI (`claude_code`, `codex`, `dsh`, `opencode`), from
+        #: the name it sent at `initialize`. The fallback route for `host_model`.
+        self.host_cli: Optional[str] = None
 
-    def sampling_env(self) -> Dict[str, str]:
-        """What a launched run needs to reach the host's model, if it can."""
-        return self.bridge.env() if self.bridge is not None else {}
+    def host_model_env(self) -> Dict[str, str]:
+        """What a launched run needs to reach the host's model, by either route.
+
+        The bridge when the host can sample; otherwise the name of the host's
+        own CLI, which `host_model` runs with the user's real configuration. No
+        host measured so far implements sampling, so the second is the one that
+        actually carries this feature.
+        """
+        if self.bridge is not None:
+            return self.bridge.env()
+        if self.host_cli:
+            from .host_sampling import HOST_CLI_ENV
+
+            return {HOST_CLI_ENV: self.host_cli}
+        return {}
 
     # -- read-only -------------------------------------------------------------
 
@@ -146,7 +161,7 @@ class Tools:
             # spec resolves there, not here -- it needs the bridge's address in
             # its environment or it has no session to borrow.
             st = runstore.launch(rd, budget_usd=budget_usd, usd_per_call=usd_per_call,
-                                 env=self.sampling_env())
+                                 env=self.host_model_env())
         except runstore.RunStoreError as e:
             return {"ok": False, "error": str(e), "run_id": rd.run_id, "dir": rd.path}
         return {"ok": True, "run_id": rd.run_id, "state": st.state, "pid": st.pid,
@@ -154,8 +169,10 @@ class Tools:
                 # Whether a `host_model` reference in this spec can work. A run
                 # that silently could not borrow the session's model would
                 # otherwise just look like one that proposed nothing.
-                "host_model_available": self.bridge is not None,
-                **({} if self.bridge is not None
+                "host_model_available": bool(self.bridge or self.host_cli),
+                "host_model_route": ("sampling" if self.bridge
+                                     else (self.host_cli or None)),
+                **({} if (self.bridge or self.host_cli)
                    else {"host_model_unavailable": self.bridge_error})}
 
     def apply(self, run_id: str, to: Optional[str] = None, dry_run: bool = False,
@@ -178,7 +195,7 @@ class Tools:
             # it is likely gone, and its address with it.
             return runstore.resume(run_id, store=self.store, budget_usd=budget_usd,
                                    usd_per_call=usd_per_call,
-                                   env=self.sampling_env()).to_dict()
+                                   env=self.host_model_env()).to_dict()
         except runstore.RunStoreError as e:
             return {"error": str(e)}
 
@@ -252,14 +269,33 @@ def build_server(store: Optional[str] = None, *, name: str = "agentdescent"):
         ``asyncio.get_running_loop()`` raises "no running event loop" and the
         bridge silently never attached.
         """
-        if t.bridge is not None or ctx is None:
+        if (t.bridge is not None or t.host_cli is not None) or ctx is None:
             return
         try:
-            from .host_sampling import bridge_for_session
+            import shutil
+
+            from . import agents
+            from .host_sampling import bridge_for_session, host_cli_for_client
 
             t.bridge = bridge_for_session(ctx.session, loop)
-            if t.bridge is None:
-                t.bridge_error = "this host did not declare the sampling capability"
+            if t.bridge is not None:
+                return
+            t.bridge_error = "this host did not declare the sampling capability"
+            # No sampling anywhere yet, so the CLI route is what makes
+            # `host_model` usable at all. Which CLI is decided by the name the
+            # client sent at `initialize`, and only accepted if it is on PATH --
+            # naming a CLI that is not there would turn every reflection into a
+            # FileNotFoundError deep inside a detached run.
+            params = getattr(ctx.session, "client_params", None)
+            # `client_info` on mcp 2.x, `clientInfo` on 1.x -- the wire name is
+            # camelCase and only 2.x renamed the Python attribute. Reading one
+            # of them silently returned None, and the fallback never fired.
+            info = (getattr(params, "client_info", None)
+                    or getattr(params, "clientInfo", None))
+            factory = host_cli_for_client(getattr(info, "name", None))
+            if factory and shutil.which(getattr(agents, factory)().command[0]):
+                t.host_cli = factory
+                t.bridge_error += f"; falling back to its CLI ({factory})"
         except Exception as e:  # noqa: BLE001 - sampling is a bonus, never a failure
             # Kept, not discarded: a run whose reflector cannot reach the host
             # proposes nothing and looks like a run that simply learned nothing.

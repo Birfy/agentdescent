@@ -136,6 +136,59 @@ def test_the_bridge_serves_workers_concurrently():
     assert elapsed < 0.6, elapsed
 
 
+def test_the_cli_route_is_what_makes_this_usable_at_all():
+    """No host measured implements sampling -- Claude Code, OpenCode and dsh all
+    connect without it -- so the fallback is not a nicety, it is the feature.
+
+    The names are the ones each host really sends at `initialize`, captured from
+    a logging shim in front of the server.
+    """
+    from agentdescent.host_sampling import HOST_CLI_ENV, host_cli_for_client
+    from agentdescent.mcp import Tools
+
+    assert host_cli_for_client("claude-code") == "claude_code"
+    assert host_cli_for_client("opencode") == "opencode"
+    assert host_cli_for_client("dsh-mcp-client") == "dsh"
+    assert host_cli_for_client("codex-cli") == "codex"        # substring
+    assert host_cli_for_client("some-other-editor") is None
+
+    t = Tools()
+    t.host_cli = "claude_code"
+    assert t.host_model_env() == {HOST_CLI_ENV: "claude_code"}
+
+
+def test_host_model_falls_back_to_the_hosts_cli(monkeypatch):
+    """With no bridge but a host CLI named, the reflection goes through it."""
+    import agentdescent.agents as agents
+    from agentdescent.host_sampling import HOST_CLI_ENV
+
+    monkeypatch.delenv(SAMPLING_URL_ENV, raising=False)
+    monkeypatch.setenv(HOST_CLI_ENV, "claude_code")
+    seen = {}
+
+    def fake_claude_code(**kw):
+        seen.update(kw)
+        return lambda prompt: f"answered: {prompt}"
+
+    monkeypatch.setattr(agents, "claude_code", fake_claude_code)
+    assert host_model()("think") == "answered: think"
+    # The user's configured model and login live in the config directory an
+    # isolated worker is pointed away from, so this route must not isolate.
+    assert seen == {"isolate": False}
+
+
+def test_a_dead_bridge_falls_back_rather_than_failing_the_run(monkeypatch):
+    """The session closing is the expected end of a bridge, not of the run."""
+    import agentdescent.agents as agents
+    from agentdescent.host_sampling import HOST_CLI_ENV
+
+    monkeypatch.setenv(SAMPLING_URL_ENV, "http://127.0.0.1:9/sample")
+    monkeypatch.setenv(SAMPLING_TOKEN_ENV, "irrelevant")
+    monkeypatch.setenv(HOST_CLI_ENV, "claude_code")
+    monkeypatch.setattr(agents, "claude_code", lambda **kw: lambda p: "from the CLI")
+    assert host_model(timeout=5)("think") == "from the CLI"
+
+
 def test_a_client_without_sampling_gets_no_bridge():
     """Most hosts do not implement sampling. Returning None beats wiring up
     something that fails on the run's first reflection."""
@@ -227,7 +280,7 @@ def test_start_says_when_the_host_cannot_lend_its_model():
     from agentdescent.mcp import Tools
 
     t = Tools()
-    assert t.sampling_env() == {}
+    assert t.host_model_env() == {}
     t.bridge, t.bridge_error = None, "this host did not declare the sampling capability"
     with tempfile.TemporaryDirectory() as store:
         t.store = store
