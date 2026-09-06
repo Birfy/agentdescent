@@ -353,6 +353,17 @@ the run holds the resolved paths and is re-runnable from anywhere.
     log.txt        the detached process's output
 ```
 
+A run outlives the tool call that started it, but it **inherits the environment
+of the process that launched it** — including provider keys and, in sandboxed
+or proxied setups, `HTTPS_PROXY`. That is what you want from an interactive
+session, which stays open. It bites in one specific case, measured: a run
+started from a *headless* `claude -p` kept working until that process exited,
+then failed every call with `[Errno 111] Connection refused`, because the proxy
+it had been handed belonged to the process that had gone. The run recorded
+`state: failed` with that error, and `agentdescent resume <run_id>` from a live
+shell picked it up on the same ledger and finished it. If you start runs from a
+short-lived host process, expect to resume them from somewhere longer-lived.
+
 `agentdescent status`, `watch`, `show`, `apply`, `cancel` and `resume` all read
 this directory, so a run started from an agent can be inspected from a shell
 and a run started from a shell can be picked up by an agent. `cancel` signals
