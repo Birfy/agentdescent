@@ -54,7 +54,7 @@ def test_start_status_show_apply_flow(store, tmp_path):
     _wait(rd)
     st = t.status(started["run_id"])
     assert st["state"] == "done" and st["recent_rounds"]
-    assert t.status()[0]["run_id"] == started["run_id"]
+    assert t.status()["runs"][0]["run_id"] == started["run_id"]
     shown = t.show(started["run_id"])
     assert shown["final_reward"] == 1.0 and "+MODE: reverse" in shown["diff"]
     assert shown["apply_plan"]["written"] == ["rules.md"]
@@ -130,6 +130,35 @@ def test_server_registers_every_tool_and_both_resources(store):
 
     res = asyncio.run(go())
     assert res is not None
+
+
+def test_status_with_no_runs_still_says_something(store):
+    """A bare list serialises to zero content blocks when empty.
+
+    An agent that asked "what is running?" on a fresh machine got back nothing
+    at all over the wire -- indistinguishable from a call that failed. The
+    wrapper names the store and carries an explicit empty list.
+    """
+    payload = Tools(store).status()
+    assert payload["runs"] == [] and payload["store"] == store
+
+
+def test_the_server_reports_its_version(monkeypatch):
+    """`initialize` answered with an empty version string, so any host that
+    shows one showed a blank. Only passed where the constructor takes it: mcp
+    1.x funnels unknown keywords into `Settings`, which rejects them."""
+    pytest.importorskip("mcp")
+    import inspect as _inspect
+
+    from agentdescent import __version__
+
+    server = build_server()
+    cls = type(server)
+    if "version" not in _inspect.signature(cls.__init__).parameters:
+        pytest.skip("this mcp does not take a server version")
+    settings = getattr(server, "settings", None)
+    reported = getattr(server, "version", None) or getattr(settings, "version", None)
+    assert reported == __version__, reported
 
 
 def test_serve_without_the_sdk_says_how_to_get_it(monkeypatch):

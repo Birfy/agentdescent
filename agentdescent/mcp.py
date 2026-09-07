@@ -28,11 +28,13 @@ lazily: ``pip install "agentdescent[mcp]"``; the core stays dependency-free.
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 from typing import Any, Dict, Optional
 
 from . import runstore
+from . import __version__
 from .cli import NESTED_ENV, apply_payload, doctor_report, plan_payload, show_payload, status_payload
 from .evolvespec import EvolveSpec, SpecError, compose
 
@@ -58,8 +60,9 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
         "plan. A run costs real agent calls: rounds x n_workers x tasks."),
     "status": (
         "Progress of one run (round, best held-out reward, calls, dollars if priced, "
-        "state, the last few rounds) or, with no run_id, a list of all runs. Cheap; safe "
-        "to poll. Summarise round-to-round deltas for the user rather than pasting JSON."),
+        "state, the last few rounds) or, with no run_id, {store, runs} where `runs` is "
+        "every run newest first and is empty when there are none. Cheap; safe to poll. "
+        "Summarise round-to-round deltas for the user rather than pasting JSON."),
     "show": (
         "The evolved artifact when a run is done: for a directory, the list of files, a "
         "unified diff against the original, and the plan `apply` would execute (files "
@@ -128,9 +131,17 @@ class Tools:
 
     def status(self, run_id: Optional[str] = None) -> Any:
         try:
-            return status_payload(run_id, store=self.store)
+            payload = status_payload(run_id, store=self.store)
         except runstore.RunStoreError as e:
             return {"error": str(e)}
+        if run_id is not None:
+            return payload
+        # Wrapped, because a bare list serialises to *zero* content blocks when
+        # it is empty: an agent asking "what is running?" on a fresh machine got
+        # back nothing at all and could not tell that from a call that failed.
+        # The CLI prints "no runs under <dir>"; this is the same sentence in the
+        # shape a tool returns, and it names the store either way.
+        return {"store": self.store or runstore.root(), "runs": payload}
 
     def show(self, run_id: str, diff: bool = True) -> Dict[str, Any]:
         try:
@@ -248,7 +259,14 @@ def _server_class():
 def build_server(store: Optional[str] = None, *, name: str = "agentdescent"):
     """An MCP server with every tool in :data:`TOOL_DESCRIPTIONS` and two resources."""
     server_cls = _server_class()
-    server = server_cls(name, instructions=(
+    # `version` only where the constructor takes it: mcp 2.x does, and without it
+    # `initialize` answers with an empty string, so every host that shows the
+    # server's version shows a blank. mcp 1.x routes unknown keywords into its
+    # `Settings` model, where an unexpected one is an error, not a no-op.
+    extra: Dict[str, Any] = {}
+    if "version" in inspect.signature(server_cls.__init__).parameters:
+        extra["version"] = __version__
+    server = server_cls(name, **extra, instructions=(
         "AgentDescent evolves skills, agent definitions, prompts, code and host plugins "
         "against examples with a parallel, merge-based optimiser. Workflow: doctor -> "
         "write an EvolveSpec -> plan (show the user) -> start -> status (once a round) -> "
