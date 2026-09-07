@@ -669,7 +669,18 @@ def build_parser() -> argparse.ArgumentParser:
                               "different benchmark -- say which you used"))
     parser.add_argument("--hard-pool", type=int, default=400,
                         help="rows of --other to scan for the hard subset")
-    parser.add_argument("--window-size", type=int, default=20, help="tasks per inner problem")
+    parser.add_argument("--window-size", type=int, default=20,
+                        help=("tasks per inner problem. It also sets the inner "
+                              "reward's GRANULARITY, which is what the `selection` "
+                              "slot needs: the inner held-out set is "
+                              "`window-size x held_out_frac`, so 20 gives 8 tasks "
+                              "and a reward that moves in steps of 0.125. Measured "
+                              "on gsmhard: at 20 the population archive held two "
+                              "heads scoring 0.625 and 0.625 at every single call "
+                              "-- a permanent tie no rule can rank, and all 8 valid "
+                              "proposals came out exact ties with the seed. At 60 "
+                              "(24 held out, steps of 0.042) the same archive reads "
+                              "0.417 / 0.750 / 0.792 and is rankable"))
     parser.add_argument("--data-seed", type=int, default=0)
     parser.add_argument("--seeds", type=int, default=2, help="inner seeds per train problem")
     parser.add_argument("--validate-seeds", type=int, default=2)
