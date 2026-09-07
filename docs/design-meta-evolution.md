@@ -435,6 +435,48 @@ cache 是**空的**——一次模型调用都没返回。示例的反思调用�
 
 ---
 
+### 4.8 AlgoTune：port 跑通，实验不成立（`bench/results/metasearch-algotune.md`）
+
+Stage 1b 第一次在线跑。**结论是一个量化的否定**，写下来是为了让下一次从噪声问题开始，
+而不是从 `pip install numpy` 开始。
+
+**port 本身没问题。** `psd_cone_projection` 一次内层搜索（4 次扩展）36 秒、4 次真实模型
+调用、在 Bubblewrap 沙箱里计时拿到 **5.6× 加速**（基线 1.003×）。设计文档里列为阻塞的
+东西全是安装问题：装 `bubblewrap`、`numpy`/`scipy`，再补
+`cvxpy networkx numba mpmath pot scikit-learn cython`，可用任务从默认的 8 个变成
+**123 / 147**（剩下 24 个要 ortools/pysat/sympy/faiss/hdbscan，装上还能更多）。147 个任务
+的单位成本也全测了（中位数 2.3 秒，尾部 17.7 秒），存在 `metasearch-algotune-task-cost.json`。
+
+**但奖励看不见规则。** 三条规则在 `psd_cone_projection` 上跨度 **0.0066**，而种子规则和
+**它自己**比差 **−0.0055**——84% 是噪声。而这还是好任务：扩大跑的自带噪声检查在
+`rbf_interpolation` 上跑种子规则三次得到 0.5680 / 0.5104 / 0.6178，sd **0.0537**，差 20 倍。
+0.51 vs 0.62 不是计时抖动，是内层搜索**找到了不同质量的程序**。
+
+**补全缓存关不上这个环**，而且原因在 prompt 里：`mutation_prompt` 有三个块是用实测计时
+拼的（`_eval_block` 加速比摘要、`_timing_report`、`_profile_block` 的"最贵 25 行，毫秒"）。
+计时抖动 → prompt 变化 → 缓存键就是 prompt → 未命中 → 采样出不同程序 → 又被重新计时。
+**实测计时就是内层搜索赖以工作的反馈**，去掉它搜索就瞎了，留着它搜索就是随机的。所以
+元奖励是一个对这种随机性的期望，只能靠采样估计——而按 sd 0.054 / 信号 0.007 算，2 SE
+分辨需要约 **240 个配对样本**，每个 75 秒，一次验证 10 小时，而外层每次 gate 都要这个分辨率。
+
+**预算还几乎全花在 gate 上。** 扩大到 24 训练 + 24 验证任务（两边都是默认的 6 倍）跑三个
+sweep：52 次内层搜索里只有 **4 次是 rollout**，约 92% 的墙钟在评估——因为每个候选提案都
+要在整个 held-out 集上打分，而每一次打分就是一次完整 ERA 搜索。
+
+顺带确认了一件对任何有噪声的域都成立的事：`Runtime.eval_one` 按
+`cache_key(artifact._signature(), task.id, env_fingerprint)` 记忆化，所以
+**每个 (artifact, task) 的第一次噪声抽样会被冻结一整轮**。于是 gate 的比较是"一个冻结抽样
+vs 一个新鲜抽样"，配对差的 sd 是 `sd×√2` ≈ 0.076，10 个 held-out 任务平均后 SE ≈ **0.024**,
+是 0.007 信号的 **3.4 倍**。sweep 0 的提交和 sweep 2 的 oracle 否决都是抛硬币。
+（这也解释了 `held_out` 三轮锁在 0.658：artifact 只变过一次，后两轮全是缓存命中。）
+
+**要改的不是参数，是两件结构性的事**：一，8 次扩展只建出 13 个节点的树，选择规则没有杠杆——
+方差主要来自模型写出什么程序；要让规则有杠杆需要几百节点的树，而一次扩展 ~10 秒。
+二，奖励是采样期望而不是函数。三条降噪路径（都不免费）：`--test-shards` 调高（内层 ERA
+自己的 held-out 只有 2 个 shard）、按稳定性而非成本筛任务、`profile=False` 稳住 prompt。
+
+---
+
 ---
 
 ## 5. 与主分支近期改动的关系
@@ -460,7 +502,7 @@ cache 是**空的**——一次模型调用都没返回。示例的反思调用�
 | P2 | `policy_source(slot, seed)` 通用门 + `seed_source` + `SLOT_PROTOCOLS` | ✅ |
 | P3 | `examples/metasearch/`：合成地形、离线端到端、`--dry-run`、加入 PORTS 契约 | ✅ |
 | P4a | GSM 跑批脚本 `bench/metasearch_slots.py`：演进 `task_sampler`，内层是完整的内层 `evolve()`，报告分三组（演进过的 / 同基准未见切片 / 另一个基准）各自的迁移比 | ✅ 脚本 + 离线测试 + **在线跑出结果**（`bench/results/metasearch-slots.md`） |
-| P4b | AlgoTune 跑批脚本 `bench/metasearch_algotune.py`（训练/验证任务不相交、新 seed 验证、迁移比、结果 JSON） | ✅ 脚本 + 插桩测试；**在线跑待做**（需 numpy/scipy 沙箱） |
+| P4b | AlgoTune 跑批脚本 `bench/metasearch_algotune.py`（训练/验证任务不相交、新 seed 验证、迁移比、结果 JSON） | ✅ 脚本 + 插桩测试 + **在线跑过**（`bench/results/metasearch-algotune.md`）：port 跑通（5.6× 加速），但**这个域现在测不了选择规则**，噪声是信号的 3.4 倍，见 §4.8 |
 | P5 | Harbor 适配器 `_harbor.py`（§4.3）+ SWE-bench-Science / TB-Science 验证 | ✅ 适配器 + `LocalRunner` 离线端到端；`DockerRunner.verify` 已写未在线跑；**基准验证待做**（需 API + Docker + 任务数据） |
 | P6 | 其余五个插槽的内置冒烟与默认种子，每个种子在真实内层 `evolve()` 里跑通 | ✅ |
 | P7 | 多插槽联合演化（`ParamSlot` 的 key 空间天然支持；`SourceSlot` 需要多槽 Strategy） | 开放 |
