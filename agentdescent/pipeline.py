@@ -198,3 +198,18 @@ class FirstError:
         """Re-raise on the caller's thread, where it can actually be seen."""
         if self._exc is not None:
             raise self._exc
+
+
+def describe(e: BaseException, limit: int = 2000) -> str:
+    """``Type: message``, capped, without stamping a type the message has.
+
+    One place, because a rollout failure used to be described independently at
+    every hop out: `executor` named it, `supervisor` named it again over the
+    queue, `evolve` named it a third time. What reached `status` was
+    "RuntimeError: RuntimeError: ..." and, capped at 200 by whichever hop was
+    narrowest, cut off mid-sentence -- an Ark 404 for an unknown model ended at
+    "does not support the c", losing the clause that named the fix. 2000 is what
+    `runstore` stores.
+    """
+    name, msg = type(e).__name__, str(e)
+    return (msg if msg.startswith(f"{name}: ") else f"{name}: {msg}")[:limit]

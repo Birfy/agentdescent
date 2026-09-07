@@ -1,0 +1,17 @@
+{
+  "name": "agentdescent",
+  "owner": {
+    "name": "Birfy"
+  },
+  "metadata": {
+    "description": "AgentDescent: evolve your skills, agents and plugins."
+  },
+  "plugins": [
+    {
+      "name": "agentdescent",
+      "source": "./integrations/claude-code",
+      "description": "Evolve skills, agents, prompts, code and plugins against examples with a parallel, merge-based optimiser.",
+      "version": "0.4.6"
+    }
+  ]
+}

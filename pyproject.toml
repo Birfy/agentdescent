@@ -19,8 +19,22 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0"]
+# `pyyaml` is only used by the dsh patch tests, which parse the block we
+# write the way dsh does. Without it `pytest tests/test_integrations.py`
+# fails on a clean checkout, which is the install the guide gives.
+dev = ["pytest>=7.0", "pyyaml>=5.1"]
 docs = ["mkdocs-material[imaging]>=9.5"]   # [imaging] builds the social cards
+# The MCP server (`agentdescent mcp`) needs the protocol SDK; the CLI does not.
+#
+# The marker is load-bearing. This project supports 3.9, every published `mcp`
+# requires >=3.10, and without the marker `pip install "agentdescent[mcp]"` --
+# the line the install docs give -- fails on 3.9 with a screen of "Ignored the
+# following versions" and installs *nothing*, not even the CLI. With it, 3.9
+# gets the CLI and an `agentdescent mcp` that says why it cannot serve.
+mcp = ["mcp>=1.2; python_version >= '3.10'"]
+
+[project.scripts]
+agentdescent = "agentdescent.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/Birfy/agentdescent"
@@ -33,6 +47,10 @@ version = { attr = "agentdescent.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["agentdescent*"]
+
+[tool.setuptools.package-data]
+# The shared skill and hooks the `install` command writes into a host.
+agentdescent = ["integrations/*.md", "integrations/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

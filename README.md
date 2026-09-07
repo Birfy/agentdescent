@@ -154,6 +154,35 @@ evolve(tasks, reward, agent=LLMAgent(claude_code()))     # Claude Code CLI
 
 </details>
 
+## Use it from your agent — Claude Code, Codex, OpenCode, DeepSeek Harness
+
+The same engine as a **plugin**. A shared skill teaches the host when to reach
+for it, an MCP server exposes `doctor / plan / start / status / show / apply /
+cancel / resume`, and the CLI mirrors them, so a run started from an agent can
+be inspected from a shell.
+
+```bash
+bash scripts/setup-hosts.sh   # installs it and wires up whichever agent CLIs you have
+agentdescent demo             # a complete evolution, offline, no key, ~10s
+agentdescent doctor           # which CLIs and keys this machine has
+```
+
+Say *"improve this prompt against these examples"* inside the agent. It runs
+`doctor`, writes a spec, **quotes the call count before starting**, waits for
+your yes, runs detached, and asks again before it writes anything back.
+
+**No cases yet is not a blocker.** Drafting them is step one of the procedure,
+not a prerequisite: point it at the file and it writes 8–20 for you to check
+first.
+
+`kind` is `text`, `skill_dir`, `agent_dir`, `agent_code` — or **`plugin`**: the
+host plugins themselves are evolvable, each rollout loaded into an isolated copy
+of the host, hooks and permission config frozen, with a recursion guard so a
+plugin evolving itself cannot start a nested run.
+
+[The plugin in three commands →](https://birfy.github.io/agentdescent/plugin-quickstart/)
+· [set it up and test it →](https://birfy.github.io/agentdescent/testing-guide/)
+
 ## What you can replace
 
 Two seams carry the algorithm, and both are `typing.Protocol`s — nothing to
@@ -220,6 +249,7 @@ Full docs render at **[birfy.github.io/agentdescent](https://birfy.github.io/age
 | [Choosing policies](https://birfy.github.io/agentdescent/policies/) · [Using the slots](https://birfy.github.io/agentdescent/policy-guide/) | The decision plane, and how to write for it |
 | [Agents & LLMs](https://birfy.github.io/agentdescent/agents/) · [Datasets](https://birfy.github.io/agentdescent/dataloader/) | The provider layer and the data layer |
 | [Parallelism](https://birfy.github.io/agentdescent/parallelism/) · [Execution](https://birfy.github.io/agentdescent/execution/) · [Sandboxes](https://birfy.github.io/agentdescent/sandboxes/) | Where rollouts run, and how they are isolated |
+| [Use it from your agent](https://birfy.github.io/agentdescent/plugins/) · [Testing it](https://birfy.github.io/agentdescent/testing-guide/) | The plugin surface, and how to verify each host |
 | [Efficiency](https://birfy.github.io/agentdescent/efficiency/) · [Runtime matrix](https://birfy.github.io/agentdescent/matrix-overview/) | Measured scaling and the scheduler comparison |
 
 ## Citing

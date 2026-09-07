@@ -52,7 +52,7 @@ from .ledger import Ledger, LedgerFailure
 from .sampling import RoundRobin, TaskSampler
 from .scheduler import DurationEstimator
 from .selection import SingleHead
-from .pipeline import EarlyStop, FirstError, StallGuard, WorkerHealth
+from .pipeline import EarlyStop, FirstError, StallGuard, WorkerHealth, describe
 from .staleness import StaleAction, StalenessPolicy, get_policy
 
 
@@ -97,6 +97,7 @@ def async_evolve(
     straggler_factor: float = 3.0,
     task_sampler: Optional["TaskSampler"] = None,
     on_round: Optional[Callable[[RoundInfo], None]] = None,
+    stop_when: Optional[Callable[[RoundInfo], bool]] = None,
     verbose: bool = False,
     #: Share one `Usage` with your model adapters (`claude(usage=u)`) and the
     #: result's token counts become real; without it only calls and seconds are
@@ -270,6 +271,11 @@ def async_evolve(
         Called with each :class:`~agentdescent.evolution.RoundInfo` as a merger
         sweep completes -- progress for a long run. It runs on the merger thread
         and must be cheap and thread-safe; an exception is reported, not fatal.
+    stop_when:
+        Asked after ``on_round`` with the same ``RoundInfo``; ``True`` ends the
+        run with ``stop_reason="stop_when"`` -- the caller's own budget (dollars,
+        a deadline, a kill file), checked between merger sweeps like the built-in
+        bounds. Same thread and the same rules as ``on_round``.
     usage:
         Share one :class:`~agentdescent.agents.Usage` with your model adapters
         (``claude(usage=u)``, ``openai_compatible(usage=u)``) and the result's
@@ -619,7 +625,7 @@ def async_evolve(
                 # a caller-contract violation, not a flaky backend: stop at once.
                 with counter_lock:
                     if errors[0] is None:
-                        errors[0] = f"{type(e).__name__}: {e}"
+                        errors[0] = describe(e)
                     died[0] = True
                 contract_error.record(e)      # first one wins; this site overwrote
                 stop.set()
@@ -630,7 +636,7 @@ def async_evolve(
                 # once they persist; the run ends when every worker has retired.
                 with counter_lock:
                     if errors[0] is None:
-                        errors[0] = f"{type(e).__name__}: {str(e)[:200]}"
+                        errors[0] = describe(e)
                 consecutive += 1
                 if verbose:
                     print(f"worker {wid}  error {consecutive}/{max_worker_errors}: "
@@ -804,7 +810,8 @@ def async_evolve(
         # here and a barrier there, which is the only part that differs.
         _info, early_stop = eng.record_round(
             index=len(history), reward=r, n_items=len(dev.state),
-            reports=reports, history=history, early=early, on_round=on_round)
+            reports=reports, history=history, early=early, on_round=on_round,
+            stop_when=stop_when)
         # A stalled pipeline: cards keep arriving and none of them commits. Under
         # Guarded with async_ratio > alpha that is a livelock, not slow progress.
         # Counted per sweep **that had cards or reports** -- a poll with neither
@@ -854,7 +861,7 @@ def async_evolve(
         except Exception as e:  # noqa: BLE001 - the run is over; keep what landed
             with counter_lock:
                 if errors[0] is None:
-                    errors[0] = f"{type(e).__name__}: {str(e)[:200]}"
+                    errors[0] = describe(e)
             return
         if not reports:
             return
@@ -877,7 +884,7 @@ def async_evolve(
         except Exception as e:  # noqa: BLE001 - the commits are already in the ledger
             with counter_lock:
                 if errors[0] is None:
-                    errors[0] = f"{type(e).__name__}: {str(e)[:200]}"
+                    errors[0] = describe(e)
 
     def _merger() -> None:
         # The merger is the only writer; if it dies the workers would keep filling a
@@ -934,7 +941,7 @@ def async_evolve(
                 consecutive += 1
                 with counter_lock:
                     if errors[0] is None:
-                        errors[0] = f"{type(e).__name__}: {str(e)[:200]}"
+                        errors[0] = describe(e)
                 if verbose:
                     print(f"merger error {consecutive}/{max_merger_errors}: "
                           f"{type(e).__name__}: {str(e)[:120]}")
@@ -1022,7 +1029,7 @@ def async_evolve(
             final_reward = final.score(eng.held_out)
             break
         except Exception as e:  # noqa: BLE001 - report, keep the partial result
-            score_error = f"{type(e).__name__}: {str(e)[:200]}"
+            score_error = describe(e)
             if attempt < 2:
                 time.sleep(1.0 * (attempt + 1))
     if final_reward is None:

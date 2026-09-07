@@ -54,6 +54,10 @@ nav:
     - Quickstart — dataset to skill: quickstart-skill.md
     - Quickstart — evolve a directory: quickstart-directory.md
     - Quickstart — evolve an agent's code: quickstart-agent-code.md
+    - Start here — the plugin in three commands: plugin-quickstart.md
+    - Use it from your agent (DSH / Claude Code / Codex / OpenCode): plugins.md
+    - Set it up and test it: testing-guide.md
+    - Testing the plugins: testing-the-plugins.md
   - Core concepts:
     - Concepts: concepts.md
     - Architecture: architecture.md
@@ -124,6 +128,7 @@ nav:
     - Gödel Agent — self-modification: algo-godel-agent.md
   - Design records:
     - Evolving a directory: design-directory-evolution.md
+    - Plugin for DSH, Claude Code, Codex and other agents: plugin-design.md
 
 markdown_extensions:
   - admonition

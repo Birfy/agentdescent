@@ -17,11 +17,17 @@ Bring your own for anything else; these are a convenience, not a contract.
 
 from __future__ import annotations
 
+import json
+import os
 import re
-from typing import Callable, Optional
+import shlex
+import subprocess
+from typing import Callable, Optional, Sequence, Union
+
+from .evolvable import ContractError
 
 __all__ = ["exact_match", "contains", "last_number", "numeric_close",
-           "SCORERS", "scorer"]
+           "SCORERS", "scorer", "command_scorer", "GraderError"]
 
 _NUMBER = re.compile(r"-?\d[\d,]*\.?\d*")
 
@@ -144,3 +150,65 @@ def scorer(score) -> Callable:
     raise ValueError(
         f"unknown score={score!r}; use one of {sorted(SCORERS)} or pass a "
         "callable (task, output) -> float")
+
+
+class GraderError(ContractError, RuntimeError):
+    """A :func:`command_scorer` command failed or printed something that is not a score.
+
+    A grader is the caller's own program, so a failure is a caller mistake in the
+    sense of :class:`~agentdescent.evolvable.ContractError`: the run stops with
+    the command's stderr rather than teaching the optimizer that every answer
+    scores zero.
+    """
+
+
+def command_scorer(cmd: Union[str, Sequence[str]], *, timeout: float = 60.0,
+                   cwd: Optional[str] = None) -> Callable:
+    """Grade with **any program**: the task as JSON on stdin, a float on stdout.
+
+    This is the scorer for everything the named ones cannot express -- a linter,
+    a compiler, a diff against a golden file, a web check -- and it needs no
+    Python: any language that can read stdin and print a number will do. The
+    contract, in full:
+
+    * stdin receives one JSON object: ``{"id", "prompt", "meta", "output"}``;
+    * the answer is also in the environment as ``ANSWER``, for one-line graders
+      (``sh -c 'test "$ANSWER" = 42 && echo 1 || echo 0'``);
+    * stdout must be a single number in ``[0, 1]`` (the last number printed is
+      read, so a grader may log before it scores);
+    * a non-zero exit, a timeout, or no number raises :class:`GraderError`.
+
+    ``cmd`` is argv, or a string split with :mod:`shlex`. It runs with the
+    caller's environment: a grader is the caller's own program, not
+    model-authored code, so unlike :func:`~agentdescent.runners.code_runner` it
+    is not put behind a trimmed environment.
+    """
+    argv = shlex.split(cmd) if isinstance(cmd, str) else list(cmd)
+    if not argv:
+        raise ValueError("command_scorer needs a non-empty command")
+
+    def reward(task, output) -> float:
+        payload = json.dumps({"id": task.id, "prompt": task.prompt,
+                              "meta": task.meta or {}, "output": output},
+                             ensure_ascii=False)
+        env = {**os.environ, "ANSWER": "" if output is None else str(output)}
+        try:
+            proc = subprocess.run(argv, input=payload, capture_output=True, text=True,
+                                  timeout=timeout, cwd=cwd, env=env)
+        except FileNotFoundError:
+            raise GraderError(f"grader {argv[0]!r} is not installed or not on PATH") from None
+        except subprocess.TimeoutExpired:
+            raise GraderError(f"grader {argv[0]!r} exceeded timeout={timeout}s on task {task.id!r}") from None
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout or "").strip()[:800] or "no output"
+            raise GraderError(f"grader exited {proc.returncode} on task {task.id!r}: {detail}")
+        numbers = _NUMBER.findall(proc.stdout or "")
+        if not numbers:
+            raise GraderError(
+                f"grader printed no number on task {task.id!r}: {proc.stdout.strip()[:200]!r}")
+        value = _to_float(numbers[-1])
+        if value is None:
+            raise GraderError(f"grader printed {numbers[-1]!r}, not a number")
+        return min(1.0, max(0.0, value))
+
+    return reward

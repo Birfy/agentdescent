@@ -51,6 +51,7 @@ from typing import Any, Dict, Iterator, List, Optional, Sequence
 
 from .executor import Result
 from .metrics import Meter
+from .pipeline import describe
 from .workspec import DEFAULT_ALLOWED_PREFIXES, RolloutSpec
 
 __all__ = ["ProcessExecutor", "worker_main"]
@@ -107,7 +108,7 @@ def worker_main(wid: int, tasks, results, allowed: Sequence[str],
                          time.time() - started))
         except Exception as e:  # noqa: BLE001
             results.put(("FAILED", wid, spec.lease_id, spec.task.id,
-                         f"{type(e).__name__}: {str(e)[:200]}",
+                         describe(e),
                          _classify(e), time.time() - started))
     results.put(("BYE", wid, None, 0.0))
 

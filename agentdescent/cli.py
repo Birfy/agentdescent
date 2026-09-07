@@ -1,0 +1,796 @@
+"""``agentdescent`` on the command line: the verbs the MCP server also exposes.
+
+One surface, two transports. Everything a host agent can do through the MCP
+server a person can do by hand here, in the same words, so a run started from
+Claude Code or DeepSeek Harness can be inspected from a shell and a run started
+from a shell can be picked up by an agent. The skill file falls back to these
+commands on a host with no MCP.
+
+    agentdescent demo                                               run one, offline, no key
+    agentdescent init    <path> [--kind ...] [--data cases.jsonl]   write a starter spec
+    agentdescent plan    <spec.json>                                validate + cost, no run
+    agentdescent evolve  <spec.json> [--detach] [--budget USD]      start a run
+    agentdescent status  [<run_id>] [--brief]                       one run or all
+    agentdescent watch   <run_id>                                   follow rounds
+    agentdescent show    <run_id> [--diff]                          the evolved tree
+    agentdescent apply   <run_id> [--to PATH] [--dry-run]           install it, backed up
+    agentdescent cancel  <run_id>
+    agentdescent resume  <run_id>
+    agentdescent doctor                                             what is installed
+    agentdescent install <dsh|claude-code|codex|opencode>           wire a host
+    agentdescent mcp                                                serve over stdio
+    agentdescent serve   [--port N]                                 read-only run panel
+
+``argparse`` only: the CLI is in the core and the core has no dependencies.
+"""
+
+from __future__ import annotations
+
+import argparse
+import difflib
+import json
+import os
+import shutil
+import sys
+import time
+from typing import Any, Dict, List, Optional, Sequence
+
+from . import runstore
+from .evolvespec import EvolveSpec, SpecError, compose, estimate, load_spec
+
+__all__ = ["main", "doctor_report", "starter_spec"]
+
+#: Set in every worker's environment by the plugin runner and the MCP server so a
+#: host that is itself being evolved cannot start a nested run. See docs/plugins.md.
+NESTED_ENV = "AGENTDESCENT_NESTED"
+
+
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
+
+
+def _out(payload: Any, *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(payload, indent=2, ensure_ascii=False, default=str))
+    elif isinstance(payload, str):
+        print(payload)
+    else:
+        print(json.dumps(payload, indent=2, ensure_ascii=False, default=str))
+
+
+def _status_line(st: runstore.RunStatus) -> str:
+    reward = "" if st.best_reward is None else f" best={st.best_reward:.3f}"
+    rounds = f"{st.round}/{st.rounds}" if st.rounds else f"{st.round}"
+    usd = "" if st.usd is None else f" ${st.usd:.2f}"
+    tail = f" [{st.stop_reason}]" if st.stop_reason else ""
+    err = f" error: {st.error}" if st.error else ""
+    return (f"{st.run_id}  {st.state:<9} round {rounds:<6} calls={st.calls}{reward}{usd}"
+            f"  {st.kind or '?'}:{st.target or '?'}{tail}{err}")
+
+
+def starter_spec(path: str, *, kind: Optional[str] = None, data: Optional[str] = None,
+                 agent: str = "claude_code") -> Dict[str, Any]:
+    """A spec to edit, with ``kind`` guessed from what ``path`` is."""
+    p = os.path.expanduser(path)
+    if kind is None:
+        if os.path.isfile(p):
+            kind = "text"
+        elif os.path.isdir(p) and os.path.exists(os.path.join(p, "tests")) and any(
+                f.endswith(".py") for f in os.listdir(p)):
+            kind = "agent_code"
+        elif os.path.isdir(p) and (os.path.exists(os.path.join(p, ".claude-plugin"))
+                                   or os.path.exists(os.path.join(p, "cordis.patch.yml"))):
+            kind = "plugin"
+        elif os.path.basename(os.path.dirname(p.rstrip(os.sep))) == "agents":
+            kind = "agent_dir"
+        else:
+            kind = "skill_dir"
+    spec: Dict[str, Any] = {
+        "version": 1, "kind": kind, "target": path,
+        "data": {"path": data or "eval/cases.jsonl", "prompt": "prompt", "gold": "gold"},
+        "score": "contains",
+        "agent": {"ref": agent},
+        "evolve": {"rounds": 6, "n_workers": 4},
+    }
+    if kind == "text":
+        spec["agent"] = {"ref": "openai_compatible", "model": "deepseek-v4-flash"}
+        spec["evolve"] = {"rounds": 8, "n_workers": 8}
+    if kind == "skill_dir":
+        spec["reflect"] = {"ref": "openai_compatible", "model": "deepseek-v4-flash"}
+        if agent == "claude_code":
+            spec["agent"] = {"ref": "claude_code",
+                             "extra_args": ["--permission-mode", "acceptEdits"]}
+    if kind == "agent_code":
+        spec["entrypoint"] = ["python", "main.py"]
+        spec["reflect"] = {"ref": "openai_compatible", "model": "deepseek-v4-flash"}
+    if kind == "plugin":
+        spec["host"] = ("claude_code" if os.path.exists(os.path.join(p, ".claude-plugin"))
+                        else "dsh")
+        spec["reflect"] = {"ref": "openai_compatible", "model": "deepseek-v4-flash"}
+    return spec
+
+
+#: Every published `mcp` requires Python >= 3.10, and this project supports 3.9.
+#: On 3.9 the extra installs nothing (see the marker in pyproject.toml), so
+#: "pip install agentdescent[mcp]" is not advice, it is a dead end -- the only
+#: true instruction is a newer interpreter.
+MCP_MIN_PYTHON = (3, 10)
+
+
+def mcp_unavailable() -> Optional[str]:
+    """Why the MCP server cannot run here, or None if it can."""
+    if sys.version_info < MCP_MIN_PYTHON:
+        return ("the MCP SDK needs Python >= %d.%d and this is %s, so "
+                "`agentdescent[mcp]` installs nothing here -- the CLI verbs are "
+                "the whole surface on this interpreter, and the shipped SKILL.md "
+                "falls back to them" % (MCP_MIN_PYTHON[0], MCP_MIN_PYTHON[1],
+                                        ".".join(map(str, sys.version_info[:3]))))
+    # Delegated so there is one answer to "is the SDK here", and so a caller
+    # that stubs it (the install-warning test does) steers every message.
+    from .integrations import mcp_sdk_missing
+
+    if mcp_sdk_missing():
+        return ('the mcp package is missing: pip install "agentdescent[mcp]" '
+                "to serve tools (the CLI works without it)")
+    return None
+
+
+def doctor_report() -> Dict[str, Any]:
+    """What this machine can run: agent CLIs, provider keys, optional pieces."""
+    clis = {name: shutil.which(name)
+            for name in ("claude", "codex", "dsh", "opencode", "git", "node", "pnpm")}
+    keys = {name: bool(os.environ.get(name)) for name in (
+        "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "DEEPSEEK_API_KEY")}
+    # The *value* of the base URL, not just its presence: it is a URL and not a
+    # secret, and without it a caller writing a spec cannot tell that
+    # `OPENAI_API_KEY` points at some other provider entirely. Measured: an
+    # agent given only "OPENAI_API_KEY: true" wrote `"model": "gpt-4o-mini"`
+    # against an endpoint that serves nothing of the sort.
+    base_url = os.environ.get("OPENAI_BASE_URL")
+    optional: Dict[str, bool] = {}
+    for mod in ("anthropic", "mcp"):
+        try:
+            __import__(mod)
+            optional[mod] = True
+        except ImportError:
+            optional[mod] = False
+    try:
+        from .sandbox_container import detect_engine
+        container = detect_engine()
+    except Exception:  # noqa: BLE001 - detection must never fail the report
+        container = None
+    problems: List[str] = []
+    if not clis["git"]:
+        problems.append("git is not on PATH; the ledger needs it")
+    if not any(clis[c] for c in ("claude", "codex", "dsh", "opencode")):
+        problems.append("no worker agent CLI on PATH (claude / codex / dsh / opencode); "
+                        "directory kinds need one")
+    if base_url:
+        problems.append(
+            f"OPENAI_BASE_URL is {base_url} -- an OpenAI-compatible endpoint that "
+            "is not OpenAI, so its model names are its own; ask the user which "
+            "model to name in a spec rather than assuming an OpenAI one")
+    if not (keys["ANTHROPIC_API_KEY"] or keys["OPENAI_API_KEY"] or keys["DEEPSEEK_API_KEY"]):
+        problems.append("no provider key in the environment; a reflector needs one "
+                        "(under dsh, forward keys in the mcp-client env block)")
+    why = mcp_unavailable()
+    if why:
+        problems.append(why)
+    return {
+        "python": sys.version.split()[0],
+        "agent_clis": clis, "provider_keys_present": keys,
+        "openai_base_url": base_url,
+        "optional": optional, "container_engine": container,
+        "nested": bool(os.environ.get(NESTED_ENV)),
+        "run_store": runstore.root(),
+        "problems": problems,
+    }
+
+
+def _tree_diff(before: Dict[str, str], after: Dict[str, str]) -> str:
+    out: List[str] = []
+    for path in sorted(set(before) | set(after)):
+        a, b = before.get(path), after.get(path)
+        if a == b:
+            continue
+        out.extend(difflib.unified_diff(
+            (a or "").splitlines(keepends=True), (b or "").splitlines(keepends=True),
+            fromfile=f"a/{path}" if a is not None else "/dev/null",
+            tofile=f"b/{path}" if b is not None else "/dev/null"))
+    return "".join(out)
+
+
+# ---------------------------------------------------------------------------
+# verbs
+# ---------------------------------------------------------------------------
+
+
+def cmd_demo(a: argparse.Namespace) -> int:
+    """Build a complete example and run it, so the first thing seen works."""
+    import tempfile
+
+    from . import demo as demo_mod
+
+    root = os.path.abspath(os.path.expanduser(a.dir)) if a.dir else tempfile.mkdtemp(
+        prefix="agentdescent-demo-")
+    os.makedirs(root, exist_ok=True)
+    spec_dict = demo_mod.build(root)
+    skill = os.path.join(root, demo_mod.DEMO_SKILL)
+    rules = os.path.join(skill, "references", "rules.md")
+
+    print(f"A skill that totals a column of a CSV, in {root}")
+    print(f"  {demo_mod.DEMO_SKILL}/references/rules.md  ->  "
+          f"{open(rules).read().strip()!r}   (wrong: `id` is a row number)")
+    print("  cases.jsonl                        ->  12 CSVs with known totals")
+    print("  the agent is a local program, so this costs nothing and needs no key\n")
+
+    spec = EvolveSpec.from_dict(spec_dict)
+    comp = compose(spec)
+    est = estimate(comp)
+    print(f"plan: {len(comp.tasks)} tasks, "
+          f"{comp.kwargs['rounds']} rounds x {comp.kwargs['n_workers']} workers, "
+          f"up to {est['agent_calls_upper_bound']} agent calls\n")
+
+    rd = runstore.create(spec.to_dict(), store=a.store)
+    print(f"running ({rd.run_id})...")
+    result = runstore.execute(rd)
+    for info in result.history:
+        print(f"  round {info.round:>2}  reward={info.held_out_reward:.3f}  "
+              f"+{info.committed}/-{info.rejected}")
+
+    print(f"\nheld-out reward: {result.final_reward:.3f}   outcomes: {result.outcomes()}")
+    print(f"what it learned:  rules.md -> "
+          f"{result.state.get('references/rules.md', '').strip()!r}")
+    if result.final_reward < 1.0:
+        print("\n(that is lower than expected for the demo; the run store has the detail:")
+        print(f" {rd.path})")
+        return 1
+    print(f"""
+The skill on disk is untouched -- an evolved artifact only lands when you say so:
+
+  agentdescent show  {rd.run_id}          the diff
+  agentdescent apply {rd.run_id} --dry-run  what it would write
+
+Your own run is the same spec with three things changed -- your directory, your
+cases.jsonl, and a real agent instead of the offline one:
+
+  agentdescent init <your-skill-dir> --data <your-cases.jsonl>
+  agentdescent doctor        # what is missing before a real run
+  agentdescent plan spec.json""")
+    return 0
+
+
+def cmd_init(a: argparse.Namespace) -> int:
+    spec = starter_spec(a.path, kind=a.kind, data=a.data, agent=a.agent)
+    out = a.out or os.path.join(".agentdescent", f"{os.path.basename(a.path.rstrip('/')) or 'spec'}.evolve.json")
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    with open(out, "w", encoding="utf-8") as fh:
+        json.dump(spec, fh, indent=2)
+    print(f"wrote {out}")
+    data = spec["data"]["path"]
+    if not os.path.exists(os.path.expanduser(data)):
+        print(f"next: create {data} -- one JSON object per line, "
+              '{"prompt": "...", "gold": "..."}')
+        print("      (`agentdescent demo` runs a complete example, offline, to copy from)")
+    print(f"then: agentdescent plan {out}")
+    return 0
+
+
+#: What an isolated worker of each CLI can fall back on, once it has been
+#: pointed away from the config directory its interactive login lives in.
+#:
+#: Only `dsh` is confirmed: its own error names the variable ("or export
+#: DEEPSEEK_API_KEY in the launching environment"). `codex` is confirmed to be
+#: the opposite -- measured against codex-cli 0.153, with OPENAI_API_KEY and
+#: OPENAI_BASE_URL both set it ignored the base URL, went to api.openai.com and
+#: sent no credentials at all ("Missing bearer or basic authentication in
+#: header"). The other two are unverified, so they get the mechanism and not a
+#: promise: claiming a key would fix it is the false assurance this warning
+#: exists to remove.
+_CLI_ENV_FALLBACK = {"dsh": "DEEPSEEK_API_KEY"}
+_CLI_ENV_USELESS = {
+    "codex": ("an environment key is not a substitute here: measured, `codex` "
+              "ignored OPENAI_API_KEY and OPENAI_BASE_URL and called "
+              "api.openai.com unauthenticated"),
+}
+
+
+def _unusable_refs(spec: EvolveSpec) -> List[str]:
+    """Warnings for agents this machine cannot actually run.
+
+    `plan` is the step that exists so nobody spends a run finding out, and it
+    was only checking the spec's *shape*: a spec naming `claude` -- the Anthropic
+    SDK completion, not the CLI -- passed and was priced at 72 calls on a machine
+    with neither the `anthropic` package nor a key, and would have failed on the
+    first one. Shape is not the same as "will run here".
+    """
+    report = doctor_report()
+    keys, clis = report["provider_keys_present"], report["agent_clis"]
+    out: List[str] = []
+    for field in ("agent", "reflect"):
+        block = getattr(spec, field, None)
+        ref = (block or {}).get("ref") if isinstance(block, dict) else None
+        if not ref:
+            continue
+        if ref == "host_model":
+            from .host_sampling import HOST_CLI_ENV, SAMPLING_URL_ENV
+
+            if not (os.environ.get(SAMPLING_URL_ENV) or os.environ.get(HOST_CLI_ENV)):
+                # Measured: a spec with `reflect: host_model`, resumed from a
+                # shell, did four rounds with `considered: 0` and finished at
+                # reward 0.0 -- every proposal raised and the run reported
+                # nothing but silence. `host_model` means "the host that started
+                # this run", and a shell is not one.
+                out.append(
+                    f"{field}: `host_model` borrows the model of the agent session that "
+                    "started the run, and there is no host in this environment -- from a "
+                    "shell it raises on every call and the run proposes nothing. Start it "
+                    "from the agent, or name a model here")
+        elif ref == "claude":
+            missing = []
+            if not report["optional"].get("anthropic"):
+                missing.append("the `anthropic` package")
+            if not keys.get("ANTHROPIC_API_KEY"):
+                missing.append("ANTHROPIC_API_KEY")
+            if missing:
+                out.append(f"{field}: `claude` is the Anthropic SDK completion (the "
+                           f"CLI is `claude_code`) and needs {' and '.join(missing)}")
+        elif ref == "openai_compatible" and not keys.get("OPENAI_API_KEY"):
+            out.append(f"{field}: `openai_compatible` needs OPENAI_API_KEY")
+        elif ref in ("claude_code", "codex", "dsh", "opencode"):
+            binary = {"claude_code": "claude"}.get(ref, ref)
+            if not clis.get(binary):
+                out.append(f"{field}: `{ref}` needs `{binary}` on PATH")
+            elif block.get("isolate") is not False and not keys.get(
+                    _CLI_ENV_FALLBACK.get(ref, ""), False):
+                # The trap that ate a 60-round run: `codex` was on PATH, so
+                # nothing complained, but a worker runs with the host's config
+                # directory redirected -- an interactive login does not carry
+                # over. Every rollout failed. Being present is not being usable.
+                remedy = _CLI_ENV_USELESS.get(ref) or (
+                    f"or export {_CLI_ENV_FALLBACK[ref]}"
+                    if ref in _CLI_ENV_FALLBACK else
+                    "whether a provider key in the environment is enough instead "
+                    "is untested for this CLI")
+                out.append(
+                    f"{field}: `{ref}` is on PATH but a worker runs isolated, so an "
+                    f'interactive login does not carry over. Set "isolate": false '
+                    f"to use the signed-in CLI -- {remedy}")
+    return out
+
+
+def _selection_not_merging(comp) -> Optional[str]:
+    """Say so when `n_workers` buys selection rather than the merge it looks like.
+
+    The reflective pair is the default now, so this fires on the one case that
+    is left: a spec whose only model is a file-editing CLI agent, where paying a
+    whole agent session per merge is not something to switch on unasked. Without
+    a fusion policy a one-key artifact -- `SingleSlot`, every prompt -- has its
+    worker proposals contradict by construction and collapse to one candidate,
+    so no fusion is built. Asked against the *composed* bundle rather than the
+    spec's `policies` block, because the default never appears in the latter.
+    """
+    installed = comp.kwargs.get("policies")
+    if installed is not None and (installed.fusion is not None
+                                  or installed.conflict is not None):
+        return None
+    strategy = comp.kwargs.get("strategy")
+    workers = comp.kwargs.get("n_workers") or 1
+    try:
+        keys = list(strategy.keys())
+    except Exception:  # noqa: BLE001 - a strategy that cannot enumerate: say nothing
+        return None
+    if workers > 1 and len(keys) == 1:
+        return (f"n_workers={workers} on a one-key artifact ({type(strategy).__name__}) "
+                "is best-of-N selection, not merging: worker proposals contradict by "
+                "construction and collapse to one candidate, so no fusion is built. "
+                "Name a cheap model in `reflect` and it merges them instead.")
+    return None
+
+
+def plan_payload(spec: EvolveSpec, *, usd_per_call: Optional[float] = None) -> Dict[str, Any]:
+    comp = compose(spec)
+    warnings = _unusable_refs(spec)
+    selection = _selection_not_merging(comp)
+    if selection:
+        warnings.append(selection)
+    return {"ok": True, "spec": spec.to_dict(), "tasks": len(comp.tasks),
+            "warnings": warnings,
+            "artifact_id": spec.artifact_id(),
+            "evolve_kwargs": {k: (v if isinstance(v, (int, float, str, bool, type(None)))
+                                  else type(v).__name__)
+                              for k, v in comp.kwargs.items()},
+            "estimate": estimate(comp, usd_per_call=usd_per_call), "notes": comp.notes}
+
+
+def cmd_plan(a: argparse.Namespace) -> int:
+    spec = load_spec(a.spec)
+    try:
+        payload = plan_payload(spec, usd_per_call=a.usd_per_call)
+    except SpecError as e:
+        _out({"ok": False, "error": str(e)}, as_json=a.json)
+        return 2
+    _out(payload, as_json=a.json)
+    return 0
+
+
+def _warn_unusable(spec: EvolveSpec) -> None:
+    """Print `plan`'s warnings on the verbs that actually start a run.
+
+    They were only ever shown by `plan`, which is the one verb that does not
+    spend anything -- so a spec that could not work reached `evolve` and
+    `resume` in silence.
+    """
+    for line in _unusable_refs(spec):
+        print(f"warning: {line}", file=sys.stderr)
+
+
+def cmd_evolve(a: argparse.Namespace) -> int:
+    spec = load_spec(a.spec)
+    try:
+        compose(spec)                        # fail here, not in the detached child
+    except SpecError as e:
+        print(f"spec error: {e}", file=sys.stderr)
+        return 2
+    _warn_unusable(spec)
+    rd = runstore.create(spec.to_dict(), store=a.store)
+    if a.detach:
+        st = runstore.launch(rd, budget_usd=a.budget, usd_per_call=a.usd_per_call)
+        _out({"run_id": rd.run_id, "state": st.state, "pid": st.pid, "dir": rd.path}
+             if a.json else f"{rd.run_id}  started (pid {st.pid})  {rd.path}", as_json=a.json)
+        return 0
+    result = runstore.execute(rd, budget_usd=a.budget, usd_per_call=a.usd_per_call)
+    st = rd.status()
+    _out({"run_id": rd.run_id, "state": st.state, "final_reward": result.final_reward,
+          "stop_reason": result.stop_reason, "outcomes": result.outcomes(),
+          "error": result.error, "dir": rd.path} if a.json else
+         f"{_status_line(st)}\nfinal reward: {result.final_reward:.3f}  "
+         f"outcomes: {result.outcomes()}\n{rd.path}", as_json=a.json)
+    return 0 if result.error is None else 1
+
+
+def cmd_run(a: argparse.Namespace) -> int:
+    """The body of a detached run; not for people."""
+    rd = runstore.RunDir(a.run_dir)
+    result = runstore.execute(rd, budget_usd=a.budget, usd_per_call=a.usd_per_call)
+    return 0 if result.error is None else 1
+
+
+def status_payload(run_id: Optional[str], *, store: Optional[str] = None,
+                   recent_rounds: int = 3) -> Any:
+    if run_id:
+        rd = runstore.get(run_id, store=store)
+        st = rd.status().to_dict()
+        st["recent_rounds"] = rd.rounds()[-recent_rounds:]
+        return st
+    return [st.to_dict() for st in runstore.list_runs(store=store)]
+
+
+def cmd_status(a: argparse.Namespace) -> int:
+    if a.run_id:
+        rd = runstore.get(a.run_id, store=a.store)
+        st = rd.status()
+        if a.json:
+            _out(status_payload(a.run_id, store=a.store), as_json=True)
+        else:
+            print(_status_line(st))
+            if not a.brief:
+                for r in rd.rounds()[-3:]:
+                    print(f"  round {r['round']:>3}  reward={r['held_out_reward']:.3f}  "
+                          f"+{r['committed']}/-{r['rejected']}  {r.get('reasons', {})}")
+        return 0
+    runs = runstore.list_runs(store=a.store)
+    if a.brief:
+        live = [s for s in runs if s.state == "running"]
+        if not live:
+            return 0
+        for s in live:
+            print(_status_line(s))
+        return 0
+    if a.json:
+        _out([s.to_dict() for s in runs], as_json=True)
+    elif not runs:
+        print(f"no runs under {a.store or runstore.root()}")
+    else:
+        for s in runs:
+            print(_status_line(s))
+    return 0
+
+
+def cmd_watch(a: argparse.Namespace) -> int:
+    rd = runstore.get(a.run_id, store=a.store)
+    seen = 0
+    while True:
+        rounds = rd.rounds()
+        for r in rounds[seen:]:
+            print(f"round {r['round']:>3}  reward={r['held_out_reward']:.3f}  "
+                  f"+{r['committed']}/-{r['rejected']}  {r.get('reasons', {})}", flush=True)
+        seen = len(rounds)
+        st = rd.status()
+        if st.state != "running":
+            print(_status_line(st))
+            return 0 if st.state == "done" else 1
+        time.sleep(a.interval)
+
+
+def show_payload(run_id: str, *, store: Optional[str] = None, diff: bool = True,
+                 max_chars: int = 40_000) -> Dict[str, Any]:
+    rd = runstore.get(run_id, store=store)
+    st = rd.status()
+    result = rd.result()
+    payload: Dict[str, Any] = {"run_id": run_id, "state": st.state,
+                               "stop_reason": st.stop_reason, "error": st.error}
+    if result is None:
+        payload["note"] = "no result yet"
+        return payload
+    payload.update(final_reward=result.final_reward, outcomes=result.outcomes(),
+                   rounds=len(result.history))
+    spec = EvolveSpec.from_dict(rd.spec_dict())
+    # What `apply` would overwrite, on every kind. Without it the caller can see
+    # the evolved artifact and still not know which file it belongs to -- and an
+    # agent that cannot name the file it is about to overwrite is right to
+    # refuse, which is what happened.
+    payload.update(kind=spec.kind, target=spec.target)
+    if spec.kind == "text":
+        payload["rendered"] = result.rendered[:max_chars]
+        payload["apply_plan"] = {"would_write": os.path.expanduser(spec.target),
+                                 "chars": len(result.rendered)}
+        return payload
+    payload["files"] = sorted(result.state)
+    if diff:
+        from .filetree import load_tree
+        try:
+            before = load_tree(spec.target)
+        except Exception as e:  # noqa: BLE001 - the original may have moved
+            before, payload["diff_note"] = {}, f"could not read original {spec.target}: {e}"
+        payload["diff"] = _tree_diff(before, result.state)[:max_chars]
+        try:
+            payload["apply_plan"] = result.write_to(os.path.expanduser(spec.target), dry_run=True)
+        except Exception as e:  # noqa: BLE001
+            payload["apply_plan"] = {"error": str(e)}
+    return payload
+
+
+def cmd_show(a: argparse.Namespace) -> int:
+    payload = show_payload(a.run_id, store=a.store, diff=a.diff)
+    if a.json:
+        _out(payload, as_json=True)
+        return 0
+    for k in ("run_id", "state", "stop_reason", "error", "final_reward", "outcomes", "note"):
+        if payload.get(k) is not None:
+            print(f"{k}: {payload[k]}")
+    if "rendered" in payload:
+        print("\n" + payload["rendered"])
+    if payload.get("diff"):
+        print("\n" + payload["diff"])
+    elif "files" in payload:
+        print("files:", ", ".join(payload["files"]))
+    if payload.get("apply_plan"):
+        print("apply would:", json.dumps(payload["apply_plan"]))
+    return 0
+
+
+def apply_payload(run_id: str, *, to: Optional[str] = None, store: Optional[str] = None,
+                  dry_run: bool = False, backup: bool = True) -> Dict[str, Any]:
+    rd = runstore.get(run_id, store=store)
+    result = rd.result()
+    if result is None:
+        raise runstore.RunStoreError(f"{run_id} has no result to apply yet")
+    spec = EvolveSpec.from_dict(rd.spec_dict())
+    dest = os.path.expanduser(to or spec.target)
+    if spec.kind == "text":
+        if dry_run:
+            return {"would_write": dest, "chars": len(result.rendered)}
+        saved = []
+        if backup and os.path.exists(dest):
+            # `.bak-N`, never a fixed `.bak`: the directory path a few lines down
+            # has always numbered its backups, and this one overwrote the single
+            # slot on every apply. Apply, hand-edit, apply again and the second
+            # backup was the hand-edit -- the original the first apply had saved
+            # was gone, from the same command that promises to keep one.
+            n = 0
+            while os.path.exists(f"{dest}.bak-{n}"):
+                n += 1
+            shutil.copy2(dest, f"{dest}.bak-{n}")
+            saved = [f"{dest}.bak-{n}"]
+        with open(dest, "w", encoding="utf-8") as fh:
+            fh.write(result.rendered)
+        return {"written": [dest], "backup": saved}
+    plan = result.write_to(dest, backup=backup, dry_run=dry_run)
+    plan["dest"] = dest
+    return plan
+
+
+def cmd_apply(a: argparse.Namespace) -> int:
+    payload = apply_payload(a.run_id, to=a.to, store=a.store, dry_run=a.dry_run,
+                            backup=not a.no_backup)
+    _out(payload, as_json=True)
+    return 0
+
+
+def cmd_cancel(a: argparse.Namespace) -> int:
+    st = runstore.cancel(a.run_id, store=a.store)
+    print(_status_line(st))
+    return 0
+
+
+def cmd_resume(a: argparse.Namespace) -> int:
+    # The environment that resumes is rarely the one that started: a run begun
+    # from an agent session and resumed from a shell has lost whatever
+    # `host_model` was borrowing.
+    try:
+        _warn_unusable(EvolveSpec.from_dict(runstore.get(a.run_id, store=a.store).spec_dict()))
+    except Exception:  # noqa: BLE001 - a warning must never block a resume
+        pass
+    st = runstore.resume(a.run_id, store=a.store, budget_usd=a.budget,
+                         usd_per_call=a.usd_per_call)
+    print(_status_line(st))
+    return 0
+
+
+def cmd_doctor(a: argparse.Namespace) -> int:
+    rep = doctor_report()
+    if a.json:
+        _out(rep, as_json=True)
+    else:
+        for k, v in rep.items():
+            if k != "problems":
+                print(f"{k}: {v}")
+        for p in rep["problems"]:
+            print(f"! {p}")
+        if not rep["problems"]:
+            print("ok: nothing missing")
+    return 0 if not rep["problems"] else 1
+
+
+def cmd_install(a: argparse.Namespace) -> int:
+    from .integrations import install
+
+    written = install(a.host, dry_run=a.dry_run, home=a.home)
+    for line in written:
+        print(line)
+    return 0
+
+
+def cmd_serve(a: argparse.Namespace) -> int:
+    print(f"agentdescent: run panel on http://{a.host}:{a.port}/  (read-only; Ctrl-C to stop)",
+          file=sys.stderr)
+    runstore.serve_http(host=a.host, port=a.port, store=a.store)
+    return 0
+
+
+def cmd_mcp(a: argparse.Namespace) -> int:
+    # A host starts this as a subprocess and shows the user nothing but
+    # "CONNECTION_CLOSED" when it dies, so the one thing that can go wrong
+    # before the protocol starts -- the SDK not being installed -- has to say so
+    # in one line on stderr rather than as a traceback nobody will see.
+    try:
+        from .mcp import serve
+
+        serve(store=a.store)
+    except ImportError as e:
+        # The instruction is spelled out here rather than taken from the
+        # exception, because which import failed decides what `e` says and the
+        # user needs the same one line either way.
+        why = mcp_unavailable()
+        # The underlying ImportError says "pip install agentdescent[mcp]", which
+        # on 3.9 is the one thing that will not help -- so it is printed only
+        # when we have nothing better, never after a reason that contradicts it.
+        msg = why or ('pip install "agentdescent[mcp]" (the CLI works without '
+                      f'it). Underlying error: {e}')
+        print(f'agentdescent mcp: cannot start the MCP server -- {msg}',
+              file=sys.stderr)
+        return 3
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# argparse
+# ---------------------------------------------------------------------------
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="agentdescent",
+                                description="Evolve skills, agents, prompts, code and plugins "
+                                            "with a parallel, merge-based optimiser.")
+    p.add_argument("--store", help="run store directory (default ~/.agentdescent/runs "
+                                    "or $AGENTDESCENT_HOME/runs)")
+    p.add_argument("--json", action="store_true", help="machine-readable output")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("demo", help="build a complete example and run it, offline")
+    s.add_argument("--dir", help="where to build it (default: a temp directory)")
+    s.set_defaults(fn=cmd_demo)
+
+    s = sub.add_parser("init", help="write a starter spec for a path")
+    s.add_argument("path")
+    s.add_argument("--kind", choices=("text", "skill_dir", "agent_dir", "agent_code", "plugin"))
+    s.add_argument("--data", help="cases file to point the spec at")
+    s.add_argument("--agent", default="claude_code", help="worker agent short name")
+    s.add_argument("--out", help="where to write the spec")
+    s.set_defaults(fn=cmd_init)
+
+    s = sub.add_parser("plan", help="validate a spec and estimate its cost; runs nothing")
+    s.add_argument("spec")
+    s.add_argument("--usd-per-call", type=float, dest="usd_per_call")
+    s.set_defaults(fn=cmd_plan)
+
+    s = sub.add_parser("evolve", help="run a spec")
+    s.add_argument("spec")
+    s.add_argument("--detach", action="store_true", help="return at once; poll with status")
+    s.add_argument("--budget", type=float, help="stop after this many dollars (needs --usd-per-call)")
+    s.add_argument("--usd-per-call", type=float, dest="usd_per_call")
+    s.set_defaults(fn=cmd_evolve)
+
+    s = sub.add_parser("run", help=argparse.SUPPRESS)
+    s.add_argument("--run-dir", required=True, dest="run_dir")
+    s.add_argument("--budget", type=float)
+    s.add_argument("--usd-per-call", type=float, dest="usd_per_call")
+    s.set_defaults(fn=cmd_run)
+
+    s = sub.add_parser("status", help="one run, or all of them")
+    s.add_argument("run_id", nargs="?")
+    s.add_argument("--brief", action="store_true", help="only running runs, one line each")
+    s.set_defaults(fn=cmd_status)
+
+    s = sub.add_parser("watch", help="follow a run's rounds until it ends")
+    s.add_argument("run_id")
+    s.add_argument("--interval", type=float, default=5.0)
+    s.set_defaults(fn=cmd_watch)
+
+    s = sub.add_parser("show", help="the evolved artifact, and the diff against the original")
+    s.add_argument("run_id")
+    s.add_argument("--diff", action="store_true", default=True)
+    s.add_argument("--no-diff", action="store_false", dest="diff")
+    s.set_defaults(fn=cmd_show)
+
+    s = sub.add_parser("apply", help="write the evolved artifact back, backing up first")
+    s.add_argument("run_id")
+    s.add_argument("--to", help="a different destination than the spec's target")
+    s.add_argument("--dry-run", action="store_true", dest="dry_run")
+    s.add_argument("--no-backup", action="store_true", dest="no_backup")
+    s.set_defaults(fn=cmd_apply)
+
+    s = sub.add_parser("cancel", help="stop a run and every worker it started")
+    s.add_argument("run_id")
+    s.set_defaults(fn=cmd_cancel)
+
+    s = sub.add_parser("resume", help="continue a stopped run on its ledger")
+    s.add_argument("run_id")
+    s.add_argument("--budget", type=float)
+    s.add_argument("--usd-per-call", type=float, dest="usd_per_call")
+    s.set_defaults(fn=cmd_resume)
+
+    s = sub.add_parser("doctor", help="which agents, keys and optional pieces are available")
+    s.set_defaults(fn=cmd_doctor)
+
+    s = sub.add_parser("install", help="wire the skill and MCP server into a host")
+    s.add_argument("host", choices=("dsh", "claude-code", "codex", "opencode"))
+    s.add_argument("--dry-run", action="store_true", dest="dry_run")
+    s.add_argument("--home", help="the host's home directory (default: the real one)")
+    s.set_defaults(fn=cmd_install)
+
+    s = sub.add_parser("serve", help="serve a read-only run panel on loopback, for a host UI")
+    s.add_argument("--host", default=runstore.DEFAULT_HTTP_HOST)
+    s.add_argument("--port", type=int, default=runstore.DEFAULT_HTTP_PORT)
+    s.set_defaults(fn=cmd_serve)
+
+    s = sub.add_parser("mcp", help="serve the tools over stdio (needs agentdescent[mcp])")
+    s.set_defaults(fn=cmd_mcp)
+    return p
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    a = build_parser().parse_args(argv)
+    try:
+        return a.fn(a)
+    except (SpecError, runstore.RunStoreError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(main())

@@ -20,6 +20,7 @@ import json
 import math
 import os
 import textwrap
+from pathlib import Path
 
 import pytest
 
@@ -1253,7 +1254,11 @@ def test_the_environment_the_sandbox_is_handed_caps_no_threads():
     one does not: the policy is worth defending on every host, and a CI runner
     without Bubblewrap should still fail if someone puts the cap back.
     """
-    _, built = support.sandbox_wrapper(["/bin/true"], scratch="/tmp")
+    # A `Path`, as the signature says: on macOS the Seatbelt branch writes a
+    # profile at `scratch / "sandbox.sb"`, so a `str` here fails the test with
+    # a TypeError instead of checking the policy. Linux only stringifies it,
+    # which is why CI never saw this.
+    _, built = support.sandbox_wrapper(["/bin/true"], scratch=Path("/tmp"))
     assert not [k for k in built if k.endswith("NUM_THREADS")], (
         "the sandbox environment caps threads for one side again")
 
