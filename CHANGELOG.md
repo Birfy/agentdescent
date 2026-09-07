@@ -8,6 +8,15 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ### Added
 
+- **`scripts/setup-hosts.sh` and a single testing guide.** One command
+  installs AgentDescent and wires up every agent CLI on the machine
+  (`--with-clis` installs the four npm packages first, `--dry-run` shows the
+  plan). It is idempotent, warns when `agentdescent` is not on the `PATH` hosts
+  will use, and finishes with `doctor`. [docs/testing-guide.md](docs/testing-guide.md)
+  is the path in order: install, prove it offline, check each host, drive it in
+  plain language, then a real model -- with the measured quirks
+  (`codex doctor` under-reports, Claude Code caches a failed connection) and the
+  two failure modes worth recognising written down.
 - **`host_model` works on every host, not only ones that implement sampling.**
   Measured by logging what each host sends at `initialize`: Claude Code 2.1.261
   declares `roots` and `elicitation`, OpenCode 1.18.29 declares `roots`, and
@@ -39,6 +48,16 @@ All notable changes to AgentDescent are documented here. The format follows
   this is the convenient route, not the durable one.
 
 ### Fixed
+
+- **`evolve` and `resume` started specs that could not work, in silence.**
+  `plan` returned `warnings`; the two verbs that actually spend money printed
+  none. And the check knew nothing about `host_model`, which is the one ref
+  whose usability depends on *where it is started from*: measured, a spec with
+  `"reflect": {"ref": "host_model"}` resumed from a shell did four rounds with
+  `considered: 0` and finished at reward 0.0 -- every proposal raised and the
+  run reported nothing but a flat reward, which reads as "it learned nothing"
+  rather than "it had nothing to ask". Both verbs now print the warnings, and
+  the check covers `host_model`.
 
 - **`status` reported a rollout count that grew quadratically.**
   `RoundInfo.rollouts` is cumulative by its own definition and the run store was

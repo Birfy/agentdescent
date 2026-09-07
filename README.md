@@ -272,7 +272,7 @@ writes a spec, shows you the plan and the cost, runs in the background, shows
 you the diff, and asks before it applies.
 
 ```bash
-pip install "agentdescent[mcp]"
+bash scripts/setup-hosts.sh            # installs it and wires up every agent CLI you have
 agentdescent demo                      # a real evolution, offline, no key
 agentdescent doctor                    # which agent CLIs and keys are here
 agentdescent install dsh               # or: claude-code, codex, opencode

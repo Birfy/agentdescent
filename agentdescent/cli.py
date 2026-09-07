@@ -313,7 +313,21 @@ def _unusable_refs(spec: EvolveSpec) -> List[str]:
         ref = (block or {}).get("ref") if isinstance(block, dict) else None
         if not ref:
             continue
-        if ref == "claude":
+        if ref == "host_model":
+            from .host_sampling import HOST_CLI_ENV, SAMPLING_URL_ENV
+
+            if not (os.environ.get(SAMPLING_URL_ENV) or os.environ.get(HOST_CLI_ENV)):
+                # Measured: a spec with `reflect: host_model`, resumed from a
+                # shell, did four rounds with `considered: 0` and finished at
+                # reward 0.0 -- every proposal raised and the run reported
+                # nothing but silence. `host_model` means "the host that started
+                # this run", and a shell is not one.
+                out.append(
+                    f"{field}: `host_model` borrows the model of the agent session that "
+                    "started the run, and there is no host in this environment -- from a "
+                    "shell it raises on every call and the run proposes nothing. Start it "
+                    "from the agent, or name a model here")
+        elif ref == "claude":
             missing = []
             if not report["optional"].get("anthropic"):
                 missing.append("the `anthropic` package")
@@ -369,6 +383,17 @@ def cmd_plan(a: argparse.Namespace) -> int:
     return 0
 
 
+def _warn_unusable(spec: EvolveSpec) -> None:
+    """Print `plan`'s warnings on the verbs that actually start a run.
+
+    They were only ever shown by `plan`, which is the one verb that does not
+    spend anything -- so a spec that could not work reached `evolve` and
+    `resume` in silence.
+    """
+    for line in _unusable_refs(spec):
+        print(f"warning: {line}", file=sys.stderr)
+
+
 def cmd_evolve(a: argparse.Namespace) -> int:
     spec = load_spec(a.spec)
     try:
@@ -376,6 +401,7 @@ def cmd_evolve(a: argparse.Namespace) -> int:
     except SpecError as e:
         print(f"spec error: {e}", file=sys.stderr)
         return 2
+    _warn_unusable(spec)
     rd = runstore.create(spec.to_dict(), store=a.store)
     if a.detach:
         st = runstore.launch(rd, budget_usd=a.budget, usd_per_call=a.usd_per_call)
@@ -548,6 +574,13 @@ def cmd_cancel(a: argparse.Namespace) -> int:
 
 
 def cmd_resume(a: argparse.Namespace) -> int:
+    # The environment that resumes is rarely the one that started: a run begun
+    # from an agent session and resumed from a shell has lost whatever
+    # `host_model` was borrowing.
+    try:
+        _warn_unusable(EvolveSpec.from_dict(runstore.get(a.run_id, store=a.store).spec_dict()))
+    except Exception:  # noqa: BLE001 - a warning must never block a resume
+        pass
     st = runstore.resume(a.run_id, store=a.store, budget_usd=a.budget,
                          usd_per_call=a.usd_per_call)
     print(_status_line(st))

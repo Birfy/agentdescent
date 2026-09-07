@@ -194,6 +194,9 @@ Two habits worth keeping from the first run:
 
 * [Use it from your agent](plugins.md) — the full plugin surface: every spec
   field, the MCP tools, where runs live, and evolving the plugins themselves.
+* [Set it up and test it](testing-guide.md) — one script that installs
+  AgentDescent and wires up every agent CLI you have, then the whole test
+  path in order.
 * [Testing the plugins](testing-the-plugins.md) — how to verify each host, and
   what no test can confirm.
 * [Quickstart — dataset to skill](quickstart-skill.md) — the same thing from

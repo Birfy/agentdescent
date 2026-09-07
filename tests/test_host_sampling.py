@@ -287,3 +287,34 @@ def test_start_says_when_the_host_cannot_lend_its_model():
         out = t.start({"kind": "text", "target": "x", "data": {"inline": []},
                        "score": "exact", "agent": {"ref": "echo"}})
     assert out.get("host_model_available") is False or out.get("ok") is False
+
+
+def test_a_host_model_spec_is_warned_about_outside_a_host(monkeypatch, tmp_path):
+    """The silent failure this exists for: a spec with `reflect: host_model`,
+    resumed from a shell, did four rounds with `considered: 0` and finished at
+    reward 0.0. Every proposal raised and the run reported only silence -- which
+    reads as "it learned nothing" rather than "it had nothing to ask".
+    """
+    from agentdescent.cli import _unusable_refs
+    from agentdescent.evolvespec import EvolveSpec
+    from agentdescent.host_sampling import HOST_CLI_ENV, SAMPLING_URL_ENV
+
+    cases = tmp_path / "cases.jsonl"
+    cases.write_text('{"prompt": "q", "gold": "a"}\n', encoding="utf-8")
+    target = tmp_path / "prompt.txt"
+    target.write_text("hi\n", encoding="utf-8")
+    spec = EvolveSpec.from_dict({
+        "kind": "text", "target": str(target),
+        "data": {"path": str(cases), "prompt": "prompt", "gold": "gold"},
+        "score": "contains", "agent": {"ref": "echo"},
+        "reflect": {"ref": "host_model"}})
+
+    for var in (SAMPLING_URL_ENV, HOST_CLI_ENV):
+        monkeypatch.delenv(var, raising=False)
+    warnings = _unusable_refs(spec)
+    assert any("host_model" in w and "no host in this environment" in w
+               for w in warnings), warnings
+
+    # Inside a host -- either route -- it is quiet.
+    monkeypatch.setenv(HOST_CLI_ENV, "claude_code")
+    assert not [w for w in _unusable_refs(spec) if "host_model" in w]
