@@ -46,6 +46,7 @@ from .aggregator import AggregatorConfig
 from .evolution import EvolutionResult, SingleSlot, Task, evolve, reflector, tasks_from
 from .filetree import TreeSpec, load_tree
 from .governance import HARNESS_BLAST_RADIUS, SKILL_BLAST_RADIUS
+from .fusion import reflective_merge
 from .policies import Policies
 from .rewards import command_scorer, scorer
 from .runners import code_runner, gated_reward, tree_runner
@@ -415,8 +416,8 @@ def build_reward(spec: EvolveSpec) -> Callable:
 # ---------------------------------------------------------------------------
 
 
-def build_policies(spec: EvolveSpec) -> Optional[Policies]:
-    """The ``Policies`` bundle a spec asks for, or ``None`` for the shipped run.
+def build_policies(spec: EvolveSpec, *, merger: Optional[Any] = None) -> Optional[Policies]:
+    """The ``Policies`` bundle a spec asks for, or the default merge pair.
 
     Every merge-side rule is installed by the aggregator through
     ``bind``/``configure``, so nothing here needs a verifier or a threshold.
@@ -426,7 +427,13 @@ def build_policies(spec: EvolveSpec) -> Optional[Policies]:
     """
     asked = dict(spec.policies)
     if not asked:
-        return None
+        # The merge pair is the default, not an opt-in. Without it a run whose
+        # artifact is one key -- every `kind: "text"` target -- has its worker
+        # proposals contradict by construction, so conflict resolution collapses
+        # them to one candidate and `n_workers` buys per-round best-of-N
+        # *selection* rather than the merge this project is about. `merger` is
+        # the reflector's model, which the spec already names.
+        return Policies(**reflective_merge(merger)) if merger is not None else None
     unknown = sorted(set(asked) - set(_POLICY_SLOTS) - {"reflective_merge"})
     if unknown:
         raise SpecError(f"policies: unknown slot(s) {unknown}; slots are {_POLICY_SLOTS} "
@@ -628,7 +635,11 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
         knobs["agg_config"] = build_agg_config(spec, **knobs["agg_config"])
     elif spec.kind == "text" and spec.agg_config:
         knobs["agg_config"] = build_agg_config(spec)
-    policies = build_policies(spec)
+    # A CLI agent can reflect, but paying a whole agent session to merge two
+    # diffs is not a default anyone would choose; those specs name a cheap model
+    # in `reflect`, and that is what merges.
+    merger = reflect if not hasattr(reflect, "in_workspace") else None
+    policies = build_policies(spec, merger=merger)
     if policies is not None:
         knobs["policies"] = policies
     if usage is not None:

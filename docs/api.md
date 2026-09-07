@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-212 public names across 34 modules.
+214 public names across 35 modules.
 
 ---
 
@@ -2058,6 +2058,14 @@ Somewhere to keep evaluations. In one process, across many, or on disk.
 ### `ConflictPolicy`
 
 Which of a batch of mutually contradictory changes survive.
+
+### `DefaultConflict`
+
+Drop contradicting diffs, keeping whichever scores better (PCGrad-style).
+
+### `DefaultFusion`
+
+Build the union of complementary diffs and hand it to the gate.
 
 ### `EDIT_PROTOCOL`
 

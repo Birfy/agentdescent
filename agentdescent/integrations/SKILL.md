@@ -45,8 +45,11 @@ written back until the user says so.
      but logged out fails every rollout. Do not assume it is authenticated: a worker runs with the host's config directory redirected,
      so a CLI signed in interactively is *not* signed in for the run unless the
      spec sets `"isolate": false`. Provider keys in the environment do reach it.
-   - Leave `policies` empty unless the user asks for a mechanism by name; the
-     empty bundle is the shipped run.
+   - Leave `policies` empty unless the user asks for a mechanism by name. Empty
+     is **not** "no merging": the reflective merge pair is installed for you
+     from the model the spec already names, so several workers merge their edits
+     instead of one winning and the rest being dropped. Only name `policies`
+     when the user asks for something else.
 3. **`plan`** with the spec, **always, before `start`**. Show the user the spec,
    the estimate (agent calls per round and in total; dollars only if a per-call
    price is known) and anything in `warnings`. Get a yes. Fix any error it

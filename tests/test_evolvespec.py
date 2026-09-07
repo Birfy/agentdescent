@@ -198,7 +198,12 @@ def test_skill_dir_composes_the_directory_quickstart(tmp_path):
     assert k["agg_config"].batch_trigger == 2
     assert comp.tree == {"rules.md": "MODE: forward\n"}
     assert len(comp.tasks) == len(_WORDS)
-    assert "policies" not in k                     # the empty bundle is the shipped run
+    # An empty `policies` block is not an empty bundle: the reflective merge pair
+    # is the default, built from the model the spec names in `reflect`, so
+    # several workers merge their edits instead of one winning and the rest
+    # being dropped. Without it a one-key artifact could not fuse at all.
+    pol = k["policies"]
+    assert pol.fusion is not None and pol.conflict is not None
 
 
 def test_agent_dir_is_the_same_call_at_the_harness_layer(tmp_path):

@@ -1952,6 +1952,21 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
 
     pol = policies_bundle or Policies()
 
+    # The merge pair is the default wherever a model is reachable. Without it,
+    # an artifact whose state is one key -- `SingleSlot`, every prompt -- has its
+    # worker proposals contradict by construction: conflict resolution collapses
+    # them to a single candidate and no fusion is ever built, so extra workers
+    # buy per-round best-of-N *selection* rather than the merge. The completion
+    # is the one the agent already runs on; a caller with no model (plain `run` /
+    # `propose` functions, the offline demo) keeps the shipped rules, because
+    # there is nothing to merge with. To ask for the old behaviour with a model
+    # present, name it: `Policies(conflict=DefaultConflict(), fusion=DefaultFusion())`.
+    if pol.conflict is None and pol.fusion is None:
+        merger = getattr(agent, "complete", None)
+        if callable(merger):
+            from .fusion import reflective_merge
+            pol = _replace(pol, **reflective_merge(merger))
+
     # Checked before the warning below, which would otherwise fire first and name
     # the wrong problem: a caller who passed a beam, a factory and a conflict
     # policy would read "your conflict policy is unused" on the way to an

@@ -654,12 +654,16 @@ def test_a_provider_error_survives_to_the_user_whole():
 
 
 def test_plan_says_when_workers_buy_selection_rather_than_merging(tmp_path):
-    """`n_workers` on a one-key artifact reads as N merged edits and is not.
+    """The one case left where `n_workers` does not buy a merge.
 
-    Every `kind: "text"` target is a `SingleSlot`, where worker proposals
-    contradict by construction and conflict resolution collapses them to one
-    candidate -- `test_a_single_slot_artifact_can_never_fuse` asserts exactly
-    that. The suite knew; the person choosing `n_workers=8` was not told.
+    A one-key artifact -- every `kind: "text"` target is a `SingleSlot` -- has
+    worker proposals that contradict by construction, so without a fusion
+    policy conflict resolution collapses them to one candidate and `n_workers`
+    is per-round best-of-N. The reflective pair is the default now, built from
+    the model the spec names, so the warning must stay quiet for an ordinary
+    spec and fire only where no model is reachable to merge with: a spec whose
+    only agent is a file-editing CLI, where paying an agent session per merge
+    is not something to switch on unasked.
     """
     from agentdescent.cli import plan_payload
     from agentdescent.evolvespec import EvolveSpec
@@ -669,30 +673,20 @@ def test_plan_says_when_workers_buy_selection_rather_than_merging(tmp_path):
     target = tmp_path / "prompt.txt"
     target.write_text("hi\n", encoding="utf-8")
 
-    def warnings_for(policies=None, **evolve):
-        body = {
+    def warnings_for(agent, **evolve):
+        spec = EvolveSpec.from_dict({
             "kind": "text", "target": str(target),
             "data": {"path": str(cases), "prompt": "prompt", "gold": "gold"},
-            "score": "contains", "agent": {"ref": "openai_compatible", "model": "m"},
-            "evolve": evolve}
-        if policies:
-            body["policies"] = policies
-        return [w for w in plan_payload(EvolveSpec.from_dict(body))["warnings"]
-                if "best-of-N" in w]
+            "score": "contains", "agent": agent, "evolve": evolve})
+        return [w for w in plan_payload(spec)["warnings"] if "best-of-N" in w]
 
-    assert warnings_for(n_workers=4), "four workers on one key is selection, not merging"
-    assert not warnings_for(n_workers=1), "one worker has nothing to say about merging"
-
-    # ...and silent once a fusion policy is asked for. `reflective_merge` is
-    # exactly what turns this case into a real merge -- measured, four workers
-    # on a one-key prompt synthesised into one candidate -- so telling someone
-    # to install the policy their spec already installs is worse than silence.
-    assert not warnings_for(
-        n_workers=4,
-        policies={"reflective_merge": {
-            "ref": "reflective_merge",
-            "complete": {"ref": "openai_compatible", "model": "m"}}}), \
-        "the spec already installs the policy the warning recommends"
+    model = {"ref": "openai_compatible", "model": "m"}
+    assert not warnings_for(model, n_workers=4), \
+        "the merge pair is the default; there is nothing to warn about"
+    assert not warnings_for(model, n_workers=1), \
+        "one worker has nothing to say about merging either way"
+    assert warnings_for({"ref": "claude_code"}, n_workers=4), \
+        "no model to merge with, so four workers really are selection"
 
 
 def test_doctor_reports_the_base_url_not_just_that_one_is_set():

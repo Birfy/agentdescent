@@ -363,17 +363,17 @@ def _unusable_refs(spec: EvolveSpec) -> List[str]:
 def _selection_not_merging(spec: EvolveSpec, comp) -> Optional[str]:
     """Say so when `n_workers` buys selection rather than the merge it looks like.
 
-    A one-key artifact -- every `kind: "text"` target is one, `SingleSlot` --
-    makes each pair of worker proposals contradict *under the shipped conflict
-    rule*, which collapses them to a single candidate so the tournament never
-    builds a fusion. The suite asserts both halves: it cannot fuse by default
-    (`test_a_single_slot_artifact_can_never_fuse`) and it fuses fine with
-    `reflective_merge` installed (`test_reflective_fusion_commits_a_union_where
-    _the_default_cannot`). So the warning is about the *default*, and must stay
-    quiet once a fusion policy is asked for -- telling someone to install the
-    policy their spec already installs is worse than saying nothing.
+    The reflective pair is the default now, so this fires on the one case that
+    is left: a spec whose only model is a file-editing CLI agent, where paying a
+    whole agent session per merge is not something to switch on unasked. Without
+    a fusion policy a one-key artifact -- `SingleSlot`, every prompt -- has its
+    worker proposals contradict by construction and collapse to one candidate,
+    so no fusion is built. Asked against the *composed* bundle rather than the
+    spec's `policies` block, because the default never appears in the latter.
     """
-    if set(spec.policies) & {"reflective_merge", "fusion", "conflict"}:
+    installed = comp.kwargs.get("policies")
+    if installed is not None and (installed.fusion is not None
+                                  or installed.conflict is not None):
         return None
     strategy = comp.kwargs.get("strategy")
     workers = comp.kwargs.get("n_workers") or 1
@@ -383,11 +383,9 @@ def _selection_not_merging(spec: EvolveSpec, comp) -> Optional[str]:
         return None
     if workers > 1 and len(keys) == 1:
         return (f"n_workers={workers} on a one-key artifact ({type(strategy).__name__}) "
-                "is best-of-N selection, not merging: under the default conflict rule "
-                "worker proposals contradict by construction and collapse to one "
-                "candidate, so no fusion is built. Add "
-                '`"policies": {"reflective_merge": {...}}` to merge them instead, or '
-                "evolve a multi-file target.")
+                "is best-of-N selection, not merging: worker proposals contradict by "
+                "construction and collapse to one candidate, so no fusion is built. "
+                "Name a cheap model in `reflect` and it merges them instead.")
     return None
 
 
