@@ -518,6 +518,67 @@ def recording_reflector(complete: Callable[[str], str], spec: Any
 
     return propose, proposals
 
+def selection_leverage(problem: Problem, *, seed: int = 0) -> Dict[str, Any]:
+    """Can a `selection` rule differ from the seed here at all? Measure it first.
+
+    The slot picks which archived head the next batch builds on, and the seed
+    (`SingleHead`) always answers "the latest". So a rule can only differ where
+    the archive's **best** head is not the latest one, and the slot's leverage on
+    a domain is exactly the fraction of `select()` calls where that is true.
+
+    Measured across gsmhard, aime, gpqa, bbh and hotpotqa at 16 inner rounds:
+    **zero, in all 63 calls**, and the reason is structural rather than
+    per-benchmark -- `evolve()` commits only a candidate that *beats* the current
+    head on held-out, so the archive is a monotone chain and `argmax(score)` is
+    the head by construction. Four parallel inner workers add a third archived
+    score and change nothing. `Candidate.per_task`, which its own docstring calls
+    what "separates per-instance Pareto from aggregate ranking", is empty on this
+    path, so a rule cannot escape the total order that way either.
+
+    So a `selection` cell here is a guaranteed null, and this says so in one
+    inner run instead of a whole outer experiment. Two earlier runs learned it
+    the expensive way. Where the slot *does* work is a real tree --
+    `examples/metasearch/evolve_search_policy.py`, whose nodes are genuinely
+    incomparable.
+    """
+    calls: List[Dict[str, Any]] = []
+
+    class _Probe:
+        """Answers exactly as the seed does, and records what it was offered."""
+
+        def select(self, ctx: Any, n: int) -> Sequence[Any]:
+            scored = [c for c in ctx.candidates if c.score is not None]
+            best = max(scored, key=lambda c: c.score) if scored else None
+            head_tasks = ctx.head.per_task or {}
+            incomparable = 0
+            for c in ctx.candidates:
+                per = c.per_task or {}
+                shared = set(head_tasks) & set(per)
+                if shared and any(per[k] > head_tasks[k] for k in shared) \
+                        and any(per[k] < head_tasks[k] for k in shared):
+                    incomparable += 1
+            calls.append({"menu": len(ctx.candidates),
+                          "best_is_not_head": bool(best is not None
+                                                   and best.version != ctx.head.version),
+                          "per_task_known": max((len(c.per_task or {})
+                                                 for c in ctx.candidates), default=0),
+                          "pareto_incomparable": incomparable})
+            return [ctx.head] * n
+
+    problem(_Probe(), seed)
+    n = len(calls)
+    diverge = sum(1 for c in calls if c["best_is_not_head"])
+    return {"calls": n,
+            "menus_above_one": sum(1 for c in calls if c["menu"] > 1),
+            "best_is_not_head": diverge,
+            "leverage": (diverge / n) if n else 0.0,
+            "per_task_known": max((c["per_task_known"] for c in calls), default=0),
+            "pareto_incomparable": sum(1 for c in calls if c["pareto_incomparable"]),
+            "verdict": ("the seed is the only reachable answer -- this cell is a "
+                        "guaranteed null" if not diverge else
+                        "a rule can differ from the seed here")}
+
+
 def progress(label: str) -> Callable[[Any], None]:
     """One line per outer sweep. A run that reports nothing until its summary
     cannot be told from a stalled one, and an outer sweep here is minutes of
@@ -722,6 +783,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-tokens", type=int, default=1200)
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--api-timeout", type=float, default=180.0)
+    parser.add_argument("--leverage-check", action="store_true",
+                        help=("for --slot selection: run ONE inner problem with a "
+                              "probe that answers exactly as the seed does, and "
+                              "report how often a rule *could* have differed. Zero "
+                              "means the cell is a guaranteed null whatever the "
+                              "reflector writes -- see selection_leverage()"))
     parser.add_argument("--thinking", choices=("disabled", "enabled", "default"),
                         default="disabled",
                         help=("reasoning tokens. Disabled by default: the solver is "
@@ -807,12 +874,28 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         complete = cached_completion(
             complete, completion_cache,
             key_extra=f"{args.model}|{args.temperature}|{args.max_tokens}|{args.thinking}")
+    if args.leverage_check:
+        if args.slot != "selection":
+            print(f"[leverage] --leverage-check measures the `selection` slot; "
+                  f"--slot is {args.slot}. Nothing to report.")
+            return 0
     train, validate, groups = build_problems(
         complete, source=args.source, other=args.other,
         train_windows=args.train_windows, unseen_windows=args.unseen_windows,
         other_windows=args.other_windows, size=args.window_size,
         data_seed=args.data_seed, inner=inner, usage=usage,
         hard_other=args.hard_other, hard_pool=args.hard_pool)
+    if args.leverage_check:
+        name, problem = next(iter(train.items()))
+        report = selection_leverage(problem)
+        print(f"[leverage] {name}: {report['calls']} select() calls, "
+              f"{report['menus_above_one']} with a menu above one, "
+              f"{report['best_is_not_head']} where the best archived head is not "
+              f"the current head -> leverage {report['leverage']:.0%}")
+        print(f"[leverage] per_task scores known: {report['per_task_known']}; "
+              f"calls with a Pareto-incomparable pair: {report['pareto_incomparable']}")
+        print(f"[leverage] {report['verdict']}")
+        return 0
     started = time.monotonic()
     payload = run_experiment(complete, train=train, validate=validate, groups=groups,
                              seeds=seeds, validate_seeds=validate_seeds,
