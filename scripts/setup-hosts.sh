@@ -54,6 +54,8 @@ if [ "$WITH_CLIS" = 1 ]; then
   fi
   prefix="$(npm config get prefix 2>/dev/null)"
   info "npm prefix: $prefix"
+  avail=$(df -h "${prefix:-/}" 2>/dev/null | awk 'NR==2 {print $4}')
+  [ -n "$avail" ] && info "free space there: $avail"
   if [ -n "$prefix" ] && [ ! -w "$prefix/lib" ] && [ "$DRY" = 0 ]; then
     info ""
     info "That directory is not writable by you, so every global install will"
@@ -83,13 +85,16 @@ if [ "$WITH_CLIS" = 1 ]; then
   if [ -n "$failed" ]; then
     info ""
     info "These did not install:$failed"
-    info "The lines above are npm's own reason. The usual ones:"
+    info "The lines above are npm's own reason. The ones seen in practice:"
+    info "  ENOSPC                     -> the disk is full. Nothing else will"
+    info "                                work either; free space and re-run"
+    info "  ENOTEMPTY (rename ...)     -> a half-installed copy is in the way:"
+    info "                                rm -rf <the path npm printed>"
+    info "                                then re-run this script"
     info "  EACCES / permission denied -> npm prefix is not yours (see above)"
-    info "  404 Not Found              -> that package is not on the public"
-    info "                                registry; install it the way its"
-    info "                                project documents (dsh, for one, is"
-    info "                                not a public npm package)"
     info "  ETIMEDOUT / ECONNREFUSED   -> registry unreachable; check a proxy"
+    info "  404 Not Found              -> not on the public registry; install"
+    info "                                it the way its project documents"
     info ""
     # Not backticks: inside a double-quoted argument the shell runs them, and
     # this line launched a demo evolution instead of printing its name.

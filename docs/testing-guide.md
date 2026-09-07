@@ -21,14 +21,18 @@ bash scripts/setup-hosts.sh
 Don't have the agent CLIs yet? Add `--with-clis` and it tries to npm-install
 them first. `--dry-run` prints what it would do and changes nothing.
 
-Only three of the four are public npm packages — `@anthropic-ai/claude-code`,
-`@openai/codex`, `opencode-ai`. **DeepSeek Harness is not on the public
-registry**, so `--with-clis` will 404 on it; install `dsh` the way its own
-project documents (on macOS, Homebrew). The script prints npm's own error for
-anything that fails, so you can tell a 404 from an EACCES rather than guessing.
+All four are public npm packages: `@anthropic-ai/claude-code`, `@openai/codex`,
+`opencode-ai`, `@deepseek-ai/dsh`. The script prints npm's own error for
+anything that fails, because the fixes are completely different:
 
-If every package fails with EACCES, npm's global prefix is not yours. The
-script checks and says so; the fix is one of:
+| npm says | What it means | Fix |
+|---|---|---|
+| `ENOSPC` | the disk is full | free space; nothing else will work either |
+| `ENOTEMPTY ... rename` | a half-installed copy is in the way | `rm -rf` the path npm printed, re-run |
+| `EACCES` | npm's global prefix is not yours | see below |
+| `ETIMEDOUT` / `ECONNREFUSED` | registry unreachable | check your proxy |
+
+For `EACCES`, point npm somewhere you own (the script checks this up front):
 
 ```bash
 npm config set prefix ~/.npm-global
