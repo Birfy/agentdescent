@@ -1,737 +1,755 @@
-[
- {
-  "task": "affine_transform_2d",
-  "seconds": 1.628809856000089,
-  "ok": true
- },
- {
-  "task": "aircraft_wing_design",
-  "seconds": 2.3247114390001116,
-  "ok": true
- },
- {
-  "task": "articulation_points",
-  "seconds": 3.0277203299999655,
-  "ok": true
- },
- {
-  "task": "base64_encoding",
-  "seconds": 4.120531467999854,
-  "ok": true
- },
- {
-  "task": "battery_scheduling",
-  "seconds": 2.3707398750000266,
-  "ok": true
- },
- {
-  "task": "btsp",
-  "seconds": 0.23605097899985594,
-  "ok": false
- },
- {
-  "task": "capacitated_facility_location",
-  "seconds": 1.9260750760001883,
-  "ok": true
- },
- {
-  "task": "channel_capacity",
-  "seconds": 2.1452688309998393,
-  "ok": false
- },
- {
-  "task": "chebyshev_center",
-  "seconds": 3.149227249999967,
-  "ok": true
- },
- {
-  "task": "cholesky_factorization",
-  "seconds": 0.7680766959999801,
-  "ok": true
- },
- {
-  "task": "clustering_outliers",
-  "seconds": 0.06234791600013523,
-  "ok": false
- },
- {
-  "task": "communicability",
-  "seconds": 1.652672874000018,
-  "ok": true
- },
- {
-  "task": "convex_hull",
-  "seconds": 6.896292962999951,
-  "ok": true
- },
- {
-  "task": "convolve2d_full_fill",
-  "seconds": 2.2397173679999014,
-  "ok": true
- },
- {
-  "task": "convolve_1d",
-  "seconds": 3.344075388000192,
-  "ok": true
- },
- {
-  "task": "correlate2d_full_fill",
-  "seconds": 2.1543621349999285,
-  "ok": true
- },
- {
-  "task": "correlate_1d",
-  "seconds": 3.325981655000078,
-  "ok": true
- },
- {
-  "task": "count_connected_components",
-  "seconds": 4.131752671999948,
-  "ok": true
- },
- {
-  "task": "count_riemann_zeta_zeros",
-  "seconds": 0.6139482579999367,
-  "ok": true
- },
- {
-  "task": "cumulative_simpson_1d",
-  "seconds": 3.695776179999939,
-  "ok": true
- },
- {
-  "task": "cumulative_simpson_multid",
-  "seconds": 2.3504266859999916,
-  "ok": true
- },
- {
-  "task": "cvar_projection",
-  "seconds": 1.3323826670000471,
-  "ok": true
- },
- {
-  "task": "cyclic_independent_set",
-  "seconds": 3.02039255700015,
-  "ok": true
- },
- {
-  "task": "delaunay",
-  "seconds": 2.521760132000054,
-  "ok": true
- },
- {
-  "task": "dijkstra_from_indices",
-  "seconds": 11.997801535999997,
-  "ok": true
- },
- {
-  "task": "discrete_log",
-  "seconds": 0.059365751999848726,
-  "ok": false
- },
- {
-  "task": "dynamic_assortment_planning",
-  "seconds": 0.06136369699993338,
-  "ok": false
- },
- {
-  "task": "earth_movers_distance",
-  "seconds": 2.63069355000016,
-  "ok": true
- },
- {
-  "task": "edge_expansion",
-  "seconds": 1.9941196139998283,
-  "ok": true
- },
- {
-  "task": "eigenvalues_complex",
-  "seconds": 1.4878844899999422,
-  "ok": true
- },
- {
-  "task": "eigenvalues_real",
-  "seconds": 0.8566568390001521,
-  "ok": true
- },
- {
-  "task": "eigenvectors_complex",
-  "seconds": 1.489116807000073,
-  "ok": true
- },
- {
-  "task": "eigenvectors_real",
-  "seconds": 1.0835905480000747,
-  "ok": true
- },
- {
-  "task": "elementwise_integration",
-  "seconds": 1.6723724340001809,
-  "ok": true
- },
- {
-  "task": "feedback_controller_design",
-  "seconds": 2.4439279180000995,
-  "ok": true
- },
- {
-  "task": "fft_cmplx_scipy_fftpack",
-  "seconds": 3.124673047999977,
-  "ok": true
- },
- {
-  "task": "fft_convolution",
-  "seconds": 4.762706092999906,
-  "ok": true
- },
- {
-  "task": "fft_real_scipy_fftpack",
-  "seconds": 4.812522511999987,
-  "ok": true
- },
- {
-  "task": "firls",
-  "seconds": 3.3133013570000003,
-  "ok": true
- },
- {
-  "task": "generalized_eigenvalues_complex",
-  "seconds": 5.7341753289999815,
-  "ok": true
- },
- {
-  "task": "generalized_eigenvalues_real",
-  "seconds": 0.8991055070000584,
-  "ok": true
- },
- {
-  "task": "generalized_eigenvectors_complex",
-  "seconds": 2.127966391999962,
-  "ok": true
- },
- {
-  "task": "generalized_eigenvectors_real",
-  "seconds": 1.4268345240000144,
-  "ok": true
- },
- {
-  "task": "graph_coloring_assign",
-  "seconds": 0.18993056999988767,
-  "ok": false
- },
- {
-  "task": "graph_global_efficiency",
-  "seconds": 1.4010543709998728,
-  "ok": true
- },
- {
-  "task": "graph_isomorphism",
-  "seconds": 1.3324792720000005,
-  "ok": true
- },
- {
-  "task": "graph_laplacian",
-  "seconds": 5.156569530999832,
-  "ok": true
- },
- {
-  "task": "group_lasso",
-  "seconds": 2.0874603459999435,
-  "ok": true
- },
- {
-  "task": "gzip_compression",
-  "seconds": 2.4775913949999904,
-  "ok": true
- },
- {
-  "task": "integer_factorization",
-  "seconds": 0.06460636600013459,
-  "ok": false
- },
- {
-  "task": "job_shop_scheduling",
-  "seconds": 0.06323006999991776,
-  "ok": false
- },
- {
-  "task": "kalman_filter",
-  "seconds": 2.2371462410001186,
-  "ok": true
- },
- {
-  "task": "kd_tree",
-  "seconds": 0.06760245700002088,
-  "ok": false
- },
- {
-  "task": "kernel_density_estimation",
-  "seconds": 1.3168962019999526,
-  "ok": true
- },
- {
-  "task": "kmeans",
-  "seconds": 2.729426083000135,
-  "ok": true
- },
- {
-  "task": "ks_test_2samp",
-  "seconds": 3.119648429000108,
-  "ok": true
- },
- {
-  "task": "l0_pruning",
-  "seconds": 2.8950214669998786,
-  "ok": true
- },
- {
-  "task": "l1_pruning",
-  "seconds": 2.148982126999954,
-  "ok": true
- },
- {
-  "task": "lasso",
-  "seconds": 3.2844107880000593,
-  "ok": true
- },
- {
-  "task": "least_squares",
-  "seconds": 1.2967255739999928,
-  "ok": true
- },
- {
-  "task": "linear_system_solver",
-  "seconds": 5.463699473999895,
-  "ok": true
- },
- {
-  "task": "lp_box",
-  "seconds": 2.727485852999962,
-  "ok": true
- },
- {
-  "task": "lp_centering",
-  "seconds": 3.0400239930002044,
-  "ok": true
- },
- {
-  "task": "lp_mdp",
-  "seconds": 2.1953872760000195,
-  "ok": true
- },
- {
-  "task": "lti_simulation",
-  "seconds": 1.8820271370000228,
-  "ok": true
- },
- {
-  "task": "lu_factorization",
-  "seconds": 3.097333261999893,
-  "ok": true
- },
- {
-  "task": "lyapunov_stability",
-  "seconds": 1.4421329619999597,
-  "ok": true
- },
- {
-  "task": "markowitz",
-  "seconds": 2.4136027310000827,
-  "ok": true
- },
- {
-  "task": "matrix_completion",
-  "seconds": 2.0640897539999514,
-  "ok": true
- },
- {
-  "task": "matrix_exponential",
-  "seconds": 2.19119799300006,
-  "ok": true
- },
- {
-  "task": "matrix_exponential_sparse",
-  "seconds": 1.7757697429999553,
-  "ok": true
- },
- {
-  "task": "matrix_multiplication",
-  "seconds": 5.177402764999897,
-  "ok": true
- },
- {
-  "task": "matrix_sqrt",
-  "seconds": 2.6094258799998897,
-  "ok": true
- },
- {
-  "task": "max_clique_cpsat",
-  "seconds": 0.06097100699980729,
-  "ok": false
- },
- {
-  "task": "max_common_subgraph",
-  "seconds": 0.06083840499991311,
-  "ok": false
- },
- {
-  "task": "max_flow_min_cost",
-  "seconds": 1.6843756239998129,
-  "ok": true
- },
- {
-  "task": "max_independent_set_cpsat",
-  "seconds": 0.06120394899994608,
-  "ok": false
- },
- {
-  "task": "max_weighted_independent_set",
-  "seconds": 0.06600882099996852,
-  "ok": false
- },
- {
-  "task": "min_dominating_set",
-  "seconds": 0.06089225199980319,
-  "ok": false
- },
- {
-  "task": "min_weight_assignment",
-  "seconds": 3.6017303610001363,
-  "ok": true
- },
- {
-  "task": "minimum_spanning_tree",
-  "seconds": 2.4766737659999762,
-  "ok": true
- },
- {
-  "task": "minimum_volume_ellipsoid",
-  "seconds": 2.4030319930000132,
-  "ok": true
- },
- {
-  "task": "multi_dim_knapsack",
-  "seconds": 0.06388124399995831,
-  "ok": false
- },
- {
-  "task": "nmf",
-  "seconds": 2.172619528000041,
-  "ok": true
- },
- {
-  "task": "ode_brusselator",
-  "seconds": 1.6542448699999568,
-  "ok": true
- },
- {
-  "task": "ode_fitzhughnagumo",
-  "seconds": 3.4344119570000657,
-  "ok": true
- },
- {
-  "task": "ode_hires",
-  "seconds": 1.5110919520000152,
-  "ok": true
- },
- {
-  "task": "ode_hodgkinhuxley",
-  "seconds": 1.7831050510001205,
-  "ok": true
- },
- {
-  "task": "ode_lorenz96_nonchaotic",
-  "seconds": 2.208877935999908,
-  "ok": true
- },
- {
-  "task": "ode_lotkavolterra",
-  "seconds": 1.4851175920000514,
-  "ok": true
- },
- {
-  "task": "ode_nbodyproblem",
-  "seconds": 1.6165217650000159,
-  "ok": true
- },
- {
-  "task": "ode_seirs",
-  "seconds": 1.5789235729998836,
-  "ok": true
- },
- {
-  "task": "ode_stiff_robertson",
-  "seconds": 2.197787759999983,
-  "ok": true
- },
- {
-  "task": "ode_stiff_vanderpol",
-  "seconds": 2.680045421999921,
-  "ok": true
- },
- {
-  "task": "odr",
-  "seconds": 2.2079730620000646,
-  "ok": true
- },
- {
-  "task": "optimal_advertising",
-  "seconds": 2.5498896919998515,
-  "ok": true
- },
- {
-  "task": "outer_product",
-  "seconds": 17.715005431999998,
-  "ok": true
- },
- {
-  "task": "pagerank",
-  "seconds": 2.768155315000058,
-  "ok": true
- },
- {
-  "task": "pca",
-  "seconds": 6.751837270000124,
-  "ok": true
- },
- {
-  "task": "pde_burgers1d",
-  "seconds": 2.2440871460000835,
-  "ok": true
- },
- {
-  "task": "pde_heat1d",
-  "seconds": 1.6481575939999402,
-  "ok": true
- },
- {
-  "task": "polynomial_mixed",
-  "seconds": 1.3883743910000703,
-  "ok": true
- },
- {
-  "task": "polynomial_real",
-  "seconds": 1.427248402000032,
-  "ok": true
- },
- {
-  "task": "power_control",
-  "seconds": 0.9919614759999149,
-  "ok": false
- },
- {
-  "task": "procrustes",
-  "seconds": 2.8369598790000055,
-  "ok": true
- },
- {
-  "task": "psd_cone_projection",
-  "seconds": 0.7066416110001228,
-  "ok": true
- },
- {
-  "task": "qp",
-  "seconds": 0.9181463190000159,
-  "ok": false
- },
- {
-  "task": "qr_factorization",
-  "seconds": 1.688583140999981,
-  "ok": true
- },
- {
-  "task": "quantile_regression",
-  "seconds": 2.534815179999896,
-  "ok": true
- },
- {
-  "task": "queens_with_obstacles",
-  "seconds": 0.13178741500018987,
-  "ok": false
- },
- {
-  "task": "queuing",
-  "seconds": 9.228814760999967,
-  "ok": true
- },
- {
-  "task": "qz_factorization",
-  "seconds": 2.015375466000023,
-  "ok": true
- },
- {
-  "task": "randomized_svd",
-  "seconds": 5.948667865000061,
-  "ok": true
- },
- {
-  "task": "rbf_interpolation",
-  "seconds": 0.5576190310000584,
-  "ok": true
- },
- {
-  "task": "robust_kalman_filter",
-  "seconds": 2.1726184859999194,
-  "ok": true
- },
- {
-  "task": "robust_linear_program",
-  "seconds": 2.3197701009999037,
-  "ok": true
- },
- {
-  "task": "rocket_landing_optimization",
-  "seconds": 2.1635287839999364,
-  "ok": true
- },
- {
-  "task": "rotate_2d",
-  "seconds": 1.6857700470000054,
-  "ok": true
- },
- {
-  "task": "set_cover",
-  "seconds": 0.06285523099995771,
-  "ok": false
- },
- {
-  "task": "set_cover_conflicts",
-  "seconds": 0.0622587459999977,
-  "ok": false
- },
- {
-  "task": "sha256_hashing",
-  "seconds": 2.262899533999871,
-  "ok": true
- },
- {
-  "task": "shift_2d",
-  "seconds": 1.568336199999976,
-  "ok": true
- },
- {
-  "task": "shortest_path_dijkstra",
-  "seconds": 1.5449555600000622,
-  "ok": true
- },
- {
-  "task": "sinkhorn",
-  "seconds": 10.011602994999976,
-  "ok": true
- },
- {
-  "task": "sparse_eigenvectors_complex",
-  "seconds": 2.2588421079999534,
-  "ok": true
- },
- {
-  "task": "sparse_lowest_eigenvalues_posdef",
-  "seconds": 1.5277534460001334,
-  "ok": true
- },
- {
-  "task": "sparse_lowest_eigenvectors_posdef",
-  "seconds": 1.834100289999924,
-  "ok": true
- },
- {
-  "task": "sparse_pca",
-  "seconds": 2.9467083760000605,
-  "ok": true
- },
- {
-  "task": "spectral_clustering",
-  "seconds": 1.451926233999984,
-  "ok": true
- },
- {
-  "task": "stable_matching",
-  "seconds": 7.117293291000124,
-  "ok": true
- },
- {
-  "task": "svd",
-  "seconds": 1.1358224589998827,
-  "ok": true
- },
- {
-  "task": "svm",
-  "seconds": 1.1061517260000073,
-  "ok": true
- },
- {
-  "task": "sylvester_solver",
-  "seconds": 3.004750891000185,
-  "ok": true
- },
- {
-  "task": "tensor_completion_3d",
-  "seconds": 3.0248318740000286,
-  "ok": true
- },
- {
-  "task": "toeplitz_solver",
-  "seconds": 1.5761665620000258,
-  "ok": true
- },
- {
-  "task": "tsp",
-  "seconds": 0.06275088600000345,
-  "ok": false
- },
- {
-  "task": "two_eigenvalues_around_0",
-  "seconds": 3.577748278000172,
-  "ok": true
- },
- {
-  "task": "unit_simplex_projection",
-  "seconds": 2.6044311579998976,
-  "ok": true
- },
- {
-  "task": "upfirdn1d",
-  "seconds": 2.968461214999934,
-  "ok": true
- },
- {
-  "task": "vector_quantization",
-  "seconds": 0.06271912900001553,
-  "ok": false
- },
- {
-  "task": "vectorized_newton",
-  "seconds": 6.184149558000172,
-  "ok": true
- },
- {
-  "task": "vehicle_routing",
-  "seconds": 0.06422388300006787,
-  "ok": false
- },
- {
-  "task": "vertex_cover",
-  "seconds": 0.06170655500000066,
-  "ok": false
- },
- {
-  "task": "voronoi_diagram",
-  "seconds": 2.4666289579997738,
-  "ok": true
- },
- {
-  "task": "wasserstein_dist",
-  "seconds": 2.787221878000082,
-  "ok": true
- },
- {
-  "task": "water_filling",
-  "seconds": 2.23069867900017,
-  "ok": true
- },
- {
-  "task": "zoom_2d",
-  "seconds": 2.928186167999911,
-  "ok": true
- }
-]
+{
+ "what": "Unit cost per AlgoTune task: seconds for ONE sandboxed evaluation of the task's own reference implementation. That is the atom every ERA expansion pays twice, so it orders tasks by what a search on them costs.",
+ "how": "prepare_suite(task, seed=0, shards=4, test_shards=2, problems=1) then evaluate_source(suite.initial_program, shards=(0,), timeout=30, repeats=3, problem_seconds=20, want_profile=False)",
+ "config": {
+  "sandbox": "Bubblewrap",
+  "shards": 4,
+  "test_shards": 2,
+  "problems": 1,
+  "timeout": 30.0,
+  "repeats": 3,
+  "problem_seconds": 20.0,
+  "model": null,
+  "provider": null,
+  "note": "no model calls at all -- this measures the sandbox, not a search"
+ },
+ "usable": 123,
+ "total": 147,
+ "rows": [
+  {
+   "task": "affine_transform_2d",
+   "seconds": 1.628809856000089,
+   "ok": true
+  },
+  {
+   "task": "aircraft_wing_design",
+   "seconds": 2.3247114390001116,
+   "ok": true
+  },
+  {
+   "task": "articulation_points",
+   "seconds": 3.0277203299999655,
+   "ok": true
+  },
+  {
+   "task": "base64_encoding",
+   "seconds": 4.120531467999854,
+   "ok": true
+  },
+  {
+   "task": "battery_scheduling",
+   "seconds": 2.3707398750000266,
+   "ok": true
+  },
+  {
+   "task": "btsp",
+   "seconds": 0.23605097899985594,
+   "ok": false
+  },
+  {
+   "task": "capacitated_facility_location",
+   "seconds": 1.9260750760001883,
+   "ok": true
+  },
+  {
+   "task": "channel_capacity",
+   "seconds": 2.1452688309998393,
+   "ok": false
+  },
+  {
+   "task": "chebyshev_center",
+   "seconds": 3.149227249999967,
+   "ok": true
+  },
+  {
+   "task": "cholesky_factorization",
+   "seconds": 0.7680766959999801,
+   "ok": true
+  },
+  {
+   "task": "clustering_outliers",
+   "seconds": 0.06234791600013523,
+   "ok": false
+  },
+  {
+   "task": "communicability",
+   "seconds": 1.652672874000018,
+   "ok": true
+  },
+  {
+   "task": "convex_hull",
+   "seconds": 6.896292962999951,
+   "ok": true
+  },
+  {
+   "task": "convolve2d_full_fill",
+   "seconds": 2.2397173679999014,
+   "ok": true
+  },
+  {
+   "task": "convolve_1d",
+   "seconds": 3.344075388000192,
+   "ok": true
+  },
+  {
+   "task": "correlate2d_full_fill",
+   "seconds": 2.1543621349999285,
+   "ok": true
+  },
+  {
+   "task": "correlate_1d",
+   "seconds": 3.325981655000078,
+   "ok": true
+  },
+  {
+   "task": "count_connected_components",
+   "seconds": 4.131752671999948,
+   "ok": true
+  },
+  {
+   "task": "count_riemann_zeta_zeros",
+   "seconds": 0.6139482579999367,
+   "ok": true
+  },
+  {
+   "task": "cumulative_simpson_1d",
+   "seconds": 3.695776179999939,
+   "ok": true
+  },
+  {
+   "task": "cumulative_simpson_multid",
+   "seconds": 2.3504266859999916,
+   "ok": true
+  },
+  {
+   "task": "cvar_projection",
+   "seconds": 1.3323826670000471,
+   "ok": true
+  },
+  {
+   "task": "cyclic_independent_set",
+   "seconds": 3.02039255700015,
+   "ok": true
+  },
+  {
+   "task": "delaunay",
+   "seconds": 2.521760132000054,
+   "ok": true
+  },
+  {
+   "task": "dijkstra_from_indices",
+   "seconds": 11.997801535999997,
+   "ok": true
+  },
+  {
+   "task": "discrete_log",
+   "seconds": 0.059365751999848726,
+   "ok": false
+  },
+  {
+   "task": "dynamic_assortment_planning",
+   "seconds": 0.06136369699993338,
+   "ok": false
+  },
+  {
+   "task": "earth_movers_distance",
+   "seconds": 2.63069355000016,
+   "ok": true
+  },
+  {
+   "task": "edge_expansion",
+   "seconds": 1.9941196139998283,
+   "ok": true
+  },
+  {
+   "task": "eigenvalues_complex",
+   "seconds": 1.4878844899999422,
+   "ok": true
+  },
+  {
+   "task": "eigenvalues_real",
+   "seconds": 0.8566568390001521,
+   "ok": true
+  },
+  {
+   "task": "eigenvectors_complex",
+   "seconds": 1.489116807000073,
+   "ok": true
+  },
+  {
+   "task": "eigenvectors_real",
+   "seconds": 1.0835905480000747,
+   "ok": true
+  },
+  {
+   "task": "elementwise_integration",
+   "seconds": 1.6723724340001809,
+   "ok": true
+  },
+  {
+   "task": "feedback_controller_design",
+   "seconds": 2.4439279180000995,
+   "ok": true
+  },
+  {
+   "task": "fft_cmplx_scipy_fftpack",
+   "seconds": 3.124673047999977,
+   "ok": true
+  },
+  {
+   "task": "fft_convolution",
+   "seconds": 4.762706092999906,
+   "ok": true
+  },
+  {
+   "task": "fft_real_scipy_fftpack",
+   "seconds": 4.812522511999987,
+   "ok": true
+  },
+  {
+   "task": "firls",
+   "seconds": 3.3133013570000003,
+   "ok": true
+  },
+  {
+   "task": "generalized_eigenvalues_complex",
+   "seconds": 5.7341753289999815,
+   "ok": true
+  },
+  {
+   "task": "generalized_eigenvalues_real",
+   "seconds": 0.8991055070000584,
+   "ok": true
+  },
+  {
+   "task": "generalized_eigenvectors_complex",
+   "seconds": 2.127966391999962,
+   "ok": true
+  },
+  {
+   "task": "generalized_eigenvectors_real",
+   "seconds": 1.4268345240000144,
+   "ok": true
+  },
+  {
+   "task": "graph_coloring_assign",
+   "seconds": 0.18993056999988767,
+   "ok": false
+  },
+  {
+   "task": "graph_global_efficiency",
+   "seconds": 1.4010543709998728,
+   "ok": true
+  },
+  {
+   "task": "graph_isomorphism",
+   "seconds": 1.3324792720000005,
+   "ok": true
+  },
+  {
+   "task": "graph_laplacian",
+   "seconds": 5.156569530999832,
+   "ok": true
+  },
+  {
+   "task": "group_lasso",
+   "seconds": 2.0874603459999435,
+   "ok": true
+  },
+  {
+   "task": "gzip_compression",
+   "seconds": 2.4775913949999904,
+   "ok": true
+  },
+  {
+   "task": "integer_factorization",
+   "seconds": 0.06460636600013459,
+   "ok": false
+  },
+  {
+   "task": "job_shop_scheduling",
+   "seconds": 0.06323006999991776,
+   "ok": false
+  },
+  {
+   "task": "kalman_filter",
+   "seconds": 2.2371462410001186,
+   "ok": true
+  },
+  {
+   "task": "kd_tree",
+   "seconds": 0.06760245700002088,
+   "ok": false
+  },
+  {
+   "task": "kernel_density_estimation",
+   "seconds": 1.3168962019999526,
+   "ok": true
+  },
+  {
+   "task": "kmeans",
+   "seconds": 2.729426083000135,
+   "ok": true
+  },
+  {
+   "task": "ks_test_2samp",
+   "seconds": 3.119648429000108,
+   "ok": true
+  },
+  {
+   "task": "l0_pruning",
+   "seconds": 2.8950214669998786,
+   "ok": true
+  },
+  {
+   "task": "l1_pruning",
+   "seconds": 2.148982126999954,
+   "ok": true
+  },
+  {
+   "task": "lasso",
+   "seconds": 3.2844107880000593,
+   "ok": true
+  },
+  {
+   "task": "least_squares",
+   "seconds": 1.2967255739999928,
+   "ok": true
+  },
+  {
+   "task": "linear_system_solver",
+   "seconds": 5.463699473999895,
+   "ok": true
+  },
+  {
+   "task": "lp_box",
+   "seconds": 2.727485852999962,
+   "ok": true
+  },
+  {
+   "task": "lp_centering",
+   "seconds": 3.0400239930002044,
+   "ok": true
+  },
+  {
+   "task": "lp_mdp",
+   "seconds": 2.1953872760000195,
+   "ok": true
+  },
+  {
+   "task": "lti_simulation",
+   "seconds": 1.8820271370000228,
+   "ok": true
+  },
+  {
+   "task": "lu_factorization",
+   "seconds": 3.097333261999893,
+   "ok": true
+  },
+  {
+   "task": "lyapunov_stability",
+   "seconds": 1.4421329619999597,
+   "ok": true
+  },
+  {
+   "task": "markowitz",
+   "seconds": 2.4136027310000827,
+   "ok": true
+  },
+  {
+   "task": "matrix_completion",
+   "seconds": 2.0640897539999514,
+   "ok": true
+  },
+  {
+   "task": "matrix_exponential",
+   "seconds": 2.19119799300006,
+   "ok": true
+  },
+  {
+   "task": "matrix_exponential_sparse",
+   "seconds": 1.7757697429999553,
+   "ok": true
+  },
+  {
+   "task": "matrix_multiplication",
+   "seconds": 5.177402764999897,
+   "ok": true
+  },
+  {
+   "task": "matrix_sqrt",
+   "seconds": 2.6094258799998897,
+   "ok": true
+  },
+  {
+   "task": "max_clique_cpsat",
+   "seconds": 0.06097100699980729,
+   "ok": false
+  },
+  {
+   "task": "max_common_subgraph",
+   "seconds": 0.06083840499991311,
+   "ok": false
+  },
+  {
+   "task": "max_flow_min_cost",
+   "seconds": 1.6843756239998129,
+   "ok": true
+  },
+  {
+   "task": "max_independent_set_cpsat",
+   "seconds": 0.06120394899994608,
+   "ok": false
+  },
+  {
+   "task": "max_weighted_independent_set",
+   "seconds": 0.06600882099996852,
+   "ok": false
+  },
+  {
+   "task": "min_dominating_set",
+   "seconds": 0.06089225199980319,
+   "ok": false
+  },
+  {
+   "task": "min_weight_assignment",
+   "seconds": 3.6017303610001363,
+   "ok": true
+  },
+  {
+   "task": "minimum_spanning_tree",
+   "seconds": 2.4766737659999762,
+   "ok": true
+  },
+  {
+   "task": "minimum_volume_ellipsoid",
+   "seconds": 2.4030319930000132,
+   "ok": true
+  },
+  {
+   "task": "multi_dim_knapsack",
+   "seconds": 0.06388124399995831,
+   "ok": false
+  },
+  {
+   "task": "nmf",
+   "seconds": 2.172619528000041,
+   "ok": true
+  },
+  {
+   "task": "ode_brusselator",
+   "seconds": 1.6542448699999568,
+   "ok": true
+  },
+  {
+   "task": "ode_fitzhughnagumo",
+   "seconds": 3.4344119570000657,
+   "ok": true
+  },
+  {
+   "task": "ode_hires",
+   "seconds": 1.5110919520000152,
+   "ok": true
+  },
+  {
+   "task": "ode_hodgkinhuxley",
+   "seconds": 1.7831050510001205,
+   "ok": true
+  },
+  {
+   "task": "ode_lorenz96_nonchaotic",
+   "seconds": 2.208877935999908,
+   "ok": true
+  },
+  {
+   "task": "ode_lotkavolterra",
+   "seconds": 1.4851175920000514,
+   "ok": true
+  },
+  {
+   "task": "ode_nbodyproblem",
+   "seconds": 1.6165217650000159,
+   "ok": true
+  },
+  {
+   "task": "ode_seirs",
+   "seconds": 1.5789235729998836,
+   "ok": true
+  },
+  {
+   "task": "ode_stiff_robertson",
+   "seconds": 2.197787759999983,
+   "ok": true
+  },
+  {
+   "task": "ode_stiff_vanderpol",
+   "seconds": 2.680045421999921,
+   "ok": true
+  },
+  {
+   "task": "odr",
+   "seconds": 2.2079730620000646,
+   "ok": true
+  },
+  {
+   "task": "optimal_advertising",
+   "seconds": 2.5498896919998515,
+   "ok": true
+  },
+  {
+   "task": "outer_product",
+   "seconds": 17.715005431999998,
+   "ok": true
+  },
+  {
+   "task": "pagerank",
+   "seconds": 2.768155315000058,
+   "ok": true
+  },
+  {
+   "task": "pca",
+   "seconds": 6.751837270000124,
+   "ok": true
+  },
+  {
+   "task": "pde_burgers1d",
+   "seconds": 2.2440871460000835,
+   "ok": true
+  },
+  {
+   "task": "pde_heat1d",
+   "seconds": 1.6481575939999402,
+   "ok": true
+  },
+  {
+   "task": "polynomial_mixed",
+   "seconds": 1.3883743910000703,
+   "ok": true
+  },
+  {
+   "task": "polynomial_real",
+   "seconds": 1.427248402000032,
+   "ok": true
+  },
+  {
+   "task": "power_control",
+   "seconds": 0.9919614759999149,
+   "ok": false
+  },
+  {
+   "task": "procrustes",
+   "seconds": 2.8369598790000055,
+   "ok": true
+  },
+  {
+   "task": "psd_cone_projection",
+   "seconds": 0.7066416110001228,
+   "ok": true
+  },
+  {
+   "task": "qp",
+   "seconds": 0.9181463190000159,
+   "ok": false
+  },
+  {
+   "task": "qr_factorization",
+   "seconds": 1.688583140999981,
+   "ok": true
+  },
+  {
+   "task": "quantile_regression",
+   "seconds": 2.534815179999896,
+   "ok": true
+  },
+  {
+   "task": "queens_with_obstacles",
+   "seconds": 0.13178741500018987,
+   "ok": false
+  },
+  {
+   "task": "queuing",
+   "seconds": 9.228814760999967,
+   "ok": true
+  },
+  {
+   "task": "qz_factorization",
+   "seconds": 2.015375466000023,
+   "ok": true
+  },
+  {
+   "task": "randomized_svd",
+   "seconds": 5.948667865000061,
+   "ok": true
+  },
+  {
+   "task": "rbf_interpolation",
+   "seconds": 0.5576190310000584,
+   "ok": true
+  },
+  {
+   "task": "robust_kalman_filter",
+   "seconds": 2.1726184859999194,
+   "ok": true
+  },
+  {
+   "task": "robust_linear_program",
+   "seconds": 2.3197701009999037,
+   "ok": true
+  },
+  {
+   "task": "rocket_landing_optimization",
+   "seconds": 2.1635287839999364,
+   "ok": true
+  },
+  {
+   "task": "rotate_2d",
+   "seconds": 1.6857700470000054,
+   "ok": true
+  },
+  {
+   "task": "set_cover",
+   "seconds": 0.06285523099995771,
+   "ok": false
+  },
+  {
+   "task": "set_cover_conflicts",
+   "seconds": 0.0622587459999977,
+   "ok": false
+  },
+  {
+   "task": "sha256_hashing",
+   "seconds": 2.262899533999871,
+   "ok": true
+  },
+  {
+   "task": "shift_2d",
+   "seconds": 1.568336199999976,
+   "ok": true
+  },
+  {
+   "task": "shortest_path_dijkstra",
+   "seconds": 1.5449555600000622,
+   "ok": true
+  },
+  {
+   "task": "sinkhorn",
+   "seconds": 10.011602994999976,
+   "ok": true
+  },
+  {
+   "task": "sparse_eigenvectors_complex",
+   "seconds": 2.2588421079999534,
+   "ok": true
+  },
+  {
+   "task": "sparse_lowest_eigenvalues_posdef",
+   "seconds": 1.5277534460001334,
+   "ok": true
+  },
+  {
+   "task": "sparse_lowest_eigenvectors_posdef",
+   "seconds": 1.834100289999924,
+   "ok": true
+  },
+  {
+   "task": "sparse_pca",
+   "seconds": 2.9467083760000605,
+   "ok": true
+  },
+  {
+   "task": "spectral_clustering",
+   "seconds": 1.451926233999984,
+   "ok": true
+  },
+  {
+   "task": "stable_matching",
+   "seconds": 7.117293291000124,
+   "ok": true
+  },
+  {
+   "task": "svd",
+   "seconds": 1.1358224589998827,
+   "ok": true
+  },
+  {
+   "task": "svm",
+   "seconds": 1.1061517260000073,
+   "ok": true
+  },
+  {
+   "task": "sylvester_solver",
+   "seconds": 3.004750891000185,
+   "ok": true
+  },
+  {
+   "task": "tensor_completion_3d",
+   "seconds": 3.0248318740000286,
+   "ok": true
+  },
+  {
+   "task": "toeplitz_solver",
+   "seconds": 1.5761665620000258,
+   "ok": true
+  },
+  {
+   "task": "tsp",
+   "seconds": 0.06275088600000345,
+   "ok": false
+  },
+  {
+   "task": "two_eigenvalues_around_0",
+   "seconds": 3.577748278000172,
+   "ok": true
+  },
+  {
+   "task": "unit_simplex_projection",
+   "seconds": 2.6044311579998976,
+   "ok": true
+  },
+  {
+   "task": "upfirdn1d",
+   "seconds": 2.968461214999934,
+   "ok": true
+  },
+  {
+   "task": "vector_quantization",
+   "seconds": 0.06271912900001553,
+   "ok": false
+  },
+  {
+   "task": "vectorized_newton",
+   "seconds": 6.184149558000172,
+   "ok": true
+  },
+  {
+   "task": "vehicle_routing",
+   "seconds": 0.06422388300006787,
+   "ok": false
+  },
+  {
+   "task": "vertex_cover",
+   "seconds": 0.06170655500000066,
+   "ok": false
+  },
+  {
+   "task": "voronoi_diagram",
+   "seconds": 2.4666289579997738,
+   "ok": true
+  },
+  {
+   "task": "wasserstein_dist",
+   "seconds": 2.787221878000082,
+   "ok": true
+  },
+  {
+   "task": "water_filling",
+   "seconds": 2.23069867900017,
+   "ok": true
+  },
+  {
+   "task": "zoom_2d",
+   "seconds": 2.928186167999911,
+   "ok": true
+  }
+ ]
+}
