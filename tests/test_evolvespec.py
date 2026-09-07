@@ -206,6 +206,31 @@ def test_skill_dir_composes_the_directory_quickstart(tmp_path):
     assert pol.fusion is not None and pol.conflict is not None
 
 
+def test_the_merge_pair_survives_an_unrelated_policy_slot(tmp_path):
+    """Naming `staleness` is not a request to stop merging.
+
+    The default was first written as "install it when `policies` is empty",
+    which made it disappear the moment a spec named any other slot -- a default
+    that depends on a field with nothing to do with it. It is keyed off the two
+    merge slots instead, so only asking for a conflict or fusion rule (or the
+    pair) replaces it.
+    """
+    base = _dir_spec(str(tmp_path),
+                     reflect={"ref": "openai_compatible", "model": "m"}).to_dict()
+
+    def policies_for(**extra):
+        return compose(EvolveSpec.from_dict({**base, **extra})).kwargs.get("policies")
+
+    assert policies_for().fusion is not None, "the pair is the default"
+
+    with_other = policies_for(policies={"staleness": "guarded"})
+    assert with_other.fusion is not None and with_other.conflict is not None
+    assert with_other.staleness is not None, "and the slot the spec did name still applies"
+
+    named = policies_for(policies={"conflict": "agentdescent.defaults:DefaultConflict"})
+    assert named.fusion is None, "a spec that names a merge rule gets exactly that"
+
+
 def test_agent_dir_is_the_same_call_at_the_harness_layer(tmp_path):
     comp = compose(_dir_spec(str(tmp_path), kind="agent_dir"))
     assert comp.kwargs["blast_radius"] == HARNESS_BLAST_RADIUS

@@ -45,8 +45,8 @@ from .agents import Completion, Usage, WorkspaceAgent
 from .aggregator import AggregatorConfig
 from .evolution import EvolutionResult, SingleSlot, Task, evolve, reflector, tasks_from
 from .filetree import TreeSpec, load_tree
-from .governance import HARNESS_BLAST_RADIUS, SKILL_BLAST_RADIUS
 from .fusion import reflective_merge
+from .governance import HARNESS_BLAST_RADIUS, SKILL_BLAST_RADIUS
 from .policies import Policies
 from .rewards import command_scorer, scorer
 from .runners import code_runner, gated_reward, tree_runner
@@ -426,14 +426,21 @@ def build_policies(spec: EvolveSpec, *, merger: Optional[Any] = None) -> Optiona
     warns about cannot be written.
     """
     asked = dict(spec.policies)
+    # The merge pair is the default, not an opt-in. Without it a run whose
+    # artifact is one key -- every `kind: "text"` target -- has its worker
+    # proposals contradict by construction, so conflict resolution collapses
+    # them to one candidate and `n_workers` buys per-round best-of-N *selection*
+    # rather than the merge this project is about. `merger` is the reflector's
+    # model, which the spec already names.
+    #
+    # Keyed off the merge slots alone, not off `asked` being empty: a spec that
+    # names an unrelated slot -- `staleness`, say -- is not asking to stop
+    # merging, and silently dropping the pair there would make the default
+    # depend on a field that has nothing to do with it.
+    default_merge = (merger is not None
+                     and not {"reflective_merge", "conflict", "fusion"} & set(asked))
     if not asked:
-        # The merge pair is the default, not an opt-in. Without it a run whose
-        # artifact is one key -- every `kind: "text"` target -- has its worker
-        # proposals contradict by construction, so conflict resolution collapses
-        # them to one candidate and `n_workers` buys per-round best-of-N
-        # *selection* rather than the merge this project is about. `merger` is
-        # the reflector's model, which the spec already names.
-        return Policies(**reflective_merge(merger)) if merger is not None else None
+        return Policies(**reflective_merge(merger)) if default_merge else None
     unknown = sorted(set(asked) - set(_POLICY_SLOTS) - {"reflective_merge"})
     if unknown:
         raise SpecError(f"policies: unknown slot(s) {unknown}; slots are {_POLICY_SLOTS} "
@@ -457,6 +464,8 @@ def build_policies(spec: EvolveSpec, *, merger: Optional[Any] = None) -> Optiona
                 raise SpecError(f"policies.staleness: {e}") from None
             continue
         fields[slot] = _resolve(value, spec, where=f"policies.{slot}")
+    if default_merge:
+        fields.update(reflective_merge(merger))
     return Policies(**fields)
 
 

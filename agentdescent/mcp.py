@@ -33,8 +33,7 @@ import json
 import os
 from typing import Any, Dict, Optional
 
-from . import runstore
-from . import __version__
+from . import __version__, runstore
 from .cli import NESTED_ENV, apply_payload, doctor_report, plan_payload, show_payload, status_payload
 from .evolvespec import EvolveSpec, SpecError, compose
 

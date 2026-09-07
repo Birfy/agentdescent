@@ -12,17 +12,16 @@ until step 3.
 
 The plugin is **not in the PyPI release yet** — `pip install agentdescent`
 gives you 0.4.6, which has the engine but no `demo`, `install` or `mcp`
-commands. Until it ships, install from the branch:
+commands. Until it ships, install from git:
 
 ```bash
-pip install "agentdescent[mcp] @ git+https://github.com/Birfy/agentdescent@claude/agentdescent-multi-platform-plugin-s41qma"
+pip install "agentdescent[mcp] @ git+https://github.com/Birfy/agentdescent"
 ```
 
 Or, if you have a clone:
 
 ```bash
 git clone https://github.com/Birfy/agentdescent && cd agentdescent
-git checkout claude/agentdescent-multi-platform-plugin-s41qma
 pip install -e ".[mcp]"
 ```
 

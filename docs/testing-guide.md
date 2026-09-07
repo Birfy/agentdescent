@@ -14,7 +14,6 @@ you already have:
 
 ```bash
 git clone https://github.com/Birfy/agentdescent && cd agentdescent
-git checkout claude/agentdescent-multi-platform-plugin-s41qma
 bash scripts/setup-hosts.sh
 ```
 
@@ -55,8 +54,8 @@ unless their content is out of date.
     AgentDescent supports 3.9. On 3.9 you get the CLI and the skill; the tools
     are unavailable and `agentdescent mcp` says exactly that.
 
-Not in a PyPI release yet, so it installs from the branch. `pip install
-agentdescent` gets 0.4.6, which has the engine and none of this.
+Not in a PyPI release yet, so it installs from git. `pip install agentdescent`
+gets 0.4.6, which has the engine and none of this.
 
 ## 2. Prove it works, offline
 

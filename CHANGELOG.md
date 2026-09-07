@@ -47,7 +47,66 @@ All notable changes to AgentDescent are documented here. The format follows
   2026-07-28 (SEP-2577)**; the shape is unchanged and the SDK still ships it, so
   this is the convenient route, not the durable one.
 
+### Changed
+
+- **Merging is the default now, wherever there is a model to merge with.**
+  `reflective_merge` had to be asked for by name and the skill told agents not
+  to ask, so a plugin driven in plain language never installed it -- and
+  without it a one-key artifact (`SingleSlot`: every prompt, every
+  `kind: "text"` target) has worker proposals that contradict by construction.
+  Conflict resolution collapses them to one candidate, no fusion is built, and
+  `n_workers=4` buys per-round best-of-N *selection* rather than the merge this
+  project is named after. The pair is installed in `_build_engine` (so `evolve`
+  and `async_evolve` both get it) when the agent exposes a completion, and in
+  `compose` when a spec asks for no conflict or fusion rule of its own, using
+  the model the spec already names in `reflect`. Callers with no model -- plain
+  `run` / `propose` functions, the offline demo -- and specs whose only agent is
+  a file-editing CLI keep the shipped rules, because there is nothing cheap to
+  synthesise with. `DefaultConflict` and `DefaultFusion` are exported so the old
+  behaviour can be named. Measured on one spec with no `policies` block, four
+  workers: `conflicts_dropped` 3 -> 0, `n_candidates` 1 -> 4, `fused` 0 -> 1,
+  ledger `merge synth(w0+w1+w2+w3)`.
+
 ### Fixed
+
+- **`apply` overwrote its own backup.** On a single-file target it copied to a
+  fixed `<target>.bak` every time, while the directory path had always numbered
+  them. Apply, hand-edit, apply again, and the surviving backup was the
+  hand-edit -- the original the first apply had saved was gone, from the command
+  whose whole promise is that it keeps one. Both paths now write `.bak-N` and
+  never touch an existing one.
+- **A run's cause of death was truncated where it mattered, and named twice.**
+  `executor` described the rollout failure, `supervisor` described it again over
+  the queue, `evolve` a third time, and each hop capped it -- so the narrowest
+  won. What reached `status` was `RuntimeError: RuntimeError: ...` cut at 200
+  characters: a provider 404 for an unknown model ended at "does not support the
+  c", losing the clause that named the fix. One `pipeline.describe()` now,
+  shared by all of them and by the async path, capped at the 2000 `runstore`
+  already stores. Measured on the same failure: 214 characters before, 422
+  after.
+- **The MCP server reported no version, and "no runs" reported nothing at all.**
+  `initialize` answered with an empty version string, so any host that displays
+  it displayed a blank; it is passed now wherever the SDK's constructor accepts
+  one. And `status` with no `run_id` returned a bare list, which serialises to
+  *zero* content blocks when empty -- an agent asking what was running on a
+  fresh machine could not tell that from a failed call, on the one tool the
+  skill says to poll. It returns `{store, runs}`, which names the store either
+  way.
+- **`plan` says when `n_workers` is selection rather than merging.** With the
+  merge pair now default the warning has narrowed to the case still true -- a
+  spec with no model to merge with -- and reads the composed bundle rather than
+  the spec's `policies` block, so it cannot fire at a spec that already has what
+  it recommends.
+- **The suite did not collect on a clean checkout, and two tests assumed
+  Linux.** `pyyaml` is used by the dsh patch tests and was never declared, so
+  the documented `pip install -e ".[dev,mcp]"` left the suite unable to import.
+  On macOS `mkdtemp` hands back `/var/folders/...` while a child resolves the
+  symlink to `/private/var/...`, so `HOME` never equalled the worker's `getcwd()`
+  -- the workspace root is `realpath`-ed now, which is what a host comparing the
+  two would expect. `sandbox_wrapper` was passed a `str` where its signature says
+  `Path`, which only the macOS Seatbelt branch dereferences. And the dsh plugin
+  test reported a corepack too old for the pnpm the profile pins as a plugin
+  failure; it skips with dsh's own error instead.
 
 - **`evolve` and `resume` started specs that could not work, in silence.**
   `plan` returned `warnings`; the two verbs that actually spend money printed

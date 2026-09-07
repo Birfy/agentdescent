@@ -312,7 +312,16 @@ def bridge_for_session(session: Any, loop: Any, *,
     """
     import asyncio
 
-    from mcp.types import ClientCapabilities, SamplingCapability, SamplingMessage, TextContent
+    try:
+        from mcp.types import (
+            ClientCapabilities, SamplingCapability, SamplingMessage, TextContent)
+    except ImportError:
+        # No SDK is the extreme case of the rule below: an SDK that cannot
+        # answer the capability question is a "no", and one that is not
+        # installed cannot answer at all. Raising here instead turned a host
+        # without sampling into a crash, and it is reachable from a test suite
+        # installed with `[dev]` alone -- which is what CI installs.
+        return None
 
     try:
         supported = session.check_client_capability(

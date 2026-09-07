@@ -360,7 +360,7 @@ def _unusable_refs(spec: EvolveSpec) -> List[str]:
     return out
 
 
-def _selection_not_merging(spec: EvolveSpec, comp) -> Optional[str]:
+def _selection_not_merging(comp) -> Optional[str]:
     """Say so when `n_workers` buys selection rather than the merge it looks like.
 
     The reflective pair is the default now, so this fires on the one case that
@@ -392,7 +392,7 @@ def _selection_not_merging(spec: EvolveSpec, comp) -> Optional[str]:
 def plan_payload(spec: EvolveSpec, *, usd_per_call: Optional[float] = None) -> Dict[str, Any]:
     comp = compose(spec)
     warnings = _unusable_refs(spec)
-    selection = _selection_not_merging(spec, comp)
+    selection = _selection_not_merging(comp)
     if selection:
         warnings.append(selection)
     return {"ok": True, "spec": spec.to_dict(), "tasks": len(comp.tasks),

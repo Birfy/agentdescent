@@ -11,7 +11,9 @@
 #
 set -uo pipefail
 
-BRANCH="claude/agentdescent-multi-platform-plugin-s41qma"
+# The plugin is in `main`; it is not in a PyPI release yet -- `pip install
+# agentdescent` still gets the engine without `demo`, `install` or `mcp`.
+BRANCH="main"
 REPO="https://github.com/Birfy/agentdescent"
 DRY=0
 WITH_CLIS=0
@@ -126,7 +128,7 @@ if [ -f "pyproject.toml" ] && grep -q 'name = "agentdescent"' pyproject.toml 2>/
   info "from this checkout (editable)"
   run "python3 -m pip install -q -e '.[mcp]'"
 else
-  info "from the branch (not yet in a PyPI release)"
+  info "from git (the plugin is not in a PyPI release yet)"
   run "python3 -m pip install -q 'agentdescent[mcp] @ git+$REPO@$BRANCH'"
 fi
 

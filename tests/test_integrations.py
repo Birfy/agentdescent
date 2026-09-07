@@ -188,18 +188,31 @@ def test_package_data_ships_the_shared_files():
 def test_install_warns_when_the_mcp_sdk_is_missing(tmp_path, monkeypatch):
     """Every manifest tells the host to run `agentdescent mcp`; without the SDK
     that subprocess dies and the host reports only "CONNECTION_CLOSED"."""
+    import sys
+
     import agentdescent.integrations as integrations
+    from agentdescent.cli import MCP_MIN_PYTHON
 
     monkeypatch.setattr(integrations, "mcp_sdk_missing", lambda: True)
     lines = install("claude-code", dry_run=True, home=str(tmp_path))
     assert any("agentdescent[mcp]" in l and l.startswith("WARNING") for l in lines), lines
+
     monkeypatch.setattr(integrations, "mcp_sdk_missing", lambda: False)
-    assert not any(l.startswith("WARNING") for l in install("dsh", dry_run=True, home=str(tmp_path)))
+    quiet = install("dsh", dry_run=True, home=str(tmp_path))
+    if sys.version_info >= MCP_MIN_PYTHON:
+        assert not any(l.startswith("WARNING") for l in quiet), quiet
+    else:
+        # Below 3.10 the stub cannot make the server runnable: `mcp_unavailable`
+        # checks the interpreter before it asks whether the package is here, and
+        # on 3.9 the extra installs nothing whatever the stub says. The warning
+        # is right; asserting silence here would be asserting a lie.
+        assert any("Python >= " in l for l in quiet if l.startswith("WARNING")), quiet
 
 
 def test_agentdescent_mcp_without_the_sdk_says_how_to_get_it(monkeypatch, capsys):
     """A traceback here is invisible: the host shows the user a closed pipe."""
     import builtins
+    import sys
 
     from agentdescent import cli
 
@@ -217,8 +230,14 @@ def test_agentdescent_mcp_without_the_sdk_says_how_to_get_it(monkeypatch, capsys
     code = cli.main(["mcp"])
     assert code == 3
     err = capsys.readouterr().err
-    assert 'pip install "agentdescent[mcp]"' in err, err
     assert "Traceback" not in err
+    # What it should say depends on the interpreter, and only one of the two is
+    # ever true advice: below 3.10 the extra installs nothing, so naming it as
+    # the fix would send the reader in a circle.
+    if sys.version_info >= cli.MCP_MIN_PYTHON:
+        assert 'pip install "agentdescent[mcp]"' in err, err
+    else:
+        assert "needs Python >= " in err, err
 
 
 # ---------------------------------------------------------------------------
