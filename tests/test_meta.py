@@ -411,3 +411,67 @@ def test_accepts_and_compile_answer_the_same_question():
     # ...and the unfenced form, which is what a rendered artifact looks like.
     assert isinstance(spec.compile(spec.render(spec.initial())),
                       SLOT_PROTOCOLS["task_sampler"])
+
+
+def test_a_stochastic_policy_is_seeded_and_therefore_reproducible():
+    """`random` in a candidate's namespace is a seeded generator, not the module.
+
+    A policy is allowed to be stochastic -- the first evolved `selection` rule on
+    GSM-Hard wrote `random.random() < 0.2` -- but everything above rests on an
+    inner run being a function of `(value, seed)`, and a rule drawing from the
+    process-wide stream is not. `meta_validate` would then be scoring the dice.
+    """
+    from agentdescent.meta import compile_policy_source
+    from agentdescent.selection import Candidate, SelectionContext
+
+    source = ("class Policy:\n"
+              "    def select(self, ctx, n):\n"
+              "        if random.random() < 0.5:\n"
+              "            return [ctx.candidates[0]] * n\n"
+              "        return [ctx.head] * n\n")
+    head = Candidate("a", 2, {}, score=0.5)
+    older = Candidate("a", 1, {}, score=0.9)
+
+    def stream(src=source, rng_seed=None, k=16):
+        policy = compile_policy_source("selection", src, rng_seed=rng_seed)
+        ctx = SelectionContext(head=head, candidates=(older, head), round=0, n_workers=1)
+        return [policy.select(ctx, 1)[0].version for _ in range(k)]
+
+    first = stream()
+    assert stream() == first          # same source, same stream, every compile
+    assert len(set(first)) > 1        # and still actually stochastic
+    # Different policies draw different streams, so one cannot inherit another's luck.
+    assert stream(source.replace("0.5", "0.5 ")) != first
+    assert stream(rng_seed=1) != stream(rng_seed=2)
+
+
+def test_a_candidate_cannot_reach_an_unseeded_generator():
+    """`SystemRandom` reads the OS entropy pool, so no seeding makes it
+    reproducible; the bound generator simply does not have it, and the slot's
+    own smoke test turns that into a refusal at the gate rather than a surprise
+    on some later call."""
+    from agentdescent.meta import compile_policy_source
+
+    source = ("class Policy:\n"
+              "    def select(self, ctx, n):\n"
+              "        rng = random.SystemRandom()\n"
+              "        return [ctx.head] * n\n")
+    with pytest.raises(ValueError, match="SystemRandom"):
+        compile_policy_source("selection", source)
+
+
+def test_a_candidate_may_still_seed_its_own_generator():
+    """The well-behaved stochastic policy: `random.Random(ctx.round)` is already
+    reproducible, and must keep working."""
+    from agentdescent.meta import compile_policy_source
+    from agentdescent.selection import Candidate, SelectionContext
+
+    policy = compile_policy_source("selection", (
+        "class Policy:\n"
+        "    def select(self, ctx, n):\n"
+        "        rng = random.Random(ctx.round)\n"
+        "        return [rng.choice(list(ctx.candidates)) for _ in range(n)]\n"))
+    rows = (Candidate("a", 0), Candidate("a", 1, parent=0))
+    ctx = SelectionContext(head=rows[0], candidates=rows, round=3)
+    assert [c.version for c in policy.select(ctx, 2)] == \
+           [c.version for c in policy.select(ctx, 2)]

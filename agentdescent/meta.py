@@ -52,6 +52,7 @@ import inspect
 import json
 import math
 import os
+import random
 import re
 import statistics
 import tempfile
@@ -636,12 +637,68 @@ SLOT_PROTOCOLS: Dict[str, type] = {
 
 #: What a candidate class may import, by module name. These are bound into
 #: its namespace, and an ``import`` of anything else is refused at the gate.
+#:
+#: ``random`` is the exception and is NOT the module -- see
+#: :func:`_candidate_modules`.
 _SOURCE_MODULES: Dict[str, Any] = {
     "math": math, "statistics": statistics, "json": json, "re": re,
 }
 for _name in ("random", "itertools", "collections", "functools", "dataclasses",
               "typing", "enum", "heapq", "bisect"):
     _SOURCE_MODULES[_name] = __import__(_name)
+
+
+def _candidate_modules(source: str, rng_seed: Optional[int] = None) -> Dict[str, Any]:
+    """The allowed modules, with ``random`` replaced by a **seeded** generator.
+
+    A candidate policy is allowed to be stochastic -- "revisit the best archived
+    head 20% of the time" is a reasonable rule and a model writes it -- but the
+    process-wide `random` module makes such a rule a function of global
+    interpreter state, and everything above rests on an inner run being a
+    function of ``(value, seed)``. :func:`meta_validate` scores the seed value
+    and the evolved value on the *same* problem and calls the difference the
+    rule; if the rule rolls dice from a shared stream, that difference is partly
+    the dice.
+
+    Measured, and why this exists: the first evolved `selection` policy on
+    GSM-Hard called ``random.random() < 0.2``. It did not bite -- the branch
+    never changed an outcome in that run -- but nothing made that true.
+
+    So `random` here is a `random.Random` **instance**, whose API is the module's
+    for everything a scoring rule uses (`random`, `uniform`, `choice`, `shuffle`,
+    `sample`, `randint`, `randrange`, `gauss`). It is seeded from the source text
+    by default, so the same policy always draws the same stream and two different
+    policies draw different ones -- and `SystemRandom`, which would escape this,
+    is simply not an attribute of an instance.
+    """
+    if rng_seed is None:
+        rng_seed = int.from_bytes(hashlib.sha256(source.encode("utf-8")).digest()[:8], "big")
+    modules = dict(_SOURCE_MODULES)
+    modules["random"] = _SeededRandom(rng_seed)
+    return modules
+
+
+class _SeededRandom:
+    """A `random.Random` wearing enough of the module's face to stand in for it.
+
+    Delegation rather than subclassing so that exactly two things are decided
+    here: `Random` stays available -- a candidate that seeds its own generator
+    (`random.Random(ctx.round)`) is the *well-behaved* case and must keep
+    working -- and `SystemRandom` does not exist, because it reads the OS
+    entropy pool and no seeding can make it reproducible. Everything else is
+    the bound generator's own method, so `random.random()`, `random.choice(...)`
+    and `random.shuffle(...)` all draw from this stream and nothing else does.
+    """
+
+    Random = random.Random
+
+    def __init__(self, seed: int) -> None:
+        self._rng = random.Random(seed)
+
+    def __getattr__(self, name: str) -> Any:
+        # Only reached for names not found above, so `SystemRandom` raises
+        # AttributeError here rather than returning the module's.
+        return getattr(self._rng, name)
 #: ...and the engine's own value types, so a rule can build what it returns.
 def _aggregator_helpers() -> Dict[str, Any]:
     # Imported lazily: aggregator imports policies, which this module imports.
@@ -878,7 +935,8 @@ _SMOKES: Dict[str, Callable[[Any], None]] = {
 
 
 def compile_policy_source(slot: str, source: str, *, class_name: str = "Policy",
-                          smoke: Optional[Callable[[Any], None]] = None) -> Any:
+                          smoke: Optional[Callable[[Any], None]] = None,
+                          rng_seed: Optional[int] = None) -> Any:
     """Gate ``source``, instantiate its ``class_name``, and check it fits ``slot``.
 
     The gate is structural, not semantic: an AST walk that refuses imports
@@ -898,14 +956,15 @@ def compile_policy_source(slot: str, source: str, *, class_name: str = "Policy",
     if slot not in SLOT_PROTOCOLS:
         raise ValueError(f"{slot!r} is not an evolvable slot; choose one of {SLOTS}")
     tree = _gate_source(source, class_name)
+    modules = _candidate_modules(source, rng_seed)
     builtins = dict(_SAFE_BUILTINS)
     builtins["__build_class__"] = __builtins__["__build_class__"] if isinstance(__builtins__, dict) \
         else __builtins__.__build_class__      # `class` statements need it
 
     def restricted_import(name, globals=None, locals=None, fromlist=(), level=0):
         # An `import` inside a method reaches here; only the allowlist answers.
-        if level == 0 and name in _SOURCE_MODULES:
-            return _SOURCE_MODULES[name]
+        if level == 0 and name in modules:
+            return modules[name]
         if level == 0 and name in _SOURCE_PACKAGES and set(fromlist or ()) <= _SOURCE_PACKAGES[name]:
             pool = {**_SOURCE_TYPES, **_aggregator_helpers()}
             return type("_ns", (), {n: pool[n] for n in fromlist})()
@@ -913,7 +972,7 @@ def compile_policy_source(slot: str, source: str, *, class_name: str = "Policy",
 
     builtins["__import__"] = restricted_import
     namespace: Dict[str, Any] = {"__builtins__": builtins, "__name__": "candidate"}
-    namespace.update(_SOURCE_MODULES)
+    namespace.update(modules)
     namespace.update(_SOURCE_TYPES)
     namespace.update(_aggregator_helpers())
     try:
