@@ -11,10 +11,6 @@
 #
 set -uo pipefail
 
-# The plugin is in `main`; it is not in a PyPI release yet -- `pip install
-# agentdescent` still gets the engine without `demo`, `install` or `mcp`.
-BRANCH="main"
-REPO="https://github.com/Birfy/agentdescent"
 DRY=0
 WITH_CLIS=0
 for arg in "$@"; do
@@ -128,8 +124,8 @@ if [ -f "pyproject.toml" ] && grep -q 'name = "agentdescent"' pyproject.toml 2>/
   info "from this checkout (editable)"
   run "python3 -m pip install -q -e '.[mcp]'"
 else
-  info "from git (the plugin is not in a PyPI release yet)"
-  run "python3 -m pip install -q 'agentdescent[mcp] @ git+$REPO@$BRANCH'"
+  info "from PyPI"
+  run "python3 -m pip install -q 'agentdescent[mcp]'"
 fi
 
 if ! command -v agentdescent >/dev/null 2>&1 && [ "$DRY" = 0 ]; then

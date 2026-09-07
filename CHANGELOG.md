@@ -6,6 +6,8 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-09-07
+
 ### Added
 
 - **`scripts/setup-hosts.sh` and a single testing guide.** One command

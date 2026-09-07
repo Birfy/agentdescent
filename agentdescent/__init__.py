@@ -188,7 +188,7 @@ from .parallel import (
     shard_round_robin,
 )
 
-__version__ = "0.4.6"
+__version__ = "0.5.0"
 
 __all__ = [
     "Contract",
