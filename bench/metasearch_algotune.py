@@ -30,13 +30,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import statistics
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
 from agentdescent.agents import Usage, with_retries
-from agentdescent.meta import (MetaOutcome, Problem, meta_evolve, meta_validate,
-                               priority_selection, slot_reflector, transfer_ratio)
+from agentdescent.meta import (MetaOutcome, Problem, auc, cached_completion,
+                               meta_evolve, meta_validate, priority_selection,
+                               slot_reflector, transfer_ratio)
 
 from examples._common import add_standard_args, completion_for, confirm, worker_count
 from examples._measure import usage_dict
@@ -89,6 +91,32 @@ def algotune_problem(task: str, complete: Callable[[str], str], *,
             nodes=len(run.tree.nodes), selection=run.tree.summary().get("selection"))
 
     return problem
+
+
+def determinism_check(problem: Problem, *, runs: int = 3,
+                      seed: int = 0) -> Dict[str, Any]:
+    """Run the seed rule against **itself** and report the spread of its reward.
+
+    The synthetic landscape is a pure function of `(rule, seed)`, so its paired
+    gains are exact. This port is not: an expansion is a model call and the
+    reward is a **sandboxed wall-clock speedup**, so the same rule on the same
+    task can score differently twice. That spread is the noise floor, and a gain
+    below it is not evidence -- the same check, on the GSM port, is what exposed
+    an outer loop reporting -0.0625 for a rule validated against a byte-for-byte
+    copy of itself.
+    """
+    from examples.metasearch._policy_source import SEED_SOURCE, EvolvedSelection
+
+    rewards, outcomes = [], []
+    for _ in range(runs):
+        outcome = problem(EvolvedSelection(SEED_SOURCE), seed)
+        outcomes.append({"curve": outcome.curve, "final": outcome.final,
+                         "detail": outcome.detail})
+        rewards.append(auc(outcome))
+    spread = max(rewards) - min(rewards) if rewards else 0.0
+    sd = (statistics.stdev(rewards) if len(rewards) > 1 else 0.0)
+    return {"runs": runs, "rewards": rewards, "spread": spread, "sd": sd,
+            "outcomes": outcomes}
 
 
 def progress(label: str) -> Callable[[Any], None]:
@@ -203,6 +231,30 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-tokens", type=int, default=16000)
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--api-timeout", type=float, default=180.0)
+    parser.add_argument("--thinking", choices=("disabled", "enabled", "default"),
+                        default="default",
+                        help=("send `thinking` in the request body. Every call here "
+                              "is a program rewrite or a one-function rule rewrite, "
+                              "and a reasoning preamble costs minutes each; on the "
+                              "tree-search port leaving this at `default` made two "
+                              "runs die at the wall-clock limit with no call having "
+                              "returned. Part of the reported configuration, not "
+                              "just a speed knob -- it changes the reply, so it has "
+                              "to be the same across arms of a comparison"))
+    parser.add_argument("--completion-cache", default="", metavar="DIR",
+                        help=("memoise `prompt -> text` here. Unlike the synthetic "
+                              "landscape, an inner search on AlgoTune is a real ERA "
+                              "run whose every expansion is a model call, so without "
+                              "this a paired gain measures the endpoint's sampling "
+                              "as much as the rule. It does NOT make the inner run "
+                              "deterministic on its own -- the reward is a sandboxed "
+                              "wall-clock speedup; see --determinism-check"))
+    parser.add_argument("--determinism-check", type=int, default=0, metavar="N",
+                        help=("before evolving, run the seed rule against itself N "
+                              "times on the first train task and report the spread "
+                              "of the meta-reward. That spread is the noise floor "
+                              "any gain has to clear, and on this port it cannot be "
+                              "assumed zero: the reward is a timed speedup"))
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     return parser
 
@@ -232,16 +284,32 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     if not confirm(args):
         return 0
     usage = Usage()
+    options: Dict[str, Any] = {}
+    if args.thinking != "default":
+        options["thinking"] = {"type": args.thinking}
     complete = with_intact_replies(
         with_retries(completion_for(args, usage=usage, max_tokens=args.max_tokens,
                                     timeout=args.api_timeout, temperature=args.temperature,
-                                    retries=1), attempts=5, backoff=4.0),
+                                    retries=1, **options), attempts=5, backoff=4.0),
         attempts=4)
+    if args.completion_cache:
+        complete = cached_completion(
+            complete, args.completion_cache,
+            key_extra=f"{args.model}|{args.temperature}|{args.max_tokens}|{args.thinking}")
     inner = dict(iterations=args.iterations, workers=args.inner_workers, shards=args.shards,
                  test_shards=args.test_shards, problems=args.problems, staleness=args.staleness,
                  candidate_timeout=args.candidate_timeout, max_seconds=args.max_seconds,
                  mode="serial" if args.inner_workers == 1 else "sync")
     problems = {task: algotune_problem(task, complete, **inner) for task in train + validate}
+    noise = None
+    if args.determinism_check:
+        noise = determinism_check(problems[train[0]], runs=args.determinism_check)
+        print(f"[noise floor] {train[0]}: seed rule against itself x{args.determinism_check} "
+              f"-> rewards {['%.4f' % r for r in noise['rewards']]}, "
+              f"spread {noise['spread']:.4f}, sd {noise['sd']:.4f}", flush=True)
+        if noise["spread"] > 0.0:
+            print("             the inner run is NOT a function of the rule here. Any "
+                  "gain below this spread is not evidence.", flush=True)
     payload = run_experiment(
         complete, train={t: problems[t] for t in train},
         validate={t: problems[t] for t in validate}, seeds=seeds,
@@ -254,6 +322,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     payload["config"] = {**inner, "model": args.model, "provider": args.provider,
                          "temperature": args.temperature, "outer_seed": args.seed}
     payload["usage"] = usage_dict(usage)
+    payload["noise_floor"] = noise
     print("[evolved rule]\n" + payload["evolved_source"])
     print(format_report(payload))
     args.output.parent.mkdir(parents=True, exist_ok=True)
