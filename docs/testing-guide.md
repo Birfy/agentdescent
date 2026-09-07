@@ -54,8 +54,8 @@ unless their content is out of date.
     AgentDescent supports 3.9. On 3.9 you get the CLI and the skill; the tools
     are unavailable and `agentdescent mcp` says exactly that.
 
-Not in a PyPI release yet, so it installs from git. `pip install agentdescent`
-gets 0.4.6, which has the engine and none of this.
+The script installs from the checkout it is run in, or from PyPI
+(`agentdescent[mcp]`, 0.5.0 and later) when it is not in one.
 
 ## 2. Prove it works, offline
 

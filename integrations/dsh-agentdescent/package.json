@@ -1,6 +1,6 @@
 {
   "name": "dsh-agentdescent",
-  "version": "0.4.6",
+  "version": "0.5.0",
   "description": "Evolve skills, agents, prompts, code and plugins from inside DeepSeek Harness, with AgentDescent.",
   "keywords": [
     "dsh-plugin",
