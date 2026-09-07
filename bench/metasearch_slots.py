@@ -323,6 +323,28 @@ def hard_rows(rows: Sequence[dict], complete: Callable[[str], str], *,
 #: calling conventions any implementer would be told, and every proposal the
 #: first live runs produced violated the sampler one.
 SLOT_NOTES: Dict[str, str] = {
+    "selection": """How the engine calls this, which is stricter than the signature:
+
+- A declared `selection` policy installs the POPULATION layer: the engine keeps
+  an archive of every distinct committed head with its held-out score, and asks
+  you, once per merge, which archived candidate the next batch should build on.
+  The default (`SingleHead`) always answers "the latest head". Beating it means
+  sometimes going back to an earlier, better one -- GEPA's and DGM's trick.
+- Return between 1 and `n` candidates, and every one MUST be an object out of
+  `ctx.candidates`. Do not construct a Candidate, do not return an index, do not
+  return `ctx.head` when it is not in `ctx.candidates`. Returning the same
+  candidate several times is normal and means "put that many workers there".
+- `ctx.candidates` can be exactly `(ctx.head,)` -- early rounds, before anything
+  has been committed. You must return that one candidate then, not an empty list.
+- `c.score` is `None` for a candidate that has NOT been measured yet. Ranking an
+  unmeasured candidate as the worst is how a fresh branch never gets explored, so
+  handle `None` explicitly -- `max(candidates, key=lambda c: c.score)` raises a
+  TypeError the moment one is unscored and kills the run.
+- `c.selected` is how many times that candidate was already chosen; it is the
+  novelty term. `c.per_task` may be empty -- do not assume it is populated.
+- Candidates are read-only. Do not mutate them or `ctx.candidates`.
+- You may keep state across calls, but choose only among the candidates you were
+  handed this call.""",
     "task_sampler": """How the engine calls this, which is stricter than the signature:
 
 - `keys` is ONE WORKER'S SHARD for this round, not the whole task set, and it
