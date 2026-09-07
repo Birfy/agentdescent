@@ -18,9 +18,25 @@ git checkout claude/agentdescent-multi-platform-plugin-s41qma
 bash scripts/setup-hosts.sh
 ```
 
-Don't have the agent CLIs yet? Add `--with-clis` and it installs the four npm
-packages first (`@anthropic-ai/claude-code`, `@openai/codex`, `opencode-ai`,
-`@deepseek-ai/dsh`). `--dry-run` prints what it would do and changes nothing.
+Don't have the agent CLIs yet? Add `--with-clis` and it tries to npm-install
+them first. `--dry-run` prints what it would do and changes nothing.
+
+Only three of the four are public npm packages — `@anthropic-ai/claude-code`,
+`@openai/codex`, `opencode-ai`. **DeepSeek Harness is not on the public
+registry**, so `--with-clis` will 404 on it; install `dsh` the way its own
+project documents (on macOS, Homebrew). The script prints npm's own error for
+anything that fails, so you can tell a 404 from an EACCES rather than guessing.
+
+If every package fails with EACCES, npm's global prefix is not yours. The
+script checks and says so; the fix is one of:
+
+```bash
+npm config set prefix ~/.npm-global
+export PATH="$HOME/.npm-global/bin:$PATH"    # add this to your shell rc
+```
+
+None of the CLIs are required — `agentdescent demo` runs with none of them
+installed, and the script wires up whichever ones it finds.
 
 The script is safe to re-run: config blocks it already owns are left alone
 unless their content is out of date.

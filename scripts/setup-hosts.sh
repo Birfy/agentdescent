@@ -52,12 +52,50 @@ if [ "$WITH_CLIS" = 1 ]; then
     info "npm is not installed -- get Node 18+ from https://nodejs.org, then re-run"
     exit 1
   fi
+  prefix="$(npm config get prefix 2>/dev/null)"
+  info "npm prefix: $prefix"
+  if [ -n "$prefix" ] && [ ! -w "$prefix/lib" ] && [ "$DRY" = 0 ]; then
+    info ""
+    info "That directory is not writable by you, so every global install will"
+    info "fail with EACCES. Either point npm somewhere you own:"
+    info "    npm config set prefix ~/.npm-global"
+    info "    export PATH=\"\$HOME/.npm-global/bin:\$PATH\"   # add to your shell rc"
+    info "or install the CLIs with sudo / your node version manager. Continuing"
+    info "anyway so you can see the real errors:"
+    info ""
+  fi
   # The four packages, at the versions this was verified against. Drop any you
   # do not want; AgentDescent wires up whichever it finds.
+  failed=""
   for pkg in "@anthropic-ai/claude-code" "@openai/codex" "opencode-ai" "@deepseek-ai/dsh"; do
     info "npm install -g $pkg"
-    run "npm install -g '$pkg' >/dev/null 2>&1 || echo '   (failed: $pkg -- skipping)'"
+    if [ "$DRY" = 1 ]; then
+      printf '   would run: npm install -g %s\n' "$pkg"
+      continue
+    fi
+    # The error is the whole point of running this: swallowing it leaves a
+    # bare "failed" that neither you nor anyone helping you can act on.
+    if ! out=$(npm install -g "$pkg" 2>&1); then
+      failed="$failed $pkg"
+      printf '%s\n' "$out" | tail -6 | sed 's/^/       /'
+    fi
   done
+  if [ -n "$failed" ]; then
+    info ""
+    info "These did not install:$failed"
+    info "The lines above are npm's own reason. The usual ones:"
+    info "  EACCES / permission denied -> npm prefix is not yours (see above)"
+    info "  404 Not Found              -> that package is not on the public"
+    info "                                registry; install it the way its"
+    info "                                project documents (dsh, for one, is"
+    info "                                not a public npm package)"
+    info "  ETIMEDOUT / ECONNREFUSED   -> registry unreachable; check a proxy"
+    info ""
+    # Not backticks: inside a double-quoted argument the shell runs them, and
+    # this line launched a demo evolution instead of printing its name.
+    info "AgentDescent itself does not need any of them: 'agentdescent demo'"
+    info "runs with none installed. Wire up whichever you do have and carry on."
+  fi
 fi
 
 say "Agent CLIs on PATH"
