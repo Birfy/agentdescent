@@ -262,7 +262,7 @@ python -m examples.skill_dir_evolution        # offline, no API key
 Guide: [evolving a directory](https://github.com/Birfy/agentdescent/blob/main/docs/directory-evolution.md)
 · [design record](https://github.com/Birfy/agentdescent/blob/main/docs/design-directory-evolution.md).
 
-## Use it from your agent — DeepSeek Harness, Claude Code, Codex
+## Use it from your agent — Claude Code, Codex, OpenCode, DeepSeek Harness
 
 The same engine as a **plugin**: a shared skill teaches the host agent when to
 call it, an MCP server exposes `doctor / plan / start / status / show / apply`,
@@ -282,7 +282,14 @@ agentdescent install dsh               # or: claude-code, codex, opencode
 on purpose, twelve cases with known answers, and an agent that is a local
 program — then runs the real loop and reports what it learned. No key, no cost,
 nothing written to your own files. New here? Start with
-[the plugin in three commands](https://github.com/Birfy/agentdescent/blob/main/docs/plugin-quickstart.md).
+[the plugin in three commands](https://github.com/Birfy/agentdescent/blob/main/docs/plugin-quickstart.md),
+then [set it up and test it](https://github.com/Birfy/agentdescent/blob/main/docs/testing-guide.md)
+— install, prove it offline, check each host, drive it in plain language, in
+that order, with the traps each step actually hits.
+
+**No test cases yet is not a blocker.** Drafting them is step one of the
+procedure, not a prerequisite: point it at the prompt or skill you want
+improved and it writes 8–20 cases for you to check before anything runs.
 
 The spec is an `evolve()` call as data — every field is an ordinary argument or
 a public building block, so there is no second API to learn:

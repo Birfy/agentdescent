@@ -125,9 +125,78 @@ Known quirks, all measured:
 * Claude Code caches a failed MCP connection for ~15 minutes. A different
   `--plugin-dir` path is the quickest way to retry.
 
+### Driving each host without a terminal session
+
+The plain-language test below is the real one, but each host also has a
+non-interactive form worth having in a script. All three were run end to end
+against a real endpoint; each carries one thing that is not obvious.
+
+**Claude Code.** `--permission-mode bypassPermissions` is refused by the safety
+classifier when an automated caller asks for it, so name the tools:
+
+```bash
+P=mcp__plugin_agentdescent_agentdescent
+claude -p "improve ./prompt.txt against ./cases.jsonl" \
+  --plugin-dir ~/.agentdescent/plugins/claude-code \
+  --allowedTools "Read,Glob,Grep,${P}__doctor,${P}__plan,${P}__start,${P}__status,${P}__show,${P}__apply"
+```
+
+`-p` is stateless. It stops for your yes as the contract requires; continue
+with `claude -c -p "yes, start it"`.
+
+**Codex.** The sandbox flag matters more than anything else here:
+
+```bash
+codex exec --skip-git-repo-check -s workspace-write \
+  -c 'sandbox_workspace_write.network_access=true' \
+  "improve ./prompt.txt against ./cases.jsonl, run it to completion"
+```
+
+Without `network_access=true` the run *starts*, burns a full round and then
+dies with `URLError: [Errno 8] nodename nor servname provided`. The Seatbelt
+sandbox blocks the network, the MCP server is a child of `codex`, and the
+detached run inherits that — the same "a detached run inherits its launcher's
+environment" trap as §6, wearing a different hat. Nothing about the message
+points at the sandbox.
+
+**DSH.** `dsh --profile headless "<task>"` answers one task and exits. Its
+default provider is `deepseek-official`, so without `DEEPSEEK_API_KEY` you get
+`MISSING_CREDENTIAL` before anything else happens. To point it at another
+OpenAI-compatible endpoint, override the provider by id in a patch overlay —
+a bare row is an override, which is why there is no `- insert:` here:
+
+```yaml
+# ark.patch.yml
+- id: llm-deepseek
+  config:
+    baseURL: https://your-endpoint/v3
+    apiKeyEnv: YOUR_KEY_VAR
+```
+
+```bash
+dsh --profile headless --patch ./ark.patch.yml "improve ./prompt.txt against ./cases.jsonl"
+```
+
+The `headless` profile installs its own dependencies on first boot through
+corepack, which must be new enough for the pnpm the profile pins — the same
+corepack requirement §2's dsh test skips on.
+
 ## 4. Drive it in plain language
 
 This is the actual test. Make a target and some examples:
+
+!!! tip "No cases yet? Skip the next block and just ask."
+    Drafting them is step one of the procedure, not a prerequisite for it — the
+    skill's own description says so. Point it at a bare `prompt.txt` and it
+    writes 8–20 cases into `eval/cases.jsonl` and **stops for you to read
+    them**. Measured on a support-agent prompt with no data and no spec: twelve
+    cases, whose `gold` came back as behavioural rubrics ("acknowledges the
+    frustration without grovelling; does not promise a refund; asks for the
+    invoice number") rather than keyword strings, followed by the observation
+    that `contains` cannot score that and an offer of `{"cmd": "./grade.sh"}`
+    instead. Reviewing those cases is the one step you cannot skip: the search
+    optimises whatever you scored it on, very efficiently.
+
 
 ```bash
 mkdir -p /tmp/try && cd /tmp/try
