@@ -97,11 +97,64 @@ usage line — **137 calls carrying 4,175 tokens**, about 30 tokens per call,
 where a program-writing prompt is ~10,000. A run whose model calls all failed
 produces a clean, plausible, entirely meaningless null.
 
+## The domain that passes: LLM-SRBench `lsr_synth`, per-problem
+
+Scanning problems for a **rising curve** — the fourth property — separates the
+two LLM-SRBench categories completely:
+
+| category | problems with a rising curve |
+|---|---|
+| `lsr_transform` | **0 of 6** — 3 solved straight to the 12.00 cap, 3 never moved |
+| `lsr_synth` | **4 of 8** — one from each of bio_pop_growth, chem_react, matsci, phys_osc |
+
+`lsr_transform`'s answers are transformations of known equations: get the
+structure right and NMSE collapses to the cap, get it wrong and score nothing.
+A step function has no slope for a selection rule to accelerate. `lsr_synth` is
+genuine discovery on noisy scientific data, so a candidate can be *partly*
+right — baselines of 2.50 and 2.76 climbing to 4.05 and 4.18, through two
+commits, in intermediate steps.
+
+Seed / greedy / worst-first on the four rising problems, 8 expansions, with the
+seed rule run again as the noise floor:
+
+| problem | seed | greedy | worst-first | noise | spread |
+|---|---:|---:|---:|---:|---:|
+| `bpg1` | 0.2272 | 0.2089 | 0.2728 | 0.0042 | 0.0638 |
+| `crk31` | 0.3419 | 0.3419 | 0.3276 | 0.0000 | 0.0143 |
+| `matsci13` | 0.5993 | 0.5993 | 0.5995 | 0.0000 | 0.0003 |
+| `po22` | 0.1823 | 0.1084 | 0.3667 | 0.0000 | 0.2583 |
+| **mean** | **0.3377** | **0.3146** | **0.3917** | **0.0011** | **0.0842** |
+
+**Measurable**: noise 0.0011 against spread 0.0842, a 75x margin. This is the
+first real-data domain here where rules separate well above the noise floor.
+
+### The deliberately-bad rule wins, and that is not a broken measurement
+
+`worst-first` (`return -rank`) has the highest mean, and on `po22` it doubles
+the seed. The check stated elsewhere on this page — *"if worst-first does not
+come last, the measurement is broken"* — **does not hold here, and the reason is
+worth keeping.** That check was calibrated on the synthetic landscape, where
+rank carries real information. In an 8-node tree of mostly-failed candidates it
+does not: expanding the *lowest*-ranked node mostly means staying near the root
+and trying independent variations rather than deepening a bad line. Breadth
+beats depth at a tiny budget, and pure exploitation (`greedy`) is worst of the
+three.
+
+So the direction here is the **opposite** of the landscape's, where "explore
+less" was worth +0.0227. That makes it a good target rather than a spoiled one:
+a rule evolved on `lsr_synth` should discover "explore more", and the transfer
+question becomes whether that survives a larger budget.
+
+Hold the caveats: four problems, one seed each, 8 expansions; the spread is
+carried by `po22` (0.2583) while `matsci13` contributes 0.0003; and `bpg1`'s
+noise is 0.0042 rather than 0.
+
 ## Status
 
-Verified: determinism on LLM-SRBench and hyp2f1 (both 0.0000); zero rule spread
-on both under the whole-category protocol at 30 expansions.
+Verified: determinism on LLM-SRBench (0.0000 once `problem_seconds` is raised)
+and hyp2f1 (0.0000); zero rule spread on both under the whole-category protocol
+at 30 expansions; and on `lsr_synth` per-problem, a measurable spread of 0.0842
+against a 0.0011 noise floor.
 
-Not yet verified: whether LLM-SRBench's **per-problem** protocol — the one the
-recorded run used — gives a rising curve and separable rules. That run is the
-remaining step, and it is blocked on API quota rather than on anything measured.
+Not yet run: the evolution itself — `meta_evolve` over `priority()` on the
+rising `lsr_synth` problems, validated on problems the outer loop never saw.
