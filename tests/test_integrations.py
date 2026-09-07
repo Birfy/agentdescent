@@ -555,7 +555,8 @@ def test_dsh_actually_boots_with_the_patch_installed(tmp_path, monkeypatch):
 def test_the_native_dsh_plugin_also_boots(tmp_path):
     """The plugin route writes its own patch, and had the same broken env block.
 
-    Skips without dsh and pnpm. As above, `MISSING_CREDENTIAL` is a pass.
+    Skips without dsh and pnpm, and when corepack cannot lay out the pnpm the
+    profile pins. As above, `MISSING_CREDENTIAL` is a pass.
     """
     if not (shutil.which("dsh") and shutil.which("pnpm")):
         pytest.skip("needs an installed dsh and pnpm")
@@ -570,6 +571,14 @@ def test_the_native_dsh_plugin_also_boots(tmp_path):
                           f"link:{pkg}"], capture_output=True, text=True,
                          timeout=300, env=env, cwd=str(tmp_path))
     assert "declares no dsh.bundle" not in add.stdout + add.stderr
+    # `dsh plugin add` installs the profile's own pinned pnpm through corepack.
+    # A corepack too old for that pin (node 22 ships 0.34.0, which cannot lay
+    # out pnpm 12) fails here, and the only symptom downstream is a dumped
+    # config missing our rows -- which reads like our bug and is not one.
+    if "pnpm failed in profile directory" in add.stdout + add.stderr:
+        pytest.skip("dsh could not provision its pinned pnpm (corepack too "
+                    "old? try `npm i -g corepack@latest`): "
+                    + (add.stdout + add.stderr)[-400:])
     out = subprocess.run(["dsh", "--profile", "headless", "--dump-config"],
                          capture_output=True, text=True, timeout=300,
                          env=env, cwd=str(tmp_path))
