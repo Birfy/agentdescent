@@ -53,7 +53,7 @@ from .evolvable import Contract, ContractError, Diff, EvidenceCard, stable_hash
 from .governance import FROZEN_IDS, GovernanceError, assert_mutable
 from .ledger import Ledger, LedgerFailure
 from .metrics import Meter, measured
-from .pipeline import EarlyStop, FirstError, WorkerHealth
+from .pipeline import EarlyStop, FirstError, WorkerHealth, describe as _describe
 from .policies import FusionTrial, Policies
 from .sampling import RoundRobin, TaskSampler
 from .selection import SingleHead
@@ -2665,7 +2665,7 @@ def evolve(
             except Exception as e:  # noqa: BLE001 - a backend failure
                 with unit_lock:
                     if first_error[0] is None:
-                        first_error[0] = f"{type(e).__name__}: {str(e)[:200]}"
+                        first_error[0] = _describe(e)
                     failed_units[0] += 1
                 if verbose:
                     print(f"round {r:>3}  worker {unit.worker} failed: "
@@ -2824,7 +2824,7 @@ def evolve(
             raise            # a caller-contract violation: the run is meaningless
         except Exception as e:  # noqa: BLE001 - a rollout backend failure (e.g. an
             # API/credit error) shouldn't lose the run: stop and return partial results.
-            run_error = f"{type(e).__name__}: {str(e)[:200]}"
+            run_error = _describe(e)
             if verbose:
                 print(f"round {r:>3}  stopped early: {run_error[:140]}")
             break
@@ -2865,7 +2865,7 @@ def evolve(
         if round_reward is None:
             e = score_error
             if first_error[0] is None:
-                first_error[0] = f"{type(e).__name__}: {str(e)[:200]}"
+                first_error[0] = _describe(e)
             dead_rounds += 1
             # Same rule as the worker path: scoring held-out runs the agent, so an
             # unmeasurable round is a backend failure like any other.
@@ -2929,7 +2929,7 @@ def evolve(
     except ContractError:
         raise
     except Exception as e:  # noqa: BLE001 - report, keep the partial result
-        run_error = run_error or f"{type(e).__name__}: {str(e)[:200]}"
+        run_error = run_error or _describe(e)
         final_reward = history[-1].held_out_reward if history else 0.0
     if run_error:
         # Never end a run silently: verbose=False is the default, so a partial

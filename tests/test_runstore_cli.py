@@ -242,6 +242,44 @@ def test_evolve_status_show_apply_round_trip(store, tmp_path):
         assert "MODE: reverse" in fh.read()
 
 
+def test_applying_a_text_target_twice_keeps_both_backups(store, tmp_path):
+    """`.bak` was a single slot, so the second apply destroyed the first backup.
+
+    Apply, hand-edit, apply again: the surviving `.bak` held the hand-edit and
+    the original the first apply had saved was gone -- from the command whose
+    whole promise is that it keeps one. The directory path has always numbered
+    them; this is that, for a file.
+    """
+    from tests.test_evolvespec import _agent_ref, _rows_file
+
+    target = tmp_path / "prompt.txt"
+    target.write_text("original\n", encoding="utf-8")
+    spec = {"kind": "text", "target": str(target),
+            "data": {"path": _rows_file(str(tmp_path)), "prompt": "prompt", "gold": "gold"},
+            "score": "contains", "agent": _agent_ref(),
+            "reflect": {"ref": "tests.test_evolvespec:stub_reflect", "call": False},
+            "allow": ["tests."], "prompt_template": "{prompt}",
+            "evolve": {"rounds": 1, "n_workers": 1, "seed": 0}}
+    path = tmp_path / "text-spec.json"
+    path.write_text(json.dumps(spec))
+
+    code, out = _cli("--store", store, "--json", "evolve", str(path))
+    assert code == 0, out
+    rid = json.loads(out)["run_id"]
+
+    first = json.loads(_cli("--store", store, "apply", rid)[1])["backup"]
+    assert first == [str(target) + ".bak-0"]
+    assert open(first[0]).read() == "original\n"
+
+    target.write_text("hand-edited\n", encoding="utf-8")
+    second = json.loads(_cli("--store", store, "apply", rid)[1])["backup"]
+    assert second == [str(target) + ".bak-1"], second
+
+    # the point: the first backup is still the original, untouched
+    assert open(first[0]).read() == "original\n"
+    assert open(second[0]).read() == "hand-edited\n"
+
+
 def test_evolve_detach_then_watch(store, tmp_path):
     path, _ = _spec_file(tmp_path)
     code, out = _cli("--store", store, "--json", "evolve", path, "--detach")

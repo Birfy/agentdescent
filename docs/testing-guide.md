@@ -194,6 +194,15 @@ just goes quiet.
 | "stop the run" | `cancel` kills the workers too, and it tells you what you lose |
 | ask it to evolve **a plugin** | it sets `host`, and refuses to start a nested run from inside a worker |
 
+!!! note "What this scenario does *not* exercise"
+    `prompt.txt` is a one-key artifact, so its worker proposals contradict by
+    construction: conflict resolution collapses them to a single candidate and
+    **no fusion is ever built**. Four workers here are per-round best-of-N
+    selection, not the parallel merge. `plan` now says so. To watch the merge
+    actually run, evolve a **skill directory** — several files, so two workers
+    can edit different ones and both survive — or install a reflective fusion
+    policy, which is what closes the gap for one-key artifacts.
+
 ## 5. Using a real model
 
 Two ways, neither needing a spec change beyond one field.

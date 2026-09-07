@@ -630,6 +630,57 @@ def test_plan_warns_when_the_named_agent_cannot_run_here(monkeypatch, tmp_path):
     assert plan_payload(spec_for("openai_compatible"))["warnings"] == []
 
 
+def test_a_provider_error_survives_to_the_user_whole():
+    """The run's cause of death was truncated where it mattered, and named twice.
+
+    `executor` described the rollout failure and capped it at 200; `evolve`
+    described the same exception again. What reached `status` was
+    "RuntimeError: RuntimeError: ... does not support the c" -- the half that
+    said *"refer to the documentation ... to select a compatible model"* fell
+    off the end, and that half is the only actionable part.
+    """
+    from agentdescent.pipeline import describe as _describe
+
+    long = ("https://endpoint/v3 returned HTTP 404 for model 'x': " + "detail. " * 60)
+    once = _describe(RuntimeError(long))
+    assert once.startswith("RuntimeError: ") and long in once
+
+    # described a second time, it is not stamped a second time
+    assert _describe(RuntimeError(once)) == once
+    assert once.count("RuntimeError: ") == 1
+
+    # and a different type still says what it was
+    assert _describe(ValueError("boom")) == "ValueError: boom"
+
+
+def test_plan_says_when_workers_buy_selection_rather_than_merging(tmp_path):
+    """`n_workers` on a one-key artifact reads as N merged edits and is not.
+
+    Every `kind: "text"` target is a `SingleSlot`, where worker proposals
+    contradict by construction and conflict resolution collapses them to one
+    candidate -- `test_a_single_slot_artifact_can_never_fuse` asserts exactly
+    that. The suite knew; the person choosing `n_workers=8` was not told.
+    """
+    from agentdescent.cli import plan_payload
+    from agentdescent.evolvespec import EvolveSpec
+
+    cases = tmp_path / "cases.jsonl"
+    cases.write_text('{"prompt": "q", "gold": "a"}\n', encoding="utf-8")
+    target = tmp_path / "prompt.txt"
+    target.write_text("hi\n", encoding="utf-8")
+
+    def warnings_for(**evolve):
+        spec = EvolveSpec.from_dict({
+            "kind": "text", "target": str(target),
+            "data": {"path": str(cases), "prompt": "prompt", "gold": "gold"},
+            "score": "contains", "agent": {"ref": "openai_compatible", "model": "m"},
+            "evolve": evolve})
+        return [w for w in plan_payload(spec)["warnings"] if "best-of-N" in w]
+
+    assert warnings_for(n_workers=4), "four workers on one key is selection, not merging"
+    assert not warnings_for(n_workers=1), "one worker has nothing to say about merging"
+
+
 def test_doctor_reports_the_base_url_not_just_that_one_is_set():
     """Given only "OPENAI_API_KEY: true", an agent wrote `"model": "gpt-4o-mini"`
     against an endpoint that serves nothing of the sort. The URL is not a

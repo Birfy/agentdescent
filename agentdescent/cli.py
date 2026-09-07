@@ -360,9 +360,37 @@ def _unusable_refs(spec: EvolveSpec) -> List[str]:
     return out
 
 
+def _selection_not_merging(comp) -> Optional[str]:
+    """Say so when `n_workers` buys selection rather than the merge it looks like.
+
+    A one-key artifact -- every `kind: "text"` target is one, `SingleSlot` --
+    makes each pair of worker proposals contradict by construction. Conflict
+    resolution collapses them to a single candidate, so the tournament never
+    builds a fusion and `merge_of_n` is per-round best-of-N. The suite asserts
+    this (`test_a_single_slot_artifact_can_never_fuse`); nothing said it to the
+    person choosing `n_workers`, who reads four workers as four merged edits.
+    """
+    strategy = comp.kwargs.get("strategy")
+    workers = comp.kwargs.get("n_workers") or 1
+    try:
+        keys = list(strategy.keys())
+    except Exception:  # noqa: BLE001 - a strategy that cannot enumerate: say nothing
+        return None
+    if workers > 1 and len(keys) == 1:
+        return (f"n_workers={workers} on a one-key artifact ({type(strategy).__name__}) "
+                "is best-of-N selection, not merging: worker proposals contradict by "
+                "construction and collapse to one candidate, so no fusion is ever built. "
+                "Evolve a multi-file target, or install a reflective fusion policy, to "
+                "exercise the merge.")
+    return None
+
+
 def plan_payload(spec: EvolveSpec, *, usd_per_call: Optional[float] = None) -> Dict[str, Any]:
     comp = compose(spec)
     warnings = _unusable_refs(spec)
+    selection = _selection_not_merging(comp)
+    if selection:
+        warnings.append(selection)
     return {"ok": True, "spec": spec.to_dict(), "tasks": len(comp.tasks),
             "warnings": warnings,
             "artifact_id": spec.artifact_id(),
@@ -550,11 +578,21 @@ def apply_payload(run_id: str, *, to: Optional[str] = None, store: Optional[str]
     if spec.kind == "text":
         if dry_run:
             return {"would_write": dest, "chars": len(result.rendered)}
+        saved = []
         if backup and os.path.exists(dest):
-            shutil.copy2(dest, dest + ".bak")
+            # `.bak-N`, never a fixed `.bak`: the directory path a few lines down
+            # has always numbered its backups, and this one overwrote the single
+            # slot on every apply. Apply, hand-edit, apply again and the second
+            # backup was the hand-edit -- the original the first apply had saved
+            # was gone, from the same command that promises to keep one.
+            n = 0
+            while os.path.exists(f"{dest}.bak-{n}"):
+                n += 1
+            shutil.copy2(dest, f"{dest}.bak-{n}")
+            saved = [f"{dest}.bak-{n}"]
         with open(dest, "w", encoding="utf-8") as fh:
             fh.write(result.rendered)
-        return {"written": [dest], "backup": [dest + ".bak"] if backup else []}
+        return {"written": [dest], "backup": saved}
     plan = result.write_to(dest, backup=backup, dry_run=dry_run)
     plan["dest"] = dest
     return plan
