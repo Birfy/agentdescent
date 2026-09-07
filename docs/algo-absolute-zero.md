@@ -1,3 +1,7 @@
+---
+description: A runnable reproduction of Absolute Zero zero-data self-play, where one model proposes and solves its own tasks graded for learnability. Inference analogue, three seeds.
+---
+
 # Absolute Zero — Zero-data self-play (single model)
 
 > **Self-play policy evolution.** One model proposes and solves its own tasks,

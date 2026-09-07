@@ -1,3 +1,7 @@
+---
+description: How AgentDescent works: N workers propose diffs against ledger snapshots and a barrier-free aggregator merges them through a five-stage pipeline into a git-backed ledger.
+---
+
 # Architecture
 
 This document explains how AgentDescent's components fit together and how a diff

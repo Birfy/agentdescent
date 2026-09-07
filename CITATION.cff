@@ -1,0 +1,45 @@
+# Consumed by GitHub's "Cite this repository" button.
+#
+# No `version:`/`date-released:` here on purpose. `agentdescent/__init__.py` is
+# the only place the version lives -- see the note in pyproject.toml, written
+# where a duplicate had drifted to 0.7.0 while every wheel said 0.2.0. A copy
+# here would be a second source with nothing keeping it honest, and what this
+# file is for is citing the paper, which has no package version anyway.
+cff-version: 1.2.0
+message: >-
+  If you use AgentDescent, please cite the paper below.
+title: AgentDescent
+type: software
+abstract: >-
+  A parallel, asynchronous framework for self-evolving LLM agents that puts the
+  distributed deep-learning training stack on top of agent self-improvement: the
+  parameters are a library of evolvable artifacts, the gradients are diffs
+  carrying evidence cards, and the optimizer step is a merge decision.
+authors:
+  - family-names: Chen
+    given-names: Danyang
+    orcid: "https://orcid.org/0000-0002-5622-1545"
+repository-code: "https://github.com/Birfy/agentdescent"
+url: "https://birfy.github.io/agentdescent/"
+license: MIT
+keywords:
+  - self-evolving agents
+  - recursive self-improvement
+  - LLM agents
+  - parallel and asynchronous execution
+  - diff aggregation
+  - bounded staleness
+  - prompt optimization
+  - skill learning
+preferred-citation:
+  type: article
+  title: >-
+    AgentDescent: Asynchronous Parallel Self-Evolution of LLM Agents by Merging
+    Conflicting Edits
+  authors:
+    - family-names: Chen
+      given-names: Danyang
+      orcid: "https://orcid.org/0000-0002-5622-1545"
+  year: 2026
+  doi: "10.5281/zenodo.22348027"
+  url: "https://doi.org/10.5281/zenodo.22348027"

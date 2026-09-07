@@ -1,3 +1,7 @@
+---
+description: Strategies decide what evolves and how a proposal becomes a diff. The key space a strategy writes is what decides whether concurrent edits can fuse at all.
+---
+
 # Strategies — what evolves, and how a proposal becomes a diff
 
 *Modules:* [`agentdescent.strategies`](https://github.com/Birfy/agentdescent/blob/main/agentdescent/strategies.py)

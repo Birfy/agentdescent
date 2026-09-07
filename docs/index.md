@@ -1,3 +1,7 @@
+---
+description: AgentDescent puts the deep-learning training stack on top of self-evolving LLM agents: diffs are the gradients, and the aggregator is the optimizer step.
+---
+
 # AgentDescent
 
 **Gradient descent — but the parameters are agents.** A parallel, asynchronous

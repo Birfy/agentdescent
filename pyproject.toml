@@ -23,7 +23,7 @@ dependencies = []
 # write the way dsh does. Without it `pytest tests/test_integrations.py`
 # fails on a clean checkout, which is the install the guide gives.
 dev = ["pytest>=7.0", "pyyaml>=5.1"]
-docs = ["mkdocs-material>=9.5"]
+docs = ["mkdocs-material[imaging]>=9.5"]   # [imaging] builds the social cards
 # The MCP server (`agentdescent mcp`) needs the protocol SDK; the CLI does not.
 #
 # The marker is load-bearing. This project supports 3.9, every published `mcp`
