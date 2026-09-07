@@ -194,14 +194,35 @@ just goes quiet.
 | "stop the run" | `cancel` kills the workers too, and it tells you what you lose |
 | ask it to evolve **a plugin** | it sets `host`, and refuses to start a nested run from inside a worker |
 
-!!! note "What this scenario does *not* exercise"
-    `prompt.txt` is a one-key artifact, so its worker proposals contradict by
-    construction: conflict resolution collapses them to a single candidate and
-    **no fusion is ever built**. Four workers here are per-round best-of-N
-    selection, not the parallel merge. `plan` now says so. To watch the merge
-    actually run, evolve a **skill directory** — several files, so two workers
-    can edit different ones and both survive — or install a reflective fusion
-    policy, which is what closes the gap for one-key artifacts.
+!!! note "Add `reflective_merge`, or the workers are not merging"
+    `prompt.txt` is a one-key artifact, and under the **shipped** conflict rule
+    its worker proposals contradict by construction: they collapse to a single
+    candidate and no fusion is ever built. Four workers there are per-round
+    best-of-N selection. `plan` warns when a spec is in that shape.
+
+    Installing the reflective pair is what makes it a merge, and it is what you
+    want by default:
+
+    ```json
+    "policies": {
+      "reflective_merge": {
+        "ref": "reflective_merge",
+        "complete": {"ref": "openai_compatible", "model": "your-model"}
+      }
+    }
+    ```
+
+    Measured on this exact scenario, with and without. Default: four proposals,
+    three dropped as conflicts, `n_candidates: 1`, `single-candidate`, no
+    fusion. With `reflective_merge`: `conflicts_dropped: 0`, `n_candidates: 4`,
+    `fused: 1`, and the ledger reads
+    `merge synth(w0:value:1+w1:value:1+w2:value:1+w3:value:1)` -- all four
+    workers synthesised into the committed candidate. Same on a multi-file
+    skill directory, where one round also came back `synthesis-failed` and fell
+    back to the best single, which is the fallback working rather than a fault.
+
+    Read `contested` in `fusion_stats()`, or `fusion_trials` in `result.json`,
+    rather than inferring the merge from the worker count.
 
 ## 5. Using a real model
 

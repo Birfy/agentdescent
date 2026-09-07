@@ -669,16 +669,30 @@ def test_plan_says_when_workers_buy_selection_rather_than_merging(tmp_path):
     target = tmp_path / "prompt.txt"
     target.write_text("hi\n", encoding="utf-8")
 
-    def warnings_for(**evolve):
-        spec = EvolveSpec.from_dict({
+    def warnings_for(policies=None, **evolve):
+        body = {
             "kind": "text", "target": str(target),
             "data": {"path": str(cases), "prompt": "prompt", "gold": "gold"},
             "score": "contains", "agent": {"ref": "openai_compatible", "model": "m"},
-            "evolve": evolve})
-        return [w for w in plan_payload(spec)["warnings"] if "best-of-N" in w]
+            "evolve": evolve}
+        if policies:
+            body["policies"] = policies
+        return [w for w in plan_payload(EvolveSpec.from_dict(body))["warnings"]
+                if "best-of-N" in w]
 
     assert warnings_for(n_workers=4), "four workers on one key is selection, not merging"
     assert not warnings_for(n_workers=1), "one worker has nothing to say about merging"
+
+    # ...and silent once a fusion policy is asked for. `reflective_merge` is
+    # exactly what turns this case into a real merge -- measured, four workers
+    # on a one-key prompt synthesised into one candidate -- so telling someone
+    # to install the policy their spec already installs is worse than silence.
+    assert not warnings_for(
+        n_workers=4,
+        policies={"reflective_merge": {
+            "ref": "reflective_merge",
+            "complete": {"ref": "openai_compatible", "model": "m"}}}), \
+        "the spec already installs the policy the warning recommends"
 
 
 def test_doctor_reports_the_base_url_not_just_that_one_is_set():
