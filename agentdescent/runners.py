@@ -496,8 +496,16 @@ PLUGIN_FROZEN: Dict[str, Sequence[str]] = {
 }
 
 #: What the reflector is shown from a plugin tree, per host.
+#: What the reflector is shown for each host. These have to be loadable: the
+#: tree comes from `load_tree`, so a glob naming an extension the loader does
+#: not admit is dead. `src/**/*.ts` was exactly that until `compose` started
+#: widening the include list for `kind: "plugin"` -- both halves are needed, and
+#: a glob added here without the other is a comment, not a rule.
 PLUGIN_CONTEXT: Dict[str, Sequence[str]] = {
-    "dsh": ("**/SKILL.md", "cordis.patch.yml", "package.json", "src/**/*.ts", "*.md"),
+    # `lib/**` as well as `src/**`: a dsh plugin is as often shipped ESM as it
+    # is compiled TypeScript, and the one this project publishes is the former.
+    "dsh": ("**/SKILL.md", "cordis.patch.yml", "package.json",
+            "src/**/*.ts", "src/**/*.js", "lib/**/*.js", "*.md"),
     "claude_code": (".claude-plugin/plugin.json", "**/SKILL.md", "commands/**/*.md",
                     "agents/**/*.md", ".mcp.json", "*.md"),
     "codex": ("**/SKILL.md", "config.toml", "*.md"),

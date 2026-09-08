@@ -155,6 +155,52 @@ def test_env_passthrough_forwards_named_variables_only(tmp_path, monkeypatch):
     assert run(FileTree(tree).render(tree), Task(id="t", prompt="x")) == "secret None"
 
 
+def test_a_plugin_tree_carries_its_code(tmp_path):
+    """The loader's default extensions do not include JavaScript.
+
+    So a `kind: "plugin"` tree was the manifests, the patch and the README, and
+    never the behaviour -- and `PLUGIN_CONTEXT["dsh"]` named `src/**/*.ts`,
+    which the loader could not produce, so that glob was a comment rather than a
+    rule. `compose` widens the include list for this kind only, because
+    `load_tree` *raises* on a file it matches but cannot represent and the
+    default is shared with every other kind.
+    """
+    from agentdescent.evolvespec import EvolveSpec, compose
+
+    plugin = tmp_path / "p"
+    (plugin / "lib").mkdir(parents=True)
+    (plugin / "package.json").write_text('{"name": "p"}', encoding="utf-8")
+    (plugin / "lib" / "index.js").write_text("export default 1\n", encoding="utf-8")
+    (plugin / "README.md").write_text("# p\n", encoding="utf-8")
+    cases = tmp_path / "cases.jsonl"
+    cases.write_text('{"prompt": "q", "gold": "a"}\n', encoding="utf-8")
+
+    comp = compose(EvolveSpec.from_dict({
+        "kind": "plugin", "host": "dsh", "target": str(plugin),
+        "data": {"path": str(cases), "prompt": "prompt", "gold": "gold"},
+        "score": "contains", "agent": {"ref": "claude_code"}}))
+
+    assert "lib/index.js" in comp.kwargs["strategy"].keys(), \
+        "a plugin that cannot have its code edited is not an evolvable plugin"
+
+
+def test_every_dsh_context_glob_is_one_the_loader_can_produce():
+    """A context glob for an extension the loader drops is a comment.
+
+    `src/**/*.ts` was one for as long as the plugin kind existed: it named the
+    file the reflector should read, and the tree never contained one.
+    """
+    from dataclasses import replace as _r
+
+    from agentdescent.filetree import TreeSpec
+
+    plugin_spec = _r(TreeSpec(), include=tuple(TreeSpec().include) + (
+        "**/*.js", "**/*.mjs", "**/*.cjs", "**/*.ts", "**/*.jsx", "**/*.tsx"))
+    for glob in PLUGIN_CONTEXT["dsh"]:
+        sample = glob.replace("**/", "d/").replace("*.", "f.")
+        assert plugin_spec.selects(sample), f"{glob} can never match a loaded file"
+
+
 def test_the_host_table_is_complete():
     assert set(PLUGIN_HOSTS) == set(PLUGIN_FROZEN) == set(PLUGIN_CONTEXT) == {
         "dsh", "claude_code", "codex", "opencode"}
