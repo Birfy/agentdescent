@@ -155,6 +155,33 @@ def test_env_passthrough_forwards_named_variables_only(tmp_path, monkeypatch):
     assert run(FileTree(tree).render(tree), Task(id="t", prompt="x")) == "secret None"
 
 
+def test_the_dsh_host_does_not_require_a_build_step():
+    """A dsh plugin is often plain ESM with nothing to compile.
+
+    `setup` ran `pnpm build` and `validate` ran `pnpm test` unconditionally, so
+    a package declaring neither died at setup on `Command "build" not found`
+    before it was ever installed -- and the plugin this repository publishes
+    declares neither, which made `kind: "plugin"` unable to evolve its own dsh
+    plugin. Measured against the real CLIs: with `--if-present` the same target
+    installs, passes the gate and answers.
+
+    The gate does not become a no-op. A package that declares the scripts still
+    runs them, and `dsh --dump-config` still has to compose -- which is the
+    check that the plugin loaded at all.
+    """
+    dsh = PLUGIN_HOSTS["dsh"]
+    setup, validate = " ".join(dsh.setup), " ".join(dsh.validate)
+
+    assert "pnpm run --if-present build" in setup
+    assert "pnpm run --if-present test" in validate
+    # the bare forms are what failed; neither should survive anywhere
+    assert "&& pnpm build" not in setup and "&& pnpm test" not in validate
+
+    assert "pnpm install" in setup, "a plugin's dependencies are not optional"
+    assert "plugin --profile headless add" in setup
+    assert "--dump-config" in validate, "the gate still proves the plugin loads"
+
+
 def test_the_host_table_is_complete():
     assert set(PLUGIN_HOSTS) == set(PLUGIN_FROZEN) == set(PLUGIN_CONTEXT) == {
         "dsh", "claude_code", "codex", "opencode"}
