@@ -564,7 +564,20 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
         path = os.path.expanduser(spec.target)
         if not os.path.isdir(path):
             raise SpecError(f"target {spec.target!r} is not a directory")
+        # A host plugin is code, and the loader's default extensions are not:
+        # `.md .txt .py .json .yaml .yml .toml .sh .cfg .ini`. Without this a
+        # `kind: "plugin"` tree is the manifests, the patch and the README, and
+        # never the behaviour -- `PLUGIN_CONTEXT["dsh"]` even names
+        # `src/**/*.ts`, which the loader could not produce.
+        #
+        # Widened here rather than in `TreeSpec`, because the default is shared
+        # with every other kind and `load_tree` *raises* on a file it matches
+        # but cannot represent. A skill directory that happens to carry a
+        # minified bundle works today and would start failing outright.
         tspec = TreeSpec()
+        if spec.kind == "plugin":
+            tspec = replace(tspec, include=tuple(tspec.include) + (
+                "**/*.js", "**/*.mjs", "**/*.cjs", "**/*.ts", "**/*.jsx", "**/*.tsx"))
         agg_defaults = {"batch_trigger": 2, "max_wait_rounds": 1}
         cfg = build_agg_config(spec, **agg_defaults)
         tspec.validate_against(cfg.trust_region_chars)
