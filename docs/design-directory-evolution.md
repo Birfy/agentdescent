@@ -1,5 +1,13 @@
 # 设计文档：演化「目录形态」的 Skill / Agent，并由真实 Agent 执行
 
+!!! note "状态：设计记录，非现行 API"
+    本文是目录演化的设计记录，保留当时的方案与取舍。其中的一行式入口
+    `evolve_skill_dir()` / `evolve_agent_dir()` / `evolve_agent_code()`（§3.7）**已被移除**：
+    仓库只保留 `evolve()` 一个入口，目录适配层作为公开积木存在——`load_tree` /
+    `FileTree` / `tree_runner` / `code_runner` / `tree_reflector`，配合 `scorer`、
+    `gated_reward` 和 `governance.SKILL_BLAST_RADIUS` / `HARNESS_BLAST_RADIUS`。
+    现行写法见 [Evolving a directory](directory-evolution.md)。
+
 > 目标：用户给出一个**目录**（一个 skill 目录、一个 agent 目录，或一份 agent 代码），
 > AgentDescent 演化它；每一次 rollout 由**真实 agent**（Claude Code / Codex /
 > OpenHands / 任意 CLI agent）在一个装载了当前候选目录的工作区里执行任务。
@@ -316,23 +324,33 @@ ledger 的 JSON 往返也不受影响（`None` 只存在于 `Diff.ops`，不进 
 
 第一版也可以先只支持「新增 + 覆盖」，把删除列为已知限制。
 
-### 3.7 一行式入口（`agentdescent/skilldir.py`）
+### 3.7 一行式入口（`agentdescent/skilldir.py`）—— 已移除
+
+> 下面是当时的设计。这三个包装后来被删掉，只保留 `evolve()` 一个入口；它们
+> 组装的每一件东西都是公开积木，现行写法见
+> [directory-evolution.md](directory-evolution.md#the-three-workloads)。
+
+当时的写法是 `evolve_skill_dir(path, tasks, reward=..., agent=..., reflect_with=...,
+layout=..., frozen=[...])`。现行写法把同样的组装摆在明面上：
 
 ```python
-from agentdescent import evolve_skill_dir
+from agentdescent import FileTree, evolve, load_tree, tree_reflector, tree_runner
+from agentdescent.governance import SKILL_BLAST_RADIUS
 
-result = evolve_skill_dir(
-    "~/.claude/skills/pdf-audit",          # 用户目录
-    tasks,                                  # Task(prompt=..., meta={"fixtures": {...}, "gold": ...})
-    reward=my_scorer,
-    agent=claude_code(),                    # 真实 agent 执行
-    reflect_with=openai_compatible(model="deepseek-v4-flash"),   # 便宜模型做反思
-    layout="claude_skill",
-    frozen=["tests/**"],
-    n_workers=4, max_concurrency=4, rounds=8,
-)
+path = "~/.claude/skills/pdf-audit"                      # 用户目录
+tree = load_tree(path)
+strategy = FileTree(tree, frozen=["tests/**"], max_files_per_diff=2)
+run = tree_runner(claude_code(), layout="claude_skill", name="pdf-audit",
+                  overlay=strategy.frozen_files(tree))   # 真实 agent 执行
+
+result = evolve(tasks, my_scorer, run=run, strategy=strategy,      # Task(meta={"fixtures": ..., "gold": ...})
+                propose=tree_reflector(openai_compatible(model="deepseek-v4-flash"),
+                                       strategy=strategy),          # 便宜模型做反思
+                artifact_id="pdf-audit", blast_radius=SKILL_BLAST_RADIUS,
+                self_verify=False, cheap_eval_tasks=4,
+                n_workers=4, max_concurrency=4, rounds=8)
 print(result.final_reward, result.outcomes())
-result.write_to("~/.claude/skills/pdf-audit", backup=True)   # 装回，先备份
+result.write_to(path, backup=True)   # 装回，先备份
 ```
 
 三个变体，共用同一套底座：

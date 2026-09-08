@@ -38,6 +38,7 @@ from .advantage import (
     TrustRegion,
     state_distance,
 )
+from .defaults import DefaultConflict, DefaultFusion
 from .fusion import KeepContradictions, ReflectiveFusion, reflective_merge
 from .sampling import DifficultyWeighted, RoundRobin, TaskSampler
 from .selection import (
@@ -112,7 +113,7 @@ from .sandbox_shared import SharedSandboxPool
 from .supervisor import ProcessExecutor
 from .workspec import Ref, RefError, RolloutSpec
 from . import rewards                      # agentdescent.rewards.last_number(...)
-from .skill import evolve_skill
+from .rewards import SCORERS, scorer, command_scorer, GraderError
 from .filetree import (
     TreeError,
     TreeSpec,
@@ -123,8 +124,10 @@ from .filetree import (
     tree_summary,
 )
 from .treestrategy import EDIT_PROTOCOL, FileTree, parse_edits, tree_reflector
-from .runners import LAYOUTS, TEST_FAILURE_MARKER, code_runner, tree_runner
-from .skilldir import evolve_agent_code, evolve_agent_dir, evolve_skill_dir
+from .runners import (
+    LAYOUTS, PLUGIN_FROZEN, PLUGIN_HOSTS, TEST_FAILURE_MARKER, PluginHost, code_runner,
+    gated_reward, plugin_runner, tree_runner,
+)
 from .orchestrator import AgentDescent, RoundStat, run_fork_baseline
 from .agents import (
     AgentError,
@@ -136,11 +139,13 @@ from .agents import (
     claude_code,
     cli_agent,
     codex,
+    dsh,
+    opencode,
     metered,
     openai_compatible,
     with_retries,
 )
-from .agents import WorkspaceAgent
+from .agents import WorkspaceAgent, worker_env
 from .evolution import (
     Agent,
     LLMAgent,
@@ -163,6 +168,7 @@ from .evolution import (
     rule_id,
 )
 from .async_evolve import async_evolve
+from .evolvespec import EvolveSpec, SpecError, compose, load_spec, run_spec
 from .async_runtime import AsyncAgentDescent, AsyncConfig, AsyncStats
 from . import baselines                     # agentdescent.baselines.merge_of_n(...)
 from .parallel import (
@@ -182,7 +188,7 @@ from .parallel import (
     shard_round_robin,
 )
 
-__version__ = "0.4.6"
+__version__ = "0.5.0"
 
 __all__ = [
     "Contract",
@@ -213,6 +219,8 @@ __all__ = [
     "TaskSampler",
     "ReflectiveFusion",
     "KeepContradictions",
+    "DefaultConflict",
+    "DefaultFusion",
     "reflective_merge",
     "GroupAdvantage",
     "AdvantageAcceptance",
@@ -316,6 +324,8 @@ __all__ = [
     "shard_round_robin",
     "Completion",
     "codex",
+    "dsh",
+    "opencode",
     "claude_code",
     "cli_agent",
     "WorkspaceAgent",
@@ -343,7 +353,15 @@ __all__ = [
     "tasks_from",
     "RoundInfo",
     "evolve",
-    "evolve_skill",
+    "SCORERS",
+    "scorer",
+    "command_scorer",
+    "GraderError",
+    "EvolveSpec",
+    "SpecError",
+    "compose",
+    "load_spec",
+    "run_spec",
     "TreeError",
     "TreeSpec",
     "canonical",
@@ -359,9 +377,12 @@ __all__ = [
     "TEST_FAILURE_MARKER",
     "code_runner",
     "tree_runner",
-    "evolve_skill_dir",
-    "evolve_agent_dir",
-    "evolve_agent_code",
+    "gated_reward",
+    "plugin_runner",
+    "PluginHost",
+    "PLUGIN_HOSTS",
+    "PLUGIN_FROZEN",
+    "worker_env",
     "async_evolve",
     "claude_agent",
     "rule_id",

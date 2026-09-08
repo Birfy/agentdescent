@@ -10,7 +10,7 @@ reads, and promotion is the EMA-style confirmation between them.
 
 | Policy | Rule | Reach for it when |
 |---|---|---|
-| `DefaultPromotion(promote_after_k)` | promote after K regression-free rounds on dev; the counter resets on any regression | the default; read its docstring before replacing it — the reset semantics are the part everyone gets wrong |
+| `DefaultPromotion(promote_after_k=None)` — `None` takes the run's `AggregatorConfig.promote_after_k` | promote after K regression-free rounds on dev; the counter resets on any regression | the default; read its docstring before replacing it — the reset semantics are the part everyone gets wrong |
 
 A clean run also promotes on `finalize()`: `target_reward` can fire on the
 very commit that reaches it, and the artifact the run was *for* must reach the

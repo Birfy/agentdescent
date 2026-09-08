@@ -1,3 +1,7 @@
+---
+description: Nineteen published self-evolution algorithms ported as runnable plug-ins on one runtime, each with a declared fidelity class and a measured before-and-after result.
+---
+
 # Self-evolution algorithms — nineteen ports
 
 AgentDescent is a *general* engine for parallel, merge-based evolution. To show

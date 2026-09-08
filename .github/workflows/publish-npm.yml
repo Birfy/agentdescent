@@ -1,0 +1,72 @@
+name: publish-npm
+
+# Publish `integrations/dsh-agentdescent` to npm via Trusted Publishing (OIDC)
+# -- no token stored, the same shape as publish.yml does for PyPI.
+#
+# ONE-TIME BOOTSTRAP, and it cannot be skipped: npm can only configure a trusted
+# publisher on a package that already exists, because the setting lives on the
+# package's own settings page (npm/cli#8544). PyPI has "pending publishers" for
+# exactly this; npm does not. So the first version goes out by hand:
+#
+#   cd integrations/dsh-agentdescent
+#   npm publish --access public        # signed in as a maintainer
+#
+# then on npmjs.com -> the package -> Settings -> Trusted Publisher, add:
+#   owner/repo = Birfy/agentdescent, workflow = publish-npm.yml
+#
+# After that this workflow publishes every release and no credential is stored.
+# Until then it will fail with an auth error, which is the honest outcome --
+# it is not misconfigured, the bootstrap has not happened.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write          # the OIDC token Trusted Publishing exchanges
+    defaults:
+      run:
+        working-directory: integrations/dsh-agentdescent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"   # trusted publishing needs >= 22.14.0
+          registry-url: https://registry.npmjs.org
+      # npm >= 11.5.1 is what understands OIDC; the version bundled with the
+      # runner's Node is usually older.
+      - run: npm install -g npm@latest
+
+      # The package version is derived from `agentdescent.__version__`, so a
+      # release whose tag and package disagree means the manifests were not
+      # re-rendered. Publishing that silently is how npm ends up a version
+      # behind PyPI for a release nobody thinks to check.
+      - name: The tag and the package must agree
+        if: github.event_name == 'release'
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          [ "$tag" = "$pkg" ] || {
+            echo "::error::release tag $tag != package.json $pkg -- re-render the"
+            echo "::error::manifests (agentdescent.integrations.render_dsh_plugin)"
+            exit 1
+          }
+
+      # Already-published is not a failure: a re-run of a release, or a release
+      # cut after a manual publish, should be a no-op rather than red.
+      - name: Publish unless this version is already on npm
+        run: |
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "$name@$version is already on npm; nothing to do"
+          else
+            npm publish --access public
+          fi

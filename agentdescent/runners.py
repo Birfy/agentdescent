@@ -33,8 +33,9 @@ import subprocess
 import tempfile
 import time
 import warnings
+from dataclasses import dataclass, field
 from typing import (
-    TYPE_CHECKING, Callable, Dict, Mapping, Optional, Sequence, Tuple,
+    TYPE_CHECKING, Callable, Dict, Mapping, Optional, Sequence, Tuple, Union,
 )
 
 from .agents import AgentError, Completion, WorkspaceAgent
@@ -47,10 +48,16 @@ if TYPE_CHECKING:                                   # pragma: no cover
 
 __all__ = [
     "LAYOUTS",
+    "PLUGIN_CONTEXT",
+    "PLUGIN_FROZEN",
+    "PLUGIN_HOSTS",
+    "PluginHost",
+    "plugin_runner",
     "TEST_FAILURE_MARKER",
     "code_runner",
     "layout_prefix",
     "tree_runner",
+    "gated_reward",
 ]
 
 #: Where the tree is written inside the workspace. ``{name}`` is the artifact's
@@ -59,6 +66,9 @@ LAYOUTS: Dict[str, str] = {
     "claude_skill": ".claude/skills/{name}",   # project-scoped Claude Code skill
     "claude_agent": ".claude/agents",          # project-scoped subagent definitions
     "skill_library": ".claude/skills",         # a directory OF skills, one dir each
+    "dsh_skill": ".dsh/skills/{name}",         # DeepSeek Harness project skill
+    "agents_skill": ".agents/skills/{name}",   # Agent Skills standard; dsh, Codex and OpenCode read it
+    "opencode_skill": ".opencode/skills/{name}",   # OpenCode project skill
     "root": "",                                # the tree *is* the working directory
 }
 
@@ -362,3 +372,204 @@ def code_runner(entrypoint: Sequence[str], *, layout: str = "root",
         return (proc.stdout or "").strip()
 
     return run
+
+
+def gated_reward(reward: Callable[[Task, str], float]) -> Callable[[Task, str], float]:
+    """``reward``, with a failed :func:`code_runner` gate scoring 0.
+
+    The gate speaks in-band -- a failing ``test_cmd`` makes the rollout's output
+    ``TEST_FAILURE_MARKER`` plus the captured text, so the reflector can read
+    what broke. Scoring that as an ordinary answer would let a candidate "pass"
+    by echoing the marker; this is the wrapper every ``code_runner`` run needs
+    around its reward, and the reason ``evolve()`` is handed this rather than
+    ``reward`` directly."""
+    def gated(task: Task, output: str) -> float:
+        if isinstance(output, str) and output.startswith(TEST_FAILURE_MARKER):
+            return 0.0
+        return reward(task, output)
+    return gated
+
+
+# ---------------------------------------------------------------------------
+# Host plugins
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PluginHost:
+    """How one host loads an *uninstalled* plugin from a path, as data.
+
+    Every command runs from the workspace root with ``HOME`` pointing at it
+    (:func:`_child_env`), so ``~/.dsh``, ``~/.claude`` and ``~/.codex`` are inside
+    the sandbox and the user's real profile is never touched. ``{plugin_dir}`` is
+    the plugin's path relative to the workspace and ``{name}`` its directory
+    name; nothing else is substituted, because nothing else varies per rollout.
+    """
+
+    name: str
+    #: The host CLI. The task prompt is appended as the last argument.
+    entrypoint: Sequence[str]
+    #: Wires the candidate plugin into the isolated host home. Runs before ``validate``.
+    setup: Optional[Sequence[str]] = None
+    #: The gate: a plugin that does not validate scores 0 and the reflector reads why.
+    validate: Optional[Sequence[str]] = None
+    #: Environment the host needs beyond the trimmed allowlist (never secrets;
+    #: those come through ``env_passthrough`` by name).
+    env: Mapping[str, str] = field(default_factory=dict)
+
+    def render(self, plugin_dir: str, name: str) -> "PluginHost":
+        def fmt(cmd):
+            return None if cmd is None else [c.format(plugin_dir=plugin_dir, name=name)
+                                             for c in cmd]
+        return PluginHost(self.name, fmt(self.entrypoint), fmt(self.setup),
+                          fmt(self.validate), dict(self.env))
+
+
+#: The hosts a ``plugin``-kind spec may name. Paths are relative to the workspace.
+PLUGIN_HOSTS: Dict[str, PluginHost] = {
+    # DeepSeek Harness: `dsh plugin add link:<path>` installs into the profile
+    # under $DSH_HOME (= ~/.dsh = <ws>/.dsh here); the headless profile then
+    # runs one task and prints the answer. `--dump-config` composing is the
+    # cheapest proof the plugin loaded at all.
+    #
+    # `--if-present` on both scripts, because a dsh plugin is often plain ESM
+    # with nothing to compile -- the one this repository ships is, and without
+    # this the setup step died on `Command "build" not found` before the plugin
+    # was ever installed, so `kind: "plugin"` could not evolve it. A package
+    # that does declare `build` or `test` still runs them, and still fails the
+    # gate when they fail; the fallback for one that declares neither is
+    # `--dump-config`, which is a real check that the plugin loads.
+    "dsh": PluginHost(
+        "dsh",
+        entrypoint=["dsh", "--profile", "headless"],
+        # `link:` gets the **absolute** path. `dsh plugin add` runs pnpm inside
+        # `$DSH_HOME/profiles/headless`, not here, so a workspace-relative
+        # `link:plugin/<name>` is resolved from the profile directory and lands
+        # nowhere. pnpm records the broken link and exits 0; dsh then reports
+        # `declares no dsh.bundle` -- it cannot read a package.json that is not
+        # there -- and composes without the plugin. The gate still passes,
+        # because `--dump-config` composes fine without it, so the run scores
+        # the *unmodified* host and every candidate ties with the baseline.
+        setup=["sh", "-c", "p=\"$PWD/{plugin_dir}\" && cd \"$p\" && "
+                           "pnpm install --prefer-offline && "
+                           "pnpm run --if-present build && "
+                           "cd - >/dev/null && "
+                           "dsh plugin --profile headless add \"link:$p\""],
+        validate=["sh", "-c", "cd {plugin_dir} && pnpm run --if-present test && "
+                              "cd - >/dev/null && "
+                              "dsh --profile headless --dump-config >/dev/null"],
+    ),
+    # Claude Code: --plugin-dir loads a plugin from a path for one session;
+    # --strict-mcp-config with no config keeps the user's MCP servers out.
+    "claude_code": PluginHost(
+        "claude_code",
+        entrypoint=["claude", "-p", "--plugin-dir", "{plugin_dir}", "--strict-mcp-config",
+                    "--permission-mode", "acceptEdits"],
+        validate=["claude", "plugin", "validate", "{plugin_dir}"],
+    ),
+    # Codex has no plugin format: a "plugin" is a skills directory plus a
+    # config.toml fragment, copied to where Codex reads them under HOME.
+    "codex": PluginHost(
+        "codex",
+        # `--full-auto` does not exist (checked against codex-cli 0.153.4).
+        # `workspace-write` is the sandbox that lets the agent edit its
+        # workspace, and a rollout workspace is a temp dir, not a git repo, so
+        # the repo check has to be skipped or codex refuses to start.
+        entrypoint=["codex", "exec", "--sandbox", "workspace-write",
+                    "--skip-git-repo-check"],
+        setup=["sh", "-c", "mkdir -p .agents/skills .codex && "
+                           "if [ -d {plugin_dir}/skills ]; then cp -r {plugin_dir}/skills/. .agents/skills/; fi && "
+                           "if [ -f {plugin_dir}/config.toml ]; then cp {plugin_dir}/config.toml .codex/config.toml; fi"],
+        validate=["sh", "-c", "if [ -f {plugin_dir}/config.toml ]; then "
+                              "python3 -c 'import sys,tomllib;tomllib.load(open(sys.argv[1],\"rb\"))' "
+                              "{plugin_dir}/config.toml; fi"],
+    ),
+}
+
+PLUGIN_HOSTS["opencode"] = PluginHost(
+    "opencode",
+    # `opencode run` answers one message from the working directory. HOME is the
+    # workspace, so the config it reads is <ws>/.config/opencode/opencode.jsonc
+    # and the project skills are <ws>/.opencode/skills -- both inside the sandbox.
+    entrypoint=["opencode", "run"],
+    setup=["sh", "-c", "mkdir -p .opencode .config/opencode && "
+                       "if [ -d {plugin_dir}/skills ]; then cp -r {plugin_dir}/skills .opencode/; fi && "
+                       "if [ -f {plugin_dir}/opencode.jsonc ]; then "
+                       "cp {plugin_dir}/opencode.jsonc .config/opencode/opencode.jsonc; fi"],
+    validate=["sh", "-c", "if [ -f {plugin_dir}/opencode.jsonc ]; then "
+                          "node -e 'JSON.parse(require(\"fs\").readFileSync(process.argv[1],\"utf8\"))' "
+                          "{plugin_dir}/opencode.jsonc; fi"],
+)
+
+
+#: Frozen by default for each host, on top of whatever the spec freezes. Hooks
+#: and permission config are the plugin's own L0: a hook that blocks a tool call
+#: is a guard, and an optimizer that could loosen it to score better would be
+#: optimising the guard away. Lockfiles are regenerated by tooling in `setup`,
+#: not authored by a model. Tests are frozen for the same reason as in
+#: `code_runner`: the shortest path to a high score is to weaken the yardstick.
+PLUGIN_FROZEN: Dict[str, Sequence[str]] = {
+    "dsh": ("tests/**", "pnpm-lock.yaml", "package-lock.json", "hooks.json", "**/permission*"),
+    "claude_code": ("hooks/**", ".claude-plugin/marketplace.json", "**/permission*"),
+    "codex": ("**/permission*",),
+    "opencode": ("**/permission*",),
+}
+
+#: What the reflector is shown from a plugin tree, per host.
+#: What the reflector is shown for each host. These have to be loadable: the
+#: tree comes from `load_tree`, so a glob naming an extension the loader does
+#: not admit is dead. `src/**/*.ts` was exactly that until `compose` started
+#: widening the include list for `kind: "plugin"` -- both halves are needed, and
+#: a glob added here without the other is a comment, not a rule.
+PLUGIN_CONTEXT: Dict[str, Sequence[str]] = {
+    # `lib/**` as well as `src/**`: a dsh plugin is as often shipped ESM as it
+    # is compiled TypeScript, and the one this project publishes is the former.
+    "dsh": ("**/SKILL.md", "cordis.patch.yml", "package.json",
+            "src/**/*.ts", "src/**/*.js", "lib/**/*.js", "*.md"),
+    "claude_code": (".claude-plugin/plugin.json", "**/SKILL.md", "commands/**/*.md",
+                    "agents/**/*.md", ".mcp.json", "*.md"),
+    "codex": ("**/SKILL.md", "config.toml", "*.md"),
+    "opencode": ("**/SKILL.md", "opencode.jsonc", "*.md"),
+}
+
+
+def plugin_runner(host: Union[str, PluginHost], *, name: str = "plugin",
+                  agent_args: Sequence[str] = (),
+                  env_passthrough: Sequence[str] = (),
+                  overlay: Optional[Mapping[str, str]] = None,
+                  fixtures: Optional[Callable[[Task], Mapping[str, str]]] = None,
+                  timeout: float = 900.0,
+                  workspace_root: Optional[str] = None,
+                  sandbox_pool: Optional["SandboxPool"] = None) -> Callable[[str, Task], str]:
+    """Run a **host plugin** on a task: materialise it, load it into an isolated
+    copy of the host, gate it, then run the host on the prompt.
+
+    A thin table over :func:`code_runner`, which already does *materialise,
+    setup, gate, entrypoint*: the plugin tree lands at ``plugin/<name>``, the
+    host's ``setup`` wires it into the host home that lives inside the workspace
+    (``HOME`` is the workspace), ``validate`` is the ``test_cmd`` gate, and the
+    host CLI is the entrypoint. A failing gate scores 0 in-band exactly as a
+    failing test suite does, so "the plugin no longer registers its tool" is a
+    learning signal.
+
+    ``env_passthrough`` names the variables the host needs (its provider key);
+    values are read here, never stored. ``AGENTDESCENT_NESTED=1`` is set so a
+    tool the worker reaches -- this package's own MCP server, when the plugin
+    being evolved is the one that hosts it -- refuses to start a nested run.
+
+    Candidate plugin code runs **inside the host process** with the host's tool
+    access. Use a container sandbox (``sandbox_pool`` over a
+    :class:`~agentdescent.sandbox_container.ContainerProvider`) for anything you
+    would not run by hand.
+    """
+    spec = PLUGIN_HOSTS[host] if isinstance(host, str) else host
+    plugin_dir = f"plugin/{name}"
+    spec = spec.render(plugin_dir, name)
+    env: Dict[str, str] = {"AGENTDESCENT_NESTED": "1", **spec.env}
+    for key in env_passthrough:
+        if key in os.environ:
+            env[key] = os.environ[key]
+    return code_runner([*spec.entrypoint, *agent_args], layout=plugin_dir, name=name,
+                       setup_cmd=spec.setup, test_cmd=spec.validate, overlay=overlay,
+                       fixtures=fixtures, timeout=timeout, env=env,
+                       workspace_root=workspace_root, sandbox_pool=sandbox_pool)

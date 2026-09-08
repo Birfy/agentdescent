@@ -1,3 +1,7 @@
+---
+description: The concepts behind AgentDescent: the training-to-self-improvement analogy, why diffs do not add, bounded staleness, the aggregator, and governance by blast radius.
+---
+
 # Concepts
 
 The ideas behind AgentDescent, in the order you need them. This is the *why*; for

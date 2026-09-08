@@ -24,22 +24,45 @@ from typing import (
     TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple,
 )
 
-from .evolvable import Diff, EvidenceCard, Evolvable
+from .evolvable import ContractError, Diff, EvidenceCard, Evolvable
 from .policies import (
     AcceptDecision, FusionTrial, MergeContext, Promotion, ProposalContext,
 )
 from .stats import annealed_delta, prob_improvement
 
 if TYPE_CHECKING:                                # pragma: no cover
-    from .aggregator import MergeReport
+    from .aggregator import AggregatorConfig, MergeReport
 
 __all__ = [
     "DefaultAcceptance",
     "DefaultConflict",
     "DefaultFusion",
     "DefaultPromotion",
+    "PolicyUnboundError",
     "SingleProposal",
 ]
+
+
+class PolicyUnboundError(ContractError, RuntimeError):
+    """A default policy was asked to decide before the engine handed it what it reads.
+
+    Every default here needs something only the engine has -- the verifier for
+    the two that rank, the `AggregatorConfig` for the two that read thresholds.
+    A caller building one by hand cannot supply those, so the constructors accept
+    ``None`` and the aggregator fills them in through :meth:`bind` /
+    :meth:`configure` when the policy is installed. This is what a policy raises
+    if it is used *without* having been installed -- naming the missing piece,
+    rather than dying on ``'NoneType' has no attribute 'cheap_eval'`` in the
+    middle of the first contradiction.
+    """
+
+
+def _unbound(policy: object, what: str, hook: str) -> PolicyUnboundError:
+    name = type(policy).__name__
+    return PolicyUnboundError(
+        f"{name} has no {what}: it was used before the aggregator installed it. "
+        f"Pass it through Policies(...) so the engine calls {name}.{hook}(), or "
+        f"call {hook}() yourself when driving the policy by hand.")
 
 
 class SingleProposal:
@@ -58,10 +81,22 @@ class SingleProposal:
 
 
 class DefaultConflict:
-    """Drop contradicting diffs, keeping whichever scores better (PCGrad-style)."""
+    """Drop contradicting diffs, keeping whichever scores better (PCGrad-style).
 
-    def __init__(self, verifier) -> None:
+    ``verifier`` is normally left unset: the engine constructs it, so a caller
+    has no way to pass one in. :class:`~agentdescent.aggregator.Aggregator` calls
+    :meth:`bind` on every conflict policy that has it -- which is what lets a
+    wrapper such as :class:`~agentdescent.advantage.AdvantageConflict` carry
+    this rule as its fallback through ``Policies(conflict=...)``.
+    """
+
+    def __init__(self, verifier=None) -> None:
         self.verifier = verifier
+
+    def bind(self, verifier) -> None:
+        """Receive the engine's verifier, if the caller did not supply one."""
+        if self.verifier is None:
+            self.verifier = verifier
 
     def resolve(self, artifact: Evolvable,
                 cards: Sequence[EvidenceCard]) -> Tuple[List[EvidenceCard], int]:
@@ -81,6 +116,8 @@ class DefaultConflict:
                             if diffs_contradict(survivor.diff, k.diff)), None)
                 if idx is None:
                     break
+                if self.verifier is None:
+                    raise _unbound(self, "verifier", "bind")
                 # project out the worse of the two on the held-out subset.
                 d_score = self.verifier.cheap_eval(artifact.apply(survivor.diff))
                 k_score = self.verifier.cheap_eval(artifact.apply(kept[idx].diff))
@@ -138,7 +175,9 @@ class DefaultFusion:
     is where a choice is unavoidable.
     """
 
-    def __init__(self, verifier, tournament: bool = False) -> None:
+    def __init__(self, verifier=None, tournament: bool = False) -> None:
+        #: Left unset by a caller; the aggregator fills it in through
+        #: :meth:`bind` when the policy is installed.
         self.verifier = verifier
         #: Rank candidates against each other before putting one forward. Off by
         #: default; see the class docstring for the cost/benefit that decides it.
@@ -147,12 +186,19 @@ class DefaultFusion:
         #: by the engine when it assembles the result.
         self.trials: List[FusionTrial] = []
 
+    def bind(self, verifier) -> None:
+        """Receive the engine's verifier, if the caller did not supply one."""
+        if self.verifier is None:
+            self.verifier = verifier
+
     def select(self, artifact: Evolvable,
                diffs: List[Diff]) -> Tuple[Diff, Evolvable, bool]:
         union, reason = self._union_of(diffs)
 
         if not self.tournament:
             return self._commit_union(artifact, diffs, union, reason)
+        if self.verifier is None:
+            raise _unbound(self, "verifier", "bind")
 
         # Score once and keep the numbers. `max(..., key=cheap_eval)` recomputed
         # them and threw them away, which is why the question below had no data
@@ -271,18 +317,43 @@ class DefaultAcceptance:
       posterior either way produced lines like `P(delta>0)=0.97 <= 0.50` when the
       regression guard was the real cause -- self-contradictory to anyone reading
       `outcomes()` to find out why nothing committed, which is its one job.
+
+    The three thresholds are the aggregator's -- ``base_delta``,
+    ``anneal_half_life`` and ``accept_samples`` on
+    :class:`~agentdescent.aggregator.AggregatorConfig`. Leave them ``None`` and
+    the aggregator fills them from its config through :meth:`configure` when the
+    policy is installed, so a wrapper's inner rule and the run's ``agg_config=``
+    cannot disagree. Pass a value to pin it; a pinned value is never overwritten.
     """
 
-    def __init__(self, base_delta: float, anneal_half_life: int,
-                 accept_samples: int) -> None:
+    def __init__(self, base_delta: Optional[float] = None,
+                 anneal_half_life: Optional[int] = None,
+                 accept_samples: Optional[int] = None) -> None:
         self.base_delta = base_delta
         self.anneal_half_life = anneal_half_life
         self.accept_samples = accept_samples
+
+    @classmethod
+    def from_config(cls, config: "AggregatorConfig") -> "DefaultAcceptance":
+        """The rule the aggregator would build for ``config``, pinned."""
+        return cls(config.base_delta, config.anneal_half_life, config.accept_samples)
+
+    def configure(self, config: "AggregatorConfig") -> None:
+        """Fill every threshold the caller left unset from the run's config."""
+        if self.base_delta is None:
+            self.base_delta = config.base_delta
+        if self.anneal_half_life is None:
+            self.anneal_half_life = config.anneal_half_life
+        if self.accept_samples is None:
+            self.accept_samples = config.accept_samples
 
     def accept(self, ctx: MergeContext) -> AcceptDecision:
         from .evolvable import stable_hash
         from .stats import BetaPosterior
 
+        if (self.base_delta is None or self.anneal_half_life is None
+                or self.accept_samples is None):
+            raise _unbound(self, "thresholds", "configure")
         prior = ctx.prior if ctx.prior is not None else BetaPosterior()
         base_s, base_f = ctx.base_counts
         cand_s, cand_f = ctx.cand_counts
@@ -338,9 +409,20 @@ class DefaultPromotion:
     looked at would mean a quiet artifact never promotes.
     """
 
-    def __init__(self, promote_after_k: int) -> None:
+    def __init__(self, promote_after_k: Optional[int] = None) -> None:
+        #: ``None`` until :meth:`configure` fills it from the run's config.
         self.promote_after_k = promote_after_k
         self._survival: Dict[str, int] = defaultdict(int)
+
+    @classmethod
+    def from_config(cls, config: "AggregatorConfig") -> "DefaultPromotion":
+        """The rule the aggregator would build for ``config``, pinned."""
+        return cls(config.promote_after_k)
+
+    def configure(self, config: "AggregatorConfig") -> None:
+        """Fill ``promote_after_k`` from the run's config if the caller left it unset."""
+        if self.promote_after_k is None:
+            self.promote_after_k = config.promote_after_k
 
     @property
     def survival(self) -> Dict[str, int]:
@@ -348,6 +430,8 @@ class DefaultPromotion:
         return self._survival
 
     def observe(self, reports: Sequence["MergeReport"]) -> Sequence[Promotion]:
+        if self.promote_after_k is None:
+            raise _unbound(self, "promote_after_k", "configure")
         by_id = {r.artifact_id: r for r in reports}
         out: List[Promotion] = []
         for aid in set(self._survival) | set(by_id):

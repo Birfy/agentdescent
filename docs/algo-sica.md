@@ -1,3 +1,7 @@
+---
+description: A runnable reproduction of SICA, the self-improving coding agent that edits its own Python source under an AST gate. Self-edit analogue with measured GSM-Hard results.
+---
+
 # SICA — Self-improving coding agent (real source edits)
 
 > **Self-edit.** An archive of agent iterations; the best performer edits its own

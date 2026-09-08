@@ -16,10 +16,14 @@ import threading
 
 import pytest
 
-from agentdescent import evolve_skill_dir, load_tree
+from agentdescent import (
+    AggregatorConfig, evolve, gated_reward, load_tree, scorer, tasks_from,
+    tree_reflector,
+)
 from agentdescent.agents import cli_agent, echo
 from agentdescent.evolution import EvolutionResult, Task
 from agentdescent.filetree import TreeError, canonical
+from agentdescent.governance import HARNESS_BLAST_RADIUS, SKILL_BLAST_RADIUS
 from agentdescent.runners import TEST_FAILURE_MARKER, code_runner, tree_runner
 from agentdescent.treestrategy import FileTree
 
@@ -78,15 +82,65 @@ def _reflector():
 
 
 # ---------------------------------------------------------------------------
+# the wiring -- what a directory run hands evolve()
+# ---------------------------------------------------------------------------
+
+
+def _dir_defaults(kw, n_tasks):
+    """The engine defaults a directory workload wants: no self-verify re-run, a
+    small cheap layer, a merge every two cards. Explicit, so nothing is hidden."""
+    for key, value in (("self_verify", False), ("cheap_eval_tasks", 4),
+                       ("held_out_frac", 0.3), ("rounds", 6), ("patience", 3),
+                       ("target_reward", 0.98)):
+        kw.setdefault(key, value)
+    kw.setdefault("n_workers", max(1, min(4, int(n_tasks * (1 - kw["held_out_frac"])))))
+    kw.setdefault("max_concurrency", kw["n_workers"])
+    kw.setdefault("agg_config", AggregatorConfig(batch_trigger=2, max_wait_rounds=1))
+
+
+def _evolve_dir(path, rows, *, agent, reflect_with, score="exact", layout="claude_skill",
+                frozen=(), blast_radius=SKILL_BLAST_RADIUS, prompt_template="{prompt}",
+                **kw):
+    """A skill or agent directory, run by a real workspace agent."""
+    tasks = tasks_from(rows)
+    name = os.path.basename(path)
+    tree = load_tree(path)
+    strategy = FileTree(tree, frozen=frozen, max_files_per_diff=2)
+    run = tree_runner(agent, layout=layout, name=name,
+                      overlay=strategy.frozen_files(tree),
+                      prompt_template=prompt_template)
+    _dir_defaults(kw, len(tasks))
+    return evolve(tasks, scorer(score), run=run, strategy=strategy, artifact_id=name,
+                  propose=tree_reflector(reflect_with, strategy=strategy),
+                  blast_radius=blast_radius, **kw)
+
+
+def _evolve_code(path, rows, *, entrypoint, reflect_with, score="exact",
+                 frozen=("tests/**", "conftest.py"), test_cmd=None, **kw):
+    """Agent code: the tree is executed behind a frozen test gate."""
+    tasks = tasks_from(rows)
+    name = os.path.basename(path)
+    tree = load_tree(path)
+    strategy = FileTree(tree, frozen=frozen, max_files_per_diff=2)
+    run = code_runner(entrypoint, layout="root", name=name, test_cmd=test_cmd,
+                      overlay=strategy.frozen_files(tree))
+    _dir_defaults(kw, len(tasks))
+    return evolve(tasks, gated_reward(scorer(score)), run=run, strategy=strategy,
+                  artifact_id=name, blast_radius=HARNESS_BLAST_RADIUS,
+                  propose=tree_reflector(reflect_with, strategy=strategy,
+                                         context_files=("**/*.py",)),
+                  **kw)
+
+
+# ---------------------------------------------------------------------------
 # the loop
 # ---------------------------------------------------------------------------
 
 
 def test_a_skill_directory_evolves_and_the_agent_really_reads_it():
     path = _skill_dir()
-    result = evolve_skill_dir(
+    result = _evolve_dir(
         path, _rows(), agent=_agent(), reflect_with=_reflector(),
-        score="exact", prompt_template="{prompt}",
         rounds=4, n_workers=2, max_concurrency=1, seed=0)
 
     assert result.error is None, result.error
@@ -99,9 +153,8 @@ def test_a_skill_directory_evolves_and_the_agent_really_reads_it():
 
 def test_the_starting_directory_is_the_starting_artifact():
     path = _skill_dir(rules="MODE: reverse\n")   # already correct
-    result = evolve_skill_dir(
+    result = _evolve_dir(
         path, _rows(), agent=_agent(), reflect_with=_reflector(),
-        score="exact", prompt_template="{prompt}",
         rounds=2, n_workers=1, max_concurrency=1)
     assert result.final_reward == 1.0
     assert result.history[0].held_out_reward == 1.0
@@ -116,9 +169,8 @@ def test_frozen_files_are_never_proposed_even_when_the_reflector_targets_them():
         return ('<EDITS>' + json.dumps({"edits": [
             {"path": "GRADING.md", "content": "everything scores 1.0"}]}) + '</EDITS>')
 
-    result = evolve_skill_dir(
-        path, _rows(), agent=_agent(), reflect_with=sneaky, score="exact",
-        prompt_template="{prompt}", frozen=["GRADING.md"],
+    result = _evolve_dir(
+        path, _rows(), agent=_agent(), reflect_with=sneaky, frozen=["GRADING.md"],
         rounds=2, n_workers=1, max_concurrency=1)
     assert result.state["GRADING.md"] == "gold answers: alpha=ALPHA\n"
     assert result.outcomes().get("committed", 0) == 0
@@ -277,19 +329,19 @@ def test_write_to_refuses_a_result_that_is_not_a_file_tree():
 
 
 # ---------------------------------------------------------------------------
-# the other two entry points
+# an agent directory, and agent code
 # ---------------------------------------------------------------------------
 
 
 def test_an_agent_directory_runs_at_the_harness_layer():
     from agentdescent.evolution import EvolvingArtifact
     from agentdescent.governance import Layer, classify
-    from agentdescent.skilldir import HARNESS_BLAST_RADIUS, evolve_agent_dir
 
     path = _skill_dir()
-    result = evolve_agent_dir(
-        path, _rows(), agent=_agent(), reflect_with=_reflector(), score="exact",
-        prompt_template="{prompt}", rounds=2, n_workers=1, max_concurrency=1)
+    result = _evolve_dir(
+        path, _rows(), agent=_agent(), reflect_with=_reflector(),
+        layout="claude_agent", blast_radius=HARNESS_BLAST_RADIUS,
+        rounds=2, n_workers=1, max_concurrency=1)
     assert result.error is None, result.error
     # an agent definition is a harness: L1, so every merge also passes the oracle.
     art = EvolvingArtifact("a", {}, blast_radius=HARNESS_BLAST_RADIUS)
@@ -297,8 +349,6 @@ def test_an_agent_directory_runs_at_the_harness_layer():
 
 
 def test_agent_code_evolves_behind_a_test_gate_it_cannot_rewrite():
-    from agentdescent.skilldir import evolve_agent_code
-
     root = tempfile.mkdtemp()
     src = os.path.join(root, "tiny-agent")
     os.makedirs(os.path.join(src, "tests"))
@@ -314,9 +364,8 @@ def test_agent_code_evolves_behind_a_test_gate_it_cannot_rewrite():
             # a second edit aimed at the frozen tests: must be dropped
             {"path": "tests/test_main.py", "content": "assert False"}]}) + "</EDITS>"
 
-    result = evolve_agent_code(
-        src, _rows(), entrypoint=[sys.executable, "main.py"],
-        reflect_with=reflect, score="exact",
+    result = _evolve_code(
+        src, _rows(), entrypoint=[sys.executable, "main.py"], reflect_with=reflect,
         test_cmd=[sys.executable, "-c", "import ast;ast.parse(open('main.py').read())"],
         rounds=2, n_workers=1, max_concurrency=1)
 
@@ -328,8 +377,6 @@ def test_agent_code_evolves_behind_a_test_gate_it_cannot_rewrite():
 
 
 def test_a_candidate_that_breaks_the_gate_scores_zero_and_is_not_committed():
-    from agentdescent.skilldir import evolve_agent_code
-
     root = tempfile.mkdtemp()
     src = os.path.join(root, "tiny-agent-2")
     os.makedirs(src)
@@ -340,9 +387,8 @@ def test_a_candidate_that_breaks_the_gate_scores_zero_and_is_not_committed():
         return "<EDITS>" + json.dumps({"edits": [
             {"path": "main.py", "content": "this is not python("}]}) + "</EDITS>"
 
-    result = evolve_agent_code(
-        src, _rows(), entrypoint=[sys.executable, "main.py"],
-        reflect_with=wrecker, score="exact",
+    result = _evolve_code(
+        src, _rows(), entrypoint=[sys.executable, "main.py"], reflect_with=wrecker,
         test_cmd=[sys.executable, "-c", "import ast;ast.parse(open('main.py').read())"],
         rounds=2, n_workers=1, max_concurrency=1)
 

@@ -74,13 +74,17 @@ export OPENAI_API_KEY=sk-...
 ```
 
 ```python
-from agentdescent import evolve_skill, openai_compatible
+from agentdescent import SingleSlot, evolve, openai_compatible, reflector, scorer, tasks_from
 from agentdescent.dataloader import hf_rows
 
 rows = hf_rows("openai/gsm8k", config="main", split="train", limit=64)
+model = openai_compatible(model="deepseek-v4-flash")
 
-result = evolve_skill(rows, model=openai_compatible(model="deepseek-v4-flash"),
-                      prompt="question", gold="answer", score="last_number")
+result = evolve(tasks_from(rows, prompt="question", gold="answer"), scorer("last_number"),
+                run=lambda skill, task: model(f"{skill}\n\n{task.prompt}"),
+                propose=reflector(model),
+                strategy=SingleSlot(initial_value="You are a helpful assistant."),
+                rounds=8, n_workers=8, max_concurrency=8, held_out_frac=0.3)
 
 print(result.rendered)        # the skill it learned
 print(result.final_reward)    # held-out reward

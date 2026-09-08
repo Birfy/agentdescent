@@ -35,11 +35,6 @@ OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 SECTIONS: List[Tuple[str, str, str, str]] = [
     ("agentdescent.evolution", "The loop",
      "`evolve()`, the artifact, the actor, and what a run returns.", "evolution.md"),
-    ("agentdescent.skill", "One-call skill evolution",
-     "The shortest path from a dataset to an evolved instruction.", "quickstart-skill.md"),
-    ("agentdescent.skilldir", "One-call directory evolution",
-     "The same, for a skill folder, an agent folder, or its code.",
-     "directory-evolution.md"),
     ("agentdescent.agents", "Agents and models",
      "Any `prompt -> text` is a completion; a `WorkspaceAgent` also has a directory.",
      "agents.md"),
@@ -90,6 +85,9 @@ SECTIONS: List[Tuple[str, str, str, str]] = [
     ("agentdescent.dataloader", "The data layer",
      "Datasets, splits, and cached fetches from HuggingFace or raw URLs.",
      "dataloader.md"),
+    ("agentdescent.evolvespec", "An evolve() call as data",
+     "The JSON spec a host agent writes and the CLI / MCP server run.",
+     "plugins.md"),
 
     ("agentdescent.async_evolve", "Barrier-free evolution",
      "`evolve()` without the round barrier.", "async.md"),
@@ -108,7 +106,8 @@ CONSTANTS: Dict[str, str] = {
     "FAST_MAX": "The L2/L1 blast-radius boundary (`0.30`).",
     "FROZEN_IDS": "Artifact ids the loop may read but never mutate (L0).",
     "LAYOUTS": "Where a runner writes the evolving tree inside a workspace "
-               "(`claude_skill`, `skill_library`, `claude_agent`, `root`).",
+               "(`claude_skill`, `skill_library`, `claude_agent`, `dsh_skill`, "
+               "`agents_skill`, `root`).",
     "TEST_FAILURE_MARKER": "Prefix of the output `code_runner` produces when the "
                            "frozen gate fails, so the failure scores 0 and the "
                            "reflector can read it.",
@@ -355,9 +354,8 @@ def _param_section(name: str, obj: Any) -> List[str]:
     """The full signature and a parameter table, where a reader needs them.
 
     The **signature block** is printed when the one-line heading had to collapse
-    to ``(...)`` -- 67 of them did, including `evolve`, `evolve_skill` and every
-    `evolve_*_dir`, so the page named the entry points and showed none of their
-    parameters.
+    to ``(...)`` -- 67 of them did, including `evolve` and `async_evolve`, so
+    the page named the entry points and showed none of their parameters.
 
     The **table** is printed only when the docstring actually documents a
     parameter. A table whose prose column is empty on every row says nothing the

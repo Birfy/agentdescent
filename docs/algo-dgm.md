@@ -1,3 +1,7 @@
+---
+description: A runnable reproduction of DGM (Darwin Godel Machine): a coding agent that edits its own codebase into an open-ended archive. Measured on vendored bugs under real pytest.
+---
+
 # DGM — Darwin Gödel Machine
 
 > **Harness self-evolution.** A coding agent that *edits its own codebase*,

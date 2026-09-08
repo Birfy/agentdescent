@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "agentdescent": {
+      "command": "agentdescent",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}

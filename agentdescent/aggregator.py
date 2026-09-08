@@ -32,7 +32,7 @@ import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import (Callable, Deque, Dict, List, Optional, Protocol, Tuple,
+from typing import (Any, Callable, Deque, Dict, List, Optional, Protocol, Tuple,
                     Union, runtime_checkable)
 
 from .evolvable import (
@@ -447,6 +447,23 @@ def fuse_diffs(diffs: List[Diff]) -> Diff:
                 contract_breaking=breaking, author="aggregator")
 
 
+def install_policy(policy: Any, verifier: Any, config: "AggregatorConfig") -> None:
+    """Offer a policy the engine's verifier and config through its optional hooks.
+
+    ``bind(verifier)`` and ``configure(config)`` are both optional: a policy that
+    has neither is left alone. Wrappers such as
+    :class:`~agentdescent.advantage.AdvantageConflict` forward them to their
+    inner rule, which is what lets ``Policies(conflict=AdvantageConflict())``
+    work without the caller ever seeing a verifier. Public so a hand-built
+    aggregator, a factory, or a test can install a policy the same way."""
+    bind = getattr(policy, "bind", None)
+    if callable(bind):
+        bind(verifier)
+    configure = getattr(policy, "configure", None)
+    if callable(configure):
+        configure(config)
+
+
 class Aggregator:
     """Per-artifact optimizer step over the ledger."""
 
@@ -475,20 +492,23 @@ class Aggregator:
         self.config = config or AggregatorConfig()
         # The decisions, as objects. Swapping one is the point; the defaults are
         # the code that used to be inline here, moved rather than rewritten.
+        cfg = self.config
         self.conflict_policy = conflict or DefaultConflict(verifier)
         self.fusion_policy = fusion or DefaultFusion(
-            verifier, tournament=self.config.fusion_tournament)
-        # A fusion policy ranks candidates, so it needs the verifier -- and a
-        # caller building one cannot supply it, because the verifier is built
-        # inside the engine. Hand it over to any policy that asked by exposing
-        # `bind`; the shipped one takes it in its constructor and has none.
-        _bind = getattr(self.fusion_policy, "bind", None)
-        if callable(_bind):
-            _bind(verifier)
-        cfg = self.config
-        self.acceptance_policy = acceptance or DefaultAcceptance(
-            cfg.base_delta, cfg.anneal_half_life, cfg.accept_samples)
-        self.promotion_policy = promotion or DefaultPromotion(cfg.promote_after_k)
+            verifier, tournament=cfg.fusion_tournament)
+        self.acceptance_policy = acceptance or DefaultAcceptance.from_config(cfg)
+        self.promotion_policy = promotion or DefaultPromotion.from_config(cfg)
+        # Two things a policy may need are built in here and nowhere a caller
+        # can reach: the verifier (for anything that ranks) and the config (for
+        # anything that reads a threshold). So every installed policy is offered
+        # both, through two optional hooks -- `bind(verifier)` and
+        # `configure(config)` -- and a wrapper forwards them to whatever it
+        # wraps. Before this only fusion was bound, so
+        # `AdvantageConflict(DefaultConflict())` type-checked, installed, and
+        # died on the first contradiction that reached the inner rule.
+        for policy in (self.conflict_policy, self.fusion_policy,
+                       self.acceptance_policy, self.promotion_policy):
+            install_policy(policy, verifier, cfg)
         self.buffer = EvidenceBuffer()
         self._posteriors: Dict[str, BetaPosterior] = defaultdict(BetaPosterior)
         # dev-branch survival counter for EMA-style promotion.

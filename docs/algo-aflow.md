@@ -1,3 +1,7 @@
+---
+description: A runnable reproduction of AFlow agentic workflow search with soft mixed selection over top-k workflows. Mechanism microport, measured on GSM8K over three seeds.
+---
+
 # AFlow — Agentic workflow search
 
 > **Workflow self-evolution.** Search the space of code-expressed agentic

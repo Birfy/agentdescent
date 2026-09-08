@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-199 public names across 35 modules.
+214 public names across 35 modules.
 
 ---
 
@@ -233,6 +233,7 @@ evolve(
     shuffle: bool = False,
     seed: int = 0,
     on_round: Optional[Callable[['RoundInfo'], None]] = None,
+    stop_when: Optional[Callable[['RoundInfo'], bool]] = None,
     verbose: bool = False,
     usage: Optional[Usage] = None,
     policies: Optional['Policies'] = None
@@ -282,6 +283,7 @@ evolve(
 | `shuffle` | `bool` | `False` | Shuffle `tasks` before that positional split. Off by default, which keeps a run reproducible and keeps `val_frac`'s promise that the engine's held-out split is exactly that `Dataset`'s `val`. Turn it on for **grouped** data -- anything ordered by category, source, difficulty or date -- where the tail of the file is a different distribution from the head, and every gate in the run (the acceptance test, `target_reward`, `final_reward`) would then be measured against it. |
 | `seed` | `int` | `0` | As `shuffle`. |
 | `on_round` | `Optional[Callable[['RoundInfo'], None]]` | `None` | Called with each `RoundInfo` as the round completes -- progress for a long run, which otherwise reports nothing until it returns. An exception raised here is reported but does not abort the run. |
+| `stop_when` | `Optional[Callable[['RoundInfo'], bool]]` | `None` | Called after `on_round` with the same `RoundInfo`; return `True` to end the run with `stop_reason="stop_when"`. This is the seam for a budget the engine does not know how to count -- dollars from a shared `Usage`, an external deadline, a kill file. It is asked where `max_seconds` / `max_calls` are, so it stops between rounds and never mid-merge, and the run keeps what it has committed. An exception raised here is reported, not fatal. |
 | `verbose` | `bool` | `False` | Print a line per round. Independent of the `RuntimeWarning` emitted when a run ends early -- that always fires. |
 | `usage` | `Optional[Usage]` | `None` | Share one `Usage` with your model adapters (`claude(usage=u)`, `openai_compatible(usage=u)`) and the result's token counts become real. Without it the run still reports calls, seconds and failures -- `run` is `(rendered, task) -> str`, so an opaque actor has no way to surface tokens, and inventing a number would be worse than reporting zero. |
 | `policies` | `Optional['Policies']` | `None` | Bundle of replaceable pieces (`Policies`). Every field defaults to `None` meaning "current behaviour", so `Policies()` and passing nothing are the same run. The individual keyword arguments -- `task_sampler`, `staleness_policy`, `aggregator_factory` -- are shortcuts onto its fields and keep working; an explicit argument wins over a bundle default rather than being silently ignored. Fields whose implementations have not landed yet raise rather than being accepted and ignored: a caller who passes a custom acceptance rule and sees a finished run would reasonably conclude it ran. New capabilities go here rather than adding another parameter to a function that already has thirty-five. |
@@ -310,125 +312,6 @@ tasks_from(
     id: Optional[str] = None,
     **meta_keys: str
 ) -> List['Task']
-```
-
----
-
-## One-call skill evolution
-
-The shortest path from a dataset to an evolved instruction. &nbsp;·&nbsp; `agentdescent.skill` &nbsp;·&nbsp; [guide](quickstart-skill.md)
-
-### `evolve_skill(...)`
-
-Evolve one instruction (a "skill") against a dataset, in one call.
-
-```python
-evolve_skill(
-    data: Sequence[Any],
-    model: Completion,
-    *,
-    prompt: str = 'prompt',
-    gold: str = 'gold',
-    score: Union[str, Callable] = 'last_number',
-    instruction: str = 'You are a helpful assistant.',
-    template: str = '{skill}\n\n{prompt}',
-    reflect_with: Optional[Completion] = None,
-    **evolve_kwargs: Any
-) -> EvolutionResult
-```
-
-| parameter | type | default | what it is |
-|---|---|---|---|
-| `data` | `Sequence[Any]` | *required* | Rows (dicts) from any source, or ready-made `Task` objects. Rows go through `tasks_from`. |
-| `model` | `Completion` | *required* | The completion your agent uses -- see `agents`. |
-| `prompt` | `str` | `'prompt'` | Which columns hold the question and the expected answer. Ignored when `data` is already Tasks. |
-| `gold` | `str` | `'gold'` | As `prompt`. |
-| `score` | `Union[str, Callable]` | `'last_number'` | A name from `SCORERS` or your own `(task, output) -> float`. |
-| `instruction` | `str` | `'You are a helpful assistant.'` | The starting skill. Everything the run learns replaces this. |
-| `template` | `str` | `'{skill}\n\n{prompt}'` | How the skill meets the question. Must contain `{skill}` and `{prompt}` -- change it to put the skill somewhere else (a suffix, a section header, inside a larger scaffold). |
-| `reflect_with` | `Optional[Completion]` | `None` | The model that proposes improvements. Defaults to `model`; a cheap reflector for an expensive agent is a good trade. |
-| `**evolve_kwargs` | `Any` |  | Passed to `evolve` and override the defaults chosen here (`asynchronous=True`, a different `strategy=`, an `aggregator_factory=`, ...). `shuffle=True` is worth knowing about: rows arrive in dataset order and the train/held-out split is positional, so grouped data otherwise holds out one end of the file. |
-
----
-
-## One-call directory evolution
-
-The same, for a skill folder, an agent folder, or its code. &nbsp;·&nbsp; `agentdescent.skilldir` &nbsp;·&nbsp; [guide](directory-evolution.md)
-
-### `evolve_agent_code(...)`
-
-Evolve **agent code**: the tree is executed, and a test gate guards it.
-
-```python
-evolve_agent_code(
-    path: str,
-    data: Sequence[Any],
-    *,
-    entrypoint: Sequence[str],
-    score: Union[str, Callable] = 'contains',
-    reflect_with: Completion,
-    prompt: str = 'prompt',
-    gold: str = 'gold',
-    name: Optional[str] = None,
-    spec: Optional[TreeSpec] = None,
-    editable: Sequence[str] = ('**',),
-    frozen: Sequence[str] = ('tests/**', 'conftest.py'),
-    max_files_per_diff: int = 2,
-    setup_cmd: Optional[Sequence[str]] = None,
-    test_cmd: Optional[Sequence[str]] = ('python', '-m', 'pytest', '-q'),
-    fixtures: Optional[Callable[[Task], Mapping[str, str]]] = None,
-    timeout: float = 120.0,
-    workspace_root: Optional[str] = None,
-    sandbox_pool: Optional['SandboxPool'] = None,
-    **evolve_kwargs: Any
-) -> EvolutionResult
-```
-
-### `evolve_agent_dir(...)`
-
-Evolve an **agent directory** (subagent definitions, tool config, harness).
-
-```python
-evolve_agent_dir(
-    path: str,
-    data: Sequence[Any],
-    *,
-    agent: Completion,
-    score: Union[str, Callable] = 'contains',
-    layout: str = 'claude_agent',
-    frozen: Sequence[str] = (),
-    **kwargs: Any
-) -> EvolutionResult
-```
-
-### `evolve_skill_dir(...)`
-
-Evolve a **skill directory**, executed by a real agent that reads it.
-
-```python
-evolve_skill_dir(
-    path: str,
-    data: Sequence[Any],
-    *,
-    agent: Completion,
-    score: Union[str, Callable] = 'contains',
-    reflect_with: Optional[Completion] = None,
-    prompt: str = 'prompt',
-    gold: str = 'gold',
-    name: Optional[str] = None,
-    layout: str = 'claude_skill',
-    spec: Optional[TreeSpec] = None,
-    editable: Sequence[str] = ('**',),
-    frozen: Sequence[str] = (),
-    max_files_per_diff: int = 2,
-    prompt_template: Optional[str] = None,
-    fixtures: Optional[Callable[[Task], Mapping[str, str]]] = None,
-    answer_file: Optional[str] = None,
-    workspace_root: Optional[str] = None,
-    sandbox_pool: Optional['SandboxPool'] = None,
-    blast_radius: float = 0.2,
-    **evolve_kwargs: Any
-) -> EvolutionResult
 ```
 
 ---
@@ -506,7 +389,8 @@ cli_agent(
     via_stdin: bool = False,
     timeout: float = 600.0,
     env: Optional[Dict[str, str]] = None,
-    usage: Optional[Usage] = None
+    usage: Optional[Usage] = None,
+    isolate: bool = True
 ) -> 'WorkspaceAgent'
 ```
 
@@ -522,6 +406,10 @@ codex(
     **kwargs
 ) -> Completion
 ```
+
+### `dsh(*, workspace: Optional[str] = None, extra_args: Sequence[str] = (), **kwargs) -> Completion`
+
+DeepSeek Harness (`dsh`) headless profile, as a `Completion`.
 
 ### `echo(transform: Optional[Callable[[str], str]] = None) -> Completion`
 
@@ -554,6 +442,19 @@ openai_compatible(
 ) -> Completion
 ```
 
+### `opencode(...)`
+
+OpenCode's non-interactive `run` mode, as a `Completion`.
+
+```python
+opencode(
+    *,
+    workspace: Optional[str] = None,
+    extra_args: Sequence[str] = (),
+    **kwargs
+) -> Completion
+```
+
 ### `with_retries(...)`
 
 Wrap a completion with exponential-backoff retries on any exception.
@@ -565,6 +466,19 @@ with_retries(
     backoff: float = 0.5,
     sleep: Callable[[float], None] = <built-in function sleep>
 ) -> Completion
+```
+
+### `worker_env(...)`
+
+The environment a worker agent CLI runs with.
+
+```python
+worker_env(
+    workspace: Optional[str],
+    extra: Optional[Mapping[str, str]] = None,
+    *,
+    isolate: bool = True
+) -> Dict[str, str]
 ```
 
 ---
@@ -678,6 +592,20 @@ tree_reflector(
 
 Give a real agent the candidate directory, one workspace per rollout. &nbsp;·&nbsp; `agentdescent.runners` &nbsp;·&nbsp; [guide](directory-evolution.md)
 
+### `PluginHost(...)`
+
+How one host loads an *uninstalled* plugin from a path, as data.
+
+```python
+PluginHost(
+    name: str,
+    entrypoint: Sequence[str],
+    setup: Optional[Sequence[str]] = None,
+    validate: Optional[Sequence[str]] = None,
+    env: Mapping[str, str] = <factory>
+) -> None
+```
+
 ### `code_runner(...)`
 
 Run **candidate code** on a task: materialise, gate, execute.
@@ -694,6 +622,29 @@ code_runner(
     fixtures: Optional[Callable[[Task], Mapping[str, str]]] = None,
     timeout: float = 120.0,
     env: Optional[Mapping[str, str]] = None,
+    workspace_root: Optional[str] = None,
+    sandbox_pool: Optional['SandboxPool'] = None
+) -> Callable[[str, Task], str]
+```
+
+### `gated_reward(reward: Callable[[Task, str], float]) -> Callable[[Task, str], float]`
+
+`reward`, with a failed `code_runner` gate scoring 0.
+
+### `plugin_runner(...)`
+
+Run a **host plugin** on a task: materialise it, load it into an isolated copy of the host, gate it, then run the host on the prompt.
+
+```python
+plugin_runner(
+    host: Union[str, PluginHost],
+    *,
+    name: str = 'plugin',
+    agent_args: Sequence[str] = (),
+    env_passthrough: Sequence[str] = (),
+    overlay: Optional[Mapping[str, str]] = None,
+    fixtures: Optional[Callable[[Task], Mapping[str, str]]] = None,
+    timeout: float = 900.0,
     workspace_root: Optional[str] = None,
     sandbox_pool: Optional['SandboxPool'] = None
 ) -> Callable[[str, Task], str]
@@ -1385,11 +1336,11 @@ AdaptiveTrustRegion(
 |---|---|
 | `observe(outcome: str) -> TrustRegion` | Record one merge outcome and return the region for the next merge. |
 
-### `AdvantageAcceptance(inner, strength: float = 1.0) -> None`
+### `AdvantageAcceptance(inner = None, strength: float = 1.0) -> None`
 
 Shift the acceptance prior by how well a proposal did against its group.
 
-### `AdvantageConflict(inner, margin: float = 0.5) -> None`
+### `AdvantageConflict(inner = None, margin: float = 0.5) -> None`
 
 Break a contradiction by group-relative advantage, not raw score.
 
@@ -1402,7 +1353,7 @@ Standardise a rollout's reward against the group it belongs to.
 | `key(base_version: int, cluster: str = '') -> str` | The group a rollout belongs to. Same base, same cluster. |
 | `observe(key: str, reward: float) -> Optional[float]` | Record a reward and return its advantage, or `None` if unknown yet. |
 
-### `StableDistanceAcceptance(inner, strength: float = 0.1) -> None`
+### `StableDistanceAcceptance(inner = None, strength: float = 0.1) -> None`
 
 Penalise candidates that drift far from the confirmed branch.
 
@@ -1521,6 +1472,78 @@ split_dataset(
 
 ---
 
+## An evolve() call as data
+
+The JSON spec a host agent writes and the CLI / MCP server run. &nbsp;·&nbsp; `agentdescent.evolvespec` &nbsp;·&nbsp; [guide](plugins.md)
+
+### `EvolveSpec(...)`
+
+What to evolve, against what, scored how, by whom -- as data.
+
+```python
+EvolveSpec(
+    kind: str,
+    target: str,
+    data: Dict[str, Any],
+    score: Union[str, Dict[str, Any]] = 'contains',
+    agent: Optional[Union[str, Dict[str, Any]]] = None,
+    reflect: Optional[Union[str, Dict[str, Any]]] = None,
+    name: Optional[str] = None,
+    template: str = '{skill}\n\n{prompt}',
+    layout: Optional[str] = None,
+    prompt_template: Optional[str] = None,
+    editable: Sequence[str] = ('**',),
+    frozen: Sequence[str] = (),
+    max_files_per_diff: int = 2,
+    entrypoint: Sequence[str] = (),
+    setup_cmd: Sequence[str] = (),
+    test_cmd: Sequence[str] = ('python', '-m', 'pytest', '-q'),
+    timeout: float = 120.0,
+    host: Optional[str] = None,
+    env_passthrough: Sequence[str] = (),
+    policies: Dict[str, Any] = <factory>,
+    agg_config: Dict[str, Any] = <factory>,
+    evolve: Dict[str, Any] = <factory>,
+    allow: Sequence[str] = (),
+    version: int = 1
+) -> None
+```
+
+| method | what it does |
+|---|---|
+| `absolutise(base: Optional[str] = None) -> 'EvolveSpec'` | A copy whose file paths are absolute, resolved against `base` (cwd). |
+
+### `SpecError`
+
+A spec that cannot be composed, and the field that is wrong.
+
+### `compose(...)`
+
+Turn a spec into the `evolve()` call the quickstarts would write.
+
+```python
+compose(
+    spec: EvolveSpec,
+    *,
+    usage: Optional[Usage] = None,
+    on_round: Optional[Callable] = None,
+    repo_path: Optional[str] = None,
+    workspace_root: Optional[str] = None,
+    sandbox_pool: Any = None,
+    **overrides: Any
+) -> Composition
+```
+
+### `load_spec(path: str, *, absolutise: bool = True) -> EvolveSpec`
+
+Read a spec from a JSON file.
+
+### `run_spec(spec: EvolveSpec, **hooks: Any) -> EvolutionResult`
+
+Compose and run. `hooks` are `compose`'s keyword arguments.
+
+---
+
 ## Barrier-free evolution
 
 `evolve()` without the round barrier. &nbsp;·&nbsp; `agentdescent.async_evolve` &nbsp;·&nbsp; [guide](async.md)
@@ -1571,6 +1594,7 @@ async_evolve(
     straggler_factor: float = 3.0,
     task_sampler: Optional['TaskSampler'] = None,
     on_round: Optional[Callable[[RoundInfo], None]] = None,
+    stop_when: Optional[Callable[[RoundInfo], bool]] = None,
     verbose: bool = False,
     usage: Optional[Usage] = None,
     policies: Optional['Policies'] = None
@@ -1618,6 +1642,7 @@ async_evolve(
 | `straggler_factor` | `float` | `3.0` | As `duration_estimator`. |
 | `task_sampler` | `Optional['TaskSampler']` | `None` | Which task a worker takes next from its shard. |
 | `on_round` | `Optional[Callable[[RoundInfo], None]]` | `None` | Called with each `RoundInfo` as a merger sweep completes -- progress for a long run. It runs on the merger thread and must be cheap and thread-safe; an exception is reported, not fatal. |
+| `stop_when` | `Optional[Callable[[RoundInfo], bool]]` | `None` | Asked after `on_round` with the same `RoundInfo`; `True` ends the run with `stop_reason="stop_when"` -- the caller's own budget (dollars, a deadline, a kill file), checked between merger sweeps like the built-in bounds. Same thread and the same rules as `on_round`. |
 | `verbose` | `bool` | `False` | Print one line per merger sweep. |
 | `usage` | `Optional[Usage]` | `None` | Share one `Usage` with your model adapters (`claude(usage=u)`, `openai_compatible(usage=u)`) and the result's token counts become real. Without it the run still reports calls, seconds and failures -- `run` is `(rendered, task) -> str`, so an opaque actor has no way to surface tokens, and inventing a number would be worse than reporting zero. |
 | `policies` | `Optional['Policies']` | `None` | Bundle of replaceable pieces (`Policies`). Every field defaults to `None` meaning "current behaviour", so `Policies()` and passing nothing are the same run. The individual keyword arguments -- `task_sampler`, `staleness_policy`, `aggregator_factory` -- are shortcuts onto its fields and keep working; an explicit argument wins over a bundle default rather than being silently ignored. Fields whose implementations have not landed yet raise rather than being accepted and ignored: a caller who passes a custom acceptance rule and sees a finished run would reasonably conclude it ran. New capabilities go here rather than adding another parameter to a function that already has thirty-five. |
@@ -1811,6 +1836,23 @@ A dependency-free `grep`/`read` ReAct loop over the document.
 
 The reward functions everyone writes, with the details right. &nbsp;·&nbsp; `agentdescent.rewards` &nbsp;·&nbsp; [guide](rewards.md)
 
+### `GraderError`
+
+A `command_scorer` command failed or printed something that is not a score.
+
+### `command_scorer(...)`
+
+Grade with **any program**: the task as JSON on stdin, a float on stdout.
+
+```python
+command_scorer(
+    cmd: Union[str, Sequence[str]],
+    *,
+    timeout: float = 60.0,
+    cwd: Optional[str] = None
+) -> Callable
+```
+
 ### `contains(gold_key: str = 'gold', *, normalise: bool = True) -> Callable`
 
 1.0 when the gold answer appears anywhere in the output.
@@ -1826,6 +1868,10 @@ The reward functions everyone writes, with the details right. &nbsp;·&nbsp; `ag
 ### `numeric_close(gold_key: str = 'gold', *, tolerance: float = 0.01) -> Callable`
 
 `last_number` with a relative tolerance -- for rounded answers.
+
+### `scorer(score) -> Callable`
+
+Resolve `score` -- a name from `SCORERS` or a `(task, output) -> float` callable -- into the reward `evolve()` takes.
 
 ---
 
@@ -2013,6 +2059,14 @@ Somewhere to keep evaluations. In one process, across many, or on disk.
 
 Which of a batch of mutually contradictory changes survive.
 
+### `DefaultConflict`
+
+Drop contradicting diffs, keeping whichever scores better (PCGrad-style).
+
+### `DefaultFusion`
+
+Build the union of complementary diffs and hand it to the gate.
+
 ### `EDIT_PROTOCOL`
 
 The multi-file proposal format a `FileTree` reflector is told to emit.
@@ -2047,7 +2101,7 @@ One entry per *category*: competing proposals contradict and are resolved.
 
 ### `LAYOUTS`
 
-Where a runner writes the evolving tree inside a workspace (`claude_skill`, `skill_library`, `claude_agent`, `root`).
+Where a runner writes the evolving tree inside a workspace (`claude_skill`, `skill_library`, `claude_agent`, `dsh_skill`, `agents_skill`, `root`).
 
 ### `LedgerFailure`
 
@@ -2068,6 +2122,14 @@ In-process, single-flight, counted.
 ### `MergeContext`
 
 Everything an `AcceptancePolicy` is allowed to look at.
+
+### `PLUGIN_FROZEN`
+
+dict() -> new empty dictionary dict(mapping) -> new dictionary initialized from a mapping object's (key, value) pairs dict(iterable) -> new dictionary initialized as if via: d = {} for k, v in iterable: d[k] = v dict(**kwargs) -> new dictionary initialized with the name=value pairs in the keyword argument list. For example: dict(one=1, two=2)
+
+### `PLUGIN_HOSTS`
+
+dict() -> new empty dictionary dict(mapping) -> new dictionary initialized from a mapping object's (key, value) pairs dict(iterable) -> new dictionary initialized as if via: d = {} for k, v in iterable: d[k] = v dict(**kwargs) -> new dictionary initialized with the name=value pairs in the keyword argument list. For example: dict(one=1, two=2)
 
 ### `Policies`
 
@@ -2108,6 +2170,10 @@ What one rollout produced, or why it did not.
 ### `RolloutSpec`
 
 One rollout, described completely enough to run somewhere else.
+
+### `SCORERS`
+
+dict() -> new empty dictionary dict(mapping) -> new dictionary initialized from a mapping object's (key, value) pairs dict(iterable) -> new dictionary initialized as if via: d = {} for k, v in iterable: d[k] = v dict(**kwargs) -> new dictionary initialized with the name=value pairs in the keyword argument list. For example: dict(one=1, two=2)
 
 ### `SOLVED`
 

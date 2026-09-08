@@ -78,7 +78,7 @@ def _section(text: str, heading: str) -> str:
     return rest[: end.start()] if end else rest
 
 
-@pytest.mark.parametrize("name", ["evolve", "async_evolve", "evolve_skill"])
+@pytest.mark.parametrize("name", ["evolve", "async_evolve"])
 def test_every_parameter_of_an_entry_point_reaches_the_page(name):
     """A heading that reads `evolve(...)` documents no parameters at all.
 

@@ -1,3 +1,7 @@
+---
+description: Every empirical claim in AgentDescent with the setup that produced it, including the runs where there was nothing left to learn and the knobs that did not transfer.
+---
+
 # Measured results
 
 Every number here comes from a real run on the algorithm's own dataset with
@@ -66,8 +70,8 @@ Two levers set the difficulty:
 
 ## The one-call path
 
-[`evolve_skill`](quickstart-skill.md) on 40 real HotpotQA items, 12 held out — the
-snippet from the front page, run as written:
+[The dataset quickstart](quickstart-skill.md) on 40 real HotpotQA items, 12 held
+out — the snippet from the front page, run as written:
 
 | | held-out exact match |
 |---|---|
