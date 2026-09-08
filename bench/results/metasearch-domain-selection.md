@@ -90,12 +90,34 @@ committed in 24 expansions.
 port; `bench/metasearch_slots.py --leverage-check` does the third for the
 `selection` slot on the instruction-evolution domains.
 
-Check 3 also catches an environment failure that looks exactly like a scientific
-one: a six-problem scan here reported zero commits everywhere, which was the API
-returning `HTTP 429 AccountQuotaExceeded` for every call. The tell was in the
-usage line — **137 calls carrying 4,175 tokens**, about 30 tokens per call,
-where a program-writing prompt is ~10,000. A run whose model calls all failed
-produces a clean, plausible, entirely meaningless null.
+### 4. count the failed model calls, and abort on them
+
+An environment failure looks exactly like a scientific one. A six-problem scan
+here reported zero commits everywhere; the API was returning `HTTP 429
+AccountQuotaExceeded` for every call. A run whose model calls fail produces a
+clean, plausible, entirely meaningless null, because **a call that fails is a
+candidate that was never written, which the engine sees as a rollout that found
+nothing** — biased in exactly the direction that looks like a real negative
+result.
+
+The first version of this check compared **tokens per call**: that scan showed
+137 calls carrying 4,175 tokens, about 30 per call, where a program-writing
+prompt is ~10,000. **That threshold is not sufficient, and it let a later run
+through.** `with_retries` retries a refused call and often succeeds, so the
+average stays plausible while most attempts fail — measured on an evolution run
+here: **483 calls, 296 failures (61%), and still 1,817 tokens per call**, which
+sails past any per-call threshold. Its validation table read
+`train +0.0013 / held-out -0.0378`, exactly the shape of an honest "fits its
+training problems, does not transfer" finding, and it meant nothing.
+
+So check `Usage.failures` directly and abort:
+
+```python
+fail_rate = usage.failures / usage.calls if usage.calls else 0.0
+if fail_rate > 0.02:
+    raise SystemExit(f"{usage.failures}/{usage.calls} model calls failed "
+                     f"({fail_rate:.0%}) -- this run is void")
+```
 
 ## The domain that passes: LLM-SRBench `lsr_synth`, per-problem
 
