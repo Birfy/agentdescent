@@ -442,9 +442,19 @@ PLUGIN_HOSTS: Dict[str, PluginHost] = {
     "dsh": PluginHost(
         "dsh",
         entrypoint=["dsh", "--profile", "headless"],
-        setup=["sh", "-c", "cd {plugin_dir} && pnpm install --prefer-offline && "
+        # `link:` gets the **absolute** path. `dsh plugin add` runs pnpm inside
+        # `$DSH_HOME/profiles/headless`, not here, so a workspace-relative
+        # `link:plugin/<name>` is resolved from the profile directory and lands
+        # nowhere. pnpm records the broken link and exits 0; dsh then reports
+        # `declares no dsh.bundle` -- it cannot read a package.json that is not
+        # there -- and composes without the plugin. The gate still passes,
+        # because `--dump-config` composes fine without it, so the run scores
+        # the *unmodified* host and every candidate ties with the baseline.
+        setup=["sh", "-c", "p=\"$PWD/{plugin_dir}\" && cd \"$p\" && "
+                           "pnpm install --prefer-offline && "
                            "pnpm run --if-present build && "
-                           "cd - >/dev/null && dsh plugin --profile headless add link:{plugin_dir}"],
+                           "cd - >/dev/null && "
+                           "dsh plugin --profile headless add \"link:$p\""],
         validate=["sh", "-c", "cd {plugin_dir} && pnpm run --if-present test && "
                               "cd - >/dev/null && "
                               "dsh --profile headless --dump-config >/dev/null"],

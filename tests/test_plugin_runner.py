@@ -182,6 +182,29 @@ def test_the_dsh_host_does_not_require_a_build_step():
     assert "--dump-config" in validate, "the gate still proves the plugin loads"
 
 
+def test_the_dsh_host_links_an_absolute_plugin_path():
+    """`dsh plugin add` runs pnpm somewhere else, so a relative link goes nowhere.
+
+    It installs into `$DSH_HOME/profiles/headless`, not the workspace, so
+    `link:plugin/<name>` was resolved from the profile directory and landed on a
+    path that does not exist. Measured: pnpm records the broken link and exits
+    0, dsh reports `declares no dsh.bundle` -- it cannot read a package.json
+    that is not there -- and composes without the plugin.
+
+    Nothing fails. `--dump-config` composes fine without it, so the gate passes,
+    the entrypoint answers, and every rollout scores the *unmodified* host. A
+    candidate that changes the plugin ties with the baseline, which reads as a
+    search that found nothing rather than a plugin that was never loaded.
+    """
+    setup = " ".join(PLUGIN_HOSTS["dsh"].render("plugin/x", "x").setup)
+
+    assert 'link:plugin/x' not in setup, "a workspace-relative link resolves elsewhere"
+    assert '"link:$p"' in setup and 'p="$PWD/plugin/x"' in setup
+    # and the path is captured before the `cd`, so it cannot depend on where
+    # the shell happens to be by the time dsh is called
+    assert setup.index('p="$PWD/plugin/x"') < setup.index("cd ")
+
+
 def test_the_host_table_is_complete():
     assert set(PLUGIN_HOSTS) == set(PLUGIN_FROZEN) == set(PLUGIN_CONTEXT) == {
         "dsh", "claude_code", "codex", "opencode"}
