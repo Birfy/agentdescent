@@ -438,6 +438,7 @@ openai_compatible(
     timeout: float = 120.0,
     usage: Optional[Usage] = None,
     retries: int = 3,
+    stream: bool = False,
     **create_kwargs
 ) -> Completion
 ```
@@ -464,7 +465,9 @@ with_retries(
     completion: Completion,
     attempts: int = 3,
     backoff: float = 0.5,
-    sleep: Callable[[float], None] = <built-in function sleep>
+    sleep: Callable[[float], None] = <built-in function sleep>,
+    rate_limit_backoff: float = 5.0,
+    max_sleep: float = 60.0
 ) -> Completion
 ```
 
