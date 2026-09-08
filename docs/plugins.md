@@ -395,7 +395,35 @@ validate gate, then runs the host CLI on the task:
 
 | host | loads the candidate with | gate | worker |
 |---|---|---|---|
-| `dsh` | `dsh plugin --profile headless add link:<plugin>` after `pnpm install && pnpm build` | `pnpm test`; `dsh --profile headless --dump-config` composes | `dsh --profile headless "<task>"` |
+| `dsh` | `dsh plugin --profile headless add link:<plugin>` after `pnpm install` and `pnpm run --if-present build` | `pnpm run --if-present test`; `dsh --profile headless --dump-config` composes | `dsh --profile headless "<task>"` |
+!!! note "dsh: `build` and `test` are optional, and the entrypoint needs a provider"
+    A dsh plugin is often plain ESM with nothing to compile — the one this page
+    installs is — so both scripts run with `--if-present`. A package that
+    declares them still runs them and still fails the gate when they fail; for
+    one that declares neither, `--dump-config` is the gate, and it is a real
+    check that the plugin loads.
+
+    The worker's `dsh` is a fresh profile inside the workspace with none of your
+    credentials, so the entrypoint stops at `MISSING_CREDENTIAL` unless you give
+    it one. Two spec fields do that: `entrypoint` is appended to the host's
+    command, and `env_passthrough` names the variables to carry through.
+
+    ```json
+    {"kind": "plugin", "host": "dsh", "target": "./my-dsh-plugin",
+     "entrypoint": ["--patch", "/abs/path/to/provider.patch.yml"],
+     "env_passthrough": ["DEEPSEEK_API_KEY"]}
+    ```
+
+    A patch overriding `llm-deepseek` by id (a bare row, not `- insert:`) points
+    it at any OpenAI-compatible endpoint:
+
+    ```yaml
+    - id: llm-deepseek
+      config:
+        baseURL: https://your-endpoint/v3
+        apiKeyEnv: YOUR_KEY_VAR
+    ```
+
 | `claude_code` | `claude -p --plugin-dir <plugin> --strict-mcp-config` | `claude plugin validate <plugin>` | the same command |
 | `codex` | skills copied to `.agents/skills/`, `config.toml` to `.codex/` | the TOML parses | `codex exec --sandbox workspace-write --skip-git-repo-check "<task>"` |
 | `opencode` | skills copied to `.opencode/skills/`, `opencode.jsonc` to `.config/opencode/` | the JSON parses | `opencode run "<task>"` |

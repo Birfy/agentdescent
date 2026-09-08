@@ -155,6 +155,56 @@ def test_env_passthrough_forwards_named_variables_only(tmp_path, monkeypatch):
     assert run(FileTree(tree).render(tree), Task(id="t", prompt="x")) == "secret None"
 
 
+def test_the_dsh_host_does_not_require_a_build_step():
+    """A dsh plugin is often plain ESM with nothing to compile.
+
+    `setup` ran `pnpm build` and `validate` ran `pnpm test` unconditionally, so
+    a package declaring neither died at setup on `Command "build" not found`
+    before it was ever installed -- and the plugin this repository publishes
+    declares neither, which made `kind: "plugin"` unable to evolve its own dsh
+    plugin. Measured against the real CLIs: with `--if-present` the same target
+    installs, passes the gate and answers.
+
+    The gate does not become a no-op. A package that declares the scripts still
+    runs them, and `dsh --dump-config` still has to compose -- which is the
+    check that the plugin loaded at all.
+    """
+    dsh = PLUGIN_HOSTS["dsh"]
+    setup, validate = " ".join(dsh.setup), " ".join(dsh.validate)
+
+    assert "pnpm run --if-present build" in setup
+    assert "pnpm run --if-present test" in validate
+    # the bare forms are what failed; neither should survive anywhere
+    assert "&& pnpm build" not in setup and "&& pnpm test" not in validate
+
+    assert "pnpm install" in setup, "a plugin's dependencies are not optional"
+    assert "plugin --profile headless add" in setup
+    assert "--dump-config" in validate, "the gate still proves the plugin loads"
+
+
+def test_the_dsh_host_links_an_absolute_plugin_path():
+    """`dsh plugin add` runs pnpm somewhere else, so a relative link goes nowhere.
+
+    It installs into `$DSH_HOME/profiles/headless`, not the workspace, so
+    `link:plugin/<name>` was resolved from the profile directory and landed on a
+    path that does not exist. Measured: pnpm records the broken link and exits
+    0, dsh reports `declares no dsh.bundle` -- it cannot read a package.json
+    that is not there -- and composes without the plugin.
+
+    Nothing fails. `--dump-config` composes fine without it, so the gate passes,
+    the entrypoint answers, and every rollout scores the *unmodified* host. A
+    candidate that changes the plugin ties with the baseline, which reads as a
+    search that found nothing rather than a plugin that was never loaded.
+    """
+    setup = " ".join(PLUGIN_HOSTS["dsh"].render("plugin/x", "x").setup)
+
+    assert 'link:plugin/x' not in setup, "a workspace-relative link resolves elsewhere"
+    assert '"link:$p"' in setup and 'p="$PWD/plugin/x"' in setup
+    # and the path is captured before the `cd`, so it cannot depend on where
+    # the shell happens to be by the time dsh is called
+    assert setup.index('p="$PWD/plugin/x"') < setup.index("cd ")
+
+
 def test_a_plugin_tree_carries_its_code(tmp_path):
     """The loader's default extensions do not include JavaScript.
 

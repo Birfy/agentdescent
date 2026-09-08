@@ -431,12 +431,32 @@ PLUGIN_HOSTS: Dict[str, PluginHost] = {
     # under $DSH_HOME (= ~/.dsh = <ws>/.dsh here); the headless profile then
     # runs one task and prints the answer. `--dump-config` composing is the
     # cheapest proof the plugin loaded at all.
+    #
+    # `--if-present` on both scripts, because a dsh plugin is often plain ESM
+    # with nothing to compile -- the one this repository ships is, and without
+    # this the setup step died on `Command "build" not found` before the plugin
+    # was ever installed, so `kind: "plugin"` could not evolve it. A package
+    # that does declare `build` or `test` still runs them, and still fails the
+    # gate when they fail; the fallback for one that declares neither is
+    # `--dump-config`, which is a real check that the plugin loads.
     "dsh": PluginHost(
         "dsh",
         entrypoint=["dsh", "--profile", "headless"],
-        setup=["sh", "-c", "cd {plugin_dir} && pnpm install --prefer-offline && pnpm build && "
-                           "cd - >/dev/null && dsh plugin --profile headless add link:{plugin_dir}"],
-        validate=["sh", "-c", "cd {plugin_dir} && pnpm test && cd - >/dev/null && "
+        # `link:` gets the **absolute** path. `dsh plugin add` runs pnpm inside
+        # `$DSH_HOME/profiles/headless`, not here, so a workspace-relative
+        # `link:plugin/<name>` is resolved from the profile directory and lands
+        # nowhere. pnpm records the broken link and exits 0; dsh then reports
+        # `declares no dsh.bundle` -- it cannot read a package.json that is not
+        # there -- and composes without the plugin. The gate still passes,
+        # because `--dump-config` composes fine without it, so the run scores
+        # the *unmodified* host and every candidate ties with the baseline.
+        setup=["sh", "-c", "p=\"$PWD/{plugin_dir}\" && cd \"$p\" && "
+                           "pnpm install --prefer-offline && "
+                           "pnpm run --if-present build && "
+                           "cd - >/dev/null && "
+                           "dsh plugin --profile headless add \"link:$p\""],
+        validate=["sh", "-c", "cd {plugin_dir} && pnpm run --if-present test && "
+                              "cd - >/dev/null && "
                               "dsh --profile headless --dump-config >/dev/null"],
     ),
     # Claude Code: --plugin-dir loads a plugin from a path for one session;
