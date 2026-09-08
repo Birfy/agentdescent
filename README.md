@@ -251,6 +251,7 @@ Full docs render at **[birfy.github.io/agentdescent](https://birfy.github.io/age
 | [Parallelism](https://birfy.github.io/agentdescent/parallelism/) · [Execution](https://birfy.github.io/agentdescent/execution/) · [Sandboxes](https://birfy.github.io/agentdescent/sandboxes/) | Where rollouts run, and how they are isolated |
 | [Use it from your agent](https://birfy.github.io/agentdescent/plugins/) · [Testing it](https://birfy.github.io/agentdescent/testing-guide/) | The plugin surface, and how to verify each host |
 | [Efficiency](https://birfy.github.io/agentdescent/efficiency/) · [Runtime matrix](https://birfy.github.io/agentdescent/matrix-overview/) | Measured scaling and the scheduler comparison |
+| [Molecule search — porous crystals](https://birfy.github.io/agentdescent/porous-molecules/) | A domain application: flat-PUCT tree search over molecules, with a validity gate and a real `P(s,a)` |
 
 ## Citing
 

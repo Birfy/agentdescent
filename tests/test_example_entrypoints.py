@@ -1,13 +1,17 @@
-"""The command-line contract shared by the eight faithful algorithm ports.
+"""The command-line contract shared by every standardised entry point.
 
-Eleven entry points, because ERA ships four tasks on one search: the Kaggle
+Twelve of them, because ERA ships five tasks on one search -- the Kaggle
 regression upstream bundles, the paper's *numerical solution of integrals*,
 double-precision evaluation of the Gauss hypergeometric function, equation
-discovery on LLM-SRBench, and the AlgoTune speedup benchmark. The contract is
-per entry point -- it is about the command line a user types -- so all five are
-rows here, and none of them adds an algorithm to the fidelity table.
+discovery on LLM-SRBench, and the AlgoTune speedup benchmark -- and because the
+porous-molecule search speaks the same command line. The contract is per entry
+point: it is about the flags a user types, not about what a module is. So every
+`main` that calls `add_standard_args` is a row here, and being one adds nothing
+to the fidelity table -- `porous_tree_search` is a *domain application* of the
+ERA search rather than a port of a published algorithm, and does not appear in
+`docs/self-evolution-examples.md` or `docs/port-fidelity.md` at all.
 
-Ten of the eleven where numpy is absent: the LLM-SRBench task's scoring module
+Eleven of the twelve where numpy is absent: the LLM-SRBench task's scoring module
 maps its grammar's function names onto numpy's, so its entry point cannot be
 imported without it, and this repository treats numpy as optional.
 """
@@ -37,6 +41,7 @@ except ImportError:                     # ...and the LLM-SRBench task needs it
     era_srbench = None
 from examples.evoskill import evoskill_skill_discovery as evoskill
 from examples.gepa import gepa_prompt_evolution as gepa
+from examples.porous import porous_tree_search as porous
 from examples.openevolve import openevolve_program_evolution as openevolve
 from examples.skillopt import skillopt_skill_training as skillopt
 from examples import _TEMPLATE as port_template
@@ -103,6 +108,14 @@ PORTS = (
     # `prepare_suite` is the boundary a dry-run must not cross.
     Port(era_algotune, "iterations", "glm-5.2", 1800.0, "prepare_suite",
          provider="openai", async_ratio=1, budget_is_iterations=True),
+    # The molecule search. Not an algorithm port -- it runs ERA's flat-PUCT tree
+    # on a different domain -- and here because the contract is the command
+    # line. Its model default is `None` for DGM's reason: `--offline` proposes
+    # with rule-based edit operators and needs no API at all. Its loader builds
+    # weight profiles rather than reading data, and `--iterations` is already the
+    # rollout budget, as it is for every tree search in this table.
+    Port(porous, "iterations", None, 600.0, "build_tasks",
+         async_ratio=1, budget_is_iterations=True),
 )
 
 # ERA's fourth task, equation discovery on LLM-SRBench. Same deviations again,

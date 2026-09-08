@@ -26,7 +26,8 @@ import subprocess
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Mapping, Optional, Protocol, Sequence, Tuple, runtime_checkable
+from typing import (Any, Callable, Dict, List, Mapping, Optional, Protocol,
+                    Sequence, Tuple, runtime_checkable)
 
 Completion = Callable[[str], str]
 
@@ -348,9 +349,36 @@ def echo(transform: Optional[Callable[[str], str]] = None) -> Completion:
     return complete
 
 
+class RateLimited(RuntimeError):
+    """The provider said "too many requests", and for how long if it bothered to.
+
+    Worth a type of its own because it wants a different retry from every other
+    failure: a transport error is worth retrying in half a second, and a rate
+    limit retried in half a second is three attempts spent inside two seconds
+    against a limiter measured in tens of them.
+    """
+
+    def __init__(self, message: str, retry_after: Optional[float] = None) -> None:
+        super().__init__(message)
+        #: Seconds the provider asked for, from `Retry-After`, when it sent one.
+        self.retry_after = retry_after
+
+
 def with_retries(completion: Completion, attempts: int = 3,
-                 backoff: float = 0.5, sleep: Callable[[float], None] = time.sleep) -> Completion:
-    """Wrap a completion with exponential-backoff retries on any exception."""
+                 backoff: float = 0.5, sleep: Callable[[float], None] = time.sleep,
+                 rate_limit_backoff: float = 5.0,
+                 max_sleep: float = 60.0) -> Completion:
+    """Wrap a completion with exponential-backoff retries on any exception.
+
+    Rate limits back off on their own, much longer, schedule. Measured against a
+    throttling endpoint: the generic 0.5s/1.0s pair spent all three attempts
+    inside two seconds, every one of them refused, and the engine -- which
+    retires a worker after three consecutive failures -- lost every worker in
+    about a minute and ended the run with an empty tree. A `Retry-After` header
+    wins over both schedules when the provider sends one, and everything is
+    capped at ``max_sleep`` so a hostile or mistaken header cannot park a worker
+    for an hour.
+    """
     def complete(prompt: str) -> str:
         last: Optional[Exception] = None
         for i in range(attempts):
@@ -359,7 +387,11 @@ def with_retries(completion: Completion, attempts: int = 3,
             except Exception as e:  # noqa: BLE001 - provider-agnostic retry
                 last = e
                 if i < attempts - 1:
-                    sleep(backoff * (2 ** i))
+                    delay = backoff * (2 ** i)
+                    if isinstance(e, RateLimited):
+                        delay = max(delay, rate_limit_backoff * (2 ** i),
+                                    e.retry_after or 0.0)
+                    sleep(min(delay, max_sleep))
         raise last  # type: ignore[misc]
     return complete
 
@@ -430,11 +462,54 @@ def claude(model: str = "claude-opus-4-8", max_tokens: int = 4096,
     return with_retries(complete, attempts=retries) if retries > 1 else complete
 
 
+def _read_sse(response: Any) -> Dict[str, Any]:
+    """Reassemble an OpenAI-shaped SSE stream into the response it stands for.
+
+    Returns the same shape the non-streaming path parses -- ``choices[0].message``
+    plus ``usage`` -- so nothing downstream has to know which transport was used.
+
+    Deliberately forgiving about the stream and strict about nothing: a chunk
+    that will not parse is skipped rather than raised on, because one malformed
+    frame in a hundred is a provider quirk and not a reason to throw away a
+    completed answer. `reasoning_content` deltas are read and dropped: they are
+    what keeps the connection from going idle, and they are not the reply.
+    """
+    text: List[str] = []
+    usage_payload: Dict[str, Any] = {}
+    finish: Optional[str] = None
+    for raw in response:
+        line = raw.decode("utf-8", "replace").strip()
+        if not line or not line.startswith("data:"):
+            continue
+        chunk_text = line[len("data:"):].strip()
+        if chunk_text == "[DONE]":
+            break
+        try:
+            chunk = json.loads(chunk_text)
+        except ValueError:
+            continue
+        if isinstance(chunk.get("usage"), dict):
+            usage_payload = chunk["usage"]
+        for choice in chunk.get("choices") or ():
+            delta = choice.get("delta") or {}
+            piece = delta.get("content")
+            if piece:
+                text.append(piece)
+            if choice.get("finish_reason"):
+                finish = choice["finish_reason"]
+    return {
+        "choices": [{"message": {"role": "assistant", "content": "".join(text)},
+                     "finish_reason": finish}],
+        "usage": usage_payload,
+    }
+
+
 def openai_compatible(model: str, *, base_url_env: str = "OPENAI_BASE_URL",
                       api_key_env: str = "OPENAI_API_KEY",
                       default_base_url: str = "https://api.openai.com/v1",
                       max_tokens: int = 4096, timeout: float = 120.0,
                       usage: Optional[Usage] = None, retries: int = 3,
+                      stream: bool = False,
                       **create_kwargs) -> Completion:
     """A completion for any OpenAI-compatible chat endpoint (GLM/Zhipu, proxies,
     local servers, OpenAI itself).
@@ -448,6 +523,19 @@ def openai_compatible(model: str, *, base_url_env: str = "OPENAI_BASE_URL",
     model starved of budget returns empty content, and at 1024 that happened for
     half of one measured batch of reflection prompts.
 
+    ``stream=True`` sends the request as SSE and reassembles the text, which is
+    a **reliability** knob rather than a latency one: a non-streaming request to
+    a reasoning model sends no bytes at all while the model thinks, and any
+    gateway with an idle timeout closes the connection underneath it. Measured
+    against one such endpoint: a single request finished in 205 s, but four
+    concurrent ones -- queued behind each other, so each took longer -- were all
+    cut at 301 s with `RemoteDisconnected`, three of them within 0.2 s of each
+    other. The same prompts streamed ran past ten minutes with bytes arriving
+    continuously, because the reasoning deltas themselves keep the connection
+    warm. Usage still comes back: `stream_options.include_usage` puts it in the
+    final chunk, and an endpoint that ignores that field simply reports zero
+    tokens rather than failing.
+
     Extra keyword arguments go into the request body, so ``temperature=0`` and any
     provider-specific field work the same way they do on :func:`claude`."""
     def complete(prompt: str) -> str:
@@ -455,19 +543,23 @@ def openai_compatible(model: str, *, base_url_env: str = "OPENAI_BASE_URL",
         key = os.environ.get(api_key_env)
         if not key:
             raise RuntimeError(f"set {api_key_env} (and {base_url_env}) in your environment")
-        body = json.dumps({
+        payload: Dict[str, Any] = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": max_tokens,
             **create_kwargs,
-        }).encode()
+        }
+        if stream:
+            payload["stream"] = True
+            payload.setdefault("stream_options", {"include_usage": True})
+        body = json.dumps(payload).encode()
         req = urllib.request.Request(
             f"{base}/chat/completions", data=body,
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
         t0 = time.time()
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
-                data = json.load(resp)
+                data = _read_sse(resp) if stream else json.load(resp)
         except urllib.error.HTTPError as e:
             # The body carries the only useful part -- "rate limit: retry in 12s",
             # "context length exceeded", "insufficient quota" -- and it lives on
@@ -480,9 +572,25 @@ def openai_compatible(model: str, *, base_url_env: str = "OPENAI_BASE_URL",
                 detail = e.read().decode("utf-8", "replace").strip()[:400]
             except Exception:  # noqa: BLE001 - the body is best-effort
                 detail = ""
-            raise RuntimeError(
-                f"{base} returned HTTP {e.code} for model {model!r}"
-                + (f": {detail}" if detail else "")) from e
+            message = (f"{base} returned HTTP {e.code} for model {model!r}"
+                       + (f": {detail}" if detail else ""))
+            if e.code in (429, 503):
+                # Told apart from every other 4xx so `with_retries` can wait the
+                # seconds a limiter wants instead of the half-second a transport
+                # blip wants. `Retry-After` is seconds or an HTTP date; only the
+                # numeric form is honoured, and a missing or unreadable one
+                # falls back to the rate-limit schedule.
+                header = ""
+                try:
+                    header = (e.headers.get("Retry-After") or "").strip()
+                except Exception:  # noqa: BLE001 - headers are best-effort
+                    header = ""
+                try:
+                    retry_after = float(header) if header else None
+                except ValueError:
+                    retry_after = None
+                raise RateLimited(message, retry_after) from e
+            raise RuntimeError(message) from e
         except Exception:
             if usage is not None:
                 usage.record(seconds=time.time() - t0, failed=True)
