@@ -1,6 +1,6 @@
 # Sparse audit -- Phase 0 report (2026-09-09)
 
-**Verdict: PROCEED.** the bias is real and larger than the gate's sampling noise (|delta|/sd = 1.99). A correction changes decisions.
+**Verdict: PROCEED.** the bias is real and larger than the gate's sampling noise (|delta|/sd = 1.97). A correction changes decisions.
 
 ## What was measured
 
@@ -10,11 +10,11 @@
 | verifier `f` (cheap, biased) | LLM judge (deepseek-v4-flash, thinking=off) |
 | oracle `Y` (ground truth) | normalized exact match against the reference |
 | `verifier_version` | `f55dec40cec559f7` |
-| loop | 6 rounds x 3 workers, held_out_frac=0.4, tournament=False |
+| loop | 6 rounds x 3 workers, held_out_frac=0.4, tournament=True |
 | sampling | i.i.d., inclusion probability 1.0 |
-| records | `reports/audit_phase0_2026-09-09.jsonl` |
-| wall clock | 1406s |
-| model calls | 518 (27470+195457 tokens) |
+| records | `reports/audit_phase0_2026-09-09_tournament.jsonl` |
+| wall clock | 1857s |
+| model calls | 537 (28236+256119 tokens) |
 | seed | 0 |
 
 ## The bias
@@ -23,10 +23,10 @@
 
 | pool | n | tasks | `Delta_hat` | 95% CI (unit) | 95% CI (clustered) | mean `f` | mean `Y` | disagree |
 |---|---|---|---|---|---|---|---|---|
-| all resolved | 177 | 49 | 0.1751 | [0.1186, 0.2316] | [0.1050, 0.2541] | 0.452 | 0.277 | 0.175 |
-| calibration only | 122 | 42 | 0.1803 | [0.1148, 0.2541] | [0.0976, 0.2793] | 0.508 | 0.328 | 0.180 |
+| all resolved | 178 | 50 | 0.1742 | [0.1236, 0.2303] | [0.0934, 0.2697] | 0.534 | 0.360 | 0.174 |
+| calibration only | 126 | 41 | 0.1905 | [0.1270, 0.2619] | [0.0873, 0.3111] | 0.595 | 0.405 | 0.190 |
 
-Units seen by the tap: 177; audited: 177; resolved and analysed: 177.
+Units seen by the tap: 178; audited: 178.
 
 The estimator is the Hajek (inclusion-probability-weighted) mean with a percentile bootstrap. It is **not** the PPI estimator Phase 3 needs: with the labels this cheap there is no unlabelled mass to borrow strength from, and Phase 0 only has to decide whether the bias exists and matters.
 
@@ -34,18 +34,18 @@ The estimator is the Hajek (inclusion-probability-weighted) mean with a percenti
 
 ## Does it move a decision?
 
-The acceptance gate reads a Beta posterior over 32 held-out tasks, whose own sd at the observed rate is **0.0880**.
+The acceptance gate reads a Beta posterior over 32 held-out tasks, whose own sd at the observed rate is **0.0882**.
 
-- `|Delta_hat| / gate sd` = 1.99
+- `|Delta_hat| / gate sd` = 1.97
 - audit-limited (`SE(Delta)^2 > var_p`): **False** -- when true, buying more in-loop evaluation cannot improve the criterion and the budget belongs on oracle labels instead.
 
 ## The fixed cheap subset (issue #179 §1.2)
 
 `ThreeLayerVerifier._subset` draws `cheap_eval_tasks` held-out items **once** and reuses them, and the acceptance measurement includes them. Ranking can therefore overfit a fixed sample the gate then reads. If it does, artifacts score higher inside that subset than outside it.
 
-Mean `score(inside cheap subset) - score(outside)` over 5 artifacts: **-0.1929**.
+Mean `score(inside cheap subset) - score(outside)` over 5 artifacts: **-0.1786**.
 
-Ranking was **off** (`fusion_tournament=False`, the default), so nothing selected on the cheap layer at all. Whatever gap appears here is workload variation -- which is what makes it the baseline the `--tournament` arm has to be read against.
+Ranking **was** on for this run, so the cheap layer really did choose which candidate went forward. A *positive* gap would be the contamination: candidates picked for scoring well on those few tasks, then measured again on a set that contains them. A negative one says the subset happens to hold harder tasks and selection did not overcome that.
 
 Resolution: 4 tasks inside against 28 outside, over 5 artifacts. That can see a large contamination and cannot resolve a small one; read a null here as "no evidence of", not "none".
 
@@ -55,7 +55,7 @@ Resolution: 4 tasks inside against 28 outside, over 5 artifacts. That can see a 
 {}
 ```
 
-held-out reward (as the loop measured it, i.e. through `f`): 0.688
+held-out reward (as the loop measured it, i.e. through `f`): 0.656
 
 ## Reproduce
 

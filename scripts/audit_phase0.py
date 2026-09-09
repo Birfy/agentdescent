@@ -214,6 +214,14 @@ def run(args) -> Dict:
                        f"thinking={'on' if args.judge_thinking else 'off'})")
 
     store = AuditStore(args.store)
+    # An `AuditStore` accumulates across runs **by design** -- it is the durable
+    # place labels land, sometimes weeks after the run that asked for them. That
+    # is right for the store and wrong for a report about one run: pointed at a
+    # file an earlier run wrote, the analysis silently mixed 78 old pairs into
+    # 113 new ones and reported n=191 next to "units seen: 113". Remember what
+    # was already there and subtract it, rather than forbidding an existing file:
+    # appending is the behaviour the store is for.
+    preexisting = {r.record_id for r in store.all()}
     audited = AuditedReward(
         judge,
         oracle=GoldAnswer(exact_match),
@@ -282,6 +290,7 @@ def run(args) -> Dict:
         "result": result, "audited": audited, "store": store, "usage": usage,
         "tasks": tasks, "elapsed": elapsed, "notes": notes,
         "judge_label": judge_label, "cheap_ids": cheap_ids,
+        "preexisting": preexisting,
         "held_out_ids": {getattr(t, "id", None) for t in getattr(verifier, "held_out", [])},
     }
 
@@ -289,7 +298,8 @@ def run(args) -> Dict:
 def analyse(bundle: Dict, args) -> Dict:
     store: AuditStore = bundle["store"]
     audited: AuditedReward = bundle["audited"]
-    recs = [r for r in store.all() if r.resolved]
+    prior = bundle.get("preexisting") or set()
+    recs = [r for r in store.all() if r.resolved and r.record_id not in prior]
     cal = [r for r in recs if r.purpose is Purpose.CALIBRATION]
 
     all_stats = residual_bias(recs, seed=args.seed)
@@ -330,6 +340,7 @@ def analyse(bundle: Dict, args) -> Dict:
         "subset_gaps": gaps,
         "subset_gap_mean": statistics.fmean(gaps) if gaps else None,
         "seen": audited.seen, "audited_n": audited.audited,
+        "carried": len(prior),
     }
 
 
@@ -413,7 +424,10 @@ def report(bundle: Dict, an: Dict, args) -> str:
 
     lines += [
         "",
-        f"Units seen by the tap: {an['seen']}; audited: {an['audited_n']}.",
+        f"Units seen by the tap: {an['seen']}; audited: {an['audited_n']}; "
+        f"resolved and analysed: {s['n']}."
+        + (f" ({an['carried']} earlier records in the store were excluded.)"
+           if an["carried"] else ""),
         "",
         "The estimator is the Hajek (inclusion-probability-weighted) mean with a "
         "percentile bootstrap. It is **not** the PPI estimator Phase 3 needs: "
@@ -453,10 +467,27 @@ def report(bundle: Dict, an: Dict, args) -> str:
             f"Mean `score(inside cheap subset) - score(outside)` over "
             f"{len(an['subset_gaps'])} artifacts: **{fmt(an['subset_gap_mean'])}**.")
         lines.append("")
-        lines.append("With `fusion_tournament=False` (the default) nothing ranks "
-                     "on the cheap layer at all, so a gap here is workload "
-                     "variation rather than selection pressure. Re-run with "
-                     "`--tournament` to see what ranking adds.")
+        if args.tournament:
+            lines.append(
+                "Ranking **was** on for this run, so the cheap layer really did "
+                "choose which candidate went forward. A *positive* gap would be "
+                "the contamination: candidates picked for scoring well on those "
+                "few tasks, then measured again on a set that contains them. A "
+                "negative one says the subset happens to hold harder tasks and "
+                "selection did not overcome that.")
+        else:
+            lines.append(
+                "Ranking was **off** (`fusion_tournament=False`, the default), so "
+                "nothing selected on the cheap layer at all. Whatever gap appears "
+                "here is workload variation -- which is what makes it the "
+                "baseline the `--tournament` arm has to be read against.")
+        lines.append("")
+        lines.append(
+            f"Resolution: {args.cheap_eval_tasks} tasks inside against "
+            f"{an['n_held'] - args.cheap_eval_tasks} outside, over "
+            f"{len(an['subset_gaps'])} artifacts. That can see a large "
+            "contamination and cannot resolve a small one; read a null here as "
+            "\"no evidence of\", not \"none\".")
 
     lines += [
         "",
