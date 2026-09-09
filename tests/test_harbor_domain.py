@@ -261,3 +261,36 @@ def test_scale_fixes_the_denominator_so_a_candidate_cannot_change_the_ruler(task
     with pytest.raises(ValueError):
         harbor_domain(task, Runner(baseline), scoring=["private.passed"],
                       scale={"private.passed": 0.0})
+
+
+def test_whole_file_patch_leaves_the_workspace_at_the_baseline(tmp_path):
+    """A shared workspace must never decide what the next candidate is editing.
+
+    Resetting only on the way *in* is not enough. Anything that reads a file
+    between two calls -- a SEARCH/REPLACE format that quotes existing text, a
+    diff "against the original" -- reads the previous candidate instead.
+    Measured on SWE-bench-Science task_001: every edit block naming one file
+    stopped matching after the first sample, because the file no longer held
+    what the prompt had shown, and the failures looked like the model being bad
+    at quoting.
+    """
+    from examples.metasearch._harbor import whole_file_patch
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "a.txt").write_text("baseline\n")
+    for cmd in (["init", "-q"], ["add", "-A"]):
+        subprocess.run(["git", *cmd], cwd=ws, check=True, capture_output=True)
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                    "commit", "-qm", "baseline"], cwd=ws, check=True, capture_output=True)
+
+    first = whole_file_patch(ws, {"a.txt": "candidate one\n"})
+    assert "candidate one" in first
+    assert (ws / "a.txt").read_text() == "baseline\n", "workspace still holds candidate one"
+    assert not subprocess.run(["git", "status", "--porcelain"], cwd=ws,
+                              capture_output=True, text=True).stdout.strip()
+
+    # the next candidate is built against the baseline, not against the last one
+    second = whole_file_patch(ws, {"a.txt": "candidate two\n"})
+    assert "candidate two" in second and "candidate one" not in second
+    assert whole_file_patch(ws, {}).strip() == ""

@@ -438,8 +438,17 @@ def whole_file_patch(workspace: os.PathLike, files: Mapping[str, str]) -> str:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8")
     subprocess.run(["git", "add", "-A"], cwd=ws, check=True, capture_output=True)
-    return subprocess.run(["git", "diff", "--cached", "--binary", "HEAD"], cwd=ws,
-                          check=True, capture_output=True, text=True).stdout
+    patch = subprocess.run(["git", "diff", "--cached", "--binary", "HEAD"], cwd=ws,
+                           check=True, capture_output=True, text=True).stdout
+    # Leave the workspace at the baseline, not holding this candidate's edits.
+    # Resetting only on the way *in* is not enough: anything that reads a file
+    # between two calls -- an edit format that quotes existing text, a diff
+    # against "the original" -- reads the previous candidate instead. Measured:
+    # every SEARCH/REPLACE block naming one file stopped matching after the
+    # first sample, because the file no longer held what the prompt showed.
+    subprocess.run(["git", "reset", "--hard", "HEAD"], cwd=ws, check=True, capture_output=True)
+    subprocess.run(["git", "clean", "-fdqx"], cwd=ws, check=True, capture_output=True)
+    return patch
 
 
 def _trailing_json(text: str) -> Dict[str, Any]:
