@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-226 public names across 40 modules.
+240 public names across 41 modules.
 
 ---
 
@@ -1035,6 +1035,10 @@ Synchronous truth: a gold answer, an exact match, a checker, a simulator.
 
 An oracle that never answers. The default, and it is not a no-op.
 
+### `OracleSource`
+
+Ground truth for one `(task, output)` pair.
+
 ### `resolve_from_mapping(store, answers: Dict[str, float], *, at: Optional[float] = None) -> int`
 
 Fill in truth for many pending records at once. Returns how many landed.
@@ -1060,11 +1064,104 @@ Records on disk, indexed in memory.
 | `resolve(record_id: str, oracle_score: float, *, at: Optional[float] = None) -> bool` | Attach ground truth to a pending record. `False` if there was none to attach. |
 | `versions() -> List[str]` | Every `verifier_version` seen, in order of first appearance. |
 
+### `summarise(records: Iterable[AuditRecord]) -> Dict[str, float]`
+
+Counts and the raw mean residual. **Not** an estimate of the bias.
+
+---
+
+## Prediction-powered inference
+
+The calibration estimator: a stratified mean that borrows the unlabelled scores. &nbsp;·&nbsp; `agentdescent.audit.ppi` &nbsp;·&nbsp; [guide](audit.md)
+
+### `PPIError`
+
+The input cannot support an estimate at all.
+
+### `PPIResult(...)`
+
+The estimate, its interval, and everything needed to distrust it.
+
+```python
+PPIResult(
+    theta: float,
+    ci: Tuple[float, float],
+    se: float,
+    df: float,
+    lambda_: float,
+    gain_factor: float,
+    n: int,
+    n_unlab: int,
+    alpha: float,
+    warnings: List[str] = <factory>,
+    per_stratum: Dict[str, Dict[str, float]] = <factory>
+) -> None
+```
+
+### `Stratum(...)`
+
+One layer of the sampling design, with its labelled and unlabelled halves.
+
+```python
+Stratum(
+    name: str,
+    weight: float,
+    f_lab: np.ndarray,
+    y_lab: np.ndarray,
+    f_unlab: np.ndarray
+) -> None
+```
+
+### `ppi_mean_stratified(...)`
+
+Estimate `E[Y]` over a stratified population, using the unlabelled `f`.
+
+```python
+ppi_mean_stratified(
+    strata: Sequence[Stratum],
+    *,
+    alpha: float = 0.05,
+    k_folds: int = 5,
+    seed: int = 0
+) -> PPIResult
+```
+
+| parameter | type | default | what it is |
+|---|---|---|---|
+| `strata` | `Sequence[Stratum]` | *required* | One `Stratum` per layer. `weight` must be the **population** share and the weights must sum to 1. |
+| `alpha` | `float` | `0.05` | `1 - alpha` is the nominal coverage. 0.05 gives a 95% interval. |
+| `k_folds` | `int` | `5` | Folds for cross-fitting `lam`; see `_lambda_crossfit`. |
+| `seed` | `int` | `0` | Fixes the fold split, so the same labels give the same interval twice. |
+
+### `t_ppf(p: float, df: float) -> float`
+
+Quantile of Student's t, via the Cornish-Fisher expansion in `1/df`.
+
 ---
 
 ## Audit estimation
 
 The design-based baseline: a weighted mean of the residual, with an interval. &nbsp;·&nbsp; `agentdescent.audit.estimate` &nbsp;·&nbsp; [guide](audit.md)
+
+### `bootstrap_ci(...)`
+
+Percentile bootstrap interval for `hajek_mean`.
+
+```python
+bootstrap_ci(
+    values: Sequence[float],
+    probs: Sequence[float],
+    *,
+    draws: int = 5000,
+    alpha: float = 0.05,
+    seed: int = 0,
+    clusters: Optional[Sequence] = None
+) -> Tuple[float, float]
+```
+
+### `hajek_mean(values: Sequence[float], probs: Sequence[float]) -> float`
+
+Inclusion-probability-weighted mean -- the Hajek ratio estimator.
 
 ### `residual_bias(...)`
 
@@ -1078,6 +1175,21 @@ residual_bias(
     alpha: float = 0.05,
     seed: int = 0
 ) -> Dict[str, object]
+```
+
+### `standard_error(...)`
+
+Bootstrap standard error of `hajek_mean`.
+
+```python
+standard_error(
+    values: Sequence[float],
+    probs: Sequence[float],
+    *,
+    draws: int = 2000,
+    seed: int = 1,
+    clusters: Optional[Sequence] = None
+) -> float
 ```
 
 ---
@@ -1117,6 +1229,14 @@ Which of the two disjoint pools a labelled unit belongs to.
 |---|---|
 | `CALIBRATION` | `'calibration'` |
 | `IMPROVEMENT` | `'improvement'` |
+
+### `new_record_id() -> str`
+
+A fresh record id. Also the ticket a deferred oracle resolves against.
+
+### `output_digest(output: str) -> str`
+
+A short stable digest of an output, for logs and for de-duplication.
 
 ### `verifier_fingerprint(fn: Callable[..., Any], *, extra: Any = None) -> str`
 
@@ -2297,6 +2417,10 @@ Seven methods: four the aggregator calls, three more the engine calls.
 
 A throwaway directory on this machine -- what a rollout has always got.
 
+### `MIN_N_DOMINANT`
+
+int([x]) -> integer int(x, base=10) -> integer
+
 ### `MemoryCache`
 
 In-process, single-flight, counted.
@@ -2352,6 +2476,10 @@ What one rollout produced, or why it did not.
 ### `RolloutSpec`
 
 One rollout, described completely enough to run somewhere else.
+
+### `SCHEMA_VERSION`
+
+int([x]) -> integer int(x, base=10) -> integer
 
 ### `SCORERS`
 

@@ -68,6 +68,9 @@ SECTIONS: List[Tuple[str, str, str, str]] = [
     ("agentdescent.audit.store", "The audit store",
      "Append-only persistence for paired observations, and the two pools.",
      "audit.md"),
+    ("agentdescent.audit.ppi", "Prediction-powered inference",
+     "The calibration estimator: a stratified mean that borrows the unlabelled scores.",
+     "audit.md"),
     ("agentdescent.audit.estimate", "Audit estimation",
      "The design-based baseline: a weighted mean of the residual, with an interval.",
      "audit.md"),
@@ -431,6 +434,11 @@ def _methods(cls: type) -> List[Tuple[str, str]]:
 #: the top level. They have doc pages and a public API, so leaving them out of
 #: the reference because of an import style would be a hole in it.
 SUBMODULES: List[Tuple[str, str, str, str]] = [
+    # Collected for its `__all__`; every name lands in one of the four
+    # `agentdescent.audit.*` sections above, so this bucket itself stays empty.
+    ("agentdescent.audit", "The sparse audit package",
+     "Pair a cheap verifier against ground truth, and correct for the gap.",
+     "audit.md"),
     ("agentdescent.backends", "Document backends",
      "A tool-using agent over a document that is too big for a prompt.",
      "backends.md"),

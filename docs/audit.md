@@ -209,18 +209,77 @@ ratio.
 `disagree` is worth reading beside `delta`: a small bias spread over every unit
 and a large bias on a few units give the same mean and call for different fixes.
 
-### What is deliberately not here
+`summarise` is neither an estimator nor this one — a raw *unweighted* mean for
+eyeballing a run, named so nobody wires it into a gate.
 
-**Prediction-powered inference.** PPI additionally borrows strength from the
-*unlabelled* verifier scores — units `f` scored that the oracle never saw — using
-a cross-fitted coefficient, per-stratum weights and a `t` quantile. That earns
-its keep when labels are scarce and unlabelled scores are plentiful; it also has
-several ways to be subtly wrong that a coverage test does not catch, so it
-belongs in a module with its own golden vectors and mutation tests.
+## Prediction-powered inference — the refinement
 
-The two are a baseline and a refinement, not alternatives: same point estimate in
-expectation, wider interval. Any PPI estimator added later is **measured against
-this one** rather than trusted over it.
+`residual_bias` uses only the audited units. Most of a run's units were scored by
+the verifier and never sent to the oracle, and
+[`ppi_mean_stratified`](api.md#prediction-powered-inference) puts those to work:
 
-`summarise` is neither — a raw *unweighted* mean for eyeballing a run, named so
-nobody wires it into a gate.
+```python
+from agentdescent.audit import Stratum, ppi_mean_stratified
+
+result = ppi_mean_stratified([
+    Stratum("accepted", weight=0.55, f_lab=..., y_lab=..., f_unlab=...),
+    Stratum("boundary", weight=0.15, f_lab=..., y_lab=..., f_unlab=...),
+    Stratum("rejected", weight=0.30, f_lab=..., y_lab=..., f_unlab=...),
+])
+result.theta, result.ci, result.se, result.gain_factor
+```
+
+Per stratum the estimate is
+
+```
+theta = lam * mean(f_unlab)  +  mean(y_lab - lam * f_lab)
+```
+
+At `lam = 0` this is the labelled-only mean — so **a useless verifier costs
+nothing**, which is what makes it safe to switch on. At `lam = 1` it is the
+classical PPI rectifier. In between, `lam` minimises
+
+```
+Var = lam² · Var(f_unlab) / N  +  Var(y - lam·f) / n
+```
+
+`gain_factor` reports `Var(labelled-only) / Var(this)` — the factor by which the
+oracle budget was effectively multiplied. **`gain_factor → 1` means the verifier
+carries no usable signal**, and the answer is a better verifier, not a bigger
+audit.
+
+!!! warning "`weight` is the population share, not the sample share"
+    They differ by exactly the amount stratification was introduced to create.
+    Using the sample share turns a stratified sample back into a simple one; on
+    the test workload coverage falls from 0.94 to **0.01**.
+
+### Four things that are easy to get wrong here
+
+| | why it bites |
+|---|---|
+| `lam` fitted on the labels it is applied to | The residuals look smaller than they are. Reported SE comes in ~7% low and coverage drops to 0.91. Fixed by K-fold cross-fitting — **run the coverage test before touching `_lambda_crossfit`**. |
+| a `z` quantile instead of `t` | At 40–100 labels per stratum the normal quantile is 1–2% too small, and a 2%-narrow interval covers 93% while claiming 95%. |
+| fewer than `MIN_N_DOMINANT` (80) labels in the heaviest stratum | Coverage is about 0.92, not 0.95 — the skew of a binary outcome at small n. Not a bug, so it is a warning and a locked test rather than a fix. |
+| dropping `lam² · Var(f_unlab) / N` | One missing term. The estimate does not move, the interval looks normal, coverage falls ~3pp. Nothing but a replication study finds it. |
+
+### How it is guarded
+
+`residual_bias` is the baseline PPI has to beat, and the two are checked against
+each other rather than one being trusted over the other:
+
+- **Coverage** — 400 replications must cover at the nominal rate, and the
+  reported SE must match the actual spread of the estimates to within 7%.
+- **Mutations** — three deliberately wrong estimators, whose coverage must
+  collapse: ignoring stratum weights (0.94 → 0.01), imputing `f` as truth
+  (→ 0.00), dropping the unlabelled variance term (→ 0.91). They test the
+  *coverage suite*, not the estimator: a coverage run that passes at 0.95 proves
+  nothing until you know it would fail at 0.50.
+- **Golden vectors** — six recorded inputs spanning the regimes (useless
+  verifier, perfect verifier, no unlabelled units, weights carrying the answer,
+  thin dominant stratum), exact to 1e-12. Coverage moves a point under any small
+  change and cannot separate a refactor from a regression; these can.
+  Regenerate deliberately with `python -m tools.gen_audit_ppi_golden`.
+
+Every test that checks *bias* uses a one-directional perturbation. Symmetric
+noise is unbiased on balanced binary outcomes, so a suite built from symmetric
+flips passes against an estimator that has no idea what it is doing.

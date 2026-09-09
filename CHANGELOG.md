@@ -32,6 +32,34 @@ All notable changes to AgentDescent are documented here. The format follows
   and `for_calibration` asserts the split rather than filtering for it. The
   estimator is deliberately not included. [docs/audit.md](docs/audit.md)
 
+- **`agentdescent.audit.ppi` -- the calibration estimator.** Prediction-powered
+  inference for a stratified mean: `theta = lam * mean(f_unlab) + mean(y_lab -
+  lam * f_lab)`, with `lam` chosen to minimise the variance and **cross-fitted**
+  so the interval is honest. At `lam = 0` it degenerates to the labelled-only
+  mean, so a useless verifier costs nothing; `gain_factor` reports the factor by
+  which the oracle budget was effectively multiplied, and `1.0` means the
+  verifier is buying nothing.
+
+  Guarded three ways, because a wrong interval here makes the acceptance gate
+  confident about a number it should be hedging. Coverage over 400 replications,
+  with the reported SE checked against the actual spread. Three mutation tests
+  whose coverage must collapse -- ignoring stratum weights (0.94 -> 0.01),
+  imputing the verifier as truth (-> 0.00), dropping `lam**2 Var(f_unlab)/N`
+  (-> 0.91) -- which test the coverage suite rather than the estimator. And six
+  golden vectors exact to 1e-12, spanning the regimes coverage cannot separate.
+
+  **This introduces numpy as the package's first runtime dependency.**
+
+- **`numpy` is a dependency of the core.** `dependencies` was empty and
+  `docs/plugin-design.md` said it must stay that way; the estimator above is the
+  reason to change that, and the doc now says what is true. Everything else in
+  the package, and the CLI, still run on the standard library alone.
+
+  Installing it un-skipped `tests/test_era_srbench.py`, which gated on numpy
+  alone while also needing scipy and sympy -- three tests that had never run
+  failed immediately. The guards now name every optional dependency they use,
+  matching how the same file already handles `pyarrow`.
+
 - **`anthropic_compatible` -- an Anthropic-format endpoint with no SDK
   dependency.** The twin of `openai_compatible` on the other wire format.
   Anthropic-format endpoints now serve models that are not Claude, and reaching

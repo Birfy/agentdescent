@@ -64,6 +64,8 @@ for an estimator.
 """
 
 from .estimate import bootstrap_ci, hajek_mean, residual_bias, standard_error
+from .ppi import (MIN_N_DOMINANT, PPIError, PPIResult, Stratum,
+                  ppi_mean_stratified, t_ppf)
 from .records import (SCHEMA_VERSION, AuditRecord, Purpose, new_record_id,
                       output_digest, verifier_fingerprint)
 from .sources import (DeferredOracle, GoldAnswer, NullOracle, OracleSource,
@@ -74,6 +76,7 @@ from .tap import AuditedReward, RenderTap
 __all__ = [
     "SCHEMA_VERSION",
     "AuditRecord",
+    "MIN_N_DOMINANT",
     "AuditStore",
     "AuditedReward",
     "bootstrap_ci",
@@ -81,14 +84,19 @@ __all__ = [
     "GoldAnswer",
     "NullOracle",
     "OracleSource",
+    "PPIError",
+    "PPIResult",
     "Purpose",
     "RenderTap",
+    "Stratum",
     "new_record_id",
     "hajek_mean",
     "output_digest",
+    "ppi_mean_stratified",
     "residual_bias",
     "resolve_from_mapping",
     "standard_error",
     "summarise",
+    "t_ppf",
     "verifier_fingerprint",
 ]
