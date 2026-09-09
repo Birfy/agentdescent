@@ -32,6 +32,36 @@ All notable changes to AgentDescent are documented here. The format follows
   and `for_calibration` asserts the split rather than filtering for it. The
   estimator is deliberately not included. [docs/audit.md](docs/audit.md)
 
+- **`agentdescent.audit.calibrator` -- the join.** `Calibrator.current(version)`
+  reads the store, assembles the strata, runs the estimator and returns a
+  `Rectification`: `delta_hat = E[f] - E[Y]` with the standard error the
+  acceptance gate adds to its own variance.
+
+  `E[f]` is a **count**, not an estimate -- the tap saw every unit the run
+  scored -- so only `E[Y]` carries sampling error, which is why `delta_se` and
+  `se` are the same number and would stop being so if `E[f]` were ever computed
+  from a subsample.
+
+  Every failure returns a **stale** rectification rather than a number or an
+  exception, because the caller is a merge decision and one has to be made: too
+  few labels, an unknown verifier version, a `mark_stale()` after the verifier
+  changed, or a converged run where both scorers saturate and there is no
+  variance to estimate from. That last is not a correction of zero -- a converged
+  run has no evidence about the verifier either way.
+
+  Thin strata are **merged, not dropped**: records and their unlabelled moments
+  together, pooled with Chan's parallel form. Dropping would remove those units
+  from the population the estimate describes, turning the question into "the bias
+  among units we sampled enough of" -- flattering exactly when the thin stratum
+  is where the verifier is worst.
+
+- **The store keeps the unlabelled half as three numbers per stratum.** PPI's
+  entire dependence on the units nobody audited is a count, a mean and a
+  variance, so `AuditStore` accumulates them in a Welford and never stores an
+  unlabelled score. At a 1% sampling rate that is three numbers instead of a
+  hundred thousand. Snapshots share the records' JSONL under a `kind` key and
+  reconcile last-wins; `Stratum.from_moments` is the constructor that takes them.
+
 - **`agentdescent.audit.ppi` -- the calibration estimator.** Prediction-powered
   inference for a stratified mean: `theta = lam * mean(f_unlab) + mean(y_lab -
   lam * f_lab)`, with `lam` chosen to minimise the variance and **cross-fitted**

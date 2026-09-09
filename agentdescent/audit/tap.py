@@ -213,6 +213,11 @@ class AuditedReward:
             self.stratify(task, output, score))
         prob = self.rate_for(stratum)
         if prob <= 0.0 or self._draw(task, output) >= prob:
+            # Not audited -- but not discarded either. The estimator borrows the
+            # unlabelled scores to narrow its interval, and all it needs of them
+            # is a count, a mean and a variance per stratum. Folding the score in
+            # here is what makes that possible without keeping the score itself.
+            self.store.observe_unlabelled(self.verifier_version, stratum, score)
             return None
 
         purpose = (Purpose.CALIBRATION

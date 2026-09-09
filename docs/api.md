@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-240 public names across 41 modules.
+243 public names across 42 modules.
 
 ---
 
@@ -1056,17 +1056,82 @@ Records on disk, indexed in memory.
 | method | what it does |
 |---|---|
 | `all() -> List[AuditRecord]` | Every record, in the order first seen. |
+| `flush() -> None` | Persist the moments now. Call it when a run ends. |
 | `for_calibration(verifier_version: str) -> List[AuditRecord]` | Resolved CALIBRATION records for one verifier version, and nothing else. |
 | `for_improvement(verifier_version: Optional[str] = None) -> List[AuditRecord]` | Resolved IMPROVEMENT records -- the pool you are allowed to look at. |
 | `load() -> None` | Re-read the file, last-occurrence-wins. |
+| `observe_unlabelled(verifier_version: str, stratum: str, score: float) -> None` | Fold one un-audited score into its stratum's running moments. |
 | `pending(...)` | Records still waiting on truth -- the work list for whoever answers. |
 | `reopen(record_id: str) -> bool` | Clear a resolution so it can be replaced. For corrections, not for retries. |
 | `resolve(record_id: str, oracle_score: float, *, at: Optional[float] = None) -> bool` | Attach ground truth to a pending record. `False` if there was none to attach. |
+| `unlabelled_moments(verifier_version: str)` | `stratum -> {n, mean, var}` over the units that were not audited. |
 | `versions() -> List[str]` | Every `verifier_version` seen, in order of first appearance. |
 
 ### `summarise(records: Iterable[AuditRecord]) -> Dict[str, float]`
 
 Counts and the raw mean residual. **Not** an estimate of the bias.
+
+---
+
+## The calibrator
+
+Turns a store of audited pairs into a correction the acceptance gate applies. &nbsp;·&nbsp; `agentdescent.audit.calibrator` &nbsp;·&nbsp; [guide](audit.md)
+
+### `Calibrator(...)`
+
+Keeps one rectification per verifier version, and knows when to distrust it.
+
+```python
+Calibrator(
+    store: AuditStore,
+    *,
+    alpha: float = 0.05,
+    seed: int = 0,
+    min_labels: int = 30,
+    min_per_stratum: int = 5
+) -> None
+```
+
+| parameter | type | default | what it is |
+|---|---|---|---|
+| `store` | `AuditStore` | *required* | Where the audited pairs and the unlabelled moments live. |
+| `alpha` | `float` | `0.05` |  |
+| `seed` | `int` | `0` |  |
+| `min_labels` | `int` | `30` | Below this many resolved calibration labels the result is stale rather than wide. A very wide interval and "we do not know yet" are different claims, and only the second one stops a caller reading a number off it. |
+| `min_per_stratum` | `int` | `5` | A stratum with fewer than this many labels is **merged into the largest one** rather than dropped. Dropping it would silently change the population the estimate describes; merging keeps every unit represented and costs only resolution. |
+
+| method | what it does |
+|---|---|
+| `current(verifier_version: str) -> Rectification` | The rectification to apply now, computing it if it is not cached. |
+| `mark_stale(reason: str) -> None` | Withhold every rectification until the next `recompute`. |
+| `recompute(verifier_version: str) -> Rectification` | Re-read the store and re-estimate. Clears any manual stale mark. |
+
+### `Rectification(...)`
+
+The correction, its uncertainty, and whether it may be used at all.
+
+```python
+Rectification(
+    verifier_version: str,
+    delta_hat: float,
+    delta_se: float,
+    theta: float,
+    theta_ci: Tuple[float, float],
+    se: float,
+    n: int,
+    n_unlab: int,
+    gain_factor: float,
+    is_stale: bool,
+    stale_reason: Optional[str],
+    warnings: List[str] = <factory>,
+    computed_at: float = 0.0,
+    covers: Tuple[float, float] = (0.0, 0.0)
+) -> None
+```
+
+| method | what it does |
+|---|---|
+| `stale(...)` | A rectification that must not be applied, and says why. |
 
 ---
 
@@ -1108,9 +1173,16 @@ Stratum(
     weight: float,
     f_lab: np.ndarray,
     y_lab: np.ndarray,
-    f_unlab: np.ndarray
+    f_unlab: Optional[np.ndarray] = None,
+    n_unlab: int = 0,
+    mean_unlab: float = 0.0,
+    var_unlab: float = 0.0
 ) -> None
 ```
+
+| method | what it does |
+|---|---|
+| `from_moments(...)` | Build from a running summary of the unlabelled half rather than its scores. |
 
 ### `ppi_mean_stratified(...)`
 
@@ -2488,6 +2560,10 @@ dict() -> new empty dictionary dict(mapping) -> new dictionary initialized from 
 ### `SOLVED`
 
 Reward at or above which a task counts as solved (`0.999`). Lower it for a graded scorer, or every rollout asks the reflector to fix an answer that was already good.
+
+### `STALE_INFLATION`
+
+Convert a string or number to a floating point number, if possible.
 
 ### `Sandbox`
 

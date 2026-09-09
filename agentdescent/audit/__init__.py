@@ -63,6 +63,7 @@ against this one rather than trusted over it.
 for an estimator.
 """
 
+from .calibrator import STALE_INFLATION, Calibrator, Rectification
 from .estimate import bootstrap_ci, hajek_mean, residual_bias, standard_error
 from .ppi import (MIN_N_DOMINANT, PPIError, PPIResult, Stratum,
                   ppi_mean_stratified, t_ppf)
@@ -79,6 +80,7 @@ __all__ = [
     "MIN_N_DOMINANT",
     "AuditStore",
     "AuditedReward",
+    "Calibrator",
     "bootstrap_ci",
     "DeferredOracle",
     "GoldAnswer",
@@ -87,7 +89,9 @@ __all__ = [
     "PPIError",
     "PPIResult",
     "Purpose",
+    "Rectification",
     "RenderTap",
+    "STALE_INFLATION",
     "Stratum",
     "new_record_id",
     "hajek_mean",

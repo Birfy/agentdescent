@@ -123,32 +123,76 @@ class Stratum:
     sent to the oracle. Not the labelled ones again -- reusing them would make
     the two terms of the variance dependent, and the interval would be a
     fiction.
+
+    **The estimator never keeps those scores.** Everything the mathematics does
+    with the unlabelled half is ``size``, ``mean`` and ``var`` -- three
+    sufficient statistics -- so ``__post_init__`` reduces the array to
+    :attr:`n_unlab`, :attr:`mean_unlab` and :attr:`var_unlab` and the array is
+    not read again.
+
+    That is not an optimisation, it is what lets the audit store exist. A run
+    scores tens of thousands of units and sends a few hundred to the oracle;
+    keeping every unlabelled score to satisfy this constructor would mean
+    persisting the whole run to compute a correction that needs nine numbers.
+    :meth:`from_moments` is the constructor for a caller that kept the running
+    summary instead, and it is the one
+    :class:`~agentdescent.audit.calibrator.Calibrator` uses.
     """
 
     name: str
     weight: float
     f_lab: np.ndarray
     y_lab: np.ndarray
-    f_unlab: np.ndarray
+    #: The raw unlabelled scores, when the caller happens to have them. Reduced
+    #: to the three fields below and then unused; ``None`` when they were never
+    #: kept.
+    f_unlab: Optional[np.ndarray] = None
+    n_unlab: int = 0
+    mean_unlab: float = 0.0
+    #: Sample variance, ``ddof=1``. Zero is the right value for fewer than two
+    #: unlabelled units, and the estimator drops the term rather than trusting it.
+    var_unlab: float = 0.0
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "f_lab", np.asarray(self.f_lab, dtype=float))
         object.__setattr__(self, "y_lab", np.asarray(self.y_lab, dtype=float))
-        object.__setattr__(self, "f_unlab", np.asarray(self.f_unlab, dtype=float))
         if self.f_lab.shape != self.y_lab.shape:
             raise PPIError(
                 f"stratum {self.name!r}: {self.f_lab.size} verifier scores but "
                 f"{self.y_lab.size} oracle scores -- they must be paired")
-        if not 0.0 <= self.weight:
+        if self.weight < 0.0:
             raise PPIError(f"stratum {self.name!r}: weight {self.weight!r} < 0")
+        if self.f_unlab is not None:
+            arr = np.asarray(self.f_unlab, dtype=float)
+            object.__setattr__(self, "f_unlab", arr)
+            object.__setattr__(self, "n_unlab", int(arr.size))
+            object.__setattr__(self, "mean_unlab",
+                               float(np.mean(arr)) if arr.size else 0.0)
+            object.__setattr__(self, "var_unlab",
+                               float(np.var(arr, ddof=1)) if arr.size >= 2 else 0.0)
+        elif self.n_unlab < 0:
+            raise PPIError(f"stratum {self.name!r}: n_unlab {self.n_unlab!r} < 0")
+        if self.var_unlab < 0.0:
+            raise PPIError(
+                f"stratum {self.name!r}: var_unlab {self.var_unlab!r} < 0")
+
+    @classmethod
+    def from_moments(cls, name: str, weight: float, f_lab, y_lab, *,
+                     n_unlab: int, mean_unlab: float,
+                     var_unlab: float) -> "Stratum":
+        """Build from a running summary of the unlabelled half rather than its scores.
+
+        Keyword-only on purpose: three bare floats in a row are exactly the kind
+        of argument list that gets transposed, and a swapped mean and variance
+        produces a plausible number rather than an error.
+        """
+        return cls(name=name, weight=weight, f_lab=f_lab, y_lab=y_lab,
+                   f_unlab=None, n_unlab=int(n_unlab),
+                   mean_unlab=float(mean_unlab), var_unlab=float(var_unlab))
 
     @property
     def n(self) -> int:
         return int(self.f_lab.size)
-
-    @property
-    def n_unlab(self) -> int:
-        return int(self.f_unlab.size)
 
 
 @dataclass(frozen=True)
@@ -309,13 +353,12 @@ def ppi_mean_stratified(strata: Sequence[Stratum], *, alpha: float = 0.05,
 
         # The rectifier, per unit, each with its own out-of-fold coefficient.
         resid = s.y_lab - lam_i * s.f_lab
-        mean_f_unlab = float(np.mean(s.f_unlab)) if s.n_unlab else 0.0
-        theta_h = lam_bar * mean_f_unlab + float(np.mean(resid))
+        theta_h = lam_bar * s.mean_unlab + float(np.mean(resid))
 
         var_resid = float(np.var(resid, ddof=1))
         var_lab = var_resid / s.n
         if s.n_unlab >= 2:
-            var_unlab = (lam_bar ** 2) * float(np.var(s.f_unlab, ddof=1)) / s.n_unlab
+            var_unlab = (lam_bar ** 2) * s.var_unlab / s.n_unlab
         else:
             # One unlabelled unit carries no usable variance estimate, and zero
             # is the honest value only because `lam` is then ~0 anyway.

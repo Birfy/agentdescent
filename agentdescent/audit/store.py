@@ -25,9 +25,52 @@ import json
 import os
 import threading
 import time
-from typing import Dict, Iterable, Iterator, List, Optional
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 
 from .records import SCHEMA_VERSION, AuditRecord, Purpose
+
+#: Marks a JSONL line as a moments snapshot rather than an audit record. Absent
+#: on every record ever written, so a file from before this existed still loads.
+MOMENTS_KIND = "unlabelled_moments"
+
+
+class _Welford:
+    """Running count, mean and variance of the scores nobody audited.
+
+    Three numbers per stratum, and they are **all** the estimator ever asks of
+    the unlabelled half -- :class:`~agentdescent.audit.ppi.Stratum` reduces an
+    array to exactly these and then never reads it again. So the alternative to
+    this class is persisting every score a run produces, in order to compute a
+    correction that needs nine numbers.
+
+    Welford rather than a running sum of squares: the naive form subtracts two
+    large nearly-equal numbers and can return a small *negative* variance, which
+    propagates as a nan through the interval instead of failing where it
+    happened.
+    """
+
+    __slots__ = ("n", "mean", "m2")
+
+    def __init__(self, n: int = 0, mean: float = 0.0, m2: float = 0.0) -> None:
+        self.n, self.mean, self.m2 = int(n), float(mean), float(m2)
+
+    def observe(self, x: float) -> None:
+        self.n += 1
+        delta = x - self.mean
+        self.mean += delta / self.n
+        self.m2 += delta * (x - self.mean)
+
+    @property
+    def var(self) -> float:
+        """Sample variance (``ddof=1``); 0.0 below two observations."""
+        return self.m2 / (self.n - 1) if self.n >= 2 else 0.0
+
+    def to_dict(self):
+        return {"n": self.n, "mean": self.mean, "m2": self.m2}
+
+    @classmethod
+    def from_dict(cls, d):
+        return cls(d["n"], d["mean"], d["m2"])
 
 
 class AuditStore:
@@ -43,6 +86,9 @@ class AuditStore:
         self._records: Dict[str, AuditRecord] = {}
         self._order: List[str] = []
         self._corrupt = 0
+        #: (verifier_version, stratum) -> running moments of the unlabelled half.
+        self._moments: Dict[Tuple[str, str], _Welford] = {}
+        self._unflushed = 0
         self._lock = threading.RLock()
         if path and os.path.exists(path):
             self.load()
@@ -64,6 +110,7 @@ class AuditStore:
         with self._lock:
             self._records.clear()
             self._order.clear()
+            self._moments.clear()
             self._corrupt = 0
             with open(self.path, encoding="utf-8") as fh:
                 for line in fh:
@@ -74,6 +121,13 @@ class AuditStore:
                         payload = json.loads(line)
                     except json.JSONDecodeError:
                         self._corrupt += 1
+                        continue
+                    if payload.get("kind") == MOMENTS_KIND:
+                        # Last snapshot wins, exactly as for records: a later
+                        # line supersedes an earlier one for the same key.
+                        self._moments[(payload["verifier_version"],
+                                       payload["stratum"])] = _Welford.from_dict(
+                                           payload["moments"])
                         continue
                     rec = AuditRecord.from_dict(payload)   # raises on schema drift
                     self._remember(rec)
@@ -105,7 +159,54 @@ class AuditStore:
         with self._lock:
             self._remember(record)
             self._write(record)
+            self._flush_moments()
         return record
+
+    # -- the unlabelled half -------------------------------------------------
+
+    #: Unlabelled observations between snapshots. A crash loses at most this
+    #: many, which moves a stratum mean by ~1e-4 on a run of any size. The
+    #: alternative is a line per scored unit, which is the file this avoids.
+    FLUSH_EVERY = 64
+
+    def observe_unlabelled(self, verifier_version: str, stratum: str,
+                           score: float) -> None:
+        """Fold one un-audited score into its stratum's running moments.
+
+        Called for every unit the sampler passed over, which is nearly all of
+        them, so it has to stay O(1) in both time and space. It does: three
+        floats per stratum, whatever the run's length.
+        """
+        with self._lock:
+            key = (verifier_version, stratum)
+            acc = self._moments.get(key)
+            if acc is None:
+                acc = self._moments[key] = _Welford()
+            acc.observe(float(score))
+            self._unflushed += 1
+            if self._unflushed >= self.FLUSH_EVERY:
+                self._flush_moments()
+
+    def flush(self) -> None:
+        """Persist the moments now. Call it when a run ends."""
+        with self._lock:
+            self._flush_moments(force=True)
+
+    def unlabelled_moments(self, verifier_version: str):
+        """``stratum -> {n, mean, var}`` over the units that were not audited."""
+        with self._lock:
+            return {stratum: {"n": acc.n, "mean": acc.mean, "var": acc.var}
+                    for (version, stratum), acc in self._moments.items()
+                    if version == verifier_version}
+
+    def _flush_moments(self, force: bool = False) -> None:
+        if not self.path or (not force and not self._unflushed):
+            self._unflushed = 0
+            return
+        for (version, stratum), acc in self._moments.items():
+            self._write_line({"kind": MOMENTS_KIND, "verifier_version": version,
+                              "stratum": stratum, "moments": acc.to_dict()})
+        self._unflushed = 0
 
     def resolve(self, record_id: str, oracle_score: float,
                 *, at: Optional[float] = None) -> bool:
@@ -211,13 +312,16 @@ class AuditStore:
         self._records[record.record_id] = record
 
     def _write(self, record: AuditRecord) -> None:
+        self._write_line(record.to_dict())
+
+    def _write_line(self, payload: Dict[str, Any]) -> None:
         if not self.path:
             return
         parent = os.path.dirname(os.path.abspath(self.path))
         if parent:
             os.makedirs(parent, exist_ok=True)
         with open(self.path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record.to_dict(), ensure_ascii=False) + "\n")
+            fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
 def _replace(rec: AuditRecord, **changes) -> AuditRecord:

@@ -283,3 +283,75 @@ each other rather than one being trusted over the other:
 Every test that checks *bias* uses a one-directional perturbation. Symmetric
 noise is unbiased on balanced binary outcomes, so a suite built from symmetric
 flips passes against an estimator that has no idea what it is doing.
+
+## The calibrator — from a store to a correction
+
+[`Calibrator`](api.md#the-calibrator) is the join. It reads the store, assembles
+the strata, runs the estimator, and hands back the one thing the acceptance gate
+needs:
+
+```python
+from agentdescent.audit import Calibrator
+
+cal = Calibrator(store)
+r = cal.current(audited.verifier_version)
+
+if not r.is_stale:
+    p_true = p_hat - r.delta_hat        # subtract the bias
+    var_true = var_p + r.se ** 2        # and carry its uncertainty
+```
+
+`delta_hat` is `E[f] - E[Y]`. Note which half is estimated: **`E[f]` is not**.
+The tap saw every unit the run scored — audited or not — so the population mean
+of `f` is a count, not a sample statistic. Only `E[Y]` is estimated, which is why
+`delta_se` and `se` are the same number here, and would stop being so the day
+someone computes `E[f]` from a subsample.
+
+### Stale is an answer, not a failure
+
+Every way this can fail returns a **stale** rectification rather than a number or
+an exception, because the caller is a merge decision and a merge decision has to
+be made:
+
+| situation | what comes back |
+|---|---|
+| fewer than `min_labels` resolved calibration labels | stale — "a very wide interval" and "we do not know yet" are different claims |
+| a verifier version never audited | stale |
+| `mark_stale()` was called because the verifier changed | stale, carrying the previous numbers so a log can say what was withheld |
+| the run converged — both scorers saturated, no variance anywhere | stale, and **not** a correction of zero: a converged run has no evidence about the verifier either way |
+
+A stale rectifier means widen, not correct: the gate multiplies its variance by
+`STALE_INFLATION` and commits less, rather than the same amount with more
+confidence.
+
+### Two things it will not do, because the alternative is quiet
+
+**It never reads the improvement pool.** Labels used to *edit* the verifier were
+chosen to make those units agree with it, so a bias estimated on them reads as
+more honest than the truth. The test asserts this exactly rather than within a
+tolerance: 400 flattering labels added to a store must not move `delta_hat` by a
+single bit.
+
+**It merges thin strata rather than dropping them.** A dropped stratum removes
+its units from the population the estimate describes, so the answer silently
+becomes "the bias among units we sampled enough of" — a different question, and
+a flattering one when the thin stratum is where the verifier is worst. Both
+halves move together: the records *and* their unlabelled moments, pooled with
+Chan's parallel form. Adding the variances instead would be wrong by exactly the
+between-group term, in the direction that makes an interval too narrow.
+
+### What the store keeps, and what it does not
+
+The estimator's dependence on the unlabelled half is exactly three numbers per
+stratum — a count, a mean and a variance. So the store keeps a
+[Welford](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance)
+accumulator per `(verifier_version, stratum)` and **never stores an unlabelled
+score**. At a 1% sampling rate that is the difference between three numbers and
+a hundred thousand.
+
+Welford rather than a running sum of squares, because the naive form subtracts
+two large nearly-equal numbers and can return a small *negative* variance, which
+propagates as a `nan` through the interval instead of failing where it happened.
+Snapshots go into the same JSONL under a `kind` key, reconciled last-wins like
+the records; a crash loses at most `FLUSH_EVERY` observations, which moves a
+stratum mean by about 1e-4.
