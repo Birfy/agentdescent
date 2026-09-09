@@ -108,6 +108,18 @@ Private tests collected: `3, 3, 4, 6, 8, 8, 9, 10, 10, 10, 11, 11, 12, 15, 31`.
 | **partially correct** (`0 < passed < all`) | **10** | a candidate can be *more* right than its parent without being wholly right |
 | zero root (`passed == 0`) | 5 | any progress is invisible until the first test flips |
 
+Baseline pass rates on the ten partial roots: 0.09, 0.13, 0.18, 0.33, 0.33,
+0.38, 0.40, 0.40, 0.50, 0.55 — spread across the range rather than bunched at
+either end.
+
+**A count is not a score, and selecting one would have undone all of this.**
+`harbor_domain`'s reward clamps to `[0, 1]`, so `private.passed` of 1 and of 31
+both arrive as 1.0: every candidate that passes a single test would tie every
+candidate that passes all of them, and the curve could not rise. The metric to
+select is `private.pass_rate`, which `flatten_metrics` now publishes wherever a
+payload carries both a count and its total. On `task_001` that is the difference
+between a reward of 1.0 and of 0.333.
+
 The ten partially-correct roots are exactly the shape that made `lsr_synth`
 measurable and `lsr_transform` not — a step function has no slope for a
 selection rule to accelerate, and a partially-passing test suite does.

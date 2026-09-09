@@ -1,6 +1,6 @@
 {
   "what": "SWE-bench-Science: one baseline verification per task, through each task's own published Harbor verifier image",
-  "how": "dockerd started; DockerRunner in separate-verifier mode; the dataset's tests/grader.py mounted over the image's, which repairs images that hardcode a private-test filename; nested reward.json metrics flattened so private.passed is readable",
+  "how": "dockerd started; DockerRunner in separate-verifier mode; the dataset's tests/grader.py mounted over the image's, which repairs images that hardcode a private-test filename; nested reward.json metrics flattened so private.passed is readable; counts normalised to a pass_rate, because harbor_domain's reward clamps to [0,1] and a raw count of 1 and of 31 would both read as 1.0",
   "config": {
     "dataset": "OpenMOSS-Team/SWE-bench-Science",
     "tasks_sampled": 15,
@@ -46,7 +46,24 @@
       "task_040",
       "task_050",
       "task_070"
-    ]
+    ],
+    "baseline_pass_rate": {
+      "task_001": 0.3333,
+      "task_002": 0.375,
+      "task_005": 0.0,
+      "task_015": 0.5484,
+      "task_020": 0.0,
+      "task_030": 0.5,
+      "task_040": 0.0,
+      "task_050": 0.1818,
+      "task_060": 0.0909,
+      "task_070": 0.0,
+      "task_080": 0.3333,
+      "task_090": 0.0,
+      "task_100": 0.125,
+      "task_110": 0.4,
+      "task_119": 0.4
+    }
   },
   "rows": [
     {
@@ -59,10 +76,12 @@
         "public.passed": 1.0,
         "public.collected": 1.0,
         "public.return_code": 0.0,
+        "public.pass_rate": 1.0,
         "private.passed": 1.0,
         "private.collected": 3.0,
         "private.failed": 2.0,
-        "private.return_code": 1.0
+        "private.return_code": 1.0,
+        "private.pass_rate": 0.3333333333333333
       },
       "root_state": "partial"
     },
@@ -76,10 +95,12 @@
         "public.passed": 1.0,
         "public.collected": 1.0,
         "public.return_code": 0.0,
+        "public.pass_rate": 1.0,
         "private.passed": 3.0,
         "private.collected": 8.0,
         "private.failed": 5.0,
-        "private.return_code": 1.0
+        "private.return_code": 1.0,
+        "private.pass_rate": 0.375
       },
       "root_state": "partial"
     },
@@ -93,10 +114,12 @@
         "public.passed": 1.0,
         "public.collected": 1.0,
         "public.return_code": 0.0,
+        "public.pass_rate": 1.0,
         "private.passed": 0.0,
         "private.collected": 4.0,
         "private.failed": 4.0,
-        "private.return_code": 1.0
+        "private.return_code": 1.0,
+        "private.pass_rate": 0.0
       },
       "root_state": "zero-root"
     },
@@ -110,10 +133,12 @@
         "public.passed": 1.0,
         "public.collected": 1.0,
         "public.return_code": 0.0,
+        "public.pass_rate": 1.0,
         "private.passed": 17.0,
         "private.collected": 31.0,
         "private.failed": 14.0,
-        "private.return_code": 1.0
+        "private.return_code": 1.0,
+        "private.pass_rate": 0.5483870967741935
       },
       "root_state": "partial"
     },
@@ -127,10 +152,12 @@
         "public.passed": 0.0,
         "public.collected": 1.0,
         "public.return_code": 1.0,
+        "public.pass_rate": 0.0,
         "private.passed": 0.0,
         "private.collected": 12.0,
         "private.failed": 12.0,
-        "private.return_code": 1.0
+        "private.return_code": 1.0,
+        "private.pass_rate": 0.0
       },
       "root_state": "zero-root"
     },
@@ -144,10 +171,12 @@
         "public.passed": 0.0,
         "public.collected": 1.0,
         "public.return_code": 1.0,
+        "public.pass_rate": 0.0,
         "private.passed": 5.0,
         "private.collected": 10.0,
         "private.failed": 5.0,
-        "private.return_code": 1.0
+        "private.return_code": 1.0,
+        "private.pass_rate": 0.5
       },
       "root_state": "partial"
     },
@@ -161,10 +190,12 @@
         "public.passed": 1.0,
         "public.collected": 1.0,
         "public.return_code": 0.0,
+        "public.pass_rate": 1.0,
         "private.passed": 0.0,
         "private.collected": 3.0,
         "private.failed": 3.0,
-        "private.return_code": 1.0
+        "private.return_code": 1.0,
+        "private.pass_rate": 0.0
       },
       "root_state": "zero-root"
     },
@@ -178,10 +209,12 @@
         "public.passed": 0.0,
         "public.collected": 1.0,
         "public.return_code": 1.0,
+        "public.pass_rate": 0.0,
         "private.passed": 2.0,
         "private.collected": 11.0,
         "private.failed": 9.0,
-        "private.return_code": 1.0
+        "private.return_code": 1.0,
+        "private.pass_rate": 0.18181818181818182
       },
       "root_state": "partial"
     },
@@ -195,10 +228,12 @@
         "public.passed": 0.0,
         "public.collected": 1.0,
         "public.return_code": 1.0,
+        "public.pass_rate": 0.0,
         "private.passed": 1.0,
         "private.collected": 11.0,
         "private.failed": 10.0,
-        "private.return_code": 1.0
+        "private.return_code": 1.0,
+        "private.pass_rate": 0.09090909090909091
       },
       "root_state": "partial"
     },
@@ -212,10 +247,12 @@
         "public.passed": 0.0,
         "public.collected": 1.0,
         "public.return_code": 1.0,
+        "public.pass_rate": 0.0,
         "private.passed": 0.0,
         "private.collected": 9.0,
         "private.failed": 9.0,
-        "private.return_code": 1.0
+        "private.return_code": 1.0,
+        "private.pass_rate": 0.0
       },
       "root_state": "zero-root"
     },
@@ -229,10 +266,12 @@
         "public.passed": 1.0,
         "public.collected": 1.0,
         "public.return_code": 0.0,
+        "public.pass_rate": 1.0,
         "private.passed": 5.0,
         "private.collected": 15.0,
         "private.failed": 10.0,
-        "private.return_code": 1.0
+        "private.return_code": 1.0,
+        "private.pass_rate": 0.3333333333333333
       },
       "root_state": "partial"
     },
@@ -246,10 +285,12 @@
         "public.passed": 1.0,
         "public.collected": 1.0,
         "public.return_code": 0.0,
+        "public.pass_rate": 1.0,
         "private.passed": 0.0,
         "private.collected": 6.0,
         "private.failed": 6.0,
-        "private.return_code": 1.0
+        "private.return_code": 1.0,
+        "private.pass_rate": 0.0
       },
       "root_state": "zero-root"
     },
@@ -263,10 +304,12 @@
         "public.passed": 0.0,
         "public.collected": 1.0,
         "public.return_code": 1.0,
+        "public.pass_rate": 0.0,
         "private.passed": 1.0,
         "private.collected": 8.0,
         "private.failed": 7.0,
-        "private.return_code": 1.0
+        "private.return_code": 1.0,
+        "private.pass_rate": 0.125
       },
       "root_state": "partial"
     },
@@ -280,10 +323,12 @@
         "public.passed": 0.0,
         "public.collected": 1.0,
         "public.return_code": 1.0,
+        "public.pass_rate": 0.0,
         "private.passed": 4.0,
         "private.collected": 10.0,
         "private.failed": 6.0,
-        "private.return_code": 1.0
+        "private.return_code": 1.0,
+        "private.pass_rate": 0.4
       },
       "root_state": "partial"
     },
@@ -297,10 +342,12 @@
         "public.passed": 0.0,
         "public.collected": 1.0,
         "public.return_code": 1.0,
+        "public.pass_rate": 0.0,
         "private.passed": 4.0,
         "private.collected": 10.0,
         "private.failed": 6.0,
-        "private.return_code": 1.0
+        "private.return_code": 1.0,
+        "private.pass_rate": 0.4
       },
       "root_state": "partial"
     }

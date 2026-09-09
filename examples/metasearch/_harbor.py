@@ -179,6 +179,16 @@ def flatten_metrics(payload: Any, prefix: str = "") -> Dict[str, float]:
             out[name] = float(value)
         elif isinstance(value, dict):
             out.update(flatten_metrics(value, prefix=f"{name}."))
+    # A count is not a score. `harbor_domain`'s reward clamps to [0, 1], so
+    # `private.passed` of 1 and of 31 would both read as 1.0 and the whole
+    # partial-credit signal would be flattened straight back out. Where a
+    # payload carries both a count and its total, publish the ratio too, and
+    # that is the metric to select.
+    for name in [n for n in out if n.endswith("passed")]:
+        total = out.get(name[: -len("passed")] + "collected")
+        if total is not None:
+            out[name[: -len("passed")] + "pass_rate"] = (
+                out[name] / total if total else 0.0)
     return out
 
 

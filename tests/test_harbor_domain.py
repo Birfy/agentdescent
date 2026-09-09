@@ -200,3 +200,26 @@ def test_docker_runner_refuses_a_task_with_no_image_and_no_dockerfile(task_dir):
     assert hb.DockerRunner(docker="/nonexistent-docker").image_for(
         hb.HarborTask(root, "t", "", "python:3.11-slim", None, root / "tests", 1, 1)
     ) == "python:3.11-slim"
+
+
+def test_a_count_is_normalised_so_the_reward_clamp_cannot_flatten_it():
+    """`harbor_domain`'s reward clamps to [0, 1], and a test count is not a score.
+
+    SWE-bench-Science's grader writes a *binary* top-level `reward` and puts its
+    real partial credit one level down, as `{"private": {"passed": 1,
+    "collected": 3}}`. Flattening exposes `private.passed` -- and selecting that
+    as the scoring metric would put 1 passing test and 31 passing tests both at
+    1.0 after the clamp, flattening the signal straight back out and handing the
+    search a curve that cannot rise. Publishing the ratio is what makes the
+    partial credit reachable.
+    """
+    from examples.metasearch._harbor import flatten_metrics
+
+    flat = flatten_metrics({"reward": 0, "private": {"passed": 17, "collected": 31},
+                            "public": {"passed": 1, "collected": 1}})
+    assert flat["private.passed"] == 17.0
+    assert flat["private.pass_rate"] == 17 / 31
+    assert flat["public.pass_rate"] == 1.0
+    # a count with no total stays a count, and no ratio is invented for it
+    assert "failed.pass_rate" not in flatten_metrics({"private": {"passed": 2}})
+    assert flatten_metrics({"private": {"passed": 0, "collected": 0}})["private.pass_rate"] == 0.0
