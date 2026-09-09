@@ -400,7 +400,8 @@ compile_policy_source(
     source: str,
     *,
     class_name: str = 'Policy',
-    smoke: Optional[Callable[[Any], None]] = None
+    smoke: Optional[Callable[[Any], None]] = None,
+    rng_seed: Optional[int] = None
 ) -> Any
 ```
 

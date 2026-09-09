@@ -38,6 +38,26 @@ every_engine = pytest.mark.parametrize("engine", LIVE_ENGINES or [None])
 
 
 @pytest.fixture
+def host_marker():
+    """A file that exists only in the *host* home directory.
+
+    The guarantee these tests are about is that candidate code naming the host's
+    home outright cannot reach it. Probing `os.path.exists(home)` does not test
+    that: when the suite runs as root -- normal in CI and in a container --
+    `home` is `/root`, which exists inside almost every image, so the probe
+    reports True whether isolation works or not. It cannot distinguish the two
+    cases, and it fails on a correctly isolated container. Probe for host
+    *content* instead."""
+    path = os.path.join(os.path.expanduser("~"), ".agentdescent-host-marker")
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("host")
+    try:
+        yield path
+    finally:
+        os.unlink(path)
+
+
+@pytest.fixture
 def shared_root(tmp_path_factory):
     """A workspace root the engine's VM can actually see.
 
@@ -307,7 +327,7 @@ def test_the_provider_satisfies_the_protocol_without_extra_methods():
 
 @needs_engine
 @every_engine
-def test_the_host_home_directory_is_not_visible(engine, shared_root):
+def test_the_host_home_directory_is_not_visible(engine, shared_root, host_marker):
     """The reason this provider exists.
 
     The local provider fails this: `HOME` is redirected but absolute paths are
@@ -315,7 +335,7 @@ def test_the_host_home_directory_is_not_visible(engine, shared_root):
     p = ContainerProvider(IMAGE, engine=engine)
     sb = p.acquire(SandboxSpec(workspace_root=shared_root))
     try:
-        probe = f"import os; print(os.path.exists({os.path.expanduser('~')!r}))"
+        probe = f"import os; print(os.path.exists({host_marker!r}))"
         out = subprocess.run([*sb.exec_prefix(), "python", "-c", probe],
                              capture_output=True, text=True, timeout=120)
         assert out.returncode == 0, out.stderr
@@ -327,7 +347,7 @@ def test_the_host_home_directory_is_not_visible(engine, shared_root):
 
 @needs_engine
 @every_engine
-def test_the_local_provider_does_not_stop_what_this_one_does(engine, shared_root):
+def test_the_local_provider_does_not_stop_what_this_one_does(engine, shared_root, host_marker):
     """The contrast, run side by side, because it is the whole justification.
 
     `HOME` redirection changes where a *lookup* goes; it does not change what a
@@ -335,8 +355,7 @@ def test_the_local_provider_does_not_stop_what_this_one_does(engine, shared_root
     gets it under the local provider and does not under this one."""
     from agentdescent.sandbox import WorkspaceProvider
 
-    home = os.path.expanduser("~")
-    probe = f"import os; print(os.path.exists({home!r}))"
+    probe = f"import os; print(os.path.exists({host_marker!r}))"
 
     local = WorkspaceProvider()
     sb = local.acquire(SandboxSpec(workspace_root=shared_root))
@@ -475,7 +494,7 @@ def test_a_rollout_runs_inside_the_container(engine, shared_root):
 
 @needs_engine
 @every_engine
-def test_a_candidate_cannot_read_the_host_from_inside_a_rollout(engine, shared_root):
+def test_a_candidate_cannot_read_the_host_from_inside_a_rollout(engine, shared_root, host_marker):
     """The same guarantee, reached through the runner rather than the provider --
     because that is the path a real run takes."""
     from agentdescent.evolution import Task
@@ -483,12 +502,11 @@ def test_a_candidate_cannot_read_the_host_from_inside_a_rollout(engine, shared_r
     from agentdescent.runners import code_runner
     from agentdescent.sandbox import SandboxPool
 
-    home = os.path.expanduser("~")
     pool = SandboxPool(ContainerProvider(IMAGE, engine=engine), max_sandboxes=1)
     run = code_runner(["python", "main.py"], sandbox_pool=pool,
                       workspace_root=shared_root)
     try:
-        tree = canonical({"main.py": f"import os; print(os.path.exists({home!r}))"})
+        tree = canonical({"main.py": f"import os; print(os.path.exists({host_marker!r}))"})
         assert run(tree, Task("t", "x")) == "False"
     finally:
         pool.close(strict=True)

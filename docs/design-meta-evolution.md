@@ -11,8 +11,9 @@
 > 落地的模块：`agentdescent/meta.py`（§3 全部）、`examples/era/era_empirical_software.py`
 > 的两处注入口（§3.5）、`examples/metasearch/`（§4 的 stage 0 与 stage 2 的适配器
 > `_harbor.py`）、`bench/metasearch_algotune.py`（stage 1 的跑批脚本）。
-> **未做**：AlgoTune 与科研基准的**在线**跑（需要 API key、numpy/scipy 沙箱、Docker
-> 守护进程）；容器内的 agent 阶段（那是 `harbor run --agent`，不重造）。
+> **已补跑**：AlgoTune（`bench/results/metasearch-algotune.md`）与 SWE-bench-Science
+> （`bench/results/metasearch-swe-bench-science.md`）都在线跑过了。
+> **未做**：容器内的 agent 阶段（那是 `harbor run --agent`，不重造）。
 
 ---
 
@@ -292,10 +293,21 @@ held-back；只写 `reward.txt` 的任务只有一个指标、没东西可 hold 
 `harbor_completion` 把 `WorkspaceAgent` 放到 ERA 的 `prompt -> text` 契约后面（物化父
 patch、在那里跑 agent、`git diff`，模型不用自己排版 diff）；两个 runner：`LocalRunner`
 在宿主机检出上 `git apply` + 跑 `tests/test.sh`（离线测试用真实 git、真实 `test.sh`、
-真实 ERA 树搜索端到端跑通），`DockerRunner` 在任务自己的镜像里验证（已写，本机无守护进程
-未跑，拒绝路径有测试）。剩下的边界：**容器内的 agent 阶段**是 `harbor run --agent`，不
-重造——`LocalRunner` 对"环境就是一个仓库加解释器"的任务是诚实的（SWE-bench-Science 的
-多数），对需要镜像工具链的任务不是（Terminal-Bench-Science 的多数）。
+真实 ERA 树搜索端到端跑通），`DockerRunner` 在任务自己的镜像里验证。
+
+`DockerRunner` 曾记为"本机无守护进程未跑"——**那不是阻塞，只是没启动 `dockerd`**。真跑
+一遍 SWE-bench-Science 之后暴露了四个 bug（分离 verifier 镜像、patch 被 `git reset
+--hard` 丢掉、`reward.json` 是 `indent=2` 的多行、嵌套指标被丢弃）和基准自己镜像里的
+一个（grader 写死了私有测试的文件名，15 个里有 6 个，那些任务**任何 patch 都拿不到
+reward**）。都已修，测量见
+[`bench/results/metasearch-swe-bench-science.md`](../bench/results/metasearch-swe-bench-science.md)：
+验证**逐字节确定**，奖励粒度中位 10 级，中位一次验证 5.9 秒。
+
+剩下的边界不变：**容器内的 agent 阶段**是 `harbor run --agent`，不重造——`LocalRunner`
+对"环境就是一个仓库加解释器"的任务是诚实的（SWE-bench-Science 的多数），对需要镜像工具链
+的任务不是（Terminal-Bench-Science 的多数）。没有 agent 时，`export_baseline` +
+`whole_file_patch` 让模型交整文件编辑而不是 diff：让模型自己排版 unified diff，实测
+3/3 被 verifier 自己的 `git apply` 拒掉，量的是 diff 语法而不是科学。
 
 ### 4.4 实验协议
 
@@ -503,7 +515,7 @@ vs 一个新鲜抽样"，配对差的 sd 是 `sd×√2` ≈ 0.076，10 个 held-
 | P3 | `examples/metasearch/`：合成地形、离线端到端、`--dry-run`、加入 PORTS 契约 | ✅ |
 | P4a | GSM 跑批脚本 `bench/metasearch_slots.py`：演进 `task_sampler`，内层是完整的内层 `evolve()`，报告分三组（演进过的 / 同基准未见切片 / 另一个基准）各自的迁移比 | ✅ 脚本 + 离线测试 + **在线跑出结果**（`bench/results/metasearch-slots.md`） |
 | P4b | AlgoTune 跑批脚本 `bench/metasearch_algotune.py`（训练/验证任务不相交、新 seed 验证、迁移比、结果 JSON） | ✅ 脚本 + 插桩测试 + **在线跑过**（`bench/results/metasearch-algotune.md`）：port 跑通（5.6× 加速），但**这个域现在测不了选择规则**，噪声是信号的 3.4 倍，见 §4.8 |
-| P5 | Harbor 适配器 `_harbor.py`（§4.3）+ SWE-bench-Science / TB-Science 验证 | ✅ 适配器 + `LocalRunner` 离线端到端；`DockerRunner.verify` 已写未在线跑；**基准验证待做**（需 API + Docker + 任务数据） |
+| P5 | Harbor 适配器 `_harbor.py`（§4.3）+ SWE-bench-Science / TB-Science 验证 | ✅ 适配器 + `LocalRunner` 离线端到端；`DockerRunner` **在 SWE-bench-Science 上真跑过**（15 个任务基线 + 单任务端到端，见 [`metasearch-swe-bench-science.md`](../bench/results/metasearch-swe-bench-science.md)）：域本身四条性质里三条达标且优于此前任何真实数据域；**未定**的是第四条（可负担预算下曲线是否会升），缺的是容器内 agent |
 | P6 | 其余五个插槽的内置冒烟与默认种子，每个种子在真实内层 `evolve()` 里跑通 | ✅ |
 | P7 | 多插槽联合演化（`ParamSlot` 的 key 空间天然支持；`SourceSlot` 需要多槽 Strategy） | 开放 |
 
