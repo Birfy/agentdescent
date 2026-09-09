@@ -71,6 +71,9 @@ from .records import (SCHEMA_VERSION, AuditRecord, Purpose, new_record_id,
                       output_digest, verifier_fingerprint)
 from .sources import (DeferredOracle, GoldAnswer, NullOracle, OracleSource,
                       resolve_from_mapping)
+from .sampler import (AuditPolicy, SamplePlan, boundary_stratifier,
+                      observed_weights, resid_sd_from)
+from .sampler import plan as plan_audit
 from .store import AuditStore, summarise
 from .tap import AuditedReward, RenderTap
 
@@ -78,9 +81,11 @@ __all__ = [
     "SCHEMA_VERSION",
     "AuditRecord",
     "MIN_N_DOMINANT",
+    "AuditPolicy",
     "AuditStore",
     "AuditedReward",
     "Calibrator",
+    "boundary_stratifier",
     "bootstrap_ci",
     "DeferredOracle",
     "GoldAnswer",
@@ -89,14 +94,18 @@ __all__ = [
     "PPIError",
     "PPIResult",
     "Purpose",
+    "SamplePlan",
     "Rectification",
     "RenderTap",
     "STALE_INFLATION",
     "Stratum",
     "new_record_id",
     "hajek_mean",
+    "observed_weights",
     "output_digest",
+    "plan_audit",
     "ppi_mean_stratified",
+    "resid_sd_from",
     "residual_bias",
     "resolve_from_mapping",
     "standard_error",

@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-243 public names across 42 modules.
+249 public names across 43 modules.
 
 ---
 
@@ -1070,6 +1070,90 @@ Records on disk, indexed in memory.
 ### `summarise(records: Iterable[AuditRecord]) -> Dict[str, float]`
 
 Counts and the raw mean residual. **Not** an estimate of the bias.
+
+---
+
+## Audit allocation
+
+Neyman allocation, as per-stratum inclusion probabilities. &nbsp;·&nbsp; `agentdescent.audit.sampler` &nbsp;·&nbsp; [guide](audit.md)
+
+### `AuditPolicy(...)`
+
+What the audit is trying to achieve, and what it refuses to do to get there.
+
+```python
+AuditPolicy(
+    enabled: bool = False,
+    target_halfwidth: float = 0.05,
+    boundary_width: float = 0.05,
+    calibration_fraction: float = 0.7,
+    min_per_stratum: int = 20,
+    min_dominant: int = 80,
+    max_labels: int = 400,
+    alpha: float = 0.05
+) -> None
+```
+
+| parameter | type | default | what it is |
+|---|---|---|---|
+| `enabled` | `bool` | `False` | Off by default. The whole layer is opt-in, and a policy that is not enabled plans a rate of zero everywhere rather than a small one -- "we are not auditing" and "we are auditing a little" produce different records and only one of them is honest. |
+| `target_halfwidth` | `float` | `0.05` | How narrow the correction's 95% interval should be. Drives the total label budget through the Neyman-optimal sample size; see `plan`. |
+| `boundary_width` | `float` | `0.05` | Half-width of the band around the acceptance threshold that counts as `boundary`. |
+| `calibration_fraction` | `float` | `0.7` | Share of audited units that go to the calibration pool rather than the improvement pool. Passed through to the tap. |
+| `min_per_stratum` | `int` | `20` | No layer gets fewer than this many labels, whatever Neyman says. A layer allocated two labels contributes a variance estimate from two points, which is worse than not stratifying at all. |
+| `min_dominant` | `int` | `80` | The heaviest layer gets at least this many. Defaults to `MIN_N_DOMINANT`, below which the reported coverage is about 0.92 rather than 0.95 -- so this floor and that warning are the same number for the same reason, and moving one without the other is how a floor stops meaning anything. |
+| `max_labels` | `int` | `400` | A hard cap. Oracle labels cost money or a person's afternoon, and a target half-width small enough to be unreachable should produce a warning and a bounded plan rather than an unbounded bill. |
+| `alpha` | `float` | `0.05` |  |
+
+### `SamplePlan(...)`
+
+Per-stratum inclusion probabilities, and the reasoning that produced them.
+
+```python
+SamplePlan(
+    rates: Dict[str, float],
+    target_n: Dict[str, int],
+    weights: Dict[str, float],
+    resid_sd: Dict[str, float],
+    default_rate: float = 0.0,
+    total_n: int = 0,
+    expected_units: int = 0,
+    warnings: List[str] = <factory>
+) -> None
+```
+
+### `boundary_stratifier(threshold: float, width: float = 0.05) -> Callable[[Any, str, float], str]`
+
+Split units into `accepted` / `boundary` / `rejected` around a threshold.
+
+### `observed_weights(store: Any, verifier_version: str) -> Dict[str, float]`
+
+Population shares from what a previous run actually saw.
+
+### `plan_audit(...)`
+
+Neyman allocation, converted to per-stratum inclusion probabilities.
+
+```python
+plan_audit(
+    policy: AuditPolicy,
+    *,
+    weights: Dict[str, float],
+    expected_units: int,
+    resid_sd: Optional[Dict[str, float]] = None
+) -> SamplePlan
+```
+
+| parameter | type | default | what it is |
+|---|---|---|---|
+| `policy` | `AuditPolicy` | *required* |  |
+| `weights` | `Dict[str, float]` | *required* | Population share per stratum. Need not sum to exactly 1; it is normalised, because these usually come from counting a previous run and arriving at 0.9999 should not be an error. |
+| `expected_units` | `int` | *required* | How many units the next run is expected to score. Rates are `n_h / (W_h * expected_units)`, so an estimate that is too low oversamples and one that is too high undersamples -- both bounded, and the realised inclusion probability is recorded per unit either way, so a wrong guess costs precision and never correctness. |
+| `resid_sd` | `Optional[Dict[str, float]]` | `None` | Per-stratum sd of `f - Y` from the last calibration. Missing entries fall back to an equal-residual assumption, which is what proportional allocation already assumes -- so the first run, with no history, plans proportionally and is right to. |
+
+### `resid_sd_from(previous: Any) -> Dict[str, float]`
+
+`stratum -> resid_sd` out of a `PPIResult`, or `{}`.
 
 ---
 

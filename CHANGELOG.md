@@ -32,6 +32,32 @@ All notable changes to AgentDescent are documented here. The format follows
   and `for_calibration` asserts the split rather than filtering for it. The
   estimator is deliberately not included. [docs/audit.md](docs/audit.md)
 
+- **`agentdescent.audit.sampler` -- Neyman allocation, as inclusion
+  probabilities.** A flat rate spends the oracle budget where the *units* are;
+  what sets the width of the correction is where the verifier is *unreliable*.
+  `plan_audit` allocates `n_h` proportional to `W_h * sd_h` on the residual
+  `f - Y`, converts it to a per-stratum rate, and hands it to the tap.
+  `boundary_stratifier` splits units around the acceptance threshold, where a
+  verifier's disagreement with the truth concentrates.
+
+  `target_halfwidth` is a specification, not a wish: under Neyman allocation
+  `se = sum(W_h sd_h) / sqrt(n)`, so the label budget follows from the requested
+  half-width and halving it costs four times the labels.
+
+  The plan called for a batch sampler that takes a generation's units and returns
+  which to send. That does not fit the tap, which decides per unit from a
+  unit-seeded draw -- the property that makes inclusion independent of thread
+  scheduling. The allocation survives the translation: `n_h` out of an expected
+  `W_h * N` is an inclusion probability, and per-stratum rates are what the tap
+  already takes.
+
+  Three decisions with reasons: floors are applied **after** allocation, so a
+  bound stratum does not scale the others down; a stratum with no residual
+  history is filled at the **largest measured** sd, because under-sampling an
+  unmeasured stratum is self-perpetuating while over-sampling self-corrects; and
+  a stratum the plan never saw gets a rate of **zero**, since sampling it would
+  record an inclusion probability nobody chose.
+
 - **`agentdescent.audit.calibrator` -- the join.** `Calibrator.current(version)`
   reads the store, assembles the strata, runs the estimator and returns a
   `Rectification`: `delta_hat = E[f] - E[Y]` with the standard error the

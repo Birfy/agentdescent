@@ -161,6 +161,82 @@ resulting estimate is confidently wrong rather than noisy, and it errs towards
 because a query condition is one careless edit away from being widened and an
 assertion is not.
 
+## Allocation — where the budget should go
+
+A flat rate spends the budget where the *units* are. What sets the width of the
+correction is where the verifier is *unreliable*, and those are different places:
+a layer the verifier gets right every time contributes nothing to the interval no
+matter how many of its units you label.
+
+[Neyman allocation](api.md#audit-allocation) says it exactly — `n_h ∝ W_h · sd_h`,
+the layer's population share times the standard deviation of the **residual**
+`f − Y` within it:
+
+```python
+from agentdescent.audit import (AuditPolicy, boundary_stratifier,
+                                observed_weights, plan_audit, resid_sd_from)
+
+policy = AuditPolicy(enabled=True, target_halfwidth=0.03)
+plan = plan_audit(
+    policy,
+    weights=observed_weights(store, version),      # counts from the last run
+    resid_sd=resid_sd_from(previous_ppi_result),   # where it was unreliable
+    expected_units=40_000,
+)
+
+audited = AuditedReward(
+    llm_judge, oracle=GoldAnswer(exact_match), store=store,
+    stratify=boundary_stratifier(threshold=0.5, width=policy.boundary_width),
+    rates=plan.rates, sample_rate=plan.default_rate,
+    calibration_fraction=policy.calibration_fraction,
+)
+```
+
+`target_halfwidth` is a specification rather than a wish: under Neyman
+allocation `se = Σ(W_h·sd_h) / √n`, so the total label budget follows from the
+half-width directly — and halving the half-width costs four times the labels.
+
+!!! danger "`resid_sd`, not `sd(Y)`"
+    They are different quantities, both plausible here, and the wrong one
+    produces a plan that is merely *suboptimal* — so it survives review. `sd(Y)`
+    sends the budget to whichever layer has the most variable outcome; `sd(f−Y)`
+    sends it to the layer where the verifier is least trustworthy. A layer whose
+    outcome swings wildly but which the verifier tracks perfectly deserves almost
+    no labels at all.
+
+### Rates, not a chosen set of units
+
+The plan this implements had the sampler take a generation's units and hand back
+which ones to send. That shape does not fit the tap, which sees one
+`(task, output)` at a time and decides on the spot with a draw seeded from the
+unit itself — which is what makes inclusion independent of thread scheduling.
+
+The allocation survives the translation intact: `n_h` units out of an expected
+`W_h · N` is an inclusion probability of `n_h / (W_h · N)`. So this plans
+**rates**, the tap keeps deciding per unit, and the allocation is the same one.
+The cost is that rates are set from an *expected* population, so realised counts
+land near the plan rather than on it.
+
+### Three decisions worth knowing about
+
+**Floors are applied after the allocation, never before.** When a layer is raised
+to its floor, the remaining budget is still split by Neyman rather than scaled
+down proportionally. `min_dominant` defaults to `MIN_N_DOMINANT` — the same
+number as the coverage warning, because they are the same fact, and letting them
+drift apart is how a floor stops meaning anything.
+
+**A layer with no history is over-sampled, not under-sampled.** Missing residual
+sds are filled at the *largest measured* one. The asymmetry decides it:
+under-sampling a layer nobody has measured keeps it unmeasured, which is
+self-perpetuating; over-sampling costs budget once and self-corrects the moment
+there is a real number. (An earlier version filled with the constant `1.0`, which
+against a layer measured at `0.4` handed the unmeasured one 2.5× the allocation
+for no reason but the units the constant happened to be written in.)
+
+**A stratum the plan never saw gets a rate of zero.** Not a small default:
+sampling it would put units into the estimate under an inclusion probability
+nobody chose, and that is the one field that cannot be reconstructed afterwards.
+
 ## Sampling
 
 `sample_rate` is the flat case. When the residual varies across the score range —
