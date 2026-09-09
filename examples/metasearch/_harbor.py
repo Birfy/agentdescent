@@ -341,6 +341,18 @@ class DockerRunner:
             # its own script apply it.
             apply_step = ""
             patch_mount = "/logs/artifacts/model.patch"
+            # Published images can carry a *stale* grader. Several
+            # SWE-bench-Science verifier images run
+            # `pytest /tests/private_tests/test_task_NNN.py` while the private
+            # test they ship is named for its subject, so pytest exits 4 with
+            # "file or directory not found", `private` reports 0 of 0, and
+            # `reward` is 0 for any patch whatsoever. The dataset's own
+            # `tests/grader.py` is the fixed version -- it runs the whole
+            # directory -- so where the task ships one, mount it over the
+            # image's. Measured on task_030: `private 0/0` becomes `5/10`.
+            grader = task.tests_dir / "grader.py"
+            if grader.is_file():
+                mounts += ["-v", f"{grader.resolve()}:/tests/grader.py:ro"]
         else:
             apply_step = (
                 "if [ -s /tmp/candidate.patch ]; then "
