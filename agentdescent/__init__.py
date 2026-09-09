@@ -27,6 +27,10 @@ from .ledger import (
     Ledger, Snapshot, CASConflict, ContractRejected, GitError, LedgerFailure,
 )
 from .verifier import ThreeLayerVerifier, VerifierBudget
+from .audit import (
+    AuditedReward, AuditRecord, AuditStore, DeferredOracle, GoldAnswer,
+    NullOracle, Purpose, RenderTap, resolve_from_mapping, verifier_fingerprint,
+)
 from . import backends, dataloader          # submodules: agentdescent.dataloader.hf_rows(...)
 from .dataloader import Dataset, split_dataset
 from .advantage import (
@@ -386,4 +390,15 @@ __all__ = [
     "async_evolve",
     "claude_agent",
     "rule_id",
+    # the sparse audit layer: a cheap verifier paired against ground truth
+    "AuditedReward",
+    "AuditRecord",
+    "AuditStore",
+    "DeferredOracle",
+    "GoldAnswer",
+    "NullOracle",
+    "Purpose",
+    "RenderTap",
+    "resolve_from_mapping",
+    "verifier_fingerprint",
 ]

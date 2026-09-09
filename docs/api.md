@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-214 public names across 35 modules.
+224 public names across 39 modules.
 
 ---
 
@@ -942,6 +942,144 @@ ThreeLayerVerifier(
 ### `VerifierBudget(oracle_calls_remaining: int = 200, oracle_calls_used: int = 0) -> None`
 
 Oracle call budget, consumed by `oracle_eval`.
+
+---
+
+## The sparse audit layer
+
+Pair a cheap verifier against ground truth without paying for truth. &nbsp;·&nbsp; `agentdescent.audit.tap` &nbsp;·&nbsp; [guide](audit.md)
+
+### `AuditedReward(...)`
+
+A cheap verifier that hands a sampled minority of its work to the truth.
+
+```python
+AuditedReward(
+    verifier: Callable[[Any, str], float],
+    *,
+    oracle: Optional[Any] = None,
+    store: Optional[AuditStore] = None,
+    sample_rate: float = 0.1,
+    stratify: Optional[Callable[[Any, str, float], str]] = None,
+    rates: Optional[Dict[str, float]] = None,
+    calibration_fraction: float = 0.7,
+    seed: int = 0,
+    verifier_version: Optional[str] = None,
+    version_extra: Any = None
+) -> None
+```
+
+| parameter | type | default | what it is |
+|---|---|---|---|
+| `verifier` | `Callable[[Any, str], float]` | *required* | The cheap scorer the loop optimises against -- an agent judging the output, a learned scorer, a heuristic. `(task, output) -> float`. |
+| `oracle` | `Optional[Any]` | `None` | Ground truth. `GoldAnswer` when it returns now, `DeferredOracle` when it arrives later. Defaults to `NullOracle`, which still records the questions -- useful when the answerer has not been asked yet. |
+| `store` | `Optional[AuditStore]` | `None` | Where records go. Defaults to an in-memory store; pass `AuditStore("audit.jsonl")` to keep them. |
+| `sample_rate` | `float` | `0.1` | Probability a unit is audited, when no stratum-specific rate applies. |
+| `stratify` | `Optional[Callable[[Any, str, float], str]]` | `None` | Optional `(task, output, verifier_score) -> str`. Names the layer a unit belongs to, so `rates` can spend more of the budget where the residual varies most. The stratum is recorded either way. |
+| `rates` | `Optional[Dict[str, float]]` | `None` | Per-stratum inclusion probabilities, falling back to `sample_rate`. |
+| `calibration_fraction` | `float` | `0.7` | Share of audited units assigned `CALIBRATION`; the rest become `IMPROVEMENT`. The split is drawn at random rather than taken in order, because units arrive grouped by task and by artifact and any ordered split would correlate the two pools with whatever the ordering happens to encode. |
+| `seed` | `int` | `0` | Base seed for the inclusion draw. |
+| `verifier_version` | `Optional[str]` | `None` | Overrides the fingerprint derived from `verifier`. Pass one when the verifier is an agent whose behaviour lives in a prompt or a model id rather than in the source of the function. |
+| `version_extra` | `Any` | `None` | Mixed into the derived fingerprint. The cheaper way to say the same thing: `version_extra={"model": "...", "prompt_sha": "..."}`. |
+
+| method | what it does |
+|---|---|
+| `calibration_set() -> list` | Resolved CALIBRATION records for *this* verifier version. |
+| `pending() -> list` | Audited units still waiting on truth. |
+
+### `RenderTap(run: Callable[[str, Any], str]) -> None`
+
+Optional wrapper for `run` that records *which* artifact produced an output.
+
+---
+
+## Audit oracle sources
+
+Where ground truth comes from, and how long it takes to arrive. &nbsp;·&nbsp; `agentdescent.audit.sources` &nbsp;·&nbsp; [guide](audit.md)
+
+### `DeferredOracle(*, max_queued: Optional[int] = None) -> None`
+
+Truth that arrives later: an experiment, a human, an overnight job.
+
+| method | what it does |
+|---|---|
+| `forget(record_id: str) -> None` | Drop a resolved id from the queue view. |
+| `queued() -> List[str]` | Record ids awaiting an answer, oldest first. |
+
+### `GoldAnswer(fn: Callable[[object, str], float]) -> None`
+
+Synchronous truth: a gold answer, an exact match, a checker, a simulator.
+
+### `NullOracle()`
+
+An oracle that never answers. The default, and it is not a no-op.
+
+### `resolve_from_mapping(store, answers: Dict[str, float], *, at: Optional[float] = None) -> int`
+
+Fill in truth for many pending records at once. Returns how many landed.
+
+---
+
+## The audit store
+
+Append-only persistence for paired observations, and the two pools. &nbsp;·&nbsp; `agentdescent.audit.store` &nbsp;·&nbsp; [guide](audit.md)
+
+### `AuditStore(path: Optional[str] = None) -> None`
+
+Records on disk, indexed in memory.
+
+| method | what it does |
+|---|---|
+| `all() -> List[AuditRecord]` | Every record, in the order first seen. |
+| `for_calibration(verifier_version: str) -> List[AuditRecord]` | Resolved CALIBRATION records for one verifier version, and nothing else. |
+| `for_improvement(verifier_version: Optional[str] = None) -> List[AuditRecord]` | Resolved IMPROVEMENT records -- the pool you are allowed to look at. |
+| `load() -> None` | Re-read the file, last-occurrence-wins. |
+| `pending(...)` | Records still waiting on truth -- the work list for whoever answers. |
+| `reopen(record_id: str) -> bool` | Clear a resolution so it can be replaced. For corrections, not for retries. |
+| `resolve(record_id: str, oracle_score: float, *, at: Optional[float] = None) -> bool` | Attach ground truth to a pending record. `False` if there was none to attach. |
+| `versions() -> List[str]` | Every `verifier_version` seen, in order of first appearance. |
+
+---
+
+## Audit records
+
+What one audited measurement is, and how a verifier is versioned. &nbsp;·&nbsp; `agentdescent.audit.records` &nbsp;·&nbsp; [guide](audit.md)
+
+### `AuditRecord(...)`
+
+One `(task, output)` pair scored by the verifier, awaiting or carrying truth.
+
+```python
+AuditRecord(
+    record_id: str,
+    task_id: str,
+    artifact_signature: str,
+    output: str,
+    verifier_version: str,
+    verifier_score: float,
+    inclusion_prob: float,
+    purpose: Purpose,
+    stratum: str = 'all',
+    oracle_score: Optional[float] = None,
+    dispatched_at: float = <factory>,
+    resolved_at: Optional[float] = None,
+    sampler_seed: int = 0,
+    schema_version: int = 1
+) -> None
+```
+
+### `Purpose`
+
+Which of the two disjoint pools a labelled unit belongs to.
+
+| member | value |
+|---|---|
+| `CALIBRATION` | `'calibration'` |
+| `IMPROVEMENT` | `'improvement'` |
+
+### `verifier_fingerprint(fn: Callable[..., Any], *, extra: Any = None) -> str`
+
+A stable id for the verifier `fn`, so a correction can be bound to it.
 
 ---
 
