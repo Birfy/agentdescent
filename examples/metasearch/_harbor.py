@@ -71,7 +71,7 @@ except ModuleNotFoundError:  # pragma: no cover - 3.9/3.10
 
 
 __all__ = ["HarborTask", "load_task", "parse_reward", "flatten_metrics", "LocalRunner", "DockerRunner",
-           "harbor_domain", "harbor_completion", "PARENT_PATCH_BEGIN", "PARENT_PATCH_END"]
+           "harbor_domain", "harbor_completion", "whole_file_patch", "PARENT_PATCH_BEGIN", "PARENT_PATCH_END"]
 
 
 # ---------------------------------------------------------------------------
@@ -365,6 +365,59 @@ class DockerRunner:
         if proc.returncode != 0:
             raise RuntimeError(f"verifier container failed: {(proc.stderr or proc.stdout)[-400:]}")
         return flatten_metrics(_trailing_json(proc.stdout))
+
+
+    def export_baseline(self, task: HarborTask, dest: os.PathLike) -> Path:
+        """Copy the task's baseline checkout out of its image, into ``dest``.
+
+        The benchmark is agentic: an agent edits files in a workspace and
+        Harbor turns what it left behind into a patch. Asking a bare
+        completion for a *unified diff* instead measures diff syntax, which is
+        not the science under test -- measured on this task, 3 of 3 sampled
+        patches were rejected by the verifier's own ``git apply`` before a
+        single test ran, and a patch that fails to apply is scored exactly like
+        one that applies and fails everything.
+
+        With the baseline on disk, :func:`whole_file_patch` builds the diff
+        with ``git`` from whole files, so it applies by construction and the
+        model is never asked to count context lines.
+        """
+        dest = Path(dest)
+        dest.mkdir(parents=True, exist_ok=True)
+        image = self.image_for(task)
+        cid = subprocess.run([self.docker, "create", image], check=True,
+                             capture_output=True, text=True).stdout.strip()
+        try:
+            subprocess.run([self.docker, "cp", f"{cid}:{task.workdir}/.", str(dest)],
+                           check=True, capture_output=True)
+        finally:
+            subprocess.run([self.docker, "rm", "-f", cid], capture_output=True)
+        return dest
+
+
+def whole_file_patch(workspace: os.PathLike, files: Mapping[str, str]) -> str:
+    """A diff against the baseline, from whole file contents. Applies by construction.
+
+    ``files`` maps a path relative to the workspace to its complete new text.
+    The workspace is restored to the baseline first, so each call is
+    independent of the last.
+    """
+    ws = Path(workspace)
+    # `git checkout -- .` restores the working tree from the *index*, so the
+    # previous call's `git add -A` would survive it and leak into this patch.
+    # Reset the index too, and clean ignored files (`-x`): the task's own
+    # reproduction writes gitignored outputs.
+    subprocess.run(["git", "reset", "--hard", "HEAD"], cwd=ws, check=True, capture_output=True)
+    subprocess.run(["git", "clean", "-fdqx"], cwd=ws, check=True, capture_output=True)
+    for rel, text in files.items():
+        target = (ws / rel).resolve()
+        if not str(target).startswith(str(ws.resolve()) + os.sep):
+            raise ValueError(f"{rel!r} escapes the workspace")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=ws, check=True, capture_output=True)
+    return subprocess.run(["git", "diff", "--cached", "--binary", "HEAD"], cwd=ws,
+                          check=True, capture_output=True, text=True).stdout
 
 
 def _trailing_json(text: str) -> Dict[str, Any]:
