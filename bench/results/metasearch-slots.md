@@ -222,3 +222,45 @@ python -m bench.metasearch_slots --model deepseek-v4-flash \
 `--eval-cache` also switches on the completion cache underneath it, which is
 what makes an inner run a function of the sampler. Without it a paired gain
 measures noise; the run plan says so.
+
+## The result files
+
+Two arms of every cell, because the contrast between them is the finding — a
+too-small inner budget let a *deliberately degenerate* sampler tie for best, and
+the corrected arm is what the matrix above reports.
+
+| | corrected (12 rollouts) | original (4 rollouts) |
+|---|---|---|
+| `task_sampler`, gsmhard | [gsmhard-big](metasearch-task_sampler-gsmhard-big.json) | [gsmhard](metasearch-task_sampler-gsmhard.json) |
+| `task_sampler`, hotpotqa | [hotpotqa-big](metasearch-task_sampler-hotpotqa-big.json) | [hotpotqa](metasearch-task_sampler-hotpotqa.json) |
+| `task_sampler`, bbh | [bbh-big](metasearch-task_sampler-bbh-big.json) | [bbh](metasearch-task_sampler-bbh.json) |
+| `task_sampler`, gpqa | [gpqa-big](metasearch-task_sampler-gpqa-big.json) | [gpqa](metasearch-task_sampler-gpqa.json) |
+| `task_sampler`, aime | [aime-big](metasearch-task_sampler-aime-big.json) | [aime](metasearch-task_sampler-aime.json) |
+| `task_sampler`, mgsm_zh | [mgsm_zh-big](metasearch-task_sampler-mgsm_zh-big.json) | [mgsm_zh](metasearch-task_sampler-mgsm_zh.json) |
+| `acceptance`, gsmhard | [acceptance-big](metasearch-acceptance-gsmhard-big.json) | [acceptance](metasearch-acceptance-gsmhard.json) |
+
+[`metasearch-task_sampler-gsmhard-reflective.json`](metasearch-task_sampler-gsmhard-reflective.json)
+is the `--reflective-merge` arm of the corrected GSM-Hard cell, and
+[`metasearch-gsm.json`](metasearch-gsm.json) is the instruction-evolution run the
+slot ports sit on top of.
+
+### The `selection` slot's two nulls, and why they are kept
+
+Both are properties of the *setup*, and both are cited by
+[`metasearch-domain-selection.md`](metasearch-domain-selection.md) as the
+measurements that produced two of its four required properties:
+
+* [`metasearch-selection-gsmhard-w20-null.json`](metasearch-selection-gsmhard-w20-null.json)
+  — 20-task windows. The inner reward moves in steps of 0.125, so archived
+  candidates tie and the archive sits at 0.625/0.625 forever. This is the
+  *reward must be fine-grained* row.
+* [`metasearch-selection-gsmhard.json`](metasearch-selection-gsmhard.json)
+  — a rankable inner reward, which fixes that and still does not transfer. This
+  is the *candidates must be genuinely incomparable* row: `argmax(score) == head`
+  in 63 of 63 calls, so the slot has no leverage on this domain whatever the
+  reward looks like.
+
+A null explained by a defect in the harness is a bug report, not a result, and
+is not kept — the SRBench pre-fix run was deleted for exactly that reason
+([`metasearch-selection-srbench.md`](metasearch-selection-srbench.md)). These
+two are kept because the thing they measure is real and load-bearing elsewhere.

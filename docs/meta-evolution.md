@@ -94,3 +94,21 @@ family to evolve on, a harder one never seen), and its boundary is stated in
 outer run, paired by seed, and `transfer_ratio` reads target gain over source
 gain: near 1 is a better rule, near 0 with a positive source gain is a fit to the
 training landscape, negative is a rule that traded generality for it.
+
+**A seed is only a replicate if it moves the run.** On a domain where the
+evaluator is deterministic and completions are cached, an inner run is a
+function of the value — which is the property that makes the domain measurable
+at all, and it makes `seeds=[0, 1, 2]` three copies of one comparison. Replicate
+across problems or across the data split, and check the numbers differ before
+counting them as independent.
+
+## What has been measured
+
+| result | what it says |
+|---|---|
+| [Evolving the tree search itself](https://github.com/Birfy/agentdescent/blob/main/bench/results/metasearch-tree.md) | **positive, synthetic.** +0.0227 source / +0.0120 target over 3 seeds; lands on the Pareto front of the hand-tuned PUCT family, from a seed that is off it |
+| [A search rule on real scientific data](https://github.com/Birfy/agentdescent/blob/main/bench/results/metasearch-selection-srbench.md) | **positive, real data.** LLM-SRBench `lsr_synth`: 5 wins / 0 losses / 4 ties over nine held-out paired comparisons, sign test p = 0.031 — and the rule moves in the *opposite* direction to the synthetic one, as predicted in advance |
+| [Choosing a domain to evolve on](https://github.com/Birfy/agentdescent/blob/main/bench/results/metasearch-domain-selection.md) | **the method.** Four properties a domain must supply, each named by the null that taught it, and three checks that cost one inner run apiece |
+| [A benchmark x slot matrix](https://github.com/Birfy/agentdescent/blob/main/bench/results/metasearch-slots.md) | **mixed.** Seven cells on `task_sampler` and `acceptance`; four commit, unseen gains +0.02 to +0.04, none negative once the inner budget is adequate |
+| [AlgoTune](https://github.com/Birfy/agentdescent/blob/main/bench/results/metasearch-algotune.md) | **negative, structural.** The port works; the experiment cannot, because the measured timing *is* the feedback the search runs on |
+| [SWE-bench-Science](https://github.com/Birfy/agentdescent/blob/main/bench/results/metasearch-swe-bench-science.md) | **domain qualified, experiment blocked.** Deterministic verifier, 3-31 reward levels, 5.9 s median — but nothing beats the root without the agent phase, on a weak model or a strong one |

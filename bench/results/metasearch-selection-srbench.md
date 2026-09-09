@@ -113,6 +113,23 @@ so far had pinned at 0. That is the axis the table above uses, and it moves:
 **If a validation reports identical numbers for different seeds, the seed is not
 a replicate. Check that it moves before counting it.**
 
+### The same defect shrinks the outer gate, which is the weaker half of this run
+
+`meta_evolve` was given 4 problems x 3 seeds = **12 outer tasks**, and
+`held_out_frac=0.4` cut 5 of them for the gate. With the seed inert, those 12
+tasks are 4 distinct problems repeated three times each, so the gate was really
+deciding on about **2 distinct problems**, not 5.
+
+It shows in the run: 6 rollouts, 2 commits, **0 rejections**. The gate never had
+to turn anything down, so it did no filtering — it only confirmed that each
+commit raised held-out reward (0.2838 -> 0.2868). That is the honest weak point
+of the evolution phase, and it is why the nine post-hoc comparisons above, on
+problems and splits the outer loop never touched, are what the result rests on
+rather than the commit count.
+
+A run repeating this should pass `seeds=[0]` and put the budget into **more
+problems** instead.
+
 ## What it cost, and the guard it tripped
 
 The evolution itself: 6 rollouts, 2 commits, 40 model calls, 197k tokens, 2.7
@@ -135,7 +152,9 @@ re-running the claim, not for accepting it. The replication above is that re-run
 ```
 
 Numbers, rows, the evolved source and the full config are in
-[`metasearch-selection-srbench-v2.json`](metasearch-selection-srbench-v2.json).
-The pre-fix null is kept in
-[`metasearch-selection-srbench.json`](metasearch-selection-srbench.json),
-annotated with the cause.
+[`metasearch-selection-srbench.json`](metasearch-selection-srbench.json).
+
+The pre-fix run is **not** kept. It was a null produced by the prompt bug above,
+its own annotation said every row compared the seed rule with itself, and the
+story it documented is the two corrections on this page. A void run is a bug
+report, not a result, and prose is the right place for it.

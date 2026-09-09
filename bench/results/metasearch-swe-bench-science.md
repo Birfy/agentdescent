@@ -239,6 +239,9 @@ ws = runner.export_baseline(task, "ws")     # the checkout, from the image
 EOF
 ```
 
+Every baseline, both sampling runs and the full per-task rows are in
+[`metasearch-swe-bench-science.json`](metasearch-swe-bench-science.json).
+
 Task directories come from the dataset
 (`.../resolve/main/tasks/task_NNN/{task.toml,instruction.md,metadata.json,tests/grader.py}`);
 images are pinned by digest in `task.toml`. Fetch `tests/grader.py` — it is what
