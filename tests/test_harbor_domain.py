@@ -223,3 +223,41 @@ def test_a_count_is_normalised_so_the_reward_clamp_cannot_flatten_it():
     # a count with no total stays a count, and no ratio is invented for it
     assert "failed.pass_rate" not in flatten_metrics({"private": {"passed": 2}})
     assert flatten_metrics({"private": {"passed": 0, "collected": 0}})["private.pass_rate"] == 0.0
+
+
+def test_scale_fixes_the_denominator_so_a_candidate_cannot_change_the_ruler(task_dir):
+    """`private.pass_rate` divides by a count the candidate can move.
+
+    Measured on SWE-bench-Science task_001: the baseline reports `1 of 3`, and a
+    sampled patch that broke the test module's import reported `0 of 1`. Those
+    are two different scales in one column, not a worse score on one scale.
+    `scale` divides by a fixed number instead -- read once off the baseline --
+    so every candidate is compared on the same ruler.
+    """
+    from examples.metasearch._harbor import harbor_domain, load_task
+
+    class Runner:
+        def __init__(self, metrics):
+            self.metrics = metrics
+
+        def verify(self, task, patch):
+            return self.metrics
+
+    root, _ = task_dir
+    task = load_task(root)
+    baseline = {"private.passed": 1.0, "private.collected": 3.0}
+    broke_collection = {"private.passed": 0.0, "private.collected": 1.0}
+
+    for metrics, expected in ((baseline, 1 / 3), (broke_collection, 0.0)):
+        dom = harbor_domain(task, Runner(metrics), scoring=["private.passed"],
+                            scale={"private.passed": 3.0}, shards=2)
+        ok, out, err = dom.evaluate("p", [0])
+        assert ok, err
+        assert out["score"] == expected
+        assert dom.reward(out) == expected
+        # the raw count is still what gets reported
+        assert out["metrics"]["private.passed"] == metrics["private.passed"]
+
+    with pytest.raises(ValueError):
+        harbor_domain(task, Runner(baseline), scoring=["private.passed"],
+                      scale={"private.passed": 0.0})

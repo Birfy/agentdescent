@@ -475,7 +475,8 @@ def _patch_id(patch: str) -> str:
 
 
 def harbor_domain(task: HarborTask, runner: Runner, *, scoring: Sequence[str],
-                  held_back: Sequence[str] = (), shards: Optional[int] = None) -> Domain:
+                  held_back: Sequence[str] = (), shards: Optional[int] = None,
+                  scale: Optional[Mapping[str, float]] = None) -> Domain:
     """One Harbor task in the four terms the ERA search needs.
 
     ``scoring`` and ``held_back`` name verifier metrics (``reward.json`` keys, or
@@ -485,8 +486,23 @@ def harbor_domain(task: HarborTask, runner: Runner, *, scoring: Sequence[str],
     and the repeats cost nothing because a patch is verified once and cached.
     ``domain.test_shards`` are the held-back metrics; empty when nothing is
     held back, in which case the reported figure is the scoring figure.
+
+    ``scale`` divides a metric by a **fixed** number before scoring, and is how
+    a count is turned into a rate without letting the candidate choose the
+    denominator. ``flatten_metrics`` publishes ``private.pass_rate`` as
+    ``passed / collected``, and ``collected`` is not constant: a patch that
+    breaks the test module's import takes SWE-bench-Science task_001 from
+    ``1 of 3`` to ``0 of 1`` -- a different scale, not a worse score. Passing
+    ``scoring=["private.passed"], scale={"private.passed": 3.0}`` with the
+    denominator read once off the baseline compares every candidate on the same
+    ruler. (On this benchmark the ratio is not *exploitable*, because the
+    private tests live in the verifier image and a patch to the workdir cannot
+    reach them -- but it is still two different scales in one column.)
     """
     scoring, held_back = list(scoring), list(held_back)
+    scale = dict(scale or {})
+    if any(v <= 0 for v in scale.values()):
+        raise ValueError(f"scale divisors must be positive: {scale}")
     if not scoring:
         raise ValueError("harbor_domain needs at least one scoring metric")
     if set(scoring) & set(held_back):
@@ -519,7 +535,9 @@ def harbor_domain(task: HarborTask, runner: Runner, *, scoring: Sequence[str],
         if missing:
             return False, {"score": float("-inf"), "pass_rate": None, "metrics": metrics}, \
                 f"verifier reported no metric {missing}; it wrote {sorted(metrics)}"
-        score = sum(metrics[m] for m in wanted) / len(wanted)
+        # a list, not a dict: `wanted` repeats a metric when there are more
+        # shards than scoring metrics, and a dict would collapse the repeats
+        score = sum(metrics[m] / scale.get(m, 1.0) for m in wanted) / len(wanted)
         return True, {"score": score, "pass_rate": score,
                       "metrics": {m: metrics[m] for m in wanted}}, ""
 
@@ -561,7 +579,7 @@ def harbor_domain(task: HarborTask, runner: Runner, *, scoring: Sequence[str],
         task_prompt=task_prompt,
         test_shards=test_shards,
         data_summary={"task": task.name, "scoring": scoring, "held_back": held_back,
-                      "shards": n_shards, "workdir": task.workdir,
+                      "shards": n_shards, "workdir": task.workdir, "scale": scale,
                       "runner": type(runner).__name__},
     )
 
