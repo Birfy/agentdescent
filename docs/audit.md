@@ -161,6 +161,94 @@ resulting estimate is confidently wrong rather than noisy, and it errs towards
 because a query condition is one careless edit away from being widened and an
 assertion is not.
 
+## Improving the verifier — and the trap in it
+
+Calibration corrects the verifier's mean error. The other question is whether the
+verifier can be made less wrong in the first place, and
+[`agentdescent.audit.diagnose`](api.md#diagnosing-the-verifier) is for that.
+
+!!! danger "Do not optimise the verifier against `delta_hat`"
+    A mean can be driven to zero by adding errors in the *opposite* direction,
+    and that is not an improvement. Measured on a real 177-pair HotpotQA audit,
+    two obviously-correct hard rules — reject an answer that echoes the question,
+    reject one far shorter than the reference — produced this:
+
+    | | before | after |
+    |---|---|---|
+    | `delta` | +0.175 | **+0.051** (−71%) |
+    | `sigma` | 0.381 | **0.417** (up) |
+    | disagreement | 0.175 | 0.175 (unchanged) |
+    | false-negative rate | — | **22.4%** |
+
+    Eleven corrections and eleven fresh mistakes. The bias fell because the
+    errors now cancel, not because the verifier learned anything.
+
+    **`sigma` is the target here.** `delta` is what the calibrator already
+    handles, and optimising the thing that is already handled breaks the thing
+    that is not.
+
+### Sorted by what it would take to fix
+
+```python
+from agentdescent.audit import classify_disagreements, reference_classifier
+
+report = classify_disagreements(
+    store.for_improvement(version),          # never the calibration pool
+    reference_classifier(normalise, lambda ctx: ctx.gold,
+                         spec_gap_when=..., ambiguous_when=...),
+    context={task.id: task for task in tasks},
+)
+print(report.to_markdown())
+```
+
+| kind | fix | cost |
+|---|---|---|
+| `FORMATTING` | normalise both sides | nothing; cannot introduce a judgement |
+| `SPEC_GAP` | a hard rule | cheap — and the one most likely to look free |
+| `AMBIGUOUS` | **none** | a second oracle would disagree too |
+| `JUDGMENT` | a better judge — prompt, model, thinking | expensive, and last |
+
+The order is the point: the first two need no model and no training, and are
+usually most of the residual. A diagnosis that jumps to "the judge needs to be
+smarter" is skipping the cheap majority.
+
+`Direction` is recorded beside `Kind` because a fix that trades `OVER` errors for
+`UNDER` ones looks like progress in every summary that omits it — which is
+exactly what the table above is.
+
+### The floor
+
+`report.floor_sigma` is what `sigma` would be if every non-ambiguous
+disagreement were fixed perfectly. It is not zero, and chasing below it is not a
+plan to improve the verifier — it is a plan to redefine correctness.
+
+From the same audit, gold `'Robert Erskine Childers DSC'` against an answer of
+`'Robert Erskine Childers'`, or `'from 1986 to 2013'` against `'1986 to 2013'`:
+the judge said these were right, exact match said they were wrong, and the judge
+has the better case. Driving those out means training the judge *into* exact
+match, which is what having a judge was supposed to avoid.
+
+### Measure a fix on the answers it was not aimed at
+
+```python
+from agentdescent.audit import evaluate_fix
+
+got = evaluate_fix(labelled, my_rule, context=tasks_by_id)
+print(got.to_markdown())      # helps / does not help, by sigma
+```
+
+`evaluate_fix` scores a proposed change against **every** labelled pair, not the
+disagreements it targets. Restricted to its targets, the two-rule fix above
+removes eleven errors, breaks nothing, and cuts both the disagreement rate and
+the bias by 35% — a clean win by every number a person reaches for. On the whole
+set it also breaks eleven correct judgements.
+
+The rule was not a bad rule. It was a rule nobody had measured against the
+answers it was not aimed at.
+
+`FixReport.helps` reads `sigma_after < sigma_before` and nothing else, for the
+reason at the top of this section.
+
 ## Allocation — where the budget should go
 
 A flat rate spends the budget where the *units* are. What sets the width of the

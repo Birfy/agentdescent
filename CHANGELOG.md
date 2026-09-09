@@ -32,6 +32,29 @@ All notable changes to AgentDescent are documented here. The format follows
   and `for_calibration` asserts the split rather than filtering for it. The
   estimator is deliberately not included. [docs/audit.md](docs/audit.md)
 
+- **`agentdescent.audit.diagnose` -- what the verifier gets wrong, and whether a
+  fix helps.** `classify_disagreements` sorts the residual into what it would
+  take to fix -- FORMATTING (normalise), SPEC_GAP (a hard rule), AMBIGUOUS (a
+  second oracle would disagree too; **not fixable**), JUDGMENT (a better judge) --
+  and records the **direction** of each error beside its kind.
+
+  `report.floor_sigma` is what the residual would be if every non-ambiguous
+  disagreement were fixed. It is not zero, and aiming below it is a plan to
+  redefine correctness rather than to improve the verifier.
+
+  `evaluate_fix` scores a proposed change against **every** labelled pair rather
+  than the disagreements it targets, and `FixReport.helps` reads the residual
+  rather than the bias. Both because of what a real audit produced: two
+  obviously-correct hard rules removed eleven verifier errors, created eleven
+  fresh ones, cut `delta` by 71% and left `sigma` **larger**, with a 22.4%
+  false-negative rate. Restricted to its targets that fix reads as a clean 35%
+  win by every number a person reaches for.
+
+  The lesson is in the API: **do not optimise the verifier against `delta_hat`**.
+  A mean can be driven to zero by adding errors in the opposite direction. The
+  bias is what the calibrator already handles; optimising it breaks the residual,
+  which is what the calibrator cannot handle.
+
 - **`agentdescent.audit.sampler` -- Neyman allocation, as inclusion
   probabilities.** A flat rate spends the oracle budget where the *units* are;
   what sets the width of the correction is where the verifier is *unreliable*.

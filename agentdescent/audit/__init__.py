@@ -64,6 +64,9 @@ for an estimator.
 """
 
 from .calibrator import STALE_INFLATION, Calibrator, Rectification
+from .diagnose import (Direction, Disagreement, DisagreementReport,
+                       FixReport, Kind, classify_disagreements,
+                       evaluate_fix, reference_classifier, residual_stats)
 from .estimate import bootstrap_ci, hajek_mean, residual_bias, standard_error
 from .ppi import (MIN_N_DOMINANT, PPIError, PPIResult, Stratum,
                   ppi_mean_stratified, t_ppf)
@@ -87,7 +90,13 @@ __all__ = [
     "Calibrator",
     "boundary_stratifier",
     "bootstrap_ci",
+    "classify_disagreements",
     "DeferredOracle",
+    "Direction",
+    "Disagreement",
+    "DisagreementReport",
+    "FixReport",
+    "Kind",
     "GoldAnswer",
     "NullOracle",
     "OracleSource",
@@ -100,12 +109,15 @@ __all__ = [
     "STALE_INFLATION",
     "Stratum",
     "new_record_id",
+    "evaluate_fix",
     "hajek_mean",
     "observed_weights",
     "output_digest",
     "plan_audit",
     "ppi_mean_stratified",
+    "reference_classifier",
     "resid_sd_from",
+    "residual_stats",
     "residual_bias",
     "resolve_from_mapping",
     "standard_error",

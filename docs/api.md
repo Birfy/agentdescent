@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-249 public names across 43 modules.
+258 public names across 44 modules.
 
 ---
 
@@ -1070,6 +1070,116 @@ Records on disk, indexed in memory.
 ### `summarise(records: Iterable[AuditRecord]) -> Dict[str, float]`
 
 Counts and the raw mean residual. **Not** an estimate of the bias.
+
+---
+
+## Diagnosing the verifier
+
+Sort the residual by what fixing it would cost, and measure a proposed fix. &nbsp;·&nbsp; `agentdescent.audit.diagnose` &nbsp;·&nbsp; [guide](audit.md)
+
+### `Direction`
+
+Which way the verifier was wrong.
+
+| member | value |
+|---|---|
+| `OVER` | `'over'` |
+| `UNDER` | `'under'` |
+
+### `Disagreement(record: AuditRecord, kind: Kind, direction: Direction, note: str = '') -> None`
+
+### `DisagreementReport(...)`
+
+The residual, sorted by what fixing it would cost.
+
+```python
+DisagreementReport(
+    n_pairs: int,
+    n_disagree: int,
+    delta: float,
+    sigma: float,
+    by_kind: Dict[Kind, int],
+    by_direction: Dict[Direction, int],
+    by_kind_direction: Dict[Tuple[Kind, Direction], int],
+    floor_sigma: float,
+    sigma_without: Dict[Kind, float],
+    items: List[Disagreement] = <factory>
+) -> None
+```
+
+### `FixReport(...)`
+
+What a proposed change to the verifier actually costs.
+
+```python
+FixReport(
+    n_pairs: int,
+    delta_before: float,
+    delta_after: float,
+    sigma_before: float,
+    sigma_after: float,
+    disagree_before: float,
+    disagree_after: float,
+    fixed: int,
+    broken: int,
+    false_negative_rate: float,
+    unchanged: int
+) -> None
+```
+
+### `Kind`
+
+What it would take to fix this disagreement. Ordered by increasing cost.
+
+| member | value |
+|---|---|
+| `FORMATTING` | `'formatting'` |
+| `SPEC_GAP` | `'spec_gap'` |
+| `AMBIGUOUS` | `'ambiguous'` |
+| `JUDGMENT` | `'judgment'` |
+| `UNCLASSIFIED` | `'unclassified'` |
+
+### `classify_disagreements(...)`
+
+Sort a store's resolved disagreements by what fixing them would take.
+
+```python
+classify_disagreements(
+    records: Iterable[AuditRecord],
+    classifier: Optional[Classifier] = None,
+    context: Optional[Mapping[str, Any]] = None
+) -> DisagreementReport
+```
+
+### `evaluate_fix(...)`
+
+Score a proposed verifier change against **every** labelled pair.
+
+```python
+evaluate_fix(
+    records: Iterable[AuditRecord],
+    fix: Callable[[AuditRecord, Any], float],
+    context: Optional[Mapping[str, Any]] = None
+) -> FixReport
+```
+
+### `reference_classifier(...)`
+
+A classifier for the common case: a reference answer and a normaliser.
+
+```python
+reference_classifier(
+    normalise: Callable[[str], str],
+    reference_of: Callable[[Any], str],
+    *,
+    ambiguous_when: Optional[Callable[[str, str, Any], bool]] = None,
+    spec_gap_when: Optional[Callable[[str, str, Any], bool]] = None
+) -> Classifier
+```
+
+### `residual_stats(records: Iterable[AuditRecord]) -> Dict[str, float]`
+
+`n`, `delta`, `sigma`, `disagree` over resolved records.
 
 ---
 
