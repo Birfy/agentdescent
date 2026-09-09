@@ -90,7 +90,7 @@ Every previous real-data domain failed at least one of these.
 | **1. the run is a function of the candidate** | **exact.** Repeated verifications are byte-identical | AlgoTune: sd 0.054, structural. LLM-SRBench: only after raising a wall-clock budget |
 | **2. the reward is fine-grained** | **3 to 31 levels** (median 10) once nested metrics are read | GSM-Hard: steps of 0.125, archive tied permanently |
 | **3. candidates are incomparable** | a patch is not a chain — this is a tree search, not `evolve()`'s archive | the `selection` slot was inert because `argmax(score) == head` in 63/63 |
-| **4. the search improves at an affordable budget** | **open** — see below | this is where hyp2f1 and `lsr_transform` died |
+| **4. the search improves at an affordable budget** | **no**, for this candidate generator — 0 of 14 attempts beat the root | this is where hyp2f1 and `lsr_transform` died, and it is the *only* thing wrong here |
 
 Property 1 is the notable one. **This is the first real-data domain in this line
 of work where the evaluator is deterministic by construction** rather than by
@@ -137,7 +137,7 @@ Sum over all 15: 207 s. At the median, a 60-expansion inner search costs about
 here, and two orders below what AlgoTune's noise would have demanded. Cost
 selection matters: `task_002` alone is 109 s, 18x the median.
 
-## What is not settled: property 4
+## Property 4: nothing beat the root
 
 A selection rule can only be judged by how fast the best-so-far curve rises, so
 the domain has to show *someone* beating the root at an affordable budget. That
@@ -165,8 +165,48 @@ Two things had to change before the sampling measured the science at all:
   [`metasearch-domain-selection.md`](metasearch-domain-selection.md) §4, and the
   same guard applies: a run whose model calls fail is not a negative result.
 
-The sampling run is in progress and its verdict belongs in this page, not in a
-summary of it.
+A third thing had to be fixed before the numbers meant anything, and it is the
+one most worth carrying: **the workspace was left holding the previous
+candidate's edits.** `whole_file_patch` reset on the way in but not on the way
+out, so every attempt was built on the last one rather than on the root. It
+showed up as the model apparently being bad at quoting long spans -- every
+`SEARCH` block naming `_06heur.py` stopped matching after the first sample --
+and it was not: the file no longer held what the prompt had shown it. That is a
+different experiment from the one being run.
+
+### The verdict: property 4 fails for this setup
+
+14 independent attempts, `deepseek-v4-flash`, thinking disabled, temperature
+0.9, on a workspace reset to the baseline between each:
+
+| outcome | count |
+|---|---:|
+| reached the verifier | **13 of 14** |
+| scored *exactly* the baseline, `1 of 3` | **8** |
+| **worse** — `0 of 1`, the patch broke the test module's import | **5** |
+| **above the baseline** | **0** |
+| solved (`reward = 1`) | 0 |
+
+**The best-so-far curve is flat at the root**, which is the same failure that
+ended hyp2f1 and `lsr_transform`. And the shape is the informative part: the
+outcomes are *bimodal* — a candidate is either exactly the baseline or broken,
+with nothing in between. The reward discriminates downward perfectly well (0.000
+against the root's 0.333); it is upward movement that never happens. A rule that
+decides what to expand next can only be judged by how fast the curve rises, and
+here there is no rise to accelerate.
+
+**This measures the setup, not the benchmark.** One task, a small model, a
+single shot, and no workspace agent — against a benchmark whose own headline is
+Claude Code with Opus 5 under 50% pass@1. 0 of 14 is the expected number, not a
+surprising one. What it settles is narrower and still useful: *the three
+properties that killed every previous real-data domain are satisfied here, and
+the one that remains is not a property of the domain at all — it is a property
+of how strong the candidate generator is.*
+
+So the next move is not another search-rule experiment on this domain. It is
+either a stronger generator or the real agent phase (`harbor run --agent`), and
+until one of those exists the curve will stay flat for reasons that have nothing
+to say about selection rules.
 
 ## Reproducing
 

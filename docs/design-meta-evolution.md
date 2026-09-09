@@ -515,7 +515,7 @@ vs 一个新鲜抽样"，配对差的 sd 是 `sd×√2` ≈ 0.076，10 个 held-
 | P3 | `examples/metasearch/`：合成地形、离线端到端、`--dry-run`、加入 PORTS 契约 | ✅ |
 | P4a | GSM 跑批脚本 `bench/metasearch_slots.py`：演进 `task_sampler`，内层是完整的内层 `evolve()`，报告分三组（演进过的 / 同基准未见切片 / 另一个基准）各自的迁移比 | ✅ 脚本 + 离线测试 + **在线跑出结果**（`bench/results/metasearch-slots.md`） |
 | P4b | AlgoTune 跑批脚本 `bench/metasearch_algotune.py`（训练/验证任务不相交、新 seed 验证、迁移比、结果 JSON） | ✅ 脚本 + 插桩测试 + **在线跑过**（`bench/results/metasearch-algotune.md`）：port 跑通（5.6× 加速），但**这个域现在测不了选择规则**，噪声是信号的 3.4 倍，见 §4.8 |
-| P5 | Harbor 适配器 `_harbor.py`（§4.3）+ SWE-bench-Science / TB-Science 验证 | ✅ 适配器 + `LocalRunner` 离线端到端；`DockerRunner` **在 SWE-bench-Science 上真跑过**（15 个任务基线 + 单任务端到端，见 [`metasearch-swe-bench-science.md`](../bench/results/metasearch-swe-bench-science.md)）：域本身四条性质里三条达标且优于此前任何真实数据域；**未定**的是第四条（可负担预算下曲线是否会升），缺的是容器内 agent |
+| P5 | Harbor 适配器 `_harbor.py`（§4.3）+ SWE-bench-Science / TB-Science 验证 | ✅ 适配器 + `LocalRunner` 离线端到端；`DockerRunner` **在 SWE-bench-Science 上真跑过**（15 个任务基线 + 单任务端到端，见 [`metasearch-swe-bench-science.md`](../bench/results/metasearch-swe-bench-science.md)）：域本身四条性质里三条达标且优于此前任何真实数据域；第四条（可负担预算下曲线是否会升）**在当前候选生成器下不成立**：14 次尝试 0 次超过根节点，结果是双峰的(要么恰好等于基线、要么把测试模块改崩),没有斜率给选择规则加速。那是生成器的性质不是域的性质——要么换更强的模型,要么补容器内 agent |
 | P6 | 其余五个插槽的内置冒烟与默认种子，每个种子在真实内层 `evolve()` 里跑通 | ✅ |
 | P7 | 多插槽联合演化（`ParamSlot` 的 key 空间天然支持；`SourceSlot` 需要多槽 Strategy） | 开放 |
 
