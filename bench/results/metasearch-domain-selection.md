@@ -212,6 +212,23 @@ Hold the caveats: four problems, one seed each, 8 expansions; the spread is
 carried by `po22` (0.2583) while `matsci13` contributes 0.0003; and `bpg1`'s
 noise is 0.0042 rather than 0.
 
+## The prediction held
+
+This page predicted, before any evolution was run, that *"a rule evolved on
+`lsr_synth` should discover 'explore more'"* — from `worst-first` beating
+`greedy` at a small budget. It did:
+[`metasearch-selection-srbench.md`](metasearch-selection-srbench.md) reports a
+rule that **adds** an exploration term and a depth penalty, 5 wins / 0 losses /
+4 ties over nine held-out paired comparisons (sign test p = 0.031).
+
+One property this page did **not** state, and which cost half a sample size:
+**a seed is only a replicate if it moves the run.** On this domain ERA's seed
+moves nothing — seeds 7, 8, 9, 10 and 123 give byte-identical curves with zero
+model calls, precisely *because* the inner run is a function of the rule. The
+determinism that makes a domain measurable is the same thing that makes its seed
+axis inert. Replicate across problems, or across the data split, and check that
+the numbers differ before counting them as independent.
+
 ## Status
 
 Verified: determinism on LLM-SRBench (0.0000 once `problem_seconds` is raised)
@@ -219,5 +236,6 @@ and hyp2f1 (0.0000); zero rule spread on both under the whole-category protocol
 at 30 expansions; and on `lsr_synth` per-problem, a measurable spread of 0.0842
 against a 0.0011 noise floor.
 
-Not yet run: the evolution itself — `meta_evolve` over `priority()` on the
-rising `lsr_synth` problems, validated on problems the outer loop never saw.
+Run, and positive: `meta_evolve` over `priority()` on the rising `lsr_synth`
+problems, validated on problems the outer loop never saw —
+[`metasearch-selection-srbench.md`](metasearch-selection-srbench.md).

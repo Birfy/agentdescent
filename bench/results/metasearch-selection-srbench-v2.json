@@ -119,7 +119,7 @@
  "what": "meta_evolve over ERA's priority() rule on LLM-SRBench lsr_synth, per-problem protocol; paired validation against the seed rule on problems the outer loop never saw",
  "how": "4 training problems x 3 inner seeds; held-out problems taken from a disjoint slice of the catalogue and kept only where the seed rule's curve rises (scanned separately and checkpointed, because this environment reaps long-lived processes); validation paired on seeds 7 and 8",
  "status": {
-  "verdict": "POSITIVE but with HALF the sample size it appears to have -- see sample_size",
+  "verdict": "POSITIVE, replicated on data splits, 0 failures -- see replication",
   "guard": "1 of 40 model calls failed (2.5%), above the 2% threshold set in metasearch-domain-selection.md after a 61%-failure run produced a plausible null. The guard is NOT being waived: an independent re-run of the paired validation, in a fresh process reporting its own failure count, is what decides whether these numbers stand.",
   "why_the_bias_runs_against_this_result": "a failed call is a candidate that was never written, which the engine sees as a rollout that found nothing -- so the bias is toward a null, and this result is positive. That is an argument for re-running it, not a reason to accept it.",
   "prerequisite_fixed_first": "this domain's earlier evolution was recorded as a null with a 0.024 paired noise floor. The cause was a wall-clock duration printed into the SRBench prompt, which changed the completion-cache key; with it removed the seed rule against itself is exactly 0.0000 on 3 of 3 problems retested."
@@ -130,5 +130,88 @@
   "consequence": "the honest reading is 3 held-out problems, ONE paired comparison each, 3 of 3 in favour of the evolved rule -- not '2-0 on each of three'. A validation on seeds 9 and 10 reproduced seeds 7 and 8 exactly, with 0 model calls, which confirms determinism and adds no independent evidence.",
   "irony": "this is the flip side of the determinism this domain was chosen for. The noise floor is 0.0000 because the inner run is a function of the rule; that same property makes the seed axis inert, so replication has to come from problems, or from the data-split seed passed to `prepare_problem_suite`, not from ERA's seed.",
   "corrected_claim": "3 of 3 held-out problems improve; n = 1 paired comparison per problem"
+ },
+ "replication": {
+  "what": "the claim re-run on the axis that actually varies: every held-out problem x three data splits (`prepare_problem_suite(seed=...)`), seed rule against evolved rule",
+  "why_this_axis": "ERA's own `seed` is inert in this configuration -- 7, 8, 9, 10 and 123 give byte-identical curves with zero model calls -- so the original `meta_validate(seeds=[7,8])` reported one comparison twice. The data split does move the run, so it is where replication has to come from.",
+  "rows": [
+   {
+    "problem": "lsr_synth_bio_pop_growth_bpg23",
+    "split": 0,
+    "seed_rule": 0.05001823506605986,
+    "evolved": 0.12416558435348095,
+    "gain": 0.07414734928742109
+   },
+   {
+    "problem": "lsr_synth_bio_pop_growth_bpg23",
+    "split": 1,
+    "seed_rule": 0.014797384554991204,
+    "evolved": 0.014797384554991204,
+    "gain": 0.0
+   },
+   {
+    "problem": "lsr_synth_bio_pop_growth_bpg23",
+    "split": 2,
+    "seed_rule": 0.04744138046783132,
+    "evolved": 0.11884462613566373,
+    "gain": 0.0714032456678324
+   },
+   {
+    "problem": "lsr_synth_bio_pop_growth_bpg7",
+    "split": 0,
+    "seed_rule": 0.042975897572794575,
+    "evolved": 0.08052521559033901,
+    "gain": 0.037549318017544436
+   },
+   {
+    "problem": "lsr_synth_bio_pop_growth_bpg7",
+    "split": 1,
+    "seed_rule": 0.02054404762234131,
+    "evolved": 0.02054404762234131,
+    "gain": 0.0
+   },
+   {
+    "problem": "lsr_synth_bio_pop_growth_bpg7",
+    "split": 2,
+    "seed_rule": 0.017026241388137783,
+    "evolved": 0.017026241388137783,
+    "gain": 0.0
+   },
+   {
+    "problem": "lsr_synth_matsci_matsci8",
+    "split": 0,
+    "seed_rule": 0.12473138754676684,
+    "evolved": 0.19834021605553426,
+    "gain": 0.07360882850876742
+   },
+   {
+    "problem": "lsr_synth_matsci_matsci8",
+    "split": 1,
+    "seed_rule": 0.13960784047261685,
+    "evolved": 0.13960784047261685,
+    "gain": 0.0
+   },
+   {
+    "problem": "lsr_synth_matsci_matsci8",
+    "split": 2,
+    "seed_rule": 0.14027489042314661,
+    "evolved": 0.3741834628046507,
+    "gain": 0.2339085723815041
+   }
+  ],
+  "n": 9,
+  "wins": 5,
+  "losses": 0,
+  "ties": 4,
+  "mean_gain": 0.054513034873674385,
+  "median_gain": 0.037549318017544436,
+  "sign_test_one_sided_p": 0.03125,
+  "usage": {
+   "calls": 20,
+   "failures": 0,
+   "fail_rate": 0.0
+  },
+  "verdict": "CLEAN and POSITIVE. 5 wins, 0 losses, 4 ties over 9 independent paired comparisons; sign test p = 0.031 one-sided on the 5 non-tied pairs. Zero model calls failed, so the guard that flagged the evolution run does not apply here. The evolved rule never loses: it either wins substantially or ties, and it replicates across splits on the same problem (bpg23 +0.0741 and +0.0714 on two different splits, against a 0.0000 noise floor).",
+  "honest_caveats": "the mean drops from the originally reported +0.0618 to +0.0545 once splits beyond the optimistic split 0 are included, and 4 of 9 comparisons are exact ties -- on those splits the evolved rule changes nothing. The largest single gain, matsci8 split 2 (+0.2339), carries a lot of the mean; the median (+0.0375) is the more robust summary."
  }
 }
