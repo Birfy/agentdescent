@@ -115,7 +115,12 @@ class WorkspaceProvider:
         self._lock = threading.Lock()
 
     def acquire(self, spec: SandboxSpec) -> LocalWorkspaceSandbox:
-        root = tempfile.mkdtemp(prefix=_WS_PREFIX, dir=spec.workspace_root)
+        # `realpath`, so `HOME` (= this root) and a child's `getcwd()` are the
+        # same string. On macOS `mkdtemp` hands back /var/folders/... while the
+        # child resolves the symlink to /private/var/folders/..., and a host
+        # that compares the two decides it is not running where it was put.
+        root = os.path.realpath(
+            tempfile.mkdtemp(prefix=_WS_PREFIX, dir=spec.workspace_root))
         with self._lock:
             self._n += 1
             n = self._n

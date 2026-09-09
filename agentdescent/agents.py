@@ -26,7 +26,8 @@ import subprocess
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Optional, Protocol, Sequence, runtime_checkable
+from typing import (Any, Callable, Dict, List, Mapping, Optional, Protocol,
+                    Sequence, Tuple, runtime_checkable)
 
 Completion = Callable[[str], str]
 
@@ -142,29 +143,116 @@ class WorkspaceAgent(Protocol):
     def in_workspace(self, path: str) -> Completion: ...
 
 
+#: Environment variables a host agent sets in its own session and its children
+#: inherit. A worker that sees them believes it is *inside* that session:
+#: Claude Code refuses to start, DSH loads the parent's profile, and a worker
+#: whose host runs this package's MCP server would call it recursively.
+SESSION_MARKERS: Tuple[str, ...] = (
+    "CLAUDECODE", "CLAUDE_CODE_", "CLAUDE_CONFIG_DIR", "CODEX_", "DSH_",
+    "OPENAI_AGENT_", "MCP_",
+    # OpenCode reads three of these, and redirecting only the directory is not
+    # isolation: `OPENCODE_CONFIG` (a file) and `OPENCODE_CONFIG_CONTENT`
+    # (inline JSON) both win over `OPENCODE_CONFIG_DIR` -- measured, a config
+    # named by `OPENCODE_CONFIG` still supplied its MCP servers with the dir
+    # pointed at an empty directory. They are dropped by name rather than by an
+    # "OPENCODE_" prefix on purpose: `OPENCODE_API_KEY` is a provider
+    # credential, and a worker needs its keys.
+    "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG", "OPENCODE_CONFIG_CONTENT",
+    # Dropped so the redirect below can take: `setdefault` cannot override a
+    # value the parent already exported, and this one usually is exported.
+    # It is broader than the others -- every XDG-respecting tool the worker
+    # runs sees the workspace copy -- which is the point of an isolated worker.
+    "XDG_CONFIG_HOME",
+)
+
+#: Set for every worker so a tool the worker reaches (this package's own MCP
+#: server, when the plugin that hosts it is being evolved) can tell it is inside
+#: a run and refuse to start another. See ``agentdescent.mcp``.
+NESTED_MARKER = "AGENTDESCENT_NESTED"
+
+
+#: Each host's config-directory variable, and where an isolated worker's copy
+#: goes inside the rollout workspace. One mapping because there are two things
+#: to do with it -- set it, and *create* it -- and they were separate lists that
+#: drifted: OpenCode was added to the first and not the second, and a missing
+#: `OPENCODE_CONFIG_DIR` does not fail, it silently falls back to the user's
+#: real config, so the isolation read as working and was not.
+WORKER_CONFIG_DIRS: Dict[str, str] = {
+    "CLAUDE_CONFIG_DIR": "claude",
+    "CODEX_HOME": "codex",
+    "DSH_HOME": "dsh",
+    # OpenCode needs both, and the second is the one that works. Measured
+    # against opencode 1.18: `OPENCODE_CONFIG_DIR` supplies a config only when
+    # the user has none -- with a real `~/.config/opencode/opencode.jsonc`
+    # present, a worker pointed at another directory still saw the user's MCP
+    # servers, config file or no config file in the redirected one. OpenCode
+    # resolves its config under XDG, so `XDG_CONFIG_HOME` is what actually
+    # moves it: with that redirected the same worker sees "No MCP servers
+    # configured". `OPENCODE_CONFIG_DIR` stays for the case where XDG is
+    # honoured differently by a future version.
+    "OPENCODE_CONFIG_DIR": "opencode",
+    "XDG_CONFIG_HOME": "xdg",
+}
+
+
+def worker_env(workspace: Optional[str], extra: Optional[Mapping[str, str]] = None,
+               *, isolate: bool = True) -> Dict[str, str]:
+    """The environment a worker agent CLI runs with.
+
+    Starts from the caller's environment (a worker needs its provider keys and
+    PATH), drops every :data:`SESSION_MARKERS` variable, marks the process as
+    nested, and -- when there is a workspace -- points each host's config
+    directory *inside* it (``CLAUDE_CONFIG_DIR``, ``CODEX_HOME``, ``DSH_HOME``,
+    ``OPENCODE_CONFIG_DIR``),
+    so the worker starts clean and cannot read the user's real plugins, memory or
+    MCP servers. ``extra`` wins over all of it. ``isolate=False`` keeps only the
+    nested marker, for callers who want the worker to see the user's setup.
+    """
+    env = {k: v for k, v in os.environ.items()
+           if not (isolate and any(k == m.rstrip("_") or k.startswith(m)
+                                   for m in SESSION_MARKERS))}
+    env[NESTED_MARKER] = "1"
+    if isolate and workspace:
+        home = os.path.join(workspace, ".agentdescent-worker")
+        for var, leaf in WORKER_CONFIG_DIRS.items():
+            env.setdefault(var, os.path.join(home, leaf))
+    if extra:
+        env.update(extra)
+    return env
+
+
 class _CliAgent:
     """A command-line agent: a Completion that can be rebound to a workspace."""
 
     def __init__(self, command, *, workspace=None, via_stdin=False,
-                 timeout=600.0, env=None, usage=None) -> None:
+                 timeout=600.0, env=None, usage=None, isolate=True) -> None:
         if not command:
             raise ValueError("cli_agent needs a non-empty command")
         self.command, self.workspace, self.via_stdin = list(command), workspace, via_stdin
-        self.timeout, self.env, self.usage = timeout, env, usage
+        self.timeout, self.env, self.usage, self.isolate = timeout, env, usage, isolate
 
     def in_workspace(self, path: str) -> "Completion":
         return _CliAgent(self.command, workspace=path, via_stdin=self.via_stdin,
-                         timeout=self.timeout, env=self.env, usage=self.usage)
+                         timeout=self.timeout, env=self.env, usage=self.usage,
+                         isolate=self.isolate)
 
     def __call__(self, prompt: str) -> str:
         argv = list(self.command) if self.via_stdin else [*self.command, prompt]
         t0 = time.time()
+        env = worker_env(self.workspace, self.env, isolate=self.isolate)
+        if self.workspace:
+            # Created, not merely pointed at. `codex` refuses to start when
+            # CODEX_HOME does not exist ("Error finding codex home"), and
+            # `opencode` does something worse -- it falls back to the user's
+            # real config, so isolation silently does not happen.
+            for key in WORKER_CONFIG_DIRS:
+                if env.get(key, "").startswith(self.workspace):
+                    os.makedirs(env[key], exist_ok=True)
         try:
             proc = subprocess.run(
                 argv, input=prompt if self.via_stdin else None,
                 capture_output=True, text=True, timeout=self.timeout,
-                cwd=self.workspace,
-                env={**os.environ, **self.env} if self.env else None,
+                cwd=self.workspace, env=env,
             )
         except FileNotFoundError as e:
             raise AgentError(
@@ -184,7 +272,7 @@ class _CliAgent:
 def cli_agent(command: Sequence[str], *, workspace: Optional[str] = None,
               via_stdin: bool = False, timeout: float = 600.0,
               env: Optional[Dict[str, str]] = None,
-              usage: Optional[Usage] = None) -> "WorkspaceAgent":
+              usage: Optional[Usage] = None, isolate: bool = True) -> "WorkspaceAgent":
     """Run any **command-line** coding agent as a :data:`Completion`.
 
     ``command`` is the argv prefix; the prompt is appended as the final argument,
@@ -201,9 +289,14 @@ def cli_agent(command: Sequence[str], *, workspace: Optional[str] = None,
     stall the round it belongs to (see ``evolve(round_timeout=)``). Failures raise
     :class:`AgentError` carrying the agent's own stderr rather than a bare exit
     code.
+
+    The child runs with :func:`worker_env`: the host session's markers dropped,
+    ``AGENTDESCENT_NESTED=1`` set, and each host's config directory pointed inside
+    the workspace. ``isolate=False`` keeps the caller's environment as it is
+    (bar the nested marker) for a worker that should see the user's own setup.
     """
     return _CliAgent(command, workspace=workspace, via_stdin=via_stdin,
-                     timeout=timeout, env=env, usage=usage)
+                     timeout=timeout, env=env, usage=usage, isolate=isolate)
 
 
 def claude_code(*, workspace: Optional[str] = None, extra_args: Sequence[str] = (),
@@ -216,6 +309,30 @@ def codex(*, workspace: Optional[str] = None, extra_args: Sequence[str] = (),
           **kwargs) -> Completion:
     """OpenAI Codex CLI in non-interactive exec mode, as a :data:`Completion`."""
     return cli_agent(["codex", "exec", *extra_args], workspace=workspace, **kwargs)
+
+
+def dsh(*, workspace: Optional[str] = None, extra_args: Sequence[str] = (),
+        **kwargs) -> Completion:
+    """DeepSeek Harness (``dsh``) headless profile, as a :data:`Completion`.
+
+    ``dsh --profile headless "<task>"`` runs one persisted session and prints the
+    last assistant message to stdout, which is exactly the shape
+    :func:`cli_agent` wants. Pass ``extra_args`` for ``--patch`` overlays or a
+    different profile.
+    """
+    return cli_agent(["dsh", "--profile", "headless", *extra_args],
+                     workspace=workspace, **kwargs)
+
+
+def opencode(*, workspace: Optional[str] = None, extra_args: Sequence[str] = (),
+             **kwargs) -> Completion:
+    """OpenCode's non-interactive ``run`` mode, as a :data:`Completion`.
+
+    ``opencode run "<task>"`` answers one message and exits, using the working
+    directory as the project -- which is what :func:`cli_agent`'s ``workspace``
+    binding gives it. Verified against opencode 1.18.
+    """
+    return cli_agent(["opencode", "run", *extra_args], workspace=workspace, **kwargs)
 
 
 def from_callable(fn: Completion) -> Completion:
@@ -232,9 +349,36 @@ def echo(transform: Optional[Callable[[str], str]] = None) -> Completion:
     return complete
 
 
+class RateLimited(RuntimeError):
+    """The provider said "too many requests", and for how long if it bothered to.
+
+    Worth a type of its own because it wants a different retry from every other
+    failure: a transport error is worth retrying in half a second, and a rate
+    limit retried in half a second is three attempts spent inside two seconds
+    against a limiter measured in tens of them.
+    """
+
+    def __init__(self, message: str, retry_after: Optional[float] = None) -> None:
+        super().__init__(message)
+        #: Seconds the provider asked for, from `Retry-After`, when it sent one.
+        self.retry_after = retry_after
+
+
 def with_retries(completion: Completion, attempts: int = 3,
-                 backoff: float = 0.5, sleep: Callable[[float], None] = time.sleep) -> Completion:
-    """Wrap a completion with exponential-backoff retries on any exception."""
+                 backoff: float = 0.5, sleep: Callable[[float], None] = time.sleep,
+                 rate_limit_backoff: float = 5.0,
+                 max_sleep: float = 60.0) -> Completion:
+    """Wrap a completion with exponential-backoff retries on any exception.
+
+    Rate limits back off on their own, much longer, schedule. Measured against a
+    throttling endpoint: the generic 0.5s/1.0s pair spent all three attempts
+    inside two seconds, every one of them refused, and the engine -- which
+    retires a worker after three consecutive failures -- lost every worker in
+    about a minute and ended the run with an empty tree. A `Retry-After` header
+    wins over both schedules when the provider sends one, and everything is
+    capped at ``max_sleep`` so a hostile or mistaken header cannot park a worker
+    for an hour.
+    """
     def complete(prompt: str) -> str:
         last: Optional[Exception] = None
         for i in range(attempts):
@@ -243,7 +387,11 @@ def with_retries(completion: Completion, attempts: int = 3,
             except Exception as e:  # noqa: BLE001 - provider-agnostic retry
                 last = e
                 if i < attempts - 1:
-                    sleep(backoff * (2 ** i))
+                    delay = backoff * (2 ** i)
+                    if isinstance(e, RateLimited):
+                        delay = max(delay, rate_limit_backoff * (2 ** i),
+                                    e.retry_after or 0.0)
+                    sleep(min(delay, max_sleep))
         raise last  # type: ignore[misc]
     return complete
 
@@ -314,11 +462,54 @@ def claude(model: str = "claude-opus-4-8", max_tokens: int = 4096,
     return with_retries(complete, attempts=retries) if retries > 1 else complete
 
 
+def _read_sse(response: Any) -> Dict[str, Any]:
+    """Reassemble an OpenAI-shaped SSE stream into the response it stands for.
+
+    Returns the same shape the non-streaming path parses -- ``choices[0].message``
+    plus ``usage`` -- so nothing downstream has to know which transport was used.
+
+    Deliberately forgiving about the stream and strict about nothing: a chunk
+    that will not parse is skipped rather than raised on, because one malformed
+    frame in a hundred is a provider quirk and not a reason to throw away a
+    completed answer. `reasoning_content` deltas are read and dropped: they are
+    what keeps the connection from going idle, and they are not the reply.
+    """
+    text: List[str] = []
+    usage_payload: Dict[str, Any] = {}
+    finish: Optional[str] = None
+    for raw in response:
+        line = raw.decode("utf-8", "replace").strip()
+        if not line or not line.startswith("data:"):
+            continue
+        chunk_text = line[len("data:"):].strip()
+        if chunk_text == "[DONE]":
+            break
+        try:
+            chunk = json.loads(chunk_text)
+        except ValueError:
+            continue
+        if isinstance(chunk.get("usage"), dict):
+            usage_payload = chunk["usage"]
+        for choice in chunk.get("choices") or ():
+            delta = choice.get("delta") or {}
+            piece = delta.get("content")
+            if piece:
+                text.append(piece)
+            if choice.get("finish_reason"):
+                finish = choice["finish_reason"]
+    return {
+        "choices": [{"message": {"role": "assistant", "content": "".join(text)},
+                     "finish_reason": finish}],
+        "usage": usage_payload,
+    }
+
+
 def openai_compatible(model: str, *, base_url_env: str = "OPENAI_BASE_URL",
                       api_key_env: str = "OPENAI_API_KEY",
                       default_base_url: str = "https://api.openai.com/v1",
                       max_tokens: int = 4096, timeout: float = 120.0,
                       usage: Optional[Usage] = None, retries: int = 3,
+                      stream: bool = False,
                       **create_kwargs) -> Completion:
     """A completion for any OpenAI-compatible chat endpoint (GLM/Zhipu, proxies,
     local servers, OpenAI itself).
@@ -332,6 +523,19 @@ def openai_compatible(model: str, *, base_url_env: str = "OPENAI_BASE_URL",
     model starved of budget returns empty content, and at 1024 that happened for
     half of one measured batch of reflection prompts.
 
+    ``stream=True`` sends the request as SSE and reassembles the text, which is
+    a **reliability** knob rather than a latency one: a non-streaming request to
+    a reasoning model sends no bytes at all while the model thinks, and any
+    gateway with an idle timeout closes the connection underneath it. Measured
+    against one such endpoint: a single request finished in 205 s, but four
+    concurrent ones -- queued behind each other, so each took longer -- were all
+    cut at 301 s with `RemoteDisconnected`, three of them within 0.2 s of each
+    other. The same prompts streamed ran past ten minutes with bytes arriving
+    continuously, because the reasoning deltas themselves keep the connection
+    warm. Usage still comes back: `stream_options.include_usage` puts it in the
+    final chunk, and an endpoint that ignores that field simply reports zero
+    tokens rather than failing.
+
     Extra keyword arguments go into the request body, so ``temperature=0`` and any
     provider-specific field work the same way they do on :func:`claude`."""
     def complete(prompt: str) -> str:
@@ -339,19 +543,23 @@ def openai_compatible(model: str, *, base_url_env: str = "OPENAI_BASE_URL",
         key = os.environ.get(api_key_env)
         if not key:
             raise RuntimeError(f"set {api_key_env} (and {base_url_env}) in your environment")
-        body = json.dumps({
+        payload: Dict[str, Any] = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": max_tokens,
             **create_kwargs,
-        }).encode()
+        }
+        if stream:
+            payload["stream"] = True
+            payload.setdefault("stream_options", {"include_usage": True})
+        body = json.dumps(payload).encode()
         req = urllib.request.Request(
             f"{base}/chat/completions", data=body,
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
         t0 = time.time()
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
-                data = json.load(resp)
+                data = _read_sse(resp) if stream else json.load(resp)
         except urllib.error.HTTPError as e:
             # The body carries the only useful part -- "rate limit: retry in 12s",
             # "context length exceeded", "insufficient quota" -- and it lives on
@@ -364,9 +572,25 @@ def openai_compatible(model: str, *, base_url_env: str = "OPENAI_BASE_URL",
                 detail = e.read().decode("utf-8", "replace").strip()[:400]
             except Exception:  # noqa: BLE001 - the body is best-effort
                 detail = ""
-            raise RuntimeError(
-                f"{base} returned HTTP {e.code} for model {model!r}"
-                + (f": {detail}" if detail else "")) from e
+            message = (f"{base} returned HTTP {e.code} for model {model!r}"
+                       + (f": {detail}" if detail else ""))
+            if e.code in (429, 503):
+                # Told apart from every other 4xx so `with_retries` can wait the
+                # seconds a limiter wants instead of the half-second a transport
+                # blip wants. `Retry-After` is seconds or an HTTP date; only the
+                # numeric form is honoured, and a missing or unreadable one
+                # falls back to the rate-limit schedule.
+                header = ""
+                try:
+                    header = (e.headers.get("Retry-After") or "").strip()
+                except Exception:  # noqa: BLE001 - headers are best-effort
+                    header = ""
+                try:
+                    retry_after = float(header) if header else None
+                except ValueError:
+                    retry_after = None
+                raise RateLimited(message, retry_after) from e
+            raise RuntimeError(message) from e
         except Exception:
             if usage is not None:
                 usage.record(seconds=time.time() - t0, failed=True)

@@ -1,3 +1,7 @@
+---
+description: Turn a dataset into an evolved skill in one evolve() call. A worked example on 40 HotpotQA items that raises held-out exact match from 0.167 to 0.583.
+---
+
 # Dataset → evolved skill
 
 There is one entry point, [`evolve`](evolution.md). Evolving a skill from a

@@ -1,3 +1,7 @@
+---
+description: A runnable reproduction of OpenEvolve program evolution with MAP-Elites islands, where Python source is the genome and a sandboxed evaluator supplies reward.
+---
+
 # OpenEvolve — Program evolution
 
 > **Program self-evolution.** Python source is the genome: model calls mutate it,

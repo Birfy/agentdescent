@@ -1,3 +1,7 @@
+---
+description: A runnable reproduction of R-Zero Challenger/Solver co-evolution with a GRPO-shaped acceptance rule. Inference analogue over self-play carts, measured over three seeds.
+---
+
 # R-Zero — Challenger/Solver co-evolution
 
 > **Co-evolution of two roles.** A Challenger writes questions at the Solver's

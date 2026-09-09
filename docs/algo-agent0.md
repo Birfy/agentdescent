@@ -1,3 +1,7 @@
+---
+description: A runnable reproduction of Agent0 tool-integrated curriculum co-evolution, where a curriculum agent writes tasks at the executor's frontier. Inference analogue, three seeds.
+---
+
 # Agent0 — Tool-integrated curriculum co-evolution
 
 > **Curriculum/executor co-evolution.** A Curriculum agent writes tasks at the

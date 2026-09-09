@@ -40,6 +40,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator, List, Optional, Protocol, Sequence, runtime_checkable
 
 from .metrics import Meter
+from .pipeline import describe
 from .workspec import RolloutSpec
 
 __all__ = ["Executor", "Result", "ThreadExecutor"]
@@ -122,7 +123,7 @@ class ThreadExecutor:
             run = self._run or spec.run.resolve()
             reward = self._reward or spec.reward.resolve()
         except Exception as e:                        # a Ref that will not resolve
-            return Result(spec.lease_id, spec.task.id, error=f"{type(e).__name__}: {e}",
+            return Result(spec.lease_id, spec.task.id, error=describe(e),
                           kind="caller", seconds=time.time() - t0)
         try:
             if self.sandbox_pool is not None:
@@ -132,8 +133,7 @@ class ThreadExecutor:
                 output = run(spec.rendered, spec.task)
             value = reward(spec.task, output)
         except Exception as e:  # noqa: BLE001 -- a backend or candidate failure
-            return Result(spec.lease_id, spec.task.id,
-                          error=f"{type(e).__name__}: {str(e)[:200]}",
+            return Result(spec.lease_id, spec.task.id, error=describe(e),
                           kind="model", seconds=time.time() - t0)
         seconds = time.time() - t0
         if self.meter is not None:

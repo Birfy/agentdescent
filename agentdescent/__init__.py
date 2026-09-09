@@ -38,6 +38,7 @@ from .advantage import (
     TrustRegion,
     state_distance,
 )
+from .defaults import DefaultConflict, DefaultFusion
 from .fusion import KeepContradictions, ReflectiveFusion, reflective_merge
 from .sampling import DifficultyWeighted, RoundRobin, TaskSampler
 from .selection import (
@@ -112,7 +113,7 @@ from .sandbox_shared import SharedSandboxPool
 from .supervisor import ProcessExecutor
 from .workspec import Ref, RefError, RolloutSpec
 from . import rewards                      # agentdescent.rewards.last_number(...)
-from .rewards import SCORERS, scorer
+from .rewards import SCORERS, scorer, command_scorer, GraderError
 from .meta import (
     SLOTS, SLOT_PROTOCOLS, MetaOutcome, ParamSlot, PrioritySelection, PRIORITY_SEED,
     SlotSpec, SourceSlot, auc, compile_policy_source, compile_priority, evolve_problem,
@@ -129,7 +130,10 @@ from .filetree import (
     tree_summary,
 )
 from .treestrategy import EDIT_PROTOCOL, FileTree, parse_edits, tree_reflector
-from .runners import LAYOUTS, TEST_FAILURE_MARKER, code_runner, gated_reward, tree_runner
+from .runners import (
+    LAYOUTS, PLUGIN_FROZEN, PLUGIN_HOSTS, TEST_FAILURE_MARKER, PluginHost, code_runner,
+    gated_reward, plugin_runner, tree_runner,
+)
 from .orchestrator import AgentDescent, RoundStat, run_fork_baseline
 from .agents import (
     AgentError,
@@ -141,11 +145,13 @@ from .agents import (
     claude_code,
     cli_agent,
     codex,
+    dsh,
+    opencode,
     metered,
     openai_compatible,
     with_retries,
 )
-from .agents import WorkspaceAgent
+from .agents import WorkspaceAgent, worker_env
 from .evolution import (
     Agent,
     LLMAgent,
@@ -168,6 +174,7 @@ from .evolution import (
     rule_id,
 )
 from .async_evolve import async_evolve
+from .evolvespec import EvolveSpec, SpecError, compose, load_spec, run_spec
 from .async_runtime import AsyncAgentDescent, AsyncConfig, AsyncStats
 from . import baselines                     # agentdescent.baselines.merge_of_n(...)
 from .parallel import (
@@ -187,7 +194,7 @@ from .parallel import (
     shard_round_robin,
 )
 
-__version__ = "0.4.6"
+__version__ = "0.5.0"
 
 __all__ = [
     "Contract",
@@ -218,6 +225,8 @@ __all__ = [
     "TaskSampler",
     "ReflectiveFusion",
     "KeepContradictions",
+    "DefaultConflict",
+    "DefaultFusion",
     "reflective_merge",
     "GroupAdvantage",
     "AdvantageAcceptance",
@@ -321,6 +330,8 @@ __all__ = [
     "shard_round_robin",
     "Completion",
     "codex",
+    "dsh",
+    "opencode",
     "claude_code",
     "cli_agent",
     "WorkspaceAgent",
@@ -350,6 +361,13 @@ __all__ = [
     "evolve",
     "SCORERS",
     "scorer",
+    "command_scorer",
+    "GraderError",
+    "EvolveSpec",
+    "SpecError",
+    "compose",
+    "load_spec",
+    "run_spec",
     "meta_evolve",
     "meta_validate",
     "evolve_problem",
@@ -387,6 +405,11 @@ __all__ = [
     "code_runner",
     "tree_runner",
     "gated_reward",
+    "plugin_runner",
+    "PluginHost",
+    "PLUGIN_HOSTS",
+    "PLUGIN_FROZEN",
+    "worker_env",
     "async_evolve",
     "claude_agent",
     "rule_id",

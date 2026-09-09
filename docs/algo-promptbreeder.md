@@ -1,3 +1,7 @@
+---
+description: A runnable reproduction of PromptBreeder genetic prompt self-evolution with binary tournaments. Mechanism microport with measured GSM8K results over three seeds.
+---
+
 # PromptBreeder — Prompt self-evolution (genetic)
 
 > **Prompt self-evolution.** Evolve a population of task-prompt + mutation-prompt

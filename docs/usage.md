@@ -83,6 +83,23 @@ python -m examples.dgm.dgm_self_improve                     # DGM   / offline su
 python -m examples.sica.sica_self_edit --dry-run            # SICA  / GSM-Hard
 ```
 
+### Molecule search — porous molecular crystals
+
+A domain application rather than a port: the same flat-PUCT tree ERA runs, over
+**molecules**, scored on rigidity, symmetry, directional interaction sites, an
+open packing that is still competitive on lattice energy, and synthetic
+accessibility. Every expansion must come back as a SMILES and must pass a
+dependency-free validity gate. See [the page](porous-molecules.md).
+
+```bash
+python -m examples.porous.porous_tree_search --dry-run
+python -m examples.porous.porous_tree_search --offline --iterations 24 --workers 4
+```
+
+`--offline` proposes with rule-based edit operators, so the whole search runs
+with no API key and no network — it is both the test path and the control arm
+for a model-driven run.
+
 ### Tests
 
 ```bash

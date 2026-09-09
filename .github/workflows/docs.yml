@@ -1,10 +1,11 @@
 name: docs
 
-# On every push: build + strict-validate the MkDocs site (always green).
-# Deploy to GitHub Pages runs only on a manual trigger, so pushes never fail
-# just because Pages is off. To publish: enable Pages (Settings -> Pages ->
-# Source: "GitHub Actions"; needs a public repo or a plan that supports Pages on
-# private repos), then run this workflow from the Actions tab ("Run workflow").
+# Every push to main builds, strict-validates and deploys the MkDocs site.
+# Deploy used to be manual-only, so that a push could not fail on a repository
+# where Pages was off. Pages is on now, and the guard had outlived it: the site
+# went stale silently, and README links to pages that only existed in the
+# source tree returned 404 -- which is worse than the red run it was avoiding.
+# `workflow_dispatch` is kept for re-publishing without a commit.
 
 on:
   push:
@@ -28,7 +29,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install "mkdocs-material>=9.5"
+      # cairosvg loads libcairo at runtime; the social plugin needs it to
+      # render the per-page cards, and the build fails without it.
+      - run: sudo apt-get update && sudo apt-get install -y libcairo2
+      - run: pip install "mkdocs-material[imaging]>=9.5"
       - run: mkdocs build --clean --strict
       - uses: actions/upload-pages-artifact@v3
         with:
@@ -36,9 +40,9 @@ jobs:
 
   deploy:
     needs: build
-    # only deploy on a manual run, so normal pushes stay green even when Pages
-    # is not enabled on the repo.
-    if: github.event_name == 'workflow_dispatch'
+    # A push to main, or a manual re-publish. Anything else -- a PR build --
+    # validates and stops, because a fork's build must never reach Pages.
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

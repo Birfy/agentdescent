@@ -1,3 +1,7 @@
+---
+description: How to write a policy for AgentDescent: where each of the eight algorithm slots sits in a round, what it is handed, what it must return, and how to prove it ran.
+---
+
 # Using the policy slots — a systematic guide
 
 *Companion to:* [Choosing policies](policies.md) (the catalogue of what ships)

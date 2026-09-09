@@ -6,6 +6,368 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-09-07
+
+### Added
+
+- **`scripts/setup-hosts.sh` and a single testing guide.** One command
+  installs AgentDescent and wires up every agent CLI on the machine
+  (`--with-clis` installs the four npm packages first, `--dry-run` shows the
+  plan). It is idempotent, warns when `agentdescent` is not on the `PATH` hosts
+  will use, and finishes with `doctor`. [docs/testing-guide.md](docs/testing-guide.md)
+  is the path in order: install, prove it offline, check each host, drive it in
+  plain language, then a real model -- with the measured quirks
+  (`codex doctor` under-reports, Claude Code caches a failed connection) and the
+  two failure modes worth recognising written down.
+- **`host_model` works on every host, not only ones that implement sampling.**
+  Measured by logging what each host sends at `initialize`: Claude Code 2.1.261
+  declares `roots` and `elicitation`, OpenCode 1.18.29 declares `roots`, and
+  dsh's `dsh-mcp-client` declares nothing -- **none of them supports sampling**,
+  so a `host_model` that only spoke sampling would have been a feature nobody
+  could use. It now falls back to running that host's own CLI (`claude`,
+  `codex`, `dsh`, `opencode`) with the user's real configuration
+  (`isolate=False`), chosen from the client name and only when it is on `PATH`.
+  A bridge that dies mid-run -- the session closed -- falls back the same way
+  instead of failing. `start` reports `host_model_route` so the caller knows
+  which one it got. Verified end to end: a run started from a real Claude Code
+  session, reflecting through `claude`, producing evidence cards and a commit.
+- **`host_model`: run on the model the agent session is already using.** MCP's
+  `sampling/createMessage` lets a server ask its client for a completion, so
+  `{"reflect": {"ref": "host_model"}}` reflects on the host session's own model
+  -- its authentication, its policy, no key and no model name in the spec.
+  The obstacle was structural: `start` returns in milliseconds and the run
+  proceeds in a **detached process** with no MCP session and no way to get one.
+  `agentdescent.host_sampling` bridges that gap -- a token-authenticated
+  loopback endpoint in the server process holding the live session, whose
+  address the server puts in the environment of the runs it launches, turning
+  each request back into `create_message` on the server's event loop.
+  `start` now reports `host_model_available` and, when false,
+  `host_model_unavailable`: a run whose reflector could not ask otherwise looks
+  exactly like a run that learned nothing. Verified end to end through the real
+  SDK -- a detached run reflecting on a model only the client holds, reaching
+  reward 1.0. **Sampling is deprecated at the protocol level as of MCP revision
+  2026-07-28 (SEP-2577)**; the shape is unchanged and the SDK still ships it, so
+  this is the convenient route, not the durable one.
+
+### Changed
+
+- **Merging is the default now, wherever there is a model to merge with.**
+  `reflective_merge` had to be asked for by name and the skill told agents not
+  to ask, so a plugin driven in plain language never installed it -- and
+  without it a one-key artifact (`SingleSlot`: every prompt, every
+  `kind: "text"` target) has worker proposals that contradict by construction.
+  Conflict resolution collapses them to one candidate, no fusion is built, and
+  `n_workers=4` buys per-round best-of-N *selection* rather than the merge this
+  project is named after. The pair is installed in `_build_engine` (so `evolve`
+  and `async_evolve` both get it) when the agent exposes a completion, and in
+  `compose` when a spec asks for no conflict or fusion rule of its own, using
+  the model the spec already names in `reflect`. Callers with no model -- plain
+  `run` / `propose` functions, the offline demo -- and specs whose only agent is
+  a file-editing CLI keep the shipped rules, because there is nothing cheap to
+  synthesise with. `DefaultConflict` and `DefaultFusion` are exported so the old
+  behaviour can be named. Measured on one spec with no `policies` block, four
+  workers: `conflicts_dropped` 3 -> 0, `n_candidates` 1 -> 4, `fused` 0 -> 1,
+  ledger `merge synth(w0+w1+w2+w3)`.
+
+### Fixed
+
+- **`apply` overwrote its own backup.** On a single-file target it copied to a
+  fixed `<target>.bak` every time, while the directory path had always numbered
+  them. Apply, hand-edit, apply again, and the surviving backup was the
+  hand-edit -- the original the first apply had saved was gone, from the command
+  whose whole promise is that it keeps one. Both paths now write `.bak-N` and
+  never touch an existing one.
+- **A run's cause of death was truncated where it mattered, and named twice.**
+  `executor` described the rollout failure, `supervisor` described it again over
+  the queue, `evolve` a third time, and each hop capped it -- so the narrowest
+  won. What reached `status` was `RuntimeError: RuntimeError: ...` cut at 200
+  characters: a provider 404 for an unknown model ended at "does not support the
+  c", losing the clause that named the fix. One `pipeline.describe()` now,
+  shared by all of them and by the async path, capped at the 2000 `runstore`
+  already stores. Measured on the same failure: 214 characters before, 422
+  after.
+- **The MCP server reported no version, and "no runs" reported nothing at all.**
+  `initialize` answered with an empty version string, so any host that displays
+  it displayed a blank; it is passed now wherever the SDK's constructor accepts
+  one. And `status` with no `run_id` returned a bare list, which serialises to
+  *zero* content blocks when empty -- an agent asking what was running on a
+  fresh machine could not tell that from a failed call, on the one tool the
+  skill says to poll. It returns `{store, runs}`, which names the store either
+  way.
+- **`plan` says when `n_workers` is selection rather than merging.** With the
+  merge pair now default the warning has narrowed to the case still true -- a
+  spec with no model to merge with -- and reads the composed bundle rather than
+  the spec's `policies` block, so it cannot fire at a spec that already has what
+  it recommends.
+- **The suite did not collect on a clean checkout, and two tests assumed
+  Linux.** `pyyaml` is used by the dsh patch tests and was never declared, so
+  the documented `pip install -e ".[dev,mcp]"` left the suite unable to import.
+  On macOS `mkdtemp` hands back `/var/folders/...` while a child resolves the
+  symlink to `/private/var/...`, so `HOME` never equalled the worker's `getcwd()`
+  -- the workspace root is `realpath`-ed now, which is what a host comparing the
+  two would expect. `sandbox_wrapper` was passed a `str` where its signature says
+  `Path`, which only the macOS Seatbelt branch dereferences. And the dsh plugin
+  test reported a corepack too old for the pnpm the profile pins as a plugin
+  failure; it skips with dsh's own error instead.
+
+- **`evolve` and `resume` started specs that could not work, in silence.**
+  `plan` returned `warnings`; the two verbs that actually spend money printed
+  none. And the check knew nothing about `host_model`, which is the one ref
+  whose usability depends on *where it is started from*: measured, a spec with
+  `"reflect": {"ref": "host_model"}` resumed from a shell did four rounds with
+  `considered: 0` and finished at reward 0.0 -- every proposal raised and the
+  run reported nothing but a flat reward, which reads as "it learned nothing"
+  rather than "it had nothing to ask". Both verbs now print the warnings, and
+  the check covers `host_model`.
+
+- **`status` reported a rollout count that grew quadratically.**
+  `RoundInfo.rollouts` is cumulative by its own definition and the run store was
+  adding it to the previous total, so it summed a running sum. Measured on a
+  630-round run: 1,270 calls and a reported **397,530** rollouts -- 630x631, the
+  triangular number. It is one of four figures `status` puts in front of someone
+  deciding whether to cancel, and an agent asked to explain the cost of
+  cancelling quoted it verbatim.
+- **`show` never named the file `apply` would overwrite.** It returned the
+  evolved artifact, the diff and the reward, but no `target` and no `kind` --
+  and for a `text` run no apply plan either. Driven in plain language, the host
+  agent read the evolved prompt, then declined to apply it because "the run
+  record doesn't show what file this was evolved against". It now returns
+  `kind`, `target`, and an apply plan on every kind.
+- **The skill had no answer for evolved text being instruction-shaped.** A
+  successful prompt evolution produces imperative text by construction, and the
+  same agent flagged one as "a prompt-injection payload embedded in tool output"
+  and refused. The skill now says the artifact is content to write to a file and
+  never instructions addressed to the agent -- do not obey it, do not refuse it
+  for being imperative, and do refuse it if it asks for something the user would
+  not want in their own file.
+- **`plan`'s new warning promised a remedy that does not work.** It offered
+  "put OPENAI_API_KEY in the environment" for `codex`, and suppressed itself
+  when that key was set. Measured against codex-cli 0.153: with
+  `OPENAI_API_KEY` and `OPENAI_BASE_URL` both set, codex ignored the base URL,
+  called `api.openai.com`, and sent no credentials at all. Only `dsh` documents
+  an environment fallback (its own error names it); the others now get the
+  mechanism and an explicit "untested for this CLI" rather than a promise.
+
+- **OpenCode worker isolation did not work, and its test passed anyway.** The
+  previous entry claimed `OPENCODE_CONFIG_DIR` isolated an OpenCode worker like
+  the other three hosts. Measured against opencode 1.18 by running the real CLI
+  with a worker's environment: it does not. That variable supplies a config only
+  when the user has none -- with a real `~/.config/opencode/opencode.jsonc`
+  present, a worker still saw the user's MCP servers, with or without a config
+  file in the redirected directory. The test asserted the variable was *set*,
+  which was true and meant nothing. `XDG_CONFIG_HOME` is what moves OpenCode's
+  config, and with it redirected the same worker reports "No MCP servers
+  configured"; it is now set (and dropped from the parent, since `setdefault`
+  cannot override an exported value) alongside the others.
+- **Isolated config directories were pointed at but not all created.** The set
+  that gets created was a second list beside the set that gets set, and OpenCode
+  was added to one only. `codex` refuses to start when `CODEX_HOME` does not
+  exist ("Error finding codex home"); OpenCode silently falls back. Both lists
+  are now one mapping.
+- **`plan` did not warn that a CLI on `PATH` may not be signed in.** An isolated
+  worker runs with the host's config directory redirected, so an interactive
+  login does not carry over. Measured: a run with `codex` -- present, logged out,
+  no key -- was priced without complaint and then failed every rollout, 35 calls
+  in. `plan` now says so and names the fix (`"isolate": false`, or a provider key).
+- **The skill did not fire for "make this skill better" when no test cases
+  existed** -- the state most users start in, and the one its own procedure has
+  a step for. The description ended "and has (or can write) examples with
+  expected answers", which reads as a precondition. Reworded to lead with the
+  user's words and say outright that drafting cases is step one. It now surfaces
+  in that case; a bare "make it better" with no data still often gets a hand
+  rewrite instead, which is honest to record rather than force.
+- **The skill's example spec used a relative `data.path`.** It resolves against
+  whichever directory read the spec -- the host's MCP server cwd, which the
+  agent cannot see -- so the same spec found the file from one directory and
+  not another. The skill now says to write every path absolute.
+- **The skill let "just run it, don't ask" skip the cost estimate.** Asked for
+  60 rounds and 32 workers with blanket permission, it started immediately
+  without quoting a number. Pre-authorisation now waives the confirmation and
+  never the estimate.
+
+- **The shipped `SKILL.md` never said how to choose an `agent`, and `plan` did
+  not check the choice.** Driving the skill in plain language against a real
+  Claude Code session, three separate wrong answers came out of that gap: it
+  picked `codex` (a file-editing CLI) to evolve a *prompt*, which is one agent
+  session per case to answer a question a model answers in one call; then it
+  invented `"model": "gpt-4o-mini"` for an OpenAI-*compatible* endpoint that
+  serves nothing of the sort; then it named `claude` calling it "the local
+  Claude CLI, no API key needed" -- `claude` is the Anthropic SDK completion,
+  the CLI is `claude_code`, and neither the package nor the key was present.
+  The skill now says which agent each `kind` wants, never to invent a model
+  name, and what `claude` actually is; `doctor` reports `openai_base_url`
+  itself rather than only that one is set; and `plan` returns `warnings` when
+  a named agent or reflector cannot run on this machine, so the cost quote is
+  not for a run that fails on its first call.
+
+- **`agentdescent install dsh` could stop dsh from starting at all.** Both
+  cordis patch files wrote the forwarded provider keys one `!!js
+  process.env.X` per line. `env` is validated as `{[key: string]: string}` and
+  an unset variable is `undefined`, so with no keys exported dsh rejected the
+  entry -- and it fails the *whole plugin tree* on a bad entry, so dsh would
+  not boot until the user edited the file by hand. `--dump-config` composed it
+  happily, which is why it was missed: only loading the plugin tree
+  (`dsh --profile headless`) shows it. Both files now share one quoted `!!js`
+  expression that filters unset keys (quoted because the `": "` inside it is
+  otherwise read as a nested YAML mapping). Reproduced and fixed against dsh
+  0.1.2-rc.1; the suite now boots real dsh through both the `install` and the
+  native-plugin routes.
+- **`install` could add its dsh block but never repair it.** The check was
+  "is this marker present", so an install that had written the broken entry
+  above reported "already present" and changed nothing. The block is now
+  delimited and rewritten when its content is out of date -- including blocks
+  written before the end marker existed -- while the user's own rows are left
+  alone.
+
+- **An OpenCode worker read the user's real config; the other three hosts did
+  not.** `worker_env()` redirected `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and
+  `DSH_HOME` into the rollout workspace and had no OpenCode entry, so an
+  `opencode` worker started with the user's model, credentials, plugins and MCP
+  servers -- not a policy difference, a host that was missed.
+  `OPENCODE_CONFIG_DIR` is now redirected with the rest, and `OPENCODE_CONFIG`
+  and `OPENCODE_CONFIG_CONTENT` are dropped, because redirecting the directory
+  alone is not isolation: measured against opencode 1.18, a config named by
+  `OPENCODE_CONFIG` still supplied its MCP servers with the directory pointed
+  at an empty one. `OPENCODE_API_KEY` survives -- it is a provider credential,
+  and a worker needs its keys.
+
+### Added
+
+- **Documented which model a run actually uses.** A worker is the host CLI as a
+  subprocess with its config directory redirected, so it inherits environment
+  keys but not the user's model choice or subscription login. The two switches
+  that change that -- `extra_args: ["--model", ...]` to pin a model with
+  isolation intact, and `isolate: false` to hand the worker the user's real
+  setup -- existed but appeared in no document. Both are now in
+  [docs/plugins.md](docs/plugins.md) with a worked "no provider key at all"
+  spec that points `agent` *and* `reflect` at a host CLI, and in the shipped
+  `SKILL.md`, so an agent that sees `doctor` report no key offers that instead
+  of stopping.
+- **`pip install "agentdescent[mcp]"` no longer fails the whole install on
+  Python 3.9.** Every published `mcp` requires >= 3.10 while this project
+  supports 3.9, and the unmarked extra meant the line every install doc gives
+  ended in a screen of "Ignored the following versions that require a different
+  python version" with *nothing* installed -- not even the CLI. The extra now
+  carries `python_version >= '3.10'`, so 3.9 gets the CLI and the skill; and
+  one helper, `cli.mcp_unavailable()`, gives `doctor`, `install` and
+  `agentdescent mcp` the same true reason instead of advising a pip command
+  that cannot help there. Reported from a real 3.9 install; verified on 3.9.23
+  and 3.11.
+
+- **`agentdescent demo` -- a complete evolution with no API key.** Every other
+  entry point needs a worker agent on `PATH`, a provider key and a dataset with
+  known answers, so the first thing a newcomer saw was an error about a missing
+  file. `demo` builds a skill directory whose `references/rules.md` names the
+  wrong column, twelve CSVs with known totals, and a spec pointing at the two
+  public callables `agentdescent.demo:offline_agent` (a subprocess bound to the
+  workspace, which really reads the candidate skill off disk) and
+  `offline_reflector` -- then runs the real loop and prints what it learned.
+  Nothing is mocked but the model, so staging, the layout, the ledger, the
+  parallel workers, the merge and the held-out gate all run as they do against
+  Claude Code. Any spec can point at the same pair to rehearse before spending
+  anything. `agentdescent init` now says what to do next when the cases file
+  does not exist yet. Beginner path:
+  [docs/plugin-quickstart.md](docs/plugin-quickstart.md).
+- **AgentDescent as a plugin for DeepSeek Harness, Claude Code and Codex.** A
+  shared `SKILL.md` teaches the host agent when to call it; an MCP server
+  (`agentdescent mcp`, `pip install "agentdescent[mcp]"`) exposes `doctor`,
+  `plan`, `start`, `status`, `show`, `apply`, `cancel`, `resume`; and a CLI
+  (`agentdescent`) mirrors them verb for verb. `agentdescent install
+  <dsh|claude-code|codex>` writes the skill and each host's manifest -- for
+  DeepSeek Harness an `mcp-client` entry and the `hooks-claude-code` bridge in
+  `cordis.patch.yml` with provider keys forwarded explicitly (dsh scrubs them);
+  for Claude Code a plugin directory, also published through
+  `.claude-plugin/marketplace.json`; for Codex a `config.toml` entry.
+  Guide: [docs/plugins.md](docs/plugins.md); design record:
+  [docs/plugin-design.md](docs/plugin-design.md).
+- **`EvolveSpec`: an `evolve()` call as data** (`agentdescent.evolvespec`). A
+  JSON spec names the artifact (`kind`: `text` / `skill_dir` / `agent_dir` /
+  `agent_code` / `plugin`), the data, the scorer, the agent and, optionally, a
+  `policies` block and `agg_config`; `compose()` turns it into the `evolve()`
+  call the quickstarts show and is tested against them field for field, so it
+  is a wire format for callers that are not Python, not a second entry point.
+  Agents, scorers and policies are `Ref`s resolved inside the `workspec`
+  allowlist; a spec carries no code and no secrets. The `policies` block is
+  possible because every shipped policy is now constructible from JSON scalars
+  and installed by the aggregator through `bind` / `configure`.
+- **A run store** (`agentdescent.runstore`): a run is a directory under
+  `~/.agentdescent/runs/<id>/` plus a detached process. `status.json` is
+  replaced atomically from `on_round`, `resume` re-launches on the same ledger,
+  `cancel` signals the process group so worker CLIs die with the run. Relative
+  paths in a spec (`target`, `data.path`, a `cmd` grader) are resolved where the
+  spec is *read*, because the process that runs it is a different one with a
+  different working directory; the copy stored beside the run is therefore
+  re-runnable from anywhere.
+- **`kind: plugin` -- the host plugins themselves are evolvable.**
+  `runners.plugin_runner` is a per-host table over `code_runner`: the candidate
+  plugin is loaded into an isolated copy of the host that lives inside the
+  workspace (`dsh plugin add link:`, `claude -p --plugin-dir`, Codex's skills
+  directory), validated (`pnpm test` + `--dump-config`, `claude plugin
+  validate`), then the host runs the task. `PLUGIN_FROZEN` freezes hooks,
+  permission config, lockfiles and tests by default; the layer is L1.
+- **`evolve(stop_when=)` / `async_evolve(stop_when=)`**: the caller's own budget
+  -- dollars from a shared `Usage`, a deadline, a kill file -- asked after
+  `on_round` at the same point as `max_seconds` / `max_calls`, ending the run
+  between rounds with `stop_reason="stop_when"`.
+- **`rewards.command_scorer`**: grade with any program (task JSON on stdin,
+  `$ANSWER` in the environment, a number in `[0, 1]` on stdout); a failing
+  grader raises `GraderError` rather than teaching the optimiser zeros.
+- **OpenCode is a fourth host.** `agentdescent install opencode` writes the
+  skill to `~/.config/opencode/skill/agentdescent/SKILL.md` and merges an
+  `mcp.agentdescent` entry into `~/.config/opencode/opencode.jsonc` in the shape
+  `opencode mcp add` itself writes (`type: "local"`, the command as one array),
+  preserving anything already in the file and refusing to touch one it cannot
+  parse. Also `agents.opencode()` (`opencode run`), an `opencode_skill` layout,
+  and an `opencode` entry in `PLUGIN_HOSTS`.
+- **A native DeepSeek Harness plugin**, `integrations/dsh-agentdescent`,
+  rendered from the Python package by `render_dsh_plugin()` so its embedded
+  skill cannot drift from the one every other host installs. It registers the
+  skill through `ctx.skills.register()` at runtime and its `cordis.patch.yml`
+  adds the MCP row, so `dsh plugin --profile web add link:<path>` is the whole
+  install. Verified by installing it into a real profile: `dsh --dump-config`
+  composes both rows, and a test drives `apply()` through dsh's own
+  `isSkillName` validator. Installing it needs
+  `"dsh": {"bundle": {"patch": "./cordis.patch.yml"}}` in `package.json` --
+  without it `dsh plugin add` warns "declares no dsh.bundle ... not a profile
+  layer" and the plugin is installed but inert. It also contributes a **runs
+  panel** to the dsh web UI -- a header action with the live run count and the
+  list behind it -- as a hand-written client bundle in the shipped
+  `window.__ModuleLoader__.load` shape, verified by loading it the way dsh's
+  loader does and rendering it with real React.
+- **`agentdescent serve`**: a read-only HTTP view of the run store on loopback
+  (`GET /`, `/api/runs`, `/api/runs/<id>`), for a host UI to embed and for
+  looking at runs in a browser. Cross-origin reads are answered only for a
+  loopback `Origin` -- `*` would let any page the user visits read their run
+  store off localhost, and a prefix check would accept
+  `http://127.0.0.1.evil.com`.
+- **Codex installs the same plugin as Claude Code.** Codex reads the Claude
+  Code plugin format and marketplace, so `codex plugin marketplace add
+  Birfy/agentdescent && codex plugin add agentdescent@agentdescent` installs the
+  package this repository already publishes, and the MCP server comes with it --
+  verified with `codex plugin list` and `codex mcp list` against codex-cli
+  0.153.4. `agentdescent install codex` still writes the files for anyone who
+  would rather not use a marketplace, and now prints the one-command
+  alternative. (OpenCode's plugins are a different thing -- a JS hook API for
+  intercepting tools and chat -- so its skill and MCP server stay plain
+  configuration; see docs/plugins.md.)
+- **Every host manifest is now verified against the real CLI** (dsh 0.1.2-rc.1,
+  Claude Code 2.1.261, codex-cli 0.153.4, opencode 1.18.29), which corrected
+  three things that documentation research had got wrong:
+  a dsh `cordis.patch.yml` **overrides rows by id**, so the new rows have to sit
+  under `- insert:` -- without it dsh warned `patch: entry "mcp-agentdescent"
+  not found` and composed without the server; `codex exec` has **no
+  `--full-auto`** flag (the real ones are `--sandbox workspace-write` and
+  `--skip-git-repo-check`, the latter needed because a rollout workspace is not
+  a git repo); and a Claude Code **plugin** namespaces its MCP tools
+  `mcp__plugin_<plugin>_<server>__<tool>`, not `mcp__<server>__<tool>`, so an
+  allowlist or a probe built from the documented name never matched.
+- **`agents.dsh()`**: DeepSeek Harness's headless profile as a worker;
+  `dsh_skill` and `agents_skill` layouts. **`agents.worker_env()`**: every
+  `cli_agent` child drops the host session's markers (`CLAUDECODE`,
+  `CLAUDE_CODE_*`, `CODEX_*`, `DSH_*`), is marked `AGENTDESCENT_NESTED=1`, and
+  gets `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `DSH_HOME` inside its workspace, so
+  a worker cannot recurse into the host session or this package's MCP server.
+
 ### Removed
 
 - **The one-call wrappers: `evolve()` is the only entry point.** `evolve_skill`,

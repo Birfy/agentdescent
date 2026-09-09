@@ -1,3 +1,7 @@
+---
+description: A runnable reproduction of Godel Agent recursive runtime self-modification, where the search rewrites its own search prompt. Self-edit analogue, measured on GSM-Hard.
+---
+
 # Gödel Agent — Recursive runtime self-modification
 
 > **Self-edit.** The artifact owns both its solve prompt and the
