@@ -950,3 +950,41 @@ def test_the_ports_dry_run_says_it_touched_nothing(capsys):
     printed = capsys.readouterr().out
     assert "dry-run" in printed.lower()
     assert "LLM-SRBench" in printed
+
+
+def test_no_wall_clock_duration_reaches_the_srbench_prompt():
+    """A duration in the prompt makes the inner run irreproducible.
+
+    LLM-SRBench scores accuracy, not speed, so this port was recorded as free of
+    the defect that makes AlgoTune unmeasurable. It was not: both prompt
+    builders printed the candidate's wall-clock to two decimals. Two runs of one
+    rule on `bpg1`, same seed, produced prompts differing in exactly one place --
+    `which scored 2.998 in 0.84s` against `... in 0.89s` -- at identical length,
+    which missed the completion cache and made the model sample a different
+    program. That is where the 0.024 paired noise floor on `lsr_synth` came
+    from.
+
+    The duration is still reported and still written to result files; it just
+    does not go to the model, which cannot act on it anyway. A candidate that
+    runs out of time reaches the prompt through `error`.
+    """
+    import re
+
+    from examples.era._era_srbench import mutation_prompt, per_problem_prompt
+
+    class Parent:
+        metrics = {
+            "mean_digits": 2.998,
+            "worst": [{"problem_id": "bpg1", "variables": ["P"], "digits": 2.998,
+                       "seconds": 0.84, "equation": "params[0]*P", "error": ""}],
+        }
+        code = "def equation(P, params):\n    return params[0]*P\n"
+
+    timing = re.compile(r"\d+\.\d+\s*s\b")
+    builders = [(mutation_prompt, {}),
+                (per_problem_prompt, {"variables": ["P"]})]
+    for build, extra in builders:
+        text = build(Parent(), preview="x,y\n1,2\n", functions=[], **extra)
+        found = timing.findall(text)
+        assert not found, f"{build.__name__} put a wall-clock duration in the prompt: {found}"
+        assert "2.998" in text, f"{build.__name__} dropped the score along with the timing"

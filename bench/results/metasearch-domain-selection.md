@@ -32,12 +32,14 @@ best one does.
 | synthetic landscape | **yes**, exactly 0.000 | 0.203 at budget 60 | the one that produced a result: +0.0227 / +0.0120 |
 | GSM-Hard instructions | **yes**, exactly 0.000 | n/a — slot has no leverage | archive is a monotone chain |
 | AlgoTune | **no** — structural | 0.0066 vs noise 0.0055 | the reward *is* a wall-clock speedup |
-| LLM-SRBench | **yes**, 0.0000 | 0.0000 at 30 expansions | see *Two ways to get this wrong* |
+| LLM-SRBench | evaluator yes; **whole run no** until a duration was taken out of the prompt | 0.0842 on `lsr_synth`, 0.0000 under the category protocol | see below, and *Two ways to get this wrong* |
 | hyp2f1 | **yes**, 0.0000 | 0.0000 at 30 expansions | `scipy.special.hyp2f1` is near-optimal; nothing beat it |
 
-### AlgoTune's failure is the only structural one
+### AlgoTune's failure is the only *irreparable* one
 
-Every other row can in principle be fixed by configuration. AlgoTune cannot: an
+Every other row can in principle be fixed by configuration — including
+LLM-SRBench's, which turned out to have the same defect in a repairable form
+(see below). AlgoTune cannot: an
 expansion is scored by timing it, the measured milliseconds are written into the
 next prompt (`_eval_block`, `_timing_report`, `_profile_block`), so jitter
 changes the prompt, the completion cache misses, and a different program is
@@ -51,11 +53,50 @@ LLM-SRBench scores `min(12, -log10(NMSE))` — accuracy, not speed — and still
 came back irreproducible at first: three runs of the same rule gave 0.0731,
 0.0731 and 0.4625. The cause was `PROBLEM_SECONDS = 10.0`, a per-problem
 wall-clock budget guarding the metric, straddled whenever the container was
-busy. Raising it to 120 took the noise floor to exactly **0.0000**.
+busy. Raising it to 120 took the *evaluator's* noise floor to exactly **0.0000**.
 
 So the property to check is not "is the reward a timing?" but **"does any
 wall-clock budget stand between the program and its score?"** — and where one
 does, whether it is a settable argument. AlgoTune's is not; SRBench's is.
+
+### And that was not the end of it: a duration in the prompt does it too
+
+This page went on to assert that AlgoTune's failure was "the only structural
+one" and that on LLM-SRBench *no timing field reaches the prompt*. **That was
+wrong, and it cost the `lsr_synth` evolution run.** With a deterministic
+evaluator and a completion cache, that run still produced a **0.024 paired
+noise floor** when the seed rule was scored against itself.
+
+Tracing every model call of three identical runs put the divergence at call 1,
+where the two prompts had the *same length* (8162) and different hashes. The
+diff is one line:
+
+```
+-which scored 2.998 in 0.84s.
++which scored 2.998 in 0.89s.
+```
+
+Both prompt builders printed the candidate's wall-clock to two decimals. The
+score is identical; the duration is not; the prompt text changes; the cache key
+is the prompt, so the cache misses and the model samples a different program —
+**exactly AlgoTune's mechanism, in the domain this page had cleared of it.**
+
+The lesson generalises past "is the reward a timing":
+
+> **Nothing that varies between two runs of the same candidate may appear in
+> the prompt** — not the metric, and not a fluent aside next to it. Durations,
+> memory figures, timestamps, paths with a pid in them, and any set iterated
+> without `sorted()` all qualify.
+
+Two checks that would have caught it, both cheap, and the reason the earlier
+determinism check did not: it compared *scores*, and the score was never wrong.
+
+* grep the rendered prompt for `\d+\.\d+s` and for the run's own temp paths;
+* run the seed rule twice and diff the **prompts**, not the rewards.
+
+Removing the duration is `tests/test_era_srbench.py::test_no_wall_clock_duration_reaches_the_srbench_prompt`.
+It is still reported and still written to result files; it just does not go to
+the model, which could not act on it anyway.
 
 ## Two ways to get this wrong, both paid for here
 

@@ -1,135 +1,136 @@
 {
- "evolved_source": "def priority(rank, visits, total, prior, depth, n_nodes):\n    # Flat PUCT (ERA, futs.py): exploit by rank, explore by visit count.\n    c = 1.0\n    return rank + c * (1.0 / n_nodes) * math.sqrt(total) / (1 + visits)\n",
- "seed_source": "def priority(rank, visits, total, prior, depth, n_nodes):\n    # Flat PUCT (ERA, futs.py): exploit by rank, explore by visit count.\n    c = 1.0\n    return rank + c * (1.0 / n_nodes) * math.sqrt(total) / (1 + visits)\n",
- "outcomes": {
-  "oracle-rejected": 4,
-  "below-threshold": 1
- },
- "rollouts": 10,
- "validation": {
-  "lsr_synth_bio_pop_growth_bpg1": {
-   "n": 2,
-   "before": 0.3160486766773357,
-   "after": 0.292035086769836,
-   "gain": -0.024013589907499716,
-   "gain_sd": 0.014062772634262782,
-   "wins": 0,
-   "losses": 2
+  "evolved_source": "def priority(rank, visits, total, prior, depth, n_nodes):\n    # Flat PUCT (ERA, futs.py): exploit by rank, explore by visit count.\n    c = 1.0\n    return rank + c * (1.0 / n_nodes) * math.sqrt(total) / (1 + visits)\n",
+  "seed_source": "def priority(rank, visits, total, prior, depth, n_nodes):\n    # Flat PUCT (ERA, futs.py): exploit by rank, explore by visit count.\n    c = 1.0\n    return rank + c * (1.0 / n_nodes) * math.sqrt(total) / (1 + visits)\n",
+  "outcomes": {
+    "oracle-rejected": 4,
+    "below-threshold": 1
   },
-  "lsr_synth_chem_react_crk31": {
-   "n": 2,
-   "before": 0.4061595357819379,
-   "after": 0.4061595357819379,
-   "gain": 0.0,
-   "gain_sd": 0.0,
-   "wins": 0,
-   "losses": 0
+  "rollouts": 10,
+  "validation": {
+    "lsr_synth_bio_pop_growth_bpg1": {
+      "n": 2,
+      "before": 0.3160486766773357,
+      "after": 0.292035086769836,
+      "gain": -0.024013589907499716,
+      "gain_sd": 0.014062772634262782,
+      "wins": 0,
+      "losses": 2
+    },
+    "lsr_synth_chem_react_crk31": {
+      "n": 2,
+      "before": 0.4061595357819379,
+      "after": 0.4061595357819379,
+      "gain": 0.0,
+      "gain_sd": 0.0,
+      "wins": 0,
+      "losses": 0
+    },
+    "lsr_synth_matsci_matsci13": {
+      "n": 2,
+      "before": 0.5995715746242535,
+      "after": 0.5995715746242535,
+      "gain": 0.0,
+      "gain_sd": 0.0,
+      "wins": 0,
+      "losses": 0
+    },
+    "lsr_synth_phys_osc_po22": {
+      "n": 2,
+      "before": 0.30590446557467454,
+      "after": 0.31176594878451813,
+      "gain": 0.005861483209843588,
+      "gain_sd": 0.061706726873633155,
+      "wins": 1,
+      "losses": 1
+    },
+    "lsr_synth_bio_pop_growth_bpg15": {
+      "n": 2,
+      "before": 9.602414677647207e-05,
+      "after": 0.0004547475398570168,
+      "gain": 0.00035872339308054476,
+      "gain_sd": 0.00035872339308054476,
+      "wins": 1,
+      "losses": 0
+    },
+    "lsr_synth_bio_pop_growth_bpg3": {
+      "n": 2,
+      "before": 0.212174539922142,
+      "after": 0.212174539922142,
+      "gain": 0.0,
+      "gain_sd": 0.0,
+      "wins": 0,
+      "losses": 0
+    },
+    "lsr_synth_bio_pop_growth_bpg7": {
+      "n": 2,
+      "before": 0.07411576848495639,
+      "after": 0.07411576848495639,
+      "gain": 0.0,
+      "gain_sd": 0.0,
+      "wins": 0,
+      "losses": 0
+    },
+    "lsr_synth_matsci_matsci23": {
+      "n": 2,
+      "before": 0.3697151299265941,
+      "after": 0.3697151299265941,
+      "gain": 0.0,
+      "gain_sd": 0.0,
+      "wins": 0,
+      "losses": 0
+    }
   },
-  "lsr_synth_matsci_matsci13": {
-   "n": 2,
-   "before": 0.5995715746242535,
-   "after": 0.5995715746242535,
-   "gain": 0.0,
-   "gain_sd": 0.0,
-   "wins": 0,
-   "losses": 0
+  "train_problems": [
+    "lsr_synth_bio_pop_growth_bpg1",
+    "lsr_synth_chem_react_crk31",
+    "lsr_synth_matsci_matsci13",
+    "lsr_synth_phys_osc_po22"
+  ],
+  "validate_problems": [
+    "lsr_synth_bio_pop_growth_bpg15",
+    "lsr_synth_bio_pop_growth_bpg3",
+    "lsr_synth_bio_pop_growth_bpg7",
+    "lsr_synth_matsci_matsci23"
+  ],
+  "config": {
+    "dataset": "lsr_synth",
+    "per_problem": true,
+    "iterations": 8,
+    "rounds": 6,
+    "workers": 2,
+    "seed_program": "linear",
+    "answer_format": "program",
+    "shards": 6,
+    "test_shards": 1,
+    "staleness": "guarded",
+    "problem_seconds": 120.0,
+    "problem_seconds_note": "the recorded run used 20.0; raised because a 20s per-problem wall-clock guard makes the inner run non-reproducible under container load -- three of nine problems flipped their rising/flat classification between two scans at 20.0",
+    "model": "deepseek-v4-flash",
+    "provider": "openai",
+    "temperature": 0.7,
+    "thinking": "disabled"
   },
-  "lsr_synth_phys_osc_po22": {
-   "n": 2,
-   "before": 0.30590446557467454,
-   "after": 0.31176594878451813,
-   "gain": 0.005861483209843588,
-   "gain_sd": 0.061706726873633155,
-   "wins": 1,
-   "losses": 1
+  "wall_seconds": 9053.734775959001,
+  "usage": {
+    "calls": 228,
+    "prompt_tokens": 739664,
+    "completion_tokens": 547577,
+    "total_tokens": 1287241,
+    "model_seconds": 5503.858380079269,
+    "failures": 0
   },
-  "lsr_synth_bio_pop_growth_bpg15": {
-   "n": 2,
-   "before": 9.602414677647207e-05,
-   "after": 0.0004547475398570168,
-   "gain": 0.00035872339308054476,
-   "gain_sd": 0.00035872339308054476,
-   "wins": 1,
-   "losses": 0
+  "engine_usage": {
+    "calls": 75,
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0,
+    "model_seconds": 10616.048994541168,
+    "failures": 0
   },
-  "lsr_synth_bio_pop_growth_bpg3": {
-   "n": 2,
-   "before": 0.212174539922142,
-   "after": 0.212174539922142,
-   "gain": 0.0,
-   "gain_sd": 0.0,
-   "wins": 0,
-   "losses": 0
-  },
-  "lsr_synth_bio_pop_growth_bpg7": {
-   "n": 2,
-   "before": 0.07411576848495639,
-   "after": 0.07411576848495639,
-   "gain": 0.0,
-   "gain_sd": 0.0,
-   "wins": 0,
-   "losses": 0
-  },
-  "lsr_synth_matsci_matsci23": {
-   "n": 2,
-   "before": 0.3697151299265941,
-   "after": 0.3697151299265941,
-   "gain": 0.0,
-   "gain_sd": 0.0,
-   "wins": 0,
-   "losses": 0
-  }
- },
- "train_problems": [
-  "lsr_synth_bio_pop_growth_bpg1",
-  "lsr_synth_chem_react_crk31",
-  "lsr_synth_matsci_matsci13",
-  "lsr_synth_phys_osc_po22"
- ],
- "validate_problems": [
-  "lsr_synth_bio_pop_growth_bpg15",
-  "lsr_synth_bio_pop_growth_bpg3",
-  "lsr_synth_bio_pop_growth_bpg7",
-  "lsr_synth_matsci_matsci23"
- ],
- "config": {
-  "dataset": "lsr_synth",
-  "per_problem": true,
-  "iterations": 8,
-  "rounds": 6,
-  "workers": 2,
-  "seed_program": "linear",
-  "answer_format": "program",
-  "shards": 6,
-  "test_shards": 1,
-  "staleness": "guarded",
-  "problem_seconds": 120.0,
-  "problem_seconds_note": "the recorded run used 20.0; raised because a 20s per-problem wall-clock guard makes the inner run non-reproducible under container load -- three of nine problems flipped their rising/flat classification between two scans at 20.0",
-  "model": "deepseek-v4-flash",
-  "provider": "openai",
-  "temperature": 0.7,
-  "thinking": "disabled"
- },
- "wall_seconds": 9053.734775959001,
- "usage": {
-  "calls": 228,
-  "prompt_tokens": 739664,
-  "completion_tokens": 547577,
-  "total_tokens": 1287241,
-  "model_seconds": 5503.858380079269,
-  "failures": 0
- },
- "engine_usage": {
-  "calls": 75,
-  "prompt_tokens": 0,
-  "completion_tokens": 0,
-  "total_tokens": 0,
-  "model_seconds": 10616.048994541168,
-  "failures": 0
- },
- "verdict": "null, with a failed self-consistency control",
- "reading": "Zero commits in 10 rollouts, so `evolved_source` is byte-identical to `seed_source` and every entry in `validation` is a comparison of the seed rule with ITSELF. Those gains must therefore be exactly 0.0000, and three are not: bpg1 -0.0240, po22 +0.0059, bpg15 +0.0004. That is a direct measurement of this domain's paired-validation noise floor -- up to 0.024 -- not a result about any rule. The API was healthy (0 failures, 5646 tokens/call), so it is not the quota artifact that voided the previous attempt.",
- "noise_floor_paired": 0.024013589907499716,
- "implication": "A gain below ~0.024 on this domain is unreadable. The earlier 0.0011 figure was measured at problem_seconds=20 on inner seed 0; the validation path uses fresh seeds (7, 8) whose completions are never cached, and residual wall-clock sensitivity survives at problem_seconds=120.",
- "budget_note": "10 outer rollouts here versus the 144 that produced the synthetic-landscape result (+0.0227 source / +0.0120 target). One outer rollout is a whole inner ERA search: ~13 minutes here against ~5 ms there, so matching that budget costs roughly 30 hours."
+  "verdict": "null, with a failed self-consistency control",
+  "reading": "Zero commits in 10 rollouts, so `evolved_source` is byte-identical to `seed_source` and every entry in `validation` is a comparison of the seed rule with ITSELF. Those gains must therefore be exactly 0.0000, and three are not: bpg1 -0.0240, po22 +0.0059, bpg15 +0.0004. That is a direct measurement of this domain's paired-validation noise floor -- up to 0.024 -- not a result about any rule. The API was healthy (0 failures, 5646 tokens/call), so it is not the quota artifact that voided the previous attempt.",
+  "noise_floor_paired": 0.024013589907499716,
+  "implication": "A gain below ~0.024 on this domain is unreadable. The earlier 0.0011 figure was measured at problem_seconds=20 on inner seed 0; the validation path uses fresh seeds (7, 8) whose completions are never cached, and residual wall-clock sensitivity survives at problem_seconds=120.",
+  "budget_note": "10 outer rollouts here versus the 144 that produced the synthetic-landscape result (+0.0227 source / +0.0120 target). One outer rollout is a whole inner ERA search: ~13 minutes here against ~5 ms there, so matching that budget costs roughly 30 hours.",
+  "noise_floor_cause": "Found after this run: both SRBench prompt builders printed the candidate's wall-clock to two decimals ('which scored 2.998 in 0.84s'). Three identical runs diverged at model call 1 on nothing else -- same prompt length 8162, different hash, one line differing by '0.84s' vs '0.89s'. The prompt is the completion-cache key, so the cache missed and the model sampled a different program. Removed; pinned by tests/test_era_srbench.py::test_no_wall_clock_duration_reaches_the_srbench_prompt. This run predates the fix and its null is therefore not evidence about the rule."
 }
