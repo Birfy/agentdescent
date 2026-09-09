@@ -1,0 +1,308 @@
+{
+  "what": "SWE-bench-Science: one baseline verification per task, through each task's own published Harbor verifier image",
+  "how": "dockerd started; DockerRunner in separate-verifier mode; the dataset's tests/grader.py mounted over the image's, which repairs images that hardcode a private-test filename; nested reward.json metrics flattened so private.passed is readable",
+  "config": {
+    "dataset": "OpenMOSS-Team/SWE-bench-Science",
+    "tasks_sampled": 15,
+    "tasks_total": 119,
+    "images": "pinned by digest in each task.toml",
+    "patch": "empty (the baseline)"
+  },
+  "summary": {
+    "root_partially_correct": 10,
+    "root_zero": 5,
+    "private_collected": [
+      3,
+      3,
+      4,
+      6,
+      8,
+      8,
+      9,
+      10,
+      10,
+      10,
+      11,
+      11,
+      12,
+      15,
+      31
+    ],
+    "seconds_median": 5.9,
+    "seconds_min": 1.5,
+    "seconds_max": 109.2,
+    "stale_grader_images": [
+      "task_002",
+      "task_015",
+      "task_030",
+      "task_040",
+      "task_050",
+      "task_070"
+    ],
+    "before_repair_zero_signal": [
+      "task_005",
+      "task_015",
+      "task_030",
+      "task_040",
+      "task_050",
+      "task_070"
+    ]
+  },
+  "rows": [
+    {
+      "task": "task_001",
+      "domain": "computational-reaction-chemistry",
+      "language": "python",
+      "seconds": 11.7,
+      "metrics": {
+        "reward": 0.0,
+        "public.passed": 1.0,
+        "public.collected": 1.0,
+        "public.return_code": 0.0,
+        "private.passed": 1.0,
+        "private.collected": 3.0,
+        "private.failed": 2.0,
+        "private.return_code": 1.0
+      },
+      "root_state": "partial"
+    },
+    {
+      "task": "task_002",
+      "domain": "density-functional-theory",
+      "language": "python",
+      "seconds": 109.2,
+      "metrics": {
+        "reward": 0.0,
+        "public.passed": 1.0,
+        "public.collected": 1.0,
+        "public.return_code": 0.0,
+        "private.passed": 3.0,
+        "private.collected": 8.0,
+        "private.failed": 5.0,
+        "private.return_code": 1.0
+      },
+      "root_state": "partial"
+    },
+    {
+      "task": "task_005",
+      "domain": "magnetic-resonance-spectroscopy-processing",
+      "language": "matlab-octave",
+      "seconds": 2.0,
+      "metrics": {
+        "reward": 0.0,
+        "public.passed": 1.0,
+        "public.collected": 1.0,
+        "public.return_code": 0.0,
+        "private.passed": 0.0,
+        "private.collected": 4.0,
+        "private.failed": 4.0,
+        "private.return_code": 1.0
+      },
+      "root_state": "zero-root"
+    },
+    {
+      "task": "task_015",
+      "domain": "magnetic-resonance-spin-dynamics",
+      "language": "matlab-octave",
+      "seconds": 12.1,
+      "metrics": {
+        "reward": 0.0,
+        "public.passed": 1.0,
+        "public.collected": 1.0,
+        "public.return_code": 0.0,
+        "private.passed": 17.0,
+        "private.collected": 31.0,
+        "private.failed": 14.0,
+        "private.return_code": 1.0
+      },
+      "root_state": "partial"
+    },
+    {
+      "task": "task_020",
+      "domain": "atomistic-machine-learning-and-molecular-simulation",
+      "language": "python",
+      "seconds": 1.5,
+      "metrics": {
+        "reward": 0.0,
+        "public.passed": 0.0,
+        "public.collected": 1.0,
+        "public.return_code": 1.0,
+        "private.passed": 0.0,
+        "private.collected": 12.0,
+        "private.failed": 12.0,
+        "private.return_code": 1.0
+      },
+      "root_state": "zero-root"
+    },
+    {
+      "task": "task_030",
+      "domain": "crystallography-file-format-semantics",
+      "language": "python",
+      "seconds": 7.3,
+      "metrics": {
+        "reward": 0.0,
+        "public.passed": 0.0,
+        "public.collected": 1.0,
+        "public.return_code": 1.0,
+        "private.passed": 5.0,
+        "private.collected": 10.0,
+        "private.failed": 5.0,
+        "private.return_code": 1.0
+      },
+      "root_state": "partial"
+    },
+    {
+      "task": "task_040",
+      "domain": "computational-electromagnetics-and-geophysical-forward-modeling",
+      "language": "python",
+      "seconds": 3.7,
+      "metrics": {
+        "reward": 0.0,
+        "public.passed": 1.0,
+        "public.collected": 1.0,
+        "public.return_code": 0.0,
+        "private.passed": 0.0,
+        "private.collected": 3.0,
+        "private.failed": 3.0,
+        "private.return_code": 1.0
+      },
+      "root_state": "zero-root"
+    },
+    {
+      "task": "task_050",
+      "domain": "quantum-information-many-body-tensor-networks",
+      "language": "python",
+      "seconds": 28.5,
+      "metrics": {
+        "reward": 0.0,
+        "public.passed": 0.0,
+        "public.collected": 1.0,
+        "public.return_code": 1.0,
+        "private.passed": 2.0,
+        "private.collected": 11.0,
+        "private.failed": 9.0,
+        "private.return_code": 1.0
+      },
+      "root_state": "partial"
+    },
+    {
+      "task": "task_060",
+      "domain": "high-density-extracellular-electrophysiology",
+      "language": "python",
+      "seconds": 3.1,
+      "metrics": {
+        "reward": 0.0,
+        "public.passed": 0.0,
+        "public.collected": 1.0,
+        "public.return_code": 1.0,
+        "private.passed": 1.0,
+        "private.collected": 11.0,
+        "private.failed": 10.0,
+        "private.return_code": 1.0
+      },
+      "root_state": "partial"
+    },
+    {
+      "task": "task_070",
+      "domain": "proteomics",
+      "language": "python",
+      "seconds": 1.5,
+      "metrics": {
+        "reward": 0.0,
+        "public.passed": 0.0,
+        "public.collected": 1.0,
+        "public.return_code": 1.0,
+        "private.passed": 0.0,
+        "private.collected": 9.0,
+        "private.failed": 9.0,
+        "private.return_code": 1.0
+      },
+      "root_state": "zero-root"
+    },
+    {
+      "task": "task_080",
+      "domain": "geospatial-raster-reprojection",
+      "language": "python",
+      "seconds": 6.6,
+      "metrics": {
+        "reward": 0.0,
+        "public.passed": 1.0,
+        "public.collected": 1.0,
+        "public.return_code": 0.0,
+        "private.passed": 5.0,
+        "private.collected": 15.0,
+        "private.failed": 10.0,
+        "private.return_code": 1.0
+      },
+      "root_state": "partial"
+    },
+    {
+      "task": "task_090",
+      "domain": "nuclear-magnetic-resonance-spectroscopy",
+      "language": "python",
+      "seconds": 2.3,
+      "metrics": {
+        "reward": 0.0,
+        "public.passed": 1.0,
+        "public.collected": 1.0,
+        "public.return_code": 0.0,
+        "private.passed": 0.0,
+        "private.collected": 6.0,
+        "private.failed": 6.0,
+        "private.return_code": 1.0
+      },
+      "root_state": "zero-root"
+    },
+    {
+      "task": "task_100",
+      "domain": "reticular-chemistry-and-framework-geometry",
+      "language": "python",
+      "seconds": 9.7,
+      "metrics": {
+        "reward": 0.0,
+        "public.passed": 0.0,
+        "public.collected": 1.0,
+        "public.return_code": 1.0,
+        "private.passed": 1.0,
+        "private.collected": 8.0,
+        "private.failed": 7.0,
+        "private.return_code": 1.0
+      },
+      "root_state": "partial"
+    },
+    {
+      "task": "task_110",
+      "domain": "high-performance-fibers-and-composites",
+      "language": "python",
+      "seconds": 5.9,
+      "metrics": {
+        "reward": 0.0,
+        "public.passed": 0.0,
+        "public.collected": 1.0,
+        "public.return_code": 1.0,
+        "private.passed": 4.0,
+        "private.collected": 10.0,
+        "private.failed": 6.0,
+        "private.return_code": 1.0
+      },
+      "root_state": "partial"
+    },
+    {
+      "task": "task_119",
+      "domain": "quantum-chemistry-reaction-paths",
+      "language": "python",
+      "seconds": 2.3,
+      "metrics": {
+        "reward": 0.0,
+        "public.passed": 0.0,
+        "public.collected": 1.0,
+        "public.return_code": 1.0,
+        "private.passed": 4.0,
+        "private.collected": 10.0,
+        "private.failed": 6.0,
+        "private.return_code": 1.0
+      },
+      "root_state": "partial"
+    }
+  ]
+}
