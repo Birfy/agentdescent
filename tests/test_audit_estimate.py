@@ -180,3 +180,72 @@ def test_records_carry_their_own_inclusion_probabilities_into_the_estimate():
     got = residual_bias(heavy + light, draws=500)
     # unweighted this would read 100/110 = 0.909; weighted it is 0.5
     assert got["delta"] == pytest.approx(0.5, abs=0.01)
+
+
+# -- clustering ---------------------------------------------------------------
+#
+# A run scores the same task again for every artifact version, so the audited
+# units are not independent draws. Treating them as if they were is the quiet
+# way to report an interval that is too narrow, which on this gate means
+# "PROCEED" on evidence that did not support it.
+
+
+def _clustered_sample(n_tasks=80, per_task=3, share_wrong=0.25, seed=0):
+    """Residuals that are constant within a task -- maximal dependence."""
+    rng = random.Random(seed)
+    values, tasks = [], []
+    for t in range(n_tasks):
+        shared = 1.0 if rng.random() < share_wrong else 0.0
+        values.extend([shared] * per_task)
+        tasks.extend([t] * per_task)
+    return values, tasks
+
+
+def test_the_clustered_interval_is_wider_than_the_unit_one():
+    values, tasks = _clustered_sample()
+    probs = [1.0] * len(values)
+    n_lo, n_hi = bootstrap_ci(values, probs, seed=0)
+    c_lo, c_hi = bootstrap_ci(values, probs, seed=0, clusters=tasks)
+    assert (c_hi - c_lo) > (n_hi - n_lo), (
+        "resampling tasks must not report a tighter interval than resampling "
+        "units -- the whole point is that the units carry less information than "
+        "their count suggests")
+
+
+def test_repeating_every_unit_does_not_make_the_clustered_interval_shrink():
+    """The failure the unit bootstrap has: duplicate the data, halve the width.
+
+    Scoring one task under three artifact versions is close to duplication, and a
+    unit bootstrap reads the duplicates as three times the evidence.
+    """
+    base, tasks = _clustered_sample(per_task=1)
+    tripled = [v for v in base for _ in range(3)]
+    tripled_tasks = [t for t in tasks for _ in range(3)]
+
+    once = bootstrap_ci(base, [1.0] * len(base), seed=1)
+    unit = bootstrap_ci(tripled, [1.0] * len(tripled), seed=1)
+    clustered = bootstrap_ci(tripled, [1.0] * len(tripled), seed=1,
+                             clusters=tripled_tasks)
+
+    assert (unit[1] - unit[0]) < (once[1] - once[0]) * 0.75, "premise"
+    assert (clustered[1] - clustered[0]) == pytest.approx(once[1] - once[0], abs=0.05)
+
+
+def test_independent_units_make_the_two_intervals_agree():
+    """No dependence to correct for, so clustering must cost nothing."""
+    rng = random.Random(4)
+    values = _draw(300, 0.4, 0.6, rng)
+    probs = [1.0] * 300
+    tasks = list(range(300))                    # one unit per cluster
+    n = bootstrap_ci(values, probs, seed=2)
+    c = bootstrap_ci(values, probs, seed=2, clusters=tasks)
+    assert (c[1] - c[0]) == pytest.approx(n[1] - n[0], abs=0.03)
+
+
+def test_residual_bias_reports_both_intervals_and_the_cluster_count():
+    recs = ([_rec(1.0, 0.0, rid=f"a{i}") for i in range(30)]
+            + [_rec(0.0, 0.0, rid=f"b{i}") for i in range(30)])
+    got = residual_bias(recs, draws=500)
+    assert got["n"] == 60
+    assert got["n_tasks"] == 1              # every _rec shares task_id "t"
+    assert "ci_clustered" in got and "se_clustered" in got

@@ -213,7 +213,7 @@ def run(args) -> Dict:
         judge_label = (f"LLM judge ({args.model}, "
                        f"thinking={'on' if args.judge_thinking else 'off'})")
 
-    store = AuditStore()
+    store = AuditStore(args.store)
     audited = AuditedReward(
         judge,
         oracle=GoldAnswer(exact_match),
@@ -339,10 +339,10 @@ def verdict(an: Dict) -> Tuple[str, str]:
     if s["n"] < 20:
         return ("INCONCLUSIVE",
                 f"only {s['n']} resolved pairs -- too few to call. Re-run larger.")
-    lo, hi = s["ci"]
+    lo, hi = s["ci_clustered"]          # the honest one; see `_bootstrap_means`
     if lo <= 0.0 <= hi:
         return ("STOP",
-                "the 95% CI for the verifier's bias contains 0. On this workload "
+                "the clustered 95% CI for the verifier's bias contains 0. On this workload "
                 "the calibration layer would correct a bias that is not "
                 "distinguishable from zero: build Phase 1 (recording) only.")
     ratio = abs(s["delta"]) / an["gate_sd"] if an["gate_sd"] else float("inf")
@@ -385,6 +385,7 @@ def report(bundle: Dict, an: Dict, args) -> str:
         f"| loop | {args.rounds} rounds x {args.workers} workers, "
         f"held_out_frac={args.held_out_frac}, tournament={args.tournament} |",
         f"| sampling | i.i.d., inclusion probability {args.sample_rate} |",
+        f"| records | `{os.path.relpath(args.store, os.getcwd())}` |",
         f"| wall clock | {bundle['elapsed']:.0f}s |",
         f"| model calls | {u.calls} ({u.prompt_tokens}+{u.completion_tokens} tokens) |",
         f"| seed | {args.seed} |",
@@ -395,28 +396,35 @@ def report(bundle: Dict, an: Dict, args) -> str:
         "than exact match does -- the direction that lets a loop accept changes "
         "ground truth says improved nothing.",
         "",
-        "| pool | n | `Delta_hat` | 95% CI | SE | mean `f` | mean `Y` | disagree |",
-        "|---|---|---|---|---|---|---|---|",
+        "| pool | n | tasks | `Delta_hat` | 95% CI (unit) | 95% CI (clustered) "
+        "| mean `f` | mean `Y` | disagree |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     for name, st in (("all resolved", s), ("calibration only", c)):
         if st["n"]:
             lines.append(
-                f"| {name} | {st['n']} | {fmt(st['delta'])} | "
-                f"[{fmt(st['ci'][0])}, {fmt(st['ci'][1])}] | {fmt(st['se'])} | "
+                f"| {name} | {st['n']} | {st['n_tasks']} | {fmt(st['delta'])} | "
+                f"[{fmt(st['ci'][0])}, {fmt(st['ci'][1])}] | "
+                f"[{fmt(st['ci_clustered'][0])}, {fmt(st['ci_clustered'][1])}] | "
                 f"{fmt(st['f_mean'], 3)} | {fmt(st['y_mean'], 3)} | "
                 f"{fmt(st['disagree'], 3)} |")
         else:
-            lines.append(f"| {name} | 0 | -- | -- | -- | -- | -- | -- |")
+            lines.append(f"| {name} | 0 | -- | -- | -- | -- | -- | -- | -- |")
 
     lines += [
         "",
         f"Units seen by the tap: {an['seen']}; audited: {an['audited_n']}.",
         "",
         "The estimator is the Hajek (inclusion-probability-weighted) mean with a "
-        "percentile bootstrap interval. It is **not** the PPI estimator "
-        "Phase 3 needs: with the labels this cheap there is no unlabelled mass "
-        "to borrow strength from, and Phase 0 only has to decide whether the "
-        "bias exists and matters.",
+        "percentile bootstrap. It is **not** the PPI estimator Phase 3 needs: "
+        "with the labels this cheap there is no unlabelled mass to borrow "
+        "strength from, and Phase 0 only has to decide whether the bias exists "
+        "and matters.",
+        "",
+        "**Read the clustered interval.** A run scores the same task again for "
+        "every artifact version, so the audited units are not independent draws "
+        "and the unit bootstrap is too narrow. Resampling tasks is the honest "
+        "one; the gap between the two columns is the size of that dependence.",
         "",
         "## Does it move a decision?",
         "",
@@ -504,15 +512,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="print each round as it lands -- a run this long should not\n"
                          "be indistinguishable from a hung one")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--store", default=None,
+                    help="JSONL for the audit records. Defaults beside the\n"
+                         "report, so a run can be re-analysed without re-\n"
+                         "buying every model call.")
     args = ap.parse_args(argv)
+
+    stamp = date.today().isoformat()
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    suffix = "_tournament" if args.tournament else ""
+    if args.store is None:
+        args.store = os.path.join(root, "reports", f"audit_phase0_{stamp}{suffix}.jsonl")
+    os.makedirs(os.path.dirname(args.store), exist_ok=True)
 
     bundle = run(args)
     an = analyse(bundle, args)
 
     text = report(bundle, an, args)
-    out = args.out or os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "reports", f"audit_phase0_{date.today().isoformat()}.md")
+    out = args.out or os.path.join(root, "reports",
+                                   f"audit_phase0_{stamp}{suffix}.md")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", encoding="utf-8") as fh:
         fh.write(text)

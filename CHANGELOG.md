@@ -32,6 +32,38 @@ All notable changes to AgentDescent are documented here. The format follows
   and `for_calibration` asserts the split rather than filtering for it. The
   estimator is deliberately not included. [docs/audit.md](docs/audit.md)
 
+- **`anthropic_compatible` -- an Anthropic-format endpoint with no SDK
+  dependency.** The twin of `openai_compatible` on the other wire format.
+  Anthropic-format endpoints now serve models that are not Claude, and reaching
+  one meant either `pip install anthropic` -- an optional dependency, for a
+  `base_url` override on a client whose retry and timeout defaults then have to
+  be undone -- or nothing. Base URL and key are read from the environment at call
+  time. Only `text` blocks are returned: a reasoning model answers with
+  `thinking` blocks first, and concatenating them would put the reasoning into
+  the artifact's output, where a scorer grades it and a diff might commit it.
+
+- **`agentdescent.audit.estimate` -- the design-based bias estimator.** A Hajek
+  (inclusion-probability-weighted) mean of `f - Y` with a percentile bootstrap
+  interval, plus `residual_bias(records)` to read it straight off a store.
+  Weighted from the start although every current sampler uses one probability:
+  an unweighted mean is correct exactly while that stays true, and plausible
+  either way once it stops.
+
+  Two intervals are reported. The unit bootstrap is what a reader expects and is
+  **too narrow for a run**, because the same task is scored again for every
+  artifact version and those pairs are not independent draws. `ci_clustered`
+  resamples tasks, and the gap between the two is the size of that dependence --
+  on the Phase 0 run it is about 1.6x.
+
+  Not included, still: prediction-powered inference. The two are a baseline and
+  a refinement rather than alternatives, so PPI gets measured against this one.
+
+- **`scripts/audit_phase0.py` -- the audit plan's kill test, and
+  `reports/audit_phase0_*.md`.** Not the plan's original Phase 0, which replays
+  the Ledger for past accept decisions: no run ever recorded an independent
+  second opinion to replay against. It is a fresh measurement on HotpotQA with an
+  LLM judge as the cheap verifier and normalized exact match as ground truth.
+
 ### Changed
 
 - **`ThreeLayerVerifier.oracle_eval` is now `full_eval`**, and
