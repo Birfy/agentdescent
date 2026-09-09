@@ -90,7 +90,7 @@ Every previous real-data domain failed at least one of these.
 | **1. the run is a function of the candidate** | **exact.** Repeated verifications are byte-identical | AlgoTune: sd 0.054, structural. LLM-SRBench: only after raising a wall-clock budget |
 | **2. the reward is fine-grained** | **3 to 31 levels** (median 10) once nested metrics are read | GSM-Hard: steps of 0.125, archive tied permanently |
 | **3. candidates are incomparable** | a patch is not a chain — this is a tree search, not `evolve()`'s archive | the `selection` slot was inert because `argmax(score) == head` in 63/63 |
-| **4. the search improves at an affordable budget** | **no**, for this candidate generator — 0 of 14 attempts beat the root | this is where hyp2f1 and `lsr_transform` died, and it is the *only* thing wrong here |
+| **4. the search improves at an affordable budget** | **no** — 0 of 14 beat the root, on a weak model *and* on a strong one | this is where hyp2f1 and `lsr_transform` died, and it is the *only* thing wrong here |
 
 Property 1 is the notable one. **This is the first real-data domain in this line
 of work where the evaluator is deterministic by construction** rather than by
@@ -197,16 +197,34 @@ here there is no rise to accelerate.
 
 **This measures the setup, not the benchmark.** One task, a small model, a
 single shot, and no workspace agent — against a benchmark whose own headline is
-Claude Code with Opus 5 under 50% pass@1. 0 of 14 is the expected number, not a
-surprising one. What it settles is narrower and still useful: *the three
-properties that killed every previous real-data domain are satisfied here, and
-the one that remains is not a property of the domain at all — it is a property
-of how strong the candidate generator is.*
+Claude Code with Opus 5 under 50% pass@1. 0 of 14 is the expected number.
 
-So the next move is not another search-rule experiment on this domain. It is
-either a stronger generator or the real agent phase (`harbor run --agent`), and
-until one of those exists the curve will stay flat for reasons that have nothing
-to say about selection rules.
+### It is not the model: a much stronger generator gets 0 of 14 too
+
+The obvious next suspect is the candidate generator, so the same check was run
+again on a substantially stronger model (`deepseek-v4-pro` against
+`deepseek-v4-flash`):
+
+| | weak | **strong** |
+|---|---:|---:|
+| reached the verifier | 13 of 14 | **14 of 14** |
+| scored exactly the baseline `1 of 3` | 8 | 13 |
+| worse | 5 — all `0 of 1`, the patch broke the test module outright | 1 — `0 of 3`, collection intact |
+| **above the baseline** | **0** | **0** |
+
+The candidates are visibly healthier: edit blocks almost always match, and its
+one failure leaves the test suite collectable instead of destroying the import.
+**And the curve is still flat at the root.**
+
+That is worth more than another null, because it removes the cheap explanation.
+The three properties that killed every previous real-data domain hold here; the
+fourth is not waiting on model strength, and it is not a property of the domain
+either. It is waiting on the thing the benchmark is built around and this
+repository deliberately does not reimplement: an agent working in the workspace.
+
+So the next move is not another search-rule experiment on this domain, and not a
+bigger model. It is `harbor run --agent`, or nothing — until then the curve stays
+flat for reasons that have nothing to say about selection rules.
 
 ## Reproducing
 

@@ -690,5 +690,351 @@
         "secs": 11.1
       }
     ]
+  },
+  "sampling_stronger_model": {
+    "what": "the same property-4 check on task_001, with a much stronger candidate generator",
+    "config": {
+      "model": "deepseek-v4-pro",
+      "endpoint": "an OpenAI-compatible hosted endpoint",
+      "thinking": "disabled",
+      "temperature": 0.9,
+      "max_tokens": 32000,
+      "samples": 14
+    },
+    "reached_verifier": 14,
+    "sampled": 14,
+    "outcomes": {
+      "1 of 3 (exactly the baseline)": 13,
+      "0 of 3 (all tests fail, collection intact)": 1,
+      "above the baseline": 0,
+      "solved": 0
+    },
+    "verdict": "0 of 14 again. The stronger model produces markedly *healthier* candidates -- 14 of 14 reach the verifier against 13 of 14, edit blocks almost always match, and its one failure keeps test collection intact (0 of 3) where the weaker model broke the module outright (0 of 1) five times -- but the best-so-far curve is still flat at the root. Model strength is therefore not what property 4 is waiting on here; the missing piece is the agent phase the benchmark is built around.",
+    "rows": [
+      {
+        "i": 0,
+        "metrics": {
+          "reward": 0.0,
+          "public.passed": 1.0,
+          "public.collected": 1.0,
+          "public.return_code": 0.0,
+          "public.pass_rate": 1.0,
+          "private.passed": 1.0,
+          "private.collected": 3.0,
+          "private.failed": 2.0,
+          "private.return_code": 1.0,
+          "private.pass_rate": 0.3333333333333333
+        },
+        "error": "",
+        "edits": 1,
+        "files": [
+          "source/automol/graph/base/_06heur.py"
+        ],
+        "applied": true,
+        "patch_lines": 15,
+        "secs": 10.9
+      },
+      {
+        "i": 1,
+        "metrics": {
+          "reward": 0.0,
+          "public.passed": 1.0,
+          "public.collected": 1.0,
+          "public.return_code": 0.0,
+          "public.pass_rate": 1.0,
+          "private.passed": 1.0,
+          "private.collected": 3.0,
+          "private.failed": 2.0,
+          "private.return_code": 1.0,
+          "private.pass_rate": 0.3333333333333333
+        },
+        "error": "",
+        "edits": 1,
+        "files": [
+          "source/automol/graph/base/_00core.py"
+        ],
+        "applied": true,
+        "patch_lines": 16,
+        "secs": 11.4
+      },
+      {
+        "i": 2,
+        "metrics": {
+          "reward": 0.0,
+          "public.passed": 1.0,
+          "public.collected": 1.0,
+          "public.return_code": 0.0,
+          "public.pass_rate": 1.0,
+          "private.passed": 1.0,
+          "private.collected": 3.0,
+          "private.failed": 2.0,
+          "private.return_code": 1.0,
+          "private.pass_rate": 0.3333333333333333
+        },
+        "error": "",
+        "edits": 1,
+        "files": [
+          "source/automol/graph/base/_06heur.py"
+        ],
+        "applied": true,
+        "patch_lines": 23,
+        "secs": 10.8
+      },
+      {
+        "i": 3,
+        "metrics": {
+          "reward": 0.0,
+          "public.passed": 1.0,
+          "public.collected": 1.0,
+          "public.return_code": 0.0,
+          "public.pass_rate": 1.0,
+          "private.passed": 1.0,
+          "private.collected": 3.0,
+          "private.failed": 2.0,
+          "private.return_code": 1.0,
+          "private.pass_rate": 0.3333333333333333
+        },
+        "error": "source/automol/graph/base/_00core.py: SEARCH text occurs 0 times",
+        "edits": 1,
+        "files": [
+          "source/automol/graph/base/_00core.py"
+        ],
+        "applied": true,
+        "patch_lines": 13,
+        "secs": 11.1
+      },
+      {
+        "i": 4,
+        "metrics": {
+          "reward": 0.0,
+          "public.passed": 1.0,
+          "public.collected": 1.0,
+          "public.return_code": 0.0,
+          "public.pass_rate": 1.0,
+          "private.passed": 1.0,
+          "private.collected": 3.0,
+          "private.failed": 2.0,
+          "private.return_code": 1.0,
+          "private.pass_rate": 0.3333333333333333
+        },
+        "error": "",
+        "edits": 2,
+        "files": [
+          "source/automol/graph/base/_00core.py",
+          "source/automol/graph/base/_06heur.py"
+        ],
+        "applied": true,
+        "patch_lines": 26,
+        "secs": 10.9
+      },
+      {
+        "i": 5,
+        "metrics": {
+          "reward": 0.0,
+          "public.passed": 1.0,
+          "public.collected": 1.0,
+          "public.return_code": 0.0,
+          "public.pass_rate": 1.0,
+          "private.passed": 1.0,
+          "private.collected": 3.0,
+          "private.failed": 2.0,
+          "private.return_code": 1.0,
+          "private.pass_rate": 0.3333333333333333
+        },
+        "error": "",
+        "edits": 1,
+        "files": [
+          "source/automol/graph/base/_06heur.py"
+        ],
+        "applied": true,
+        "patch_lines": 34,
+        "secs": 11.2
+      },
+      {
+        "i": 6,
+        "metrics": {
+          "reward": 0.0,
+          "public.passed": 1.0,
+          "public.collected": 1.0,
+          "public.return_code": 0.0,
+          "public.pass_rate": 1.0,
+          "private.passed": 1.0,
+          "private.collected": 3.0,
+          "private.failed": 2.0,
+          "private.return_code": 1.0,
+          "private.pass_rate": 0.3333333333333333
+        },
+        "error": "",
+        "edits": 1,
+        "files": [
+          "source/automol/graph/base/_00core.py"
+        ],
+        "applied": true,
+        "patch_lines": 15,
+        "secs": 11.0
+      },
+      {
+        "i": 7,
+        "metrics": {
+          "reward": 0.0,
+          "public.passed": 1.0,
+          "public.collected": 1.0,
+          "public.return_code": 0.0,
+          "public.pass_rate": 1.0,
+          "private.passed": 1.0,
+          "private.collected": 3.0,
+          "private.failed": 2.0,
+          "private.return_code": 1.0,
+          "private.pass_rate": 0.3333333333333333
+        },
+        "error": "",
+        "edits": 2,
+        "files": [
+          "source/automol/graph/base/_00core.py",
+          "source/automol/graph/base/_06heur.py"
+        ],
+        "applied": true,
+        "patch_lines": 48,
+        "secs": 10.9
+      },
+      {
+        "i": 8,
+        "metrics": {
+          "reward": 0.0,
+          "public.passed": 1.0,
+          "public.collected": 1.0,
+          "public.return_code": 0.0,
+          "public.pass_rate": 1.0,
+          "private.passed": 1.0,
+          "private.collected": 3.0,
+          "private.failed": 2.0,
+          "private.return_code": 1.0,
+          "private.pass_rate": 0.3333333333333333
+        },
+        "error": "",
+        "edits": 1,
+        "files": [
+          "source/automol/graph/base/_06heur.py"
+        ],
+        "applied": true,
+        "patch_lines": 15,
+        "secs": 11.0
+      },
+      {
+        "i": 9,
+        "metrics": {
+          "reward": 0.0,
+          "public.passed": 0.0,
+          "public.collected": 1.0,
+          "public.return_code": 1.0,
+          "public.pass_rate": 0.0,
+          "private.passed": 0.0,
+          "private.collected": 3.0,
+          "private.failed": 3.0,
+          "private.return_code": 1.0,
+          "private.pass_rate": 0.0
+        },
+        "error": "",
+        "edits": 1,
+        "files": [
+          "source/automol/graph/base/_00core.py"
+        ],
+        "applied": true,
+        "patch_lines": 18,
+        "secs": 10.1
+      },
+      {
+        "i": 10,
+        "metrics": {
+          "reward": 0.0,
+          "public.passed": 1.0,
+          "public.collected": 1.0,
+          "public.return_code": 0.0,
+          "public.pass_rate": 1.0,
+          "private.passed": 1.0,
+          "private.collected": 3.0,
+          "private.failed": 2.0,
+          "private.return_code": 1.0,
+          "private.pass_rate": 0.3333333333333333
+        },
+        "error": "",
+        "edits": 1,
+        "files": [
+          "source/automol/graph/base/_06heur.py"
+        ],
+        "applied": true,
+        "patch_lines": 15,
+        "secs": 11.1
+      },
+      {
+        "i": 11,
+        "metrics": {
+          "reward": 0.0,
+          "public.passed": 1.0,
+          "public.collected": 1.0,
+          "public.return_code": 0.0,
+          "public.pass_rate": 1.0,
+          "private.passed": 1.0,
+          "private.collected": 3.0,
+          "private.failed": 2.0,
+          "private.return_code": 1.0,
+          "private.pass_rate": 0.3333333333333333
+        },
+        "error": "",
+        "edits": 1,
+        "files": [
+          "source/automol/graph/base/_06heur.py"
+        ],
+        "applied": true,
+        "patch_lines": 15,
+        "secs": 11.0
+      },
+      {
+        "i": 12,
+        "metrics": {
+          "reward": 0.0,
+          "public.passed": 1.0,
+          "public.collected": 1.0,
+          "public.return_code": 0.0,
+          "public.pass_rate": 1.0,
+          "private.passed": 1.0,
+          "private.collected": 3.0,
+          "private.failed": 2.0,
+          "private.return_code": 1.0,
+          "private.pass_rate": 0.3333333333333333
+        },
+        "error": "",
+        "edits": 1,
+        "files": [
+          "source/automol/graph/base/_06heur.py"
+        ],
+        "applied": true,
+        "patch_lines": 31,
+        "secs": 10.8
+      },
+      {
+        "i": 13,
+        "metrics": {
+          "reward": 0.0,
+          "public.passed": 1.0,
+          "public.collected": 1.0,
+          "public.return_code": 0.0,
+          "public.pass_rate": 1.0,
+          "private.passed": 1.0,
+          "private.collected": 3.0,
+          "private.failed": 2.0,
+          "private.return_code": 1.0,
+          "private.pass_rate": 0.3333333333333333
+        },
+        "error": "",
+        "edits": 1,
+        "files": [
+          "source/automol/graph/base/_06heur.py"
+        ],
+        "applied": true,
+        "patch_lines": 20,
+        "secs": 10.8
+      }
+    ]
   }
 }
