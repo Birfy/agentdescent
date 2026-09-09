@@ -70,7 +70,7 @@ except ModuleNotFoundError:  # pragma: no cover - 3.9/3.10
     _toml = None
 
 
-__all__ = ["HarborTask", "load_task", "parse_reward", "LocalRunner", "DockerRunner",
+__all__ = ["HarborTask", "load_task", "parse_reward", "flatten_metrics", "LocalRunner", "DockerRunner",
            "harbor_domain", "harbor_completion", "PARENT_PATCH_BEGIN", "PARENT_PATCH_END"]
 
 
@@ -91,6 +91,15 @@ class HarborTask:
     agent_timeout: float
     #: The container working directory the patch is relative to.
     workdir: str = "/app"
+    #: ``[verifier.environment].docker_image`` -- set when the benchmark ships a
+    #: *separate* verifier image, which SWE-bench-Science does for every task.
+    verifier_image: Optional[str] = None
+    #: ``[verifier].environment_mode == "separate"``: the grader and the private
+    #: tests live in ``verifier_image``, which carries its own copy of the task
+    #: source. The public ``tests/`` directory is then only Harbor's required
+    #: entrypoint stub, and mounting it over ``/tests`` would hide the real
+    #: grader -- so in this mode it is not mounted.
+    verifier_separate: bool = False
 
 
 def _parse_toml(text: str) -> Dict[str, Any]:
@@ -145,7 +154,32 @@ def load_task(root: os.PathLike, *, workdir: str = "/app") -> HarborTask:
         verifier_timeout=float((config.get("verifier") or {}).get("timeout_sec", 120)),
         agent_timeout=float((config.get("agent") or {}).get("timeout_sec", 1800)),
         workdir=str(env.get("workdir", workdir)),
+        verifier_image=((config.get("verifier") or {}).get("environment") or {}).get("docker_image"),
+        verifier_separate=(config.get("verifier") or {}).get("environment_mode") == "separate",
     )
+
+
+def flatten_metrics(payload: Any, prefix: str = "") -> Dict[str, float]:
+    """Every numeric leaf of a ``reward.json`` payload, under a dotted name.
+
+    Harbor only requires the top-level ``reward``, and SWE-bench-Science's
+    grader writes that as ``int(public_ok and private_ok)`` -- a *binary*
+    number, the coarsest reward there is. The partial credit its own grader
+    computes (``{"private": {"passed": 1, "collected": 3}}``) is one level
+    down, so reading only the top level throws away the one graded signal on
+    the benchmark that can rank two failing patches. Flattening keeps both:
+    ``reward`` and ``private.passed`` are then both selectable metrics.
+    """
+    out: Dict[str, float] = {}
+    for key, value in (payload or {}).items():
+        name = f"{prefix}{key}"
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, (int, float)):
+            out[name] = float(value)
+        elif isinstance(value, dict):
+            out.update(flatten_metrics(value, prefix=f"{name}."))
+    return out
 
 
 def parse_reward(logs_dir: os.PathLike) -> Dict[str, float]:
@@ -155,8 +189,7 @@ def parse_reward(logs_dir: os.PathLike) -> Dict[str, float]:
     if as_json.exists():
         payload = json.loads(as_json.read_text(encoding="utf-8"))
         if isinstance(payload, dict):
-            out = {str(k): float(v) for k, v in payload.items()
-                   if isinstance(v, (int, float)) and not isinstance(v, bool)}
+            out = flatten_metrics(payload)
             if out:
                 return out
         raise ValueError(f"{as_json} holds no numeric metrics")
@@ -276,10 +309,13 @@ class DockerRunner:
         self._lock = threading.Lock()
 
     def image_for(self, task: HarborTask) -> str:
+        """The image the *verifier* runs in: its own where the task ships one."""
         with self._lock:
             if task.name in self._images:
                 return self._images[task.name]
-            if task.docker_image:
+            if task.verifier_image:
+                image = task.verifier_image
+            elif task.docker_image:
                 image = task.docker_image
             elif task.dockerfile and self.build:
                 image = "harbor-task-" + re.sub(r"[^a-z0-9]+", "-", task.name.lower()).strip("-")
@@ -292,10 +328,28 @@ class DockerRunner:
 
     def verify(self, task: HarborTask, patch: str) -> Dict[str, float]:
         image = self.image_for(task)
+        mounts: List[str] = []
+        if task.verifier_separate:
+            # Harbor's separate-verifier contract: the image ships its own
+            # ``tests/`` *and* its own ``test.sh``, and that script begins
+            # ``git reset --hard; git clean -ffdqx`` before applying the
+            # agent's patch from ``/logs/artifacts/model.patch``. Applying the
+            # patch to the workdir ourselves would therefore be silently
+            # undone -- every candidate would score the baseline and the
+            # search would look flat for a reason that is not the search.
+            # So hand the patch over where the verifier looks for it, and let
+            # its own script apply it.
+            apply_step = ""
+            patch_mount = "/logs/artifacts/model.patch"
+        else:
+            apply_step = (
+                "if [ -s /tmp/candidate.patch ]; then "
+                "(git apply --whitespace=nowarn /tmp/candidate.patch "
+                "|| patch -p1 -s < /tmp/candidate.patch); fi; ")
+            patch_mount = "/tmp/candidate.patch"
+            mounts += ["-v", f"{task.tests_dir.resolve()}:/tests:ro"]
         script = (
-            f"set -e; cd {task.workdir}; mkdir -p /logs/verifier; "
-            "if [ -s /tmp/candidate.patch ]; then "
-            "(git apply --whitespace=nowarn /tmp/candidate.patch || patch -p1 -s < /tmp/candidate.patch); fi; "
+            f"set -e; cd {task.workdir}; mkdir -p /logs/verifier; " + apply_step +
             "bash /tests/test.sh >/logs/verifier/stdout.txt 2>&1 || true; "
             "if [ -f /logs/verifier/reward.json ]; then cat /logs/verifier/reward.json; "
             "else printf '{\"reward\": %s}' \"$(cat /logs/verifier/reward.txt 2>/dev/null || echo 0)\"; fi"
@@ -304,16 +358,32 @@ class DockerRunner:
             patch_path = Path(tmp) / "candidate.patch"
             patch_path.write_text(patch, encoding="utf-8")
             proc = subprocess.run(
-                [self.docker, "run", "--rm", "--network", "none",
-                 "-v", f"{task.tests_dir.resolve()}:/tests:ro",
-                 "-v", f"{patch_path.resolve()}:/tmp/candidate.patch:ro",
+                [self.docker, "run", "--rm", "--network", "none", *mounts,
+                 "-v", f"{patch_path.resolve()}:{patch_mount}:ro",
                  image, "bash", "-c", script],
                 capture_output=True, text=True, timeout=task.verifier_timeout + 60)
         if proc.returncode != 0:
             raise RuntimeError(f"verifier container failed: {(proc.stderr or proc.stdout)[-400:]}")
-        payload = json.loads(proc.stdout.strip().splitlines()[-1])
-        return {str(k): float(v) for k, v in payload.items()
-                if isinstance(v, (int, float)) and not isinstance(v, bool)}
+        return flatten_metrics(_trailing_json(proc.stdout))
+
+
+def _trailing_json(text: str) -> Dict[str, Any]:
+    """The JSON object at the end of ``text``, however many lines it spans.
+
+    ``reward.json`` is written with ``indent=2`` by at least one benchmark, so
+    the last *line* of the verifier's output is ``}``, not the payload.
+    """
+    stripped = text.rstrip()
+    end = stripped.rfind("}")
+    if end < 0:
+        raise ValueError(f"verifier printed no JSON object: {stripped[-200:]!r}")
+    for start in range(end, -1, -1):
+        if stripped[start] == "{":
+            try:
+                return json.loads(stripped[start:end + 1])
+            except json.JSONDecodeError:
+                continue
+    raise ValueError(f"verifier printed no parseable JSON: {stripped[-200:]!r}")
 
 
 # ---------------------------------------------------------------------------
