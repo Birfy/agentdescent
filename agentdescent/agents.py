@@ -618,3 +618,96 @@ def openai_compatible(model: str, *, base_url_env: str = "OPENAI_BASE_URL",
         return message.get("content") or ""
 
     return with_retries(complete, attempts=retries) if retries > 1 else complete
+
+
+def anthropic_compatible(model: str, *, base_url_env: str = "ANTHROPIC_BASE_URL",
+                         api_key_env: str = "ANTHROPIC_API_KEY",
+                         default_base_url: str = "https://api.anthropic.com",
+                         version: str = "2023-06-01",
+                         max_tokens: int = 4096, timeout: float = 120.0,
+                         usage: Optional[Usage] = None, retries: int = 3,
+                         **create_kwargs) -> Completion:
+    """A completion for any **Anthropic-format** endpoint, with no SDK dependency.
+
+    :func:`claude` speaks the same protocol through ``pip install anthropic``.
+    This is the twin of :func:`openai_compatible` on the other wire format, and it
+    exists for the same reason that one does: a gateway. Anthropic-format
+    endpoints now serve models that are not Claude -- vendor gateways, cloud
+    marketplaces, local servers -- and reaching them through the SDK means taking
+    an optional dependency, and a `base_url` override on a client whose defaults
+    (retries, timeouts) then have to be undone. `urllib` is already imported here.
+
+    The base URL and API key are read from the environment **at call time**, so
+    neither passes through code or arguments -- point it at a gateway with
+    ``ANTHROPIC_BASE_URL=https://host/anthropic`` and ``ANTHROPIC_API_KEY=<key>``
+    and pass that gateway's own ``model`` id.
+
+    ``max_tokens`` defaults high for the reason :func:`claude` gives: a reasoning
+    model spends its budget on internal reasoning first, and too small a cap
+    returns **empty visible content** rather than a short answer.
+
+    Only ``text`` blocks are returned. A reasoning model answers with
+    ``thinking`` blocks first and the visible answer after, and concatenating all
+    of them would put the reasoning into the artifact's output -- where a scorer
+    would grade it, a judge would read it, and a diff might commit it.
+    """
+    def complete(prompt: str) -> str:
+        base = os.environ.get(base_url_env, default_base_url).rstrip("/")
+        key = os.environ.get(api_key_env)
+        if not key:
+            raise RuntimeError(f"set {api_key_env} (and {base_url_env}) in your environment")
+        payload: Dict[str, Any] = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "messages": [{"role": "user", "content": prompt}],
+            **create_kwargs,
+        }
+        req = urllib.request.Request(
+            f"{base}/v1/messages", data=json.dumps(payload).encode(),
+            headers={"x-api-key": key, "anthropic-version": version,
+                     "content-type": "application/json"})
+        t0 = time.time()
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                data = json.load(resp)
+        except urllib.error.HTTPError as e:
+            # Same reasoning as `openai_compatible`: the body carries the only
+            # useful part of a 4xx and it lives on `e.read()`.
+            if usage is not None:
+                usage.record(seconds=time.time() - t0, failed=True)
+            try:
+                detail = e.read().decode("utf-8", "replace").strip()[:400]
+            except Exception:  # noqa: BLE001 - the body is best-effort
+                detail = ""
+            message = (f"{base} returned HTTP {e.code} for model {model!r}"
+                       + (f": {detail}" if detail else ""))
+            if e.code in (429, 503):
+                header = ""
+                try:
+                    header = (e.headers.get("Retry-After") or "").strip()
+                except Exception:  # noqa: BLE001 - headers are best-effort
+                    header = ""
+                try:
+                    retry_after = float(header) if header else None
+                except ValueError:
+                    retry_after = None
+                raise RateLimited(message, retry_after) from e
+            raise RuntimeError(message) from e
+        except Exception:
+            if usage is not None:
+                usage.record(seconds=time.time() - t0, failed=True)
+            raise
+        if usage is not None:
+            u = data.get("usage") or {}
+            usage.record(prompt_tokens=u.get("input_tokens", 0) or 0,
+                         completion_tokens=u.get("output_tokens", 0) or 0,
+                         seconds=time.time() - t0)
+        blocks = data.get("content")
+        if not isinstance(blocks, list):
+            raise RuntimeError(
+                f"{base} returned a response with no content for model {model!r}: "
+                f"{json.dumps(data)[:300]}")
+        return "".join(b.get("text") or "" for b in blocks
+                       if isinstance(b, dict) and b.get("type") == "text")
+
+    return with_retries(complete, attempts=retries) if retries > 1 else complete

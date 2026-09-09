@@ -185,15 +185,42 @@ would audit a different sample and `sampler_seed` would document nothing.
 [`ThreeLayerVerifier.learned_eval`](verifier.md) seeds per-artifact for the same
 reason.
 
-## What is deliberately not here
+## Estimating the bias
 
-**The estimator.** Turning paired observations into a bias estimate with a
-confidence interval is prediction-powered inference: cross-fitting, stratum
-weights, a `t` quantile rather than a normal one, and a variance term that is
-easy to drop without any coverage test noticing. It belongs in a module with its
-own golden vectors and mutation tests.
+[`residual_bias`](api.md#audit-estimation) turns resolved records into
+`Delta = E[f - Y]` with a 95% interval:
 
-This package produces the *input* to that estimator and stops. `summarise`
-reports a raw mean residual for eyeballing a run and is named so that nobody
-mistakes it for the estimator — it is only unbiased when every unit shared one
-inclusion probability, which stratified sampling deliberately breaks.
+```python
+from agentdescent import residual_bias
+
+print(residual_bias(audited.calibration_set()))
+# {'n': 214, 'delta': 0.147, 'ci': (0.089, 0.206), 'se': 0.030,
+#  'f_mean': 0.71, 'y_mean': 0.56, 'disagree': 0.19}
+```
+
+It is the **Hájek** (inclusion-probability-weighted) mean with a percentile
+bootstrap. Weighted from the start because an unweighted mean is correct only
+while every unit shares one inclusion probability — it is silently wrong the day
+someone raises the rate on the boundary stratum, and plausible either way.
+Bootstrap rather than a `t` interval because the residual of two binary scores
+takes three values with most of its mass at zero, and because the estimator is a
+ratio.
+
+`disagree` is worth reading beside `delta`: a small bias spread over every unit
+and a large bias on a few units give the same mean and call for different fixes.
+
+### What is deliberately not here
+
+**Prediction-powered inference.** PPI additionally borrows strength from the
+*unlabelled* verifier scores — units `f` scored that the oracle never saw — using
+a cross-fitted coefficient, per-stratum weights and a `t` quantile. That earns
+its keep when labels are scarce and unlabelled scores are plentiful; it also has
+several ways to be subtly wrong that a coverage test does not catch, so it
+belongs in a module with its own golden vectors and mutation tests.
+
+The two are a baseline and a refinement, not alternatives: same point estimate in
+expectation, wider interval. Any PPI estimator added later is **measured against
+this one** rather than trusted over it.
+
+`summarise` is neither — a raw *unweighted* mean for eyeballing a run, named so
+nobody wires it into a gate.

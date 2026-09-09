@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-224 public names across 39 modules.
+226 public names across 40 modules.
 
 ---
 
@@ -347,6 +347,26 @@ Usage(
 ### `WorkspaceAgent`
 
 A `Completion` that can additionally be bound to a directory.
+
+### `anthropic_compatible(...)`
+
+A completion for any **Anthropic-format** endpoint, with no SDK dependency.
+
+```python
+anthropic_compatible(
+    model: str,
+    *,
+    base_url_env: str = 'ANTHROPIC_BASE_URL',
+    api_key_env: str = 'ANTHROPIC_API_KEY',
+    default_base_url: str = 'https://api.anthropic.com',
+    version: str = '2023-06-01',
+    max_tokens: int = 4096,
+    timeout: float = 120.0,
+    usage: Optional[Usage] = None,
+    retries: int = 3,
+    **create_kwargs
+) -> Completion
+```
 
 ### `claude(...)`
 
@@ -1039,6 +1059,26 @@ Records on disk, indexed in memory.
 | `reopen(record_id: str) -> bool` | Clear a resolution so it can be replaced. For corrections, not for retries. |
 | `resolve(record_id: str, oracle_score: float, *, at: Optional[float] = None) -> bool` | Attach ground truth to a pending record. `False` if there was none to attach. |
 | `versions() -> List[str]` | Every `verifier_version` seen, in order of first appearance. |
+
+---
+
+## Audit estimation
+
+The design-based baseline: a weighted mean of the residual, with an interval. &nbsp;·&nbsp; `agentdescent.audit.estimate` &nbsp;·&nbsp; [guide](audit.md)
+
+### `residual_bias(...)`
+
+Estimate `Delta = E[f - Y]` from resolved `AuditRecord`s.
+
+```python
+residual_bias(
+    records: Iterable,
+    *,
+    draws: int = 5000,
+    alpha: float = 0.05,
+    seed: int = 0
+) -> Dict[str, object]
+```
 
 ---
 

@@ -45,15 +45,25 @@ Typical use, an experiment that returns next week::
         print(rec.record_id, rec.output)        # go and measure these
     resolve_from_mapping(store, {"a1b2...": 0.83, ...})
 
-What is deliberately **not** here: the estimator. Turning a set of paired
-observations into a bias estimate with an interval is
-prediction-powered inference, it is easy to get subtly wrong in ways coverage
-tests do not catch, and it belongs in a module with its own golden vectors and
-mutation tests. This package produces the input to that estimator and stops
-there. :func:`~agentdescent.audit.store.summarise` reports a raw mean residual
-for eyeballing and is named so that nobody mistakes it for the estimator.
+What is here, and what is not. :mod:`~agentdescent.audit.estimate` ships the
+**design-based baseline** -- a Hajek (inclusion-probability-weighted) mean of the
+residual with a bootstrap interval, which is what Phase 0 of the plan needs to
+decide whether a bias exists and whether it is large next to the noise the
+acceptance gate already carries. What is deliberately absent is
+**prediction-powered inference**: borrowing strength from the unlabelled verifier
+scores via a cross-fitted coefficient, per-stratum weights and a `t` quantile is
+easy to get subtly wrong in ways a coverage test does not catch, and it belongs
+in a module with its own golden vectors and mutation tests. The two are a
+baseline and a refinement, not alternatives -- same point estimate in
+expectation, wider interval -- so any PPI estimator added later is measured
+against this one rather than trusted over it.
+
+:func:`~agentdescent.audit.store.summarise` is neither: it reports a raw
+*unweighted* mean for eyeballing a run, and is named so that nobody mistakes it
+for an estimator.
 """
 
+from .estimate import bootstrap_ci, hajek_mean, residual_bias, standard_error
 from .records import (SCHEMA_VERSION, AuditRecord, Purpose, new_record_id,
                       output_digest, verifier_fingerprint)
 from .sources import (DeferredOracle, GoldAnswer, NullOracle, OracleSource,
@@ -66,6 +76,7 @@ __all__ = [
     "AuditRecord",
     "AuditStore",
     "AuditedReward",
+    "bootstrap_ci",
     "DeferredOracle",
     "GoldAnswer",
     "NullOracle",
@@ -73,8 +84,11 @@ __all__ = [
     "Purpose",
     "RenderTap",
     "new_record_id",
+    "hajek_mean",
     "output_digest",
+    "residual_bias",
     "resolve_from_mapping",
+    "standard_error",
     "summarise",
     "verifier_fingerprint",
 ]

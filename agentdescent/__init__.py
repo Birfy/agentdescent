@@ -30,6 +30,7 @@ from .verifier import ThreeLayerVerifier, VerifierBudget
 from .audit import (
     AuditedReward, AuditRecord, AuditStore, DeferredOracle, GoldAnswer,
     NullOracle, Purpose, RenderTap, resolve_from_mapping, verifier_fingerprint,
+    residual_bias,
 )
 from . import backends, dataloader          # submodules: agentdescent.dataloader.hf_rows(...)
 from .dataloader import Dataset, split_dataset
@@ -147,6 +148,7 @@ from .agents import (
     opencode,
     metered,
     openai_compatible,
+    anthropic_compatible,
     with_retries,
 )
 from .agents import WorkspaceAgent, worker_env
@@ -340,6 +342,7 @@ __all__ = [
     "echo",
     "from_callable",
     "openai_compatible",
+    "anthropic_compatible",
     "with_retries",
     "Agent",
     "LLMAgent",
@@ -401,4 +404,5 @@ __all__ = [
     "RenderTap",
     "resolve_from_mapping",
     "verifier_fingerprint",
+    "residual_bias",
 ]
