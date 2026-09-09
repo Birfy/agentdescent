@@ -47,7 +47,7 @@ is the wrong one, for three reasons that all point the same way:
    would come from two different rollouts. Their difference would then carry
    rollout variance on top of the bias, and no amount of sampling separates them
    again. At the reward level both score the **same output**.
-3. **The merge path calls `oracle_eval` synchronously.**
+3. **The merge path calls `full_eval` synchronously.**
    [`Aggregator._audit`](aggregator.md) will happily block a merger on it — which
    is fine for a checker and catastrophic for an experiment that returns on
    Thursday.

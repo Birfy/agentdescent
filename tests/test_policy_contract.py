@@ -438,7 +438,8 @@ def test_an_injected_verifier_is_called_exactly_as_the_built_in_one_is():
     _run_evolve(policies=Policies(verifier=Counting(inner),
                                   aggregator_factory=factory))
     assert isinstance(seen.get("verifier"), Counting), "the engine built its own"
-    assert set(counts) <= {"cheap_eval", "eval_counts", "oracle_eval",
+    assert set(counts) <= {"cheap_eval", "eval_counts", "full_eval",
+                           "full_eval_matches_counts", "oracle_shares_full_set",
                            "learned_eval", "budget", "held_out"}, counts
 
 

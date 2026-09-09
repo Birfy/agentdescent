@@ -918,7 +918,7 @@ Rule / learned / oracle, and the budget that bounds the expensive one. &nbsp;·&
 
 ### `ThreeLayerVerifier(...)`
 
-Rule / learned / oracle backend for the aggregator.
+Rule / learned / full backend for the aggregator.
 
 ```python
 ThreeLayerVerifier(
@@ -935,13 +935,14 @@ ThreeLayerVerifier(
 |---|---|
 | `cheap_eval(artifact: Evolvable) -> float` | The signal used everywhere a budget-free score is needed. |
 | `eval_counts(artifact: Evolvable, floor: Optional[float] = None) -> Tuple[float, float]` | Return (successes, failures) on the full held-out set. |
+| `full_eval(artifact: Evolvable) -> float` | `eval_fn` on the **whole** held-out set. Consumes audit budget. |
 | `learned_eval(artifact: Evolvable) -> Tuple[float, float]` | Noisy proxy that also returns an uncertainty estimate. |
-| `oracle_eval(artifact: Evolvable) -> float` | Ground truth on the full held-out set. Consumes audit budget. |
+| `oracle_eval(artifact: Evolvable) -> float` | Deprecated alias for `full_eval`. Removed in 0.7. |
 | `rule_eval(artifact: Evolvable) -> float` | Cheap, deterministic-ish check on a tiny subset. |
 
 ### `VerifierBudget(oracle_calls_remaining: int = 200, oracle_calls_used: int = 0) -> None`
 
-Oracle call budget, consumed by `oracle_eval`.
+Budget for full-set evaluations, consumed by `full_eval`.
 
 ---
 

@@ -6,6 +6,52 @@ All notable changes to AgentDescent are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Sparse audit: a cheap verifier paired against ground truth
+  (`agentdescent.audit`).** When `reward` is an agent judging an output rather
+  than a fact about it, the loop optimises a proxy, and every gate reads the same
+  proxy -- so a change that games it is indistinguishable from a change that
+  improves. `AuditedReward` wraps the cheap scorer, hands a sampled minority of
+  its work to a truth source, and records the pair: `GoldAnswer` for truth that
+  returns now, `DeferredOracle` for an experiment that returns next week and is
+  resolved from another process against a JSONL that outlives the run.
+
+  It hooks the **reward**, not the verifier. The verifier's layers score
+  `(artifact, tasks) -> float`, an aggregate that has already averaged away the
+  pairing a bias estimate needs, and a verifier-level oracle would be asked for a
+  *fresh* measurement, folding rollout variance into the residual. At the reward
+  level both sides score the same output. That placement also makes two
+  properties structural rather than remembered: enabling the audit cannot change
+  a run (`__call__` returns the verifier's score; tested end to end against the
+  same seed with the audit off and on), and it cannot block the merge path.
+
+  Records carry the three things that cannot be reconstructed later -- the
+  `inclusion_prob` that drew the unit, the `verifier_version` that scored it, and
+  the output itself. Calibration and improvement labels go into disjoint pools
+  and `for_calibration` asserts the split rather than filtering for it. The
+  estimator is deliberately not included. [docs/audit.md](docs/audit.md)
+
+### Changed
+
+- **`ThreeLayerVerifier.oracle_eval` is now `full_eval`**, and
+  `oracle_shares_full_set` is now `full_eval_matches_counts`. The old name
+  promised an independent source of truth and the method delivers the same
+  `eval_fn` every other layer calls, differing only in **how many tasks** it
+  scores -- so it bounds sampling error and is structurally unable to detect that
+  the scorer is biased. Reading it as ground truth is what let the docs claim the
+  loop audits itself against something outside itself, which it does not.
+
+  Both old names still work, once, with a `DeprecationWarning`, and are removed
+  in 0.7. `VerifierProtocol` declares `full_eval`; the engine reads a custom
+  verifier through `verifier.full_eval_of` / `verifier.shares_eval_counts`, which
+  accept either spelling -- so a verifier written against the pre-0.6 page keeps
+  running instead of raising `AttributeError` in the middle of a merge. The
+  `oracle_budget` argument, `VerifierBudget.oracle_calls_*` and the
+  `oracle-rejected` merge outcome keep their names: they are the public spelling
+  of a knob and a result category, and renaming them would break callers for no
+  gain this rename has not already delivered.
+
 ## [0.5.0] — 2026-09-07
 
 ### Added

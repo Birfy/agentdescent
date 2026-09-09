@@ -27,7 +27,7 @@ At the reward level both score the **same output**, which the artifact was run
 to produce anyway. The expensive half is already paid; the oracle adds only its
 own cost. And because this sits below the verifier, the merge path is untouched:
 :meth:`~agentdescent.aggregator.Aggregator._audit`, which calls
-``verifier.oracle_eval`` synchronously and would happily block a merger for the
+``verifier.full_eval`` synchronously and would happily block a merger for the
 duration of a wet-lab experiment, is never involved.
 """
 

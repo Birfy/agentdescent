@@ -30,7 +30,8 @@ import pytest
 from agentdescent.aggregator import Aggregator
 from agentdescent.evolution import AppendRules, Task, evolve
 from agentdescent.scheduler import AuditScheduler
-from agentdescent.verifier import ThreeLayerVerifier, VerifierBudget
+from agentdescent.verifier import (ThreeLayerVerifier, VerifierBudget,
+                                   full_eval_of, shares_eval_counts)
 
 TASKS = [Task(id=str(i), prompt=f"q{i}", meta={"gold": "y"}) for i in range(20)]
 
@@ -108,7 +109,7 @@ def test_a_high_blast_radius_artifact_is_still_audited_unconditionally():
 
 
 def test_an_l1_audit_reuses_the_measurement_instead_of_re_buying_it():
-    """`oracle_eval` and `eval_counts` are the same sweep over the same set.
+    """`full_eval` and `eval_counts` are the same sweep over the same set.
 
     Buying it twice was never free of consequence -- see the sub-sample veto
     below -- and the budget it consumed made `oracle_budget` look like a cost cap
@@ -124,7 +125,7 @@ def test_an_l1_audit_reuses_the_measurement_instead_of_re_buying_it():
 def test_the_audit_gate_never_vetoes_on_the_cheap_sub_sample():
     """The hole that reuse closes, stated as the invariant it broke.
 
-    Past `oracle_budget`, `oracle_eval` degrades to `rule_eval` -- a sub-sample.
+    Past `oracle_budget`, `full_eval` degrades to `rule_eval` -- a sub-sample.
     The gate then vetoed on it: measured, a candidate that took the full-set rate
     from 0.5 to 1.0 came back `oracle-rejected` because a two-task sample scored
     both sides at 0.5. Two sections of the verifier page promise sub-sampling can
@@ -243,3 +244,117 @@ def test_the_full_set_is_still_what_commits(tmp_path):
     successes, failures = agg.verifier.eval_counts(
         agg.ledger.snapshot("dev").get("artifact"))
     assert round(successes + failures) == len(agg.verifier.held_out)
+
+
+# -- the 0.6 rename: oracle_eval -> full_eval -----------------------------------
+#
+# `VerifierProtocol` is structural, so a verifier is whatever a caller hands the
+# engine. Renaming a method it calls therefore breaks other people's code at the
+# worst moment -- several minutes into a run, on the merge path, with an
+# `AttributeError`. These pin the shim that stops that.
+
+
+class _Stub:
+    """An artifact the layers never look at: `eval_fn` here ignores it."""
+
+
+def test_full_eval_is_the_name_and_oracle_eval_still_answers_to_it():
+    v = ThreeLayerVerifier(eval_fn=lambda a, ts: 1.0, held_out=list(range(4)))
+    assert v.full_eval(_Stub()) == 1.0
+    with pytest.warns(DeprecationWarning, match="use full_eval"):
+        assert v.oracle_eval(_Stub()) == 1.0
+
+
+def test_the_alias_spends_the_budget_once_not_twice():
+    """It delegates rather than duplicating, so the cap still means what it says."""
+    v = ThreeLayerVerifier(eval_fn=lambda a, ts: 1.0, held_out=list(range(4)),
+                           budget=VerifierBudget(oracle_calls_remaining=5))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        v.oracle_eval(_Stub())
+    assert v.budget.oracle_calls_used == 1
+
+
+def test_a_pre_rename_verifier_is_read_with_a_warning_not_an_attribute_error():
+    class Legacy:
+        oracle_shares_full_set = False
+
+        def oracle_eval(self, artifact):
+            return 0.25
+
+    legacy = Legacy()
+    with pytest.warns(DeprecationWarning, match="renamed in 0.6"):
+        assert full_eval_of(legacy)(_Stub()) == 0.25
+    assert shares_eval_counts(legacy) is False
+
+
+def test_the_new_attribute_wins_over_the_old_one():
+    """A verifier mid-migration may carry both; the new name is the answer."""
+    class Both:
+        full_eval_matches_counts = False
+        oracle_shares_full_set = True
+
+        def full_eval(self, artifact):
+            return 1.0
+
+    assert shares_eval_counts(Both()) is False
+    assert shares_eval_counts(ThreeLayerVerifier(
+        eval_fn=lambda a, ts: 1.0, held_out=[1])) is True
+
+
+def test_a_verifier_with_neither_name_says_which_methods_it_owes():
+    class Nothing:
+        pass
+
+    with pytest.raises(AttributeError, match="full_eval"):
+        full_eval_of(Nothing())
+
+
+def test_a_pre_rename_verifier_still_drives_a_whole_run_through_the_audit_gate():
+    """The failure the shim exists to prevent, reproduced end to end.
+
+    Written as a standalone class rather than a proxy on purpose. A proxy with
+    `__getattr__` forwards `full_eval_matches_counts` from whatever it wraps, so
+    it would take the reuse shortcut and never reach the legacy method -- the
+    test would pass while testing nothing. Somebody's real pre-0.6 verifier is a
+    class like this one.
+
+    `blast_radius=0.6` is L1, so `force_oracle` fires on every merge; with
+    `oracle_shares_full_set = False` the gate cannot reuse the acceptance
+    measurement either, so the old method is genuinely called.
+    """
+    from agentdescent.policies import Policies
+
+    class Legacy:
+        """The four methods `VerifierProtocol` asked for before 0.6."""
+
+        oracle_shares_full_set = False
+
+        def __init__(self, tasks):
+            self.held_out = tasks
+            self.budget = VerifierBudget(oracle_calls_remaining=200)
+            self.calls = 0
+
+        def _score(self, artifact, tasks):
+            return artifact.score(tasks)
+
+        def cheap_eval(self, artifact):
+            return self._score(artifact, self.held_out[:4])
+
+        def learned_eval(self, artifact):
+            return self.cheap_eval(artifact), 0.1
+
+        def eval_counts(self, artifact, floor=None):
+            n = float(len(self.held_out))
+            acc = self._score(artifact, self.held_out)
+            return acc * n, (1.0 - acc) * n
+
+        def oracle_eval(self, artifact):
+            self.calls += 1
+            return self._score(artifact, self.held_out)
+
+    legacy = Legacy(TASKS[:8])
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        _run(blast_radius=0.6, rounds=4, policies=Policies(verifier=legacy))
+    assert legacy.calls > 0, "the audit gate never reached the legacy method"
