@@ -1,0 +1,128 @@
+{
+ "evolved_source": "def priority(rank, visits, total, prior, depth, n_nodes):\n    # Added prior weight and adaptive exploration scaling to prevent premature convergence when all candidates have similar rank.\n    c = 1.0\n    d = 0.1\n    exploration = c * math.sqrt(math.log1p(total) + 1.0) / (1.0 + visits)\n    prior_term = prior * math.sqrt(total + 1.0) * (1.0 - rank)\n    return rank + prior_term + exploration - d * depth",
+ "seed_source": "def priority(rank, visits, total, prior, depth, n_nodes):\n    # Flat PUCT (ERA, futs.py): exploit by rank, explore by visit count.\n    c = 1.0\n    return rank + c * (1.0 / n_nodes) * math.sqrt(total) / (1 + visits)\n",
+ "outcomes": {
+  "committed": 2
+ },
+ "rollouts": 6,
+ "validation": {
+  "lsr_synth_bio_pop_growth_bpg1": {
+   "n": 2,
+   "before": 0.3156338321166465,
+   "after": 0.3156338321166465,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "lsr_synth_chem_react_crk31": {
+   "n": 2,
+   "before": 0.2273805562758932,
+   "after": 0.2273805562758932,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "lsr_synth_matsci_matsci13": {
+   "n": 2,
+   "before": 0.5992542341503221,
+   "after": 0.5992542341503221,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "lsr_synth_phys_osc_po22": {
+   "n": 2,
+   "before": 0.11586545693448677,
+   "after": 0.14575695409320732,
+   "gain": 0.029891497158720554,
+   "gain_sd": 0.0,
+   "wins": 2,
+   "losses": 0
+  },
+  "lsr_synth_bio_pop_growth_bpg23": {
+   "n": 2,
+   "before": 0.05001823506605986,
+   "after": 0.12416558435348095,
+   "gain": 0.07414734928742109,
+   "gain_sd": 0.0,
+   "wins": 2,
+   "losses": 0
+  },
+  "lsr_synth_bio_pop_growth_bpg7": {
+   "n": 2,
+   "before": 0.042975897572794575,
+   "after": 0.08052521559033901,
+   "gain": 0.037549318017544436,
+   "gain_sd": 0.0,
+   "wins": 2,
+   "losses": 0
+  },
+  "lsr_synth_matsci_matsci8": {
+   "n": 2,
+   "before": 0.12473138754676684,
+   "after": 0.19834021605553426,
+   "gain": 0.07360882850876742,
+   "gain_sd": 0.0,
+   "wins": 2,
+   "losses": 0
+  }
+ },
+ "train_problems": [
+  "lsr_synth_bio_pop_growth_bpg1",
+  "lsr_synth_chem_react_crk31",
+  "lsr_synth_matsci_matsci13",
+  "lsr_synth_phys_osc_po22"
+ ],
+ "validate_problems": [
+  "lsr_synth_bio_pop_growth_bpg23",
+  "lsr_synth_bio_pop_growth_bpg7",
+  "lsr_synth_matsci_matsci8"
+ ],
+ "config": {
+  "dataset": "lsr_synth",
+  "per_problem": true,
+  "iterations": 8,
+  "rounds": 8,
+  "workers": 3,
+  "seed_program": "linear",
+  "answer_format": "program",
+  "shards": 6,
+  "test_shards": 1,
+  "staleness": "guarded",
+  "problem_seconds": 120.0,
+  "problem_seconds_note": "the recorded run used 20.0; raised because a 20s per-problem wall-clock guard makes the inner run non-reproducible under container load -- three of nine problems flipped their rising/flat classification between two scans at 20.0",
+  "model": "deepseek-v4-pro",
+  "provider": "openai",
+  "temperature": 0.7,
+  "thinking": "disabled"
+ },
+ "wall_seconds": 9755.941153978001,
+ "usage": {
+  "calls": 40,
+  "prompt_tokens": 111953,
+  "completion_tokens": 85237,
+  "total_tokens": 197190,
+  "model_seconds": 1997.1680490970612,
+  "failures": 1
+ },
+ "engine_usage": {
+  "calls": 47,
+  "prompt_tokens": 0,
+  "completion_tokens": 0,
+  "total_tokens": 0,
+  "model_seconds": 7473.306229829788,
+  "failures": 0
+ },
+ "what": "meta_evolve over ERA's priority() rule on LLM-SRBench lsr_synth, per-problem protocol; paired validation against the seed rule on problems the outer loop never saw",
+ "how": "4 training problems x 3 inner seeds; held-out problems taken from a disjoint slice of the catalogue and kept only where the seed rule's curve rises (scanned separately and checkpointed, because this environment reaps long-lived processes); validation paired on seeds 7 and 8",
+ "status": {
+  "verdict": "POSITIVE, pending confirmation -- the run tripped its own abort guard",
+  "guard": "1 of 40 model calls failed (2.5%), above the 2% threshold set in metasearch-domain-selection.md after a 61%-failure run produced a plausible null. The guard is NOT being waived: an independent re-run of the paired validation, in a fresh process reporting its own failure count, is what decides whether these numbers stand.",
+  "why_the_bias_runs_against_this_result": "a failed call is a candidate that was never written, which the engine sees as a rollout that found nothing -- so the bias is toward a null, and this result is positive. That is an argument for re-running it, not a reason to accept it.",
+  "prerequisite_fixed_first": "this domain's earlier evolution was recorded as a null with a 0.024 paired noise floor. The cause was a wall-clock duration printed into the SRBench prompt, which changed the completion-cache key; with it removed the seed rule against itself is exactly 0.0000 on 3 of 3 problems retested."
+ },
+ "reading": "held-out mean +0.0618 against train mean +0.0075, with all three held-out problems improving 2-0. The gain being LARGER on held-out than on train is not the shape of overfitting. The evolved rule ADDS an exploration term and a depth penalty -- 'explore more, go shallower' -- which is the opposite of the direction evolved on the synthetic landscape (+0.0227 for exploring LESS) and is the direction metasearch-domain-selection.md predicted in advance from worst-first beating greedy here."
+}
