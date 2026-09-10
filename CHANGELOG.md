@@ -33,6 +33,18 @@ All notable changes to AgentDescent are documented here. The format follows
   estimator, the allocation and the gate that spends the answer are the entries
   below. [docs/audit.md](docs/audit.md)
 
+- **Mutation tests for every statistic added after `ppi.py`.** The plan's rule
+  is that new statistical logic ships with a test that fails when the logic is
+  written wrong -- a test of the *suite*, not of the code. Four mutations, three
+  of which were mistakes actually made here:
+
+  | | the wrong way | what it does |
+  |---|---|---|
+  | A | discount a *posterior* variance, prior included | past ~40 commits the audit becomes a blanket veto: `p_improve` 0.51 for every candidate, which looks exactly like a mature artifact that stopped improving |
+  | B | average the strata's own residual sds | reports `sigma = 0` for a verifier that is +0.4 generous in one stratum and exact in another -- the gate then spends the held-out set as if an oracle had scored it |
+  | C | forget to divide `sigma_eps ** 2` by `n` | the discount falls with `n`: the more the run measured, the less of it the gate may believe |
+  | D | a control band from one fixed sigma | alarms on a generation that merely bought fewer labels |
+
 - **`agentdescent.audit.drift` -- watching the correction over generations
   without alarming every generation.** One rectification says how biased the
   verifier is; a sequence says whether the loop is *finding* its blind spots,
