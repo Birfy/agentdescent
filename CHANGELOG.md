@@ -45,6 +45,29 @@ All notable changes to AgentDescent are documented here. The format follows
   | C | forget to divide `sigma_eps ** 2` by `n` | the discount falls with `n`: the more the run measured, the less of it the gate may believe |
   | D | a control band from one fixed sigma | alarms on a generation that merely bought fewer labels |
 
+- **`attach()` -- one call that wires the six pieces.** Everything in this
+  package is opt-in and nothing in the shipped runtimes builds any of it, so
+  switching the audit on meant assembling `AuditStore`, `AuditedReward`,
+  `Calibrator`, `RectifiedAcceptance`, `VerifierWatch` and `RenderTap` plus four
+  cross-references, every one of which is silent when wrong: a
+  `verifier_version` copied by hand and later changed leaves the gate asking
+  about a verifier that never ran and getting a *stale* rectification, which
+  reads exactly like "not enough labels yet"; a calibrator pointed at a second
+  store is stale forever; a `RenderTap` around a different `run` records an
+  empty signature on every unit; a bare oracle not wrapped in `GoldAnswer` can
+  fail the rollout it was auditing.
+
+  It changes no default -- not calling it is the current behaviour -- and
+  `enabled=False` collects records while correcting nothing, which is the honest
+  way to run a first round.
+
+  With it, the plan's last acceptance criterion is a test rather than a plan: a
+  whole `evolve()` with a string-similarity judge against exact match, so
+  `f > Y` structurally. From nothing but the store -- 114 units seen, 75
+  audited, `delta_hat` **+0.35**, `resid_sd` 0.38 -- and the acceptance rate over
+  a fixed grid of merge decisions falls **0.60 -> 0.37**.
+  [docs/audit.md](docs/audit.md#switching-it-on)
+
 - **The audited units are not independent, and the estimator said they were.**
   `estimate.py` had a cluster bootstrap from Phase 0; `ppi.py` did not, so the
   *refinement* was less robust than the baseline on the one axis Phase 0 had

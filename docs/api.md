@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-301 public names across 51 modules.
+303 public names across 52 modules.
 
 ---
 
@@ -1013,6 +1013,80 @@ AuditedReward(
 ### `RenderTap(run: Callable[[str, Any], str]) -> None`
 
 Optional wrapper for `run` that records *which* artifact produced an output.
+
+---
+
+## Switching the audit on
+
+One call that assembles the six pieces and the four cross-references. &nbsp;·&nbsp; `agentdescent.audit.wiring` &nbsp;·&nbsp; [guide](audit.md)
+
+### `Audit(...)`
+
+The assembled layer. Hand the three fields to `evolve()`.
+
+```python
+Audit(
+    reward: AuditedReward,
+    run: Optional[RenderTap],
+    acceptance: RectifiedAcceptance,
+    store: AuditStore,
+    calibrator: Calibrator,
+    watch: VerifierWatch
+) -> None
+```
+
+| method | what it does |
+|---|---|
+| `recompute() -> Rectification` | Re-read the store and re-estimate. Call after a batch resolves. |
+| `rectification() -> Rectification` | The correction in force. Never raises; stale is an answer. |
+| `status() -> Dict[str, Any]` | What the audit knows, for a round hook or a log line. |
+
+### `attach(...)`
+
+Assemble the audit around `verifier` and return what `evolve()` needs.
+
+```python
+attach(
+    verifier: Callable[[Any, str], float],
+    *,
+    oracle: Optional[Any] = None,
+    store: Union[AuditStore, str, None] = None,
+    run: Optional[Callable[[str, Any], str]] = None,
+    inner: Any = None,
+    enabled: bool = True,
+    plan: Optional[SamplePlan] = None,
+    policy: Optional[AuditPolicy] = None,
+    sample_rate: float = 0.1,
+    stratify: Optional[Callable[[Any, str, float], str]] = None,
+    calibration_fraction: float = 0.7,
+    draw_by: str = 'task',
+    seed: int = 0,
+    verifier_version: Optional[str] = None,
+    version_extra: Any = None,
+    watch_ids: Iterable[str] = (),
+    watch_globs: Sequence[str] = ()
+) -> Audit
+```
+
+| parameter | type | default | what it is |
+|---|---|---|---|
+| `verifier` | `Callable[[Any, str], float]` | *required* | The cheap scorer the loop optimises against, `(task, output) -> float`. |
+| `oracle` | `Optional[Any]` | `None` | Ground truth. A bare callable `(task, output) -> float` is wrapped in `GoldAnswer`, because that is what every caller with a gold answer already has and asking them to wrap it adds an import and a chance to forget that an oracle must never raise into the rollout. `None` records the questions without answering them. |
+| `store` | `Union[AuditStore, str, None]` | `None` | An `AuditStore`, or a path to open one at. A path is the usual case: the process that resolves a deferred oracle is not this one. |
+| `run` | `Optional[Callable[[str, Any], str]]` | `None` | The loop's `run`. Wrapped in a `RenderTap` so each unit records which artifact produced it. Leave it out and the audit still estimates the bias; it just cannot attribute a unit to an artifact. |
+| `inner` | `Any` | `None` |  |
+| `enabled` | `bool` | `True` | `False` collects records and **does not correct anything** -- the gate delegates to `inner` on the untouched context. The honest way to run a first round: measure before you spend. |
+| `plan` | `Optional[SamplePlan]` | `None` | A `SamplePlan` from a previous round, which carries per-stratum rates and overrides `sample_rate`. |
+| `policy` | `Optional[AuditPolicy]` | `None` |  |
+| `sample_rate` | `float` | `0.1` |  |
+| `stratify` | `Optional[Callable[[Any, str, float], str]]` | `None` |  |
+| `calibration_fraction` | `float` | `0.7` |  |
+| `draw_by` | `str` | `'task'` |  |
+| `seed` | `int` | `0` |  |
+| `verifier_version` | `Optional[str]` | `None` |  |
+| `version_extra` | `Any` | `None` |  |
+| `watch_ids` | `Iterable[str]` | `()` | Artifact ids and diff-key globs that mean the verifier changed. Nothing is watched by default, which is right for a fixed function and exactly wrong for a run that evolves its own judge -- see `VerifierWatch`. |
+| `watch_globs` | `Sequence[str]` | `()` | As `watch_ids`. |
 
 ---
 

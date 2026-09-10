@@ -21,6 +21,54 @@ the only thing that can notice — occasionally asking someone who knows.
     so there is no bias between them to estimate. This page is for the case where
     **your `reward` is itself a proxy** and truth lives somewhere more expensive.
 
+## Switching it on
+
+Everything here is opt-in and nothing in the shipped runtimes builds any of it,
+so turning the audit on means assembling six objects and four cross-references.
+[`attach`](api.md#switching-the-audit-on) builds them together:
+
+```python
+from agentdescent.audit import attach
+
+audit = attach(llm_judge,                       # the cheap scorer
+               oracle=exact_match,              # ground truth
+               store="runs/audit.jsonl",
+               run=my_run,
+               sample_rate=0.1)
+
+evolve(tasks, reward=audit.reward, run=audit.run,
+       policies=Policies(acceptance=audit.acceptance), ...)
+
+print(audit.status())        # delta_hat, resid_sd, se, pending, stale + why
+```
+
+Every one of those cross-references is silent when wrong, which is why they are
+worth a function:
+
+| wired wrong | what you see |
+|---|---|
+| `verifier_version` copied by hand, then changed | a **stale** rectification — indistinguishable from "not enough labels yet" |
+| calibrator pointed at a second store | stale forever |
+| `RenderTap` around a different `run` than the loop uses | an empty signature on every unit; the ordering report sees one artifact |
+| a bare oracle not wrapped in `GoldAnswer` | a scorer that raises fails the rollout it was auditing |
+
+`attach` changes no default — not calling it is the current behaviour — and
+`enabled=False` collects records while correcting nothing, which is the honest
+way to run a first round: measure before you spend.
+
+### End to end, with a known bias
+
+`test_a_run_recovers_the_bias_and_the_gate_commits_less` runs a whole `evolve()`
+where the verifier is a string-similarity judge and the truth is exact match, so
+`f > Y` structurally. From nothing but the store:
+
+| | |
+|---|---|
+| units seen / audited | 114 / 75 |
+| `delta_hat` recovered | **+0.35** |
+| `resid_sd` | 0.38 |
+| acceptance rate over a fixed grid of merges | **0.60 → 0.37** |
+
 ## The two sources
 
 | | cheap verifier | oracle |

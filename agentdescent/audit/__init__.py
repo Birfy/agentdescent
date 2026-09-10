@@ -66,6 +66,7 @@ package, that discount was **0.60**: thirty-two tasks judged by an LLM carried
 the information of nineteen judged by exact match.
 """
 
+from .wiring import Audit, attach
 from .calibrator import (STALE_INFLATION, Calibrator, Rectification,
                          population_resid_sd)
 from .coverage import (MIN_UNSEEN, Coverage, CoveragePlan, coverage_of,
@@ -105,6 +106,7 @@ from .tap import AuditedReward, RenderTap
 
 __all__ = [
     "SCHEMA_VERSION",
+    "Audit",
     "AuditRecord",
     "MIN_N_DOMINANT",
     "MIN_UNSEEN",
@@ -119,6 +121,7 @@ __all__ = [
     "AuditStore",
     "AuditedReward",
     "Adjustment",
+    "attach",
     "Cost",
     "Coverage",
     "CoveragePlan",
