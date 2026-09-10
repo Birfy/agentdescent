@@ -169,21 +169,26 @@ verifier can be made less wrong in the first place, and
 
 !!! danger "Do not optimise the verifier against `delta_hat`"
     A mean can be driven to zero by adding errors in the *opposite* direction,
-    and that is not an improvement. Measured on a real 177-pair HotpotQA audit,
-    two obviously-correct hard rules — reject an answer that echoes the question,
-    reject one far shorter than the reference — produced this:
+    and that is not an improvement. Measured on a real 177-pair HotpotQA audit by
+    `scripts/audit_diagnose.py`, which re-derives every number below offline:
 
-    | | before | after |
-    |---|---|---|
-    | `delta` | +0.175 | **+0.051** (−71%) |
-    | `sigma` | 0.381 | **0.417** (up) |
-    | disagreement | 0.175 | 0.175 (unchanged) |
-    | false-negative rate | — | **22.4%** |
+    | rule | fixed | broke | `sigma` | `delta` | false negatives | |
+    |---|---|---|---|---|---|---|
+    | **A** answer echoes the question | 12 | 11 | 0.381 → **0.410** | −74% | 0% → **22.4%** | *does not help* |
+    | **B** answer far shorter than the gold | 10 | 0 | 0.381 → **0.324** | −32% | 0% → 0% | helps |
+    | **A + B**, as anyone would ship them | 19 | 11 | 0.381 → **0.362** | −97% | 0% → **22.4%** | helps |
 
-    Eleven corrections and eleven fresh mistakes. The bias fell because the
-    errors now cancel, not because the verifier learned anything.
+    **Rule A cuts the bias by three quarters and makes the verifier worse.**
+    Twelve corrections, eleven fresh mistakes: the mean falls because the errors
+    now cancel, and the spread — which is what the acceptance gate's variance is
+    built from — goes up.
 
-    **`sigma` is the target here.** `delta` is what the calibrator already
+    **And bundled with a rule that works, it passes.** B alone is a clean win, so
+    the bundle's `sigma` improves and the bundle "helps" — while still containing
+    A and still rejecting 22.4% of correct answers. A bundle launders whatever is
+    in it, so measure one rule at a time.
+
+    **`sigma` is the target throughout.** `delta` is what the calibrator already
     handles, and optimising the thing that is already handled breaks the thing
     that is not.
 
@@ -238,16 +243,87 @@ print(got.to_markdown())      # helps / does not help, by sigma
 ```
 
 `evaluate_fix` scores a proposed change against **every** labelled pair, not the
-disagreements it targets. Restricted to its targets, the two-rule fix above
-removes eleven errors, breaks nothing, and cuts both the disagreement rate and
-the bias by 35% — a clean win by every number a person reaches for. On the whole
-set it also breaks eleven correct judgements.
+disagreements it targets. Restricted to its targets, rule A above removes twelve
+errors and breaks nothing — a clean win by every number a person reaches for. On
+the whole set it also breaks eleven correct judgements and the residual goes up.
 
 The rule was not a bad rule. It was a rule nobody had measured against the
 answers it was not aimed at.
 
 `FixReport.helps` reads `sigma_after < sigma_before` and nothing else, for the
 reason at the top of this section.
+
+Two rates come out of it and they are not the same number:
+
+| | denominator | on rule A |
+|---|---|---|
+| `breakage_rate` | judgements that were **right** | 7.5% |
+| `false_negative_after` | **answers** that were right | 22.4% |
+
+They coincide only when the verifier errs in both directions equally, which is
+never the interesting case. They were one field called `false_negative_rate`
+until real data put 7.5% and 22.4% side by side.
+
+## The scorecard — before a new verifier replaces the old one
+
+A verifier is the instrument every other number in a run is measured with, so
+changing it invalidates the run's history in a way nothing in the run can see.
+[`verifier_scorecard`](api.md#the-verifier-scorecard) is the card that has to be
+filled in at that moment:
+
+```python
+from agentdescent.audit import verifier_scorecard, rescan
+
+card = verifier_scorecard(cal.current(new_version), fresh_labels,
+                          previous=cal.current(old_version),
+                          previous_records=old_labels,
+                          rescan_report=rescan(old_labels, new_verifier, tasks),
+                          cost=Cost(verifier_seconds=0.4, oracle_seconds=9.1))
+print(card.to_markdown())      # card.ship is False if anything blocks
+```
+
+The plan's top row is `delta_hat`, "the only real target: it should fall". That
+is the row rule A wins, so the card leads with `sigma` instead and reports
+`delta_hat` below it with the reason attached.
+
+| row | goal | blocks? |
+|---|---|---|
+| `sigma` | lower | **yes** — a rise means new errors in the opposite direction |
+| false-negative rate | lower | **yes**, at a bound you set; it is a policy dial, not a measurement |
+| `delta_hat` | — | never scored: the one metric a change can improve by breaking things |
+| disagreement | lower | no |
+| `gain_factor` | higher | no — approaching 1 means *change the verifier*, not audit harder |
+| seconds per decision | lower | **yes** above `max_cost_ratio` of an oracle call |
+
+`blockers` is the whole verdict. A weighted total would let a large fall in the
+metric that lies buy a small rise in the one that does not, which is the exact
+trade the card exists to refuse.
+
+### The rescan, and what it is not
+
+```python
+report = rescan(old_records, new_verifier, tasks_by_id,
+                pairs=[(base_sig, cand_sig), ...])
+```
+
+The plan describes replaying the Ledger — "the verifier is cheap and the
+artifacts are all stored, so this sweep is nearly free". The Ledger stores
+artifact *states*. The outputs those artifacts produced — the things a verifier
+scores — were never kept, so re-deciding a past merge means re-running the agent
+over both sides' held-out sets, which is a whole run's worth of rollouts and the
+expensive half.
+
+What *is* nearly free is re-scoring the outputs the **audit store** kept. Those
+are a probability sample, so the numbers come with an `n` and are weighted by
+`inclusion_prob`. Weaker than the plan's claim, and honest. It still answers the
+question the row exists for: on the Phase 0 records, the A+B bundle disagrees
+with the shipped judge on 17% of stored outputs and **reverses the ordering of
+2 of 10 artifact pairs** — above the 10% alarm, meaning the run's recorded
+history was scored by an instrument that would no longer say the same thing.
+
+`sigma_shift` sits next to `mean_shift` for a reason: a verifier that moved half
+its scores up by 0.5 and half down by 0.5 has a mean shift of exactly zero and
+has rescored the run from end to end.
 
 ## Allocation — where the budget should go
 

@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-264 public names across 45 modules.
+272 public names across 46 modules.
 
 ---
 
@@ -1122,7 +1122,9 @@ FixReport(
     disagree_after: float,
     fixed: int,
     broken: int,
-    false_negative_rate: float,
+    breakage_rate: float,
+    false_negative_before: float,
+    false_negative_after: float,
     unchanged: int
 ) -> None
 ```
@@ -1180,6 +1182,110 @@ reference_classifier(
 ### `residual_stats(records: Iterable[AuditRecord]) -> Dict[str, float]`
 
 `n`, `delta`, `sigma`, `disagree` over resolved records.
+
+---
+
+## The verifier scorecard
+
+What has to be true before a new verifier replaces the old one. &nbsp;·&nbsp; `agentdescent.audit.scorecard` &nbsp;·&nbsp; [guide](audit.md)
+
+### `Cost(verifier_seconds: float, oracle_seconds: float = nan) -> None`
+
+Seconds per decision, for the verifier and for the thing it stands in for.
+
+### `Goal`
+
+Which way a metric is supposed to move.
+
+| member | value |
+|---|---|
+| `LOWER` | `'lower is better'` |
+| `HIGHER` | `'higher is better'` |
+| `WATCH` | `'no target; read it'` |
+
+### `Metric(...)`
+
+One row. `previous` is `None` when there is nothing to compare to.
+
+```python
+Metric(
+    name: str,
+    value: float,
+    goal: Goal,
+    previous: Optional[float] = None,
+    note: str = '',
+    blocking: bool = False,
+    triggered: bool = False
+) -> None
+```
+
+### `RescanReport(...)`
+
+What a new verifier would have said about outputs the run already scored.
+
+```python
+RescanReport(
+    n: int,
+    n_artifacts: int,
+    agreement: float,
+    mean_shift: float,
+    sigma_shift: float,
+    by_artifact: Dict[str, Dict[str, float]] = <factory>,
+    flipped: List[Tuple[str, str, float, float]] = <factory>,
+    n_pairs: int = 0,
+    sigma_before: float = nan,
+    sigma_after: float = nan
+) -> None
+```
+
+### `Scorecard(...)`
+
+The rows, and whether they add up to a change worth making.
+
+```python
+Scorecard(
+    version: str,
+    previous_version: Optional[str],
+    metrics: List[Metric],
+    blockers: List[str] = <factory>,
+    notes: List[str] = <factory>,
+    rescan: Optional[RescanReport] = None,
+    computed_at: float = 0.0
+) -> None
+```
+
+### `rescan(...)`
+
+Re-score the outputs the audit kept, and see what would have moved.
+
+```python
+rescan(
+    records: Sequence[AuditRecord],
+    new_verifier: Callable[[AuditRecord, Any], float],
+    context: Optional[Mapping[str, Any]] = None,
+    *,
+    pairs: Optional[Sequence[Tuple[str, str]]] = None
+) -> RescanReport
+```
+
+### `verifier_scorecard(...)`
+
+Fill the card for `current`, against `previous` where there is one.
+
+```python
+verifier_scorecard(
+    current: Rectification,
+    records: Sequence[AuditRecord],
+    *,
+    previous: Optional[Rectification] = None,
+    previous_records: Sequence[AuditRecord] = (),
+    rescan_report: Optional[RescanReport] = None,
+    cost: Optional[Cost] = None,
+    previous_cost: Optional[Cost] = None,
+    max_false_negative: float = 0.05,
+    max_cost_ratio: float = 0.25
+) -> Scorecard
+```
 
 ---
 
@@ -2752,6 +2858,10 @@ Runs rollouts somewhere. Threads here, processes and hosts later.
 ### `FAST_MAX`
 
 The L2/L1 blast-radius boundary (`0.30`).
+
+### `FLIP_ALARM`
+
+Convert a string or number to a floating point number, if possible.
 
 ### `FROZEN_IDS`
 

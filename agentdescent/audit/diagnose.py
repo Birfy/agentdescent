@@ -8,18 +8,27 @@ Two findings from running it on a real audit shape everything below.
 
 **Do not optimise the verifier against ``delta_hat``.** A mean can be driven to
 zero by adding errors in the opposite direction, and that is not an improvement.
-Measured on 177 HotpotQA pairs, two hard rules that looked like a clean win --
-reject an answer that echoes the question, reject one far shorter than the
-reference -- moved the numbers like this:
+Measured on 177 HotpotQA pairs by ``scripts/audit_diagnose.py``, which anyone
+can re-run offline, two hard rules that both look like a clean win:
 
-    Delta       +0.175  ->  +0.051   (down 71%)
-    sigma_eps    0.381  ->   0.417   (UP)
-    disagreement 0.175  ->   0.175   (unchanged)
+    rule                                  fixed broke   sigma           Delta
+    A  answer echoes the question           12    11    0.381 -> 0.410  -74%
+    B  answer far shorter than the gold     10     0    0.381 -> 0.324  -32%
+    A + B, as anyone would ship them        19    11    0.381 -> 0.362  -97%
 
-Eleven corrections and eleven fresh mistakes. The bias fell because the errors
-now cancel, not because the verifier learned anything. ``sigma`` is the target
-here; ``delta`` is what the calibrator already handles, and optimising the thing
-that is already handled breaks the thing that is not.
+**Rule A cuts the bias by three quarters and makes the verifier worse.** Twelve
+corrections, eleven fresh mistakes: the mean falls because the errors now cancel,
+and the spread -- which is what the acceptance gate's variance is built from --
+goes up. Its false-negative rate goes from nothing to 22.4%.
+
+**And bundled with a rule that works, it passes.** B alone is a clean win, the
+bundle's ``sigma`` improves, so the bundle "helps" -- while still containing A
+and still rejecting 22.4% of correct answers. A bundle launders whatever is in
+it, so :func:`evaluate_fix` is meant to be run on one rule at a time.
+
+``sigma`` is the target throughout; ``delta`` is what the calibrator already
+handles, and optimising the thing that is already handled breaks the thing that
+is not.
 
 **Some of the residual is not the verifier's fault and must not be "fixed".**
 From the same audit, gold ``'Robert Erskine Childers DSC'`` against an answer of
@@ -65,9 +74,9 @@ class Direction(str, Enum):
     """Which way the verifier was wrong.
 
     Recorded separately from :class:`Kind` because a fix that trades one for the
-    other looks like progress in every summary that does not carry it. The
-    example in the module docstring is exactly that: eleven ``OVER`` errors
-    turned into eleven ``UNDER`` errors, and every mean-based number improved.
+    other looks like progress in every summary that does not carry it. Rule A in
+    the module docstring is exactly that: twelve ``OVER`` errors corrected,
+    eleven ``UNDER`` errors created, and every mean-based number improved.
     """
 
     #: ``f > Y`` -- credit for an answer that was wrong. The direction that lets
@@ -317,8 +326,19 @@ class FixReport:
     #: evaluated only on the disagreements it targets can never report.
     broken: int
     #: ``broken`` over the pairs that were correct before -- what fraction of the
-    #: verifier's good judgements this fix destroys.
-    false_negative_rate: float
+    #: verifier's good judgements this fix destroys. **Not** the false-negative
+    #: rate, which it was called until the two were measured side by side on
+    #: real data and came out 7.5% and 22.4%: the denominators are the
+    #: judgements that were right and the *answers* that were right, and those
+    #: are different sets whenever the verifier is wrong in only one direction.
+    breakage_rate: float
+    #: Correct answers the verifier scores below the truth, over all correct
+    #: answers -- the classical false-negative rate, and the same definition
+    #: :func:`agentdescent.audit.scorecard.scorecard` reports. Before and after,
+    #: because a fix that raises it is spending something the summary rows do
+    #: not show.
+    false_negative_before: float
+    false_negative_after: float
     unchanged: int
 
     @property
@@ -342,8 +362,10 @@ class FixReport:
             f"| delta | {self.delta_before:+.4f} | {self.delta_after:+.4f} |",
             f"| disagreement | {self.disagree_before:.3f} | {self.disagree_after:.3f} |",
             "",
-            f"fixed {self.fixed}, broke {self.broken}, unchanged {self.unchanged}; "
-            f"false-negative rate {self.false_negative_rate:.1%}.",
+            f"fixed {self.fixed}, broke {self.broken}, unchanged "
+            f"{self.unchanged}; {self.breakage_rate:.1%} of the verifier's good "
+            f"judgements destroyed; false negatives "
+            f"{self.false_negative_before:.1%} -> {self.false_negative_after:.1%}.",
         ])
 
 
@@ -355,28 +377,38 @@ def evaluate_fix(records: Iterable[AuditRecord],
     ``fix(record, context_for_task) -> new verifier score``.
 
     Every pair, and that is the whole point. Evaluated on the disagreements it
-    targets, the two-rule fix in the module docstring removes eleven errors and
-    looks like a 35% win; evaluated on all 177 pairs it also breaks eleven
-    correct judgements, and the residual it was meant to shrink goes **up**.
+    targets, rule A in the module docstring removes twelve errors and breaks
+    nothing -- a clean win by every number a person reaches for. Evaluated on
+    all 177 pairs it also breaks eleven correct judgements, and the residual it
+    was meant to shrink goes **up**.
 
-    The rule that produced that result was not a bad rule -- "reject an answer
-    that echoes the question" is obviously right. It was a rule nobody had
-    measured against the answers it was not aimed at.
+    Rule A was not a bad rule -- "reject an answer that echoes the question" is
+    obviously right. It was a rule nobody had measured against the answers it
+    was not aimed at.
+
+    One rule at a time, too. Bundled with a rule that works, A passes: the
+    bundle's residual improves, the verdict reads "helps", and the harmful half
+    is invisible in every number the bundle reports.
     """
     resolved = [r for r in records if r.oracle_score is not None]
     if not resolved:
         nan = float("nan")
-        return FixReport(0, nan, nan, nan, nan, nan, nan, 0, 0, nan, 0)
+        return FixReport(0, nan, nan, nan, nan, nan, nan, 0, 0, nan, nan, nan, 0)
 
     before = [r.residual for r in resolved]
     after: List[float] = []
     fixed = broken = unchanged = 0
     correct_before = 0
+    right_answers = fn_before = fn_after = 0
     for rec in resolved:
         new_f = float(fix(rec, (context or {}).get(rec.task_id)))
         was_right = rec.verifier_score == rec.oracle_score
         is_right = new_f == rec.oracle_score
         correct_before += was_right
+        if rec.oracle_score > 0.0:
+            right_answers += 1
+            fn_before += rec.verifier_score < rec.oracle_score
+            fn_after += new_f < rec.oracle_score
         if was_right and not is_right:
             broken += 1
         elif not was_right and is_right:
@@ -394,4 +426,8 @@ def evaluate_fix(records: Iterable[AuditRecord],
         disagree_before=sum(1 for x in before if x) / n,
         disagree_after=sum(1 for x in after if x) / n,
         fixed=fixed, broken=broken, unchanged=unchanged,
-        false_negative_rate=(broken / correct_before) if correct_before else 0.0)
+        breakage_rate=(broken / correct_before) if correct_before else 0.0,
+        false_negative_before=(fn_before / right_answers) if right_answers
+        else float("nan"),
+        false_negative_after=(fn_after / right_answers) if right_answers
+        else float("nan"))

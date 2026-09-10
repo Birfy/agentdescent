@@ -83,6 +83,13 @@ from .sources import (DeferredOracle, GoldAnswer, NullOracle, OracleSource,
 from .sampler import (AuditPolicy, SamplePlan, boundary_stratifier,
                       observed_weights, resid_sd_from)
 from .sampler import plan as plan_audit
+from .scorecard import (FLIP_ALARM, Cost, Goal, Metric, RescanReport,
+                        Scorecard, rescan)
+# Aliased for the same reason ``plan`` is: exporting it under its own name would
+# shadow the module it lives in, so ``from agentdescent.audit import scorecard``
+# would hand back a function and ``import agentdescent.audit.scorecard`` a
+# module.
+from .scorecard import scorecard as verifier_scorecard
 from .store import AuditStore, summarise
 from .tap import AuditedReward, RenderTap
 
@@ -94,6 +101,7 @@ __all__ = [
     "AuditStore",
     "AuditedReward",
     "Adjustment",
+    "Cost",
     "Calibrator",
     "boundary_stratifier",
     "bootstrap_ci",
@@ -103,7 +111,10 @@ __all__ = [
     "Disagreement",
     "DisagreementReport",
     "FixReport",
+    "FLIP_ALARM",
+    "Goal",
     "Kind",
+    "Metric",
     "GoldAnswer",
     "NullOracle",
     "OracleSource",
@@ -114,6 +125,8 @@ __all__ = [
     "VerifierWatch",
     "SamplePlan",
     "Rectification",
+    "RescanReport",
+    "Scorecard",
     "RenderTap",
     "STALE_INFLATION",
     "Stratum",
@@ -127,6 +140,7 @@ __all__ = [
     "population_resid_sd",
     "ppi_mean_stratified",
     "rectified_counts",
+    "rescan",
     "reference_classifier",
     "resid_sd_from",
     "residual_stats",
@@ -136,4 +150,5 @@ __all__ = [
     "summarise",
     "t_ppf",
     "verifier_fingerprint",
+    "verifier_scorecard",
 ]

@@ -33,6 +33,31 @@ All notable changes to AgentDescent are documented here. The format follows
   estimator, the allocation and the gate that spends the answer are the entries
   below. [docs/audit.md](docs/audit.md)
 
+- **`agentdescent.audit.scorecard` -- what has to be true before a new verifier
+  replaces the old one.** A verifier is the instrument every other number in a
+  run is measured with, so changing it invalidates the run's history in a way
+  nothing in the run can see. `verifier_scorecard` fills the plan's Phase 5 card
+  -- with the top row changed.
+
+  The plan leads with `delta_hat`, "the only real target: it should fall". That
+  is the row the harmful rule above wins, so the card leads with `sigma`, treats
+  a rise in it as a blocker, and reports `delta_hat` below it, never scored.
+  `blockers` is the whole verdict rather than a weighted total, because a total
+  would let a large fall in the metric that lies buy a small rise in the one that
+  does not.
+
+  `rescan` re-scores the outputs the audit store kept and reports the agreement
+  rate, the per-artifact shift, and how many artifact *pairs* reverse order --
+  the plan calls this a Ledger replay and says it is nearly free, but the Ledger
+  stores artifact states and the outputs a verifier scores were never kept, so a
+  true re-decide needs the rollouts back. Re-scoring the audited sample is what
+  is free; it comes with an `n` and is weighted by `inclusion_prob`.
+
+  `scripts/audit_diagnose.py` runs the whole Phase 5 diagnosis offline against
+  the committed Phase 0 records and writes
+  [reports/verifier_diagnosis_f55dec40cec559f7.md](reports/verifier_diagnosis_f55dec40cec559f7.md).
+  [docs/audit.md](docs/audit.md#the-scorecard--before-a-new-verifier-replaces-the-old-one)
+
 - **`agentdescent.audit.gate` -- the audit reaching the decision that commits.**
   `RectifiedAcceptance` wraps any acceptance policy and discounts the held-out
   evidence by however much the verifier disagrees with ground truth. On the
@@ -82,16 +107,34 @@ All notable changes to AgentDescent are documented here. The format follows
 
   `evaluate_fix` scores a proposed change against **every** labelled pair rather
   than the disagreements it targets, and `FixReport.helps` reads the residual
-  rather than the bias. Both because of what a real audit produced: two
-  obviously-correct hard rules removed eleven verifier errors, created eleven
-  fresh ones, cut `delta` by 71% and left `sigma` **larger**, with a 22.4%
-  false-negative rate. Restricted to its targets that fix reads as a clean 35%
-  win by every number a person reaches for.
+  rather than the bias. Both because of what a real audit produced -- see
+  `scripts/audit_diagnose.py`, which re-derives it offline from the committed
+  Phase 0 records:
+
+  | rule | fixed | broke | `sigma` | `delta` | false negatives | |
+  |---|---|---|---|---|---|---|
+  | A: answer echoes the question | 12 | 11 | 0.381 -> **0.410** | -74% | 0% -> **22.4%** | *does not help* |
+  | B: answer far shorter than the gold | 10 | 0 | 0.381 -> **0.324** | -32% | 0% -> 0% | helps |
+  | A + B | 19 | 11 | 0.381 -> **0.362** | -97% | 0% -> **22.4%** | helps |
+
+  Rule A cuts the bias by three quarters and makes the verifier worse; restricted
+  to the disagreements it targets it removes twelve errors and breaks nothing, a
+  clean win by every number a person reaches for. And bundled with a rule that
+  works it *passes* -- the bundle's residual improves, so nothing in the bundle's
+  own numbers shows that it still rejects 22.4% of correct answers. A bundle
+  launders whatever is in it, so `evaluate_fix` is meant to be run one rule at a
+  time.
 
   The lesson is in the API: **do not optimise the verifier against `delta_hat`**.
   A mean can be driven to zero by adding errors in the opposite direction. The
   bias is what the calibrator already handles; optimising it breaks the residual,
   which is what the calibrator cannot handle.
+
+  `FixReport.breakage_rate` and `FixReport.false_negative_before/after` were one
+  field called `false_negative_rate` until the same data put them side by side at
+  7.5% and 22.4%: the denominators are the judgements that were right and the
+  *answers* that were right, and those differ whenever the verifier errs in one
+  direction only -- the normal case.
 
 - **`agentdescent.audit.sampler` -- Neyman allocation, as inclusion
   probabilities.** A flat rate spends the oracle budget where the *units* are;

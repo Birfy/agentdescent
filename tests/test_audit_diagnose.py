@@ -1,12 +1,17 @@
 """A fix has to be measured on the answers it was not aimed at.
 
 The test that matters is `test_a_fix_that_only_trades_directions_does_not_help`.
-It reproduces, synthetically, what a real audit produced: two obviously-correct
-hard rules that removed eleven verifier errors, created eleven new ones, cut the
-mean bias by 71%, and left the residual *larger* than before.
+It reproduces, synthetically, what a real audit produced: one obviously-correct
+hard rule -- reject an answer that echoes the question -- that removed twelve
+verifier errors, created eleven new ones, cut the mean bias by 74%, and left the
+residual *larger* than before.
 
 Every number that summarises a fix by its mean said that was a success. Only the
 residual said otherwise, which is why `FixReport.helps` reads the residual.
+
+The fixtures here are 11/11 rather than the measured 12/11, so the arithmetic is
+checkable by hand. `scripts/audit_diagnose.py` has the real numbers and
+re-derives them offline from the committed Phase 0 records.
 """
 
 import math
@@ -165,9 +170,9 @@ def test_a_fix_that_only_trades_directions_does_not_help():
     """The finding this module exists for, reproduced.
 
     On a real 177-pair audit, two hard rules fixed 11 over-credits and broke 11
-    correct judgements. Every mean-based number improved -- `delta` fell 71% --
-    and the residual, which is what the acceptance gate's variance is built from,
-    went up.
+    correct judgements. Every mean-based number improved -- `delta` fell by more
+    than two thirds -- and the residual, which is what the acceptance gate's
+    variance is built from, went up.
     """
     recs = _population(n_agree=146, n_over=31)
     over = [r for r in recs if r.residual > 0][:11]
@@ -199,10 +204,11 @@ def test_a_fix_that_only_corrects_errors_helps():
     got = evaluate_fix(recs, rule)
     assert got.fixed == 31 and got.broken == 0
     assert got.sigma_after < got.sigma_before and got.helps
-    assert got.false_negative_rate == 0.0
+    assert got.breakage_rate == 0.0
+    assert got.false_negative_after == got.false_negative_before == 0.0
 
 
-def test_the_false_negative_rate_is_over_the_answers_it_was_not_aimed_at():
+def test_breakage_is_over_the_answers_the_fix_was_not_aimed_at():
     recs = _population(n_agree=100, n_over=10)
     right = [r for r in recs if r.residual == 0.0][:25]
     targets = {r.record_id for r in right}
@@ -212,8 +218,40 @@ def test_the_false_negative_rate_is_over_the_answers_it_was_not_aimed_at():
 
     got = evaluate_fix(recs, rule)
     assert got.broken == 25 and got.fixed == 0
-    assert got.false_negative_rate == pytest.approx(25 / 100)
+    assert got.breakage_rate == pytest.approx(25 / 100)
     assert not got.helps
+
+
+def test_breakage_and_the_false_negative_rate_are_different_denominators():
+    """They were the same field until real data separated them: 7.5% and 22.4%.
+
+    `breakage_rate` divides by the judgements that were *right*;
+    `false_negative_after` divides by the *answers* that were right. Those are
+    different sets whenever the verifier errs in one direction only -- which is
+    the normal case, and was exactly the Phase 0 case.
+    """
+    # 60 correct answers the verifier agrees with, 40 wrong ones it forgives
+    recs = _population(n_agree=60, n_over=40)
+    targets = {r.record_id for r in recs if r.residual == 0.0}
+    targets = set(list(targets)[:6])
+
+    def rule(rec, ctx):
+        return 0.0 if rec.record_id in targets else rec.verifier_score
+
+    got = evaluate_fix(recs, rule)
+    assert got.broken == 6
+    assert got.breakage_rate == pytest.approx(6 / 60), "good judgements broken"
+    assert got.false_negative_after == pytest.approx(6 / 60), (
+        "here the two coincide, because every right answer was also a right "
+        "judgement")
+
+    # now the verifier under-credits twenty right answers to begin with, so the
+    # two denominators come apart
+    wider = recs + [_rec(0.0, 1.0, task=f"missed{i}") for i in range(20)]
+    got = evaluate_fix(wider, rule)
+    assert got.breakage_rate == pytest.approx(6 / 60), "unchanged: still 60 of them"
+    assert got.false_negative_before == pytest.approx(20 / 80)
+    assert got.false_negative_after == pytest.approx(26 / 80)
 
 
 def test_a_fix_evaluated_only_on_its_targets_would_have_looked_like_a_win():
@@ -223,6 +261,10 @@ def test_a_fix_evaluated_only_on_its_targets_would_have_looked_like_a_win():
     errors and breaks nothing: the disagreement rate and the bias both fall by
     35% and it reads as a clean win. The same fix on the whole set is the test
     above -- eleven fresh errors, and a larger residual.
+
+    Bundling is the other way to hide this, and `scripts/audit_diagnose.py`
+    measures it: the same rule paired with one that genuinely works passes on
+    every number the pair reports.
 
     `helps` survives even this misuse, and the reason is worth keeping. On the
     restricted view every residual is `+1`, so `sigma_before` is **zero** -- a
@@ -257,6 +299,15 @@ def test_a_fix_evaluated_only_on_its_targets_would_have_looked_like_a_win():
     # and `helps` refuses the restricted view too, because a constant residual
     # has no spread to improve on
     assert not misleading.helps
+
+
+def test_an_unchanged_verifier_still_reports_the_false_negatives_it_had():
+    """The `before` column exists so a fix cannot be credited with a rate it
+    inherited."""
+    recs = _population(n_agree=100, n_over=10, n_under=15)
+    got = evaluate_fix(recs, lambda rec, ctx: rec.verifier_score)
+    assert got.false_negative_before == pytest.approx(15 / 115)
+    assert got.false_negative_after == pytest.approx(15 / 115)
 
 
 def test_a_no_op_fix_changes_nothing():
