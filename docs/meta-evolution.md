@@ -146,8 +146,10 @@ half an hour — budget the outer loop in *sweeps of wall clock*, not in rounds.
 ## From the CLI and the host plugins
 
 `kind: "policy_slot"` puts all of this behind the ordinary spec surface, so
-`plan`, `evolve`, `status`, `watch`, `show` and `apply` work on it unchanged —
-it is still an `evolve()` call. `agentdescent init selection --kind policy_slot`
+`plan`, `evolve`, `status` and `watch` work on it unchanged — it is still an
+`evolve()` call. `show` prints the evolved rule, and `apply` needs a
+destination: the artifact is source text, but `target` names a slot rather than
+a file, so `agentdescent apply <run> --to rule.py` is how the rule comes out. `agentdescent init selection --kind policy_slot`
 writes a starter:
 
 ```json

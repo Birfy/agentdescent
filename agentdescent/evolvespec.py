@@ -35,8 +35,10 @@ The composition table -- what each ``kind`` assembles -- is
 ``policy_slot`` is the odd one and the reason the table is worth reading: its
 artifact is not a file but a *decision rule of the optimiser itself*, and one
 rollout is a whole inner ``evolve()`` or tree search rather than one model call.
-Everything downstream -- plan, cost, detach, status, show, apply -- is unchanged,
-because it is still just an ``evolve()`` call.
+Because it is still an ``evolve()`` call, plan, cost, detach, status and watch
+need nothing from it. ``show`` and ``apply`` do: the rendered value is source
+text like ``kind: "text"``, but ``target`` names a *slot* rather than a file, so
+there is nothing to diff against and ``apply`` has to be told a destination.
 """
 
 from __future__ import annotations
@@ -539,11 +541,14 @@ def _read_text_target(target: str) -> str:
 #: thing to do for them.
 _SLOT_SPEC_DEFAULTS = {"selection": "agentdescent.meta:priority_selection"}
 
-#: ``score`` values a ``policy_slot`` accepts by short name. Anything else is a
-#: ``module:attribute`` ref to a ``MetaOutcome -> float``.
-_META_REWARDS = {"auc": "agentdescent.meta:auc",
-                 "final_reward": "agentdescent.meta:final_reward",
-                 "rollouts_to": "agentdescent.meta:rollouts_to"}
+#: ``score`` values a ``policy_slot`` accepts by short name, and whether the
+#: attribute *is* the reward or a factory for one. `auc` and `final_reward` are
+#: rewards; `rollouts_to(target)` builds one and has no default target, so it
+#: can only be named in the configured form and says so rather than scoring
+#: every outcome 0.0. Anything else is a ``module:attribute`` ref.
+_META_REWARDS = {"auc": ("agentdescent.meta:auc", False),
+                 "final_reward": ("agentdescent.meta:final_reward", False),
+                 "rollouts_to": ("agentdescent.meta:rollouts_to", True)}
 
 
 def _compose_policy_slot(spec: EvolveSpec, *, usage: Optional[Usage] = None,
@@ -599,15 +604,28 @@ def _compose_policy_slot(spec: EvolveSpec, *, usage: Optional[Usage] = None,
     if score in (None, "contains"):
         score = "auc"
     if isinstance(score, str):
-        target = _META_REWARDS.get(score, score)
-        if ":" not in target:
-            raise SpecError(f"score: {score!r} is not one of "
-                            f"{sorted(_META_REWARDS)} and not 'module:attribute'")
-        # A meta-reward *is* the callable (`auc`), not a factory for one, which
-        # is the opposite of every other ref in a spec -- so a bare string means
-        # `call: false` here. The dict form still overrides it, for a reward that
-        # genuinely is configured (`{"ref": ..., "call": true, "k": 3}`).
-        score = {"ref": target, "call": False}
+        known = _META_REWARDS.get(score)
+        if known is None:
+            if ":" not in score:
+                raise SpecError(f"score: {score!r} is not one of "
+                                f"{sorted(_META_REWARDS)} and not 'module:attribute'")
+            # An unknown ref: `auc`-shaped is by far the common case, so a bare
+            # string means the attribute is the reward. `{"ref": ..., "call": true,
+            # ...}` still says otherwise, and `_check_meta_reward` catches either
+            # way round before a single rollout runs.
+            score = {"ref": score, "call": False}
+        else:
+            target, is_factory = known
+            if is_factory:
+                raise SpecError(
+                    f"score: {spec.score!r} builds a reward and needs its argument -- "
+                    f'write {{"ref": "{spec.score}", "target": 0.9}}. Naming it bare '
+                    "would score every outcome 0.0.")
+            score = {"ref": target, "call": False}
+    elif isinstance(score, Mapping) and "ref" in score:
+        named = _META_REWARDS.get(score["ref"])
+        if named is not None:
+            score = {**score, "ref": named[0]}
     meta_reward = _resolve(score, spec, where="score")
 
     model = _resolve(spec.reflect or spec.agent, spec, where="reflect")
@@ -622,6 +640,27 @@ def _compose_policy_slot(spec: EvolveSpec, *, usage: Optional[Usage] = None,
     kwargs.update({k: v for k, v in defaults.items() if k not in spec.evolve})
     kwargs.update(spec.evolve)
     kwargs.update(overrides)
+
+    # `policies` and `agg_config` are generic and were being dropped on the
+    # floor here -- written in the spec, no error, no effect. They configure the
+    # *outer* loop, which for this kind is the meta-search; naming
+    # `policies.selection` while evolving `selection` is legal and means the two
+    # different things it says.
+    if spec.agg_config:
+        kwargs.setdefault("agg_config", build_agg_config(spec))
+    # `merger=None`, so the reflective-merge pair is **opt-in** here where it is
+    # the default for every other kind. `build_policies`' reasoning for that
+    # default -- an artifact that is one key makes worker proposals contradict
+    # by construction -- applies, but `meta_evolve` does not install it, and the
+    # recorded real-data result was produced without it. Measured on the
+    # landscape with two workers proposing two valid rules: without the pair a
+    # better rule commits; with it, both rounds came back `oracle-rejected` and
+    # the artifact stayed at the seed. A spec asking for `reflective_merge` gets
+    # it; the CLI silently diverging from the library and from the published run
+    # is the worse default.
+    policies = build_policies(spec, merger=None)
+    if policies is not None:
+        kwargs.setdefault("policies", policies)
     if usage is not None:
         kwargs.setdefault("usage", usage)
     if on_round is not None:

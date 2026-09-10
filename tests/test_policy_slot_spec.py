@@ -69,12 +69,6 @@ def test_the_text_scorer_default_becomes_this_kind_s_default():
         compose(_spec(score="exact"))
 
 
-def test_a_meta_reward_short_name_resolves_to_the_function_not_a_factory():
-    """`auc` *is* the callable, the opposite of every other ref in a spec."""
-    for name in ("auc", "final_reward", "rollouts_to"):
-        assert compose(_spec(score=name)).reward is not None
-
-
 def test_it_says_when_the_gate_cannot_decide_anything():
     """The recurring defect in this line of work, said before the run.
 
@@ -132,3 +126,85 @@ def test_it_runs_end_to_end_and_commits_a_better_rule(monkeypatch):
     result = comp.run()
     assert result.outcomes().get("committed") == 1
     assert "return rank" in result.rendered
+
+
+def test_a_meta_reward_that_cannot_score_is_refused_before_the_run():
+    """A mis-wired reward is a run of zeros that looks exactly like a null.
+
+    `reward()` turns any failure into 0.0 -- correct for a candidate whose
+    outcome will not parse, and it also swallows a *wiring* mistake. Measured:
+    `rollouts_to` is `rollouts_to(target) -> MetaReward`, and naming it where
+    `auc` goes scored every outcome 0.000 with nothing to say why.
+    """
+    from agentdescent.evolution import Task
+    from agentdescent.meta import MetaOutcome
+
+    outcome = MetaOutcome(curve=[0.5, 0.8, 0.95, 0.95], final=0.95, rollouts=4).to_json()
+    assert compose(_spec(score="auc")).reward(Task("t", "p"), outcome) == pytest.approx(0.8)
+    assert compose(_spec(score="final_reward")).reward(Task("t", "p"), outcome) == 0.95
+
+    # the factory, named bare, is refused with the spelling that works
+    with pytest.raises(SpecError, match="needs its argument"):
+        compose(_spec(score="rollouts_to"))
+    configured = compose(_spec(score={"ref": "rollouts_to", "target": 0.9}))
+    assert configured.reward(Task("t", "p"), outcome) == pytest.approx(1 / 3)
+
+    # and any other shape that cannot score is caught by `meta_parts` itself
+    from agentdescent.meta import meta_parts, priority_selection, slot_reflector
+
+    slot = priority_selection()
+    with pytest.raises(ValueError, match="could not score"):
+        meta_parts({"p": lambda v, s: None}, slot="selection", spec=slot,
+                   propose=slot_reflector(lambda p: "", slot),
+                   meta_reward=lambda outcome, extra: 0.0)
+
+
+def test_policies_and_agg_config_are_honoured_rather_than_dropped():
+    """They were written in the spec, validated by nothing and applied to nothing."""
+    comp = compose(_spec(policies={"staleness": "guarded"},
+                         agg_config={"batch_trigger": 2}))
+    assert type(comp.kwargs["policies"].staleness).__name__ == "GuardedStaleness"
+    assert comp.kwargs["agg_config"] is not None
+    with pytest.raises(SpecError, match="unknown slot"):
+        compose(_spec(policies={"nonsense": "x"}))
+    with pytest.raises(SpecError, match="unknown field"):
+        compose(_spec(agg_config={"nonsense": 1}))
+
+
+def test_the_reflective_merge_pair_is_opt_in_for_this_kind():
+    """It is the default everywhere else, and installing it here would make the
+    CLI disagree with `meta_evolve` and with the recorded real-data run."""
+    assert compose(_spec()).kwargs.get("policies") is None
+    asked = compose(_spec(policies={
+        "reflective_merge": {"ref": "reflective_merge", "complete": {"ref": "echo"}}}))
+    assert type(asked.kwargs["policies"].fusion).__name__ == "ReflectiveFusion"
+
+
+def test_an_import_from_the_whitelist_is_a_function_not_a_bound_method():
+    """`type("_ns", (), {...})()` turns a plain function into a bound method, so
+    the namespace object is prepended to every call. Two of the eleven
+    whitelisted names are functions -- and they are exactly the helpers a
+    `conflict` or `fusion` policy imports."""
+    from agentdescent.meta import compile_policy_source
+
+    conflict = '''class Policy:
+    def resolve(self, artifact, cards):
+        from agentdescent.aggregator import diffs_contradict
+        kept, dropped = [], 0
+        for card in cards:
+            if any(diffs_contradict(card.diff, k.diff) for k in kept):
+                dropped += 1
+            else:
+                kept.append(card)
+        return kept, dropped
+'''
+    fusion = '''class Policy:
+    def select(self, artifact, diffs):
+        from agentdescent.aggregator import fuse_diffs
+        if len(diffs) == 1:
+            return diffs[0], artifact.apply(diffs[0]), False
+        union = fuse_diffs(list(diffs))
+        return union, artifact.apply(union), True
+'''
+    assert compile_policy_source("conflict", conflict) is not None
+    assert compile_policy_source("fusion", fusion) is not None

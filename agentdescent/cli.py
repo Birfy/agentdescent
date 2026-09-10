@@ -544,6 +544,19 @@ def show_payload(run_id: str, *, store: Optional[str] = None, diff: bool = True,
     # agent that cannot name the file it is about to overwrite is right to
     # refuse, which is what happened.
     payload.update(kind=spec.kind, target=spec.target)
+    if spec.kind == "policy_slot":
+        # The artifact is source text, like `text` -- but `target` is a *slot*,
+        # so there is no file it came from and none to diff against. Listing it
+        # as a tree gave a file called `value` and an `apply_plan` holding an
+        # error, which is worse than saying plainly where it can go.
+        payload["rendered"] = result.rendered[:max_chars]
+        payload["apply_plan"] = {
+            "needs": "--to PATH",
+            "why": f"the target is the {spec.target!r} policy slot, not a file; "
+                   "an evolved rule is pasted into a spec or passed to "
+                   "evolve(policies=...), so apply must be told where to write it",
+            "chars": len(result.rendered)}
+        return payload
     if spec.kind == "text":
         payload["rendered"] = result.rendered[:max_chars]
         payload["apply_plan"] = {"would_write": os.path.expanduser(spec.target),
@@ -590,8 +603,14 @@ def apply_payload(run_id: str, *, to: Optional[str] = None, store: Optional[str]
     if result is None:
         raise runstore.RunStoreError(f"{run_id} has no result to apply yet")
     spec = EvolveSpec.from_dict(rd.spec_dict())
+    if spec.kind == "policy_slot" and not to:
+        # Without this the slot name is treated as a path and `write_to` raises
+        # a TreeError that `main()` does not catch, so the command traces back.
+        raise runstore.RunStoreError(
+            f"{run_id} evolved the {spec.target!r} policy slot, which is not a file: "
+            "pass --to PATH to write the rule, or read it with `show`")
     dest = os.path.expanduser(to or spec.target)
-    if spec.kind == "text":
+    if spec.kind in ("text", "policy_slot"):
         if dry_run:
             return {"would_write": dest, "chars": len(result.rendered)}
         saved = []

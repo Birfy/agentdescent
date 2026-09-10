@@ -57,6 +57,7 @@ import re
 import statistics
 import tempfile
 import threading
+import types
 from dataclasses import dataclass, field
 from types import FunctionType
 from typing import (
@@ -968,7 +969,14 @@ def compile_policy_source(slot: str, source: str, *, class_name: str = "Policy",
             return modules[name]
         if level == 0 and name in _SOURCE_PACKAGES and set(fromlist or ()) <= _SOURCE_PACKAGES[name]:
             pool = {**_SOURCE_TYPES, **_aggregator_helpers()}
-            return type("_ns", (), {n: pool[n] for n in fromlist})()
+            # SimpleNamespace, not `type(...)()`: a plain function placed in a
+            # class body becomes a *bound method* on instantiation, so the
+            # namespace object is prepended to every call. Two of the eleven
+            # whitelisted names are functions -- `diffs_contradict` and
+            # `fuse_diffs`, exactly the helpers a `conflict` or `fusion` policy
+            # imports -- and a candidate using one was rejected with
+            # "takes 2 positional arguments but 3 were given".
+            return types.SimpleNamespace(**{n: pool[n] for n in fromlist})
         raise ImportError(f"import of {name!r} is not allowed")
 
     builtins["__import__"] = restricted_import
@@ -1361,6 +1369,32 @@ def meta_evolve(
     return evolve(tasks, reward, **kwargs)
 
 
+def _check_meta_reward(score: Any) -> None:
+    """A meta-reward that cannot score is a run of zeros, and looks like a null.
+
+    ``reward()`` turns any failure into ``0.0`` -- deliberately, because a
+    candidate whose outcome will not parse *has* earned nothing. That same
+    catch swallows a **wiring** mistake: handing over a factory instead of the
+    function it returns makes ``float(<closure>)`` raise, every rollout score
+    0.0, and the run report a flat null with nothing in it to say why.
+
+    Measured: ``rollouts_to`` is ``rollouts_to(target) -> MetaReward``, and
+    naming it where ``auc`` goes scored every outcome 0.000. So try it once,
+    here, on an outcome that is known good.
+    """
+    probe = MetaOutcome(curve=[0.0, 0.5, 1.0], final=1.0, rollouts=3)
+    try:
+        value = float(score(probe))
+    except Exception as error:      # noqa: BLE001 - re-raised with the cause named
+        raise ValueError(
+            f"meta_reward {getattr(score, '__name__', score)!r} could not score a "
+            f"MetaOutcome ({type(error).__name__}: {error}). A reward is "
+            "`MetaOutcome -> float`; `rollouts_to` is a *factory* for one and needs "
+            "its target, as `rollouts_to(0.9)`.") from error
+    if value != value:
+        raise ValueError(f"meta_reward {getattr(score, '__name__', score)!r} returned NaN")
+
+
 def meta_parts(
     problems: Union[Sequence[Problem], Mapping[str, Problem]],
     *,
@@ -1387,6 +1421,7 @@ def meta_parts(
     tasks, named = _outer_tasks(problems, seeds)
     score = meta_reward or auc
     spec.compile(spec.render(spec.initial()))      # the seed must pass its own gate
+    _check_meta_reward(score)
 
     def run(rendered: str, task: Task) -> str:
         try:
