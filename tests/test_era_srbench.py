@@ -639,6 +639,7 @@ def test_both_roots_exist_in_both_formats():
 
 def test_a_damaged_ground_truth_is_not_scorable_and_is_not_a_miss():
     """Both defects are the published copy's, not any answer's."""
+    pytest.importorskip("sympy")
     from tools import score_symbolic_accuracy as sa
     assert not sa.scorable("-0.19*A(t)**2 + 0.19_z*A(t)**2", ["t", "A"])
     assert not sa.scorable("F0*sin(t) - beta*sin(v(t))", ["x", "t", "v"])

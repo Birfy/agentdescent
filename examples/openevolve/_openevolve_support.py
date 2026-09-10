@@ -258,6 +258,33 @@ def sandbox_command(
         "or run on macOS where sandbox-exec ships with the system")
 
 
+def _sandbox_interpreter() -> str:
+    """The interpreter to exec *inside* the sandbox, with symlinks resolved.
+
+    The sandbox binds ``/usr`` read-only and deliberately does not bind
+    ``/etc``. On Debian and Ubuntu ``/usr/bin/python3`` is a symlink into
+    ``/etc/alternatives/``, so inside the sandbox it dangles and bwrap fails
+    with ``execvp /usr/bin/python3: No such file or directory`` -- before any
+    candidate runs, and reported as an evaluation failure rather than a setup
+    one.
+
+    Resolving the chain here gives the real file (``/usr/bin/python3.11``),
+    which is under the bind. Binding ``/etc`` would also fix it and is the wrong
+    trade: the point of the profile is that the candidate sees as little of the
+    host as possible.
+    """
+    resolved = os.path.realpath("/usr/bin/python3")
+    if os.path.isfile(resolved) and resolved.startswith("/usr/"):
+        return resolved
+    # A python3 outside /usr is not reachable under this profile whatever we do;
+    # say so here rather than as a puzzling execvp failure from inside bwrap.
+    if not os.path.isfile(resolved):
+        raise RuntimeError(f"/usr/bin/python3 resolves to {resolved!r}, which does not exist")
+    raise RuntimeError(
+        f"/usr/bin/python3 resolves to {resolved!r}, outside the /usr bind this "
+        "sandbox profile provides; install a system python3 under /usr")
+
+
 def _bubblewrap_command(
     candidate: Path,
     trials: int,
@@ -269,6 +296,7 @@ def _bubblewrap_command(
     bwrap = shutil.which("bwrap")
     if not bwrap:
         raise RuntimeError("Bubblewrap (bwrap) is required for candidate isolation")
+    interpreter = _sandbox_interpreter()
     command = [
         bwrap,
         "--ro-bind",
@@ -300,7 +328,7 @@ def _bubblewrap_command(
             "--setenv",
             "PATH",
             "/usr/bin",
-            "/usr/bin/python3",
+            interpreter,
             "-I",
             "/runner.py",
             "/candidate.py",

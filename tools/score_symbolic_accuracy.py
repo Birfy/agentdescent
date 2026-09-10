@@ -285,7 +285,8 @@ def scorable(truth: str, variables: Optional[List[str]] = None) -> bool:
 
     The second is caught by checking that every free symbol in the truth is one
     of the problem's own variables. That needs the variable list; without one
-    only the first check runs, which is why callers pass it.
+    only the first check runs, which is why callers pass it -- and it needs
+    ``sympy``, whose absence raises rather than answering ``False``.
     """
     if not truth or not truth.strip():
         return False
@@ -293,8 +294,12 @@ def scorable(truth: str, variables: Optional[List[str]] = None) -> bool:
         return False
     if variables is None:
         return True
+    # Not inside the `try`: a missing checker is not a damaged ground truth, and
+    # swallowing ModuleNotFoundError here made every row unscorable and printed
+    # "109 in the run, 0 with an intact ground truth" -- which reads as "the
+    # published benchmark is entirely broken" and means "sympy is not installed".
+    import sympy
     try:
-        import sympy
         expression = sympy.sympify(normalise(truth, list(variables)))
     except Exception:
         return False
