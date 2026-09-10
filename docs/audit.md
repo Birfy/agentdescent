@@ -110,6 +110,57 @@ where the verifier is a string-similarity judge and the truth is exact match, so
 | `resid_sd` | 0.38 |
 | acceptance rate over a fixed grid of merges | **0.60 → 0.37** |
 
+## Two workloads, and two different failures
+
+Phase 0 is the kill test: measure the bias on a workload that genuinely has two
+scorers, and stop if it is not there. It ran twice.
+
+| | HotpotQA | BBH |
+|---|---|---|
+| `Delta` | +0.175 | **+0.327** |
+| `sigma` | 0.381 | 0.469 |
+| disagreement | 17.5% | 32.7% |
+| \|Δ\|/gate sd | 1.99 | **5.55** |
+
+PROCEED on both. The second is worth having because it is not a second sample of
+the first: on BBH the residual is **entirely** in the two label-shaped subtasks.
+
+| subtask | n | `Delta` | `sigma` | disagree |
+|---|---|---|---|---|
+| `salient_translation_error_detection` | 10 | **+0.90** | 0.316 | 0.900 |
+| `date_understanding` | 10 | **+0.70** | 0.483 | 0.700 |
+| `object_counting` | 7 | 0 | 0 | 0 |
+| `word_sorting` | 8 | 0 | 0 | 0 |
+| `causal_judgement`, `sports_understanding` | 14 | 0 | 0 | 0 |
+
+The judge's error is a property of the **shape** of the answer, which is why the
+report splits by subtask rather than quoting one average of two unrelated
+phenomena.
+
+!!! danger "Generous, or not discriminating? `delta_hat` cannot tell you"
+    Exact match refuses `(B) Numerical Values` against a gold of `(B)`, and a
+    judge accepting that is the benign story — a formatting disagreement, the
+    kind a normalisation fixes.
+
+    So forgive every formatting difference the judge is *told* to forgive:
+    compare the option labels alone, and ask whether it still says yes where
+    that says no. On BBH it does, on **7 of 20** labelled-answer units — while
+    calling 17 of 20 right against a lenient truth of 10.
+
+    A merely generous judge scores near zero there. This one has stopped
+    discriminating on label-shaped answers, and **that failure and the benign one
+    produce the same `delta_hat`.** The correction still works — the gate spends
+    the residual either way — but "fix the verifier" and "normalise the oracle"
+    are opposite responses, and only this check separates them.
+
+`audit-limited` is **True** on BBH: `SE(Δ)² > var_p`, so buying more in-loop
+evaluation cannot improve the criterion and the budget belongs on oracle labels.
+
+```bash
+python3 scripts/audit_phase0.py --workload bbh --tasks 80 --rounds 6 \
+        --workers 3 --seed 0 --model <your model>
+```
+
 ## The two sources
 
 | | cheap verifier | oracle |

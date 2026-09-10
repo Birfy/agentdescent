@@ -127,6 +127,40 @@ All notable changes to AgentDescent are documented here. The format follows
   calibration pool was measuring.
   [docs/audit.md](docs/audit.md#the-audited-units-are-not-independent)
 
+- **Phase 0 on a second workload, and the judge fails differently there.**
+  `--workload bbh` runs the kill test on BIG-Bench Hard, sampled across six
+  subtasks chosen for the *shape* of their answers.
+  [reports/audit_phase0_bbh_2026-09-10.md](reports/audit_phase0_bbh_2026-09-10.md).
+
+  | | HotpotQA | BBH |
+  |---|---|---|
+  | `Delta` | +0.175 | **+0.327** |
+  | `sigma` | 0.381 | 0.469 |
+  | disagreement | 17.5% | 32.7% |
+  | \|Delta\|/gate sd | 1.99 | **5.55** |
+
+  PROCEED on both, and the second is not a second sample of the first. The
+  residual is **entirely** in the two label-shaped subtasks --
+  `salient_translation_error_detection` at +0.90 and `date_understanding` at
+  +0.70 -- while `object_counting`, `word_sorting` and both Yes/No subtasks sit
+  at `Delta` 0, `sigma` 0, zero disagreement. The judge's error is a property of
+  the shape of the answer, so the report splits by subtask rather than quoting
+  one average of two unrelated phenomena.
+
+  And the failure is not the benign one. Exact match refuses
+  `(B) Numerical Values` against a gold of `(B)`, and a judge accepting that is
+  what this experiment was built to measure. Forgiving every formatting
+  difference the judge is *told* to forgive -- comparing option labels alone --
+  it still says right on **7 of 20** labelled-answer units where that lenient
+  oracle says wrong. A merely generous judge scores near zero there. This one has
+  stopped discriminating on label-shaped answers, which is a different failure
+  from the one `Delta` describes and is **indistinguishable from it in
+  `Delta`**.
+
+  Also `audit-limited` is **True** on this workload: `SE(Delta)^2 > var_p`, so
+  buying more in-loop evaluation cannot improve the criterion and the budget
+  belongs on oracle labels.
+
 - **`agentdescent.audit.propose` -- something that proposes a fix, not only
   scores one.** `diagnose` sorted the verifier's errors and measured a proposed
   rule; nothing proposed one, so the improvement pool's labels were paying for a
