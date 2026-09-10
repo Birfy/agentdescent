@@ -51,6 +51,7 @@ spending anything.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import random
@@ -224,7 +225,19 @@ def bbh_tasks(n: int, *, seed: int = 0,
             question = str(row.get("input") or "").strip()
             if not answer or not question:
                 continue
-            tasks.append(Task(id=f"{name}:{i}", prompt=question,
+            # Hashed from the question, not the row's position. BBH has no id
+            # column, and a positional id is only meaningful together with the
+            # `limit` and `seed` that produced the shuffle -- so a records file
+            # written today cannot be re-joined to its gold answers tomorrow
+            # without reproducing the exact call. That is the durability the
+            # whole package rests on (a wet-lab result comes back next week to a
+            # process that has only the JSONL), and it was broken here.
+            #
+            # Found by falling into it: a first analysis of this workload joined
+            # gold by position against an unshuffled read and reported a
+            # rubber-stamp rate of 65% where the truth is 25%.
+            digest = hashlib.sha256(question.encode("utf-8")).hexdigest()[:10]
+            tasks.append(Task(id=f"{name}:{digest}", prompt=question,
                               meta={"gold": answer, "expected": answer,
                                     "subtask": name}))
             taken += 1
@@ -242,6 +255,74 @@ _WORKLOAD_LABELS = {
     "hotpot": "HotpotQA validation",
     "bbh": "BIG-Bench Hard across " + str(len(BBH_SUBTASKS)) + " subtasks",
 }
+
+
+_OPTION = re.compile(r"\s*\(([A-Za-z])\)")
+
+
+def _option_label(text: str) -> Optional[str]:
+    """The leading ``(B)`` of an answer, if it has one."""
+    m = _OPTION.match(text or "")
+    return m.group(1).upper() if m else None
+
+
+def label_agreement(records, tasks) -> Optional[Dict[str, float]]:
+    """On multiple-choice answers, does the judge track even a *lenient* oracle?
+
+    Exact match refuses ``(B) Numerical Values`` against a gold of ``(B)``, and a
+    judge accepting that is the benign story this experiment was built to
+    measure. So this asks the harder question: forgive every formatting
+    difference the judge is *told* to forgive -- compare option labels alone --
+    and see whether the judge still says yes where that says no.
+
+    A judge that is merely generous scores near zero here. One that has stopped
+    discriminating scores high, and the two are indistinguishable in ``Delta``.
+
+    ``None`` when the workload has no labelled answers, which is most of them.
+    """
+    gold = {t.id: t.meta.get("gold", "") for t in tasks}
+    n = stamped = lenient_right = judged_right = 0
+    for rec in records:
+        if rec.oracle_score is None:
+            continue
+        want = _option_label(gold.get(rec.task_id, ""))
+        if want is None:
+            continue
+        n += 1
+        got = _option_label(rec.output)
+        lenient_right += int(got == want)
+        judged_right += int(rec.verifier_score > 0)
+        stamped += int(rec.verifier_score > 0 and got != want)
+    if not n:
+        return None
+    return {"n": n, "lenient_correct": lenient_right,
+            "judge_says_right": judged_right, "rubber_stamped": stamped,
+            "rate": stamped / n}
+
+
+def by_subtask(records, tasks) -> Dict[str, Dict[str, float]]:
+    """Residual per ``meta['subtask']``, for a workload that has them.
+
+    The residual is mostly a property of the *shape* of the answer, so a
+    workload drawn across shapes has to be reported across them or the headline
+    number is an average of two different phenomena.
+    """
+    group = {t.id: t.meta.get("subtask") for t in tasks}
+    buckets: Dict[str, List[float]] = {}
+    for rec in records:
+        name = group.get(rec.task_id)
+        if name is None or rec.oracle_score is None:
+            continue
+        buckets.setdefault(name, []).append(rec.residual)
+    out = {}
+    for name, resid in sorted(buckets.items()):
+        out[name] = {
+            "n": len(resid),
+            "delta": statistics.fmean(resid),
+            "sigma": statistics.stdev(resid) if len(resid) > 1 else 0.0,
+            "disagree": sum(1 for x in resid if x) / len(resid),
+        }
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -439,6 +520,67 @@ def verdict(an: Dict) -> Tuple[str, str]:
 # The report
 # ---------------------------------------------------------------------------
 
+def _shape_section(bundle: Dict, args) -> List[str]:
+    """Where the residual actually came from, when the workload has shapes.
+
+    Empty for a workload without ``meta['subtask']``, which keeps this out of
+    the HotpotQA report rather than printing a table of one row.
+    """
+    # This run's records only. The store accumulates across runs by design, and
+    # a per-shape table that mixed an earlier run's answers into this one's
+    # would attribute another workload's residual to these subtasks.
+    prior = bundle.get("preexisting") or set()
+    records = [r for r in bundle["store"].all()
+               if r.resolved and r.record_id not in prior]
+    tasks = bundle["tasks"]
+    split = by_subtask(records, tasks)
+    if len(split) < 2:
+        return []
+    rows = ["## Where the residual came from", "",
+            "The residual is mostly a property of the *shape* of the answer, so "
+            "a workload drawn across shapes has to be reported across them -- "
+            "otherwise the headline number is an average of two different "
+            "phenomena.",
+            "",
+            "| subtask | n | `Delta` | `sigma` | disagree |",
+            "|---|---|---|---|---|"]
+    for name, cell in sorted(split.items(), key=lambda kv: -kv[1]["delta"]):
+        rows.append(f"| `{name}` | {cell['n']} | {cell['delta']:+.4f} | "
+                    f"{cell['sigma']:.4f} | {cell['disagree']:.3f} |")
+
+    stamp = label_agreement(records, tasks)
+    if stamp:
+        rows += [
+            "",
+            "### Generous, or not discriminating?",
+            "",
+            "Exact match refuses `(B) Numerical Values` against a gold of `(B)`, "
+            "and a judge accepting that is the benign story this experiment was "
+            "built to measure. So: forgive every formatting difference the judge "
+            "is *told* to forgive -- compare the option labels alone -- and ask "
+            "whether it still says yes where that says no.",
+            "",
+            f"- labelled-answer units: **{stamp['n']}**",
+            f"- correct by the lenient label oracle: **{stamp['lenient_correct']}**",
+            f"- the judge called right: **{stamp['judge_says_right']}**",
+            f"- **rubber-stamped** (judge said right, lenient oracle says wrong): "
+            f"**{stamp['rubber_stamped']}/{stamp['n']} = {stamp['rate']:.0%}**",
+            "",
+        ]
+        if stamp["rate"] > 0.25:
+            rows.append(
+                "A judge that is merely *generous* scores near zero here. This "
+                "one has stopped discriminating on label-shaped answers -- a "
+                "different failure from the one `Delta` describes, and "
+                "indistinguishable from it in `Delta`.")
+        else:
+            rows.append(
+                "Near zero: the disagreement is formatting, which is the benign "
+                "case and the one a normalisation can fix.")
+        rows.append("")
+    return rows
+
+
 def report(bundle: Dict, an: Dict, args) -> str:
     s, c = an["all"], an["calibration"]
     call, why = verdict(an)
@@ -520,6 +662,7 @@ def report(bundle: Dict, an: Dict, args) -> str:
         "true, buying more in-loop evaluation cannot improve the criterion and "
         "the budget belongs on oracle labels instead.",
         "",
+        *_shape_section(bundle, args),
         "## The fixed cheap subset (issue #179 §1.2)",
         "",
         "`ThreeLayerVerifier._subset` draws `cheap_eval_tasks` held-out items "
