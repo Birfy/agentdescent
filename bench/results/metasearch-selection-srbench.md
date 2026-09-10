@@ -51,7 +51,7 @@ def priority(rank, visits, total, prior, depth, n_nodes):
     return rank + c * (1.0 / n_nodes) * math.sqrt(total) / (1 + visits)
 ```
 
-**After** — what eight outer sweeps on `lsr_synth` committed:
+**After** — what the run on `lsr_synth` committed, in **two** outer sweeps:
 
 ```python
 def priority(rank, visits, total, prior, depth, n_nodes):
@@ -173,8 +173,24 @@ problems** instead.
 
 ## What it cost, and the guard it tripped
 
-The evolution itself: 6 rollouts, 2 commits, 40 model calls, 197k tokens, 2.7
-hours wall clock. It tripped its own abort guard — **1 of 40 calls failed
+The evolution itself: **2 outer sweeps**, 6 rollouts, 2 commits, 40 model calls,
+197k tokens, 2.7 hours wall clock.
+
+**It was configured for 8 rounds and stopped after 2**, on the `max_seconds`
+budget — 5400 s, and the second sweep ended at 5773 s. Not convergence, and not
+the round count: a rollout here is one whole inner search, so a sweep of three
+workers costs about half an hour and the budget bought two of them.
+
+| sweep | held-out | committed | rejected | rollouts | elapsed |
+|---|---:|---:|---:|---:|---:|
+| 0 | 0.2838 | 1 | 0 | 3 | 3874 s |
+| 1 | 0.2868 | 1 | 0 | 6 | 5773 s |
+
+So the result comes from **two proposals, both accepted**, against a gate that
+never had to refuse anything. The rule below is what those two commits produced;
+what makes it evidence is the nine held-out comparisons, not the depth of the
+search that found it. A longer run is the obvious next experiment and has not
+been done. It tripped its own abort guard — **1 of 40 calls failed
 (2.5%), against a 2% threshold** set after a 61%-failure run produced a
 plausible null.
 

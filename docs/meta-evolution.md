@@ -134,7 +134,12 @@ meta_evolve(problems, slot="selection", spec=priority_selection(),
 
 with an inner search of 8 expansions, `deepseek-v4-pro` at temperature 0.7,
 thinking disabled, and completions cached so an inner run is a function of the
-rule. It cost 6 rollouts, 2 commits, 40 model calls and 197k tokens.
+rule.
+
+**It asked for 8 rounds and got 2**, stopping on a `max_seconds=5400` budget:
+6 rollouts, 2 commits, 0 rejections, 40 model calls, 197k tokens, 2.7 hours.
+A rollout is one whole inner search, so a sweep of three workers costs about
+half an hour — budget the outer loop in *sweeps of wall clock*, not in rounds.
 
 **`seeds=[0]`, not `[0, 1, 2]`.** The recorded run passed three seeds and they were three copies of one comparison: on a domain where the inner run is a function of the value, the seed randomises nothing. Spend that budget on more *problems* instead — the reasoning is in [the result page](https://github.com/Birfy/agentdescent/blob/main/bench/results/metasearch-selection-srbench.md).
 
@@ -168,8 +173,8 @@ counting them as independent.
 
 ### What one evolved rule looks like
 
-Seed (upstream ERA's flat PUCT) against the rule eight sweeps on LLM-SRBench
-`lsr_synth` committed:
+Seed (upstream ERA's flat PUCT) against the rule two outer sweeps on
+LLM-SRBench `lsr_synth` committed:
 
 ```python
 # before

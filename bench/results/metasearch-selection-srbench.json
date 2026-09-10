@@ -97,7 +97,10 @@
   "model": "deepseek-v4-pro",
   "provider": "openai",
   "temperature": 0.7,
-  "thinking": "disabled"
+  "thinking": "disabled",
+  "rounds_configured": 8,
+  "rounds_actually_run": 2,
+  "stopped_by": "max_seconds=5400: the second sweep ended at 5773 s. Not convergence and not the round count -- a rollout is one whole inner search, so a sweep of three workers costs ~30 min and the budget bought two."
  },
  "wall_seconds": 9755.941153978001,
  "usage": {
@@ -214,5 +217,23 @@
   },
   "verdict": "CLEAN and POSITIVE. 5 wins, 0 losses, 4 ties over 9 independent paired comparisons; sign test p = 0.031 one-sided on the 5 non-tied pairs. Zero model calls failed, so the guard that flagged the evolution run does not apply here. The evolved rule never loses: it either wins substantially or ties, and it replicates across splits on the same problem (bpg23 +0.0741 and +0.0714 on two different splits, against a 0.0000 noise floor).",
   "honest_caveats": "the mean drops from the originally reported +0.0618 to +0.0545 once splits beyond the optimistic split 0 are included, and 4 of 9 comparisons are exact ties -- on those splits the evolved rule changes nothing. The largest single gain, matsci8 split 2 (+0.2339), carries a lot of the mean; the median (+0.0375) is the more robust summary."
- }
+ },
+ "sweeps": [
+  {
+   "sweep": 0,
+   "held_out_reward": 0.2838,
+   "committed": 1,
+   "rejected": 0,
+   "rollouts": 3,
+   "elapsed_s": 3874
+  },
+  {
+   "sweep": 1,
+   "held_out_reward": 0.2868,
+   "committed": 1,
+   "rejected": 0,
+   "rollouts": 6,
+   "elapsed_s": 5773
+  }
+ ]
 }
