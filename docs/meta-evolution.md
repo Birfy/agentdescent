@@ -74,6 +74,70 @@ wrong about *priority*. The gate is an AST whitelist plus a run over a fixed
 grid of inputs that includes the root before any expansion: a rule that divides
 by `visits` is refused at proposal time.
 
+## What the outer loop actually does
+
+`meta_evolve` is not a new optimiser. It is [`evolve()`](api.md) — the same
+parallel, merge-based loop the rest of this project uses — with three things
+substituted:
+
+| `evolve()` term | what `meta_evolve` puts there |
+|---|---|
+| the **artifact** | the slot's value: for `priority_selection()`, the source of one function |
+| a **rollout** | compile the candidate, then run **one whole inner search** with it and return the best-so-far curve |
+| the **reward** | a `MetaOutcome -> [0, 1]` summary of that curve, `auc` by default |
+| the **task set** | one task per `(inner problem, inner seed)` pair, interleaved *seed-major* so every problem lands on both sides of the train/held-out cut |
+
+One outer rollout is therefore an entire inner search, which is what makes this
+expensive and what decides where to evolve and where to validate.
+
+The loop per round:
+
+1. **Split.** `held_out_frac` cuts the tasks into train and held-out, as
+   `evolve()` always does. The held-out side is never rolled out on.
+2. **Roll out.** `n_workers` workers each take a train task in parallel, compile
+   the current rule through the slot's gate, and run the inner search.
+3. **Propose.** For a rollout that scored below target, `slot_reflector` makes
+   **one model call**. The prompt is only four things: the slot's own
+   `describe()` (arguments and the syntax contract — no advice about what to
+   change), the current value, the inner outcome as JSON (`curve`, `final`,
+   `outcomes`), and the reward. The model replies with a whole new function.
+4. **Merge.** The workers' proposals go through the ordinary conflict and fusion
+   policies — by default `reflective_merge`, so contradicting proposals are
+   fused rather than one being discarded.
+5. **Gate.** The merged candidate is scored on the **held-out** tasks and
+   committed only if it does not lose ground there.
+6. **Oracle.** `blast_radius=0.6` is `HARNESS_BLAST_RADIUS`, so the slot is
+   governed at **L1**: every merge is also forced through the oracle, which
+   scores the same artifact on the same held-out set. A tie is a veto.
+
+Two gates sit in front of the model's output, and they are what make an
+arbitrary LLM rewrite safe to execute:
+
+* **an AST whitelist** — exactly one function of the six named arguments, built
+  from arithmetic, comparisons, conditionals, locals, `min`/`max`/`abs` and
+  `math.sqrt/log/log1p/exp/tanh/pow`. No imports, loops, or other calls.
+* **a fixed input grid** — the rule must return a finite number everywhere on
+  it, including the root before any expansion. A rule that divides by `visits`
+  is refused at proposal time rather than crashing at the root.
+
+The wrapper keeps rank normalisation, prior normalisation, the visit reservation
+up the parent chain and the tie-break, so an evolved rule can only be wrong
+about *priority* — never about the tree's bookkeeping.
+
+### The configuration the real-data result used
+
+```python
+meta_evolve(problems, slot="selection", spec=priority_selection(),
+            propose=slot_reflector(complete, spec),
+            seeds=[0], rounds=8, n_workers=3, held_out_frac=0.4)
+```
+
+with an inner search of 8 expansions, `deepseek-v4-pro` at temperature 0.7,
+thinking disabled, and completions cached so an inner run is a function of the
+rule. It cost 6 rollouts, 2 commits, 40 model calls and 197k tokens.
+
+**`seeds=[0]`, not `[0, 1, 2]`.** The recorded run passed three seeds and they were three copies of one comparison: on a domain where the inner run is a function of the value, the seed randomises nothing. Spend that budget on more *problems* instead — the reasoning is in [the result page](https://github.com/Birfy/agentdescent/blob/main/bench/results/metasearch-selection-srbench.md).
+
 ## Where to evolve, where to validate
 
 The outer loop runs a whole inner search per rollout and again per held-out
@@ -101,6 +165,34 @@ function of the value — which is the property that makes the domain measurable
 at all, and it makes `seeds=[0, 1, 2]` three copies of one comparison. Replicate
 across problems or across the data split, and check the numbers differ before
 counting them as independent.
+
+### What one evolved rule looks like
+
+Seed (upstream ERA's flat PUCT) against the rule eight sweeps on LLM-SRBench
+`lsr_synth` committed:
+
+```python
+# before
+def priority(rank, visits, total, prior, depth, n_nodes):
+    c = 1.0
+    return rank + c * (1.0 / n_nodes) * math.sqrt(total) / (1 + visits)
+
+# after
+def priority(rank, visits, total, prior, depth, n_nodes):
+    c, d = 1.0, 0.1
+    exploration = c * math.sqrt(math.log1p(total) + 1.0) / (1.0 + visits)
+    prior_term = prior * math.sqrt(total + 1.0) * (1.0 - rank)
+    return rank + prior_term + exploration - d * depth
+```
+
+`1 / n_nodes` is **deleted**, so exploration stops decaying as the tree grows;
+`(1 - rank)` explicitly favours low-ranked nodes; `- 0.1 * depth` prefers
+breadth. Measured at nine nodes it moves a node **9.5x** further off its raw
+rank than the seed does, and in the opposite direction as the tree grows.
+
+The same seed and the same reflector on a *synthetic* landscape go the other way
+— every one of three runs **shrinks** exploration. Nothing in the prompt says
+which way to go; the domains want opposite things and the search finds each.
 
 ## What has been measured
 

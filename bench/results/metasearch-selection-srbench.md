@@ -40,19 +40,60 @@ Hold the caveats: 4 of 9 comparisons are exact ties, the mean is carried by
 `matsci8` split 2 (+0.2339) so the median is the more robust summary, and this
 is 3 problems, not 30.
 
-## The rule, and why its *direction* is the strongest evidence
+## The rule, before and after
+
+**Before** — upstream ERA's flat PUCT, the seed every run starts from:
 
 ```python
 def priority(rank, visits, total, prior, depth, n_nodes):
-    c, d = 1.0, 0.1
+    # Flat PUCT (ERA, futs.py): exploit by rank, explore by visit count.
+    c = 1.0
+    return rank + c * (1.0 / n_nodes) * math.sqrt(total) / (1 + visits)
+```
+
+**After** — what eight outer sweeps on `lsr_synth` committed:
+
+```python
+def priority(rank, visits, total, prior, depth, n_nodes):
+    # Added prior weight and adaptive exploration scaling to prevent premature
+    # convergence when all candidates have similar rank.
+    c = 1.0
+    d = 0.1
     exploration = c * math.sqrt(math.log1p(total) + 1.0) / (1.0 + visits)
     prior_term = prior * math.sqrt(total + 1.0) * (1.0 - rank)
     return rank + prior_term + exploration - d * depth
 ```
 
-It **adds** an exploration term and a depth penalty: *explore more, go
-shallower*. That is the **opposite** of what evolved on the synthetic landscape,
-where the whole gain came from exploring **less**.
+Four changes, all pushing the same way:
+
+| # | change | effect |
+|---|---|---|
+| 1 | **`1 / n_nodes` deleted** | in the seed that divisor makes exploration *decay as the tree grows*. Without it exploration no longer shrinks with tree size — the biggest of the four |
+| 2 | `sqrt(total)` → `sqrt(log1p(total) + 1)` | PUCT's schedule replaced by a UCB1-style logarithmic one |
+| 3 | **`prior * sqrt(total+1) * (1 - rank)` added** | `(1 - rank)` explicitly favours *low*-ranked nodes — the "`worst-first` beats `greedy` here" finding, written into the rule |
+| 4 | **`- 0.1 * depth` added** | prefer breadth near the root over deepening one line |
+
+How far each moves a node off its raw rank (`priority - rank`, unvisited node,
+`prior = 0.5`):
+
+| tree size | seed | evolved | ratio |
+|---:|---:|---:|---:|
+| 2 nodes | 0.500 | 1.867 | 3.7x |
+| 4 nodes | 0.433 | 2.345 | 5.4x |
+| 6 nodes | 0.373 | 2.651 | 7.1x |
+| 9 nodes | 0.314 | 2.988 | **9.5x** |
+
+**The seed's exploration falls as the tree grows (0.50 → 0.31); the evolved
+rule's rises (1.87 → 2.99).** The sign of the schedule is reversed, not a
+constant retuned.
+
+### Why the direction is the strongest evidence
+
+It **adds** exploration and a depth penalty: *explore more, go shallower*. That
+is the **opposite** of what evolved on the synthetic landscape, where the whole
+gain came from exploring **less** — there `1 / n_nodes` was kept or strengthened
+(seed 0 made it `1 / (1 + n_nodes)`, seed 2 folded it under the square root),
+and here it is deleted outright.
 
 And it is the direction
 [`metasearch-domain-selection.md`](metasearch-domain-selection.md) predicted in

@@ -96,12 +96,29 @@ gain. That is the honest claim: *the search did not exceed the hand-tuned family
 it found a point on it*, from a seed that sits off the front entirely, having
 only ever seen `SOURCE`.
 
+The contrast with the same slot evolved on **real** data is the sharpest result
+in this line: on LLM-SRBench `lsr_synth` the search deletes `1 / n_nodes`
+outright and *adds* exploration, the opposite direction, and that was predicted
+in advance from the domain's own measurements
+([`metasearch-selection-srbench.md`](metasearch-selection-srbench.md)). Same
+seed, same slot description, same reflector — opposite answers, because the
+domains want opposite things.
+
 It is worth being clear about how much that is. The whole axis is 0.02 of AUC,
 and the search covers it in 144 rollouts (~3 minutes, 130k-210k tokens). What it
 did not do is discover anything outside the exploration/exploitation trade-off
 the reference family already parameterises.
 
 ### What the rules look like
+
+The seed all three start from is upstream ERA's flat PUCT:
+
+```python
+def priority(rank, visits, total, prior, depth, n_nodes):
+    # Flat PUCT (ERA, futs.py): exploit by rank, explore by visit count.
+    c = 1.0
+    return rank + c * (1.0 / n_nodes) * math.sqrt(total) / (1 + visits)
+```
 
 All three evolved rules keep the shape `rank + <shrinking exploration term>` and
 every one of them shrinks it, three different ways:
