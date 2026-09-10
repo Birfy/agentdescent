@@ -179,16 +179,27 @@ class Calibrator:
         one** rather than dropped. Dropping it would silently change the
         population the estimate describes; merging keeps every unit represented
         and costs only resolution.
+    cluster_by:
+        Record attribute the audited units are grouped by, ``"task_id"`` by
+        default. They are **not** independent draws: a run scores the same task
+        again for every artifact version, and a task the verifier is generous
+        about it is generous about every time. Measured on the Phase 0 audit --
+        177 units from 49 tasks -- treating them as independent made the
+        interval **32% too narrow**, and the gate spends that interval's width
+        as ``drift``. ``None`` restores the independent estimate, which is right
+        only when each audited unit is a distinct task.
     """
 
     def __init__(self, store: AuditStore, *, alpha: float = 0.05,
                  seed: int = 0, min_labels: int = 30,
-                 min_per_stratum: int = 5) -> None:
+                 min_per_stratum: int = 5,
+                 cluster_by: Optional[str] = "task_id") -> None:
         self.store = store
         self.alpha = alpha
         self.seed = seed
         self.min_labels = min_labels
         self.min_per_stratum = min_per_stratum
+        self.cluster_by = cluster_by
         self._cache: Dict[str, Rectification] = {}
         self._stale_reason: Optional[str] = None
         self._lock = threading.RLock()
@@ -273,7 +284,9 @@ class Calibrator:
             strata.append(Stratum.from_moments(
                 name, weight, f_lab, y_lab,
                 n_unlab=int(m["n"]), mean_unlab=float(m["mean"]),
-                var_unlab=float(m["var"])))
+                var_unlab=float(m["var"]),
+                clusters_lab=([getattr(r, self.cluster_by) for r in rows]
+                              if self.cluster_by else None)))
             # E[f] over the whole layer: labelled and unlabelled together.
             f_pop += weight * ((float(f_lab.sum()) + m["mean"] * m["n"])
                                / max(1, len(rows) + int(m["n"])))

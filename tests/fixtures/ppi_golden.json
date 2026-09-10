@@ -11,8 +11,10 @@
     "n_unlab": 0,
     "per_stratum": {
       "s0": {
+        "design_effect": 1.0,
         "lambda": 0.0,
         "n": 80,
+        "n_clusters": 80.0,
         "n_unlab": 0,
         "resid_sd": 0.3179742048291164,
         "theta": 0.55,
@@ -39,8 +41,10 @@
     "n_unlab": 880,
     "per_stratum": {
       "s0": {
+        "design_effect": 1.0,
         "lambda": 0.8800000000000002,
         "n": 120,
+        "n_clusters": 120.0,
         "n_unlab": 880,
         "resid_sd": 0.0,
         "theta": 0.3960000000000001,
@@ -65,8 +69,10 @@
     "n_unlab": 900,
     "per_stratum": {
       "s0": {
+        "design_effect": 1.0,
         "lambda": 0.684241811806018,
         "n": 100,
+        "n_clusters": 100.0,
         "n_unlab": 300,
         "resid_sd": 0.2564323999762428,
         "theta": 0.7577958746929846,
@@ -74,8 +80,10 @@
         "weight": 0.5
       },
       "s1": {
+        "design_effect": 1.0,
         "lambda": 0.5313311356931435,
         "n": 100,
+        "n_clusters": 100.0,
         "n_unlab": 300,
         "resid_sd": 0.3942772444036626,
         "theta": 0.4673945661260456,
@@ -83,8 +91,10 @@
         "weight": 0.3
       },
       "s2": {
+        "design_effect": 1.0,
         "lambda": 0.3219180161943319,
         "n": 100,
+        "n_clusters": 100.0,
         "n_unlab": 300,
         "resid_sd": 0.4512608598542129,
         "theta": 0.19616396761133603,
@@ -109,8 +119,10 @@
     "n_unlab": 500,
     "per_stratum": {
       "s0": {
+        "design_effect": 1.0,
         "lambda": 0.8180035650623886,
         "n": 25,
+        "n_clusters": 25.0,
         "n_unlab": 250,
         "resid_sd": 0.27688746209726917,
         "theta": 0.7140263814616756,
@@ -118,8 +130,10 @@
         "weight": 0.6
       },
       "s1": {
+        "design_effect": 1.0,
         "lambda": 0.39114219114219106,
         "n": 25,
+        "n_clusters": 25.0,
         "n_unlab": 250,
         "resid_sd": 0.47609522856952335,
         "theta": 0.22561678321678325,
@@ -146,8 +160,10 @@
     "n_unlab": 450,
     "per_stratum": {
       "s0": {
+        "design_effect": 1.0,
         "lambda": 0.0,
         "n": 150,
+        "n_clusters": 150.0,
         "n_unlab": 450,
         "resid_sd": 0.5937063442305445,
         "theta": 0.48,
@@ -174,8 +190,10 @@
     "n_unlab": 600,
     "per_stratum": {
       "s0": {
+        "design_effect": 1.0,
         "lambda": 0.7378646319941866,
         "n": 60,
+        "n_clusters": 60.0,
         "n_unlab": 200,
         "resid_sd": 0.1810203347193925,
         "theta": 0.8631672808747708,
@@ -183,8 +201,10 @@
         "weight": 0.7
       },
       "s1": {
+        "design_effect": 1.0,
         "lambda": 0.6532747878901725,
         "n": 60,
+        "n_clusters": 60.0,
         "n_unlab": 200,
         "resid_sd": 0.27871780678530217,
         "theta": 0.5176215522369367,
@@ -192,8 +212,10 @@
         "weight": 0.2
       },
       "s2": {
+        "design_effect": 1.0,
         "lambda": 0.08591856861087627,
         "n": 60,
+        "n_clusters": 60.0,
         "n_unlab": 200,
         "resid_sd": 0.4459484908564836,
         "theta": 0.0379502676810369,

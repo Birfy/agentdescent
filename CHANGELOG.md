@@ -45,6 +45,42 @@ All notable changes to AgentDescent are documented here. The format follows
   | C | forget to divide `sigma_eps ** 2` by `n` | the discount falls with `n`: the more the run measured, the less of it the gate may believe |
   | D | a control band from one fixed sigma | alarms on a generation that merely bought fewer labels |
 
+- **The audited units are not independent, and the estimator said they were.**
+  `estimate.py` had a cluster bootstrap from Phase 0; `ppi.py` did not, so the
+  *refinement* was less robust than the baseline on the one axis Phase 0 had
+  already measured. A run scores the same task again for every artifact version,
+  and a task the verifier is generous about it is generous about every time.
+
+  On 200 tasks scored under four artifacts each, at a nominal 0.95:
+
+  | treatment | coverage |
+  |---|---|
+  | independent (as shipped) | **0.79** |
+  | cluster-robust variance | 0.91 |
+  | cluster-robust, halves from disjoint tasks | **0.945** |
+
+  `Stratum(clusters_lab=...)` makes the labelled term cluster-robust, the
+  cross-fitting folds hold out whole groups, and the degrees of freedom count
+  groups rather than units. `Calibrator` passes `task_id` by default: on the
+  real Phase 0 records that widens `se` from 0.0363 to 0.0523, **44%**, with
+  `delta_hat` unmoved. `cluster_var_of_mean` reduces to `s**2 / n` *exactly* on
+  singleton groups, which is why the golden vectors did not move a digit -- two
+  new fields appeared and every number stayed.
+
+  **The last row is a sampling design, not an arithmetic fix**, and two
+  alternatives were measured so nobody retries them: an exact unlabelled design
+  effect instead of the borrowed one moves coverage 0.912 -> 0.921, and
+  group-aware folds are worth well under a point. PPI assumes the two halves are
+  independent samples and a per-unit draw puts the same task in both.
+
+  So `AuditedReward` gained `draw_by`, **defaulting to `"task"`**: a task is
+  audited whole or not at all. It is identical to the old per-unit draw when
+  each task is scored once and differs exactly where the difference matters. It
+  also makes the two pools disjoint at the task level, where a per-unit split
+  had one task's units informing the improvement pool about a task the
+  calibration pool was measuring.
+  [docs/audit.md](docs/audit.md#the-audited-units-are-not-independent)
+
 - **`agentdescent.audit.coverage` -- the improvement pool is not allocated like
   the calibration pool.** Neyman (`n_h ~ W_h * sd_h` on the residual) minimises
   the variance of the correction. The improvement pool's job is to find as many

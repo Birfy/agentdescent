@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-300 public names across 51 modules.
+301 public names across 51 modules.
 
 ---
 
@@ -980,6 +980,7 @@ AuditedReward(
     *,
     oracle: Optional[Any] = None,
     store: Optional[AuditStore] = None,
+    draw_by: str = 'task',
     sample_rate: float = 0.1,
     stratify: Optional[Callable[[Any, str, float], str]] = None,
     rates: Optional[Dict[str, float]] = None,
@@ -995,6 +996,7 @@ AuditedReward(
 | `verifier` | `Callable[[Any, str], float]` | *required* | The cheap scorer the loop optimises against -- an agent judging the output, a learned scorer, a heuristic. `(task, output) -> float`. |
 | `oracle` | `Optional[Any]` | `None` | Ground truth. `GoldAnswer` when it returns now, `DeferredOracle` when it arrives later. Defaults to `NullOracle`, which still records the questions -- useful when the answerer has not been asked yet. |
 | `store` | `Optional[AuditStore]` | `None` | Where records go. Defaults to an in-memory store; pass `AuditStore("audit.jsonl")` to keep them. |
+| `draw_by` | `str` | `'task'` | What the inclusion draw is a function of. `"task"` (the default) audits a task **whole or not at all**; `"output"` draws per unit. They are identical when each task is scored once, and differ exactly where the difference matters. A run scores the same task again for every artifact version, and a per-unit draw then puts that task in *both* the labelled and the unlabelled half -- which the estimator assumes cannot happen. Measured at a nominal 0.95, on 200 tasks scored under four versions each: coverage **0.9125** when the halves share tasks and **0.945** when they do not. `"output"` buys more distinct tasks per label and an interval about 15% too narrow. Use it only when a task is scored once, where it is the same thing. |
 | `sample_rate` | `float` | `0.1` | Probability a unit is audited, when no stratum-specific rate applies. |
 | `stratify` | `Optional[Callable[[Any, str, float], str]]` | `None` | Optional `(task, output, verifier_score) -> str`. Names the layer a unit belongs to, so `rates` can spend more of the budget where the residual varies most. The stratum is recorded either way. |
 | `rates` | `Optional[Dict[str, float]]` | `None` | Per-stratum inclusion probabilities, falling back to `sample_rate`. |
@@ -1666,7 +1668,8 @@ Calibrator(
     alpha: float = 0.05,
     seed: int = 0,
     min_labels: int = 30,
-    min_per_stratum: int = 5
+    min_per_stratum: int = 5,
+    cluster_by: Optional[str] = 'task_id'
 ) -> None
 ```
 
@@ -1677,6 +1680,7 @@ Calibrator(
 | `seed` | `int` | `0` |  |
 | `min_labels` | `int` | `30` | Below this many resolved calibration labels the result is stale rather than wide. A very wide interval and "we do not know yet" are different claims, and only the second one stops a caller reading a number off it. |
 | `min_per_stratum` | `int` | `5` | A stratum with fewer than this many labels is **merged into the largest one** rather than dropped. Dropping it would silently change the population the estimate describes; merging keeps every unit represented and costs only resolution. |
+| `cluster_by` | `Optional[str]` | `'task_id'` | Record attribute the audited units are grouped by, `"task_id"` by default. They are **not** independent draws: a run scores the same task again for every artifact version, and a task the verifier is generous about it is generous about every time. Measured on the Phase 0 audit -- 177 units from 49 tasks -- treating them as independent made the interval **32% too narrow**, and the gate spends that interval's width as `drift`. `None` restores the independent estimate, which is right only when each audited unit is a distinct task. |
 
 | method | what it does |
 |---|---|
@@ -1843,6 +1847,7 @@ PPIResult(
     n_unlab: int,
     alpha: float,
     warnings: List[str] = <factory>,
+    clustered: bool = False,
     per_stratum: Dict[str, Dict[str, float]] = <factory>
 ) -> None
 ```
@@ -1860,13 +1865,18 @@ Stratum(
     f_unlab: Optional[np.ndarray] = None,
     n_unlab: int = 0,
     mean_unlab: float = 0.0,
-    var_unlab: float = 0.0
+    var_unlab: float = 0.0,
+    clusters_lab: Optional[Sequence[Any]] = None
 ) -> None
 ```
 
 | method | what it does |
 |---|---|
 | `from_moments(...)` | Build from a running summary of the unlabelled half rather than its scores. |
+
+### `cluster_var_of_mean(values: np.ndarray, clusters: Sequence[Any]) -> Tuple[float, int]`
+
+Variance of `mean(values)` when the units come in correlated groups.
 
 ### `ppi_mean_stratified(...)`
 

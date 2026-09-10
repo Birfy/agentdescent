@@ -43,11 +43,12 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from statistics import NormalDist
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
 __all__ = [
+    "cluster_var_of_mean",
     "MIN_N_DOMINANT",
     "PPIError",
     "PPIResult",
@@ -152,6 +153,13 @@ class Stratum:
     #: Sample variance, ``ddof=1``. Zero is the right value for fewer than two
     #: unlabelled units, and the estimator drops the term rather than trusting it.
     var_unlab: float = 0.0
+    #: One group id per labelled unit -- usually the task. Audited units are not
+    #: independent draws: a run scores the same task again for every artifact
+    #: version, and a task the verifier is generous about it is generous about
+    #: every time. ``None`` treats them as independent, which is what the
+    #: estimator did before this field existed and is right only when each unit
+    #: is a distinct task. See :func:`ppi_mean_stratified`.
+    clusters_lab: Optional[Sequence[Any]] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "f_lab", np.asarray(self.f_lab, dtype=float))
@@ -160,6 +168,13 @@ class Stratum:
             raise PPIError(
                 f"stratum {self.name!r}: {self.f_lab.size} verifier scores but "
                 f"{self.y_lab.size} oracle scores -- they must be paired")
+        if self.clusters_lab is not None:
+            groups = list(self.clusters_lab)
+            if len(groups) != int(self.f_lab.size):
+                raise PPIError(
+                    f"stratum {self.name!r}: {len(groups)} cluster ids for "
+                    f"{self.f_lab.size} labelled units")
+            object.__setattr__(self, "clusters_lab", groups)
         if self.weight < 0.0:
             raise PPIError(f"stratum {self.name!r}: weight {self.weight!r} < 0")
         if self.f_unlab is not None:
@@ -178,8 +193,8 @@ class Stratum:
 
     @classmethod
     def from_moments(cls, name: str, weight: float, f_lab, y_lab, *,
-                     n_unlab: int, mean_unlab: float,
-                     var_unlab: float) -> "Stratum":
+                     n_unlab: int, mean_unlab: float, var_unlab: float,
+                     clusters_lab: Optional[Sequence[Any]] = None) -> "Stratum":
         """Build from a running summary of the unlabelled half rather than its scores.
 
         Keyword-only on purpose: three bare floats in a row are exactly the kind
@@ -188,11 +203,19 @@ class Stratum:
         """
         return cls(name=name, weight=weight, f_lab=f_lab, y_lab=y_lab,
                    f_unlab=None, n_unlab=int(n_unlab),
-                   mean_unlab=float(mean_unlab), var_unlab=float(var_unlab))
+                   mean_unlab=float(mean_unlab), var_unlab=float(var_unlab),
+                   clusters_lab=clusters_lab)
 
     @property
     def n(self) -> int:
         return int(self.f_lab.size)
+
+    @property
+    def n_clusters(self) -> int:
+        """Distinct groups among the labelled units; ``n`` when there are none."""
+        if self.clusters_lab is None:
+            return self.n
+        return len(set(self.clusters_lab))
 
 
 @dataclass(frozen=True)
@@ -223,6 +246,12 @@ class PPIResult:
     n_unlab: int
     alpha: float
     warnings: List[str] = field(default_factory=list)
+    #: Were the labelled units treated as coming in correlated groups? ``False``
+    #: means every unit was taken as an independent draw, which is a claim about
+    #: the data: a run that scores the same task under several artifact versions
+    #: violates it, and the interval is then too narrow. Measured on the Phase 0
+    #: audit: 32% too narrow over 177 units from 49 tasks.
+    clustered: bool = False
     #: Per stratum: ``weight``, ``n``, ``n_unlab``, ``theta``, ``var``,
     #: ``lambda``, and ``resid_sd`` -- the sd of ``f - Y``, which is what
     #: Neyman allocation needs and what a sampler must **not** confuse with the
@@ -234,11 +263,75 @@ class PPIResult:
         return 0.5 * (self.ci[1] - self.ci[0])
 
 
-def _folds(n: int, k: int, seed: int) -> List[np.ndarray]:
-    """Indices split into ``k`` roughly equal folds, deterministically shuffled."""
+def _folds(n: int, k: int, seed: int,
+           clusters: Optional[Sequence[Any]] = None) -> List[np.ndarray]:
+    """Indices split into ``k`` roughly equal folds, deterministically shuffled.
+
+    With ``clusters``, whole **groups** go into a fold rather than whole units.
+    Splitting units puts the same task on both sides of the split, and ``lam`` is
+    then fitted on data correlated with the data it is applied to -- which is
+    pitfall 1 reintroduced by the back door, and invisible in the point estimate.
+    Measured on the clustered simulation in `test_audit_ppi.py`, group-level
+    folds are worth well under a point of coverage -- the dominant loss there is
+    the labelled and unlabelled halves sharing tasks, not the folds. Kept
+    anyway: it is the same argument as pitfall 1, and "it leaks a little" is not
+    a reason to leave a known leak.
+    """
     idx = np.arange(n)
-    np.random.default_rng(seed).shuffle(idx)
-    return [f for f in np.array_split(idx, k) if f.size]
+    rng = np.random.default_rng(seed)
+    if clusters is None:
+        rng.shuffle(idx)
+        return [f for f in np.array_split(idx, k) if f.size]
+    order: Dict[Any, int] = {}
+    for c in clusters:
+        if c not in order:
+            order[c] = len(order)
+    groups = np.arange(len(order))
+    rng.shuffle(groups)
+    fold_of = {g: i for i, chunk in enumerate(np.array_split(groups, k))
+               for g in chunk}
+    buckets: List[List[int]] = [[] for _ in range(k)]
+    for i, c in enumerate(clusters):
+        buckets[fold_of[order[c]]].append(i)
+    return [np.array(b, dtype=int) for b in buckets if b]
+
+
+def cluster_var_of_mean(values: np.ndarray,
+                        clusters: Sequence[Any]) -> Tuple[float, int]:
+    """Variance of ``mean(values)`` when the units come in correlated groups.
+
+    ``(variance, n_groups)``. The textbook cluster-robust form for a sample
+    mean::
+
+        Var = G / (G - 1) * (1 / n**2) * sum_g (sum_{i in g} (u_i - ubar))**2
+
+    Summing *within* a group before squaring is the whole difference: it lets a
+    group that is uniformly high count once rather than once per member, which
+    is exactly what repeated measurements of the same task are.
+
+    **With one unit per group it reduces to ``s**2 / n`` exactly**, which is what
+    makes this safe to switch on: the estimator that ran before clusters existed
+    is the degenerate case of this one, not an approximation of it. The identity
+    is checked in `test_singleton_clusters_reproduce_the_independent_estimate`.
+    """
+    n = int(values.size)
+    if n == 0:
+        return 0.0, 0
+    index: Dict[Any, int] = {}
+    for c in clusters:
+        if c not in index:
+            index[c] = len(index)
+    groups = len(index)
+    if groups < 2:
+        # Everything measured on one task says nothing about how the estimate
+        # would move on another. Not zero -- that would be a confident interval
+        # of width zero -- but not estimable either.
+        return float("nan"), groups
+    centred = values - float(np.mean(values))
+    sums = np.zeros(groups, dtype=float)
+    for value, c in zip(centred, clusters):
+        sums[index[c]] += value
+    return float(groups / (groups - 1) * np.sum(sums ** 2) / (n * n)), groups
 
 
 def _lambda_from(f: np.ndarray, y: np.ndarray, n: int, n_unlab: int) -> float:
@@ -269,7 +362,8 @@ def _lambda_from(f: np.ndarray, y: np.ndarray, n: int, n_unlab: int) -> float:
 
 
 def _lambda_crossfit(f: np.ndarray, y: np.ndarray, n_unlab: int, *,
-                     k_folds: int, seed: int) -> np.ndarray:
+                     k_folds: int, seed: int,
+                     clusters: Optional[Sequence[Any]] = None) -> np.ndarray:
     """A per-unit coefficient, each fitted **without** the unit it is applied to.
 
     This is pitfall 1, and it is the reason this function exists rather than one
@@ -279,15 +373,24 @@ def _lambda_crossfit(f: np.ndarray, y: np.ndarray, n_unlab: int, *,
     reported standard error came in about 7% under the true sampling sd and
     coverage fell from 0.95 to 0.91.
 
+    ``clusters`` makes the folds hold out whole **groups**. Without it the same
+    task lands on both sides of the split and ``lam`` is fitted on data
+    correlated with the data it is applied to -- the same failure, by the back
+    door. Measured, it is worth well under a point; kept because a known leak is
+    not made acceptable by being small.
+
     **Run the coverage test before changing anything here.** The failure is
     invisible in a point estimate -- it moves only the width of the interval.
     """
     n = int(f.size)
     if n < 2:
         return np.zeros(n)
-    k = max(2, min(k_folds, n))
+    n_groups = len(set(clusters)) if clusters is not None else n
+    k = max(2, min(k_folds, n_groups if clusters is not None else n))
+    if clusters is not None and n_groups < 2:
+        return np.zeros(n)          # one group: nothing to hold out
     out = np.zeros(n)
-    for fold in _folds(n, k, seed):
+    for fold in _folds(n, k, seed, clusters):
         mask = np.ones(n, dtype=bool)
         mask[fold] = False
         if mask.sum() < 2:                      # too little left to fit on
@@ -313,6 +416,33 @@ def ppi_mean_stratified(strata: Sequence[Stratum], *, alpha: float = 0.05,
         Folds for cross-fitting ``lam``; see :func:`_lambda_crossfit`.
     seed:
         Fixes the fold split, so the same labels give the same interval twice.
+
+    Clustering
+    ----------
+    Audited units are usually **not** independent: a run scores the same task
+    again for every artifact version, and a task the verifier is generous about
+    it is generous about every time. Pass ``Stratum.clusters_lab`` and the
+    labelled term becomes cluster-robust, the cross-fitting folds hold out whole
+    groups, and the degrees of freedom count groups rather than units. Measured
+    on 200 tasks scored under four versions each, at a nominal 0.95:
+
+    ==========================================  ========
+    treatment                                   coverage
+    ==========================================  ========
+    independent (no ``clusters_lab``)           0.79
+    cluster-robust                              0.91
+    cluster-robust, halves from disjoint tasks  **0.945**
+    ==========================================  ========
+
+    **The last row is a sampling design, not an arithmetic fix.** PPI assumes
+    the labelled and unlabelled halves are independent samples, and a per-unit
+    inclusion draw puts the same task in both. No variance formula recovers the
+    covariance that omits, and the store's three numbers per stratum cannot
+    supply it either -- computing the unlabelled half's own design effect
+    exactly, rather than borrowing the labelled half's, was measured and moves
+    coverage 0.912 to 0.921, so it is not the answer. The answer is
+    ``AuditedReward(draw_by="task")``, which audits a task whole or not at all,
+    and is this package's default for that reason.
 
     Raises
     ------
@@ -348,7 +478,8 @@ def ppi_mean_stratified(strata: Sequence[Stratum], *, alpha: float = 0.05,
 
     for s in strata:
         lam_i = _lambda_crossfit(s.f_lab, s.y_lab, s.n_unlab,
-                                 k_folds=k_folds, seed=seed)
+                                 k_folds=k_folds, seed=seed,
+                                 clusters=s.clusters_lab)
         lam_bar = float(np.mean(lam_i))
 
         # The rectifier, per unit, each with its own out-of-fold coefficient.
@@ -356,13 +487,43 @@ def ppi_mean_stratified(strata: Sequence[Stratum], *, alpha: float = 0.05,
         theta_h = lam_bar * s.mean_unlab + float(np.mean(resid))
 
         var_resid = float(np.var(resid, ddof=1))
-        var_lab = var_resid / s.n
+        iid_lab = var_resid / s.n
+        deff, groups, df_lab = 1.0, s.n, float(s.n - 1)
+        if s.clusters_lab is not None:
+            robust, groups = cluster_var_of_mean(resid, s.clusters_lab)
+            if groups < 2:
+                warnings.append(
+                    f"stratum {s.name!r}: every labelled unit is in one cluster, "
+                    f"so there is nothing to vary over; falling back to the "
+                    f"independent estimate, which is too narrow by an unknown "
+                    f"amount")
+            elif iid_lab > 0.0:
+                # Floored at 1: a design effect below 1 is negative
+                # intra-cluster correlation, which is real and rare, and
+                # *narrowing* an interval on an estimate from a handful of
+                # clusters is the wrong direction to be wrong in.
+                deff = max(1.0, robust / iid_lab)
+                df_lab = float(groups - 1)
+        var_lab = iid_lab * deff
         if s.n_unlab >= 2:
-            var_unlab = (lam_bar ** 2) * s.var_unlab / s.n_unlab
+            var_unlab = (lam_bar ** 2) * s.var_unlab / s.n_unlab * deff
         else:
             # One unlabelled unit carries no usable variance estimate, and zero
             # is the honest value only because `lam` is then ~0 anyway.
             var_unlab = 0.0
+        # The unlabelled half is clustered too, and the store keeps three
+        # numbers per stratum -- a count, a mean and a variance -- so it cannot
+        # supply its own cluster structure. Borrowing the labelled half's design
+        # effect assumes the same intra-cluster correlation on both sides, which
+        # is a property of the workload rather than of who got labelled.
+        mean_group = s.n / groups if groups else 1.0
+        df_unlab = max(1.0, s.n_unlab / mean_group - 1.0)
+        if deff > 1.0 and s.n_unlab >= 2:
+            warnings.append(
+                f"stratum {s.name!r}: the unlabelled half's design effect "
+                f"({deff:.2f}) is borrowed from the labelled half -- the store "
+                f"keeps three numbers per stratum and has no cluster structure "
+                f"of its own")
         var_h = var_lab + var_unlab
 
         w2 = s.weight ** 2
@@ -370,9 +531,9 @@ def ppi_mean_stratified(strata: Sequence[Stratum], *, alpha: float = 0.05,
         var_total += w2 * var_h
         var_classical += w2 * float(np.var(s.y_lab, ddof=1)) / s.n
         if var_lab > 0:
-            components.append((w2 * var_lab, s.n - 1))
+            components.append((w2 * var_lab, df_lab))
         if var_unlab > 0 and s.n_unlab >= 2:
-            components.append((w2 * var_unlab, s.n_unlab - 1))
+            components.append((w2 * var_unlab, df_unlab))
 
         lam_num += lam_bar * s.n
         n_lab += s.n
@@ -385,6 +546,11 @@ def ppi_mean_stratified(strata: Sequence[Stratum], *, alpha: float = 0.05,
             # whichever layer has the most variable outcome rather than the
             # layer where the verifier is least trustworthy.
             "resid_sd": float(np.std(s.f_lab - s.y_lab, ddof=1)),
+            #: How much wider the interval is for the units not being
+            #: independent. 1.0 when no clusters were given, which is a claim
+            #: about the data and not an absence of one.
+            "design_effect": deff,
+            "n_clusters": float(groups),
         }
 
     # Welch-Satterthwaite over every component that contributed variance.
@@ -414,4 +580,5 @@ def ppi_mean_stratified(strata: Sequence[Stratum], *, alpha: float = 0.05,
         theta=theta, ci=ci, se=se, df=df,
         lambda_=(lam_num / n_lab if n_lab else 0.0),
         gain_factor=gain, n=n_lab, n_unlab=n_unlab, alpha=alpha,
+        clustered=any(s.clusters_lab is not None for s in strata),
         warnings=warnings, per_stratum=per)

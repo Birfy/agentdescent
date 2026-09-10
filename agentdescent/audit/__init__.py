@@ -80,7 +80,7 @@ from .estimate import bootstrap_ci, hajek_mean, residual_bias, standard_error
 from .gate import (Adjustment, RectifiedAcceptance, VerifierWatch,
                    discount_for, rectified_counts)
 from .ppi import (MIN_N_DOMINANT, PPIError, PPIResult, Stratum,
-                  ppi_mean_stratified, t_ppf)
+                  cluster_var_of_mean, ppi_mean_stratified, t_ppf)
 from .ranking import Flip, RankReport, kendall_tau_b, rank_agreement
 from .queue import DrainReport, drain, prioritise
 from .records import (SCHEMA_VERSION, AuditRecord, Purpose, new_record_id,
@@ -126,6 +126,7 @@ __all__ = [
     "boundary_stratifier",
     "bootstrap_ci",
     "classify_disagreements",
+    "cluster_var_of_mean",
     "DeferredOracle",
     "Direction",
     "DrainReport",

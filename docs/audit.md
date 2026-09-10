@@ -493,6 +493,53 @@ audit.
     Using the sample share turns a stratified sample back into a simple one; on
     the test workload coverage falls from 0.94 to **0.01**.
 
+### The audited units are not independent
+
+A run scores the same task again for every artifact version, and a task the
+verifier is generous about, it is generous about **every** time. Treating those
+as separate observations makes the interval too narrow — and the acceptance gate
+spends that width as `drift`.
+
+Measured, on 200 tasks scored under four artifacts each, at a nominal 0.95:
+
+| treatment | coverage |
+|---|---|
+| independent — no `clusters_lab` | **0.79** |
+| cluster-robust variance | 0.91 |
+| cluster-robust, halves from disjoint tasks | **0.945** |
+
+`Stratum(clusters_lab=...)` switches on the first fix: the labelled term becomes
+the textbook cluster-robust form, the cross-fitting folds hold out whole groups,
+and the degrees of freedom count groups rather than units. `Calibrator` passes
+`task_id` by default, and on the real Phase 0 records that widens `se` from
+0.0363 to 0.0523 — **44%** — while leaving `delta_hat` where it was.
+
+!!! danger "The last row is a sampling design, not an arithmetic fix"
+    PPI assumes the labelled and unlabelled halves are **independent samples**. A
+    per-unit inclusion draw puts the same task in both, and no variance formula
+    recovers the covariance that omits.
+
+    Two things were measured and are not the answer, so nobody has to try them
+    again: computing the unlabelled half's own design effect exactly rather than
+    borrowing the labelled half's moves coverage 0.912 → 0.921, and making the
+    cross-fitting folds group-aware is worth well under a point.
+
+    The answer is [`AuditedReward(draw_by="task")`](api.md#the-sparse-audit-layer),
+    which audits a task **whole or not at all** so the halves cannot share one.
+    It is the default. `draw_by="output"` is the per-unit draw: identical when
+    each task is scored once, more distinct tasks per label when they repeat, and
+    an interval about 15% too narrow.
+
+The same change makes the two pools honest at the task level. With a per-unit
+split, one task's units land in *both* the calibration and improvement pools —
+so the improvement pool's edits are informed by a task the calibration pool also
+measures, which is [the mixing `for_calibration` asserts
+against](#two-pools-never-mixed), one level up.
+
+`cluster_var_of_mean` reduces to `s² / n` **exactly** when every group is a
+singleton, which is what made this safe to switch on: the golden vectors did not
+move a digit when it landed — two new fields appeared and every number stayed.
+
 ### Four things that are easy to get wrong here
 
 | | why it bites |
