@@ -56,6 +56,47 @@ worth a function:
 `enabled=False` collects records while correcting nothing, which is the honest
 way to run a first round: measure before you spend.
 
+### From a spec, the CLI and MCP
+
+Everything above is Python. A run started by `agentdescent evolve spec.json` or
+by the MCP `start` tool reaches the same wiring through an `audit` block:
+
+```json
+{
+  "kind": "skill_dir",
+  "target": "~/.claude/skills/qa",
+  "data": {"path": "eval/cases.jsonl", "prompt": "prompt", "gold": "gold"},
+  "score": {"ref": "mypkg.judges:llm_judge"},
+  "agent": "claude_code",
+  "audit": {"oracle": "mypkg.scorers:exact_match", "sample_rate": 0.1}
+}
+```
+
+| key | default |
+|---|---|
+| `oracle` | none — records the questions without answering them |
+| `store` | **`audit.jsonl` beside the run's ledger** |
+| `enabled` | **`false`** — collect, correct nothing |
+| `sample_rate`, `calibration_fraction`, `draw_by`, `seed` | the `attach` defaults |
+| `stratify`, `watch_ids`, `watch_globs` | none |
+
+Two of those are decisions rather than conveniences.
+
+**The store is derived, not configured.** `audit_status` takes a path and not a
+run id, so a run that wrote its audit somewhere only the caller knows is a run
+whose audit nobody reads. `status <run_id>` reports `audit_store` once records
+exist — and only once they exist, because a path to a file that was never
+written invites `audit_status` to report an empty store as an answer.
+
+**`enabled` is false.** Collecting records is free and changes nothing;
+correcting the acceptance gate changes what commits, and a spec that merely
+names an oracle has not asked for that. `plan` says so in its notes. Look at
+what the first run measured, then set it.
+
+`oracle` and `stratify` are refs resolved through the spec's own `allow` list —
+the audit is not a reason to widen the trust boundary — and an acceptance policy
+the spec already named is **wrapped**, not replaced.
+
 ### End to end, with a known bias
 
 `test_a_run_recovers_the_bias_and_the_gate_commits_less` runs a whole `evolve()`

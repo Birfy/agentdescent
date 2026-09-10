@@ -137,8 +137,16 @@ the loop optimised a **proxy**, and every gate in it read that same proxy — so
 change that games the judge is indistinguishable from one that improves. Nothing
 in `status` or `show` can tell you which happened.
 
-The `audit_*` tools can, if the user set up a sparse audit. They take the audit
-JSONL path, not a `run_id`.
+The `audit_*` tools can. They take the audit JSONL path, not a `run_id` — add an
+`audit` block to the spec and `status` reports `audit_store` once records exist:
+
+```json
+"audit": {"oracle": "mypkg.scorers:exact_match", "sample_rate": 0.1}
+```
+
+`enabled` defaults to false there: the run collects records and the acceptance
+gate is untouched. Show the user what the first run measured before offering to
+turn the correction on.
 
 1. **`audit_status`** — `delta_hat` is how generous the verifier is on average;
    `resid_sd` is how *scattered* its error is, and that is the bigger number and

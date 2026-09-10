@@ -45,6 +45,29 @@ All notable changes to AgentDescent are documented here. The format follows
   | C | forget to divide `sigma_eps ** 2` by `n` | the discount falls with `n`: the more the run measured, the less of it the gate may believe |
   | D | a control band from one fixed sigma | alarms on a generation that merely bought fewer labels |
 
+- **`EvolveSpec.audit` -- the audit reachable from the CLI and the MCP server.**
+  Everything in the package was reachable only from Python, so a run started by
+  `agentdescent evolve spec.json` or by the MCP `start` tool could not create an
+  audit store -- which left the seven `audit_*` tools able to read a file that
+  path could not produce.
+
+  `"audit": {"oracle": "mypkg:exact_match", "sample_rate": 0.1}` is the whole
+  minimum. Two of the defaults are decisions: the store is **derived**, landing
+  at `audit.jsonl` beside the run's ledger, because `audit_status` takes a path
+  and not a run id and a run that wrote its audit somewhere only the caller
+  knows is a run whose audit nobody reads; and `enabled` is **false**, because
+  collecting records is free while correcting the gate changes what commits, and
+  a spec that merely names an oracle has not asked for that. `plan` reports the
+  block before anything runs and `status <run_id>` reports `audit_store` once
+  records exist -- only once, since a path to a file that was never written
+  invites `audit_status` to report an empty store as an answer.
+
+  `oracle` and `stratify` are refs through the spec's own allowlist, an
+  acceptance policy the spec already named is wrapped rather than replaced, and
+  a mistyped key is an error with the key list beside it -- otherwise
+  `sample-rate` is a setting that silently did nothing.
+  [docs/audit.md](docs/audit.md#from-a-spec-the-cli-and-mcp)
+
 - **`attach()` -- one call that wires the six pieces.** Everything in this
   package is opt-in and nothing in the shipped runtimes builds any of it, so
   switching the audit on meant assembling `AuditStore`, `AuditedReward`,

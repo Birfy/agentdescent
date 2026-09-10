@@ -56,10 +56,13 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
         "Start an evolution run in the background and return its run_id at once. The run "
         "is a detached process; poll `status` about once per round (not more often) and "
         "read `show` when it is done. Never call start without having shown the user the "
-        "plan. A run costs real agent calls: rounds x n_workers x tasks."),
+        "plan. A run costs real agent calls: rounds x n_workers x tasks. When the spec has "
+        "an `audit` block, `status` reports `audit_store` once records exist -- pass that "
+        "path to audit_status to find out how far the run's scorer is from the truth."),
     "status": (
         "Progress of one run (round, best held-out reward, calls, dollars if priced, "
-        "state, the last few rounds) or, with no run_id, {store, runs} where `runs` is "
+        "state, the last few rounds, and `audit_store` when the run has one) or, with no "
+        "run_id, {store, runs} where `runs` is "
         "every run newest first and is empty when there are none. Cheap; safe to poll. "
         "Summarise round-to-round deltas for the user rather than pasting JSON."),
     "show": (

@@ -2708,6 +2708,7 @@ EvolveSpec(
     timeout: float = 120.0,
     host: Optional[str] = None,
     env_passthrough: Sequence[str] = (),
+    audit: Optional[Dict[str, Any]] = None,
     policies: Dict[str, Any] = <factory>,
     agg_config: Dict[str, Any] = <factory>,
     evolve: Dict[str, Any] = <factory>,

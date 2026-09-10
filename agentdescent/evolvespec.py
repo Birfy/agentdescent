@@ -189,6 +189,13 @@ class EvolveSpec:
     host: Optional[str] = None
     #: Names of environment variables the worker may see. Names, never values.
     env_passthrough: Sequence[str] = ()
+    #: Pair the reward against ground truth. ``{"oracle": "mod:fn"}`` is the
+    #: whole minimum. Only worth setting when ``score`` is a model judging an
+    #: output rather than a fact about it -- then the loop is optimising a proxy
+    #: and nothing in it can tell. See :func:`build_audit` for the keys, and
+    #: note that ``enabled`` defaults to **false**: the audit collects without
+    #: changing what commits until you say otherwise.
+    audit: Optional[Dict[str, Any]] = None
     #: One ref per slot; ``"staleness"`` may be a policy name. ``reflective_merge``
     #: fills ``conflict`` and ``fusion`` together.
     policies: Dict[str, Any] = field(default_factory=dict)
@@ -264,6 +271,8 @@ class EvolveSpec:
         out = replace(self, target=target)
         if isinstance(self.data, Mapping) and "path" in self.data:
             out.data = {**self.data, "path": resolve(str(self.data["path"]))}
+        if isinstance(self.audit, Mapping) and self.audit.get("store"):
+            out.audit = {**self.audit, "store": resolve(str(self.audit["store"]))}
         if isinstance(self.score, Mapping) and "cmd" in self.score:
             cmd = self.score["cmd"]
             argv = shlex.split(cmd) if isinstance(cmd, str) else list(cmd)
@@ -416,6 +425,58 @@ def build_reward(spec: EvolveSpec) -> Callable:
 # ---------------------------------------------------------------------------
 
 
+#: Keys :func:`build_audit` accepts. Spelled out so a typo is an error with a
+#: list beside it rather than a setting that silently did nothing -- which is
+#: how `sample_rate` becomes `sample-rate` and an audit runs at the default.
+_AUDIT_KEYS = ("oracle", "store", "sample_rate", "calibration_fraction",
+               "draw_by", "enabled", "seed", "watch_ids", "watch_globs",
+               "stratify")
+
+
+def build_audit(spec: EvolveSpec, *, reward: Callable, run: Optional[Callable],
+                repo_path: Optional[str] = None) -> Optional[Any]:
+    """The :class:`~agentdescent.audit.wiring.Audit` a spec asks for, or ``None``.
+
+    ``oracle`` and ``stratify`` are refs, resolved through the spec's own
+    allowlist -- the audit is not a reason to widen the trust boundary.
+
+    ``store`` defaults to ``audit.jsonl`` **beside the run's ledger**, so the
+    ``audit_*`` MCP tools can find it from the run id without being told where
+    it went. A run that writes its audit somewhere only the caller knows is a
+    run whose audit nobody reads.
+
+    ``enabled`` defaults to **false**. Collecting records is free and changes
+    nothing; correcting the acceptance gate changes what commits, and a spec
+    that merely names an oracle has not asked for that. Set it once you have
+    looked at what the first run measured.
+    """
+    if not spec.audit:
+        return None
+    from .audit import attach
+
+    unknown = sorted(set(spec.audit) - set(_AUDIT_KEYS))
+    if unknown:
+        raise SpecError(f"audit: unknown key(s) {unknown}; keys are "
+                        f"{list(_AUDIT_KEYS)}")
+    cfg = dict(spec.audit)
+    oracle = cfg.pop("oracle", None)
+    if oracle is not None:
+        oracle = _resolve(oracle, spec, where="audit.oracle")
+    stratify = cfg.pop("stratify", None)
+    if stratify is not None:
+        stratify = _resolve(stratify, spec, where="audit.stratify")
+    store = cfg.pop("store", None)
+    if store is None and repo_path:
+        store = os.path.join(os.path.dirname(os.path.abspath(repo_path)),
+                             "audit.jsonl")
+    cfg.setdefault("enabled", False)
+    try:
+        return attach(reward, oracle=oracle, store=store, run=run,
+                      stratify=stratify, **cfg)
+    except (TypeError, ValueError) as e:
+        raise SpecError(f"audit: {e}") from None
+
+
 def build_policies(spec: EvolveSpec, *, merger: Optional[Any] = None) -> Optional[Policies]:
     """The ``Policies`` bundle a spec asks for, or the default merge pair.
 
@@ -499,6 +560,10 @@ class Composition:
     kwargs: Dict[str, Any]
     tree: Optional[Dict[str, str]] = None
     notes: List[str] = field(default_factory=list)
+    #: The sparse audit, when the spec asked for one. ``reward`` and
+    #: ``kwargs["run"]`` are already its wrapped versions; this is the handle for
+    #: reading what it measured.
+    audit: Optional[Any] = None
 
     def run(self) -> EvolutionResult:
         return evolve(self.tasks, self.reward, **self.kwargs)
@@ -662,6 +727,26 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
     # in `reflect`, and that is what merges.
     merger = reflect if not hasattr(reflect, "in_workspace") else None
     policies = build_policies(spec, merger=merger)
+
+    # The audit wraps the reward and the run, so it has to be built after both
+    # exist and before the policies bundle is finalised -- its acceptance rule
+    # wraps whatever the spec asked for rather than replacing it.
+    audit = build_audit(spec, reward=reward, run=kwargs.get("run"),
+                        repo_path=repo_path)
+    if audit is not None:
+        reward = audit.reward
+        if audit.run is not None:
+            kwargs["run"] = audit.run
+        if policies is None:
+            policies = Policies()
+        audit.acceptance.inner = (policies.acceptance if policies.acceptance
+                                  is not None else audit.acceptance.inner)
+        policies = replace(policies, acceptance=audit.acceptance)
+        notes.append(
+            f"audit on: records go to {audit.store.path or 'memory'}"
+            + ("" if audit.enabled else
+               "; enabled=false, so it collects and corrects nothing -- read "
+               "`audit status` before turning it on"))
     if policies is not None:
         knobs["policies"] = policies
     if usage is not None:
@@ -675,7 +760,8 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
     if len(tasks) < 4:
         notes.append(f"only {len(tasks)} tasks: the held-out split will be tiny and the "
                      "acceptance test weak; 8-20 is a workable minimum.")
-    return Composition(tasks=tasks, reward=reward, kwargs=kwargs, tree=tree, notes=notes)
+    return Composition(tasks=tasks, reward=reward, kwargs=kwargs, tree=tree,
+                       notes=notes, audit=audit)
 
 
 def run_spec(spec: EvolveSpec, **hooks: Any) -> EvolutionResult:
