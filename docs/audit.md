@@ -648,6 +648,21 @@ side's own held-out set. `mean(f) - delta` estimates `mean(Y)` with variance
 that as evidence. Correcting a bias the gate never suffered from while ignoring
 the noise it did is the shape of the mistake worth naming.
 
+!!! warning "\"A positive `delta_hat` should mean fewer commits\" is half true"
+    It is the plan's acceptance criterion, and it holds only above a rate of a
+    half. Since `delta_hat` cancels out of the comparison, its only route to the
+    verdict is the Beta spread `p(1-p)` — and subtracting it moves rates
+    *towards* a half when they were above it and *away* when they were below.
+    Measured over 600 random pairs on 32 held-out tasks:
+
+    | measured rates | plain | `delta_hat` = 0.175 | plus `resid_sd` = 0.38 |
+    |---|---|---|---|
+    | 0.55 – 0.85 | 0.608 | 0.542 | 0.450 |
+    | 0.10 – 0.35 | 0.602 | **0.685** | 0.257 |
+
+    The criterion was reaching for `resid_sd`, which lowers the rate in both
+    regimes because it is uncertainty rather than a shift.
+
 `delta_hat` is still applied, for two smaller reasons that are real:
 
 * **The variance scale.** A Beta posterior's spread is `p(1-p)`. At a measured

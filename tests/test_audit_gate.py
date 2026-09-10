@@ -173,6 +173,58 @@ def test_the_bias_cancels_out_of_the_comparison():
     assert bias_only.p_improve != plain.p_improve
 
 
+def test_a_positive_bias_alone_can_raise_the_acceptance_rate():
+    """The plan's acceptance criterion is "delta_hat > 0 -> fewer commits". Half true.
+
+    `delta_hat` cancels out of the comparison, so its only route to the verdict
+    is the Beta spread `p(1-p)`. Subtracting it moves rates **towards** a half
+    when they were above it -- wider posterior, fewer commits -- and **away**
+    from a half when they were below it, which narrows the posterior and commits
+    *more*. Measured over 600 random pairs on 32 held-out tasks:
+
+    ======================  =======  ==================  =====================
+    measured rates          plain    delta_hat = 0.175   plus sigma_eps = 0.38
+    ======================  =======  ==================  =====================
+    0.55 - 0.85              0.608          0.542                0.450
+    0.10 - 0.35              0.602        **0.685**              0.257
+    ======================  =======  ==================  =====================
+
+    The criterion is really about `resid_sd`, which lowers the rate in both
+    regimes because it is uncertainty rather than a shift. That is the whole
+    argument of this module in one table.
+    """
+    rng = random.Random(11)
+    inner, n = _inner(), 32
+
+    def acceptance_rate(gate, lo, hi):
+        rng.seed(11)
+        accepted = 0
+        for _ in range(600):
+            base = rng.randint(int(lo * n), int(hi * n))
+            cand = min(n, base + rng.randint(0, 8))
+            accepted += gate.accept(_ctx(
+                base=(float(base), float(n - base)),
+                cand=(float(cand), float(n - cand)))).accept
+        return accepted / 600
+
+    bias_only = RectifiedAcceptance(inner, rectification=_rect(resid_sd=0.0, se=0.0))
+    full = RectifiedAcceptance(inner, rectification=_rect())
+
+    high = [acceptance_rate(g, 0.55, 0.85) for g in (inner, bias_only, full)]
+    low = [acceptance_rate(g, 0.10, 0.35) for g in (inner, bias_only, full)]
+
+    plain_high, bias_high, full_high = high
+    plain_low, bias_low, full_low = low
+
+    assert bias_high < plain_high, "above a half, the bias alone commits less"
+    assert bias_low > plain_low, (
+        "below a half it commits MORE -- the criterion as written is not what "
+        "the correction does")
+    assert full_high < plain_high and full_low < plain_low, (
+        "sigma_eps lowers the rate in both regimes, because it is uncertainty "
+        "and not a shift -- which is what the criterion was reaching for")
+
+
 def test_the_regression_guard_reads_the_same_rates_after_correction():
     """Shifting both sides by one constant cannot reorder them."""
     gate = RectifiedAcceptance(_inner(), rectification=_rect())
