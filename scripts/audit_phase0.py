@@ -176,6 +176,74 @@ def hotpot_tasks(n: int, *, seed: int = 0) -> List[Task]:
     return tasks
 
 
+#: BBH subtasks, chosen for the *shape* of their answers rather than for
+#: difficulty. The phenomenon under study is a judge accepting what exact match
+#: refuses, so a subtask whose only correct string is ``True`` or ``False``
+#: contributes nothing: the two scorers cannot disagree there. These can.
+#:
+#: ``date_understanding`` and ``salient_translation_error_detection`` want a
+#: label -- ``(B)`` -- where a model naturally answers with the content;
+#: ``object_counting`` wants ``8`` where a model may write ``eight``;
+#: ``word_sorting`` wants an exact sequence a model may punctuate. The Yes/No
+#: pair is in for contrast: it is most of BBH, and a workload where the two
+#: scorers *cannot* differ is worth having in the same measurement.
+BBH_SUBTASKS = (
+    "date_understanding",
+    "object_counting",
+    "word_sorting",
+    "salient_translation_error_detection",
+    "causal_judgement",
+    "sports_understanding",
+)
+
+
+def bbh_tasks(n: int, *, seed: int = 0,
+              subtasks: Sequence[str] = BBH_SUBTASKS) -> List[Task]:
+    """BIG-Bench Hard, sampled across subtasks rather than down one of them.
+
+    A single subtask is one answer shape, and the residual this experiment
+    measures is mostly a property of the shape. Spreading the draw is what makes
+    the second workload a second *workload* and not a second sample of the
+    first.
+
+    The subtask goes in ``meta`` so the diagnosis can group by it -- which is
+    also what the coverage sampler's key wants.
+    """
+    from agentdescent.dataloader import hf_rows
+
+    rng = random.Random(seed)
+    per = max(1, n // max(1, len(subtasks)))
+    tasks: List[Task] = []
+    for name in subtasks:
+        rows = hf_rows("lukaemon/bbh", "test", config=name,
+                       limit=max(per * 2, 20))
+        rng.shuffle(rows)
+        taken = 0
+        for i, row in enumerate(rows):
+            answer = str(row.get("target") or "").strip()
+            question = str(row.get("input") or "").strip()
+            if not answer or not question:
+                continue
+            tasks.append(Task(id=f"{name}:{i}", prompt=question,
+                              meta={"gold": answer, "expected": answer,
+                                    "subtask": name}))
+            taken += 1
+            if taken >= per:
+                break
+    rng.shuffle(tasks)
+    return tasks[:n]
+
+
+WORKLOADS = {"hotpot": hotpot_tasks, "bbh": bbh_tasks}
+
+#: What the report calls each one. A report that says "HotpotQA validation" over
+#: BBH numbers is worse than one that says nothing.
+_WORKLOAD_LABELS = {
+    "hotpot": "HotpotQA validation",
+    "bbh": "BIG-Bench Hard across " + str(len(BBH_SUBTASKS)) + " subtasks",
+}
+
+
 # ---------------------------------------------------------------------------
 # The statistic
 # ---------------------------------------------------------------------------
@@ -185,7 +253,7 @@ def hotpot_tasks(n: int, *, seed: int = 0) -> List[Task]:
 # ---------------------------------------------------------------------------
 
 def run(args) -> Dict:
-    tasks = hotpot_tasks(args.tasks, seed=args.seed)
+    tasks = WORKLOADS[args.workload](args.tasks, seed=args.seed)
     usage = Usage()
     notes: Dict[str, int] = {}
 
@@ -389,7 +457,8 @@ def report(bundle: Dict, an: Dict, args) -> str:
         "",
         "| | |",
         "|---|---|",
-        f"| workload | HotpotQA validation, {len(bundle['tasks'])} questions |",
+        f"| workload | {_WORKLOAD_LABELS[args.workload]}, "
+        f"{len(bundle['tasks'])} questions |",
         f"| verifier `f` (cheap, biased) | {bundle['judge_label']} |",
         "| oracle `Y` (ground truth) | normalized exact match against the reference |",
         f"| `verifier_version` | `{bundle['audited'].verifier_version}` |",
@@ -503,8 +572,10 @@ def report(bundle: Dict, an: Dict, args) -> str:
         "## Reproduce",
         "",
         "```bash",
-        f"python3 scripts/audit_phase0.py --tasks {args.tasks} --rounds {args.rounds} "
+        f"python3 scripts/audit_phase0.py --workload {args.workload} "
+        f"--tasks {args.tasks} --rounds {args.rounds} "
         f"--workers {args.workers} --seed {args.seed}"
+        + (" --tournament" if args.tournament else "")
         + (" --dry-run" if args.dry_run else f" --model {args.model}"),
         "```",
     ]
@@ -515,6 +586,10 @@ def report(bundle: Dict, an: Dict, args) -> str:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--workload", choices=sorted(WORKLOADS), default="hotpot",
+                    help="hotpot: multi-hop free-text answers. bbh: BIG-Bench "
+                         "Hard, sampled across subtasks so the measurement is "
+                         "not one answer shape.")
     ap.add_argument("--tasks", type=int, default=40)
     ap.add_argument("--rounds", type=int, default=5)
     ap.add_argument("--workers", type=int, default=3)
