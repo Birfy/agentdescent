@@ -77,6 +77,10 @@ SECTIONS: List[Tuple[str, str, str, str]] = [
     ("agentdescent.audit.calibrator", "The calibrator",
      "Turns a store of audited pairs into a correction the acceptance gate applies.",
      "audit.md"),
+    ("agentdescent.audit.gate", "Spending the correction",
+     "The only place the audit changes an outcome: evidence discounted by "
+     "verifier noise.",
+     "audit.md"),
     ("agentdescent.audit.ppi", "Prediction-powered inference",
      "The calibration estimator: a stratified mean that borrows the unlabelled scores.",
      "audit.md"),

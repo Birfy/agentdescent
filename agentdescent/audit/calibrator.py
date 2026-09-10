@@ -7,9 +7,13 @@ estimate of the true mean quality. What the gate needs is the *difference*:
 
     Delta = E[f] - E[Y]
 
-and it applies it as ``p_true = p_hat - delta_hat``, adding ``se ** 2`` to its
-own variance so that the correction's uncertainty is carried rather than
-assumed away.
+and the gate applies it as ``p_true = p_hat - delta_hat``. What this module
+therefore has to produce is not one number but three: the correction, its
+uncertainty, and -- the one the plan does not ask for -- :attr:`resid_sd`, the
+*spread* of the verifier's error rather than its mean. ``delta_hat`` cancels out
+of a comparison between two candidates scored by the same verifier;
+``resid_sd`` does not, and on real data it is the larger term by 5.5x. See
+:mod:`agentdescent.audit.gate` for the arithmetic and the measurement.
 
 ``E[f]`` is not estimated. Every unit the run scored was seen by the tap --
 audited or not -- so the population mean of ``f`` is a **known quantity**,
@@ -35,6 +39,7 @@ quietly:
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 from collections import defaultdict
@@ -46,7 +51,8 @@ import numpy as np
 from .ppi import MIN_N_DOMINANT, PPIError, Stratum, ppi_mean_stratified
 from .store import AuditStore
 
-__all__ = ["Calibrator", "Rectification", "STALE_INFLATION"]
+__all__ = ["Calibrator", "Rectification", "STALE_INFLATION",
+           "population_resid_sd"]
 
 #: Variance multiplier the acceptance gate applies while a rectification is
 #: stale. Not a correction -- a stale rectifier has no number to correct *with*
@@ -84,6 +90,12 @@ class Rectification:
     gain_factor: float
     is_stale: bool
     stale_reason: Optional[str]
+    #: Population sd of the residual ``f - Y``, weighted across strata -- the
+    #: *spread* of the verifier's error, as opposed to :attr:`delta_hat`, its
+    #: mean. Two different facts, and the gate needs this one: a mean error
+    #: cancels out of a comparison between two candidates and this does not.
+    #: See :mod:`agentdescent.audit.gate`.
+    resid_sd: float = float("nan")
     warnings: List[str] = field(default_factory=list)
     computed_at: float = 0.0
     #: Earliest and latest ``dispatched_at`` among the records used.
@@ -109,7 +121,7 @@ class Rectification:
                 theta=previous.theta, theta_ci=previous.theta_ci,
                 se=previous.se, n=previous.n, n_unlab=previous.n_unlab,
                 gain_factor=previous.gain_factor,
-                is_stale=True, stale_reason=reason,
+                is_stale=True, stale_reason=reason, resid_sd=previous.resid_sd,
                 warnings=list(previous.warnings), computed_at=previous.computed_at,
                 covers=previous.covers)
         nan = float("nan")
@@ -117,6 +129,38 @@ class Rectification:
                    theta=nan, theta_ci=(nan, nan), se=nan, n=0, n_unlab=0,
                    gain_factor=nan, is_stale=True, stale_reason=reason,
                    computed_at=time.time())
+
+
+def population_resid_sd(strata) -> float:
+    """Sd of ``f - Y`` over the whole population, from the labelled pairs.
+
+    Not the average of the strata's own residual sds. A verifier that is
+    uniformly +0.4 generous in one stratum and uniformly right in another has
+    zero spread *inside* each and plenty across them, and the within-stratum
+    average would report zero -- which is the number that would tell the gate a
+    proxy is a measurement.
+
+    So both terms::
+
+        Var = sum_h W_h * (sd_h ** 2 + (mean_h - Delta) ** 2)
+
+    The weights are population shares, so this describes the units the run
+    scored rather than the units it happened to audit. Strata are equally
+    sampled internally by construction (the tap holds one rate per stratum), so
+    a plain mean within a stratum needs no weighting of its own.
+    """
+    parts = [(s.weight, np.asarray(s.f_lab, dtype=float)
+              - np.asarray(s.y_lab, dtype=float)) for s in strata]
+    parts = [(w, r) for w, r in parts if r.size]
+    if not parts:
+        return float("nan")
+    total_w = sum(w for w, _ in parts)
+    if total_w <= 0.0:
+        return float("nan")
+    grand = sum(w * float(r.mean()) for w, r in parts) / total_w
+    var = sum(w * (float(r.var(ddof=1)) if r.size >= 2 else 0.0)
+              + w * (float(r.mean()) - grand) ** 2 for w, r in parts) / total_w
+    return math.sqrt(max(0.0, var))
 
 
 class Calibrator:
@@ -244,7 +288,8 @@ class Calibrator:
             delta_hat=delta, delta_se=ppi.se,
             theta=ppi.theta, theta_ci=ppi.ci, se=ppi.se,
             n=ppi.n, n_unlab=ppi.n_unlab, gain_factor=ppi.gain_factor,
-            is_stale=False, stale_reason=None, warnings=warnings,
+            is_stale=False, stale_reason=None,
+            resid_sd=population_resid_sd(strata), warnings=warnings,
             computed_at=time.time(), covers=(min(stamps), max(stamps)))
 
     @staticmethod

@@ -45,29 +45,35 @@ Typical use, an experiment that returns next week::
         print(rec.record_id, rec.output)        # go and measure these
     resolve_from_mapping(store, {"a1b2...": 0.83, ...})
 
-What is here, and what is not. :mod:`~agentdescent.audit.estimate` ships the
-**design-based baseline** -- a Hajek (inclusion-probability-weighted) mean of the
-residual with a bootstrap interval, which is what Phase 0 of the plan needs to
-decide whether a bias exists and whether it is large next to the noise the
-acceptance gate already carries. What is deliberately absent is
-**prediction-powered inference**: borrowing strength from the unlabelled verifier
-scores via a cross-fitted coefficient, per-stratum weights and a `t` quantile is
-easy to get subtly wrong in ways a coverage test does not catch, and it belongs
-in a module with its own golden vectors and mutation tests. The two are a
-baseline and a refinement, not alternatives -- same point estimate in
-expectation, wider interval -- so any PPI estimator added later is measured
-against this one rather than trusted over it.
+What measures what. :mod:`~agentdescent.audit.estimate` is the **design-based
+baseline** -- a Hajek (inclusion-probability-weighted) mean of the residual with
+a bootstrap interval, which is what deciding *whether there is a bias at all*
+needs. :mod:`~agentdescent.audit.ppi` is the refinement that borrows strength
+from the unlabelled verifier scores; the two are not alternatives -- same point
+estimate in expectation, wider interval -- so the estimator is measured against
+the baseline rather than trusted over it, and carries golden vectors and
+mutation tests of its own. :func:`~agentdescent.audit.store.summarise` is
+neither: a raw *unweighted* mean for eyeballing a run, named so nobody mistakes
+it for an estimator.
 
-:func:`~agentdescent.audit.store.summarise` is neither: it reports a raw
-*unweighted* mean for eyeballing a run, and is named so that nobody mistakes it
-for an estimator.
+And then three modules that do something with the answer.
+:mod:`~agentdescent.audit.sampler` decides where the next labels should go,
+:mod:`~agentdescent.audit.diagnose` sorts the verifier's errors by what fixing
+them would cost, and :mod:`~agentdescent.audit.gate` is the only place any of it
+changes an outcome -- by discounting the held-out evidence in proportion to how
+much the verifier disagrees with ground truth. On the run that motivated this
+package, that discount was **0.60**: thirty-two tasks judged by an LLM carried
+the information of nineteen judged by exact match.
 """
 
-from .calibrator import STALE_INFLATION, Calibrator, Rectification
+from .calibrator import (STALE_INFLATION, Calibrator, Rectification,
+                         population_resid_sd)
 from .diagnose import (Direction, Disagreement, DisagreementReport,
                        FixReport, Kind, classify_disagreements,
                        evaluate_fix, reference_classifier, residual_stats)
 from .estimate import bootstrap_ci, hajek_mean, residual_bias, standard_error
+from .gate import (Adjustment, RectifiedAcceptance, VerifierWatch,
+                   discount_for, rectified_counts)
 from .ppi import (MIN_N_DOMINANT, PPIError, PPIResult, Stratum,
                   ppi_mean_stratified, t_ppf)
 from .records import (SCHEMA_VERSION, AuditRecord, Purpose, new_record_id,
@@ -87,6 +93,7 @@ __all__ = [
     "AuditPolicy",
     "AuditStore",
     "AuditedReward",
+    "Adjustment",
     "Calibrator",
     "boundary_stratifier",
     "bootstrap_ci",
@@ -103,18 +110,23 @@ __all__ = [
     "PPIError",
     "PPIResult",
     "Purpose",
+    "RectifiedAcceptance",
+    "VerifierWatch",
     "SamplePlan",
     "Rectification",
     "RenderTap",
     "STALE_INFLATION",
     "Stratum",
     "new_record_id",
+    "discount_for",
     "evaluate_fix",
     "hajek_mean",
     "observed_weights",
     "output_digest",
     "plan_audit",
+    "population_resid_sd",
     "ppi_mean_stratified",
+    "rectified_counts",
     "reference_classifier",
     "resid_sd_from",
     "residual_stats",

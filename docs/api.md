@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-258 public names across 44 modules.
+264 public names across 45 modules.
 
 ---
 
@@ -1317,6 +1317,7 @@ Rectification(
     gain_factor: float,
     is_stale: bool,
     stale_reason: Optional[str],
+    resid_sd: float = nan,
     warnings: List[str] = <factory>,
     computed_at: float = 0.0,
     covers: Tuple[float, float] = (0.0, 0.0)
@@ -1326,6 +1327,111 @@ Rectification(
 | method | what it does |
 |---|---|
 | `stale(...)` | A rectification that must not be applied, and says why. |
+
+### `population_resid_sd(strata) -> float`
+
+Sd of `f - Y` over the whole population, from the labelled pairs.
+
+---
+
+## Spending the correction
+
+The only place the audit changes an outcome: evidence discounted by verifier noise. &nbsp;·&nbsp; `agentdescent.audit.gate` &nbsp;·&nbsp; [guide](audit.md)
+
+### `Adjustment(...)`
+
+What the audit did to one merge decision, and why.
+
+```python
+Adjustment(
+    applied: bool,
+    reason: str,
+    delta_hat: float = 0.0,
+    sigma_eps: float = 0.0,
+    drift: float = 0.0,
+    kappa_base: float = 1.0,
+    kappa_cand: float = 1.0,
+    var_before: float = 0.0,
+    var_after: float = 0.0,
+    audit_limited: bool = False,
+    stale: bool = False
+) -> None
+```
+
+| method | what it does |
+|---|---|
+| `to_detail() -> str` | One clause, for the tail of a refusal a person will read. |
+
+### `RectifiedAcceptance(...)`
+
+An acceptance gate that knows its measurement came from a proxy.
+
+```python
+RectifiedAcceptance(
+    inner: Any = None,
+    *,
+    calibrator: Optional[Calibrator] = None,
+    verifier_version: Union[str, Callable[[], str]] = '',
+    rectification: Optional[Rectification] = None,
+    enabled: bool = True,
+    drift_allowance: Optional[float] = None,
+    inflate_when_stale: float = 2.0,
+    min_kappa: float = 0.001
+) -> None
+```
+
+| parameter | type | default | what it is |
+|---|---|---|---|
+| `inner` | `Any` | `None` | The rule that actually decides. Defaults to the shipped gate, with the run's thresholds filled in by the aggregator at install time. |
+| `calibrator` | `Optional[Calibrator]` | `None` | Where the correction comes from. Re-read on every decision, so a rectification that goes stale mid-run takes effect at the next merge. |
+| `verifier_version` | `Union[str, Callable[[], str]]` | `''` | The version to ask the calibrator about -- a string, or a callable returning one for a verifier that can change under the run. |
+| `rectification` | `Optional[Rectification]` | `None` | A fixed correction instead of a calibrator. For a run that measured its bias once, offline, and does not intend to keep measuring. |
+| `enabled` | `bool` | `True` | `False` delegates to `inner` on the untouched context. This is the constraint that lets the audit be turned on mid-run: off, it is not approximately the old behaviour, it *is* the old call. |
+| `drift_allowance` | `Optional[float]` | `None` | Standard deviation to carry for `Delta` differing between the two sides being compared. `None` uses the rectification's own `se`, which is the right order of magnitude and not an estimate of the thing (see the module docstring). |
+| `inflate_when_stale` | `float` | `2.0` | Variance multiplier while no usable correction exists. `1.0` passes through instead, which is the choice to treat "we have not measured the verifier" and "the verifier is unbiased" as the same claim. |
+| `min_kappa` | `float` | `0.001` |  |
+
+| method | what it does |
+|---|---|
+| `current() -> Optional[Rectification]` | The rectification in force, or `None` if there is no source. |
+| `explain(ctx) -> Adjustment` | What `accept` would do to `ctx`, without deciding anything. |
+
+### `VerifierWatch(...)`
+
+Marks a calibrator stale when the instrument it calibrated may have moved.
+
+```python
+VerifierWatch(
+    calibrator: Calibrator,
+    *,
+    fingerprint: Optional[Callable[[], str]] = None,
+    artifact_ids: Iterable[str] = (),
+    key_globs: Sequence[str] = (),
+    layers: Iterable[int] = ()
+) -> None
+```
+
+| method | what it does |
+|---|---|
+| `check() -> bool` | Re-read the fingerprint; mark stale and return True if it changed. |
+| `on_merge(artifact, diff) -> bool` | Call after a diff commits. True means the calibration was withdrawn. |
+
+### `discount_for(...)`
+
+How many of these observations are worth believing, given `extra_var`.
+
+```python
+discount_for(
+    counts: Tuple[float, float],
+    extra_var: float,
+    *,
+    min_kappa: float = 0.001
+) -> Tuple[float, float, float]
+```
+
+### `rectified_counts(counts: Tuple[float, float], delta: float) -> Tuple[Tuple[float, float], float]`
+
+Shift `(successes, failures)` so the rate reads `p - delta`.
 
 ---
 

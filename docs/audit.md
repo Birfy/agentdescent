@@ -460,9 +460,9 @@ from agentdescent.audit import Calibrator
 cal = Calibrator(store)
 r = cal.current(audited.verifier_version)
 
-if not r.is_stale:
-    p_true = p_hat - r.delta_hat        # subtract the bias
-    var_true = var_p + r.se ** 2        # and carry its uncertainty
+r.delta_hat      # E[f] - E[Y]: how generous the verifier is, on average
+r.se             # how well that average is pinned down
+r.resid_sd       # how *scattered* the error is around it  <- the one that matters
 ```
 
 `delta_hat` is `E[f] - E[Y]`. Note which half is estimated: **`E[f]` is not**.
@@ -519,3 +519,150 @@ propagates as a `nan` through the interval instead of failing where it happened.
 Snapshots go into the same JSONL under a `kind` key, reconciled last-wins like
 the records; a crash loses at most `FLUSH_EVERY` observations, which moves a
 stratum mean by about 1e-4.
+
+`resid_sd` is not in the plan, and it turns out to be the term the gate is mostly
+made of. Why is the next section.
+
+## Spending it — the gate
+
+[`RectifiedAcceptance`](api.md#spending-the-correction) is the only place in the
+package where the audit changes an outcome. It wraps whatever acceptance rule
+the run already uses:
+
+```python
+from agentdescent.audit import RectifiedAcceptance
+from agentdescent.policies import Policies
+
+gate = RectifiedAcceptance(calibrator=cal, verifier_version=audited.verifier_version)
+evolve(tasks, reward=audited, policies=Policies(acceptance=gate), ...)
+```
+
+`enabled=False` returns `inner.accept(ctx)` on the untouched context — not
+"behaves the same as", *the same call* — which is what makes it safe to switch on
+during a production run.
+
+### The plan's formula is aimed at the wrong term
+
+Phase 4 of the plan says:
+
+```python
+p_true = p_hat - delta_hat
+var_true = var_p + r.se ** 2
+```
+
+Both halves are slightly off, and the Phase 0 audit says by how much. On 177
+HotpotQA pairs, with the shipped gate reading 32 held-out tasks at 0.688:
+
+| term | value | share of the binomial term (0.00671) |
+|---|---|---|
+| `resid_sd ** 2 / n` | 0.00454 | **68%** |
+| `se(delta) ** 2` | 0.00082 | 12% |
+
+The plan carries the 12% term and omits the 68% one.
+
+**Why the correction itself mostly does not matter.** `delta_hat` is one number
+subtracted from *both* sides of a comparison, so it cancels out of `cand - base`
+exactly. So does its standard error. A gate asking "is this candidate better
+than that one" is almost immune to a verifier that is uniformly generous — which
+is good news, and is why this module reads less like a correction than expected.
+
+What does not cancel is the verifier's *disagreement* with the truth on each
+side's own held-out set. `mean(f) - delta` estimates `mean(Y)` with variance
+`resid_sd ** 2 / n`, independently on each side, and the gate has been spending
+that as evidence. Correcting a bias the gate never suffered from while ignoring
+the noise it did is the shape of the mistake worth naming.
+
+`delta_hat` is still applied, for two smaller reasons that are real:
+
+* **The variance scale.** A Beta posterior's spread is `p(1-p)`. At a measured
+  0.90 that is 0.09; at the true 0.73 it is 0.20 — the gate is 2.2× overconfident
+  about a difference in either direction.
+* **The rates in the refusal.** `held-out regression 0.812 -> 0.781` is read by a
+  person, and two numbers that are both 0.17 too high are two wrong numbers.
+
+`se(delta)` is carried, **once** rather than twice, under a name that says what
+it stands in for: `Adjustment.drift`, the allowance for `delta` not actually
+being the same on both sides. It would not be, if a candidate shifted its outputs
+into a stratum where the verifier is more generous — which is the failure this
+whole package exists to catch. `se` is not an estimate of that drift; it is the
+only number to hand of roughly the right size, and `drift_allowance=` takes a
+better one.
+
+### How the doubt is applied
+
+By **discounting the counts**. A rate measured by a noisy proxy over `n` tasks is
+worth some smaller number of oracle-scored tasks, and `discount_for` solves for
+exactly that number:
+
+```
+p(1-p) / n_eff  =  p(1-p) / n + extra_var
+kappa           =  p(1-p) / (p(1-p) + n * extra_var)
+```
+
+Scaling `(successes, failures)` by `kappa` leaves the rate untouched, so the
+regression guard, `observed_delta`, and the artifact's own prior all see exactly
+what they saw before; only the Beta test's confidence moves. And because the
+change is in the *context* rather than in the rule, every acceptance policy gets
+it, not just the shipped one.
+
+On the Phase 0 numbers `kappa ≈ 0.60`: **32 tasks judged by that LLM judge carry
+the information of 19 judged by exact match.** A candidate scoring 0.625 → 0.750
+commits on the first reading and does not commit on the second.
+
+!!! note "The gate's prior is not discounted"
+    An earlier version solved for a *posterior* variance instead, which made the
+    achievable widening depend on how many commits an artifact already had:
+    past about forty, the prior alone was narrower than the target and the audit
+    could not make the gate doubt its verifier at all — silently, since the
+    arithmetic returned a number either way. The prior is separate evidence and
+    still speaks; it is just not evidence the verifier produced.
+
+Clipping is one-directional on purpose. Shifting a rate out of `[0, 1]` and
+clipping it back shrinks the gap between the two sides, never widens it, so the
+correction's failure mode is a candidate that does not commit.
+
+### When there is nothing to apply
+
+| situation | what the gate does |
+|---|---|
+| `enabled=False` | `inner.accept(ctx)`, same object in and out |
+| rectification is stale | keeps the rates, spends `1 / STALE_INFLATION` of the evidence |
+| no calibrator and no rectification | the same — "unmeasured" is not "unbiased" |
+| `resid_sd` is missing | **stale**, because the missing term is the one the variance is mostly made of |
+| `inflate_when_stale=1.0` | pass through, for a run migrating onto the audit |
+
+A refusal says which of these applied, and — one extra Monte-Carlo draw, on
+refusals only — whether the audit is what caused it:
+
+```
+refused by the audit -- audit: delta_hat +0.175; sigma_eps 0.381; evidence x0.61
+```
+
+The draw is seeded per candidate, so re-running the gate on the same context
+returns the same number: the attribution is a fact about that decision, not a
+coin flip near the threshold.
+
+### The instrument has to hold still
+
+A correction estimated for one verifier says nothing about the next, and nothing
+in the arithmetic notices. [`VerifierWatch`](api.md#spending-the-correction)
+withdraws the calibration when the verifier may have moved:
+
+```python
+watch = VerifierWatch(cal,
+                      fingerprint=lambda: verifier_fingerprint(judge, extra=prompt),
+                      artifact_ids=["judge_prompt"],
+                      key_globs=["rubric.*"])
+watch.check()                       # exact, and blind to an evolving prompt
+watch.on_merge(artifact, diff)      # heuristic, and not blind to it
+```
+
+`check()` compares fingerprints, which is exact and blind to the case that
+matters most: a verifier whose *prompt* the loop is evolving has the same module,
+qualname and source. Fold the prompt into the fingerprint (`extra=`) and it stops
+being blind.
+
+**Nothing is watched by default**, which is the right default for a run whose
+verifier is a fixed function and exactly the wrong one for a run that evolves its
+own judge. A false positive costs one recompute; a false negative is the failure
+the package exists to prevent. Name too much rather than too little.

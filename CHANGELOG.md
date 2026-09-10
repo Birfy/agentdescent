@@ -30,7 +30,45 @@ All notable changes to AgentDescent are documented here. The format follows
   `inclusion_prob` that drew the unit, the `verifier_version` that scored it, and
   the output itself. Calibration and improvement labels go into disjoint pools
   and `for_calibration` asserts the split rather than filtering for it. The
-  estimator is deliberately not included. [docs/audit.md](docs/audit.md)
+  estimator, the allocation and the gate that spends the answer are the entries
+  below. [docs/audit.md](docs/audit.md)
+
+- **`agentdescent.audit.gate` -- the audit reaching the decision that commits.**
+  `RectifiedAcceptance` wraps any acceptance policy and discounts the held-out
+  evidence by however much the verifier disagrees with ground truth. On the
+  Phase 0 audit that discount is **0.60**: thirty-two tasks judged by an LLM
+  carry the information of nineteen judged by exact match, and a candidate
+  scoring 0.625 -> 0.750 commits without the audit and does not commit with it.
+
+  The plan's Phase 4 formula, `var_true = var_p + se(delta) ** 2`, is aimed at
+  the wrong term. `delta_hat` is one number subtracted from **both** sides of a
+  comparison, so it cancels out of `cand - base` exactly, and so does its
+  standard error: a gate asking "is this better than that" is nearly immune to a
+  uniformly generous verifier. What does not cancel is the *spread* of the
+  verifier's error, `resid_sd ** 2 / n`, which each side carries independently
+  -- and which the gate had been spending as evidence. Measured: 0.00454 against
+  0.00082, **5.5x larger** than the term the plan carries.
+
+  So `Rectification` gained `resid_sd`, the population sd of `f - Y` pooled
+  across strata with the between-stratum term included (a verifier uniformly
+  +0.4 generous in one stratum and exact in another has zero spread inside each
+  and plenty across them). `delta_hat` is still applied, for the two smaller
+  reasons that are real -- the Beta spread `p(1-p)` is 2.2x wrong when read at
+  an uncorrected rate, and the rates in a refusal are read by a person -- and
+  `se(delta)` is carried once rather than twice, named `drift`: the allowance
+  for `delta` differing between the two sides, which is the failure this package
+  exists to catch.
+
+  Applied by **discounting the counts**, so the rate is untouched and the
+  regression guard, `observed_delta` and the artifact's prior all see exactly
+  what they saw before. `enabled=False` returns `inner.accept(ctx)` on the
+  untouched context -- the same call, not an equivalent one -- so the audit can
+  be switched on mid-run. A stale rectification widens instead of correcting; a
+  rectification with no `resid_sd` is treated as stale, because the missing term
+  is the one the variance is mostly made of. `VerifierWatch` withdraws the
+  calibration when the instrument may have moved, by fingerprint, artifact id,
+  governance layer or glob over a diff's keys.
+  [docs/audit.md](docs/audit.md#spending-it--the-gate)
 
 - **`agentdescent.audit.diagnose` -- what the verifier gets wrong, and whether a
   fix helps.** `classify_disagreements` sorts the residual into what it would

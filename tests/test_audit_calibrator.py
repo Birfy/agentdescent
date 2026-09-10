@@ -55,6 +55,36 @@ def _populated(*, n=200, bias=0.3, base=0.5, version="v1", n_unlab=600, seed=0):
 
 # -- the estimate ------------------------------------------------------------
 
+def test_it_carries_the_spread_of_the_error_and_not_only_its_mean():
+    """`resid_sd` is the term the acceptance gate is mostly made of.
+
+    `delta_hat` is one number applied to both sides of a comparison, so it
+    cancels; the *spread* of `f - Y` does not, and it is what
+    :mod:`agentdescent.audit.gate` spends. Here the residual is Bernoulli at
+    ``bias * (1 - base) = 0.15``, whose sd is ``sqrt(0.15 * 0.85) = 0.357`` --
+    more than twice the bias itself.
+    """
+    sds = []
+    for seed in range(40):
+        store, truth = _populated(seed=seed)
+        sds.append(Calibrator(store).current("v1").resid_sd)
+    assert np.mean(sds) == pytest.approx(math.sqrt(0.15 * 0.85), abs=0.02)
+    assert np.mean(sds) > 2 * 0.15, (
+        "the spread is the larger fact, and the plan carries only the mean")
+
+
+def test_a_stale_rectification_carries_the_spread_forward_too():
+    """So a log can show what was withheld, on all the numbers rather than some."""
+    store, _ = _populated()
+    cal = Calibrator(store)
+    fresh = cal.current("v1")
+    cal.mark_stale("the judge was rewritten")
+    held = cal.current("v1")
+    assert held.is_stale
+    assert held.resid_sd == pytest.approx(fresh.resid_sd)
+
+
+
 def test_it_recovers_a_bias_that_was_put_there_on_purpose():
     """Averaged over draws, not asserted on one.
 
