@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-306 public names across 52 modules.
+311 public names across 53 modules.
 
 ---
 
@@ -1263,6 +1263,66 @@ reference_classifier(
 
 ---
 
+## Searching for a fix
+
+Enumerate the hard rules, score every combination, rank by the residual. &nbsp;·&nbsp; `agentdescent.audit.propose` &nbsp;·&nbsp; [guide](audit.md)
+
+### `Candidate(rules: Tuple[str, ...], report: FixReport, passengers: Tuple[str, ...] = ()) -> None`
+
+One combination of rules and what it does to the whole labelled set.
+
+### `Rule(name: str, predicate: Predicate) -> None`
+
+A named reason to mark an output wrong that the verifier marked right.
+
+### `SearchReport(...)`
+
+Every combination tried, best first, and the two things to distrust.
+
+```python
+SearchReport(
+    sigma_before: float,
+    candidates: List[Candidate] = <factory>,
+    n_rules: int = 0,
+    n_combinations: int = 0,
+    floor: float = nan,
+    warnings: List[str] = <factory>
+) -> None
+```
+
+### `length_rules(...)`
+
+Candidate rules that need only a reference and a normaliser.
+
+```python
+length_rules(
+    normalise: Callable[[str], str],
+    reference_of: Callable[[Any], str],
+    *,
+    question_of: Optional[Callable[[Any], str]] = None,
+    short: Sequence[float] = (0.6, 0.4),
+    long: Sequence[float] = (1.6, 3.0)
+) -> List[Rule]
+```
+
+### `search(...)`
+
+Score every combination of `rules` up to `max_size`, best first.
+
+```python
+search(
+    records: Sequence[AuditRecord],
+    rules: Sequence[Rule],
+    context: Optional[Mapping[str, Any]] = None,
+    *,
+    max_size: int = 2,
+    floor: float = nan,
+    max_combinations: int = 200
+) -> SearchReport
+```
+
+---
+
 ## The verifier scorecard
 
 What has to be true before a new verifier replaces the old one. &nbsp;·&nbsp; `agentdescent.audit.scorecard` &nbsp;·&nbsp; [guide](audit.md)
@@ -2384,23 +2444,6 @@ Archive(
 
 Keep the `k` best-scoring candidates and spread the workers over them.
 
-### `Candidate(...)`
-
-One starting point the next batch could be launched from.
-
-```python
-Candidate(
-    artifact_id: str,
-    version: int,
-    state: Mapping[str, str] = <factory>,
-    score: Optional[float] = None,
-    per_task: Mapping[str, float] = <factory>,
-    selected: int = 0,
-    parent: Optional[int] = None,
-    prior: Optional[float] = None
-) -> None
-```
-
 ### `MCTS(exploration: float = 1.4) -> None`
 
 UCT over the candidate tree: one evolve step is one rollout.
@@ -3349,6 +3392,10 @@ Seven methods: four the aggregator calls, three more the engine calls.
 ### `LocalWorkspaceSandbox`
 
 A throwaway directory on this machine -- what a rollout has always got.
+
+### `MAX_COMBINATIONS`
+
+int([x]) -> integer int(x, base=10) -> integer
 
 ### `MIN_N_DOMINANT`
 

@@ -26,6 +26,7 @@ from agentdescent.audit.diagnose import (classify_disagreements, evaluate_fix,
                                          reference_classifier, residual_stats)
 from agentdescent.audit.coverage import (coverage_of, plan_coverage,
                                          rarefaction, unseen_mass_overall)
+from agentdescent.audit.propose import length_rules, search
 from agentdescent.audit.scorecard import rescan, scorecard
 from scripts.audit_phase0 import normalize
 
@@ -186,6 +187,11 @@ def main() -> None:
                          for r in records if r.residual != 0.0) if m]
     curve = rarefaction(modes, [5, 10, 15, 20, 25, 30], reps=400)
 
+    found = search(records,
+                   length_rules(normalise, lambda c: c[1],
+                                question_of=lambda c: c[0]),
+                   context, max_size=2, floor=report.floor_sigma)
+
     stats = residual_stats(records)
     card = scorecard(
         Rectification(
@@ -247,6 +253,26 @@ def main() -> None:
         "That is the argument for measuring each rule alone rather than the "
         "change as",
         "shipped: a bundle launders whatever is in it.",
+        "",
+        "---",
+        "",
+        "## What a search finds instead",
+        "",
+        "The same eight-ish rules, every combination up to two, ranked on the",
+        "residual rather than the bias:",
+        "",
+        found.to_markdown(limit=8),
+        "",
+        f"**The best pair cuts the residual "
+        f"{1 - found.best.sigma / found.sigma_before:.0%} and breaks "
+        f"{found.best.report.broken}.** It is better than either rule picked by "
+        f"hand above, and",
+        f"`echoes-the-question` ranks "
+        f"{1 + next(i for i, c in enumerate(found.candidates) if c.rules == ('echoes-the-question',))}"
+        f" of {len(found.candidates)} on its own -- last -- because the ranking "
+        f"is on the",
+        "residual and that is what the residual is for. Nobody had to remember "
+        "not to ship it.",
         "",
         swept.to_markdown(),
         "",

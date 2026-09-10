@@ -353,6 +353,66 @@ They coincide only when the verifier errs in both directions equally, which is
 never the interesting case. They were one field called `false_negative_rate`
 until real data put 7.5% and 22.4% side by side.
 
+## Searching for a fix instead of guessing one
+
+Everything above scores **a** proposed fix. Nothing proposes one, which left the
+improvement pool's labels paying for a diagnosis nobody acted on.
+[`search`](api.md#searching-for-a-fix) is the first rung of the ladder,
+automated: enumerate the hard rules a person reaches for, score every
+combination on the whole labelled set, rank by the residual.
+
+```python
+from agentdescent.audit import length_rules, search
+
+rules = length_rules(normalise, lambda ctx: ctx.gold,
+                     question_of=lambda ctx: ctx.question)
+found = search(store.for_improvement(version), rules, tasks_by_id,
+               max_size=2, floor=report.floor_sigma)
+print(found.to_markdown())
+```
+
+On the Phase 0 audit, seven rules taken two at a time — 28 combinations:
+
+| `sigma` | fixed | broke | false negatives | rules |
+|---|---|---|---|---|
+| 0.3812 | — | — | — | *the verifier as it is* |
+| **0.2421** | 20 | **0** | 0% | `far-shorter(0.6)` + `far-longer(1.6)` |
+| 0.2521 | 19 | 0 | 0% | `far-shorter(0.6)` + `shares-no-token-with-reference` |
+| 0.2955 | 14 | 0 | 0% | `far-longer(1.6)` + `shares-no-token-with-reference` |
+
+**The best pair cuts the residual 36% and breaks nothing** — better than either
+rule picked by hand — and `echoes-the-question`, the rule that cuts the bias 74%
+while making the verifier worse, ranks **28 of 28**. Nobody had to remember not
+to ship it; the ranking is on the residual and that is what the residual is for.
+
+It lands at 0.2421 against a
+[`floor_sigma`](#the-floor) of 0.2203: two points above what the classifier said
+was reachable, and the rest is the `AMBIGUOUS` bucket, which is the part that
+must not be fixed.
+
+Three rules about the search itself, each of which was a way to be wrong:
+
+**A search is a bundle generator, and a bundle launders whatever is in it.** Every
+member of a winning combination is also scored alone, and a combination that
+helps while carrying a member that does not is flagged `launders` and kept out of
+`report.clean`.
+
+**A rule may only reject.** It never raises a score — one that could would be
+free to buy a lower residual with a higher false-negative rate in the same move,
+and the report would show only the first.
+
+**Going below the floor is a warning, not a result.** Either a disagreement
+classified `AMBIGUOUS` is fixable after all, or — far more likely on a few
+hundred labels — the combination is fitting the sample. `report.below_the_floor`
+names them; read the units they changed before believing them. For the same
+reason the search refuses to build more than `MAX_COMBINATIONS`: every
+combination scored is another chance for one to look good by luck.
+
+The records must be the **improvement** pool. Labels used to choose a rule
+cannot then measure the bias it leaves behind — that is [constraint
+2](#two-pools-never-mixed), and a search is the most thorough way there is to
+violate it.
+
 ## The scorecard — before a new verifier replaces the old one
 
 A verifier is the instrument every other number in a run is measured with, so

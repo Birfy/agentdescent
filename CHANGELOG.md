@@ -127,6 +127,36 @@ All notable changes to AgentDescent are documented here. The format follows
   calibration pool was measuring.
   [docs/audit.md](docs/audit.md#the-audited-units-are-not-independent)
 
+- **`agentdescent.audit.propose` -- something that proposes a fix, not only
+  scores one.** `diagnose` sorted the verifier's errors and measured a proposed
+  rule; nothing proposed one, so the improvement pool's labels were paying for a
+  diagnosis nobody acted on. `search` is the plan's first rung automated:
+  enumerate the hard rules a person reaches for, score every combination on the
+  whole labelled set, rank by the residual. No model, no training.
+
+  On the Phase 0 audit, seven rules two at a time:
+
+  | `sigma` | fixed | broke | FN | rules |
+  |---|---|---|---|---|
+  | 0.3812 | -- | -- | -- | *as it is* |
+  | **0.2421** | 20 | **0** | 0% | `far-shorter(0.6)` + `far-longer(1.6)` |
+  | 0.2521 | 19 | 0 | 0% | `far-shorter(0.6)` + `shares-no-token-with-reference` |
+
+  The best pair cuts the residual **36% and breaks nothing** -- better than
+  either rule picked by hand -- and `echoes-the-question`, the rule that cuts the
+  bias 74% while making the verifier worse, ranks **28 of 28**. Nobody had to
+  remember not to ship it. It lands 0.02 above the `floor_sigma` the classifier
+  predicted, and the remainder is the AMBIGUOUS bucket.
+
+  Three disciplines, each of which was a way to be wrong: a search is a bundle
+  generator and a bundle launders whatever is in it, so every member is also
+  scored alone and a combination carrying a non-helping member is flagged; a
+  rule may only **reject**, never raise a score, or it could buy a lower
+  residual with a higher false-negative rate in one move; and going below the
+  floor is a warning rather than a result, because on a few hundred labels it is
+  far more likely to be fitting the sample.
+  [docs/audit.md](docs/audit.md#searching-for-a-fix-instead-of-guessing-one)
+
 - **`agentdescent.audit.coverage` -- the improvement pool is not allocated like
   the calibration pool.** Neyman (`n_h ~ W_h * sd_h` on the residual) minimises
   the variance of the correction. The improvement pool's job is to find as many

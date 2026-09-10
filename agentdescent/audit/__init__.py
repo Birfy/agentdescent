@@ -84,6 +84,8 @@ from .gate import (Adjustment, RectifiedAcceptance, VerifierWatch,
 from .ppi import (MIN_N_DOMINANT, PPIError, PPIResult, Stratum,
                   cluster_var_of_mean, ppi_mean_stratified, t_ppf)
 from .ranking import Flip, RankReport, kendall_tau_b, rank_agreement
+from .propose import (MAX_COMBINATIONS, Candidate, Rule, SearchReport,
+                      length_rules, search)
 from .queue import DrainReport, drain, prioritise
 from .records import (SCHEMA_VERSION, AuditRecord, Purpose, new_record_id,
                       output_digest, verifier_fingerprint)
@@ -109,6 +111,7 @@ __all__ = [
     "SCHEMA_VERSION",
     "Audit",
     "AuditRecord",
+    "MAX_COMBINATIONS",
     "MIN_N_DOMINANT",
     "MIN_UNSEEN",
     "audit_drift",
@@ -123,6 +126,7 @@ __all__ = [
     "AuditedReward",
     "Adjustment",
     "attach",
+    "Candidate",
     "CALIBRATION_CEILING",
     "CALIBRATION_FLOOR",
     "Cost",
@@ -160,6 +164,8 @@ __all__ = [
     "SamplePlan",
     "RankReport",
     "Rectification",
+    "Rule",
+    "SearchReport",
     "RescanReport",
     "Scorecard",
     "RenderTap",
@@ -173,6 +179,7 @@ __all__ = [
     "evaluate_fix",
     "hajek_mean",
     "kendall_tau_b",
+    "length_rules",
     "observed_weights",
     "output_digest",
     "plan_audit",
@@ -190,6 +197,7 @@ __all__ = [
     "residual_stats",
     "residual_bias",
     "resolve_from_mapping",
+    "search",
     "standard_error",
     "summarise",
     "t_ppf",

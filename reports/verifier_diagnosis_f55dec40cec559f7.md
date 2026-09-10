@@ -40,6 +40,32 @@ false-negative rate that went from nothing to 22%.
 That is the argument for measuring each rule alone rather than the change as
 shipped: a bundle launders whatever is in it.
 
+---
+
+## What a search finds instead
+
+The same eight-ish rules, every combination up to two, ranked on the
+residual rather than the bias:
+
+# Rule search -- 7 rules, 28 combinations
+
+The verifier as it is: sigma **0.3812**; floor 0.2203
+
+| sigma | fixed | broke | false negatives | rules |
+|---|---|---|---|---|
+| 0.2421 | 20 | 0 | 0.0% | far-shorter(0.6) + far-longer(1.6) |
+| 0.2521 | 19 | 0 | 0.0% | far-shorter(0.6) + shares-no-token-with-reference |
+| 0.2955 | 14 | 0 | 0.0% | far-shorter(0.6) + far-longer(3.0) |
+| 0.2955 | 14 | 0 | 0.0% | far-longer(1.6) + shares-no-token-with-reference |
+| 0.3031 | 13 | 0 | 0.0% | far-shorter(0.6) + empty |
+| 0.3031 | 13 | 0 | 0.0% | far-longer(1.6) + empty |
+| 0.3031 | 13 | 0 | 0.0% | empty + shares-no-token-with-reference |
+| 0.3104 | 12 | 0 | 0.0% | far-shorter(0.4) + far-longer(1.6) |
+
+**The best pair cuts the residual 36% and breaks 0.** It is better than either rule picked by hand above, and
+`echoes-the-question` ranks 28 of 28 on its own -- last -- because the ranking is on the
+residual and that is what the residual is for. Nobody had to remember not to ship it.
+
 # Rescan -- 177 stored outputs, 5 artifacts
 
 - agreement with the previous verifier: **83.1%**
