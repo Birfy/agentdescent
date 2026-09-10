@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-284 public names across 48 modules.
+288 public names across 49 modules.
 
 ---
 
@@ -1250,6 +1250,7 @@ Scorecard(
     blockers: List[str] = <factory>,
     notes: List[str] = <factory>,
     rescan: Optional[RescanReport] = None,
+    rank: Optional[RankReport] = None,
     computed_at: float = 0.0
 ) -> None
 ```
@@ -1280,11 +1281,74 @@ verifier_scorecard(
     previous: Optional[Rectification] = None,
     previous_records: Sequence[AuditRecord] = (),
     rescan_report: Optional[RescanReport] = None,
+    rank: Optional[RankReport] = None,
     cost: Optional[Cost] = None,
     previous_cost: Optional[Cost] = None,
     max_false_negative: float = 0.05,
     max_cost_ratio: float = 0.25
 ) -> Scorecard
+```
+
+---
+
+## Ordering agreement
+
+Can the verifier put candidates in the right order -- the only thing the gate uses. &nbsp;·&nbsp; `agentdescent.audit.ranking` &nbsp;·&nbsp; [guide](audit.md)
+
+### `Flip(...)`
+
+One artifact pair the verifier orders backwards.
+
+```python
+Flip(
+    base: str,
+    candidate: str,
+    verifier_gap: float,
+    oracle_gap: float,
+    n_base: int,
+    n_candidate: int
+) -> None
+```
+
+### `RankReport(...)`
+
+Ordering agreement, at the unit level and at the level the gate acts on.
+
+```python
+RankReport(
+    n_units: int,
+    tau_b: float,
+    concordant: int,
+    discordant: int,
+    one_directional: bool,
+    n_artifacts: int,
+    by_artifact: Dict[str, Dict[str, float]] = <factory>,
+    n_pairs: int = 0,
+    agree: int = 0,
+    ties: int = 0,
+    flips: List[Flip] = <factory>
+) -> None
+```
+
+| method | what it does |
+|---|---|
+| `above(gap: float) -> Tuple[int, int]` | `(agree, flip)` among pairs whose *verifier* gap is at least `gap`. |
+
+### `kendall_tau_b(x: Sequence[float], y: Sequence[float]) -> Tuple[float, int, int]`
+
+`(tau_b, concordant, discordant)`, tie-corrected.
+
+### `rank_agreement(...)`
+
+Does the verifier order units, and artifacts, the way ground truth does?
+
+```python
+rank_agreement(
+    records: Iterable[AuditRecord],
+    *,
+    pairs: Optional[Sequence[Tuple[str, str]]] = None,
+    min_units: int = 1
+) -> RankReport
 ```
 
 ---

@@ -195,6 +195,56 @@ def test_the_markdown_puts_the_refusal_where_it_will_be_read():
         "the row that decides comes before the row that lies")
 
 
+# -- the ordering row --------------------------------------------------------
+
+def test_the_card_carries_the_only_property_the_gate_uses():
+    """A verifier can be badly biased and order perfectly.
+
+    `delta_hat` and `sigma` both say "generous"; neither says "picks the wrong
+    winner". The row exists because those are different facts.
+    """
+    def artifact(sig, f_rate, y_rate, n=20):
+        return [_rec(1.0 if i < round(f_rate * n) else 0.0,
+                     1.0 if i < round(y_rate * n) else 0.0, sig=sig)
+                for i in range(n)]
+
+    biased_but_ordered = artifact("lo", 0.5, 0.2) + artifact("hi", 0.9, 0.6)
+    unbiased_but_reversed = artifact("a", 0.50, 0.60) + artifact("b", 0.55, 0.45)
+
+    good = scorecard(_rect(), biased_but_ordered)
+    bad = scorecard(_rect(), unbiased_but_reversed)
+
+    assert good.get("ordering agreement").value == 1.0
+    assert bad.get("ordering agreement").value == 0.0
+    assert any("not the one ground truth" in n for n in bad.notes)
+    assert not any("not the one ground truth" in n for n in good.notes)
+
+
+def test_the_ordering_row_does_not_block():
+    """A handful of pairs from one lineage is not something to gate on, and the
+    row says so where someone deciding will read it."""
+    def artifact(sig, f_rate, y_rate, n=20):
+        return [_rec(1.0 if i < round(f_rate * n) else 0.0,
+                     1.0 if i < round(y_rate * n) else 0.0, sig=sig)
+                for i in range(n)]
+
+    # the fixture also carries a few false negatives; raise that bound so the
+    # only thing this test can be reading is the ordering row
+    card = scorecard(_rect(), artifact("a", 0.50, 0.60) + artifact("b", 0.55, 0.45),
+                     max_false_negative=0.5)
+    row = card.get("ordering agreement")
+    assert row.value == 0.0, "premise: every pair is ordered backwards"
+    assert not row.blocking and not row.triggered
+    assert "Not blocking" in row.note
+    assert card.ship, "it is a flag, not a gate"
+
+
+def test_a_single_artifact_has_no_ordering_to_report():
+    card = scorecard(_rect(), _before())
+    assert card.get("ordering agreement") is None
+    assert card.rank is None
+
+
 # -- the rescan --------------------------------------------------------------
 
 def test_a_uniform_rescale_has_no_spread():

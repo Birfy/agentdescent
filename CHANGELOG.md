@@ -45,6 +45,35 @@ All notable changes to AgentDescent are documented here. The format follows
   | C | forget to divide `sigma_eps ** 2` by `n` | the discount falls with `n`: the more the run measured, the less of it the gate may believe |
   | D | a control band from one fixed sigma | alarms on a generation that merely bought fewer labels |
 
+- **`agentdescent.audit.ranking` -- can the verifier order things at all?**
+  Everything else in this package measures how *far* the verifier is from the
+  truth: `delta_hat` its mean error, `resid_sd` the spread, `gain_factor` how
+  much an estimator can borrow. The acceptance gate does one thing and it is not
+  that -- it decides whether a candidate beats a baseline. A verifier can be
+  badly wrong on all three and order every comparison correctly (add 0.2 to
+  every score and nothing the gate decides changes), or close on all three and
+  pick the wrong winner.
+
+  On the Phase 0 audit, five artifacts from one run: **eight of ten pairs
+  ordered the same way, two reversed.** The artifact the verifier ranks first
+  (0.714) is third by ground truth, and one reversal is on an apparent 12-point
+  improvement -- the size of gap the gate commits on.
+
+  Unit-level Kendall tau is nearly uninformative here and is the number people
+  ask for: 4753 concordant pairs, **zero** discordant, `tau_b = 0.681`. That is
+  a restatement of the bias being one-directional, not evidence of ordering --
+  two units are discordant only when the verifier prefers one and the truth
+  prefers the other, and a verifier that answered 1.0 to everything scores zero
+  discordant pairs too. `RankReport.one_directional` flags it and the report
+  says it in place.
+
+  `RankReport.above(gap)` filters to pairs whose *verifier* gap the gate could
+  act on, because a reversal below the gate's own noise costs nothing. The
+  scorecard carries an `ordering agreement` row that deliberately **does not
+  block**: five artifacts from one run are a lineage, ten pairs is not a sample,
+  and a binomial interval on 2-of-10 spans 0.03 to 0.56.
+  [docs/audit.md](docs/audit.md#can-it-order-things-at-all)
+
 - **`agentdescent.audit.drift` -- watching the correction over generations
   without alarming every generation.** One rectification says how biased the
   verifier is; a sequence says whether the loop is *finding* its blind spots,

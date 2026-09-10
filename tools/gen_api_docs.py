@@ -74,6 +74,10 @@ SECTIONS: List[Tuple[str, str, str, str]] = [
     ("agentdescent.audit.scorecard", "The verifier scorecard",
      "What has to be true before a new verifier replaces the old one.",
      "audit.md"),
+    ("agentdescent.audit.ranking", "Ordering agreement",
+     "Can the verifier put candidates in the right order -- the only thing the "
+     "gate uses.",
+     "audit.md"),
     ("agentdescent.audit.drift", "Drift monitoring",
      "EWMA control charts on the correction, without an alarm every generation.",
      "audit.md"),

@@ -78,6 +78,7 @@ from .gate import (Adjustment, RectifiedAcceptance, VerifierWatch,
                    discount_for, rectified_counts)
 from .ppi import (MIN_N_DOMINANT, PPIError, PPIResult, Stratum,
                   ppi_mean_stratified, t_ppf)
+from .ranking import Flip, RankReport, kendall_tau_b, rank_agreement
 from .records import (SCHEMA_VERSION, AuditRecord, Purpose, new_record_id,
                       output_digest, verifier_fingerprint)
 from .sources import (DeferredOracle, GoldAnswer, NullOracle, OracleSource,
@@ -128,6 +129,7 @@ __all__ = [
     "Disagreement",
     "DisagreementReport",
     "FixReport",
+    "Flip",
     "FLIP_ALARM",
     "Goal",
     "Kind",
@@ -141,6 +143,7 @@ __all__ = [
     "RectifiedAcceptance",
     "VerifierWatch",
     "SamplePlan",
+    "RankReport",
     "Rectification",
     "RescanReport",
     "Scorecard",
@@ -151,11 +154,13 @@ __all__ = [
     "discount_for",
     "evaluate_fix",
     "hajek_mean",
+    "kendall_tau_b",
     "observed_weights",
     "output_digest",
     "plan_audit",
     "population_resid_sd",
     "ppi_mean_stratified",
+    "rank_agreement",
     "rectified_counts",
     "rescan",
     "reference_classifier",

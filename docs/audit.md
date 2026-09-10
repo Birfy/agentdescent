@@ -758,6 +758,58 @@ verifier is a fixed function and exactly the wrong one for a run that evolves it
 own judge. A false positive costs one recompute; a false negative is the failure
 the package exists to prevent. Name too much rather than too little.
 
+## Can it order things at all?
+
+Everything above measures how *far* the verifier is from the truth. The
+acceptance gate does exactly one thing, and it is not that: it decides whether a
+candidate is better than a baseline. A verifier can be badly wrong on every
+number on this page and order every comparison correctly — add 0.2 to every
+score and nothing the gate decides changes — and it can be close on all of them
+and still pick the wrong winner.
+
+[`rank_agreement`](api.md#ordering-agreement) is the row for that, and the
+scorecard carries it.
+
+On the Phase 0 audit, five artifacts from one run:
+
+| artifact | n | mean `f` | mean `Y` |
+|---|---|---|---|
+| `bab6bec25105a4c1` | 49 | **0.714** | 0.408 |
+| `26ecdd4b7262776b` | 32 | 0.625 | 0.375 |
+| `0bf0b7ead111b97e` | 32 | 0.594 | **0.469** |
+| `434f372098a00a9f` | 32 | 0.188 | 0.062 |
+| `4aab01c9a0d25067` | 32 | 0.000 | 0.000 |
+
+**Eight of ten pairs are ordered the same way; two are reversed.** The artifact
+the verifier ranks first is third by ground truth, and one reversal is on an
+apparent **12-point** improvement — the size of gap the gate commits on. `Δ` and
+`resid_sd` both say "this judge is generous". Neither says "it picks the wrong
+winner in one comparison out of five".
+
+!!! danger "Unit-level Kendall τ is nearly uninformative here — and it is the number people ask for"
+    Same data: 4753 concordant pairs, **zero** discordant, `τ_b = 0.681`. That
+    is not evidence of good ordering; it is a restatement of the bias being
+    one-directional. Two units are discordant only when the verifier prefers one
+    and the truth prefers the other, and when every error runs the same way
+    (`f > Y`, never `f < Y`) no such pair exists. **A verifier that answered 1.0
+    to everything scores zero discordant pairs too.**
+
+    `RankReport.one_directional` flags it, and the markdown says it in place.
+
+Two more things the report is careful about:
+
+**A reversal on a gap smaller than the gate's noise costs nothing** — the gate
+refuses both candidates there. `report.above(gap)` gives the agreement among the
+pairs the gate would actually have acted on. On this data the sub-0.05 reversal
+drops out and the 12-point one does not.
+
+**Artifacts from one run are a lineage, not independent draws.** Five of them
+make ten pairs, and the report deliberately offers no interval: a binomial
+interval on 2-of-10 spans 0.03 to 0.56 and would be wrong about the dependence
+on top of that. A reversal is a reason to go and look, not a rate.
+
+The scorecard row **does not block** for the same reason.
+
 ## Watching it over generations
 
 One rectification says how biased the verifier is now. A sequence of them says

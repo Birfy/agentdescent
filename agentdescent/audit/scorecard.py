@@ -63,6 +63,7 @@ from typing import (Any, Callable, Dict, Iterable, List, Mapping, Optional,
 from .calibrator import Rectification
 from .diagnose import residual_stats
 from .estimate import hajek_mean
+from .ranking import RankReport, rank_agreement
 from .records import AuditRecord
 
 __all__ = ["FLIP_ALARM", "Cost", "Goal", "Metric", "RescanReport", "Scorecard",
@@ -308,6 +309,7 @@ class Scorecard:
     blockers: List[str] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
     rescan: Optional[RescanReport] = None
+    rank: Optional[RankReport] = None
     computed_at: float = 0.0
 
     @property
@@ -347,6 +349,8 @@ class Scorecard:
                         "there was nothing to compare against.")
         for note in self.notes:
             rows += ["", note]
+        if self.rank is not None:
+            rows += ["", "---", "", self.rank.to_markdown()]
         if self.rescan is not None:
             rows += ["", "---", "", self.rescan.to_markdown()]
         return "\n".join(rows)
@@ -366,6 +370,7 @@ def scorecard(current: Rectification, records: Sequence[AuditRecord], *,
               previous: Optional[Rectification] = None,
               previous_records: Sequence[AuditRecord] = (),
               rescan_report: Optional[RescanReport] = None,
+              rank: Optional[RankReport] = None,
               cost: Optional[Cost] = None,
               previous_cost: Optional[Cost] = None,
               max_false_negative: float = 0.05,
@@ -419,6 +424,22 @@ def scorecard(current: Rectification, records: Sequence[AuditRecord], *,
         "disagreement", now["disagree"], Goal.LOWER,
         previous=was["disagree"] if was else None,
         note="How often the two scorers differ at all, in either direction."))
+
+    ranked = rank if rank is not None else rank_agreement(records)
+    if ranked.n_pairs:
+        metrics.append(Metric(
+            "ordering agreement", ranked.agreement, Goal.HIGHER,
+            previous=(rank_agreement(previous_records).agreement
+                      if previous_records else None),
+            note="Artifact pairs the verifier orders the way ground truth does "
+                 f"({ranked.agree} of {ranked.agree + len(ranked.flips)}). The "
+                 "only property the acceptance gate actually uses, and the one "
+                 "no other row here carries -- a verifier can be badly biased "
+                 "and order perfectly, or nearly unbiased and pick the wrong "
+                 "winner. **Not blocking**: these artifacts are a lineage from "
+                 "one run rather than independent draws, and a handful of pairs "
+                 "is not something to gate on. Read a reversal as a reason to "
+                 "go and look."))
 
     metrics.append(Metric(
         "gain_factor", current.gain_factor, Goal.HIGHER,
@@ -480,6 +501,13 @@ def scorecard(current: Rectification, records: Sequence[AuditRecord], *,
             f"recorded history was scored by an instrument that no longer "
             f"exists and the affected version chain has to be marked")
 
+    if ranked.n_pairs and not ranked.picks_the_same_winner:
+        notes.append(
+            f"> The artifact this verifier ranks first (`"
+            f"{ranked.best_by_verifier[:12]}`) is not the one ground truth "
+            f"ranks first (`{ranked.best_by_oracle[:12]}`). Picking the winner "
+            f"is what the gate is for.")
+
     if previous is None and not previous_records:
         notes.append(
             "> Nothing to compare against, so nothing blocks. This is a "
@@ -493,4 +521,5 @@ def scorecard(current: Rectification, records: Sequence[AuditRecord], *,
         version=current.verifier_version,
         previous_version=previous.verifier_version if previous else None,
         metrics=metrics, blockers=blockers, notes=notes,
-        rescan=rescan_report, computed_at=time.time())
+        rescan=rescan_report, rank=ranked if ranked.n_pairs else None,
+        computed_at=time.time())

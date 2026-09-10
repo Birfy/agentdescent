@@ -61,6 +61,7 @@ The recorded history was scored by an instrument that no longer exists. Mark the
 | false-negative rate | 0.0000 | -- | -- | -- (can block) |
 | delta_hat | 0.1751 | -- | -- | -- |
 | disagreement | 0.1751 | -- | -- | -- |
+| ordering agreement | 0.8000 | -- | -- | -- |
 | gain_factor | nan | -- | -- | -- |
 | labels | 177.0000 | -- | -- | -- |
 
@@ -72,10 +73,40 @@ The recorded history was scored by an instrument that no longer exists. Mark the
 
 **disagreement** -- How often the two scorers differ at all, in either direction.
 
+**ordering agreement** -- Artifact pairs the verifier orders the way ground truth does (8 of 10). The only property the acceptance gate actually uses, and the one no other row here carries -- a verifier can be badly biased and order perfectly, or nearly unbiased and pick the wrong winner. **Not blocking**: these artifacts are a lineage from one run rather than independent draws, and a handful of pairs is not something to gate on. Read a reversal as a reason to go and look.
+
 **gain_factor** -- Approaching 1 means the verifier carries no usable signal about the truth, at which point the answer is a different verifier rather than a bigger audit.
 
 ## Nothing blocks
 
 Every row that has a target moved the right way, or there was nothing to compare against.
 
+> The artifact this verifier ranks first (`bab6bec25105`) is not the one ground truth ranks first (`0bf0b7ead111`). Picking the winner is what the gate is for.
+
 > Nothing to compare against, so nothing blocks. This is a baseline, not a passing grade.
+
+---
+
+# Ordering -- 5 artifacts, 177 units
+
+- artifact pairs ordered the same way: **8/10** (80.0%)
+- the verifier's favourite is **not** the truth's (`bab6bec25105` vs `0bf0b7ead111`)
+- unit-level Kendall tau-b: 0.6813 (4753 concordant, 0 discordant)
+    - every error runs the same way, so **no unit pair can be discordant** and tau says nothing about ordering here. A verifier that answered 1.0 to everything would score the same.
+
+| artifact | n | mean f | mean Y |
+|---|---|---|---|
+| `bab6bec25105a4c1` | 49 | 0.714 | 0.408 |
+| `26ecdd4b7262776b` | 32 | 0.625 | 0.375 |
+| `0bf0b7ead111b97e` | 32 | 0.594 | 0.469 |
+| `434f372098a00a9f` | 32 | 0.188 | 0.062 |
+| `4aab01c9a0d25067` | 32 | 0.000 | 0.000 |
+
+## Reversed
+
+- `0bf0b7ead111` -> `26ecdd4b7262`: verifier +0.031, truth -0.094
+- `0bf0b7ead111` -> `bab6bec25105`: verifier +0.121, truth -0.061
+
+A reversal on a gap the gate would have refused costs nothing. One on a gap it would have committed is a commit that made the artifact worse.
+
+These artifacts come from one run -- a lineage, not independent draws -- and 10 pairs is not a sample to put an interval around. Read a flip as a reason to look at it, not as a rate.
