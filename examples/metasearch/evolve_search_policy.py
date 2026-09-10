@@ -145,6 +145,17 @@ def landscape_problem(family: Family, budget: int = DEFAULT_INNER_BUDGET) -> Pro
     return problem
 
 
+def source_problems(budget: int = DEFAULT_INNER_BUDGET) -> Dict[str, Problem]:
+    """The inner problems a ``kind: "policy_slot"`` spec points at, offline.
+
+    Only ``SOURCE``: ``TARGET`` is the transfer column and the outer loop must
+    never see it. Zero-argument on purpose -- ``data.problems`` in a spec is a
+    ref, and a ref with no configuration is the shape a person can write from
+    memory.
+    """
+    return {"source": landscape_problem(FAMILIES["source"], budget)}
+
+
 def make_run(budget: int = DEFAULT_INNER_BUDGET) -> Callable[[str, Task], str]:
     """The rollout as `meta_evolve` performs it, exposed for the tests."""
     problems = {name: landscape_problem(family, budget) for name, family in FAMILIES.items()}

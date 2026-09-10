@@ -143,6 +143,44 @@ half an hour — budget the outer loop in *sweeps of wall clock*, not in rounds.
 
 **`seeds=[0]`, not `[0, 1, 2]`.** The recorded run passed three seeds and they were three copies of one comparison: on a domain where the inner run is a function of the value, the seed randomises nothing. Spend that budget on more *problems* instead — the reasoning is in [the result page](https://github.com/Birfy/agentdescent/blob/main/bench/results/metasearch-selection-srbench.md).
 
+## From the CLI and the host plugins
+
+`kind: "policy_slot"` puts all of this behind the ordinary spec surface, so
+`plan`, `evolve`, `status`, `watch`, `show` and `apply` work on it unchanged —
+it is still an `evolve()` call. `agentdescent init selection --kind policy_slot`
+writes a starter:
+
+```json
+{
+  "kind": "policy_slot",
+  "target": "selection",
+  "data": {"problems": "mypkg.problems:build", "seeds": [0]},
+  "score": "auc",
+  "agent": {"ref": "openai_compatible", "model": "deepseek-v4-flash"},
+  "evolve": {"rounds": 4, "n_workers": 2, "max_seconds": 5400}
+}
+```
+
+Two fields do not mean what they mean for every other kind, and both are the
+nature of the thing rather than an inconsistency:
+
+* **`target` is a slot name, not a path.** `selection`, `task_sampler`, … — the
+  artifact is a decision rule of the optimiser, and there is no file to point at.
+* **`data` holds refs, not rows.** An inner problem is a callable
+  `(value, seed) -> MetaOutcome`; no row format can express one. `data.problems`
+  is a `module:attribute` ref to a mapping of them (or a zero-argument builder),
+  inside the spec's import allowlist.
+
+`score` takes `auc` (the default), `final_reward`, `rollouts_to`, or a ref to
+any `MetaOutcome -> float`.
+
+**`plan` is worth reading here rather than skipping.** Because a rollout is a
+whole inner search, it reports how many outer tasks exist and how many of them
+the gate actually gets — and it says so when that number is 0 or very small,
+which is the defect this line of work hit at four different levels and which has
+failed both ways: committing nothing, and silently committing a rule that lost
+on its own family.
+
 ## Where to evolve, where to validate
 
 The outer loop runs a whole inner search per rollout and again per held-out

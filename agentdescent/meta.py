@@ -76,6 +76,7 @@ from .staleness import StaleAction, StalenessPolicy
 from .strategies import SingleSlot
 
 __all__ = [
+    "meta_parts",
     "SLOTS",
     "MetaOutcome",
     "Problem",
@@ -1346,8 +1347,6 @@ def meta_evolve(
     ``spec.compile(result.rendered)`` is the evolved value, and
     ``result.rendered`` is what to hand :func:`meta_validate`.
     """
-    if slot not in SLOTS:
-        raise ValueError(f"{slot!r} is not an evolvable slot; choose one of {SLOTS}")
     for taken in ("strategy", "run", "reward", "agent"):
         if taken in evolve_kwargs:
             raise TypeError(f"meta_evolve() sets {taken}= itself")
@@ -1355,6 +1354,36 @@ def meta_evolve(
         if model is None:
             raise ValueError("meta_evolve() needs propose= or model=")
         propose = slot_reflector(model, spec)
+    tasks, reward, kwargs = meta_parts(
+        problems, slot=slot, spec=spec, propose=propose, meta_reward=meta_reward,
+        seeds=seeds, blast_radius=blast_radius, artifact_id=artifact_id)
+    kwargs.update(evolve_kwargs)
+    return evolve(tasks, reward, **kwargs)
+
+
+def meta_parts(
+    problems: Union[Sequence[Problem], Mapping[str, Problem]],
+    *,
+    slot: str,
+    spec: SlotSpec,
+    propose: Callable[[str, Task, str, float], Optional[str]],
+    meta_reward: Optional[MetaReward] = None,
+    seeds: Sequence[int] = (0,),
+    blast_radius: float = 0.6,
+    artifact_id: str = "policy-slot",
+) -> Tuple[List[Task], Callable[[Task, str], float], Dict[str, Any]]:
+    """The :func:`evolve` call :func:`meta_evolve` makes, taken apart.
+
+    ``(tasks, reward, kwargs)``, so that ``evolve(tasks, reward, **kwargs)`` is
+    the run. Split out because a spec-driven front end -- ``kind:
+    "policy_slot"`` in :mod:`agentdescent.evolvespec` -- has to assemble the
+    same call to hand the CLI a ``Composition`` it can plan, cost and detach,
+    and two copies of this would drift. The seed is compiled here, before any
+    rollout, so a slot whose own seed fails its gate is refused by ``plan``
+    rather than at the first rollout.
+    """
+    if slot not in SLOTS:
+        raise ValueError(f"{slot!r} is not an evolvable slot; choose one of {SLOTS}")
     tasks, named = _outer_tasks(problems, seeds)
     score = meta_reward or auc
     spec.compile(spec.render(spec.initial()))      # the seed must pass its own gate
@@ -1373,11 +1402,13 @@ def meta_evolve(
         except (TypeError, ValueError, json.JSONDecodeError):
             return 0.0
 
-    evolve_kwargs.setdefault("self_verify", False)
-    evolve_kwargs.setdefault("solved_threshold", 1.1)
-    return evolve(tasks, reward, run=run, propose=propose, strategy=spec,
-                  blast_radius=blast_radius, artifact_id=artifact_id,
-                  initial_state=spec.initial(), **evolve_kwargs)
+    kwargs: Dict[str, Any] = {
+        "run": run, "propose": propose, "strategy": spec,
+        "blast_radius": blast_radius, "artifact_id": artifact_id,
+        "initial_state": spec.initial(),
+        "self_verify": False, "solved_threshold": 1.1,
+    }
+    return tasks, reward, kwargs
 
 
 def meta_validate(

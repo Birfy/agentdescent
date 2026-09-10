@@ -36,7 +36,8 @@ import time
 from typing import Any, Dict, List, Optional, Sequence
 
 from . import runstore
-from .evolvespec import EvolveSpec, SpecError, compose, estimate, load_spec
+from .evolvespec import (EvolveSpec, SpecError, compose, estimate, load_spec,
+                         _POLICY_SLOTS)
 
 __all__ = ["main", "doctor_report", "starter_spec"]
 
@@ -108,6 +109,17 @@ def starter_spec(path: str, *, kind: Optional[str] = None, data: Optional[str] =
         spec["host"] = ("claude_code" if os.path.exists(os.path.join(p, ".claude-plugin"))
                         else "dsh")
         spec["reflect"] = {"ref": "openai_compatible", "model": "deepseek-v4-flash"}
+    if kind == "policy_slot":
+        # `target` is a slot, not a path, and `data` holds refs rather than rows
+        # -- an inner problem is a callable and no row format can express one.
+        spec["target"] = path if path in _POLICY_SLOTS else "selection"
+        spec["data"] = {"problems": data or "mypkg.problems:build", "seeds": [0]}
+        spec["score"] = "auc"
+        spec["agent"] = {"ref": "openai_compatible", "model": "deepseek-v4-flash"}
+        # A round is `n_workers` whole inner searches, so ask for few and budget
+        # in wall clock: the recorded run asked for 8 rounds and got 2 in 90 min.
+        spec["evolve"] = {"rounds": 4, "n_workers": 2, "max_seconds": 5400}
+        spec["allow"] = ["mypkg"]
     return spec
 
 
@@ -705,7 +717,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("init", help="write a starter spec for a path")
     s.add_argument("path")
-    s.add_argument("--kind", choices=("text", "skill_dir", "agent_dir", "agent_code", "plugin"))
+    s.add_argument("--kind", choices=("text", "skill_dir", "agent_dir", "agent_code",
+                                  "plugin", "policy_slot"))
     s.add_argument("--data", help="cases file to point the spec at")
     s.add_argument("--agent", default="claude_code", help="worker agent short name")
     s.add_argument("--out", help="where to write the spec")

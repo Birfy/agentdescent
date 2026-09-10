@@ -30,6 +30,13 @@ The composition table -- what each ``kind`` assembles -- is
     agent_dir   FileTree       tree_runner         tree_reflector   scorer         L1
     agent_code  FileTree       code_runner         tree_reflector   gated_reward   L1
     plugin      FileTree       plugin_runner       tree_reflector   gated_reward   L1
+    policy_slot SlotSpec       one inner search    slot_reflector   meta_reward    L1
+
+``policy_slot`` is the odd one and the reason the table is worth reading: its
+artifact is not a file but a *decision rule of the optimiser itself*, and one
+rollout is a whole inner ``evolve()`` or tree search rather than one model call.
+Everything downstream -- plan, cost, detach, status, show, apply -- is unchanged,
+because it is still just an ``evolve()`` call.
 """
 
 from __future__ import annotations
@@ -70,7 +77,8 @@ __all__ = [
 
 #: The artifact shapes a spec can name. ``plugin`` is a host plugin (a DSH Cordis
 #: package, a Claude Code plugin directory); see :func:`~agentdescent.runners.plugin_runner`.
-KINDS: Tuple[str, ...] = ("text", "skill_dir", "agent_dir", "agent_code", "plugin")
+KINDS: Tuple[str, ...] = ("text", "skill_dir", "agent_dir", "agent_code", "plugin",
+                          "policy_slot")
 
 #: The composition table, for readers and for the test that checks it against
 #: the quickstarts. Values are the *names* of what is assembled; :func:`compose`
@@ -86,6 +94,11 @@ KIND_ROWS: Dict[str, Dict[str, str]] = {
                    "reward": "gated_reward(scorer)", "blast_radius": "HARNESS_BLAST_RADIUS"},
     "plugin":     {"strategy": "FileTree", "run": "plugin_runner", "propose": "tree_reflector",
                    "reward": "gated_reward(scorer)", "blast_radius": "HARNESS_BLAST_RADIUS"},
+    # The odd row: the artifact is a decision rule of the optimiser rather than
+    # a file, and `run` is a whole inner search rather than one model call.
+    "policy_slot": {"strategy": "SlotSpec", "run": "one inner search",
+                    "propose": "slot_reflector", "reward": "meta_reward(auc)",
+                    "blast_radius": "HARNESS_BLAST_RADIUS"},
 }
 
 #: Short names a spec may use instead of ``module:attribute``. Every entry is a
@@ -258,8 +271,12 @@ class EvolveSpec:
 
         # `text` is the one kind whose target may be the instruction itself
         # rather than a path, so it is resolved only when it names a real file.
+        # `policy_slot` names a *slot*, never a path, so it is never resolved --
+        # absolutising it would turn `selection` into `$PWD/selection`.
         target = self.target
-        if self.kind != "text" or os.path.isfile(resolve(self.target)):
+        if self.kind == "policy_slot":
+            pass
+        elif self.kind != "text" or os.path.isfile(resolve(self.target)):
             target = resolve(self.target)
         out = replace(self, target=target)
         if isinstance(self.data, Mapping) and "path" in self.data:
@@ -516,6 +533,133 @@ def _read_text_target(target: str) -> str:
     return target
 
 
+#: The default :class:`~agentdescent.meta.SlotSpec` factory per slot. Only
+#: ``selection`` has a purpose-built one; every other slot falls back to the
+#: generic source gate, which is why naming ``data.slot_spec`` is the honest
+#: thing to do for them.
+_SLOT_SPEC_DEFAULTS = {"selection": "agentdescent.meta:priority_selection"}
+
+#: ``score`` values a ``policy_slot`` accepts by short name. Anything else is a
+#: ``module:attribute`` ref to a ``MetaOutcome -> float``.
+_META_REWARDS = {"auc": "agentdescent.meta:auc",
+                 "final_reward": "agentdescent.meta:final_reward",
+                 "rollouts_to": "agentdescent.meta:rollouts_to"}
+
+
+def _compose_policy_slot(spec: EvolveSpec, *, usage: Optional[Usage] = None,
+                         on_round: Optional[Callable] = None,
+                         **overrides: Any) -> Composition:
+    """``kind: "policy_slot"`` -- evolve one decision rule of the optimiser.
+
+    The artifact is a slot of :class:`~agentdescent.policies.Policies`, and one
+    rollout is a **whole inner search**, so the cost model is unlike every other
+    kind: rounds are cheap to ask for and expensive to get. The assembly itself
+    is :func:`~agentdescent.meta.meta_parts`, shared with
+    :func:`~agentdescent.meta.meta_evolve` so the two cannot drift.
+
+    ``data`` holds refs rather than rows, because inner problems are callables
+    and no row format can express one::
+
+        data:
+          problems: "mypkg.landscape:source_problems"   # -> Mapping[str, Problem]
+          seeds: [0]                                    # optional
+          slot_spec: "agentdescent.meta:priority_selection"   # optional
+    """
+    from .meta import SLOTS, meta_parts, slot_reflector
+
+    if not isinstance(spec.data, Mapping) or "problems" not in spec.data:
+        raise SpecError("kind='policy_slot' needs data.problems, a "
+                        "'module:attribute' ref to the inner problems")
+    slot = spec.target
+    if slot not in SLOTS:
+        raise SpecError(f"target must be an evolvable slot, one of {SLOTS}; got {slot!r}")
+
+    problems = _resolve(spec.data["problems"], spec, where="data.problems")
+    if callable(problems) and not isinstance(problems, Mapping):
+        problems = problems()          # a zero-arg builder is the usual shape
+    if not problems:
+        raise SpecError("data.problems resolved to nothing to evolve against")
+
+    seeds = spec.data.get("seeds", [0])
+    if not isinstance(seeds, Sequence) or isinstance(seeds, str) or not seeds:
+        raise SpecError("data.seeds must be a non-empty list of integers")
+    seeds = [int(x) for x in seeds]
+
+    slot_spec_ref = spec.data.get("slot_spec") or _SLOT_SPEC_DEFAULTS.get(slot)
+    if slot_spec_ref is None:
+        raise SpecError(f"slot {slot!r} has no default SlotSpec; name one in "
+                        "data.slot_spec (see agentdescent.meta.policy_source)")
+    slot_spec = _resolve(slot_spec_ref, spec, where="data.slot_spec")
+
+    # `EvolveSpec.score` defaults to "contains", a *text* scorer: it compares an
+    # answer to a gold string and cannot read a MetaOutcome. Treat the unset
+    # default as this kind's default rather than failing on a field the author
+    # never wrote.
+    score = spec.score
+    if score in (None, "contains"):
+        score = "auc"
+    if isinstance(score, str):
+        target = _META_REWARDS.get(score, score)
+        if ":" not in target:
+            raise SpecError(f"score: {score!r} is not one of "
+                            f"{sorted(_META_REWARDS)} and not 'module:attribute'")
+        # A meta-reward *is* the callable (`auc`), not a factory for one, which
+        # is the opposite of every other ref in a spec -- so a bare string means
+        # `call: false` here. The dict form still overrides it, for a reward that
+        # genuinely is configured (`{"ref": ..., "call": true, "k": 3}`).
+        score = {"ref": target, "call": False}
+    meta_reward = _resolve(score, spec, where="score")
+
+    model = _resolve(spec.reflect or spec.agent, spec, where="reflect")
+    tasks, reward, kwargs = meta_parts(
+        problems, slot=slot, spec=slot_spec,
+        propose=slot_reflector(model, slot_spec), meta_reward=meta_reward,
+        seeds=seeds, artifact_id=spec.artifact_id())
+
+    # `rounds` deliberately low: a round here is `n_workers` inner searches, and
+    # the recorded run asked for 8 and got 2 inside a 90-minute budget.
+    defaults: Dict[str, Any] = {"rounds": 4, "n_workers": 2, "held_out_frac": 0.4}
+    kwargs.update({k: v for k, v in defaults.items() if k not in spec.evolve})
+    kwargs.update(spec.evolve)
+    kwargs.update(overrides)
+    if usage is not None:
+        kwargs.setdefault("usage", usage)
+    if on_round is not None:
+        kwargs.setdefault("on_round", on_round)
+
+    n_train = _train_count(len(tasks), kwargs.get("held_out_frac", 0.4))
+    n_gate = len(tasks) - n_train
+    notes = [f"one rollout is a whole inner search on one of {len(problems)} problem(s); "
+             f"{len(tasks)} outer task(s), {n_train} for training and {n_gate} for the gate"]
+    # The recurring defect in this line of work, at four different levels: a
+    # gate too small to resolve the effect it is judging. It has failed closed
+    # (nothing commits) and open (a rule that loses on its own family was
+    # committed on 9 held-out instances). Say it before the run, not after.
+    if n_gate == 0:
+        notes.append(
+            "NO held-out task: every acceptance decision would be made on data the search "
+            "trained on. Add problems, or raise held_out_frac -- this run cannot tell an "
+            "improvement from a fit.")
+    elif n_gate < 4:
+        notes.append(
+            f"only {n_gate} held-out task(s): the gate is being asked to resolve a small "
+            "effect from very few samples, which has failed both ways here -- silently "
+            "committing a worse rule, and committing nothing at all. More problems is the fix.")
+    if len(seeds) > 1:
+        # Not an assertion that these seeds are useless -- on a landscape the
+        # seed picks the instance and they are real replicates. It is that the
+        # question has to be asked, because on a domain whose inner run is a
+        # function of the value (deterministic evaluator, cached completions)
+        # the seed changes nothing, and five seeds are then one comparison
+        # counted five times. That went unnoticed through a whole run here.
+        notes.append(
+            f"seeds={seeds}: a seed is a replicate only if it changes the inner run. Run one "
+            "problem at two seeds and compare the curves before trusting the count -- where "
+            "the evaluator is deterministic and completions are cached they will be identical, "
+            "and the extra seeds buy nothing that more problems would not buy better.")
+    return Composition(tasks=tasks, reward=reward, kwargs=kwargs, notes=notes)
+
+
 def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
             on_round: Optional[Callable] = None, repo_path: Optional[str] = None,
             workspace_root: Optional[str] = None, sandbox_pool: Any = None,
@@ -533,6 +677,9 @@ def compose(spec: EvolveSpec, *, usage: Optional[Usage] = None,
         raise SpecError("agent is required (for kind='text' it is the model)")
     if spec.version != 1:
         raise SpecError(f"unsupported spec version {spec.version}")
+
+    if spec.kind == "policy_slot":
+        return _compose_policy_slot(spec, usage=usage, on_round=on_round, **overrides)
 
     tasks = build_tasks(spec)
     reward = build_reward(spec)
