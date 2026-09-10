@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-272 public names across 46 modules.
+284 public names across 48 modules.
 
 ---
 
@@ -1289,6 +1289,90 @@ verifier_scorecard(
 
 ---
 
+## Drift monitoring
+
+EWMA control charts on the correction, without an alarm every generation. &nbsp;·&nbsp; `agentdescent.audit.drift` &nbsp;·&nbsp; [guide](audit.md)
+
+### `DriftKind`
+
+What a signal is telling the operator to do.
+
+| member | value |
+|---|---|
+| `BIAS_UP` | `'bias-up'` |
+| `BIAS_DOWN` | `'bias-down'` |
+| `SIGNAL_LOST` | `'signal-lost'` |
+| `NOT_INDEPENDENT` | `'not-independent'` |
+
+### `DriftMonitor(...)`
+
+EWMA charts on `delta_hat` and `gain_factor`, generation by generation.
+
+```python
+DriftMonitor(
+    *,
+    lam: float = 0.2,
+    L: float = 3.0,
+    centre: Optional[float] = None,
+    min_gain: float = 1.05,
+    gain_lam: float = 0.2
+) -> None
+```
+
+| method | what it does |
+|---|---|
+| `observe(rect: Rectification, label: str = '') -> List[DriftSignal]` | Chart one generation. Returns only the signals *this* point raised. |
+| `observe_point(point: DriftPoint) -> List[DriftSignal]` | Chart a point assembled by hand. For a caller that is not using `Calibrator`. |
+
+### `DriftPoint(...)`
+
+One generation's rectification, reduced to what a chart needs.
+
+```python
+DriftPoint(
+    label: str,
+    delta_hat: float,
+    se: float,
+    gain_factor: float,
+    n: int,
+    covers: Tuple[float, float] = (0.0, 0.0)
+) -> None
+```
+
+### `DriftReport(...)`
+
+Every point charted, every signal raised, and whether the chart is valid.
+
+```python
+DriftReport(
+    points: List[DriftPoint] = <factory>,
+    z_bias: List[float] = <factory>,
+    band: List[float] = <factory>,
+    z_gain: List[float] = <factory>,
+    signals: List[DriftSignal] = <factory>,
+    centre: float = 0.0,
+    overlapping: bool = False
+) -> None
+```
+
+### `DriftSignal(...)`
+
+One alarm, with the number that raised it and what to do.
+
+```python
+DriftSignal(
+    kind: DriftKind,
+    at: int,
+    label: str,
+    value: float,
+    z: float,
+    limit: float,
+    detail: str
+) -> None
+```
+
+---
+
 ## Audit allocation
 
 Neyman allocation, as per-stratum inclusion probabilities. &nbsp;·&nbsp; `agentdescent.audit.sampler` &nbsp;·&nbsp; [guide](audit.md)
@@ -1669,6 +1753,70 @@ standard_error(
     clusters: Optional[Sequence] = None
 ) -> float
 ```
+
+---
+
+## The audit out of process
+
+The audit's verbs as JSON, for the MCP surface and anything resolving truth later. &nbsp;·&nbsp; `agentdescent.audit.service` &nbsp;·&nbsp; [guide](audit.md)
+
+### `audit_drift(path: str, versions: Optional[Sequence[str]] = None) -> Dict[str, Any]`
+
+Chart one rectification per verifier version, oldest first.
+
+### `audit_pending(...)`
+
+The records waiting on an oracle -- for a person or an experiment system.
+
+```python
+audit_pending(
+    path: str,
+    limit: int = 50,
+    older_than: Optional[float] = None,
+    version: Optional[str] = None
+) -> Dict[str, Any]
+```
+
+### `audit_recompute(path: str, version: Optional[str] = None) -> Dict[str, Any]`
+
+Re-read the store and re-estimate. Returns the new rectification.
+
+### `audit_rescan(...)`
+
+Re-score the stored outputs with another verifier and see what moves.
+
+```python
+audit_rescan(
+    path: str,
+    verifier: str,
+    version: Optional[str] = None,
+    allow: Optional[Sequence[str]] = None,
+    pairs: Optional[Sequence[Sequence[str]]] = None
+) -> Dict[str, Any]
+```
+
+### `audit_resolve(path: str, record_id: str, oracle_score: float) -> Dict[str, Any]`
+
+Attach ground truth to one pending record.
+
+### `audit_scorecard(...)`
+
+Fill the card for `version`, against `previous` if one is named.
+
+```python
+audit_scorecard(
+    path: str,
+    version: Optional[str] = None,
+    previous: Optional[str] = None,
+    max_false_negative: float = 0.05,
+    verifier_seconds: Optional[float] = None,
+    oracle_seconds: Optional[float] = None
+) -> Dict[str, Any]
+```
+
+### `audit_status(path: str, version: Optional[str] = None) -> Dict[str, Any]`
+
+The rectifier in force, how much it rests on, and what is outstanding.
 
 ---
 

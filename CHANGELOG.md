@@ -33,6 +33,57 @@ All notable changes to AgentDescent are documented here. The format follows
   estimator, the allocation and the gate that spends the answer are the entries
   below. [docs/audit.md](docs/audit.md)
 
+- **`agentdescent.audit.drift` -- watching the correction over generations
+  without alarming every generation.** One rectification says how biased the
+  verifier is; a sequence says whether the loop is *finding* its blind spots,
+  which is the failure no single measurement shows. `DriftMonitor` is an EWMA
+  control chart, and the plan is explicit that a test per generation is the
+  wrong instrument. Measured over two thousand runs of a hundred in-control
+  generations:
+
+  | | alarms per 100 generations | clean runs that alarm |
+  |---|---|---|
+  | a two-sided test per generation | 4.95 | **99.3%** |
+  | this chart (lam=0.2, L=3) | 0.27 | 16.2% |
+
+  Two departures from the textbook chart, both because the inputs are estimates.
+  The limits are **recursive** -- `Var(z) = lam**2 se**2 + (1-lam)**2 Var(z_prev)`
+  -- because each `delta_hat` arrives with its own standard error and the closed
+  form assumes one shared sigma; the band widens after a noisy generation and
+  narrows after a well-audited one. And **overlapping label sets invalidate the
+  chart and are the default**: `Calibrator` recomputes from the whole store, so
+  consecutive points share most of their labels, are positively correlated, and
+  the true spread of `z` is wider than the recursion -- the limits are too tight
+  and the chart alarms on a verifier that never moved. The monitor reads
+  `Rectification.covers`, notices, and says so rather than charting silently.
+
+  `gain_factor` is smoothed against a threshold rather than charted with limits,
+  because it has no standard error. Below it the signal says what the number
+  implies: replace the verifier, not buy more labels.
+
+- **`agentdescent.audit.service` and the `audit_*` MCP tools.** `audit_status`,
+  `audit_pending`, `audit_resolve`, `audit_recompute`, `audit_scorecard`,
+  `audit_rescan`, `audit_drift`. They take a JSONL **path**, not a `run_id`,
+  because constraint 2 of this package is that truth may take days: the process
+  that dispatched a record is gone when a wet-lab result comes back, and the
+  resolver has a file and nothing else. They never raise -- a tool call that
+  throws gives a model a stack trace and no way to act.
+
+  Three decisions rather than plumbing. A **missing file is an error**, not an
+  empty store: `AuditStore` treats an absent path as one about to be written,
+  which is right for a run and wrong for a question about one, and reading a
+  typo as "no records yet" is how a caller tells a user their verifier is
+  unbiased. `version=None` means the **busiest** version and the reply always
+  names which it picked. And `audit_rescan` resolves a `module:attribute`
+  reference through the same allowlist the spec system uses -- resolution runs
+  whatever it imports, so widening it is the operator's decision and not one a
+  calling model can make by naming a module.
+
+  The tool descriptions carry the two warnings a model needs and cannot derive:
+  `audit_resolve` REFUSES to overwrite a result, and `audit_scorecard` says in
+  as many words not to recommend a verifier change because `delta_hat` fell.
+  [docs/audit.md](docs/audit.md#watching-it-over-generations)
+
 - **`agentdescent.audit.scorecard` -- what has to be true before a new verifier
   replaces the old one.** A verifier is the instrument every other number in a
   run is measured with, so changing it invalidates the run's history in a way

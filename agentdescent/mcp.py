@@ -79,6 +79,49 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
     "resume": (
         "Continue a stopped, failed or cancelled run on its existing ledger (the engine "
         "picks up where it left off). Returns the new status."),
+    "audit_status": (
+        "Read a sparse-audit JSONL: how biased the run's cheap verifier is against ground "
+        "truth (`delta_hat`), how *scattered* that error is (`resid_sd` -- the number the "
+        "acceptance gate's uncertainty is mostly made of), how many labels it rests on, "
+        "and how many units are still waiting on an oracle. Call this before quoting any "
+        "reward number from a run whose reward was an agent judging an output: it is the "
+        "only thing that can tell the user the loop was optimising a proxy. If "
+        "`is_stale` is true the correction must not be applied and `stale_reason` says "
+        "why."),
+    "audit_pending": (
+        "List the audited units still waiting on ground truth -- record_id, task, the "
+        "output that was produced -- so a person or an experiment system can go and "
+        "measure them and hand the results back through audit_resolve. Outputs are "
+        "truncated; raise `limit` deliberately, a full queue is large."),
+    "audit_resolve": (
+        "Attach one ground-truth score to one pending audit record. REFUSES to overwrite "
+        "a record that already has a result: a second score for the same unit is either "
+        "a duplicate submission or a correction, and only the user can say which -- ask "
+        "them rather than retrying. Does not recompute the correction; call "
+        "audit_recompute when a batch is in."),
+    "audit_recompute": (
+        "Re-read the audit store and re-estimate the correction. Call after resolving a "
+        "batch, or when audit_status says the rectification is stale because the verifier "
+        "changed."),
+    "audit_scorecard": (
+        "Grade a verifier before it replaces another one. Reports `sigma` first (the "
+        "spread of the verifier's error) and `blockers`, which is the verdict. Do NOT "
+        "recommend a verifier change on `delta_hat` falling: a mean error goes to zero "
+        "when errors cancel, and on real data a correct-looking rule cut it 74% while "
+        "making the verifier worse. If `ship` is false, relay the blockers verbatim."),
+    "audit_rescan": (
+        "Re-score the outputs the audit kept with a different verifier, and report how "
+        "much of the run's recorded history it would have scored differently -- including "
+        "how many artifact pairs reverse order. `verifier` is a 'module:attribute' "
+        "reference; resolving it RUNS the module, so anything outside the agentdescent "
+        "package needs the user to widen `allow` explicitly. Ask them; do not widen it "
+        "on their behalf."),
+    "audit_drift": (
+        "Chart the correction across verifier versions with an EWMA control chart. A "
+        "`bias-up` signal means the loop is finding answers the verifier likes and the "
+        "truth does not. A `signal-lost` signal means the verifier no longer predicts the "
+        "truth -- the fix is a different verifier, not more labels. If `overlapping` is "
+        "true the limits do not apply and an alarm is not evidence; say so."),
 }
 
 
@@ -222,6 +265,63 @@ class Tools:
         except runstore.RunStoreError as e:
             return json.dumps({"error": str(e)})
 
+    # -- the audit ------------------------------------------------------------
+    #
+    # These take a JSONL **path**, not a run_id. Nothing writes an audit store
+    # into a run directory: `AuditedReward` is built by the caller and points
+    # wherever they said, and the resolving process is usually not this one at
+    # all -- a wet-lab result comes back next week, to a machine that has only
+    # the file. The bodies live in `agentdescent.audit.service` for the same
+    # reason the run-store bodies live in `cli`: so they can be driven without
+    # an MCP host.
+
+    def audit_status(self, path: str, version: Optional[str] = None) -> Dict[str, Any]:
+        from .audit import service
+
+        return service.audit_status(path, version)
+
+    def audit_pending(self, path: str, limit: int = 50,
+                      older_than: Optional[float] = None,
+                      version: Optional[str] = None) -> Dict[str, Any]:
+        from .audit import service
+
+        return service.audit_pending(path, limit, older_than, version)
+
+    def audit_resolve(self, path: str, record_id: str,
+                      oracle_score: float) -> Dict[str, Any]:
+        from .audit import service
+
+        return service.audit_resolve(path, record_id, oracle_score)
+
+    def audit_recompute(self, path: str, version: Optional[str] = None) -> Dict[str, Any]:
+        from .audit import service
+
+        return service.audit_recompute(path, version)
+
+    def audit_scorecard(self, path: str, version: Optional[str] = None,
+                        previous: Optional[str] = None,
+                        max_false_negative: float = 0.05,
+                        verifier_seconds: Optional[float] = None,
+                        oracle_seconds: Optional[float] = None) -> Dict[str, Any]:
+        from .audit import service
+
+        return service.audit_scorecard(path, version, previous,
+                                       max_false_negative, verifier_seconds,
+                                       oracle_seconds)
+
+    def audit_rescan(self, path: str, verifier: str, version: Optional[str] = None,
+                     allow: Optional[list] = None,
+                     pairs: Optional[list] = None) -> Dict[str, Any]:
+        from .audit import service
+
+        return service.audit_rescan(path, verifier, version, allow, pairs)
+
+    def audit_drift(self, path: str,
+                    versions: Optional[list] = None) -> Dict[str, Any]:
+        from .audit import service
+
+        return service.audit_drift(path, versions)
+
 
 def _context_class():
     """The SDK's ``Context``, whose *annotation* is how a tool asks for a session.
@@ -237,6 +337,7 @@ def _context_class():
     except ImportError:
         from mcp.server.fastmcp import Context  # mcp 1.x
         return Context
+
 
 
 def _server_class():
@@ -269,7 +370,10 @@ def build_server(store: Optional[str] = None, *, name: str = "agentdescent"):
         "AgentDescent evolves skills, agent definitions, prompts, code and host plugins "
         "against examples with a parallel, merge-based optimiser. Workflow: doctor -> "
         "write an EvolveSpec -> plan (show the user) -> start -> status (once a round) -> "
-        "show -> ask -> apply."))
+        "show -> ask -> apply. The audit_* tools are a separate axis and take a JSONL "
+        "path, not a run_id: when a run's reward was an agent judging an output rather "
+        "than a fact about it, the loop was optimising a proxy, and audit_status is the "
+        "only thing that can tell the user how far that proxy is from the truth."))
     t = Tools(store)
 
     def attach_bridge(ctx: Any, loop: Any) -> None:
@@ -375,6 +479,42 @@ def build_server(store: Optional[str] = None, *, name: str = "agentdescent"):
 
     resume.__annotations__["ctx"] = context_cls
     server.tool(description=TOOL_DESCRIPTIONS["resume"])(resume)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["audit_status"])
+    def audit_status(path: str, version: Optional[str] = None) -> Dict[str, Any]:
+        return t.audit_status(path, version)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["audit_pending"])
+    def audit_pending(path: str, limit: int = 50, older_than: Optional[float] = None,
+                      version: Optional[str] = None) -> Dict[str, Any]:
+        return t.audit_pending(path, limit, older_than, version)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["audit_resolve"])
+    def audit_resolve(path: str, record_id: str, oracle_score: float) -> Dict[str, Any]:
+        return t.audit_resolve(path, record_id, oracle_score)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["audit_recompute"])
+    def audit_recompute(path: str, version: Optional[str] = None) -> Dict[str, Any]:
+        return t.audit_recompute(path, version)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["audit_scorecard"])
+    def audit_scorecard(path: str, version: Optional[str] = None,
+                        previous: Optional[str] = None,
+                        max_false_negative: float = 0.05,
+                        verifier_seconds: Optional[float] = None,
+                        oracle_seconds: Optional[float] = None) -> Dict[str, Any]:
+        return t.audit_scorecard(path, version, previous, max_false_negative,
+                                 verifier_seconds, oracle_seconds)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["audit_rescan"])
+    def audit_rescan(path: str, verifier: str, version: Optional[str] = None,
+                     allow: Optional[list] = None,
+                     pairs: Optional[list] = None) -> Dict[str, Any]:
+        return t.audit_rescan(path, verifier, version, allow, pairs)
+
+    @server.tool(description=TOOL_DESCRIPTIONS["audit_drift"])
+    def audit_drift(path: str, versions: Optional[list] = None) -> Dict[str, Any]:
+        return t.audit_drift(path, versions)
 
     @server.resource("agentdescent://runs", mime_type="application/json",
                      description="Every run in the store, newest first, with its status.")

@@ -742,3 +742,91 @@ being blind.
 verifier is a fixed function and exactly the wrong one for a run that evolves its
 own judge. A false positive costs one recompute; a false negative is the failure
 the package exists to prevent. Name too much rather than too little.
+
+## Watching it over generations
+
+One rectification says how biased the verifier is now. A sequence of them says
+whether the loop is *finding* the verifier's blind spots — a `delta_hat` walking
+steadily upward is a population drifting into whatever the proxy likes, and no
+single measurement shows it.
+
+```python
+from agentdescent.audit import DriftMonitor
+
+monitor = DriftMonitor()
+for generation in generations:
+    monitor.observe(calibrator.recompute(version), label=generation.name)
+print(monitor.report.to_markdown())
+```
+
+!!! danger "Not a test per generation"
+    At α = 0.05 that alarms once every twenty generations *when nothing is
+    wrong*, by construction. Measured over two thousand runs of a hundred
+    in-control generations each:
+
+    | | alarms per 100 generations | clean runs that alarm |
+    |---|---|---|
+    | a two-sided test per generation | 4.95 | **99.3%** |
+    | this chart (λ=0.2, L=3) | 0.27 | 16.2% |
+
+    An operator who has seen five false alarms does not act on the sixth. `L`
+    is not a per-generation significance level; it sets the average run length
+    between false alarms.
+
+Two things differ from the textbook chart, both because the inputs are estimates
+rather than measurements:
+
+**The limits are recursive.** The closed form assumes every point has the same
+standard error; here each `delta_hat` arrives with its own, which grows and
+shrinks with how many labels that generation bought. So
+`Var(z) = λ²·se² + (1−λ)²·Var(z_prev)`, carried forward exactly — the band widens
+after a noisy generation and narrows after a well-audited one.
+
+**Overlapping label sets invalidate the chart, and are the default.**
+`Calibrator` recomputes from the whole store, so consecutive rectifications share
+most of their labels, are strongly positively correlated, and the true spread of
+`z` is *wider* than the recursion says — the limits are too tight and the chart
+alarms on a verifier that never moved. `DriftMonitor` reads `Rectification.covers`,
+notices, and says so instead of charting silently. Feed it one rectification per
+generation, computed on that generation's own labels, and the chart is valid.
+
+`gain_factor` is watched differently, because it has no standard error and there
+is nothing to put limits around: it is smoothed and compared against a threshold
+near 1. Below it the verifier no longer predicts the truth well enough to borrow
+from, and the signal says the thing the number implies — **replace the verifier**;
+more labels only pay for what it stopped contributing.
+
+## From another process
+
+Truth may take days. The process that dispatched a record is long gone when a
+wet-lab result or a human review comes back, so
+[`agentdescent.audit.service`](api.md#the-audit-out-of-process) takes a **path**
+and returns JSON. These are also the `audit_*` tools on the
+[MCP server](plugins.md) (`agentdescent mcp`).
+
+| verb | what it answers |
+|---|---|
+| `audit_status` | the rectifier in force, what it rests on, what is outstanding |
+| `audit_pending` | the units waiting on an oracle, for a person or an experiment rig |
+| `audit_resolve` | file one result — **refuses to overwrite** an existing one |
+| `audit_recompute` | re-estimate after a batch is in |
+| `audit_scorecard` | the card above, as rows and as prose |
+| `audit_rescan` | re-score stored outputs with another verifier |
+| `audit_drift` | the chart above, one point per verifier version |
+
+Three details that are decisions rather than plumbing:
+
+**A missing file is an error, not an empty store.** `AuditStore` treats an absent
+path as a store about to be written, which is right for a run and wrong for a
+question about one: reading a typo as "no records yet" is how a caller ends up
+telling a user their verifier is unbiased.
+
+**`version=None` means the busiest version, and the reply always names which one
+it picked.** A store can hold several, and answering about the wrong one silently
+is the failure this package exists to prevent, committed by its own reporting.
+
+**`audit_rescan` resolves a `module:attribute` reference, which runs whatever it
+imports.** It is bounded by the same allowlist the spec system uses — the
+`agentdescent` package and nothing else — so widening it is a decision the person
+operating the server makes, never one a calling model can make for them by
+naming a module.

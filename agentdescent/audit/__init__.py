@@ -71,6 +71,8 @@ from .calibrator import (STALE_INFLATION, Calibrator, Rectification,
 from .diagnose import (Direction, Disagreement, DisagreementReport,
                        FixReport, Kind, classify_disagreements,
                        evaluate_fix, reference_classifier, residual_stats)
+from .drift import (DriftKind, DriftMonitor, DriftPoint, DriftReport,
+                    DriftSignal)
 from .estimate import bootstrap_ci, hajek_mean, residual_bias, standard_error
 from .gate import (Adjustment, RectifiedAcceptance, VerifierWatch,
                    discount_for, rectified_counts)
@@ -83,6 +85,9 @@ from .sources import (DeferredOracle, GoldAnswer, NullOracle, OracleSource,
 from .sampler import (AuditPolicy, SamplePlan, boundary_stratifier,
                       observed_weights, resid_sd_from)
 from .sampler import plan as plan_audit
+from .service import (audit_drift, audit_pending, audit_recompute,
+                      audit_rescan, audit_resolve, audit_scorecard,
+                      audit_status)
 from .scorecard import (FLIP_ALARM, Cost, Goal, Metric, RescanReport,
                         Scorecard, rescan)
 # Aliased for the same reason ``plan`` is: exporting it under its own name would
@@ -97,6 +102,13 @@ __all__ = [
     "SCHEMA_VERSION",
     "AuditRecord",
     "MIN_N_DOMINANT",
+    "audit_drift",
+    "audit_pending",
+    "audit_recompute",
+    "audit_rescan",
+    "audit_resolve",
+    "audit_scorecard",
+    "audit_status",
     "AuditPolicy",
     "AuditStore",
     "AuditedReward",
@@ -108,6 +120,11 @@ __all__ = [
     "classify_disagreements",
     "DeferredOracle",
     "Direction",
+    "DriftKind",
+    "DriftMonitor",
+    "DriftPoint",
+    "DriftReport",
+    "DriftSignal",
     "Disagreement",
     "DisagreementReport",
     "FixReport",
