@@ -53,6 +53,29 @@ The recorded history was scored by an instrument that no longer exists. Mark the
 
 ---
 
+## Is the improvement pool still learning?
+
+Good-Turing over every label, where a label on which the two scorers
+agreed is a draw on the species "no error". The estimate is then
+`P(the next label shows an error mode nobody has seen)`.
+
+| key | labels | modes | singletons | P(new) | next 60 labels |
+|---|---|---|---|---|---|
+| high | 80 | 7 | 3 | 0.0375 | 60 |
+| low | 97 | 0 | 0 | 0.0000 | 5 |
+
+**Overall P(new) = 0.0169.** The improvement pool has learnt what it can from this audit; the budget belongs in the calibration pool, whose interval keeps narrowing.
+
+Diminishing returns, measured rather than assumed:
+
+| labels drawn | 5 | 10 | 15 | 20 | 25 | 30 |
+|---|---|---|---|---|---|---|
+| distinct modes found | 3.13 | 4.41 | 5.15 | 5.82 | 6.37 | 6.89 |
+
+Six times the labels for about twice the modes. An allocation proportional to how *often* a layer is wrong keeps buying the flat part of that curve, which is why the improvement pool is allocated by what is still undiscovered and not by the residual.
+
+---
+
 # Verifier scorecard -- `f55dec40cec559f7`
 
 | metric | value | previous | change | verdict |

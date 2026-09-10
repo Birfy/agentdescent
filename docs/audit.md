@@ -863,6 +863,106 @@ near 1. Below it the verifier no longer predicts the truth well enough to borrow
 from, and the signal says the thing the number implies — **replace the verifier**;
 more labels only pay for what it stopped contributing.
 
+## Where the *improvement* labels go
+
+The calibration pool is allocated by Neyman — `n_h ∝ W_h · sd_h` on the residual
+— which minimises the variance of the correction. The improvement pool has a
+different job (find as many distinct things wrong with the verifier as possible),
+and the same rule is wrong for it: once thirty labels have shown the same
+formatting bug, the thirty-first teaches nothing, and Neyman keeps sending labels
+there because that is where the residual is largest.
+
+[`plan_coverage`](api.md#coverage-allocation) allocates by **Good–Turing unseen
+mass** instead — the share of observed items seen exactly once estimates the
+probability that the next label shows something new.
+
+```python
+from agentdescent.audit import coverage_of, plan_coverage
+
+coverage = coverage_of(store.for_improvement(version), score_band, error_mode)
+plan = plan_coverage(weights=weights, expected_units=1000,
+                     coverage=coverage, target_n=60)
+plan.rates          # key -> inclusion probability
+plan.done           # the pool has stopped learning; move the budget
+```
+
+Checked against the Phase 0 audit, where all 31 disagreements are in hand so the
+true probability of a new mode can be computed rather than assumed:
+
+| labels drawn | 5 | 10 | 15 | 20 | 25 | 30 |
+|---|---|---|---|---|---|---|
+| modes found | 3.13 | 4.41 | 5.15 | 5.82 | 6.37 | 6.89 |
+| Good–Turing | 0.360 | 0.192 | 0.143 | 0.123 | 0.109 | 0.099 |
+| **true** P(new) | 0.312 | 0.177 | 0.138 | 0.122 | 0.108 | 0.110 |
+
+It over-estimates slightly at small `n`, which is the known behaviour, and tracks
+closely from about fifteen labels on. The first row is also the argument for the
+module: **six times the labels bought 2.2 times the modes.**
+
+And frequency is not value. The most common mode in that audit is
+`echoes-question` at 12 of 31 — and the obvious hard rule for it is [the one that
+cuts the bias 74% and makes the verifier worse](#improving-the-verifier-and-the-trap-in-it).
+An allocation by frequency would have spent the budget confirming it.
+
+!!! warning "A label on which the two scorers *agreed* is still a draw"
+    It counts in Good–Turing's denominator, as a draw on the species "no error".
+    The first version of `unseen_mass` counted only the disagreements, which made
+    a layer with ninety-seven agreeing labels and no errors at all look
+    **unsampled** — it scored 1.0 and drew the whole budget. Ninety-seven labels
+    that found nothing is strong evidence there is little to find; an *absence*
+    of labels is no evidence at all, and only the second should attract budget.
+
+    With the denominator right, that layer scores 0.0 and the busy one 0.0375.
+
+`plan.done` is the stopping rule: on this audit the overall P(new) is **0.0169**,
+so the improvement pool has learnt what it can and the budget belongs in the
+calibration pool — which never saturates, because its interval keeps narrowing.
+
+## Which pending unit to do first
+
+`AuditScheduler` has ranked every merge decision since the beginning —
+`blast_radius × uncertainty / trust` — and nothing in the shipped runtimes has
+ever popped its heap.
+
+That was right, and it is worth saying why before wiring it up. `force_oracle`
+decides by a *threshold*, and on the shipped verifier an audit costs nothing:
+`full_eval` measures the same held-out set the acceptance test just measured, so
+the aggregator reuses a number it has already paid for. **When the audit is free,
+every merge past the threshold gets one and a ranking has nothing to do.**
+
+The ranking starts mattering exactly where this package lives: an oracle that is
+a wet-lab run, a human reviewer, or a model call that costs money. There the
+budget is smaller than the number of merges that qualify, and the question stops
+being "which merges qualify" and becomes "which of them does the experimentalist
+do first".
+
+```python
+from agentdescent.audit import drain
+
+report = drain(scheduler, signature_of=lambda item: signature_for(item.payload))
+store.remember_priorities(report.priorities)
+```
+
+The drain fetches nothing and spends nothing: it turns the heap into
+`artifact_signature -> priority`, the store persists it as a snapshot line, and
+`audit_pending(path, order="priority")` hands a person the queue in that order —
+in another process, next week, from nothing but the JSONL. That is the whole
+reason the merge path's ranking exists.
+
+Three details:
+
+**The highest priority per signature wins, not the latest.** An artifact audited
+once at high priority and ten times at low priority is still the one to look at
+first; averaging would let a run of routine merges bury a single alarming one.
+
+**The scheduler ranks diffs and the tap records artifact signatures**, and
+nothing in either knows about the other. `signature_of` is the caller's, and a
+diff it cannot place is *counted* rather than guessed — `report.unplaced` is the
+size of that blind spot.
+
+**Asking for priority order with nothing drained says so.** An empty ranking
+silently reordering nothing looks identical to a ranking that was applied.
+
 ## From another process
 
 Truth may take days. The process that dispatched a record is long gone when a

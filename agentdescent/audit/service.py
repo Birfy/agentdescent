@@ -129,8 +129,21 @@ def audit_status(path: str, version: Optional[str] = None) -> Dict[str, Any]:
 
 
 def audit_pending(path: str, limit: int = 50, older_than: Optional[float] = None,
-                  version: Optional[str] = None) -> Dict[str, Any]:
+                  version: Optional[str] = None,
+                  order: str = "dispatched") -> Dict[str, Any]:
     """The records waiting on an oracle -- for a person or an experiment system.
+
+    ``order="priority"`` puts the units the merge path thought were risky first,
+    from the ranking
+    :func:`~agentdescent.audit.queue.drain` last wrote into the store. That
+    ranking is the only reason
+    :class:`~agentdescent.scheduler.AuditScheduler`'s queue exists, and it is
+    read here rather than on the merge path because the person who acts on it is
+    in another process, next week, with only this file.
+
+    Falls back to dispatch order, and says so, when nothing has been drained --
+    an empty ranking silently reordering nothing would look identical to a
+    ranking that had been applied.
 
     ``output`` is truncated to :data:`OUTPUT_PREVIEW` characters and the reply
     says when it was. A queue of a few hundred rollouts is a megabyte, and a
@@ -139,21 +152,36 @@ def audit_pending(path: str, limit: int = 50, older_than: Optional[float] = None
     store, err = _guard(path)
     if err:
         return err
+    if order not in ("dispatched", "priority"):
+        return {"error": f"order must be 'dispatched' or 'priority', not {order!r}"}
     cutoff = None if older_than is None else time.time() - float(older_than)
     rows = store.pending(older_than=cutoff)
     if version is not None:
         rows = [r for r in rows if r.verifier_version == version]
     total = len(rows)
+    priorities = store.priorities
+    ranked = order == "priority" and bool(priorities)
+    if ranked:
+        from .queue import prioritise
+
+        rows = prioritise(rows, priorities)
     rows = rows[:max(0, int(limit))]
     return {
         "path": path, "pending": total, "returned": len(rows),
+        "order": "priority" if ranked else "dispatched",
+        "ranked_signatures": len(priorities),
+        **({"note": "nothing has been drained from the merge path's audit "
+                    "scheduler, so this is dispatch order"}
+           if order == "priority" and not ranked else {}),
         "truncated_outputs_at": OUTPUT_PREVIEW,
         "records": [{
             "record_id": r.record_id, "task_id": r.task_id,
             "verifier_version": r.verifier_version,
+            "artifact_signature": r.artifact_signature,
             "verifier_score": r.verifier_score, "stratum": r.stratum,
             "purpose": r.purpose.value, "inclusion_prob": r.inclusion_prob,
             "dispatched_at": r.dispatched_at,
+            "priority": priorities.get(r.artifact_signature),
             "output": r.output[:OUTPUT_PREVIEW],
             "output_truncated": len(r.output) > OUTPUT_PREVIEW,
         } for r in rows],

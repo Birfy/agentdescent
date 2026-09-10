@@ -32,6 +32,11 @@ from .records import SCHEMA_VERSION, AuditRecord, Purpose
 #: Marks a JSONL line as a moments snapshot rather than an audit record. Absent
 #: on every record ever written, so a file from before this existed still loads.
 MOMENTS_KIND = "unlabelled_moments"
+#: Snapshot line holding ``artifact_signature -> priority``, drained from the
+#: merge path's :class:`~agentdescent.scheduler.AuditScheduler`. Last one wins,
+#: like the moments -- a priority is a current opinion, not a measurement, and
+#: keeping the history of it would only invite averaging opinions.
+PRIORITY_KIND = "audit_priority"
 
 
 class _Welford:
@@ -88,6 +93,8 @@ class AuditStore:
         self._corrupt = 0
         #: (verifier_version, stratum) -> running moments of the unlabelled half.
         self._moments: Dict[Tuple[str, str], _Welford] = {}
+        #: artifact_signature -> how much the merge path wanted this audited.
+        self._priorities: Dict[str, float] = {}
         self._unflushed = 0
         self._lock = threading.RLock()
         if path and os.path.exists(path):
@@ -111,6 +118,7 @@ class AuditStore:
             self._records.clear()
             self._order.clear()
             self._moments.clear()
+            self._priorities.clear()
             self._corrupt = 0
             with open(self.path, encoding="utf-8") as fh:
                 for line in fh:
@@ -121,6 +129,9 @@ class AuditStore:
                         payload = json.loads(line)
                     except json.JSONDecodeError:
                         self._corrupt += 1
+                        continue
+                    if payload.get("kind") == PRIORITY_KIND:
+                        self._priorities = dict(payload["priorities"])
                         continue
                     if payload.get("kind") == MOMENTS_KIND:
                         # Last snapshot wins, exactly as for records: a later
@@ -198,6 +209,29 @@ class AuditStore:
             return {stratum: {"n": acc.n, "mean": acc.mean, "var": acc.var}
                     for (version, stratum), acc in self._moments.items()
                     if version == verifier_version}
+
+    def remember_priorities(self, priorities: Dict[str, float]) -> None:
+        """Record what the merge path thought was worth auditing.
+
+        Written as a snapshot rather than merged into the records, because a
+        priority belongs to an *artifact* and a record belongs to a unit: one
+        number would otherwise be copied onto every unit that artifact produced
+        and go stale on the next merge. Persisting it at all is what lets
+        :func:`~agentdescent.audit.service.audit_pending` order a queue for a
+        person in another process next week -- which is the whole reason the
+        merge path's ranking exists and has never been read.
+        """
+        with self._lock:
+            self._priorities.update(
+                {str(k): float(v) for k, v in priorities.items()})
+            self._write_line({"kind": PRIORITY_KIND,
+                              "priorities": dict(self._priorities)})
+
+    @property
+    def priorities(self) -> Dict[str, float]:
+        """``artifact_signature -> priority``, as last recorded."""
+        with self._lock:
+            return dict(self._priorities)
 
     def _flush_moments(self, force: bool = False) -> None:
         if not self.path or (not force and not self._unflushed):

@@ -18,12 +18,14 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from agentdescent.audit import AuditRecord, Purpose
 from agentdescent.audit.calibrator import Rectification
 from agentdescent.audit.diagnose import (classify_disagreements, evaluate_fix,
                                          reference_classifier, residual_stats)
+from agentdescent.audit.coverage import (coverage_of, plan_coverage,
+                                         rarefaction, unseen_mass_overall)
 from agentdescent.audit.scorecard import rescan, scorecard
 from scripts.audit_phase0 import normalize
 
@@ -75,6 +77,36 @@ def echoes_the_question(output: str, question: str) -> bool:
 def far_shorter_than_reference(output: str, gold: str, ratio: float) -> bool:
     o, g = normalise(output), normalise(gold)
     return bool(o) and bool(g) and o != g and len(o) < ratio * len(g)
+
+
+def error_mode(record: AuditRecord, ctx) -> Optional[str]:
+    """A coarse signature of *what a person would have to fix*.
+
+    Deliberately coarser than the record and coarser than the task: two answers
+    that echo their question are the same bug however different the questions
+    were, and counting them as two modes would make the pool look like it was
+    still learning.
+    """
+    if ctx is None:
+        return None
+    question, gold = ctx
+    out, ref = normalise(record.output), normalise(gold)
+    if echoes_the_question(record.output, question):
+        return "echoes-question"
+    if out and ref and (out in ref or ref in out):
+        return "substring-of-reference"
+    if out and ref and len(out) < 0.6 * len(ref):
+        return "far-shorter"
+    if out and ref and len(out) > 1.6 * len(ref):
+        return "far-longer"
+    if not out:
+        return "empty"
+    return f"other:{record.task_id[:6]}"          # unclassified: its own mode
+
+
+def score_band(record: AuditRecord) -> str:
+    """A key computable at dispatch, before any label exists."""
+    return "high" if record.verifier_score >= 0.5 else "low"
 
 
 def make_fix(*, echo: bool = True, shorter: float = 0.6):
@@ -141,6 +173,19 @@ def main() -> None:
     bundle = graded[-1][1]
     swept = rescan(records, candidates[-1][1], context)
 
+    coverage = coverage_of(records, score_band,
+                           lambda r: error_mode(r, context.get(r.task_id)))
+    counts: Dict[str, float] = {}
+    for rec in records:
+        counts[score_band(rec)] = counts.get(score_band(rec), 0.0) + 1.0
+    total = sum(counts.values())
+    coverage_plan = plan_coverage(
+        weights={k: v / total for k, v in counts.items()},
+        expected_units=1000, coverage=coverage, target_n=60)
+    modes = [m for m in (error_mode(r, context.get(r.task_id))
+                         for r in records if r.residual != 0.0) if m]
+    curve = rarefaction(modes, [5, 10, 15, 20, 25, 30], reps=400)
+
     stats = residual_stats(records)
     card = scorecard(
         Rectification(
@@ -204,6 +249,45 @@ def main() -> None:
         "shipped: a bundle launders whatever is in it.",
         "",
         swept.to_markdown(),
+        "",
+        "---",
+        "",
+        "## Is the improvement pool still learning?",
+        "",
+        "Good-Turing over every label, where a label on which the two scorers",
+        "agreed is a draw on the species \"no error\". The estimate is then",
+        "`P(the next label shows an error mode nobody has seen)`.",
+        "",
+        "| key | labels | modes | singletons | P(new) | next 60 labels |",
+        "|---|---|---|---|---|---|",
+    ]
+    for key in sorted(coverage):
+        cell = coverage[key]
+        lines.append(
+            f"| {key} | {cell.labels} | {cell.modes} | {cell.singletons} | "
+            f"{cell.unseen:.4f} | {coverage_plan.target_n.get(key, 0)} |")
+    overall = unseen_mass_overall(coverage)
+    lines += [
+        "",
+        f"**Overall P(new) = {overall:.4f}.** "
+        + ("The improvement pool has learnt what it can from this audit; the "
+           "budget belongs in the calibration pool, whose interval keeps "
+           "narrowing."
+           if coverage_plan.done else
+           "Still finding new modes, so improvement labels are still buying "
+           "something."),
+        "",
+        "Diminishing returns, measured rather than assumed:",
+        "",
+        "| labels drawn | " + " | ".join(str(m) for m, _ in curve) + " |",
+        "|---" * (len(curve) + 1) + "|",
+        "| distinct modes found | "
+        + " | ".join(f"{v:.2f}" for _, v in curve) + " |",
+        "",
+        "Six times the labels for about twice the modes. An allocation "
+        "proportional to how *often* a layer is wrong keeps buying the flat "
+        "part of that curve, which is why the improvement pool is allocated by "
+        "what is still undiscovered and not by the residual.",
         "",
         "---",
         "",

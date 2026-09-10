@@ -45,6 +45,59 @@ All notable changes to AgentDescent are documented here. The format follows
   | C | forget to divide `sigma_eps ** 2` by `n` | the discount falls with `n`: the more the run measured, the less of it the gate may believe |
   | D | a control band from one fixed sigma | alarms on a generation that merely bought fewer labels |
 
+- **`agentdescent.audit.coverage` -- the improvement pool is not allocated like
+  the calibration pool.** Neyman (`n_h ~ W_h * sd_h` on the residual) minimises
+  the variance of the correction. The improvement pool's job is to find as many
+  *distinct* things wrong with the verifier as possible, and the same rule keeps
+  sending labels to the layer where the residual is largest long after the
+  thirtieth example of the same formatting bug. `plan_coverage` allocates by
+  Good-Turing unseen mass instead -- the share of observed items seen exactly
+  once estimates `P(the next label shows something new)`.
+
+  Validated against the Phase 0 audit, where all 31 disagreements are in hand so
+  the true discovery rate is computable:
+
+  | labels drawn | 5 | 10 | 15 | 20 | 25 | 30 |
+  |---|---|---|---|---|---|---|
+  | modes found | 3.13 | 4.41 | 5.15 | 5.82 | 6.37 | 6.89 |
+  | Good-Turing | 0.360 | 0.192 | 0.143 | 0.123 | 0.109 | 0.099 |
+  | **true** P(new) | 0.312 | 0.177 | 0.138 | 0.122 | 0.108 | 0.110 |
+
+  Six times the labels for 2.2 times the modes. And frequency is not value: the
+  most common mode in that audit is `echoes-question`, whose obvious hard rule is
+  the one that cuts the bias 74% and makes the verifier worse.
+
+  **A label on which the two scorers agreed is still a draw**, counted in the
+  denominator as the species "no error". The first version counted only the
+  disagreements, which made a layer with ninety-seven agreeing labels and no
+  errors look *unsampled* -- it scored 1.0 and drew the whole budget. Ninety-
+  seven labels that found nothing is strong evidence there is little to find; an
+  absence of labels is no evidence at all.
+
+  `plan.done` is a stopping rule: on the Phase 0 records overall P(new) is
+  **0.0169**, so the improvement pool has learnt what it can and the budget
+  belongs in the calibration pool, which never saturates.
+  [docs/audit.md](docs/audit.md#where-the-improvement-labels-go)
+
+- **`agentdescent.audit.queue` -- the merge path's ranking finally reaches
+  someone.** `AuditScheduler` has ranked every merge decision since the
+  beginning and nothing has ever popped its heap. That was right: `force_oracle`
+  is a threshold, and on the shipped verifier an audit is free (`full_eval`
+  measures the set the acceptance test just measured), so every qualifying merge
+  gets one and a ranking has nothing to do. It starts mattering exactly where
+  this package lives -- an oracle that is a wet-lab run or a person -- where the
+  budget is smaller than the number of qualifying merges.
+
+  `drain(scheduler, signature_of=...)` turns the heap into
+  `artifact_signature -> priority`; `AuditStore.remember_priorities` persists it
+  as a snapshot line; `audit_pending(path, order="priority")` hands a person the
+  queue in that order, in another process, from nothing but the JSONL. The
+  highest priority per signature wins rather than the latest, a diff whose
+  signature the caller cannot resolve is counted rather than guessed, and asking
+  for priority order with nothing drained says so instead of silently returning
+  dispatch order.
+  [docs/audit.md](docs/audit.md#which-pending-unit-to-do-first)
+
 - **`agentdescent.audit.ranking` -- can the verifier order things at all?**
   Everything else in this package measures how *far* the verifier is from the
   truth: `delta_hat` its mean error, `resid_sd` the spread, `gain_factor` how

@@ -68,6 +68,9 @@ the information of nineteen judged by exact match.
 
 from .calibrator import (STALE_INFLATION, Calibrator, Rectification,
                          population_resid_sd)
+from .coverage import (MIN_UNSEEN, Coverage, CoveragePlan, coverage_of,
+                       exhausted, plan_coverage, rarefaction, unseen_mass,
+                       unseen_mass_overall)
 from .diagnose import (Direction, Disagreement, DisagreementReport,
                        FixReport, Kind, classify_disagreements,
                        evaluate_fix, reference_classifier, residual_stats)
@@ -79,6 +82,7 @@ from .gate import (Adjustment, RectifiedAcceptance, VerifierWatch,
 from .ppi import (MIN_N_DOMINANT, PPIError, PPIResult, Stratum,
                   ppi_mean_stratified, t_ppf)
 from .ranking import Flip, RankReport, kendall_tau_b, rank_agreement
+from .queue import DrainReport, drain, prioritise
 from .records import (SCHEMA_VERSION, AuditRecord, Purpose, new_record_id,
                       output_digest, verifier_fingerprint)
 from .sources import (DeferredOracle, GoldAnswer, NullOracle, OracleSource,
@@ -103,6 +107,7 @@ __all__ = [
     "SCHEMA_VERSION",
     "AuditRecord",
     "MIN_N_DOMINANT",
+    "MIN_UNSEEN",
     "audit_drift",
     "audit_pending",
     "audit_recompute",
@@ -115,12 +120,15 @@ __all__ = [
     "AuditedReward",
     "Adjustment",
     "Cost",
+    "Coverage",
+    "CoveragePlan",
     "Calibrator",
     "boundary_stratifier",
     "bootstrap_ci",
     "classify_disagreements",
     "DeferredOracle",
     "Direction",
+    "DrainReport",
     "DriftKind",
     "DriftMonitor",
     "DriftPoint",
@@ -151,16 +159,22 @@ __all__ = [
     "STALE_INFLATION",
     "Stratum",
     "new_record_id",
+    "coverage_of",
     "discount_for",
+    "drain",
+    "exhausted",
     "evaluate_fix",
     "hajek_mean",
     "kendall_tau_b",
     "observed_weights",
     "output_digest",
     "plan_audit",
+    "plan_coverage",
     "population_resid_sd",
+    "prioritise",
     "ppi_mean_stratified",
     "rank_agreement",
+    "rarefaction",
     "rectified_counts",
     "rescan",
     "reference_classifier",
@@ -171,6 +185,8 @@ __all__ = [
     "standard_error",
     "summarise",
     "t_ppf",
+    "unseen_mass",
+    "unseen_mass_overall",
     "verifier_fingerprint",
     "verifier_scorecard",
 ]

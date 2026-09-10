@@ -92,7 +92,10 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
         "List the audited units still waiting on ground truth -- record_id, task, the "
         "output that was produced -- so a person or an experiment system can go and "
         "measure them and hand the results back through audit_resolve. Outputs are "
-        "truncated; raise `limit` deliberately, a full queue is large."),
+        "truncated; raise `limit` deliberately, a full queue is large. "
+        "order='priority' puts the units the run's own merge path ranked as "
+        "riskiest first -- use it when the oracle is a person or an experiment "
+        "and only part of the queue will get done."),
     "audit_resolve": (
         "Attach one ground-truth score to one pending audit record. REFUSES to overwrite "
         "a record that already has a result: a second score for the same unit is either "
@@ -282,10 +285,11 @@ class Tools:
 
     def audit_pending(self, path: str, limit: int = 50,
                       older_than: Optional[float] = None,
-                      version: Optional[str] = None) -> Dict[str, Any]:
+                      version: Optional[str] = None,
+                      order: str = "dispatched") -> Dict[str, Any]:
         from .audit import service
 
-        return service.audit_pending(path, limit, older_than, version)
+        return service.audit_pending(path, limit, older_than, version, order)
 
     def audit_resolve(self, path: str, record_id: str,
                       oracle_score: float) -> Dict[str, Any]:
@@ -486,8 +490,9 @@ def build_server(store: Optional[str] = None, *, name: str = "agentdescent"):
 
     @server.tool(description=TOOL_DESCRIPTIONS["audit_pending"])
     def audit_pending(path: str, limit: int = 50, older_than: Optional[float] = None,
-                      version: Optional[str] = None) -> Dict[str, Any]:
-        return t.audit_pending(path, limit, older_than, version)
+                      version: Optional[str] = None,
+                      order: str = "dispatched") -> Dict[str, Any]:
+        return t.audit_pending(path, limit, older_than, version, order)
 
     @server.tool(description=TOOL_DESCRIPTIONS["audit_resolve"])
     def audit_resolve(path: str, record_id: str, oracle_score: float) -> Dict[str, Any]:

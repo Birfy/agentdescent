@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-288 public names across 49 modules.
+300 public names across 51 modules.
 
 ---
 
@@ -1062,6 +1062,7 @@ Records on disk, indexed in memory.
 | `load() -> None` | Re-read the file, last-occurrence-wins. |
 | `observe_unlabelled(verifier_version: str, stratum: str, score: float) -> None` | Fold one un-audited score into its stratum's running moments. |
 | `pending(...)` | Records still waiting on truth -- the work list for whoever answers. |
+| `remember_priorities(priorities: Dict[str, float]) -> None` | Record what the merge path thought was worth auditing. |
 | `reopen(record_id: str) -> bool` | Clear a resolution so it can be replaced. For corrections, not for retries. |
 | `resolve(record_id: str, oracle_score: float, *, at: Optional[float] = None) -> bool` | Attach ground truth to a pending record. `False` if there was none to attach. |
 | `unlabelled_moments(verifier_version: str)` | `stratum -> {n, mean, var}` over the units that were not audited. |
@@ -1433,6 +1434,135 @@ DriftSignal(
     limit: float,
     detail: str
 ) -> None
+```
+
+---
+
+## Coverage allocation
+
+Where the improvement labels go: Good-Turing unseen mass, not Neyman. &nbsp;·&nbsp; `agentdescent.audit.coverage` &nbsp;·&nbsp; [guide](audit.md)
+
+### `Coverage(key: str, labels: int, modes: int, singletons: int, unseen: float) -> None`
+
+What one key has taught so far, and how much it still has to teach.
+
+### `CoveragePlan(...)`
+
+Per-key inclusion probabilities for the improvement pool.
+
+```python
+CoveragePlan(
+    rates: Dict[str, float],
+    target_n: Dict[str, int],
+    weights: Dict[str, float],
+    unseen: Dict[str, float],
+    default_rate: float = 0.0,
+    total_n: int = 0,
+    expected_units: int = 0,
+    unseen_overall: float = nan,
+    warnings: List[str] = <factory>
+) -> None
+```
+
+### `coverage_of(...)`
+
+Group resolved records by `key` and measure the variety inside each.
+
+```python
+coverage_of(
+    records: Iterable[Any],
+    key: Callable[[Any], str],
+    mode: Callable[[Any], Optional[str]],
+    *,
+    keys: Sequence[str] = ()
+) -> Dict[str, Coverage]
+```
+
+### `exhausted(coverage: Mapping[str, Coverage], min_unseen: float = 0.05) -> List[str]`
+
+Keys where the next label is unlikely to show anything new.
+
+### `plan_coverage(...)`
+
+Allocate `target_n` improvement labels by how much each key can still teach.
+
+```python
+plan_coverage(
+    *,
+    weights: Mapping[str, float],
+    expected_units: int,
+    coverage: Mapping[str, Coverage],
+    target_n: int = 100,
+    min_per_key: int = 5,
+    max_rate: float = 1.0
+) -> CoveragePlan
+```
+
+### `rarefaction(...)`
+
+`[(m, mean distinct modes in a sample of m)]` -- the diminishing return.
+
+```python
+rarefaction(
+    modes: Sequence[str],
+    sizes: Sequence[int],
+    *,
+    reps: int = 200,
+    seed: int = 0
+) -> List[Tuple[int, float]]
+```
+
+### `unseen_mass(modes: Sequence[Optional[str]]) -> float`
+
+Good-Turing: the probability that the next label shows an unseen mode.
+
+### `unseen_mass_overall(coverage: Mapping[str, Coverage]) -> float`
+
+Good-Turing across every key, pooled by label count.
+
+---
+
+## The merge path's ranking
+
+Draining the audit scheduler into the queue a person works from. &nbsp;·&nbsp; `agentdescent.audit.queue` &nbsp;·&nbsp; [guide](audit.md)
+
+### `DrainReport(...)`
+
+What came off the queue, and what could not be placed.
+
+```python
+DrainReport(
+    priorities: Dict[str, float] = <factory>,
+    popped: int = 0,
+    unplaced: int = 0,
+    examples: List[str] = <factory>
+) -> None
+```
+
+### `drain(...)`
+
+Empty the scheduler's queue into `signature -> priority`.
+
+```python
+drain(
+    scheduler: Any,
+    *,
+    signature_of: Optional[Callable[[Any], Optional[str]]] = None,
+    limit: Optional[int] = None
+) -> DrainReport
+```
+
+### `prioritise(...)`
+
+Order pending records by what the merge path thought was risky.
+
+```python
+prioritise(
+    records: Iterable[AuditRecord],
+    priorities: Dict[str, float],
+    *,
+    default: float = 0.0
+) -> List[AuditRecord]
 ```
 
 ---
@@ -1837,7 +1967,8 @@ audit_pending(
     path: str,
     limit: int = 50,
     older_than: Optional[float] = None,
-    version: Optional[str] = None
+    version: Optional[str] = None,
+    order: str = 'dispatched'
 ) -> Dict[str, Any]
 ```
 
@@ -3114,6 +3245,10 @@ A throwaway directory on this machine -- what a rollout has always got.
 ### `MIN_N_DOMINANT`
 
 int([x]) -> integer int(x, base=10) -> integer
+
+### `MIN_UNSEEN`
+
+Convert a string or number to a floating point number, if possible.
 
 ### `MemoryCache`
 
