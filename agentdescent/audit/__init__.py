@@ -69,8 +69,9 @@ the information of nineteen judged by exact match.
 from .wiring import Audit, attach
 from .calibrator import (STALE_INFLATION, Calibrator, Rectification,
                          population_resid_sd)
-from .coverage import (MIN_UNSEEN, Coverage, CoveragePlan, coverage_of,
-                       exhausted, plan_coverage, rarefaction, unseen_mass,
+from .coverage import (CALIBRATION_CEILING, CALIBRATION_FLOOR, MIN_UNSEEN,
+                       Coverage, CoveragePlan, coverage_of, exhausted,
+                       plan_coverage, rarefaction, rebalance, unseen_mass,
                        unseen_mass_overall)
 from .diagnose import (Direction, Disagreement, DisagreementReport,
                        FixReport, Kind, classify_disagreements,
@@ -122,6 +123,8 @@ __all__ = [
     "AuditedReward",
     "Adjustment",
     "attach",
+    "CALIBRATION_CEILING",
+    "CALIBRATION_FLOOR",
     "Cost",
     "Coverage",
     "CoveragePlan",
@@ -179,6 +182,7 @@ __all__ = [
     "ppi_mean_stratified",
     "rank_agreement",
     "rarefaction",
+    "rebalance",
     "rectified_counts",
     "rescan",
     "reference_classifier",

@@ -161,6 +161,35 @@ All notable changes to AgentDescent are documented here. The format follows
   belongs in the calibration pool, which never saturates.
   [docs/audit.md](docs/audit.md#where-the-improvement-labels-go)
 
+- **`rebalance()` -- the calibration share stops being a constant.** Only one of
+  the two pools saturates: calibration keeps buying a narrower interval forever
+  at the usual `1/sqrt(n)`, and improvement stops buying anything once the
+  labels stop showing new error modes. `plan.done` already said when that
+  happened and nothing moved the budget.
+
+  | P(new) | calibration share |
+  |---|---|
+  | >= 0.25 | 0.50 |
+  | 0.10 | 0.77 |
+  | **0.0169** (the Phase 0 audit) | **0.92** |
+  | 0.0 | 0.95 |
+
+  `Audit.rebalance(unseen)` sets it, for a round hook. All three dials are
+  policy, not measurement -- what a label is worth in each pool depends on
+  whether you are trying to fix the verifier or to correct for it -- and no
+  labels yet returns the floor, because no evidence that the pool is done is not
+  evidence that it is.
+
+- **Constraint 7 is locked by a test, not by a convention.**
+  `tests/test_gate_reads_the_full_set.py`. The repository shipped the violation
+  once -- the regression guard read `cheap_eval`, so lowering `cheap_eval_tasks`
+  silently made "quality dropped" a judgement from four tasks. `MergeContext`
+  names the two differently to make it awkward to write again; awkward is not
+  impossible. The cheap numbers set to nonsense in both directions must not move
+  a verdict, and `cheap_eval_tasks` must not move a single commit across a whole
+  six-round run whose trajectory is mid-climb -- which is what makes an
+  identical history mean something.
+
 - **`agentdescent.audit.queue` -- the merge path's ranking finally reaches
   someone.** `AuditScheduler` has ranked every merge decision since the
   beginning and nothing has ever popped its heap. That was right: `force_oracle`

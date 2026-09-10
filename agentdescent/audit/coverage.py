@@ -64,8 +64,9 @@ from dataclasses import dataclass, field
 from typing import (Any, Callable, Dict, Iterable, List, Mapping, Optional,
                     Sequence, Tuple)
 
-__all__ = ["Coverage", "CoveragePlan", "MIN_UNSEEN", "coverage_of",
-           "exhausted", "plan_coverage", "rarefaction", "unseen_mass",
+__all__ = ["CALIBRATION_CEILING", "CALIBRATION_FLOOR", "Coverage",
+           "CoveragePlan", "MIN_UNSEEN", "coverage_of", "exhausted",
+           "plan_coverage", "rarefaction", "rebalance", "unseen_mass",
            "unseen_mass_overall"]
 
 #: Below this estimated probability of a new mode, more improvement labels are
@@ -292,6 +293,46 @@ def unseen_mass_overall(coverage: Mapping[str, Coverage]) -> float:
     if not labels:
         return float("nan")
     return sum(c.singletons for c in coverage.values()) / labels
+
+
+#: Where a calibration share sits when the improvement pool is still finding
+#: new error modes, and where it goes once the pool has stopped. Both are policy
+#: choices, not measurements: what a label is worth in each pool depends on
+#: whether you are trying to *fix* the verifier or to *correct for* it.
+CALIBRATION_FLOOR = 0.5
+CALIBRATION_CEILING = 0.95
+
+
+def rebalance(unseen: float, *, floor: float = CALIBRATION_FLOOR,
+              ceiling: float = CALIBRATION_CEILING,
+              learning_at: float = 0.25) -> float:
+    """How much of the audit budget belongs to calibration, given ``unseen``.
+
+    The two pools have different marginal value curves, and only one of them
+    saturates. Calibration keeps buying a narrower interval, forever, at the
+    usual ``1/sqrt(n)``. Improvement stops buying anything once the labels stop
+    showing new error modes -- which is what
+    :func:`unseen_mass_overall` measures. So the share should move as that
+    number falls, and ``calibration_fraction`` being a constant means it does
+    not.
+
+    Linear between two named ends: ``floor`` while ``unseen >= learning_at``,
+    ``ceiling`` at ``unseen == 0``. All three are **policy dials**. Nothing here
+    can tell you what a label is worth in each pool; that depends on whether you
+    are trying to fix the verifier or to correct for it, which is a decision
+    about the run.
+
+    ``unseen`` of NaN -- no labels yet -- returns ``floor``. No evidence that the
+    improvement pool is done is not evidence that it is.
+    """
+    if not floor <= ceiling:
+        raise ValueError(f"floor {floor!r} is above ceiling {ceiling!r}")
+    if learning_at <= 0.0:
+        raise ValueError("learning_at must be positive")
+    if unseen != unseen:                            # NaN
+        return floor
+    share = min(1.0, max(0.0, unseen) / learning_at)
+    return ceiling - (ceiling - floor) * share
 
 
 def rarefaction(modes: Sequence[str], sizes: Sequence[int], *,

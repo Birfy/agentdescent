@@ -162,6 +162,22 @@ def test_the_watch_starts_from_a_baseline_rather_than_an_alarm():
     assert not audit.watch.check()
 
 
+def test_the_audit_can_move_its_own_budget_between_the_pools():
+    """Meant for a round hook: as the improvement pool stops finding new error
+    modes, its share of the oracle budget should go to calibration, which never
+    saturates."""
+    audit = attach(lambda task, out: 1.0, oracle=lambda task, out: 1.0,
+                   calibration_fraction=0.7)
+    assert audit.reward.calibration_fraction == 0.7
+
+    assert audit.rebalance(0.4) == 0.5, "plenty of error modes left to find"
+    assert audit.reward.calibration_fraction == 0.5
+
+    share = audit.rebalance(0.0169)          # the Phase 0 number
+    assert share == pytest.approx(0.92, abs=0.01)
+    assert audit.reward.calibration_fraction == share
+
+
 # -- off is off --------------------------------------------------------------
 
 class _Recording:

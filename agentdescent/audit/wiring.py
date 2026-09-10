@@ -87,6 +87,27 @@ class Audit:
         """Re-read the store and re-estimate. Call after a batch resolves."""
         return self.calibrator.recompute(self.verifier_version)
 
+    def rebalance(self, unseen: float, **kw: Any) -> float:
+        """Move the calibration share as the improvement pool stops learning.
+
+        ``unseen`` comes from
+        :func:`~agentdescent.audit.coverage.unseen_mass_overall` on whatever
+        error-mode signature the caller can compute. Meant for a round hook::
+
+            def on_round(info):
+                cov = coverage_of(audit.store.for_improvement(v), key, mode)
+                audit.rebalance(unseen_mass_overall(cov))
+
+        Returns the new fraction. See
+        :func:`~agentdescent.audit.coverage.rebalance` for what the dials mean
+        and why they are dials.
+        """
+        from .coverage import rebalance as _rebalance
+
+        share = _rebalance(unseen, **kw)
+        self.reward.calibration_fraction = share
+        return share
+
     def status(self) -> Dict[str, Any]:
         """What the audit knows, for a round hook or a log line."""
         rect = self.rectification()

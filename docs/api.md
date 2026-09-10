@@ -13,7 +13,7 @@ means the parameter has none.
 Each section links to the page that explains *why* the module is shaped the
 way it is; this page is the *what*.
 
-303 public names across 52 modules.
+306 public names across 52 modules.
 
 ---
 
@@ -1037,6 +1037,7 @@ Audit(
 
 | method | what it does |
 |---|---|
+| `rebalance(unseen: float, **kw: Any) -> float` | Move the calibration share as the improvement pool stops learning. |
 | `recompute() -> Rectification` | Re-read the store and re-estimate. Call after a batch resolves. |
 | `rectification() -> Rectification` | The correction in force. Never raises; stale is an answer. |
 | `status() -> Dict[str, Any]` | What the audit knows, for a round hook or a log line. |
@@ -1586,6 +1587,20 @@ rarefaction(
     reps: int = 200,
     seed: int = 0
 ) -> List[Tuple[int, float]]
+```
+
+### `rebalance(...)`
+
+How much of the audit budget belongs to calibration, given `unseen`.
+
+```python
+rebalance(
+    unseen: float,
+    *,
+    floor: float = 0.5,
+    ceiling: float = 0.95,
+    learning_at: float = 0.25
+) -> float
 ```
 
 ### `unseen_mass(modes: Sequence[Optional[str]]) -> float`
@@ -3254,6 +3269,14 @@ Whether a candidate is committed.
 ### `AppendRules`
 
 Accumulate a deduped list of rules/lessons (append-only, content-addressed).
+
+### `CALIBRATION_CEILING`
+
+Convert a string or number to a floating point number, if possible.
+
+### `CALIBRATION_FLOOR`
+
+Convert a string or number to a floating point number, if possible.
 
 ### `CacheProtocol`
 

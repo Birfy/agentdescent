@@ -10,8 +10,10 @@ import math
 
 import pytest
 
-from agentdescent.audit.coverage import (MIN_UNSEEN, Coverage, coverage_of,
-                                         exhausted, plan_coverage, rarefaction,
+from agentdescent.audit.coverage import (CALIBRATION_CEILING,
+                                         CALIBRATION_FLOOR, MIN_UNSEEN,
+                                         Coverage, coverage_of, exhausted,
+                                         plan_coverage, rarefaction, rebalance,
                                          unseen_mass, unseen_mass_overall)
 
 
@@ -209,6 +211,45 @@ def test_the_overall_estimate_is_pooled_not_averaged():
 
 def test_the_overall_estimate_with_no_labels_is_nan():
     assert math.isnan(unseen_mass_overall({"a": Coverage("a", 0, 0, 0, 1.0)}))
+
+
+# -- moving the budget between the pools -------------------------------------
+
+def test_the_share_moves_as_the_improvement_pool_stops_learning():
+    """`calibration_fraction` being a constant means it does not.
+
+    Only one of the two pools saturates. Calibration keeps buying a narrower
+    interval forever; improvement stops buying anything once the labels stop
+    showing new error modes.
+    """
+    assert rebalance(0.5) == CALIBRATION_FLOOR, "plenty left to find"
+    assert rebalance(0.0) == CALIBRATION_CEILING, "nothing left to find"
+    assert CALIBRATION_FLOOR < rebalance(0.1) < CALIBRATION_CEILING
+    assert rebalance(0.05) > rebalance(0.15), "monotone in what is left"
+
+
+def test_the_phase_0_audit_would_move_it_to_about_0_92():
+    """`unseen_overall` on the committed records is 0.0169."""
+    assert rebalance(0.0169) == pytest.approx(0.92, abs=0.01)
+
+
+def test_no_labels_yet_keeps_the_improvement_pool_funded():
+    """No evidence that the pool is done is not evidence that it is."""
+    assert rebalance(float("nan")) == CALIBRATION_FLOOR
+
+
+def test_the_ends_are_dials_not_constants():
+    assert rebalance(0.0, ceiling=0.8) == 0.8
+    assert rebalance(1.0, floor=0.2) == pytest.approx(0.2)
+    assert rebalance(0.1, learning_at=0.1) == CALIBRATION_FLOOR, (
+        "learning_at is where the floor starts")
+
+
+def test_a_ceiling_below_the_floor_is_refused():
+    with pytest.raises(ValueError):
+        rebalance(0.1, floor=0.9, ceiling=0.5)
+    with pytest.raises(ValueError):
+        rebalance(0.1, learning_at=0.0)
 
 
 # -- the curve ---------------------------------------------------------------

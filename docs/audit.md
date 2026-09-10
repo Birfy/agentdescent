@@ -1054,6 +1054,27 @@ An allocation by frequency would have spent the budget confirming it.
 so the improvement pool has learnt what it can and the budget belongs in the
 calibration pool — which never saturates, because its interval keeps narrowing.
 
+`rebalance` is what moves it, and `calibration_fraction` being a constant is what
+stops it moving on its own:
+
+```python
+def on_round(info):
+    cov = coverage_of(audit.store.for_improvement(version), score_band, error_mode)
+    audit.rebalance(unseen_mass_overall(cov))
+```
+
+| P(new) | calibration share |
+|---|---|
+| ≥ 0.25 | 0.50 — plenty of error modes left to find |
+| 0.10 | 0.77 |
+| **0.0169** (the Phase 0 audit) | **0.92** |
+| 0.0 | 0.95 |
+
+Linear between two named ends, and all three dials are **policy**: nothing here
+can tell you what a label is worth in each pool, because that depends on whether
+you are trying to *fix* the verifier or to *correct for* it. No labels yet
+returns the floor — no evidence that the pool is done is not evidence that it is.
+
 ## Which pending unit to do first
 
 `AuditScheduler` has ranked every merge decision since the beginning —
