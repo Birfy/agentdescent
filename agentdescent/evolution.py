@@ -1709,6 +1709,7 @@ class _Engine:
             self.ledger.repo_path,
             index,
             self.aggregator,
+            artifact_id=self.artifact_id,
             round_info={
                 "reward": reward,
                 "committed": info.committed,
@@ -2062,10 +2063,16 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
 
     # Restore the aggregator's in-memory search state if a checkpoint exists
     # from a previous run on this ledger. A no-op when the aggregator does not
-    # support checkpointing or when the ledger is a fresh scratch repo.
+    # support checkpointing or when the ledger is a fresh scratch repo. The
+    # expected artifact id and aggregator class guard against restoring one
+    # search's state into another's (same repo, different artifact / factory).
     from .checkpoint import restore_checkpoint
     if repo_path:
-        restore_checkpoint(repo_path, aggregator)
+        restore_checkpoint(
+            repo_path, aggregator,
+            expected_artifact_id=artifact_id,
+            expected_aggregator_type=type(aggregator).__name__,
+        )
 
     # Imported here rather than at module scope: `executor` reaches `workspec`,
     # which reaches back here for `Task`.

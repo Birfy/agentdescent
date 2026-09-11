@@ -638,3 +638,64 @@ def test_population_run_checkpoints_archive(tmp_path):
     assert "selections" in state
     assert "seen_keys" in state
     assert len(state["archive"]) >= 1, "the seed was never admitted"
+
+
+# --- industrial-grade hardening ---
+
+
+def test_restore_refuses_foreign_artifact(tmp_path):
+    """A checkpoint written by artifact A must not restore into a run of
+    artifact B on the same ledger."""
+    repo = str(tmp_path / "repo")
+    agg = CountingAggregator()
+    save_checkpoint(repo, round=2, aggregator=agg, artifact_id="artifact-a")
+
+    fresh = CountingAggregator()
+    restored = restore_checkpoint(
+        repo, fresh, expected_artifact_id="artifact-b")
+    assert restored is False
+    # An old checkpoint with no artifact_id (pre-hardening) is still restored
+    # — the recorded value is None, which means "unknown", not "different".
+    d = tmp_path / "repo" / CHECKPOINT_DIR
+    payload = json.loads((d / "latest.json").read_text())
+    payload["artifact_id"] = None
+    (d / "latest.json").write_text(json.dumps(payload))
+    fresh2 = CountingAggregator()
+    assert restore_checkpoint(repo, fresh2, expected_artifact_id="artifact-b") is True
+
+
+def test_restore_refuses_foreign_aggregator_type(tmp_path):
+    repo = str(tmp_path / "repo")
+    save_checkpoint(repo, round=1, aggregator=CountingAggregator())
+
+    class OtherAggregator(CountingAggregator):
+        pass
+
+    fresh = OtherAggregator()
+    restored = restore_checkpoint(
+        repo, fresh, expected_aggregator_type="OtherAggregator")
+    assert restored is False
+
+
+def test_round_files_are_pruned(tmp_path):
+    """A long run does not accumulate one file per round."""
+    repo = str(tmp_path / "repo")
+    for r in range(50):
+        save_checkpoint(repo, round=r, aggregator=CountingAggregator())
+
+    d = tmp_path / "repo" / CHECKPOINT_DIR
+    round_files = [f for f in os.listdir(d) if f.startswith("round_")]
+    assert len(round_files) <= 20, \
+        f"expected pruning, found {len(round_files)} round files"
+
+
+def test_list_sorts_by_numeric_round(tmp_path):
+    repo = str(tmp_path / "repo")
+    save_checkpoint(repo, round=2, aggregator=CountingAggregator())
+    save_checkpoint(repo, round=10, aggregator=CountingAggregator())
+
+    items = list_checkpoints(repo)
+    # latest.json first; then round_10 before round_2 (numeric, not lexical).
+    assert items[0]["file"] == "latest.json"
+    rounds = [i["round"] for i in items if i["file"].startswith("round_")]
+    assert rounds == [10, 2], f"expected numeric sort, got {rounds}"
