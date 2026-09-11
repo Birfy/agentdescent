@@ -392,6 +392,12 @@ def async_evolve(
     # the merger closure can mutate it without a `nonlocal` per field.
     # Shared with the barrier-free loop's sibling: one tracker, one epsilon.
     early = EarlyStop(target_reward=target_reward, patience=patience)
+    # Restore the early-stop tracker from the checkpoint the previous process
+    # wrote — same reasoning as the synchronous path: a resumed run must not
+    # re-burn its patience budget re-discovering a stall it had already counted.
+    if repo_path:
+        from .checkpoint import restore_early_stop
+        restore_early_stop(repo_path, early)
     errors: List[Optional[str]] = [None]      # first backend failure seen (diagnostic)
     # Most recent artifact read from the ledger, so a failing final read still
     # yields a result instead of an exception (same reasoning as the sync path).

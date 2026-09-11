@@ -228,6 +228,74 @@ class PopulationAggregator(Aggregator):
             self._commit_state(best, "population: final best")
         super().finalize()
 
+    # -- checkpointing -------------------------------------------------------
+
+    def checkpoint(self) -> Optional[dict]:
+        """Serialise the archive and the selection counter.
+
+        The archive is the whole point of a population run: it holds every
+        committed candidate with its held-out score and its ``selected``
+        count — the novelty term ``Archive(sampling='novelty')`` reads, the
+        rotation index ``Beam`` needs. Without this, a resumed run starts an
+        archive of one (the head) and every selection policy degenerates:
+        ``Beam(4)`` is ``Beam(1)`` again, ``Archive``'s novelty term is gone,
+        and ``ParetoFrontier`` has a front of one to sit on.
+
+        ``seen_keys`` is saved beside the archive because the dedup key is the
+        candidate's *rendered* form (:meth:`_admit`), which only the strategy
+        can produce — a restored ``_seen`` rebuilt from states would disagree
+        with freshly rendered keys and re-admit everything.
+        """
+        with self._archive_lock:
+            return {
+                "archive": [dict(entry) for entry in self._archive],
+                "selections": self._selections,
+                "seen_keys": sorted(self._seen),
+            }
+
+    def restore(self, state: dict) -> None:
+        """Restore the archive written by :meth:`checkpoint`.
+
+        Entries are validated shape-wise; a malformed entry is skipped rather
+        than raised (a partially restored archive still beats an empty one,
+        and one bad row must not cost the whole history). The restored
+        ``state`` dicts are the candidates' *key spaces* — they are only ever
+        compared and committed, never executed, so trusting their shape is
+        enough.
+        """
+        archive = state.get("archive")
+        if not isinstance(archive, list):
+            return
+        restored: List[Dict[str, object]] = []
+        for entry in archive:
+            if not isinstance(entry, dict):
+                continue
+            st = entry.get("state")
+            if not isinstance(st, dict):
+                continue
+            try:
+                restored.append({
+                    "state": dict(st),
+                    "score": float(entry.get("score", 0.0)),
+                    "version": int(entry.get("version", 0)),
+                    "selected": int(entry.get("selected", 0)),
+                })
+            except (TypeError, ValueError):
+                continue
+        with self._archive_lock:
+            self._archive = restored
+            seen = state.get("seen_keys")
+            # Restore the *rendered* dedup keys, not keys derived from states:
+            # ``_admit`` compares against ``strategy.render(state)``, and only
+            # the checkpoint knows those strings. An empty/missing list means
+            # the archive came from an older checkpoint — re-admitting is then
+            # the honest behaviour (duplicates are deduped again on admit).
+            self._seen = {str(k) for k in seen} if isinstance(seen, list) else set()
+            try:
+                self._selections = int(state.get("selections", 0))
+            except (TypeError, ValueError):
+                self._selections = 0
+
 
 def population_factory(selection: SelectionPolicy, artifact_id: str, *,
                        meter=None, conflict=None, fusion=None, acceptance=None,

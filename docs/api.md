@@ -779,9 +779,11 @@ Aggregator(
 | method | what it does |
 |---|---|
 | `begin_step(*, skip_in_flight: bool = False) -> List[Union['_Candidate', MergeReport]]` | Phases 1 and 2: tick, drain what is ready, choose candidates. |
+| `checkpoint() -> Optional[dict]` | Serialise the search state the ledger does not persist. |
 | `finalize() -> None` | Publish the current dev head to stable at the end of a clean run. |
 | `finish_step(items: List[Union['_Candidate', MergeReport]]) -> List[MergeReport]` | Phase 3: decide the measured candidates, then age and promote. |
 | `measure(items: List[Union['_Candidate', MergeReport]]) -> List[Union['_Candidate', MergeReport]]` | Phase 2 for a batch from `begin_step`. **Off-thread safe.** |
+| `restore(state: dict) -> None` | Restore state written by `checkpoint`. |
 | `step() -> List[MergeReport]` | Fire every artifact bucket that is ready and return per-artifact reports. |
 
 ### `AggregatorConfig(...)`
@@ -1258,7 +1260,9 @@ PopulationAggregator(
 
 | method | what it does |
 |---|---|
+| `checkpoint() -> Optional[dict]` | Serialise the archive and the selection counter. |
 | `finalize() -> None` | Leave the best-scoring candidate on the head, then promote. |
+| `restore(state: dict) -> None` | Restore the archive written by `checkpoint`. |
 | `step() -> List[MergeReport]` | Fire every artifact bucket that is ready and return per-artifact reports. |
 
 ### `population_factory(...)`

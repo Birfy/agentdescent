@@ -1701,6 +1701,21 @@ class _Engine:
         history.append(info)
         stop_reason = early.observe(info.held_out_reward)
         notify(on_round, info)
+        # Checkpoint the aggregator's in-memory search state after every round,
+        # so a process restart can resume the search rather than starting fresh.
+        # A no-op when the aggregator does not support checkpointing.
+        from .checkpoint import save_checkpoint
+        save_checkpoint(
+            self.ledger.repo_path,
+            index,
+            self.aggregator,
+            round_info={
+                "reward": reward,
+                "committed": info.committed,
+                "rejected": info.rejected,
+            },
+            early_stop=early,
+        )
         if stop_reason is None and stop_when is not None:
             # The caller's own budget -- dollars, an external deadline, a
             # kill file -- asked at the same point the built-in ones are, so it
@@ -2044,6 +2059,13 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
                 f"aggregator_factory returned {type(aggregator).__name__}, which has "
                 f"no callable {method}(). An aggregator needs ingest(card) and "
                 "step() -> list[MergeReport] (see AggregatorProtocol).")
+
+    # Restore the aggregator's in-memory search state if a checkpoint exists
+    # from a previous run on this ledger. A no-op when the aggregator does not
+    # support checkpointing or when the ledger is a fresh scratch repo.
+    from .checkpoint import restore_checkpoint
+    if repo_path:
+        restore_checkpoint(repo_path, aggregator)
 
     # Imported here rather than at module scope: `executor` reaches `workspec`,
     # which reaches back here for `Task`.
@@ -2565,6 +2587,13 @@ def evolve(
     # Shared with the barrier-free loop: the same two questions, the same
     # tracker, and now the same epsilon (they had two).
     early = EarlyStop(target_reward=target_reward, patience=patience)
+    # Restore the early-stop tracker from the checkpoint the previous process
+    # wrote: without this, a resumed run forgets how long it had already
+    # stalled and re-burns its patience budget re-discovering the stall. Only
+    # meaningful on a resumed ledger; a fresh scratch repo has no checkpoint.
+    if repo_path:
+        from .checkpoint import restore_early_stop
+        restore_early_stop(repo_path, early)
     unit_lock = threading.Lock()
     # Per-worker snapshots, when `refresh_interval > 1`. See `_snapshot_for`.
     worker_snaps: Dict[int, Tuple["EvolvingArtifact", int]] = {}
