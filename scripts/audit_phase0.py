@@ -725,6 +725,15 @@ def run(args) -> Dict:
         cheap_eval_tasks=args.cheap_eval_tasks,
         fusion_tournament=args.tournament,
         self_verify=False, seed=args.seed, usage=usage,
+        # A deadline, because this run talks to a remote endpoint and `evolve`'s
+        # own docstring names the failure: `round_timeout=None` waits forever,
+        # "which is what you want when every rollout is bounded -- but a single
+        # hung rollout then stalls the run, because the aggregator is a
+        # barrier". A rollout here is *not* reliably bounded, and the cost of
+        # finding that out was a GSM-Hard run that sat at zero CPU for 15
+        # minutes with three worker threads blocked on one lock, holding 58
+        # resolved records it would never analyse or report.
+        round_timeout=args.round_timeout, max_seconds=args.max_seconds,
         verbose=args.verbose,
         **kwargs)
     elapsed = time.time() - t0
@@ -1063,6 +1072,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="let the judge reason before grading (off by default: a "
                          "judge you would deploy at scale does not)")
     ap.add_argument("--timeout", type=float, default=120.0)
+    ap.add_argument("--round-timeout", type=float, default=600.0,
+                    help="seconds a round waits for its workers before "
+                         "abandoning the slow ones. The default is a number "
+                         "rather than `None` on purpose: the run is analysed "
+                         "and reported from whatever resolved, and a run that "
+                         "hangs reports nothing at all. Pass 0 to wait forever.")
+    ap.add_argument("--max-seconds", type=float, default=None,
+                    help="wall-clock budget for the whole loop. Off by "
+                         "default; the round timeout is the one that matters, "
+                         "because the aggregator is a barrier.")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--dry-run", action="store_true",
                     help="offline stand-in for the judge, with a known injected bias")
@@ -1076,6 +1095,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          "report, so a run can be re-analysed without re-\n"
                          "buying every model call.")
     args = ap.parse_args(argv)
+
+    if args.round_timeout is not None and args.round_timeout <= 0:
+        args.round_timeout = None          # an explicit "wait forever"
 
     stamp = date.today().isoformat()
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
