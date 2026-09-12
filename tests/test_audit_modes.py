@@ -96,3 +96,33 @@ def test_predicates_kept_their_meaning_through_the_move():
     # `normalise` drops articles, so a bare "a" normalises to nothing and the
     # predicate declines to call an empty string far shorter than anything.
     assert not audit_modes.far_shorter_than_reference("a", "a long one", 0.6)
+
+
+# -- rounding is its own bug, with its own culprit ---------------------------
+
+@pytest.mark.parametrize("out,gold", [
+    # Both from the GSM-Hard probe. The arithmetic was right and the write-up
+    # was short; a judge saying yes has the better case, so these belong with
+    # the AMBIGUOUS disagreements rather than with a genuine slip.
+    ("14053029.666", "14053029.666666666"),
+    (r"\boxed{5489}", "5489.5466666667"),
+])
+def test_a_rounded_repeating_decimal_is_not_filed_as_a_wrong_answer(out, gold):
+    assert audit_modes.gsm8k_error_mode(_rec(out), ("q", gold, None)) == "rounded"
+
+
+@pytest.mark.parametrize("out,gold", [
+    ("The total cost is $17,413,984.", "17414074.0"),   # a real slip
+    ("6", "8.0"),                                        # plainly wrong
+])
+def test_a_genuine_slip_is_not_excused_as_rounding(out, gold):
+    assert audit_modes.gsm8k_error_mode(_rec(out), ("q", gold, None)) != "rounded"
+
+
+def test_rounding_needs_a_non_integral_reference():
+    """Against an integral reference every `round` is the identity, so `8`
+    answered `6` would be filed as a rounding and the mode would swallow the
+    bug it exists to separate itself from."""
+    assert not audit_modes._is_rounding(8.0, 6.0)
+    assert not audit_modes._is_rounding(8.0, 8.0)
+    assert audit_modes._is_rounding(5489.5466666667, 5489.0)

@@ -108,9 +108,37 @@ def gsm8k_error_mode(record, ctx: Optional[Context]) -> Optional[str]:
         return "judge-rejected-right-number"
     if want is not None and _mentions(record.output, want):
         return "gold-not-final"
+    if want is not None and _is_rounding(want, got):
+        return "rounded"
     if _has_working(record.output, worked):
         return "wrong-number-with-working"
     return "wrong-number-bare"
+
+
+def _is_rounding(want: float, got: float) -> bool:
+    """Is ``got`` ``want`` rounded or truncated at some decimal place?
+
+    Its own mode because it is its own bug, with its own fix, and a *third*
+    verdict on who was wrong. Found in the GSM-Hard probe: gold
+    ``14053029.666666666`` answered ``14053029.666``, and gold
+    ``5489.5466666667`` answered ``5489``. The arithmetic was right and the
+    write-up was short; a judge saying yes to those has the better case, so
+    they belong with the AMBIGUOUS disagreements rather than with
+    ``wrong-number-with-working``, which is a genuine slip and the thing worth
+    fixing.
+
+    Only for a non-integral reference. Against an integral one every ``round``
+    is the identity, and ``8`` answered ``6`` would be filed as a rounding.
+    """
+    if want == int(want):
+        return False
+    for places in range(0, 7):
+        scale = 10.0 ** places
+        if abs(round(want, places) - got) < 1e-9:
+            return True
+        if abs(int(want * scale) / scale - got) < 1e-9:   # truncated, not rounded
+            return True
+    return False
 
 
 def _mentions(output: str, want: float) -> bool:
@@ -148,6 +176,7 @@ ERROR_MODES = {
     "hotpot": text_error_mode,
     "bbh": text_error_mode,
     "gsm8k": gsm8k_error_mode,
+    "gsm_hard": gsm8k_error_mode,
 }
 
 

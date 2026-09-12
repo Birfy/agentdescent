@@ -46,7 +46,10 @@ def test_each_workloads_near_miss_is_one_its_own_oracle_refuses():
     disagreements -- a rehearsal that exercises none of the paths it exists to
     rehearse."""
     for workload, oracle in P.ORACLES.items():
-        gold = "18" if workload == "gsm8k" else "Ottawa"
+        # Picked by the oracle, not by the workload's name: a numeric oracle
+        # scores "Ottawa" wrong against itself, which would pass the near-miss
+        # assertion below for the wrong reason and fail the sanity one.
+        gold = "18" if oracle is P.number_match else "Ottawa"
         near = P._NEAR_MISS[workload](gold)
         assert oracle(_task(gold), near) == 0.0, workload
         assert oracle(_task(gold), gold) == 1.0, workload

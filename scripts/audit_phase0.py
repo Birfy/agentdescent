@@ -134,7 +134,8 @@ def number_match(task: Task, output: str) -> float:
 #: The oracle each workload is scored against. A single module-level oracle was
 #: right while both workloads were free-text and wrong the moment one of them
 #: answered with a quantity.
-ORACLES = {"hotpot": exact_match, "bbh": exact_match, "gsm8k": number_match}
+ORACLES = {"hotpot": exact_match, "bbh": exact_match, "gsm8k": number_match,
+           "gsm_hard": number_match}
 
 #: What the report calls each oracle. Hard-coded as "normalized exact match" for
 #: two workloads that both used it, and a report naming the wrong oracle is the
@@ -143,6 +144,7 @@ _ORACLE_LABELS = {
     "hotpot": "normalized exact match against the reference",
     "bbh": "normalized exact match against the reference",
     "gsm8k": "the final number in the answer, compared as a quantity",
+    "gsm_hard": "the final number in the answer, compared as a quantity",
 }
 
 
@@ -423,7 +425,59 @@ def gsm8k_tasks(n: int, *, seed: int = 0) -> List[Task]:
     return tasks
 
 
-WORKLOADS = {"hotpot": hotpot_tasks, "bbh": bbh_tasks, "gsm8k": gsm8k_tasks}
+def _gsm_hard_task(row: Dict) -> Optional[Task]:
+    """One GSM-Hard row as a task. The only place a GSM-Hard task id is constructed."""
+    question = str(row.get("input") or "").strip()
+    gold = str(row.get("target") or "").strip()
+    if not question or final_number(gold) is None:
+        return None
+    digest = hashlib.sha256(question.encode("utf-8")).hexdigest()[:10]
+    return Task(id=f"gsm_hard:{digest}", prompt=question,
+                meta={"gold": gold, "expected": gold})
+
+
+def gsm_hard_tasks(n: int, *, seed: int = 0) -> List[Task]:
+    """GSM8K's problems with the numbers replaced by large ones.
+
+    The fourth workload, and the one that finally supplies what the third was
+    chosen for. Phase 0 on plain GSM8K returned `Delta = 0.0000` and
+    **zero** disagreement -- not because the judge is good at arithmetic but
+    because the solver got 98.3% of grade-school word problems right, and a
+    judge cannot be measured on a distribution with no errors in it.
+
+    GSM-Hard keeps the reasoning structure and makes the arithmetic hard, which
+    is the one combination that produces the mode this line of work is about: a
+    derivation that reads correctly around a **wrong final number**. Probed at
+    24 questions, the solver gets 65% and the misses are four distinct shapes --
+    an arithmetic slip (`17414074` answered `17413984`), a repeating decimal
+    rounded (`14053029.666666666` answered `14053029.666`), a unit confusion,
+    and refusing a premise the substitution made absurd.
+
+    Constraining the *solver* was the other candidate and is worse. Capping its
+    tokens at 96 does drop accuracy to 67%, but the errors are **truncations**:
+    the output stops mid-derivation with no answer in it, so `final_number`
+    reads whatever number the sentence was cut after. That is a broken solver,
+    not a hard problem, and the modes it generates are artefacts of the cap.
+    """
+    from agentdescent.dataloader import hf_rows
+
+    rows = hf_rows("reasoning-machines/gsm-hard", "train", config="default",
+                   limit=max(n * 2, 40))
+    rng = random.Random(seed)
+    rng.shuffle(rows)
+    tasks: List[Task] = []
+    for row in rows:
+        task = _gsm_hard_task(row)
+        if task is None:
+            continue
+        tasks.append(task)
+        if len(tasks) >= n:
+            break
+    return tasks
+
+
+WORKLOADS = {"hotpot": hotpot_tasks, "bbh": bbh_tasks, "gsm8k": gsm8k_tasks,
+             "gsm_hard": gsm_hard_tasks}
 
 #: An answer the judge forgives and the workload's oracle refuses, for
 #: `--dry-run`. Keyed by workload because "the oracle refuses it" is a statement
@@ -433,6 +487,7 @@ _NEAR_MISS = {
     "hotpot": lambda gold: f"The answer is {gold}.",
     "bbh": lambda gold: f"The answer is {gold}.",
     "gsm8k": lambda gold: f"Working through it, the answer is {gold} (over 7 days).",
+    "gsm_hard": lambda gold: f"Working through it, the answer is {gold} (over 7 days).",
 }
 
 #: Wrong answers for `--dry-run`, several shapes rather than one constant.
@@ -452,6 +507,12 @@ _WRONG = {
                            f"{rng.randint(1, 400)}, so that is the answer."),
         lambda gold, rng: "I could not work this out.",
     ),
+    "gsm_hard": (
+        lambda gold, rng: str(rng.randint(1, 400)),
+        lambda gold, rng: (f"{rng.randint(2, 9)} * {rng.randint(2, 9)} = "
+                           f"{rng.randint(1, 400)}, so that is the answer."),
+        lambda gold, rng: "I could not work this out.",
+    ),
 }
 
 #: What the report calls each one. A report that says "HotpotQA validation" over
@@ -460,6 +521,7 @@ _WORKLOAD_LABELS = {
     "hotpot": "HotpotQA validation",
     "bbh": "BIG-Bench Hard across " + str(len(BBH_SUBTASKS)) + " subtasks",
     "gsm8k": "GSM8K test, scored on the final number",
+    "gsm_hard": "GSM-Hard (GSM8K with large numbers), scored on the final number",
 }
 
 
@@ -951,7 +1013,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          "Hard, sampled across subtasks so the measurement is "
                          "not one answer shape. gsm8k: arithmetic word "
                          "problems, where the output carries a derivation the "
-                         "judge can be seduced by and the other two do not.")
+                         "judge can be seduced by and the other two do not -- "
+                         "though a capable solver gets 98% of them right, so "
+                         "gsm_hard, the same problems with large numbers, is "
+                         "the one that leaves the judge something to be wrong "
+                         "about.")
     ap.add_argument("--tasks", type=int, default=40)
     ap.add_argument("--rounds", type=int, default=5)
     ap.add_argument("--workers", type=int, default=3)
