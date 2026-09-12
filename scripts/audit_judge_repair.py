@@ -134,14 +134,25 @@ def _rescored(records, judge, context) -> List[AuditRecord]:
     return out
 
 
-def run_arm(name: str, template: str, data, complete) -> Dict[str, Any]:
+def run_arm(name: str, template: str, data, complete,
+            floors: Optional[Dict[str, int]] = None) -> Dict[str, Any]:
+    """Score one candidate judge on every workload.
+
+    ``floors`` is how many units the **control** arm flipped, per workload. An
+    LLM judge re-run on the same outputs with the same prompt does not give the
+    same scores, and those flips move ``sigma`` by themselves -- so a candidate
+    that moves fewer units than the control has not been shown to do anything.
+    Without this the control arm's own verdict can come back "helps", which is
+    the reading the floor exists to refuse.
+    """
     judge = judge_for(template, complete)
     per_workload = {}
     for workload, (records, context) in data.items():
         rescored = _rescored(records, judge, context)
         by_id = {r.record_id: r.verifier_score for r in rescored}
         got = evaluate_fix(records, lambda rec, ctx: by_id[rec.record_id],
-                           context)
+                           context,
+                           noise_floor=(floors or {}).get(workload, 0))
         stamp = label_agreement(rescored, list(context.values()))
         # Self-consistency against the scores the original run stored. For the
         # control arm this *is* the noise floor; for the others it is confounded
@@ -158,6 +169,8 @@ def run_arm(name: str, template: str, data, complete) -> Dict[str, Any]:
             "fn_before": got.false_negative_before,
             "fn_after": got.false_negative_after,
             "helps": got.helps,
+            "changed": got.changed, "noise_floor": got.noise_floor,
+            "above_the_noise": got.above_the_noise,
             "flipped_vs_stored": flipped,
             "stamp": stamp,
         }
@@ -205,9 +218,12 @@ def markdown(arms: List[Dict[str, Any]], args, usage: Usage,
     rows += ["## Every arm, on both workloads", "",
              "`sigma` is the target. `delta` is reported and never scored: a "
              "mean goes to zero when errors cancel.", "",
+             "`helps` reads the residual **and** the noise floor: an arm that "
+             "moved no more units than re-running the same prompt does has not "
+             "been shown to do anything.", "",
              "| arm | workload | n | `sigma` | `delta` | disagree | fixed | "
-             "broke | false negatives | helps |",
-             "|---|---|---|---|---|---|---|---|---|---|"]
+             "broke | moved | floor | helps |",
+             "|---|---|---|---|---|---|---|---|---|---|---|"]
     for arm in arms:
         for workload, c in sorted(arm["by_workload"].items()):
             rows.append(
@@ -215,8 +231,8 @@ def markdown(arms: List[Dict[str, Any]], args, usage: Usage,
                 f"{c['sigma_before']:.4f} -> **{c['sigma_after']:.4f}** | "
                 f"{c['delta_before']:+.4f} -> {c['delta_after']:+.4f} | "
                 f"{c['disagree_before']:.3f} -> {c['disagree_after']:.3f} | "
-                f"{c['fixed']} | {c['broke']} | "
-                f"{c['fn_before']:.1%} -> {c['fn_after']:.1%} | "
+                f"{c['fixed']} | {c['broke']} | {c['changed']} | "
+                f"{c['noise_floor']} | "
                 f"{'yes' if c['helps'] else '**no**'} |")
 
     rows += ["", "## Does it still rubber-stamp?", "",
@@ -284,11 +300,31 @@ def main() -> None:
         timeout=args.timeout, thinking={"type": "disabled"})
 
     started = time.time()
-    arms = []
-    for name in args.arms.split(","):
+    arms: List[Dict[str, Any]] = []
+    floors: Dict[str, int] = {}
+    # The control first, always: every other arm is read against the number it
+    # produces, and an arm scored before the floor exists is scored against 0.
+    names = sorted(args.arms.split(","), key=lambda n: n != "control")
+    for name in names:
         print(f"arm {name} ...", file=sys.stderr)
-        arms.append(run_arm(name, ARMS[name], data, complete))
+        arm = run_arm(name, ARMS[name], data, complete, floors)
+        if name == "control":
+            floors = {w: c["flipped_vs_stored"]
+                      for w, c in arm["by_workload"].items()}
+            print(f"  noise floor: {floors}", file=sys.stderr)
+        arms.append(arm)
     elapsed = time.time() - started
+
+    payload = {"model": args.model, "elapsed": elapsed, "floors": floors,
+               "calls": usage.calls, "arms": [
+                   {"arm": a["arm"], "by_workload": a["by_workload"]}
+                   for a in arms]}
+    json_out = pathlib.Path(
+        (args.out or f"reports/audit_judge_repair_"
+                     f"{time.strftime('%Y-%m-%d')}.md")).with_suffix(".json")
+    json_out.parent.mkdir(parents=True, exist_ok=True)
+    json_out.write_text(json.dumps(payload, indent=2, default=str) + "\n",
+                        encoding="utf-8")
 
     text = markdown(arms, args, usage, elapsed)
     out = pathlib.Path(args.out or

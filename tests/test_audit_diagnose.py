@@ -318,6 +318,65 @@ def test_a_no_op_fix_changes_nothing():
     assert got.unchanged == got.n_pairs
 
 
+# -- the verifier's own noise -------------------------------------------------
+
+def test_a_stochastic_verifier_can_improve_on_itself_without_a_noise_floor():
+    """The reading this exists to refuse.
+
+    An LLM judge re-scoring the same stored outputs with the same prompt does
+    not give the same scores -- measured, 6 of 177 units on HotpotQA. Those six
+    move `sigma` on their own, so a candidate that moves eight has not been
+    shown to do anything.
+    """
+    recs = _population(n_agree=100, n_over=20)
+    over = [r for r in recs if r.residual > 0][:8]
+    right = [r for r in recs if r.residual == 0.0][:1]
+    targets = {r.record_id for r in over} | {r.record_id for r in right}
+
+    def rule(record, ctx):
+        return 0.0 if record.record_id in targets else record.verifier_score
+
+    blind = evaluate_fix(recs, rule)
+    assert blind.sigma_after < blind.sigma_before and blind.helps, (
+        "premise: on the numbers alone it looks like an improvement")
+
+    aware = evaluate_fix(recs, rule, noise_floor=blind.changed)
+    assert aware.sigma_after == blind.sigma_after, "the statistic is unchanged"
+    assert not aware.above_the_noise and not aware.helps, (
+        "only the verdict is, and it is the verdict that was wrong")
+
+
+def test_clearing_the_floor_by_one_unit_still_counts_as_clearing_it():
+    """A count from one control run is not a distribution, so the test is
+    deliberately weak -- necessary, not sufficient, and the docstring says so."""
+    recs = _population(n_agree=100, n_over=20)
+    targets = {r.record_id for r in recs if r.residual > 0}
+
+    def rule(record, ctx):
+        return 0.0 if record.record_id in targets else record.verifier_score
+
+    got = evaluate_fix(recs, rule, noise_floor=19)
+    assert got.changed == 20 and got.above_the_noise and got.helps
+
+
+def test_the_default_floor_changes_nothing():
+    """Zero is a no-op: a fix that changes no unit already has an unchanged
+    sigma, so `helps` was already False there."""
+    recs = _population(n_over=7)
+    got = evaluate_fix(recs, lambda record, ctx: record.verifier_score)
+    assert got.noise_floor == 0 and got.changed == 0
+    assert not got.above_the_noise and not got.helps
+
+
+def test_the_markdown_names_the_floor_it_was_read_against():
+    recs = _population(n_agree=100, n_over=20)
+    targets = {r.record_id for r in recs if r.residual > 0}
+    got = evaluate_fix(recs, lambda rec, ctx: 0.0 if rec.record_id in targets
+                       else rec.verifier_score, noise_floor=6)
+    assert "Noise floor 6" in got.to_markdown()
+    assert "moved 20" in got.to_markdown()
+
+
 def test_an_empty_set_reports_nothing_rather_than_dividing():
     got = evaluate_fix([], lambda record, ctx: 1.0)
     assert got.n_pairs == 0 and got.sigma_after != got.sigma_after

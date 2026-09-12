@@ -340,16 +340,45 @@ class FixReport:
     false_negative_before: float
     false_negative_after: float
     unchanged: int
+    #: Units the **unchanged** verifier flips when it is simply re-run. Zero for
+    #: a deterministic one. A stochastic verifier -- an LLM judge is one -- moves
+    #: ``sigma`` on its own, so a fix that moves fewer units than this has not
+    #: been shown to do anything. See :func:`evaluate_fix`.
+    noise_floor: int = 0
+
+    @property
+    def changed(self) -> int:
+        """Units this fix scored differently. ``fixed + broken``."""
+        return self.fixed + self.broken
+
+    @property
+    def above_the_noise(self) -> bool:
+        """Did it move more units than re-running the same verifier does?
+
+        A **necessary** condition, not a sufficient one: one control run gives a
+        count, not a distribution, so clearing it by one unit clears nothing in
+        particular. What it rules out is the case that has no other symptom --
+        a candidate whose whole effect is the verifier disagreeing with itself.
+        """
+        return self.changed > self.noise_floor
 
     @property
     def helps(self) -> bool:
-        """Did the residual actually shrink?
+        """Did the residual actually shrink, by more than noise?
 
         The only question worth asking of a fix, and deliberately not "did delta
         shrink": a fix that trades over-crediting for under-crediting improves
         every mean-based number while leaving the verifier no more accurate.
+
+        **And not by less than the verifier's own noise.** An LLM judge re-run
+        on the same outputs with the same prompt does not give the same scores:
+        measured, 6 of 177 units on HotpotQA. Those six move ``sigma`` by
+        themselves, so without a ``noise_floor`` this property will happily
+        report that a prompt improves on *itself*. It caught a real reading:
+        a one-clause fix moved 8 units on a workload the clause cannot apply
+        to, against a floor of 6 -- which is not an effect, it is a re-run.
         """
-        return self.sigma_after < self.sigma_before
+        return self.sigma_after < self.sigma_before and self.above_the_noise
 
     def to_markdown(self) -> str:
         verdict = "**helps**" if self.helps else "**does not help**"
@@ -365,13 +394,18 @@ class FixReport:
             f"fixed {self.fixed}, broke {self.broken}, unchanged "
             f"{self.unchanged}; {self.breakage_rate:.1%} of the verifier's good "
             f"judgements destroyed; false negatives "
-            f"{self.false_negative_before:.1%} -> {self.false_negative_after:.1%}.",
+            f"{self.false_negative_before:.1%} -> {self.false_negative_after:.1%}."
+            + ("" if not self.noise_floor else
+               f" Noise floor {self.noise_floor}: re-running the unchanged "
+               f"verifier moves that many units by itself, and this fix moved "
+               f"{self.changed}."),
         ])
 
 
 def evaluate_fix(records: Iterable[AuditRecord],
                  fix: Callable[[AuditRecord, Any], float],
-                 context: Optional[Mapping[str, Any]] = None) -> FixReport:
+                 context: Optional[Mapping[str, Any]] = None,
+                 *, noise_floor: int = 0) -> FixReport:
     """Score a proposed verifier change against **every** labelled pair.
 
     ``fix(record, context_for_task) -> new verifier score``.
@@ -386,6 +420,13 @@ def evaluate_fix(records: Iterable[AuditRecord],
     obviously right. It was a rule nobody had measured against the answers it
     was not aimed at.
 
+    ``noise_floor`` is how many units the **unchanged** verifier flips when it is
+    simply re-run. Leave it at 0 for a deterministic verifier -- a rule, a
+    normalisation, exact match. Set it for a stochastic one: an LLM judge
+    re-scoring the same stored outputs with the same prompt flipped 6 of 177
+    units on HotpotQA, and six flips move ``sigma`` without anything having been
+    fixed. Get it by running the unchanged verifier through this same function.
+
     One rule at a time, too. Bundled with a rule that works, A passes: the
     bundle's residual improves, the verdict reads "helps", and the harmful half
     is invisible in every number the bundle reports.
@@ -393,7 +434,8 @@ def evaluate_fix(records: Iterable[AuditRecord],
     resolved = [r for r in records if r.oracle_score is not None]
     if not resolved:
         nan = float("nan")
-        return FixReport(0, nan, nan, nan, nan, nan, nan, 0, 0, nan, nan, nan, 0)
+        return FixReport(0, nan, nan, nan, nan, nan, nan, 0, 0, nan, nan, nan, 0,
+                         noise_floor=noise_floor)
 
     before = [r.residual for r in resolved]
     after: List[float] = []
@@ -430,4 +472,5 @@ def evaluate_fix(records: Iterable[AuditRecord],
         false_negative_before=(fn_before / right_answers) if right_answers
         else float("nan"),
         false_negative_after=(fn_after / right_answers) if right_answers
-        else float("nan"))
+        else float("nan"),
+        noise_floor=noise_floor)

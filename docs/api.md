@@ -1426,7 +1426,8 @@ FixReport(
     breakage_rate: float,
     false_negative_before: float,
     false_negative_after: float,
-    unchanged: int
+    unchanged: int,
+    noise_floor: int = 0
 ) -> None
 ```
 
@@ -1462,7 +1463,9 @@ Score a proposed verifier change against **every** labelled pair.
 evaluate_fix(
     records: Iterable[AuditRecord],
     fix: Callable[[AuditRecord, Any], float],
-    context: Optional[Mapping[str, Any]] = None
+    context: Optional[Mapping[str, Any]] = None,
+    *,
+    noise_floor: int = 0
 ) -> FixReport
 ```
 
