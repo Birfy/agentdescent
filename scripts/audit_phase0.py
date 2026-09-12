@@ -86,8 +86,64 @@ def normalize(text: str) -> str:
 
 
 def exact_match(task: Task, output: str) -> float:
-    """**The oracle.** The benchmark's own definition of a correct answer."""
+    """**The oracle** for the free-text workloads: the benchmark's own definition."""
     return 1.0 if normalize(output) == normalize(task.meta["gold"]) else 0.0
+
+
+#: A number, with optional thousands separators and decimal part. Leading `$`
+#: and trailing `%` are outside the match on purpose -- the oracle compares
+#: quantities, and `$18` and `18` are the same quantity.
+_NUMBER = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
+
+
+def final_number(text: str) -> Optional[float]:
+    """The last number in ``text``, or ``None``.
+
+    "The last number in the completion" is the GSM8K convention, and it is
+    convention rather than truth: an answer ending ``18 (over 7 days)`` scores
+    against 7. That is not a flaw to route around -- it is this workload's
+    contribution to the :attr:`~agentdescent.audit.diagnose.Kind.AMBIGUOUS`
+    bucket, where the judge is right and the oracle is wrong, and the two
+    existing workloads produce that bucket only through name and date
+    formatting. A third *kind* of ambiguity is most of why this workload is
+    here.
+    """
+    found = _NUMBER.findall(text or "")
+    if not found:
+        return None
+    try:
+        return float(found[-1].replace(",", ""))
+    except ValueError:                          # e.g. a bare "1,,2"
+        return None
+
+
+def number_match(task: Task, output: str) -> float:
+    """**The oracle** for GSM8K: the final number, compared as a quantity.
+
+    Not `exact_match`: normalised string equality would score ``$18`` and
+    ``18.00`` wrong against ``18``, and a workload whose oracle refuses its own
+    correct answers measures the oracle, not the judge.
+    """
+    want = final_number(task.meta["gold"])
+    got = final_number(output)
+    if want is None or got is None:
+        return 0.0
+    return 1.0 if abs(want - got) < 1e-6 else 0.0
+
+
+#: The oracle each workload is scored against. A single module-level oracle was
+#: right while both workloads were free-text and wrong the moment one of them
+#: answered with a quantity.
+ORACLES = {"hotpot": exact_match, "bbh": exact_match, "gsm8k": number_match}
+
+#: What the report calls each oracle. Hard-coded as "normalized exact match" for
+#: two workloads that both used it, and a report naming the wrong oracle is the
+#: one error in a measurement nobody can catch later from the file.
+_ORACLE_LABELS = {
+    "hotpot": "normalized exact match against the reference",
+    "bbh": "normalized exact match against the reference",
+    "gsm8k": "the final number in the answer, compared as a quantity",
+}
 
 
 _JUDGE_TMPL = """You are grading an answer to a question.
@@ -128,7 +184,7 @@ def llm_judge(complete, usage_note: Dict[str, int]):
     return score
 
 
-def offline_judge(generosity: float = 0.35, seed: int = 0):
+def offline_judge(generosity: float = 0.35, seed: int = 0, oracle=exact_match):
     """A deterministic stand-in for `--dry-run`, biased in a known *direction*.
 
     Symmetric noise would make a broken estimator look fine -- it is unbiased on
@@ -136,9 +192,14 @@ def offline_judge(generosity: float = 0.35, seed: int = 0):
     records. So this only ever scores *up*: a wrong answer is forgiven with
     probability `generosity`, a right one is never marked down, and the true
     `Delta` is therefore `generosity * P(wrong)` and known in advance.
+
+    ``oracle`` is the workload's own, not a default: with `exact_match` hard-coded
+    the dry run on GSM8K would call every ``$18`` wrong and then forgive it at
+    `generosity`, so the known `Delta` -- the one thing this stand-in exists to
+    make known -- would be a number about the wrong oracle.
     """
     def score(task: Task, output: str) -> float:
-        truth = exact_match(task, output)
+        truth = oracle(task, output)
         if truth == 1.0:
             return 1.0
         rng = random.Random(f"{seed}:{task.id}:{output}")
@@ -185,6 +246,30 @@ def _bbh_task(subtask: str, row: Dict) -> Optional[Task]:
                 meta={"gold": answer, "expected": answer, "subtask": subtask})
 
 
+def _gsm8k_task(row: Dict) -> Optional[Task]:
+    """One GSM8K row as a task. The only place a GSM8K task id is constructed.
+
+    The gold kept in ``meta`` is the **final number**, not the worked solution
+    the dataset stores with it. The judge is shown ``meta["gold"]``, and a judge
+    shown the reasoning would be grading against a derivation rather than an
+    answer -- which is a different experiment, and an easier one.
+    """
+    question = str(row.get("question") or "").strip()
+    answer = str(row.get("answer") or "")
+    if "####" not in answer or not question:
+        return None
+    gold = answer.rsplit("####", 1)[1].strip()
+    if final_number(gold) is None:
+        return None
+    digest = hashlib.sha256(question.encode("utf-8")).hexdigest()[:10]
+    return Task(id=f"gsm8k:{digest}", prompt=question,
+                meta={"gold": gold, "expected": gold,
+                      # The derivation, for the diagnosis only. `error_mode`
+                      # needs it to tell "wrong number" from "right number the
+                      # oracle could not find", and nothing scored ever sees it.
+                      "worked": answer.rsplit("####", 1)[0].strip()})
+
+
 def task_index(workload: str, *, rows: int = 400) -> Dict[str, Task]:
     """``task_id -> Task`` for re-joining records to their gold answers.
 
@@ -218,6 +303,12 @@ def task_index(workload: str, *, rows: int = 400) -> Dict[str, Task]:
                 task = _bbh_task(name, row)
                 if task is not None:
                     out[task.id] = task
+        return out
+    if workload == "gsm8k":
+        for row in hf_rows("openai/gsm8k", "test", config="main", limit=rows):
+            task = _gsm8k_task(row)
+            if task is not None:
+                out[task.id] = task
         return out
     raise ValueError(f"unknown workload {workload!r}")
 
@@ -301,13 +392,55 @@ def bbh_tasks(n: int, *, seed: int = 0,
     return tasks[:n]
 
 
-WORKLOADS = {"hotpot": hotpot_tasks, "bbh": bbh_tasks}
+def gsm8k_tasks(n: int, *, seed: int = 0) -> List[Task]:
+    """GSM8K grade-school word problems, scored on the final number.
+
+    The third workload, and it is here for the **error modes the first two
+    cannot produce**. HotpotQA's judge is too generous about paraphrase; BBH's
+    stops discriminating on option labels. Neither has a *derivation* in the
+    output, so neither can produce the failure everyone actually fears from an
+    LLM judge: a candidate whose arithmetic reads correctly and whose final
+    number is wrong, marked right because the working looked right.
+
+    Why that matters here rather than as another benchmark row: the improvement
+    pool is allocated by how likely the next label is to show something *new*,
+    and after two workloads that probability had fallen to 0.0169 -- saturated.
+    More labels on the same two shapes cannot move it. A third shape can.
+    """
+    from agentdescent.dataloader import hf_rows
+
+    rows = hf_rows("openai/gsm8k", "test", config="main", limit=max(n * 2, 40))
+    rng = random.Random(seed)
+    rng.shuffle(rows)
+    tasks: List[Task] = []
+    for row in rows:
+        task = _gsm8k_task(row)
+        if task is None:
+            continue
+        tasks.append(task)
+        if len(tasks) >= n:
+            break
+    return tasks
+
+
+WORKLOADS = {"hotpot": hotpot_tasks, "bbh": bbh_tasks, "gsm8k": gsm8k_tasks}
+
+#: An answer the judge forgives and the workload's oracle refuses, for
+#: `--dry-run`. Keyed by workload because "the oracle refuses it" is a statement
+#: about the oracle: GSM8K's reads the **last** number, so trailing context is
+#: what moves it, where a restated sentence does not.
+_NEAR_MISS = {
+    "hotpot": lambda gold: f"The answer is {gold}.",
+    "bbh": lambda gold: f"The answer is {gold}.",
+    "gsm8k": lambda gold: f"Working through it, the answer is {gold} (over 7 days).",
+}
 
 #: What the report calls each one. A report that says "HotpotQA validation" over
 #: BBH numbers is worse than one that says nothing.
 _WORKLOAD_LABELS = {
     "hotpot": "HotpotQA validation",
     "bbh": "BIG-Bench Hard across " + str(len(BBH_SUBTASKS)) + " subtasks",
+    "gsm8k": "GSM8K test, scored on the final number",
 }
 
 
@@ -389,11 +522,13 @@ def by_subtask(records, tasks) -> Dict[str, Dict[str, float]]:
 
 def run(args) -> Dict:
     tasks = WORKLOADS[args.workload](args.tasks, seed=args.seed)
+    oracle = ORACLES[args.workload]
     usage = Usage()
     notes: Dict[str, int] = {}
 
     if args.dry_run:
-        judge = offline_judge(generosity=args.dry_generosity, seed=args.seed)
+        judge = offline_judge(generosity=args.dry_generosity, seed=args.seed,
+                              oracle=oracle)
         solve = None
         judge_label = f"offline stand-in (generosity={args.dry_generosity})"
     else:
@@ -427,7 +562,7 @@ def run(args) -> Dict:
     preexisting = {r.record_id for r in store.all()}
     audited = AuditedReward(
         judge,
-        oracle=GoldAnswer(exact_match),
+        oracle=GoldAnswer(oracle),
         store=store,
         sample_rate=args.sample_rate,
         calibration_fraction=args.calibration_fraction,
@@ -438,6 +573,14 @@ def run(args) -> Dict:
     if args.dry_run:
         # A deterministic solver whose answers are right, near-miss or wrong in
         # roughly realistic proportions -- enough for the harness to have pairs.
+        #
+        # The near-miss has to be a near-miss *for this workload's oracle*.
+        # `The answer is 18.` is one for exact match and is simply **correct**
+        # for `number_match`, so the shared string would have given the GSM8K
+        # dry run no disagreements at all -- a harness rehearsal that exercises
+        # none of the paths it exists to rehearse.
+        near_miss = _NEAR_MISS[args.workload]
+
         def _run(rendered: str, task: Task) -> str:
             rng = random.Random(f"{args.seed}:{task.id}:{len(rendered)}")
             gold = task.meta["gold"]
@@ -445,7 +588,7 @@ def run(args) -> Dict:
             if roll < 0.35 + 0.25 * min(1.0, len(rendered) / 400.0):
                 return gold
             if roll < 0.75:
-                return f"The answer is {gold}."      # near-miss: judge yes, EM no
+                return near_miss(gold)
             return "unknown"
         kwargs = dict(run=RenderTap(_run), propose=lambda r, t, o, s: None)
     else:
@@ -656,7 +799,7 @@ def report(bundle: Dict, an: Dict, args) -> str:
         f"| workload | {_WORKLOAD_LABELS[args.workload]}, "
         f"{len(bundle['tasks'])} questions |",
         f"| verifier `f` (cheap, biased) | {bundle['judge_label']} |",
-        "| oracle `Y` (ground truth) | normalized exact match against the reference |",
+        f"| oracle `Y` (ground truth) | {_ORACLE_LABELS[args.workload]} |",
         f"| `verifier_version` | `{bundle['audited'].verifier_version}` |",
         f"| loop | {args.rounds} rounds x {args.workers} workers, "
         f"held_out_frac={args.held_out_frac}, tournament={args.tournament} |",
@@ -786,7 +929,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--workload", choices=sorted(WORKLOADS), default="hotpot",
                     help="hotpot: multi-hop free-text answers. bbh: BIG-Bench "
                          "Hard, sampled across subtasks so the measurement is "
-                         "not one answer shape.")
+                         "not one answer shape. gsm8k: arithmetic word "
+                         "problems, where the output carries a derivation the "
+                         "judge can be seduced by and the other two do not.")
     ap.add_argument("--tasks", type=int, default=40)
     ap.add_argument("--rounds", type=int, default=5)
     ap.add_argument("--workers", type=int, default=3)
