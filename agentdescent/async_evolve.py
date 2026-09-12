@@ -87,6 +87,9 @@ def async_evolve(
     oracle_budget: int = 200,
     cheap_eval_tasks: Optional[int] = None,
     fusion_tournament: Optional[bool] = None,
+    #: Checkpoint the aggregator's search state every round so a process
+    #: restart can resume the search. Off by default; see ``evolve()``.
+    checkpointing: bool = False,
     solved_threshold: float = SOLVED,
     shuffle: bool = False,
     seed: int = 0,
@@ -341,7 +344,7 @@ def async_evolve(
         cheap_eval_tasks=cheap_eval_tasks, fusion_tournament=fusion_tournament,
         shuffle=shuffle, seed=seed,
         usage=usage, verifier=_pol.verifier, ledger_impl=_pol.ledger,
-        policies_bundle=_pol)
+        policies_bundle=_pol, checkpointing=checkpointing)
     eng.meter.start()
     if n_workers < 1:
         raise ValueError(f"n_workers must be >= 1, got {n_workers}")
@@ -392,6 +395,12 @@ def async_evolve(
     # the merger closure can mutate it without a `nonlocal` per field.
     # Shared with the barrier-free loop's sibling: one tracker, one epsilon.
     early = EarlyStop(target_reward=target_reward, patience=patience)
+    # Restore the early-stop tracker from the checkpoint the previous process
+    # wrote — same reasoning as the synchronous path: a resumed run must not
+    # re-burn its patience budget re-discovering a stall it had already counted.
+    if checkpointing and getattr(eng, "checkpoint_payload", None) is not None:
+        from .checkpoint import restore_early_stop
+        restore_early_stop(repo_path or "", early, payload=eng.checkpoint_payload)
     errors: List[Optional[str]] = [None]      # first backend failure seen (diagnostic)
     # Most recent artifact read from the ledger, so a failing final read still
     # yields a result instead of an exception (same reasoning as the sync path).

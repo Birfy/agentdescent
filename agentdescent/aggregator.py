@@ -76,6 +76,14 @@ class AggregatorProtocol(Protocol):
 
     def step(self) -> List["MergeReport"]: ...
 
+    #: **Checkpointing** (optional, duck-typed — not part of the Protocol
+    #: contract). An aggregator that holds search state beyond what the
+    #: ledger persists (a tree, an archive, per-variant posteriors) can
+    #: implement ``checkpoint()`` and ``restore()`` to survive a process
+    #: restart. See :mod:`agentdescent.checkpoint` for the wiring. Not
+    #: defining either method opts out — the run works, a resume just
+    #: starts the search fresh.
+
 
 # Builds an aggregator from the runtime deps ``evolve`` owns. The default is the
 # reference :class:`Aggregator`; pass your own to ``evolve(aggregator_factory=)``.
@@ -715,6 +723,64 @@ class Aggregator:
         finishes without an error, and never in place of the round-based rule."""
         for aid in list(self._known_artifacts()):
             self._promote(aid)
+
+    # -- checkpointing (optional; see agentdescent.checkpoint) ---------------
+
+    def checkpoint(self) -> Optional[dict]:
+        """Serialise the search state the ledger does not persist.
+
+        Three things live only in memory here: the per-artifact Beta posteriors
+        (the acceptance test's running prior — without them a resumed run's
+        first merge is judged by a fresh, over-permissive prior), the
+        promotion survival counters (without them a resumed run re-promotes
+        from zero), and the set of artifacts seen (without it ``finalize``
+        publishes only what the resumed run touched). The evidence buffer is
+        deliberately **not** saved: its cards are transient input, and the
+        staleness filter would discard most of them on the next merge anyway.
+        """
+        try:
+            posteriors = {
+                aid: {"successes": p.successes, "failures": p.failures}
+                for aid, p in self._posteriors.items()
+            }
+        except AttributeError:
+            return None
+        return {
+            "posteriors": posteriors,
+            "promoted_at": dict(self._promoted_at),
+            "seen": sorted(self._seen),
+        }
+
+    def restore(self, state: dict) -> None:
+        """Restore state written by :meth:`checkpoint`.
+
+        Unknown keys are ignored (forward compatibility); missing keys leave
+        the field at its constructor default. A malformed posterior entry is
+        skipped rather than raised — a partially restored prior is worse than
+        a fresh one only when the numbers are wrong, and this way they can
+        not be.
+        """
+        posteriors = state.get("posteriors")
+        if isinstance(posteriors, dict):
+            for aid, p in posteriors.items():
+                if not isinstance(p, dict):
+                    continue
+                try:
+                    self._posteriors[aid] = BetaPosterior(
+                        successes=float(p.get("successes", 0.0)),
+                        failures=float(p.get("failures", 0.0)),
+                    )
+                except (TypeError, ValueError):
+                    continue
+        promoted_at = state.get("promoted_at")
+        if isinstance(promoted_at, dict):
+            self._promoted_at = {
+                aid: int(v) for aid, v in promoted_at.items()
+                if isinstance(v, (int, float))
+            }
+        seen = state.get("seen")
+        if isinstance(seen, list):
+            self._seen = set(seen)
 
     @property
     def _survival(self) -> Dict[str, int]:

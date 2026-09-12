@@ -257,6 +257,16 @@ class Ledger:
             _git(self.repo_path, "config", "user.name", "agentdescent")
             _git(self.repo_path, "config", "user.email", "bot@agentdescent.local")
             os.makedirs(os.path.join(self.repo_path, "artifacts"), exist_ok=True)
+            # Checkpoints are per-process diagnostics, not ledger state: they
+            # live in the working tree but must never enter a branch. If they
+            # were committed, switching branches (dev -> stable at promote
+            # time) would *delete* them from the tree -- a dev-only file does
+            # not exist on stable -- and a resume would find nothing. Ignored
+            # files survive every checkout because git does not touch them.
+            # (The name mirrors checkpoint.CHECKPOINT_DIR; spelled out here to
+            # keep the ledger free of that import.)
+            with open(os.path.join(self.repo_path, ".gitignore"), "w") as f:
+                f.write("checkpoints/\n")
             self._write_versions({})
             _git(self.repo_path, "add", "-A")
             _git(self.repo_path, "commit", "-q", "-m", "genesis")
