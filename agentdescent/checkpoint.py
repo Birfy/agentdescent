@@ -41,7 +41,6 @@ from __future__ import annotations
 
 import json
 import os
-import threading
 import time
 from contextlib import contextmanager
 from typing import Any, Dict, Optional
@@ -233,12 +232,14 @@ def restore_checkpoint(
     *,
     expected_artifact_id: Optional[str] = None,
     expected_aggregator_type: Optional[str] = None,
-) -> bool:
+) -> Optional[dict]:
     """Restore the aggregator's in-memory state from the latest checkpoint.
 
     Called from ``_build_engine`` after the aggregator is created and before
-    the first round. Returns ``True`` if state was restored, ``False`` if no
-    checkpoint exists or the aggregator does not support it.
+    the first round. Returns the checkpoint payload (a dict) if state was
+    restored, ``None`` if no checkpoint exists or the aggregator does not
+    support it. The payload can be passed to :func:`restore_early_stop` to
+    avoid a second file read.
 
     ``expected_artifact_id`` / ``expected_aggregator_type`` make the restore
     refuse a checkpoint that does not belong here. The same ledger path can
@@ -248,43 +249,52 @@ def restore_checkpoint(
     """
     restore_fn = getattr(aggregator, "restore", None)
     if not callable(restore_fn):
-        return False
+        return None
     payload = load_checkpoint(repo_path)
     if payload is None:
-        return False
+        return None
     if expected_artifact_id is not None:
         recorded = payload.get("artifact_id")
         if recorded is not None and recorded != expected_artifact_id:
             # Different artifact on the same ledger — refuse.
-            return False
+            return None
     if expected_aggregator_type is not None:
         recorded = payload.get("aggregator_type")
         if recorded is not None and recorded != expected_aggregator_type:
             # The aggregator implementation changed; its state shape may be
             # incompatible. Refuse rather than half-restore.
-            return False
+            return None
     state = payload.get("archive_state")
     if not isinstance(state, dict):
-        return False
+        return None
     try:
         restore_fn(state)
     except Exception:
         # A restore failure means the checkpoint is incompatible with the
         # current aggregator (e.g. the factory was changed). Start fresh
         # rather than crashing — the run still works, it just has no history.
-        return False
-    return True
-
-
-def restore_early_stop(repo_path: str, early_stop: Any) -> bool:
+        return None
+    return payload
+def restore_early_stop(
+    repo_path: str,
+    early_stop: Any,
+    *,
+    payload: Optional[dict] = None,
+) -> bool:
     """Restore the run's EarlyStop tracker (best / stalled) from a checkpoint.
 
     Called from the drivers before the round loop starts. Without this, a
     resumed run forgets how long it had already stalled and re-burns its
     patience budget re-discovering the stall — a real cost on a long run.
-    Returns ``True`` if the tracker was restored.
+
+    ``payload`` accepts an already-loaded checkpoint dict (from
+    :func:`load_checkpoint`), so a driver that has already called
+    :func:`restore_checkpoint` (which loads the same file) can pass it through
+    instead of reading and parsing it a second time. ``None`` (the default)
+    loads it internally.
     """
-    payload = load_checkpoint(repo_path)
+    if payload is None:
+        payload = load_checkpoint(repo_path)
     if payload is None:
         return False
     early = payload.get("early_stop")

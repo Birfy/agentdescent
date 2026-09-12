@@ -397,7 +397,7 @@ def async_evolve(
     # re-burn its patience budget re-discovering a stall it had already counted.
     if repo_path:
         from .checkpoint import restore_early_stop
-        restore_early_stop(repo_path, early)
+        restore_early_stop(repo_path, early, payload=getattr(eng, "checkpoint_payload", None))
     errors: List[Optional[str]] = [None]      # first backend failure seen (diagnostic)
     # Most recent artifact read from the ledger, so a failing final read still
     # yields a result instead of an exception (same reasoning as the sync path).

@@ -241,17 +241,22 @@ class PopulationAggregator(Aggregator):
         ``Beam(4)`` is ``Beam(1)`` again, ``Archive``'s novelty term is gone,
         and ``ParetoFrontier`` has a front of one to sit on.
 
-        ``seen_keys`` is saved beside the archive because the dedup key is the
-        candidate's *rendered* form (:meth:`_admit`), which only the strategy
-        can produce — a restored ``_seen`` rebuilt from states would disagree
-        with freshly rendered keys and re-admit everything.
+        The parent ``Aggregator`` state (Beta posteriors, promotion counters,
+        ``_seen``) is merged in via ``super().checkpoint()``. ``_seen`` doubles
+        as the population's rendered-key dedup set (``PopulationAggregator``
+        inherits the field and uses it in ``_admit``), so the parent's ``seen``
+        key already contains the rendered keys — no separate ``seen_keys`` is
+        needed.
         """
+        parent = super().checkpoint()
         with self._archive_lock:
-            return {
+            own = {
                 "archive": [dict(entry) for entry in self._archive],
                 "selections": self._selections,
-                "seen_keys": sorted(self._seen),
             }
+        if parent is not None:
+            own.update(parent)
+        return own
 
     def restore(self, state: dict) -> None:
         """Restore the archive written by :meth:`checkpoint`.
@@ -262,7 +267,17 @@ class PopulationAggregator(Aggregator):
         ``state`` dicts are the candidates' *key spaces* — they are only ever
         compared and committed, never executed, so trusting their shape is
         enough.
+
+        The parent ``Aggregator`` state (Beta posteriors, promotion counters,
+        seen set) is restored via ``super().restore()`` first, so the
+        acceptance prior is in place before the population archive is loaded
+        on top of it.
         """
+        # Restore the parent's state first (posteriors, promoted_at, seen).
+        # The parent's ``restore`` reads ``posteriors`` / ``promoted_at`` /
+        # ``seen`` keys, which ``checkpoint`` merged in from ``super()``.
+        super().restore(state)
+
         archive = state.get("archive")
         if not isinstance(archive, list):
             return
@@ -284,13 +299,15 @@ class PopulationAggregator(Aggregator):
                 continue
         with self._archive_lock:
             self._archive = restored
-            seen = state.get("seen_keys")
-            # Restore the *rendered* dedup keys, not keys derived from states:
-            # ``_admit`` compares against ``strategy.render(state)``, and only
-            # the checkpoint knows those strings. An empty/missing list means
-            # the archive came from an older checkpoint — re-admitting is then
-            # the honest behaviour (duplicates are deduped again on admit).
-            self._seen = {str(k) for k in seen} if isinstance(seen, list) else set()
+            # The parent's ``restore`` already set ``_seen`` from the ``seen``
+            # key (which contains both artifact ids and rendered keys, since
+            # PopulationAggregator inherits ``_seen`` from Aggregator and uses
+            # it in ``_admit``). An old checkpoint may carry ``seen_keys`` from
+            # before the merge — restore it too for backwards compatibility,
+            # but prefer the parent's ``seen`` when both exist.
+            seen_keys = state.get("seen_keys")
+            if isinstance(seen_keys, list) and not self._seen:
+                self._seen = {str(k) for k in seen_keys}
             try:
                 self._selections = int(state.get("selections", 0))
             except (TypeError, ValueError):

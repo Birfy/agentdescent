@@ -111,6 +111,7 @@ from .checkpoint import (
     save_checkpoint,
     load_checkpoint,
     restore_checkpoint,
+    restore_early_stop,
     clear_checkpoints,
     list_checkpoints,
 )

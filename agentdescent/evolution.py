@@ -1650,6 +1650,9 @@ class _Engine:
     #: ``None`` when the caller passed ``repo_path`` (theirs to keep, and how a run
     #: is resumed).
     scratch_repo: Optional[str] = None
+    #: The checkpoint payload loaded by ``_build_engine`` (or ``None``).
+    #: Threaded to ``restore_early_stop`` to avoid a second file read.
+    checkpoint_payload: Optional[dict] = None
 
     def record_round(self, *, index: int, reward: float, n_items: int,
                      reports: Sequence[Any],
@@ -2066,9 +2069,12 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     # support checkpointing or when the ledger is a fresh scratch repo. The
     # expected artifact id and aggregator class guard against restoring one
     # search's state into another's (same repo, different artifact / factory).
+    # The returned payload is threaded to restore_early_stop to avoid a second
+    # file read.
     from .checkpoint import restore_checkpoint
+    _cp_payload = None
     if repo_path:
-        restore_checkpoint(
+        _cp_payload = restore_checkpoint(
             repo_path, aggregator,
             expected_artifact_id=artifact_id,
             expected_aggregator_type=type(aggregator).__name__,
@@ -2110,7 +2116,8 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
     return _Engine(ledger, runtime, verifier, aggregator, strategy, run, reward,
                    propose, train, held_out, {t.id: t for t in train},
                    [t.id for t in train], artifact_id, blast_radius,
-                   executor=executor, meter=meter, scratch_repo=scratch)
+                   executor=executor, meter=meter, scratch_repo=scratch,
+                   checkpoint_payload=_cp_payload)
 
 
 def evolve(
@@ -2600,7 +2607,7 @@ def evolve(
     # meaningful on a resumed ledger; a fresh scratch repo has no checkpoint.
     if repo_path:
         from .checkpoint import restore_early_stop
-        restore_early_stop(repo_path, early)
+        restore_early_stop(repo_path, early, payload=eng.checkpoint_payload)
     unit_lock = threading.Lock()
     # Per-worker snapshots, when `refresh_interval > 1`. See `_snapshot_for`.
     worker_snaps: Dict[int, Tuple["EvolvingArtifact", int]] = {}
