@@ -350,7 +350,7 @@ def test_resumed_run_restores_default_aggregator_state(tmp_path):
         return f"change-{task.id}-{reward}"
 
     # First run: let it evolve for a few rounds. Reward varies by task.
-    r1 = evolve(tasks, lambda t, o: 0.9 if t.id == "t0" else 0.1,
+    r1 = evolve(tasks, lambda t, o: 0.9 if t.id == "t0" else 0.1, checkpointing=True,
                 run=run, propose=propose,
                 rounds=2, n_workers=2, repo_path=repo)
 
@@ -359,7 +359,7 @@ def test_resumed_run_restores_default_aggregator_state(tmp_path):
 
     # Second run resumes with the saved state. It must not crash, and the
     # checkpoint round must be >= what the first run reached.
-    r2 = evolve(tasks, lambda t, o: 0.5, run=run, propose=propose,
+    r2 = evolve(tasks, lambda t, o: 0.5, run=run, propose=propose, checkpointing=True,
                 rounds=1, n_workers=1, repo_path=repo)
     assert r2.final_reward >= 0.0
 
@@ -385,7 +385,7 @@ def test_evolve_writes_checkpoint_after_each_round(tmp_path):
     def factory(ledger, verifier, audit, config, policy):
         return CountingAggregator()
 
-    evolve(tasks, lambda t, o: 0.5, run=run, propose=propose,
+    evolve(tasks, lambda t, o: 0.5, run=run, propose=propose, checkpointing=True,
            rounds=3, n_workers=1, repo_path=str(tmp_path / "repo"),
            aggregator_factory=factory)
 
@@ -415,7 +415,7 @@ def test_resume_restores_aggregator_state(tmp_path):
         return CountingAggregator()
 
     # First run: 3 rounds
-    evolve(tasks, lambda t, o: 0.5, run=run, propose=propose,
+    evolve(tasks, lambda t, o: 0.5, run=run, propose=propose, checkpointing=True,
            rounds=3, n_workers=1, repo_path=repo,
            aggregator_factory=factory)
 
@@ -425,7 +425,7 @@ def test_resume_restores_aggregator_state(tmp_path):
 
     # Second run: resume on the same repo. The aggregator is re-created,
     # but the checkpoint should be detected and restore() called.
-    result = evolve(tasks, lambda t, o: 0.5, run=run, propose=propose,
+    result = evolve(tasks, lambda t, o: 0.5, run=run, propose=propose, checkpointing=True,
                     rounds=1, n_workers=1, repo_path=repo,
                     aggregator_factory=factory)
 
@@ -492,7 +492,7 @@ def test_resume_does_not_reburn_patience(tmp_path):
     repo = str(tmp_path / "repo")
     tasks = [Task(id=f"t{i}", prompt=f"task {i}") for i in range(8)]
 
-    evolve(tasks, lambda t, o: 0.5, run=lambda r, t: t.id,
+    evolve(tasks, lambda t, o: 0.5, run=lambda r, t: t.id, checkpointing=True,
            propose=lambda r, t, o, rew: f"change-{t.id}",
            rounds=3, n_workers=1, repo_path=repo, patience=10)
 
@@ -502,7 +502,7 @@ def test_resume_does_not_reburn_patience(tmp_path):
 
     # A second run resumes. It must not crash, and the checkpoint it writes
     # carries the stall counter forward through the restored tracker.
-    evolve(tasks, lambda t, o: 0.5, run=lambda r, t: t.id,
+    evolve(tasks, lambda t, o: 0.5, run=lambda r, t: t.id, checkpointing=True,
            propose=lambda r, t, o, rew: f"change-{t.id}",
            rounds=1, n_workers=1, repo_path=repo, patience=10)
 
@@ -523,7 +523,7 @@ def test_async_path_checkpoints_too(tmp_path):
 
     with _w.catch_warnings():
         _w.simplefilter("ignore")
-        evolve(tasks, lambda t, o: 0.5, run=lambda r, t: t.id,
+        evolve(tasks, lambda t, o: 0.5, run=lambda r, t: t.id, checkpointing=True,
                propose=lambda r, t, o, rew: f"change-{t.id}",
                rounds=2, n_workers=2, repo_path=repo,
                max_seconds=30.0, asynchronous=True)
@@ -635,7 +635,7 @@ def test_population_run_checkpoints_archive(tmp_path):
 
     with _w.catch_warnings():
         _w.simplefilter("ignore")
-        evolve(tasks, lambda t, o: 0.5, run=lambda r, t: t.id,
+        evolve(tasks, lambda t, o: 0.5, run=lambda r, t: t.id, checkpointing=True,
                propose=lambda r, t, o, rew: f"rule-{t.id}",
                rounds=2, n_workers=1, repo_path=repo,
                policies=Policies(selection=Beam(k=3)))
@@ -793,3 +793,21 @@ def test_population_restore_recovers_parent_state():
     # Population state recovered:
     assert len(fresh._archive) == 1
     assert fresh._selections == 3
+
+
+def test_checkpointing_off_by_default(tmp_path):
+    """Without checkpointing=True, no checkpoint files are written — a
+    throwaway run pays zero IO cost."""
+    from agentdescent.evolution import evolve, Task
+
+    repo = str(tmp_path / "repo")
+    tasks = [Task(id=f"t{i}", prompt=f"task {i}") for i in range(8)]
+
+    evolve(tasks, lambda t, o: 0.5, run=lambda r, t: t.id,
+           propose=lambda r, t, o, rew: f"change-{t.id}",
+           rounds=2, n_workers=1, repo_path=repo)
+
+    d = os.path.join(repo, CHECKPOINT_DIR)
+    assert not os.path.isdir(d) or not any(
+        f.endswith(".json") for f in os.listdir(d)
+    ), "checkpoint was written without checkpointing=True"
