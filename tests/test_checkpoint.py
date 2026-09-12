@@ -22,6 +22,7 @@ import pytest
 from agentdescent.aggregator import AggregatorProtocol, MergeReport
 from agentdescent.checkpoint import (
     CHECKPOINT_DIR,
+    LOCK_FILE,
     SCHEMA_VERSION,
     clear_checkpoints,
     list_checkpoints,
@@ -218,7 +219,11 @@ def test_clear_removes_all_checkpoints(tmp_path):
 
     clear_checkpoints(str(tmp_path))
 
-    assert not d.exists() or not any(d.iterdir())
+    # Every checkpoint is gone. The directory and its lock file stay: the lock
+    # guards this very call, and deleting it would hand a waiting process a
+    # lock on a file nobody else can see any more.
+    assert [f.name for f in d.iterdir()] == [LOCK_FILE]
+    assert load_checkpoint(str(tmp_path)) is None
 
 
 def test_clear_is_noop_when_no_dir(tmp_path):
@@ -356,12 +361,45 @@ def test_resumed_run_restores_default_aggregator_state(tmp_path):
 
     payload = load_checkpoint(repo)
     assert payload is not None, "no checkpoint written for the default aggregator"
+    posteriors = payload["archive_state"]["posteriors"]
+    assert posteriors, "the prior the first run built was not saved"
+    evidence = {aid: p["successes"] + p["failures"] for aid, p in posteriors.items()}
+    assert any(v > 0 for v in evidence.values()), (
+        f"the saved prior carries no evidence: {evidence}")
 
-    # Second run resumes with the saved state. It must not crash, and the
-    # checkpoint round must be >= what the first run reached.
-    r2 = evolve(tasks, lambda t, o: 0.5, run=run, propose=propose, checkpointing=True,
-                rounds=1, n_workers=1, repo_path=repo)
-    assert r2.final_reward >= 0.0
+    # Second run resumes with that prior in place rather than a fresh, and
+    # therefore over-permissive, one. Asserted on the aggregator the run
+    # actually used -- `final_reward` is fixed at 0.5 here and would be
+    # satisfied whether or not anything was restored.
+    from agentdescent.aggregator import Aggregator
+
+    seen = {"before": None}
+
+    def capture(ledger, verifier, audit, config, policy):
+        agg = Aggregator(ledger, verifier, audit, config, staleness_policy=policy)
+        original = agg.restore
+
+        def restore(state):
+            seen["before"] = {
+                aid: p["successes"] + p["failures"]
+                for aid, p in state["posteriors"].items()
+            }
+            return original(state)
+
+        agg.restore = restore
+        seen["agg"] = agg
+        return agg
+
+    evolve(tasks, lambda t, o: 0.5, run=run, propose=propose, checkpointing=True,
+           rounds=1, n_workers=1, repo_path=repo, aggregator_factory=capture)
+
+    assert seen["before"] == evidence, (
+        f"restore() was handed {seen['before']}, not the saved {evidence}")
+    restored = {aid: p.successes + p.failures
+                for aid, p in seen["agg"]._posteriors.items()}
+    for aid, total in evidence.items():
+        assert restored.get(aid, 0.0) >= total, (
+            f"{aid}: prior came back as {restored.get(aid)}, saved {total}")
 
 
 # --- end-to-end: evolve() with checkpoint ---
@@ -548,11 +586,12 @@ def _make_population_aggregator():
     # Parent (Aggregator) state — needed for super().checkpoint() to succeed:
     agg._posteriors = defaultdict(BetaPosterior)
     agg._promoted_at = {}
+    agg._seen = set()            # artifact ids, the parent's
     # PopulationAggregator's own state:
     agg.selection = Archive(sampling="novelty")
     agg.population_artifact = "artifact"
     agg._archive = []
-    agg._seen = set()
+    agg._keys = set()            # rendered candidates, this layer's
     agg._archive_lock = threading.Lock()
     agg._selections = 0
     return agg
@@ -564,15 +603,18 @@ def test_population_aggregator_checkpoint_roundtrip():
         {"state": {"k": "v1"}, "score": 0.5, "version": 1, "selected": 2},
         {"state": {"k": "v2"}, "score": 0.8, "version": 3, "selected": 0},
     ]
-    agg._seen = {"# Playbook\n- v1", "# Playbook\n- v2"}
+    agg._seen = {"artifact"}
+    agg._keys = {"# Playbook\n- v1", "# Playbook\n- v2"}
     agg._selections = 5
 
     state = agg.checkpoint()
     assert state["selections"] == 5
     assert len(state["archive"]) == 2
-    # seen is saved by super().checkpoint() (not a separate seen_keys).
-    assert "seen" in state
-    assert "seen_keys" not in state  # merged into parent's "seen" key
+    # Two sets, two keys. `seen` is the parent's artifact ids; `keys` is this
+    # layer's rendered candidates. Merging them would put rendered artifacts
+    # into the set `finalize` promotes from.
+    assert state["seen"] == ["artifact"]
+    assert set(state["keys"]) == {"# Playbook\n- v1", "# Playbook\n- v2"}
 
     fresh = _make_population_aggregator()
     fresh.restore(state)
@@ -583,7 +625,8 @@ def test_population_aggregator_checkpoint_roundtrip():
     assert fresh._archive[1]["score"] == 0.8
     # The dedup keys must survive verbatim — they are rendered forms only
     # the strategy can produce.
-    assert fresh._seen == {"# Playbook\n- v1", "# Playbook\n- v2"}
+    assert fresh._keys == {"# Playbook\n- v1", "# Playbook\n- v2"}
+    assert fresh._seen == {"artifact"}
 
 
 def test_population_aggregator_restore_skips_malformed_entries():
@@ -734,7 +777,7 @@ def test_population_checkpoint_includes_parent_state():
     agg.selection = Archive(sampling="novelty")
     agg.population_artifact = "artifact"
     agg._archive = [{"state": {"k": "v"}, "score": 0.5, "version": 1, "selected": 0}]
-    agg._seen = {"# Playbook\n- v"}
+    agg._keys = {"# Playbook\n- v"}
     agg._archive_lock = threading.Lock()
     agg._selections = 3
 
@@ -763,11 +806,11 @@ def test_population_restore_recovers_parent_state():
     agg._posteriors = defaultdict(BetaPosterior)
     agg._posteriors["artifact"] = BetaPosterior(successes=3.0, failures=1.0)
     agg._promoted_at = {"artifact": 7}
-    agg._seen = {"x"}
+    agg._seen = {"artifact"}
     agg.selection = Archive(sampling="novelty")
     agg.population_artifact = "artifact"
     agg._archive = [{"state": {"k": "v"}, "score": 0.5, "version": 1, "selected": 0}]
-    agg._seen = {"# Playbook\n- v"}
+    agg._keys = {"# Playbook\n- v"}
     agg._archive_lock = threading.Lock()
     agg._selections = 3
 
@@ -811,3 +854,209 @@ def test_checkpointing_off_by_default(tmp_path):
     assert not os.path.isdir(d) or not any(
         f.endswith(".json") for f in os.listdir(d)
     ), "checkpoint was written without checkpointing=True"
+
+
+# --- the ledger keeps checkpoints out of its index -------------------------
+#
+# `_commit` runs `git add -A`. A committed checkpoint breaks the ledger twice
+# over: a branch switch deletes it (a dev-only file does not exist on stable),
+# and once the next round rewrites the now-tracked file, `checkout` refuses to
+# clobber a modified tracked file at all -- so every `snapshot(STABLE)` and
+# `promote_to_stable` after that dies. These cover both halves.
+
+
+def _ledger(repo: str):
+    from agentdescent.evolution import EvolvingArtifact
+    from agentdescent.ledger import Ledger
+    return Ledger(repo, lambda a: {"state": dict(a.state)},
+                  lambda aid, v, s: EvolvingArtifact(aid, s.get("state", {}), v))
+
+
+def _git(repo: str, *args: str) -> str:
+    import subprocess
+    return subprocess.run(["git", "-C", repo, *args],
+                          capture_output=True, text=True).stdout
+
+
+def _ledger_from_an_earlier_version(repo: str):
+    """A ledger as a build without checkpointing left it on disk.
+
+    Its `.git/` already exists, so `_init_repo` skips its whole body on the
+    next open -- which is why an exclusion written only at genesis never
+    reaches the long-lived repos a resume is for. Strips both spellings so the
+    test is honest about what it is simulating: nothing excludes
+    `checkpoints/` here.
+    """
+    _ledger(repo)                       # build the structure, then age it
+    open(os.path.join(repo, ".git", "info", "exclude"), "w").close()
+    for branch in ("dev", "stable"):
+        _git(repo, "checkout", "-q", branch)
+        if os.path.exists(os.path.join(repo, ".gitignore")):
+            _git(repo, "rm", "--cached", "--quiet", ".gitignore")
+            os.remove(os.path.join(repo, ".gitignore"))
+            _git(repo, "commit", "-q", "-m", "a ledger without checkpointing")
+    return _ledger(repo)                # re-open: what a resume does
+
+
+def test_a_ledger_from_an_earlier_version_still_excludes_checkpoints(tmp_path):
+    repo = str(tmp_path / "repo")
+    _ledger_from_an_earlier_version(repo)
+
+    save_checkpoint(repo, round=0, aggregator=CountingAggregator())
+
+    seen = _git(repo, "status", "--porcelain", "--", CHECKPOINT_DIR)
+    assert seen == "", f"checkpoints are visible to git: {seen!r}"
+
+
+def test_checkpoints_survive_the_branch_switch_that_finalize_makes(tmp_path):
+    """dev -> stable must leave the checkpoint alone, and must not fail.
+
+    Committed, `checkpoints/latest.json` exists on dev and not on stable, so
+    the switch deletes it -- and once the next round has rewritten the tracked
+    file, `checkout` refuses outright and takes `snapshot(STABLE)` with it.
+    """
+    from agentdescent.evolution import EvolvingArtifact
+    from agentdescent.ledger import Ledger
+
+    repo = str(tmp_path / "repo")
+    led = _ledger_from_an_earlier_version(repo)
+    led.register(EvolvingArtifact("a", {"rules": "seed"}))
+    save_checkpoint(repo, round=0, aggregator=CountingAggregator())
+    led.commit(EvolvingArtifact("a", {"rules": "v1"}), led.head_version(Ledger.DEV))
+    save_checkpoint(repo, round=1, aggregator=CountingAggregator())
+
+    led.snapshot(Ledger.STABLE)         # raised "local changes would be
+    led.promote_to_stable("a")          # overwritten by checkout" before
+
+    payload = load_checkpoint(repo)
+    assert payload is not None and payload["round"] == 1
+
+
+# --- a checkpoint failure never takes the run down -------------------------
+
+
+def test_a_held_lock_reads_as_no_checkpoint_rather_than_raising(tmp_path):
+    """A resume racing a live process must start fresh, not die.
+
+    `flock` is held per *open file description*, so a second `open()` conflicts
+    even from this process -- no subprocess needed to hold it.
+    """
+    import agentdescent.checkpoint as cp
+    from agentdescent.ledger import _acquire_file_lock, _release_file_lock
+
+    repo = str(tmp_path)
+    save_checkpoint(repo, round=1, aggregator=CountingAggregator())
+
+    monkey, cp._LOCK_TIMEOUT = cp._LOCK_TIMEOUT, 0.2
+    lock_path = os.path.join(repo, CHECKPOINT_DIR, LOCK_FILE)
+    handle = _acquire_file_lock(lock_path, timeout=5.0)
+    try:
+        assert save_checkpoint(repo, round=2, aggregator=CountingAggregator()) is False
+        assert load_checkpoint(repo) is None
+        assert restore_checkpoint(repo, CountingAggregator()) is None
+        assert list_checkpoints(repo) == []
+    finally:
+        _release_file_lock(handle, lock_path)
+        cp._LOCK_TIMEOUT = monkey
+
+    # The lock released, everything works again -- and the round-1 checkpoint
+    # the blocked write could not replace is still intact.
+    payload = load_checkpoint(repo)
+    assert payload is not None and payload["round"] == 1
+
+
+def test_state_that_does_not_round_trip_through_json_is_refused(tmp_path):
+    """`default=str` would have written the repr and called it a success.
+
+    A `PopulationAggregator` restoring that state commits it to the ledger as
+    the next parent, so a silently reshaped candidate is worse than none.
+    """
+
+    class SetStateAggregator(CountingAggregator):
+        def checkpoint(self):
+            return {"archive": [{"state": {"rules": {"a", "b"}}}]}
+
+    assert save_checkpoint(str(tmp_path), round=0,
+                           aggregator=SetStateAggregator()) is False
+    assert load_checkpoint(str(tmp_path)) is None
+
+
+def test_a_read_leaves_nothing_behind_on_a_path_with_no_checkpoints(tmp_path):
+    """`status` is handed whatever path a run recorded; it must not write."""
+    plain = tmp_path / "not-a-repo"
+    plain.mkdir()
+
+    assert load_checkpoint(str(plain)) is None
+    assert list_checkpoints(str(plain)) == []
+
+    assert list(plain.iterdir()) == [], "a read created files"
+
+
+# --- round numbering continues across a resume -----------------------------
+
+
+def test_round_numbering_continues_after_a_resume(tmp_path):
+    """Both drivers count rounds from zero per process.
+
+    Without an offset the resume writes `round_0.json` over the previous run's,
+    and reports `round 0` for a search that is several rounds deep.
+    """
+    from agentdescent.evolution import evolve, Task
+
+    repo = str(tmp_path / "repo")
+    tasks = [Task(id=f"t{i}", prompt=f"task {i}") for i in range(8)]
+    kw = dict(run=lambda r, t: t.id,
+              propose=lambda r, t, o, rew: f"change-{t.id}",
+              n_workers=1, repo_path=repo, checkpointing=True)
+
+    evolve(tasks, lambda t, o: 0.5, rounds=2, **kw)
+    first = load_checkpoint(repo)["round"]
+
+    evolve(tasks, lambda t, o: 0.5, rounds=2, **kw)
+    second = load_checkpoint(repo)["round"]
+
+    assert second > first, (
+        f"resume restarted round numbering: {first} then {second}")
+    d = os.path.join(repo, CHECKPOINT_DIR)
+    rounds = sorted(int(f[len("round_"):-len(".json")])
+                    for f in os.listdir(d) if f.startswith("round_"))
+    assert rounds == list(range(second + 1)), (
+        f"per-round files overwrote each other: {rounds}")
+
+
+# --- the population's dedup keys are not the aggregator's artifact ids ------
+
+
+def test_finalize_does_not_promote_rendered_artifacts_as_ids(tmp_path):
+    """`_admit` dedups on `artifact.render()`.
+
+    That set used to *be* `Aggregator._seen`, which `_known_artifacts` unions
+    into the promotion table -- so `finalize` called `_promote` once per
+    rendered candidate, passing a whole artifact where an id belongs.
+    Checkpointing then serialised those ids and restored them on resume.
+    """
+    from agentdescent.evolution import evolve, Task
+    from agentdescent.policies import Policies
+    from agentdescent.selection import Beam
+    import agentdescent.aggregator as agg_mod
+
+    promoted = []
+    original = agg_mod.Aggregator._promote
+
+    def spy(self, artifact_id):
+        promoted.append(artifact_id)
+        return original(self, artifact_id)
+
+    agg_mod.Aggregator._promote = spy
+    try:
+        evolve([Task(id=f"t{i}", prompt=f"task {i}") for i in range(8)],
+               lambda t, o: 0.5, run=lambda r, t: t.id,
+               propose=lambda r, t, o, rew: f"change-{t.id}",
+               rounds=3, n_workers=2, repo_path=str(tmp_path / "repo"),
+               checkpointing=True, policies=Policies(selection=Beam(4)))
+    finally:
+        agg_mod.Aggregator._promote = original
+
+    assert promoted, "the spy never fired; the test proves nothing"
+    assert set(promoted) == {"artifact"}, (
+        f"rendered artifacts reached _promote as ids: {promoted}")
