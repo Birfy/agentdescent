@@ -32,6 +32,7 @@ edit is not evidence about them.
 
 from __future__ import annotations
 
+import re
 import threading
 from dataclasses import dataclass, field
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
@@ -40,16 +41,81 @@ __all__ = [
     "CONTEXT_FILE",
     "EpisodeRecord",
     "LocalWorld",
+    "ROUTING_HEADING",
     "WorldLog",
     "child_paths",
     "normalise",
     "owns",
+    "parse_routing",
+    "routing_entry",
 ]
 
 #: The per-directory context record. Version-controlled, so it is part of ``v``
 #: and a later agent inherits it -- which is the point: it is how a rejected
 #: attempt leaves something behind (paper, appendix 1.4).
 CONTEXT_FILE = "CONTEXT.md"
+
+#: The section of a ``CONTEXT.md`` that says which child nodes exist and what
+#: each is for. Upstream this is not documentation: it is **how a manager knows
+#: where it may delegate**, and a node created without an entry at its parent is
+#: a node later agents cannot find. Matched case-insensitively because upstream's
+#: own tree writes both "Routing Table" and "Routing table".
+ROUTING_HEADING = "## Routing Table"
+
+_ROUTE_LINE = re.compile(
+    r"""^\s*[-*]\s*          # a markdown list item
+        `?\s*(?P<path>\.?/?[A-Za-z0-9._\-/]+?)\s*/?`?\s*   # the path, backticks optional
+        (?:$|[-=]+>|\u2192|:)  # end of line, '->', an arrow, or a colon
+    """, re.VERBOSE)
+
+
+def parse_routing(body: str) -> List[str]:
+    """The child paths a ``CONTEXT.md`` routes to, in the order it lists them.
+
+    Only the routing section is read: a path mentioned in prose is a mention,
+    and treating it as a route would let any sentence create authority.
+    """
+    if not body:
+        return []
+    lines, out, inside = body.splitlines(), [], False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("##"):
+            inside = stripped.lower().startswith(ROUTING_HEADING.lower())
+            continue
+        if not inside:
+            continue
+        match = _ROUTE_LINE.match(line)
+        if match:
+            path = normalise(match.group("path"))
+            if path and path not in out:
+                out.append(path)
+    return out
+
+
+def routing_entry(body: str, path: str, note: str) -> Optional[str]:
+    """``body`` with ``path`` added to its routing table, or ``None`` if listed.
+
+    Idempotent on purpose. Upstream's rule for these files is *current state, not
+    history* -- a routing table that grows an entry every time a manager passes
+    through is a transcript, which is the one thing it must not become.
+    """
+    path = normalise(path)
+    if not path or path in parse_routing(body):
+        return None
+    line = f"- `./{path}/` -> {note}"
+    lines = (body or "").splitlines()
+    for i, existing in enumerate(lines):
+        if existing.strip().lower().startswith(ROUTING_HEADING.lower()):
+            j = i + 1
+            while j < len(lines) and not lines[j].strip().startswith("##"):
+                j += 1
+            while j > i + 1 and not lines[j - 1].strip():
+                j -= 1
+            lines.insert(j, line)
+            return "\n".join(lines) + "\n"
+    tail = "" if not lines or not lines[-1].strip() else "\n"
+    return "\n".join(lines) + tail + f"\n{ROUTING_HEADING}\n\n{line}\n"
 
 
 def normalise(path: str) -> str:
@@ -126,6 +192,24 @@ class LocalWorld:
                 f"{self.path or './'} cannot situate a child at {q or './'}")
         return LocalWorld(version=self.version, path=q)
 
+    def routing(self, state: Mapping[str, str]) -> List[str]:
+        """Where this node says work may be delegated to.
+
+        Its own ``CONTEXT.md`` routing table first -- upstream that table is the
+        mechanism, not documentation: a manager delegates to the paths its node
+        routes to. Falling back to the sub-directories that actually exist keeps
+        a node without a table usable rather than sterile, which matters on the
+        first episodes of a repository that has almost no ``CONTEXT.md`` yet.
+        """
+        key = f"{self.path}/{CONTEXT_FILE}" if self.path else CONTEXT_FILE
+        declared = [p for p in parse_routing(state.get(key, "")) if owns(self.path, p)
+                    and normalise(p) != self.path]
+        return declared or child_paths(self.path, list(state))
+
+    def context_key(self) -> str:
+        """This node's own ``CONTEXT.md`` path."""
+        return f"{self.path}/{CONTEXT_FILE}" if self.path else CONTEXT_FILE
+
     def situate(self, state: Mapping[str, str], *, max_chars: int = 8_000) -> str:
         """The context an agent entering this world is given.
 
@@ -198,6 +282,7 @@ class WorldLog:
         self._episodes: List[EpisodeRecord] = []
         self._rework: Dict[str, str] = {}
         self._contract_violations = 0
+        self._shape_violations = 0
         self._counter = 0
 
     # -- episodes ----------------------------------------------------------
@@ -258,6 +343,21 @@ class WorldLog:
         with self._lock:
             self._contract_violations += n
 
+    def note_shape_violation(self, n: int = 1) -> None:
+        with self._lock:
+            self._shape_violations += n
+
+    @property
+    def shape_violations(self) -> int:
+        """Edits dropped for making the key space stop being a tree.
+
+        Separate from ``contract_violations`` because they need opposite fixes:
+        one is an agent writing outside its authority, the other is an agent
+        mistaking a file for a node.
+        """
+        with self._lock:
+            return self._shape_violations
+
     @property
     def contract_violations(self) -> int:
         """Edits dropped for escaping their author's subtree.
@@ -276,4 +376,5 @@ class WorldLog:
                 f"accepted={verdicts.get('accepted', 0)}  "
                 f"rejected={verdicts.get('rejected', 0)}  "
                 f"rework={verdicts.get('rework', 0)}  "
-                f"contract_violations={self.contract_violations}")
+                f"contract_violations={self.contract_violations}  "
+                f"shape_violations={self.shape_violations}")

@@ -24,7 +24,8 @@ from examples.genesis._delegation import (Brief, Delegation, Edit,
 from examples.genesis._judge import ParentJudge
 from examples.genesis._octopus import OctopusConflict, git_available, three_way
 from examples.genesis._spatial import SpatialContract, parse_situated_edits
-from examples.genesis._world import CONTEXT_FILE, LocalWorld, WorldLog, owns
+from examples.genesis._world import (CONTEXT_FILE, LocalWorld, WorldLog, owns,
+                                     parse_routing, routing_entry)
 
 
 # ---------------------------------------------------------------------------
@@ -55,6 +56,94 @@ def test_situate_inherits_the_context_chain_root_first():
     text = LocalWorld(version=1, path="src/backend").situate(state)
     assert text.index("# root") < text.index("# src") < text.index("# backend")
     assert "src/backend/x.py" in text
+
+
+# ---------------------------------------------------------------------------
+# CONTEXT.md: inherited on the way in, maintained on the way out
+# ---------------------------------------------------------------------------
+
+_TABLE = """# src
+
+## Intent
+Everything under ./src/backend/ is mentioned here in prose, and that is all.
+
+## Routing Table
+- `./src/frontend/` -> tokenizer and parser
+
+## Constraints
+- `./spec/` is read-only.
+"""
+
+
+def test_only_the_routing_section_confers_a_route():
+    """A path named in prose is a mention; treating it as a route would let any
+    sentence create authority."""
+    assert parse_routing(_TABLE) == ["src/frontend"]
+
+
+def test_a_node_delegates_to_what_its_context_md_routes_to():
+    state = {"src/CONTEXT.md": _TABLE, "src/backend/evaluator.py": "x"}
+    assert LocalWorld(version=1, path="src").routing(state) == ["src/frontend"]
+
+
+def test_a_node_without_a_table_falls_back_to_the_directories_that_exist():
+    """A repository whose CONTEXT.md tree is not written yet stays usable."""
+    state = {"src/CONTEXT.md": "# src\n", "src/backend/e.py": "x", "src/frontend/l.py": "y"}
+    assert LocalWorld(version=1, path="src").routing(state) == ["src/backend", "src/frontend"]
+
+
+def test_a_routing_entry_is_written_once_and_only_once():
+    """*Current state, not history* -- the table must not become a transcript."""
+    once = routing_entry(_TABLE, "src/backend", "evaluation")
+    assert once is not None and once.count("`./src/backend/`") == 1
+    assert routing_entry(once, "src/backend", "evaluation") is None
+
+
+def test_a_manager_that_opens_an_unrouted_node_records_it_at_its_own_level():
+    """A node its parent does not route to is a node later agents cannot find."""
+    log = WorldLog()
+    policy = RecursiveDelegation(
+        manager=lambda b: ([Delegation("src/backend", "evaluate the parse tree")]
+                           if b.world.path == "src" else []),
+        executor=lambda b: [Edit(b.world.path, f"{b.world.path}/e.py", "x = 1\n")],
+        log=log, max_depth=3, root_path="src")
+    proposals = policy.propose(_proposal_ctx({"src/CONTEXT.md": _TABLE},
+                                             Task(id="t", prompt="x")))
+    edits = {e["path"]: e["content"] for e in parse_situated_edits(proposals[0])}
+    assert "src/backend/e.py" in edits, "the child's work must survive"
+    assert "src/backend" in parse_routing(edits["src/CONTEXT.md"])
+    assert policy.routes_opened == 1
+
+
+def test_a_routing_note_is_trimmed_before_a_source_file():
+    """Bookkeeping must never cost the change it is describing."""
+    log = WorldLog()
+    policy = RecursiveDelegation(
+        manager=lambda b: ([Delegation("src/a", "x"), Delegation("src/b", "y")]
+                           if b.world.path == "src" else []),
+        executor=lambda b: [Edit(b.world.path, f"{b.world.path}/f{i}.py", str(i))
+                            for i in range(2)],
+        log=log, max_depth=3, max_edits=4, root_path="src")
+    edits = parse_situated_edits(policy.propose(
+        _proposal_ctx({"src/CONTEXT.md": _TABLE}, Task(id="t", prompt="x")))[0])
+    assert len(edits) == 4 and policy.truncated == 1
+    assert all(not e["path"].endswith(CONTEXT_FILE) for e in edits)
+
+
+def test_the_offline_manager_takes_its_decomposition_from_context_md():
+    """The table is the mechanism: edit it and the delegation follows."""
+    state = domain.initial_files()
+    brief = Brief(world=LocalWorld(version=1, path=""), objective="o",
+                  context="", state=state, task=Task(id="t", prompt="1 + 2"),
+                  output="", reward=0.0, depth=0)
+    assert [d.path for d in domain.offline_manager(brief)] == ["src"]
+
+    rerouted = dict(state)
+    rerouted["CONTEXT.md"] = state["CONTEXT.md"].replace("`./src/`", "`./src/frontend/`")
+    brief = Brief(world=LocalWorld(version=1, path=""), objective="o",
+                  context="", state=rerouted, task=Task(id="t", prompt="1 + 2"),
+                  output="", reward=0.0, depth=0)
+    assert [d.path for d in domain.offline_manager(brief)] == ["src/frontend"]
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +189,39 @@ def test_the_strategy_declares_no_key_space_so_tp_is_refused_rather_than_lossy()
     file the run created -- the failure this port is built to avoid.
     """
     assert not hasattr(_strategy(), "keys")
+
+
+@pytest.mark.parametrize("existing,attempt", [
+    ("src/lexer.py", "src/lexer.py/__init__.py"),   # an ancestor is a file
+    ("src/pkg/a.py", "src/pkg"),                     # the target is a directory
+])
+def test_an_edit_that_would_stop_the_tree_being_a_tree_is_dropped(existing, attempt):
+    """`a/b.py` and `a/b.py/c.py` cannot both exist, and the engine never checks.
+
+    Found the expensive way: an agent delegated to `src/frontend/lexer.py` as
+    though it were a node, wrote inside it, and `EvolutionResult.write_to` raised
+    `FileExistsError` after 40 episodes and 328 model calls -- the whole run lost
+    at the one point where it was being saved.
+    """
+    log = WorldLog()
+    strategy = _strategy(log=log)
+    state = dict(strategy.initial(), **{existing: "x = 1\n"})
+    proposal = render_edits([Edit("src", attempt, "y = 2\n")], "r")
+    assert strategy.to_diff(state, proposal, "w0", 1, "world") is None
+    assert log.shape_violations == 1
+
+
+def test_a_delegation_to_a_file_is_refused_because_a_node_is_a_directory():
+    log = WorldLog()
+    policy = RecursiveDelegation(
+        manager=lambda b: [Delegation("src/lexer.py", "fix the lexer")],
+        executor=lambda b: [Edit(b.world.path, f"{b.world.path}/x.py", "1")],
+        log=log, max_depth=3, root_path="src")
+    state = {"src/CONTEXT.md": "# src\n", "src/lexer.py": "x = 1\n"}
+    policy.propose(_proposal_ctx(state, Task(id="t", prompt="x")))
+    assert policy.mistaken_nodes == 1
+    assert [e.role for e in log.episodes] == ["executor"], \
+        "the refused delegation must not open an episode"
 
 
 def test_a_reply_that_ignores_the_protocol_costs_its_episode_and_does_not_crash():

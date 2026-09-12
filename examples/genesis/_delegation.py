@@ -41,7 +41,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 from agentdescent.filetree import parse_tree
 
 from ._world import (CONTEXT_FILE, EpisodeRecord, LocalWorld, WorldLog,
-                     child_paths, normalise, owns)
+                     normalise, owns, routing_entry)
 
 __all__ = ["Brief", "Delegation", "Edit", "RecursiveDelegation", "render_edits"]
 
@@ -56,11 +56,18 @@ class Delegation:
 
 @dataclass(frozen=True)
 class Edit:
-    """One file write by the agent situated at ``owner``. ``content=None`` deletes."""
+    """One file write by the agent situated at ``owner``. ``content=None`` deletes.
+
+    ``kind`` separates the work from the bookkeeping. Maintaining ``CONTEXT.md``
+    is an obligation upstream puts on every agent, but it must never cost the
+    change it is describing: the trust region is small, and an edit set trimmed
+    to fit should lose its routing note before it loses a source file.
+    """
 
     owner: str
     path: str
     content: Optional[str]
+    kind: str = "work"          # "work" | "context"
 
 
 @dataclass(frozen=True)
@@ -124,6 +131,11 @@ class RecursiveDelegation:
     #: living in the acceptance gate where the held-out suite actually is.
     review: Optional[Review] = None
     truncated: int = 0
+    #: Child nodes opened at a path their parent did not yet route to, and
+    #: therefore written into the parent's routing table.
+    routes_opened: int = 0
+    #: Delegations refused because the target was a file, not a node.
+    mistaken_nodes: int = 0
 
     # -- the ProposalPolicy protocol ---------------------------------------
 
@@ -165,7 +177,7 @@ class RecursiveDelegation:
         delegations: Sequence[Delegation] = ()
         if depth < self.max_depth:
             delegations = [d for d in self.manager(brief) or ()
-                           if owns(world.path, d.path) and normalise(d.path) != world.path]
+                           if self._is_node(world, d, state)]
 
         if not delegations:
             # A leaf executor: it writes files, it does not delegate. Its edits
@@ -186,6 +198,8 @@ class RecursiveDelegation:
 
         merged: List[Edit] = []
         claimed: Dict[str, str] = {}          # path -> the child that took it
+        routed = world.routing(state)
+        opened: List[Delegation] = []         # children this node had not routed to
         for delegation in delegations:
             child = world.delegate(delegation.path)
             returned, child_record = self._episode(child, delegation.objective, state,
@@ -211,9 +225,35 @@ class RecursiveDelegation:
             for edit in returned:
                 claimed[edit.path] = child.path
             merged.extend(returned)
+            if normalise(delegation.path) not in routed:
+                opened.append(delegation)
+
+        # A node whose parent does not route to it is a node later agents cannot
+        # find. Upstream the manager that opens one writes the entry at its own
+        # level; here the same write, from the same agent, on its own CONTEXT.md.
+        note = self._routing_note(world, state, opened)
+        if note is not None:
+            merged.append(note)
 
         record.n_edits = len(merged)
         return merged, record
+
+    def _is_node(self, world: LocalWorld, delegation: Delegation,
+                 state: Mapping[str, str]) -> bool:
+        """May a child be situated here at all?
+
+        Inside the parent's subtree, not the parent itself, and **not an existing
+        file**. A node is a directory: upstream a path is a node when it holds at
+        least one tracked file, and delegating to `lexer.py` as though it were one
+        makes every write land *inside* a file. A real run did exactly that.
+        """
+        path = normalise(delegation.path)
+        if not owns(world.path, path) or path == world.path:
+            return False
+        if path in state:
+            self.mistaken_nodes += 1
+            return False
+        return True
 
     def _judge(self, child: LocalWorld, returned: Sequence[Edit], parent: Brief,
                claimed: Mapping[str, str]) -> "tuple[str, str]":
@@ -241,6 +281,28 @@ class RecursiveDelegation:
                 return "rework", complaint
         return "accepted", ""
 
+    def _routing_note(self, world: LocalWorld, state: Mapping[str, str],
+                      opened: Sequence[Delegation]) -> Optional[Edit]:
+        """Add every newly opened child to this node's routing table, once.
+
+        One edit for all of them rather than one each: the trust region counts
+        files, and a node's table is one file.
+        """
+        if not opened:
+            return None
+        key = world.context_key()
+        body = state.get(key, f"# {world.path or './'}\n")
+        changed = False
+        for delegation in opened:
+            updated = routing_entry(body, delegation.path,
+                                    delegation.objective.strip() or "delegated work")
+            if updated is not None:
+                body, changed = updated, True
+        if not changed:
+            return None
+        self.routes_opened += len(opened)
+        return Edit(owner=world.path, path=key, content=body, kind="context")
+
     def _failure_note(self, child: LocalWorld, state: Mapping[str, str],
                       reason: str) -> Optional[Edit]:
         """Write the refusal into the child's ``CONTEXT.md``, if it is new.
@@ -256,16 +318,23 @@ class RecursiveDelegation:
         body = state.get(key, f"# {child.path}\n")
         if line in body:
             return None
-        return Edit(owner=child.path, path=key, content=body.rstrip("\n") + "\n" + line + "\n")
+        return Edit(owner=child.path, path=key, kind="context",
+                    content=body.rstrip("\n") + "\n" + line + "\n")
 
     # -- bounds ------------------------------------------------------------
 
     def _bound(self, edits: Sequence[Edit]) -> List[Edit]:
-        """Last write per path wins, then the trust region, counted."""
+        """Last write per path wins, then the trust region, counted.
+
+        Work before bookkeeping, so a trimmed edit set loses a routing note
+        before it loses a source file -- see :class:`Edit`.
+        """
         by_path: Dict[str, Edit] = {}
         for edit in edits:
             by_path[edit.path] = edit
-        ordered = [by_path[p] for p in sorted(by_path)]
+        work = sorted((p for p, e in by_path.items() if e.kind == "work"))
+        context = sorted((p for p, e in by_path.items() if e.kind != "work"))
+        ordered = [by_path[p] for p in work + context]
         if len(ordered) > self.max_edits:
             self.truncated += len(ordered) - self.max_edits
             ordered = ordered[:self.max_edits]
@@ -276,7 +345,9 @@ class RecursiveDelegation:
                 f"{ctx.reward:.2f}: {getattr(ctx.task, 'prompt', '')}")
 
     def stats(self) -> str:
-        return f"delegation: {self.log.summary()} truncated_edits={self.truncated}"
+        return (f"delegation: {self.log.summary()} truncated_edits={self.truncated} "
+                f"routes_opened={self.routes_opened} "
+                f"mistaken_nodes={self.mistaken_nodes}")
 
 
 def _state_of(rendered: str) -> Dict[str, str]:

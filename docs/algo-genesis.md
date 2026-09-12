@@ -46,6 +46,14 @@ itself. Only what the parent accepts is offered to the version history; a
 refused change leaves nothing behind except, where the refusal was recorded in
 `CONTEXT.md`, its reason.
 
+`CONTEXT.md` is not documentation in this system, and the port treats it the same
+way. It is part of `v`, so a later agent inherits it; the chain from the root
+down to `p` is what an entering agent is *given*; and its **routing table is
+where a manager may delegate**. A node its parent does not route to is a node
+later agents cannot find, so a manager that opens one writes the entry at its own
+level — which is a write to the accepted version like any other, gated like any
+other.
+
 ## How it plugs into `evolve()`
 
 Every piece is a seam the engine already had. Nothing in `agentdescent/` changed.
@@ -56,7 +64,7 @@ Every piece is a seam the engine already had. Nothing in `agentdescent/` changed
 | [`RecursiveDelegation`](https://github.com/Birfy/agentdescent/blob/main/examples/genesis/_delegation.py) | `Policies(proposal=)` | One rollout is a whole episode tree at **one** version: manager → children → leaf executors → the parent's verdict → the merged edit set. |
 | [`OctopusConflict`](https://github.com/Birfy/agentdescent/blob/main/examples/genesis/_octopus.py) | `Policies(conflict=)` | Three-way merges the contested values, so two agents editing two functions of one file both survive. Real overlaps fall through to the shipped rule. |
 | [`ParentJudge`](https://github.com/Birfy/agentdescent/blob/main/examples/genesis/_judge.py) | `Policies(acceptance=)` | Upstream's monotone rule: *partial progress is accepted*; a regression is refused; a tie commits and sends more work to that subtree. |
-| [`LocalWorld` / `WorldLog`](https://github.com/Birfy/agentdescent/blob/main/examples/genesis/_world.py) | — | `(v,p)` itself, the `CONTEXT.md` chain an entering agent is given, and the archive that outlives the agents. |
+| [`LocalWorld` / `WorldLog`](https://github.com/Birfy/agentdescent/blob/main/examples/genesis/_world.py) | — | `(v,p)` itself; the `CONTEXT.md` chain an entering agent is given; `routing()`, the table that decides where a manager may delegate; and the archive that outlives the agents. |
 
 `--keyed-union` and `--engine-gate` turn the third and fourth rows back into the
 engine's own defaults, which is how the rows below were measured.
@@ -113,6 +121,36 @@ one from being built at all.
     What the rows support is that the **mechanism** runs, and how it differs from
     the engine's defaults when it does.
 
+## What a real-model run found that the offline arm could not
+
+The offline actors are rule-based, so they never mistake a file for a node and
+never write outside their subtree. A run against `deepseek-v4-flash` through an
+Anthropic-shaped endpoint did both within forty episodes, and turned up two
+defects that no offline test could have reached.
+
+**A node is a directory, and nothing said so.** A manager delegated to
+`src/frontend/lexer.py` as though it were a node. The child was situated there,
+wrote `lexer.py/CONTEXT.md` and `lexer.py/__init__.py` *inside* it, and every
+stage accepted it: the key space is a flat dict, so `a/b.py` and `a/b.py/c.py`
+coexist happily until something tries to put them on a filesystem. The run died
+in `EvolutionResult.write_to` with `FileExistsError` after 328 model calls — the
+whole thing lost at the one point where it was being saved. Two rules now stop
+it, and they are separate on purpose because they need opposite fixes:
+`RecursiveDelegation` refuses a delegation whose target is an existing file
+(`mistaken_nodes`), and `SpatialContract` refuses any edit that would make the
+key space stop being a tree (`shape_violations`).
+
+**The manager prompt never taught what a node is.** With the rule in place the
+refusals were counted rather than fatal — 32 of them in one run — which is the
+counter doing its job and the prompt not doing its own. It now states that a node
+is a directory, lists what the node's routing table actually routes to, and says
+that naming a new child adds it to that table.
+
+This is the general point about the offline arm, stated in one place: it
+exercises the mechanism and it cannot exercise the mechanism's *failure* paths,
+because a rule-based actor does not fail that way. Both counters exist because a
+model does.
+
 ## Honesty boundary
 
 `--offline` — the default — proposes with rule-based actors that reveal
@@ -163,6 +201,18 @@ so would a reader of this page without this paragraph.
   the depth configured.
 * **Multi-repository work (`foreign_repos`), the Tauri desktop shell, the Phoenix
   dashboard and peak-hour scheduling are out of scope.**
+* **`CONTEXT.md` is inherited and routed from, but only partly maintained.**
+  The read half is faithful: the chain is assembled root-first exactly as
+  `ContextNode.build_context/2` does, and the routing table is load-bearing —
+  the offline manager's decomposition is *parsed from it*, not hardcoded, so
+  editing the table changes where the run delegates (there is a test that does
+  exactly that). The write half is not: upstream every `:read_write` agent keeps
+  its node current — intent, API surface, known issues — and the read-only roles
+  (`Investigator`, `ContextExtractor`) exist to do nothing else. Here an agent
+  writes `CONTEXT.md` on its own in exactly two cases, the routing entry for a
+  node it opened and the refusal note for a child it rejected. An LLM executor
+  may write more; nothing requires it to. Skills (`.agents/skills/`,
+  `hierarchical_skill_names/2`) are not loaded at all.
 * **Only two roles are ported.** The released code has ten agent modules; the
   paper's appendix §1.3 says the model has two — manager and leaf executor — and
   that "codebase lead / investigator / task scheduler are implementation labels,

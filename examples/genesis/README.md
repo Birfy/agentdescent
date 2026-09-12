@@ -36,7 +36,7 @@ the path, an accepted event moves the version. Each piece is one file here.
 
 | file | what it is | upstream |
 |---|---|---|
-| [`_world.py`](_world.py) | `LocalWorld(v, p)`, the `CONTEXT.md` chain, the episode archive | paper §3.1, `core/context_node.ex` |
+| [`_world.py`](_world.py) | `LocalWorld(v, p)`, the `CONTEXT.md` chain **and its routing table**, the episode archive | paper §3.1, `core/context_node.ex` |
 | [`_delegation.py`](_delegation.py) | `ProposalPolicy`: one rollout is a whole episode tree at one version | paper §3.2, `agent/subagent_processing.ex` |
 | [`_spatial.py`](_spatial.py) | `Strategy`: an agent writes only inside its own subtree | `agents/manager.ex:179` |
 | [`_octopus.py`](_octopus.py) | `ConflictPolicy`: three-way merge, so two agents in one file both survive | `Git.merge_octopus/2` |

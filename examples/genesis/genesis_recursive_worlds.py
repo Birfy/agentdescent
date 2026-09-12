@@ -21,9 +21,12 @@ Preserved from that revision:
 * The responsible parent's verdict -- accept / reject / ask again -- with
   upstream's monotone rule, *partial progress is accepted*
   (:mod:`examples.genesis._judge`, upstream ``agents/manager.ex:58``).
-* The ``CONTEXT.md`` chain is part of the accepted version and is what an
-  entering agent is given; a refusal is recorded there even though the refused
-  code is not (paper, appendix 1.4).
+* ``CONTEXT.md`` is part of the accepted version, in both directions: the chain
+  from the root down is what an entering agent is given, its **routing table is
+  where a manager may delegate**, a manager that opens an unrouted node records
+  it at its own level, and a refusal is written there even though the refused
+  code is not (paper, appendix 1.4; upstream ``core/context_node.ex`` and the
+  routing-table clauses of ``agents/prompt_fragments.ex``).
 * Human-supplied validation stays human-supplied: ``spec/**`` is frozen to every
   proposal and restored pristine before scoring.
 
@@ -56,6 +59,13 @@ Intentional differences
   enforced in the strategy instead, where creation is free.
 * **Depth is 2-3 here, 4-8 upstream**, because the domain is three nodes deep.
   The number reported is the depth *observed*, never the depth configured.
+* **Only the routing table is maintained automatically.** Upstream every
+  ``:read_write`` agent keeps its node's ``CONTEXT.md`` current -- intent, API
+  surface, known issues -- and the read-only roles exist to do nothing else. Here
+  the two writes an agent makes on its own are the routing entry for a node it
+  opened and the refusal note for a child it rejected; an LLM executor may write
+  more, and nothing requires it to. Skills (``.agents/skills/``) are not loaded
+  at all.
 * **Multi-repository work, the desktop shell and the dashboard are out of scope.**
   Upstream's task-level accept is a human action on that dashboard
   (``EvoGit.Review.merge_branch/2,3``); here the task-level gate is the
@@ -206,7 +216,9 @@ def main(argv=None) -> None:
     print(f"stop reason     : {result.stop_reason}")
     print(f"error           : {result.error or 'none'}")
     print(f"world           : root episodes={result.rollouts}  {log.summary()}  "
-          f"truncated_edits={delegation.truncated}")
+          f"truncated_edits={delegation.truncated}  "
+          f"routes_opened={delegation.routes_opened}  "
+          f"mistaken_nodes={delegation.mistaken_nodes}")
     if octopus is not None:
         print(f"merge           : merged={octopus.merged} conflicted={octopus.conflicted}")
     if not args.engine_gate:

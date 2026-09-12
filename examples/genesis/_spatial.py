@@ -145,6 +145,21 @@ def _first_json_object(text: str) -> Optional[str]:
     return None
 
 
+def _collides(state: Mapping[str, str], path: str) -> bool:
+    """Would writing ``path`` make the key space stop being a tree?
+
+    Either an ancestor of ``path`` is already a file (``a/b.py`` exists, and this
+    wants ``a/b.py/c``), or ``path`` is already a directory prefix of other keys
+    (``a/b/c`` exists, and this wants to write a file at ``a/b``).
+    """
+    parts = path.split("/")
+    for i in range(1, len(parts)):
+        if "/".join(parts[:i]) in state:
+            return True
+    prefix = path + "/"
+    return any(key.startswith(prefix) for key in state)
+
+
 @dataclass
 class SpatialContract:
     """A directory, one key per file path, with authority scoped by subtree.
@@ -189,6 +204,19 @@ class SpatialContract:
                 # The contract. Counted, never silent -- see WorldLog.
                 if self.log is not None:
                     self.log.note_contract_violation()
+                continue
+            if content is not None and _collides(state, path):
+                # A key space of paths is only a *tree* if no path is a prefix
+                # of another: `a/b.py` and `a/b.py/c.py` cannot both exist on a
+                # filesystem. The engine's state is a flat dict and never checks,
+                # so the pair survives every stage and detonates at the end, in
+                # `EvolutionResult.write_to` -- a whole run lost at the one point
+                # where it was being saved. Measured: an agent delegated to
+                # `src/frontend/lexer.py` as though it were a node, wrote a
+                # CONTEXT.md and an __init__.py *inside* it, and `write_to`
+                # raised FileExistsError after 40 episodes and 328 model calls.
+                if self.log is not None:
+                    self.log.note_shape_violation()
                 continue
             if not self.writable(path):
                 continue

@@ -437,21 +437,31 @@ def _outstanding(state: Mapping[str, str]) -> Dict[str, List[str]]:
 
 
 def offline_manager(brief: Brief) -> Sequence[Delegation]:
-    """Decompose, or return nothing and become the executor of this node.
+    """Decompose along the node's routing table, or become its executor.
 
-    The routing table is read from the node's own ``CONTEXT.md`` upstream; here
-    it is the fixed decomposition the human wrote, which is the part of the
-    offline actor that is a surrogate. An LLM manager is not given it.
+    The decomposition is **read from ``CONTEXT.md``**, not hardcoded here:
+    ``LocalWorld.routing`` parses the routing table of the node the agent is
+    standing on, which is what that table is for upstream. What stays a surrogate
+    is only the choice of *which* routed child to work on, and that is decided by
+    what the node still owes rather than by a fixed list.
     """
-    path, owed = normalise(brief.world.path), _outstanding(brief.state)
-    if path == "":
-        return [Delegation("src", "implement the language under src/")]
-    if path == "src":
-        if ENTRY not in brief.state:
-            return ()                       # this node's own file: do it here
-        return [Delegation(node, f"clear the outstanding work under {node}/")
-                for node in ("src/frontend", "src/backend") if owed[node]]
-    return ()
+    path = normalise(brief.world.path)
+    if path == "src" and ENTRY not in brief.state:
+        return ()                           # this node's own file: do it here
+    return [Delegation(node, f"clear the outstanding work under {node}/")
+            for node in brief.world.routing(brief.state)
+            if _owes(brief.state, node)]
+
+
+def _owes(state: Mapping[str, str], node: str) -> bool:
+    """Does ``node`` or anything beneath it still have outstanding work?
+
+    Asked of the subtree rather than the node, so the root keeps delegating into
+    ``src/`` while the work is two levels further down.
+    """
+    node = normalise(node)
+    return any(items for key, items in _outstanding(state).items()
+               if key == node or key.startswith(node + "/"))
 
 
 def offline_executor(brief: Brief) -> Sequence[Edit]:
@@ -531,6 +541,8 @@ situated at the repository path `{path}` and you own everything under it.
 
 {context}
 
+This node's routing table says its children are: {routes}
+
 OBJECTIVE
 {objective}
 
@@ -538,10 +550,18 @@ You do not write code. Decide whether to delegate to more specific paths inside 
 your own subtree, or to handle this yourself.
 
 Reply with ONE JSON object and nothing else:
-{{"delegations": [{{"path": "<a path inside {path}>", "objective": "<one sentence>"}}]}}
+{{"delegations": [{{"path": "<a node inside {path}>", "objective": "<one sentence>"}}]}}
 
-An empty list means you will handle it at your own path. Never name a path \
-outside your subtree -- it belongs to another agent."""
+Rules:
+- A node is a **directory**, never a file. `src/frontend` is a node; \
+`src/frontend/lexer.py` is a file that belongs to the agent situated at \
+`src/frontend`, and delegating to it is refused.
+- Prefer a child this node already routes to. Naming a new one is allowed and \
+adds it to this node's routing table -- do that only when the work genuinely \
+belongs to a new part of the tree.
+- An empty list means you will handle it at your own path, writing the files \
+that belong to `{path}` itself.
+- Never name a path outside your subtree -- it belongs to another agent."""
 
 _EXECUTOR_PROMPT = """You are an executor agent in a recursive software world. You are \
 situated at the repository path `{path}` and you may write ONLY files under it.
@@ -563,8 +583,10 @@ def llm_manager(complete) -> Callable[[Brief], Sequence[Delegation]]:
     """Ask a model where to situate children. A bad reply means "handle it here"."""
 
     def manager(brief: Brief) -> Sequence[Delegation]:
+        routes = brief.world.routing(brief.state)
         reply = _ask(complete, _MANAGER_PROMPT.format(
             path=brief.world.path or "./", context=brief.context,
+            routes=", ".join(f"`{r}/`" for r in routes) or "(none yet)",
             objective=brief.objective))
         try:
             data = json.loads(_first_object(reply) or "{}")
