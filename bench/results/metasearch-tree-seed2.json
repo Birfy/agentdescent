@@ -1,0 +1,85 @@
+{
+ "plan": "metasearch: evolve priority() on 150 x source instances (inner budget 60), rounds=24 workers=6 mode=sync blast_radius=0.6 (L1); validate on 200 fresh instances of source and target; openai/deepseek-v4-flash temperature=1.0 thinking=disabled",
+ "seed": 2,
+ "mode": "sync",
+ "wall_seconds": 162.3276350459996,
+ "evolved_source": "def priority(rank, visits, total, prior, depth, n_nodes):\n    # Use sqrt of prior-scaled bonus, decay more slowly with visits via log1p, and add depth bonus for promising nodes\n    c = 1.2\n    # Exploration: prior * sqrt(total / (1 + n_nodes)) to keep it stable as tree grows\n    explore = prior * math.sqrt(total / (1.0 + n_nodes)) / (1.0 + math.log1p(visits))\n    # Exploit: rank plus a small depth reward for unvisited promising nodes\n    depth_bonus = 0.05 * (1.0 / (1.0 + depth)) if visits == 0 else 0.0\n    return rank + c * explore + depth_bonus",
+ "final_reward": 0.7544966252470224,
+ "outcomes": {
+  "committed": 1,
+  "oracle-rejected": 11,
+  "below-threshold": 12
+ },
+ "rollouts": 144,
+ "validation": {
+  "source": {
+   "n": 200,
+   "seed_rule": 0.7397118171235236,
+   "evolved_rule": 0.7613450721063114,
+   "gain": 0.021633254982787786,
+   "gain_sd": 0.04385131659963576,
+   "wins": 131,
+   "losses": 59
+  },
+  "target": {
+   "n": 200,
+   "seed_rule": 0.3731442454946802,
+   "evolved_rule": 0.3872159951121084,
+   "gain": 0.014071749617428186,
+   "gain_sd": 0.06255459093064614,
+   "wins": 124,
+   "losses": 73
+  }
+ },
+ "transfer_ratio": 0.6504684398452377,
+ "reference": {
+  "evolved": {
+   "source": 0.7613450721063114,
+   "target": 0.3872159951121084
+  },
+  "seed (flat-PUCT c=1)": {
+   "source": 0.7397118171235236,
+   "target": 0.3731442454946802
+  },
+  "PUCT c=0.5 (best on target)": {
+   "source": 0.7600947437010639,
+   "target": 0.3848825025577545
+  },
+  "PUCT c=0.25 (good on both)": {
+   "source": 0.7607392196965521,
+   "target": 0.3875227942538813
+  },
+  "greedy (best on source, c->0)": {
+   "source": 0.7614410848591345,
+   "target": 0.38738857622090656
+  },
+  "worst-first (deliberately bad)": {
+   "source": 0.3743878116254526,
+   "target": 0.18469066040079546
+  }
+ },
+ "model": {
+  "provider": "openai",
+  "model": "deepseek-v4-flash",
+  "temperature": 1.0,
+  "max_tokens": 4096,
+  "thinking": "disabled",
+  "inner_budget": 60
+ },
+ "usage": {
+  "calls": 96,
+  "prompt_tokens": 121853,
+  "completion_tokens": 19986,
+  "total_tokens": 141839,
+  "model_seconds": 588.1185009479523,
+  "failures": 0
+ },
+ "engine_usage": {
+  "calls": 3106,
+  "prompt_tokens": 0,
+  "completion_tokens": 0,
+  "total_tokens": 0,
+  "model_seconds": 642.6040077209473,
+  "failures": 0
+ }
+}

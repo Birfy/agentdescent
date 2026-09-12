@@ -1,0 +1,233 @@
+{
+ "seed_source": "class Policy:\n    # Round robin over the shard (the engine's default).\n    def pick(self, keys, round_index):\n        return keys[round_index % len(keys)]\n\n    def record(self, task_id, score):\n        pass\n",
+ "evolved_source": "class Policy:\n    # Round robin over the shard (the engine's default).\n    def pick(self, keys, round_index):\n        return keys[round_index % len(keys)]\n\n    def record(self, task_id, score):\n        pass\n",
+ "outer": {
+  "final_reward": 0.7369791666666666,
+  "rollouts": 6,
+  "outcomes": {
+   "oracle-rejected": 3
+  },
+  "stop_reason": "rounds",
+  "error": null,
+  "seconds": 4.663152788999923,
+  "rounds": 3,
+  "workers": 2,
+  "seeds": [
+   0,
+   1
+  ],
+  "proposals": [
+   {
+    "source": "I'll improve the policy to prioritize tasks that haven't been tried yet, then focus on tasks with lower scores (since solved tasks yield no proposals).\n\n```python\nclass Policy:\n    # Track scores per task; prioritize untried tasks, then lowest-scoring tasks.\n    def __init__(self):\n        self.scores = {}\n        self.tried = set()\n    \n    def pick(self, keys, round_index):\n        # First, prefer tasks we haven't tried yet\n        untried = [k for k in keys if k not in self.tried]\n        if untried:\n            # Among untried, pick deterministically based on round\n            return untried[round_index % len(untried)]\n        \n        # All tried: pick the one with lowest score (most likely to improve)\n        # If tie, use round_index for stability\n        scored = [(self.scores.get(k, 0), k) for k in keys]\n        scored.sort(key=lambda x: (x[0], x[1]))\n        return scored[round_index % len(scored)][1]\n    \n    def record(self, task_id, score):\n        self.tried.add(task_id)\n        self.scores[task_id] = score\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "aime-0:0"
+   },
+   {
+    "source": "Here's an improved policy that prioritizes exploring tasks with unknown scores while avoiding already-solved tasks:\n\n```python\nclass Policy:\n    # Changed: prioritize unsolved/unknown tasks over round-robin, since solved tasks yield no proposals.\n    def __init__(self):\n        self.scores = {}  # task_id -> last score (0..1)\n        self.attempts = {}  # task_id -> count of times picked\n\n    def pick(self, keys, round_index):\n        # Filter to tasks we haven't seen or that are not solved (score < 1.0)\n        candidates = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if not candidates:\n            # All solved in this shard \u2014 fall back to any key (but prefer least attempted)\n            candidates = keys\n        \n        # Among candidates, prefer those with fewest attempts (exploration)\n        # and among ties, those with lowest known score (exploit uncertainty)\n        def sort_key(k):\n            return (self.attempts.get(k, 0), self.scores.get(k, 0.0))\n        return min(candidates, key=sort_key)\n\n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        self.attempts[task_id] = self.attempts.get(task_id, 0) + 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "aime-1:0"
+   },
+   {
+    "source": "Here's a revised policy that uses a simple exploration strategy: prioritize tasks that haven't been tried yet, and among those, prefer ones with higher uncertainty (no score yet). Once all tasks in the shard have been tried, fall back to the best-scoring one.\n\n```python\nclass Policy:\n    # Changed: prioritize untried tasks in the shard, then best-known score; avoids wasting picks on solved tasks.\n    def __init__(self):\n        self.scores = {}  # task_id -> last score\n        self.tried = set()\n\n    def pick(self, keys, round_index):\n        # Filter to tasks we haven't tried yet in this shard\n        untried = [k for k in keys if k not in self.tried]\n        if untried:\n            # Pick the first untried (deterministic, but could randomize)\n            return untried[0]\n        # All tried: pick the one with highest score (best known), but avoid solved (score>=1.0)\n        candidates = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if not candidates:\n            # All solved, just pick first (won't help but must return something)\n            return keys[0]\n        # Pick max score among candidates\n        return max(candidates, key=lambda k: self.scores.get(k, 0))\n\n    def record(self, task_id, score):\n        self.tried.add(task_id)\n        self.scores[task_id] = score\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "aime-3:0"
+   },
+   {
+    "source": "Here's a revised policy that uses recorded scores to prioritize unsolved tasks and explore uncertain ones:\n\n```python\nclass Policy:\n    # Changed: Use score history to prioritize unsolved tasks and explore uncertain ones,\n    # instead of blind round-robin which wastes picks on solved tasks.\n    def __init__(self):\n        self.scores = {}  # task_id -> list of scores\n        self.picks = {}   # task_id -> count of times picked\n\n    def pick(self, keys, round_index):\n        # Filter to tasks we haven't solved yet (no score >= 1.0)\n        unsolved = [k for k in keys if not any(s >= 1.0 for s in self.scores.get(k, []))]\n        if not unsolved:\n            unsolved = list(keys)  # all solved in shard, just pick any\n        \n        # Among unsolved, prefer those with fewer picks (exploration) \n        # and those with higher variance (uncertainty)\n        def priority(k):\n            scores = self.scores.get(k, [])\n            n = len(scores)\n            if n == 0:\n                return (0, 0)  # never tried, highest priority\n            mean = sum(scores) / n\n            var = sum((s - mean) ** 2 for s in scores) / n if n > 1 else 0\n            # Lower priority value = higher priority\n            return (self.picks.get(k, 0), -var)  # fewer picks first, then higher variance\n        \n        return min(unsolved, key=priority)\n\n    def record(self, task_id, score):\n        self.scores.setdefault(task_id, []).append(score)\n        self.picks[task_id] = self.picks.get(task_id, 0) + 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "aime-2:0"
+   },
+   {
+    "source": "I'll improve the policy to prioritize tasks that haven't been tried yet, then focus on tasks with lower scores (since solved tasks yield no proposals).\n\n```python\nclass Policy:\n    # Track scores per task; prioritize untried tasks, then lowest-scoring tasks.\n    def __init__(self):\n        self.scores = {}\n        self.tried = set()\n    \n    def pick(self, keys, round_index):\n        # First, prefer tasks we haven't tried yet\n        untried = [k for k in keys if k not in self.tried]\n        if untried:\n            # Among untried, pick deterministically based on round\n            return untried[round_index % len(untried)]\n        \n        # All tried: pick the one with lowest score (most likely to improve)\n        # If tie, use round_index for stability\n        scored = [(self.scores.get(k, 0), k) for k in keys]\n        scored.sort(key=lambda x: (x[0], x[1]))\n        return scored[round_index % len(scored)][1]\n    \n    def record(self, task_id, score):\n        self.tried.add(task_id)\n        self.scores[task_id] = score\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "aime-0:0"
+   },
+   {
+    "source": "Here's an improved policy that prioritizes exploring tasks with unknown scores while avoiding already-solved tasks:\n\n```python\nclass Policy:\n    # Changed: prioritize unsolved/unknown tasks over round-robin, since solved tasks yield no proposals.\n    def __init__(self):\n        self.scores = {}  # task_id -> last score (0..1)\n        self.attempts = {}  # task_id -> count of times picked\n\n    def pick(self, keys, round_index):\n        # Filter to tasks we haven't seen or that are not solved (score < 1.0)\n        candidates = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if not candidates:\n            # All solved in this shard \u2014 fall back to any key (but prefer least attempted)\n            candidates = keys\n        \n        # Among candidates, prefer those with fewest attempts (exploration)\n        # and among ties, those with lowest known score (exploit uncertainty)\n        def sort_key(k):\n            return (self.attempts.get(k, 0), self.scores.get(k, 0.0))\n        return min(candidates, key=sort_key)\n\n    def record(self, task_id, score):\n        self.scores[task_id] = score\n        self.attempts[task_id] = self.attempts.get(task_id, 0) + 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "aime-1:0"
+   }
+  ],
+  "reflective_merge": false,
+  "proposals_rejected_by_gate": 0,
+  "invalid_proposals": 0,
+  "history": [
+   {
+    "round": 0,
+    "held_out_reward": 0.7369791666666666,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "oracle-rejected": 1
+    }
+   },
+   {
+    "round": 1,
+    "held_out_reward": 0.7369791666666666,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "oracle-rejected": 1
+    }
+   },
+   {
+    "round": 2,
+    "held_out_reward": 0.7369791666666666,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "oracle-rejected": 1
+    }
+   }
+  ]
+ },
+ "validation": {
+  "aime-0": {
+   "n": 1,
+   "before": 0.84375,
+   "after": 0.84375,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "aime-1": {
+   "n": 1,
+   "before": 0.75,
+   "after": 0.75,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "aime-2": {
+   "n": 1,
+   "before": 0.4791666666666667,
+   "after": 0.4791666666666667,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "aime-3": {
+   "n": 1,
+   "before": 0.875,
+   "after": 0.875,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "aime-4": {
+   "n": 1,
+   "before": 0.875,
+   "after": 0.875,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "aime-5": {
+   "n": 1,
+   "before": 0.5,
+   "after": 0.5,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "gsmhard-0": {
+   "n": 1,
+   "before": 0.625,
+   "after": 0.625,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  }
+ },
+ "by_group": {
+  "train": {
+   "problems": [
+    "aime-0",
+    "aime-1",
+    "aime-2",
+    "aime-3"
+   ],
+   "seed_rule": 0.7369791666666666,
+   "evolved_rule": 0.7369791666666666,
+   "gain": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "unseen": {
+   "problems": [
+    "aime-4",
+    "aime-5"
+   ],
+   "seed_rule": 0.6875,
+   "evolved_rule": 0.6875,
+   "gain": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "other": {
+   "problems": [
+    "gsmhard-0"
+   ],
+   "seed_rule": 0.625,
+   "evolved_rule": 0.625,
+   "gain": 0.0,
+   "wins": 0,
+   "losses": 0
+  }
+ },
+ "transfer_ratio": {
+  "unseen": null,
+  "other": null
+ },
+ "validate_seeds": [
+  1000
+ ],
+ "config": {
+  "rounds": 12,
+  "workers": 1,
+  "slot": "task_sampler",
+  "held_out_frac": 0.4,
+  "cache_dir": "/tmp/claude-0/-home-user-agentdescent/11f5938a-d37f-5fc2-bc0a-9c4c1833f52c/scratchpad/evalcache-run",
+  "source": "aime",
+  "other": "gsmhard",
+  "window_size": 20,
+  "data_seed": 0,
+  "model": "deepseek-v4-flash",
+  "provider": "openai",
+  "temperature": 0.0,
+  "thinking": "disabled",
+  "hard_other": false,
+  "reflective_merge": false,
+  "meta_reward": "auc",
+  "quality_target": 0.75,
+  "template": "System instruction:\n{skill}\n\nUser problem:\n{prompt}",
+  "seed_instruction": "Solve the competition mathematics problem. The answer is an integer; return only that integer.",
+  "outer_seed": 0
+ },
+ "usage": {
+  "calls": 784,
+  "prompt_tokens": 8752,
+  "completion_tokens": 31953,
+  "total_tokens": 40705,
+  "model_seconds": 754.2266497612,
+  "failures": 0,
+  "wall_seconds": 147.21922708899956,
+  "completion_cache": {
+   "hits": 688,
+   "misses": 35
+  }
+ }
+}

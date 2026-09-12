@@ -1,0 +1,81 @@
+{
+ "plan": "metasearch: evolve priority() on 150 x source instances (inner budget 60), rounds=24 workers=6 mode=sync blast_radius=0.6 (L1); validate on 200 fresh instances of source and target; openai/deepseek-v4-flash temperature=1.0 thinking=disabled",
+ "seed": 1,
+ "mode": "sync",
+ "wall_seconds": 239.36002165100035,
+ "evolved_source": "def priority(rank, visits, total, prior, depth, n_nodes):\n    # Reduce depth bonus more sharply; make exploration adaptive to tree size\n    depth_bonus = 0.03 * (1.0 / (1.0 + depth * depth * depth))\n    if visits == 0:\n        explore = 1.5 * (prior + 0.005) * math.sqrt(total + 1) / (1.0 + depth * 0.1)\n    else:\n        explore = 1.5 * prior * math.sqrt(math.log(total + 1) / (1 + visits)) / (1.0 + depth * 0.1)\n    return rank + depth_bonus + explore",
+ "final_reward": 0.7754439748478476,
+ "outcomes": {
+  "committed": 3,
+  "oracle-rejected": 7,
+  "below-threshold": 14
+ },
+ "rollouts": 144,
+ "validation": {
+  "source": {
+   "n": 200,
+   "seed_rule": 0.7507381065169412,
+   "evolved_rule": 0.7758372911290486,
+   "gain": 0.025099184612107483,
+   "gain_sd": 0.04686512580775101,
+   "wins": 146,
+   "losses": 49
+  },
+  "target": {
+   "n": 200,
+   "seed_rule": 0.3801273248972021,
+   "evolved_rule": 0.39319209823398876,
+   "gain": 0.013064773336786717,
+   "gain_sd": 0.06059897969000251,
+   "wins": 113,
+   "losses": 85
+  }
+ },
+ "transfer_ratio": 0.5205258074592773,
+ "reference": {
+  "evolved": {
+   "source": 0.7758372911290486,
+   "target": 0.39319209823398876
+  },
+  "seed (flat-PUCT c=1)": {
+   "source": 0.7507381065169412,
+   "target": 0.3801273248972021
+  },
+  "PUCT c=0.25 (best hand-written)": {
+   "source": 0.7737782854418335,
+   "target": 0.39143959949700435
+  },
+  "greedy (rank only)": {
+   "source": 0.7755525957609395,
+   "target": 0.3915281585428643
+  },
+  "worst-first (deliberately bad)": {
+   "source": 0.3642447056319879,
+   "target": 0.1878561828346272
+  }
+ },
+ "model": {
+  "provider": "openai",
+  "model": "deepseek-v4-flash",
+  "temperature": 1.0,
+  "max_tokens": 4096,
+  "thinking": "disabled",
+  "inner_budget": 60
+ },
+ "usage": {
+  "calls": 144,
+  "prompt_tokens": 178647,
+  "completion_tokens": 29078,
+  "total_tokens": 207725,
+  "model_seconds": 900.2194473743439,
+  "failures": 0
+ },
+ "engine_usage": {
+  "calls": 4428,
+  "prompt_tokens": 0,
+  "completion_tokens": 0,
+  "total_tokens": 0,
+  "model_seconds": 981.9831442832947,
+  "failures": 0
+ }
+}

@@ -20,7 +20,19 @@ written back until the user says so.
    cannot see -- so the same spec finds the file from one host and not another.
    - `kind`: `text` (a prompt or instruction), `skill_dir` (a SKILL.md folder),
      `agent_dir` (subagent definitions), `agent_code` (a tree that runs behind
-     tests), `plugin` (a host plugin; needs `host`).
+     tests), `plugin` (a host plugin; needs `host`), `policy_slot` (a decision
+     rule of the optimiser itself -- see below; almost never what a user means).
+   - **`policy_slot` is not for improving the user's files.** Its artifact is one
+     slot of AgentDescent's own search (`selection`, `task_sampler`, ...), and
+     one rollout is a *whole inner search*, so a round costs minutes to hours
+     rather than seconds. Only build one when the user asks to evolve the search
+     or optimiser itself. Its `target` is the slot name, not a path, and its
+     `data` holds refs rather than rows because an inner problem is a callable:
+     `data: {problems: "mypkg.problems:build", seeds: [0]}`, `score: auc`.
+     Budget it in wall clock (`evolve.max_seconds`), not in rounds -- a recorded
+     run asked for 8 rounds and completed 2 in 90 minutes. Read `plan`'s notes
+     aloud: they say how many held-out tasks the gate actually gets, and with
+     too few it has both committed a worse rule and committed nothing at all.
    - No data? Offer to draft 8 to 20 cases into `eval/cases.jsonl`
      (`{"prompt": ..., "gold": ...}` per line) and have the user check them.
      Never evolve against data the user has not seen.

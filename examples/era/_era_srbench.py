@@ -1044,6 +1044,17 @@ def evaluate_source(
                 "acc": (int(scored["acc"]) if scored else 0),
                 "equation": (result.get("equation") or "")[:240],
                 "error": str(result.get("error") or ""),
+                # Reported and kept in result files, deliberately NOT shown to
+                # the model: this is wall-clock, and the two prompt builders
+                # below used to print it to two decimals. The score is
+                # accuracy, so the duration is not something a search can act
+                # on -- but it varies run to run, which changed the prompt at
+                # identical length, missed the completion cache, and made the
+                # model sample a different program. Measured: three runs of
+                # one rule on `bpg1` diverged at model call 1 on nothing but
+                # `in 0.84s` vs `in 0.89s`, and that is where the 0.024 paired
+                # noise floor on `lsr_synth` came from. A candidate that runs
+                # out of time still reaches the prompt, through `error`.
                 "seconds": round(float(result.get("seconds") or 0.0), 2),
             }
             # Program-format answers leave their constants as `params[i]` holes,
@@ -1126,7 +1137,7 @@ def _failure_report(metrics: Dict[str, Any], limit: int = 5) -> str:
         shown = f" -> `{equation[:110]}`" if equation else ""
         lines.append(
             f"  {row['problem_id']} ({', '.join(row['variables'])}): "
-            f"{row['digits']} digits in {row['seconds']}s{note}{shown}")
+            f"{row['digits']} digits{note}{shown}")
     return "\n".join(lines)
 
 
@@ -1202,7 +1213,7 @@ def per_problem_prompt(
         equation = (row.get("equation") or "").strip()
         note = f" It raised: {row['error']}." if row.get("error") else ""
         attempt = (f"The equation it returned was:\n  {equation or '(none)'}\n"
-                   f"which scored {row['digits']} in {row['seconds']}s.{note}")
+                   f"which scored {row['digits']}.{note}")
     imports = ", ".join(sorted(ALLOWED_IMPORTS))
     contract = answer_contract(answer_format, variables, functions)
     shape = ("a STRING holding `def equation(...)` source"

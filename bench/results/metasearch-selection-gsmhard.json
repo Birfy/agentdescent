@@ -1,0 +1,310 @@
+{
+ "seed_source": "class Policy:\n    # Every worker starts from the current head (the engine's default).\n    def select(self, ctx, n):\n        return [ctx.head] * n\n",
+ "evolved_source": "class Policy:\n    # Change: occasionally revisit the best-scored candidate instead of always\n    # following the latest head, to escape local plateaus and exploit known good\n    # states. Unmeasured candidates are ranked worst to keep exploration alive.\n    def select(self, ctx, n):\n        # If only one candidate exists, must return it\n        if len(ctx.candidates) == 1:\n            return [ctx.candidates[0]] * n\n        \n        # Separate scored and unscored candidates\n        scored = [c for c in ctx.candidates if c.score is not None]\n        unscored = [c for c in ctx.candidates if c.score is None]\n        \n        # If there are scored candidates, pick the best one with a small\n        # probability of exploring a different one (novelty via selected count)\n        if scored:\n            # Sort scored by score descending, then by selected ascending\n            # (prefer less-selected among ties to add novelty)\n            best = max(scored, key=lambda c: (c.score, -c.selected))\n            # With 20% chance, pick a random scored candidate (not the best)\n            # to add diversity, but still prefer higher scores\n            if random.random() < 0.2 and len(scored) > 1:\n                # Weighted random: higher score more likely\n                weights = [c.score if c.score is not None else 0 for c in scored]\n                total = sum(weights)\n                if total > 0:\n                    r = random.uniform(0, total)\n                    acc = 0\n                    for c, w in zip(scored, weights):\n                        acc += w\n                        if r <= acc:\n                            best = c\n                            break\n            # Return all workers on the chosen candidate\n            return [best] * n\n        \n        # If no scored candidates, pick the least-selected one to explore\n        if unscored:\n            least_selected = min(unscored, key=lambda c: c.selected)\n            return [least_selected] * n\n        \n        # Fallback (shouldn't happen)\n        return [ctx.candidates[0]] * n",
+ "outer": {
+  "final_reward": 0.7508680555555557,
+  "rollouts": 12,
+  "outcomes": {
+   "committed": 1,
+   "oracle-rejected": 3,
+   "below-threshold": 2
+  },
+  "stop_reason": "rounds",
+  "error": null,
+  "seconds": 2073.9081279739985,
+  "rounds": 6,
+  "workers": 2,
+  "seeds": [
+   0,
+   1,
+   2
+  ],
+  "proposals": [
+   {
+    "source": "```python\nclass Policy:\n    # Change: occasionally revisit the best-scored candidate instead of always\n    # following the latest head, to escape local plateaus and exploit known good\n    # states. Unmeasured candidates are ranked worst to keep exploration alive.\n    def select(self, ctx, n):\n        # If only one candidate exists, must return it\n        if len(ctx.candidates) == 1:\n            return [ctx.candidates[0]] * n\n        \n        # Separate scored and unscored candidates\n        scored = [c for c in ctx.candidates if c.score is not None]\n        unscored = [c for c in ctx.candidates if c.score is None]\n        \n        # If there are scored candidates, pick the best one with a small\n        # probability of exploring a different one (novelty via selected count)\n        if scored:\n            # Sort scored by score descending, then by selected ascending\n            # (prefer less-selected among ties to add novelty)\n            best = max(scored, key=lambda c: (c.score, -c.selected))\n            # With 20% chance, pick a random scored candidate (not the best)\n            # to add diversity, but still prefer higher scores\n            if random.random() < 0.2 and len(scored) > 1:\n                # Weighted random: higher score more likely\n                weights = [c.score if c.score is not None else 0 for c in scored]\n                total = sum(weights)\n                if total > 0:\n                    r = random.uniform(0, total)\n                    acc = 0\n                    for c, w in zip(scored, weights):\n                        acc += w\n                        if r <= acc:\n                            best = c\n                            break\n            # Return all workers on the chosen candidate\n            return [best] * n\n        \n        # If no scored candidates, pick the least-selected one to explore\n        if unscored:\n            least_selected = min(unscored, key=lambda c: c.selected)\n            return [least_selected] * n\n        \n        # Fallback (shouldn't happen)\n        return [ctx.candidates[0]] * n\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-1:0"
+   },
+   {
+    "source": "We need a policy that sometimes goes back to an earlier, better candidate instead of always following the latest head. The key insight: when we have multiple candidates, we should prefer ones with higher scores, but also consider novelty (fewer selections) to avoid getting stuck. \n\nA simple improvement: track the best-scoring candidate seen so far and return it when it's still available, but mix in some exploration of unmeasured candidates. Since we can return multiple candidates, we can allocate some to the best known and some to the head for continued exploration.\n\n```python\nclass Policy:\n    # Track best scored candidate; return it plus head for exploration.\n    def __init__(self):\n        self.best_score = -float('inf')\n        self.best_candidate = None\n\n    def select(self, ctx, n):\n        # If only one candidate, must return it\n        if len(ctx.candidates) == 1:\n            return [ctx.candidates[0]] * n\n\n        # Update best candidate from scored ones\n        for c in ctx.candidates:\n            if c.score is not None and c.score > self.best_score:\n                self.best_score = c.score\n                self.best_candidate = c\n\n        # If we have a best candidate that's still in the list, use it\n        if self.best_candidate is not None and self.best_candidate in ctx.candidates:\n            # Allocate half to best, half to head (or all to best if n==1)\n            best_count = (n + 1) // 2\n            head_count = n - best_count\n            result = [self.best_candidate] * best_count\n            if head_count > 0:\n                result.extend([ctx.head] * head_count)\n            return result\n\n        # Otherwise fall back to head\n        return [ctx.head] * n\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-0:0"
+   },
+   {
+    "source": "I need to improve the selection policy to better balance exploration and exploitation. The current policy mostly follows the best score but occasionally explores randomly. The issue is that it may get stuck on a local optimum.\n\nKey insight: The current policy returns all `n` workers to the same candidate. Instead, I should sometimes split workers between the best scored candidate and an unexplored/unscored one to maintain diversity while still exploiting.\n\n```python\nclass Policy:\n    # Change: split workers between best scored and least-selected candidate\n    # to maintain exploration while exploiting known good states. This prevents\n    # getting stuck on a single plateau and allows parallel exploration.\n    def select(self, ctx, n):\n        # If only one candidate exists, must return it\n        if len(ctx.candidates) == 1:\n            return [ctx.candidates[0]] * n\n        \n        # Separate scored and unscored candidates\n        scored = [c for c in ctx.candidates if c.score is not None]\n        unscored = [c for c in ctx.candidates if c.score is None]\n        \n        # If we have both scored and unscored, split workers\n        if scored and unscored:\n            # Best scored candidate\n            best_scored = max(scored, key=lambda c: (c.score, -c.selected))\n            # Least selected unscored (most novel)\n            best_unscored = min(unscored, key=lambda c: c.selected)\n            \n            # Allocate 70% to best scored, 30% to exploration\n            n_explore = max(1, int(n * 0.3))\n            n_exploit = n - n_explore\n            return [best_scored] * n_exploit + [best_unscored] * n_explore\n        \n        # If only scored candidates exist\n        if scored:\n            # Pick best scored, but also include a second-best for diversity\n            sorted_scored = sorted(scored, key=lambda c: (c.score, -c.selected), reverse=True)\n            best = sorted_scored[0]\n            if len(sorted_scored) > 1 and n > 1:\n                # Split: 80% best, 20% second-best\n                n_second = max(1, int(n * 0.2))\n                n_best = n - n_second\n                return [best] * n_best + [sorted_scored[1]] * n_second\n            return [best] * n\n        \n        # If only unscored candidates, pick least selected\n        if unscored:\n            least_selected = min(unscored, key=lambda c: c.selected)\n            return [least_selected] * n\n        \n        # Fallback\n        return [ctx.candidates[0]] * n\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-3:0"
+   },
+   {
+    "source": "I need to improve the selection policy to better balance exploration and exploitation. The current policy has a 20% chance of random exploration, but this can cause regression (as seen in the curve dropping from 0.708 to 0.541). \n\nThe key insight is that when we have a good candidate, we should stick with it more consistently, and only explore when we're stuck or when novelty is genuinely needed. I'll use a more principled approach: track the best score seen and only explore when the current best hasn't improved recently.\n\n```python\nclass Policy:\n    # Change: use an epsilon-greedy with adaptive exploration - explore less when\n    # we have a good candidate, and always prefer the best scored candidate with\n    # a strong bias toward it. Track best score to reduce random regressions.\n    def __init__(self):\n        self.best_score = None\n        self.stagnation = 0\n        \n    def select(self, ctx, n):\n        # If only one candidate exists, must return it\n        if len(ctx.candidates) == 1:\n            return [ctx.candidates[0]] * n\n        \n        # Separate scored and unscored candidates\n        scored = [c for c in ctx.candidates if c.score is not None]\n        unscored = [c for c in ctx.candidates if c.score is None]\n        \n        # If there are scored candidates, pick the best one\n        if scored:\n            # Find the best scored candidate\n            best = max(scored, key=lambda c: (c.score, -c.selected))\n            \n            # Update best score tracking\n            if self.best_score is None or best.score > self.best_score:\n                self.best_score = best.score\n                self.stagnation = 0\n            else:\n                self.stagnation += 1\n            \n            # Adaptive exploration: explore less when we have a good score,\n            # more when stagnating. Base exploration on stagnation count.\n            explore_prob = 0.1 if self.stagnation < 3 else 0.3\n            \n            # Only explore if we have alternatives and the best isn't too good\n            if (random.random() < explore_prob and len(scored) > 1 and \n                (self.best_score is None or self.best_score < 0.9)):\n                # Among scored candidates, prefer higher scores but add novelty\n                # by weighting with selected count (less selected = more weight)\n                weights = []\n                for c in scored:\n                    if c == best:\n                        w = 0.5  # still keep some weight on best\n                    else:\n                        # Higher score and less selected = more weight\n                        w = (c.score if c.score is not None else 0) * (1.0 / (1.0 + c.selected))\n                    weights.append(max(w, 0.01))  # ensure positive\n                \n                total = sum(weights)\n                r = random.uniform(0, total)\n                acc = 0\n                for c, w in zip(scored, weights):\n                    acc += w\n                    if r <= acc:\n                        best = c\n                        break\n            \n            # Return all workers on the chosen candidate\n            return [best] * n\n        \n        # If no scored candidates, pick the least-selected one to explore\n        if unscored:\n            least_selected = min(unscored, key=lambda c: c.selected)\n            return [least_selected] * n\n        \n        # Fallback (shouldn't happen)\n        return [ctx.candidates[0]] * n\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-2:0"
+   },
+   {
+    "source": "I need to improve the policy to better handle cases where the search gets stuck. The current policy always returns all workers to a single candidate, which can lead to premature convergence. Let me think about what would help on problems like gsmhard-1 where the curve is flat at 0.625.\n\nThe issue is likely that the policy keeps exploiting the same best candidate without exploring enough. I should add more exploration by distributing workers across multiple candidates, especially when progress stalls.\n\n```python\nclass Policy:\n    # Change: distribute workers across top candidates instead of all-on-one,\n    # to maintain exploration pressure and avoid premature convergence on plateaus.\n    def select(self, ctx, n):\n        # If only one candidate exists, must return it\n        if len(ctx.candidates) == 1:\n            return [ctx.candidates[0]] * n\n        \n        # Separate scored and unscored candidates\n        scored = [c for c in ctx.candidates if c.score is not None]\n        unscored = [c for c in ctx.candidates if c.score is None]\n        \n        # If there are unscored candidates, always explore at least one\n        # worker on the least-selected unscored candidate\n        result = []\n        if unscored:\n            least_selected_unscored = min(unscored, key=lambda c: c.selected)\n            result.append(least_selected_unscored)\n            n -= 1\n        \n        # If we still have workers and scored candidates exist\n        if n > 0 and scored:\n            # Sort scored by score descending, then by selected ascending\n            scored_sorted = sorted(scored, key=lambda c: (-c.score, c.selected))\n            \n            # Allocate workers: give more to better candidates, but keep some spread\n            # Use a softmax-like distribution based on score\n            if len(scored_sorted) == 1:\n                # Only one scored candidate, put all remaining there\n                result.extend([scored_sorted[0]] * n)\n            else:\n                # Compute weights: higher score gets more, but not all\n                scores = [c.score for c in scored_sorted]\n                min_score = min(scores)\n                max_score = max(scores)\n                if max_score > min_score:\n                    # Normalize to [0.5, 1.5] range to keep some spread\n                    weights = [0.5 + 1.0 * (s - min_score) / (max_score - min_score) for s in scores]\n                else:\n                    weights = [1.0] * len(scores)\n                \n                # Allocate workers proportionally, but ensure at least 1 for top-2\n                total_weight = sum(weights)\n                allocations = [max(1, int(n * w / total_weight)) for w in weights]\n                # Adjust to match n exactly\n                diff = n - sum(allocations)\n                if diff > 0:\n                    # Give extra to the best candidate\n                    allocations[0] += diff\n                elif diff < 0:\n                    # Remove from the worst candidates first\n                    for i in range(len(allocations)-1, -1, -1):\n                        if allocations[i] > 1:\n                            take = min(-diff, allocations[i] - 1)\n                            allocations[i] -= take\n                            diff += take\n                            if diff == 0:\n                                break\n                \n                # Add allocations to result\n                for c, alloc in zip(scored_sorted, allocations):\n                    result.extend([c] * alloc)\n        \n        # If we still have workers left (no scored candidates), use unscored\n        if n > 0 and unscored:\n            # Distribute among unscored, preferring least selected\n            unscored_sorted = sorted(unscored, key=lambda c: c.selected)\n            for i in range(n):\n                result.append(unscored_sorted[i % len(unscored_sorted)])\n        \n        # Ensure we return exactly n candidates\n        if len(result) < n:\n            # Fill with the best available\n            best = max(ctx.candidates, key=lambda c: (c.score if c.score is not None else -1, -c.selected))\n            result.extend([best] * (n - len(result)))\n        \n        return result[:n]\n```",
+    "accepted_by_gate": false,
+    "reason": "select() must return 1..n candidates from ctx.candidates",
+    "on_task": "gsmhard-1:1"
+   },
+   {
+    "source": "I need to improve the policy to better handle the exploration-exploitation tradeoff. The current policy has a 20% chance to explore, but it seems to be getting stuck in local optima. Looking at the curve, it oscillates between 0.458 and 0.708 before finally reaching 0.75, suggesting it's not effectively escaping plateaus.\n\nThe key insight: when we have a good candidate, we should sometimes go back to it even if it's not the latest head, but we need to be more aggressive about exploring when we're stuck. Also, the weighted random selection might be too conservative - it still heavily favors the best score.\n\nLet me make the exploration more systematic: when the best candidate has been selected many times, we should force exploration of alternatives more strongly. Also, I'll use a UCB-like approach that balances score and novelty more explicitly.\n\n```python\nclass Policy:\n    # Change: Use UCB-style selection that explicitly balances score and novelty,\n    # with forced exploration when the best candidate is over-exploited.\n    # This helps escape local plateaus more reliably than random exploration.\n    def select(self, ctx, n):\n        # If only one candidate exists, must return it\n        if len(ctx.candidates) == 1:\n            return [ctx.candidates[0]] * n\n        \n        # Separate scored and unscored candidates\n        scored = [c for c in ctx.candidates if c.score is not None]\n        unscored = [c for c in ctx.candidates if c.score is None]\n        \n        # If there are unscored candidates, always explore them first\n        # (they represent fresh branches that need evaluation)\n        if unscored:\n            # Pick the least-selected unscored candidate to spread exploration\n            least_selected = min(unscored, key=lambda c: c.selected)\n            return [least_selected] * n\n        \n        # All candidates are scored - use UCB-style selection\n        if scored:\n            # Compute total selections to normalize\n            total_selections = sum(c.selected for c in scored) + len(scored)\n            \n            # UCB score: score + exploration bonus that decreases with selections\n            # but increases with total selections (so it grows over time)\n            import math\n            exploration_constant = 0.5  # Tune this\n            \n            def ucb_score(c):\n                # Higher score is better, but we want to explore less-selected ones\n                # when they have comparable scores\n                if c.selected == 0:\n                    # Never selected - give a strong exploration bonus\n                    bonus = exploration_constant * math.sqrt(math.log(total_selections + 1) / 1.0)\n                else:\n                    bonus = exploration_constant * math.sqrt(math.log(total_selections + 1) / c.selected)\n                return c.score + bonus\n            \n            # Pick the candidate with highest UCB score\n            best = max(scored, key=ucb_score)\n            \n            # But with some probability, deliberately pick a different one\n            # to avoid getting stuck - especially if best has been selected many times\n            if best.selected > 2 and random.random() < 0.3:\n                # Pick among the others, weighted by UCB score\n                others = [c for c in scored if c is not best]\n                if others:\n                    weights = [max(0.1, ucb_score(c)) for c in others]\n                    total = sum(weights)\n                    r = random.uniform(0, total)\n                    acc = 0\n                    for c, w in zip(others, weights):\n                        acc += w\n                        if r <= acc:\n                            best = c\n                            break\n            \n            return [best] * n\n        \n        # Fallback (shouldn't happen)\n        return [ctx.candidates[0]] * n\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-0:1"
+   },
+   {
+    "source": "We need to improve the policy to better handle the case where the best-scored candidate is not the latest head, and where exploration of unmeasured candidates is needed. The current policy has a 20% chance to pick a random scored candidate, but this may not be enough to escape local plateaus. \n\nThe key insight from the problem description is that GEPA and DGM use the trick of going back to earlier, better candidates. The current policy does this only 20% of the time, but the curve shows it often gets stuck at 0.625 and sometimes drops to 0.25, suggesting it's not consistently exploiting the best known state.\n\nA better approach: use a more systematic exploration/exploitation balance. Instead of a fixed 20% random chance, we should:\n1. Always prefer the best-scored candidate, but with a probability that decreases as the best candidate's score improves (to avoid over-exploiting a mediocre plateau).\n2. When exploring, prefer candidates with higher scores but also consider novelty (lower selected count) to avoid re-exploring the same suboptimal states.\n\nLet's revise to use a softmax-like selection over scored candidates, with temperature that encourages more exploration when scores are close, and also incorporate the selected count as a penalty to promote novelty.\n\n```python\nclass Policy:\n    # Change: use softmax over scored candidates with temperature based on score\n    # spread, and add novelty penalty via selected count. This balances\n    # exploitation of best-known states with exploration of promising alternatives,\n    # avoiding both getting stuck on plateaus and wasting workers on unmeasured states.\n    def select(self, ctx, n):\n        if len(ctx.candidates) == 1:\n            return [ctx.candidates[0]] * n\n        \n        scored = [c for c in ctx.candidates if c.score is not None]\n        unscored = [c for c in ctx.candidates if c.score is None]\n        \n        if scored:\n            # Compute scores with novelty penalty: score - 0.1 * selected\n            # (penalty encourages trying less-selected candidates when scores are close)\n            scores = [c.score - 0.1 * c.selected for c in scored]\n            max_score = max(scores)\n            min_score = min(scores)\n            spread = max_score - min_score\n            \n            # Temperature: if spread is small, explore more; if large, exploit more\n            # Use a base temperature that scales with spread\n            if spread < 0.05:\n                # Very close scores - explore broadly\n                temp = 0.5\n            elif spread < 0.2:\n                temp = 0.2\n            else:\n                temp = 0.05\n            \n            # Softmax probabilities\n            exp_scores = [math.exp((s - max_score) / temp) for s in scores]\n            total = sum(exp_scores)\n            probs = [e / total for e in exp_scores]\n            \n            # Sample one candidate\n            r = random.random()\n            acc = 0\n            chosen = scored[0]\n            for c, p in zip(scored, probs):\n                acc += p\n                if r <= acc:\n                    chosen = c\n                    break\n            \n            return [chosen] * n\n        \n        if unscored:\n            # No scored candidates - pick least selected to explore\n            least_selected = min(unscored, key=lambda c: c.selected)\n            return [least_selected] * n\n        \n        return [ctx.candidates[0]] * n\n```\n\nThis revision uses a softmax with temperature that adapts to the score spread. When scores are close (plateau), it explores more among scored candidates; when one is clearly better, it exploits that one. The novelty penalty (0.1 * selected) helps avoid repeatedly picking the same candidate when scores are similar, encouraging exploration of less-tried alternatives that might lead to better states.",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-1:0"
+   },
+   {
+    "source": "I need to improve the selection policy to better balance exploration and exploitation. The current policy mostly follows the best score but occasionally picks randomly. The issue is that it may not revisit promising earlier candidates enough when they have good scores but haven't been explored recently.\n\nMy change: Add a \"recency-weighted\" exploration that prefers candidates with good scores but also considers how long since they were last selected, creating a more systematic revisit of good states rather than random exploration.\n\n```python\nclass Policy:\n    # Change: Use a recency-weighted score that combines score with time-since-last-selection\n    # to systematically revisit good candidates instead of random exploration.\n    # This helps escape local plateaus by periodically checking earlier good states.\n    def select(self, ctx, n):\n        # If only one candidate exists, must return it\n        if len(ctx.candidates) == 1:\n            return [ctx.candidates[0]] * n\n        \n        # Separate scored and unscored candidates\n        scored = [c for c in ctx.candidates if c.score is not None]\n        unscored = [c for c in ctx.candidates if c.score is None]\n        \n        # If there are scored candidates, use a combined score\n        if scored:\n            # Compute a \"revisit score\" that rewards high scores but also\n            # candidates that haven't been selected recently (low selected count)\n            # This creates a systematic exploration of good states\n            def revisit_key(c):\n                # Score is primary, but add a small bonus for less-selected\n                # candidates to encourage revisiting them\n                return (c.score, -c.selected)\n            \n            # Sort by score descending, then by selected ascending\n            best = max(scored, key=revisit_key)\n            \n            # With 30% chance, pick the second-best or third-best scored candidate\n            # to systematically explore alternatives rather than random\n            if len(scored) > 1 and random.random() < 0.3:\n                # Sort all scored candidates by the same key\n                sorted_scored = sorted(scored, key=revisit_key, reverse=True)\n                # Pick from top 3 (excluding the very best) with decreasing probability\n                candidates_to_try = sorted_scored[1:min(4, len(sorted_scored))]\n                if candidates_to_try:\n                    # Weighted pick: prefer higher-ranked alternatives\n                    weights = [len(candidates_to_try) - i for i in range(len(candidates_to_try))]\n                    best = random.choices(candidates_to_try, weights=weights)[0]\n            \n            # Return all workers on the chosen candidate\n            return [best] * n\n        \n        # If no scored candidates, pick the least-selected one to explore\n        if unscored:\n            least_selected = min(unscored, key=lambda c: c.selected)\n            return [least_selected] * n\n        \n        # Fallback (shouldn't happen)\n        return [ctx.candidates[0]] * n\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-0:0"
+   },
+   {
+    "source": "I need to improve the selection policy to better balance exploration and exploitation. The current policy mostly follows the best score but occasionally explores randomly. The issue is that it may get stuck on a local optimum.\n\nKey insight: The current policy returns all `n` workers to the same candidate. Instead, I should sometimes split workers between the best scored candidate and an unexplored/unscored one to maintain diversity while still exploiting.\n\n```python\nclass Policy:\n    # Change: split workers between best scored and least-selected candidate\n    # to maintain exploration while exploiting known good states. This prevents\n    # getting stuck on a single plateau and allows parallel exploration.\n    def select(self, ctx, n):\n        # If only one candidate exists, must return it\n        if len(ctx.candidates) == 1:\n            return [ctx.candidates[0]] * n\n        \n        # Separate scored and unscored candidates\n        scored = [c for c in ctx.candidates if c.score is not None]\n        unscored = [c for c in ctx.candidates if c.score is None]\n        \n        # If we have both scored and unscored, split workers\n        if scored and unscored:\n            # Best scored candidate\n            best_scored = max(scored, key=lambda c: (c.score, -c.selected))\n            # Least selected unscored (most novel)\n            best_unscored = min(unscored, key=lambda c: c.selected)\n            \n            # Allocate 70% to best scored, 30% to exploration\n            n_explore = max(1, int(n * 0.3))\n            n_exploit = n - n_explore\n            return [best_scored] * n_exploit + [best_unscored] * n_explore\n        \n        # If only scored candidates exist\n        if scored:\n            # Pick best scored, but also include a second-best for diversity\n            sorted_scored = sorted(scored, key=lambda c: (c.score, -c.selected), reverse=True)\n            best = sorted_scored[0]\n            if len(sorted_scored) > 1 and n > 1:\n                # Split: 80% best, 20% second-best\n                n_second = max(1, int(n * 0.2))\n                n_best = n - n_second\n                return [best] * n_best + [sorted_scored[1]] * n_second\n            return [best] * n\n        \n        # If only unscored candidates, pick least selected\n        if unscored:\n            least_selected = min(unscored, key=lambda c: c.selected)\n            return [least_selected] * n\n        \n        # Fallback\n        return [ctx.candidates[0]] * n\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-3:0"
+   },
+   {
+    "source": "I need to improve the policy to better handle the exploration-exploitation tradeoff. The current policy has a fixed 20% random exploration which can waste workers on poor candidates. Looking at the curve, there's a drop from 0.708 to 0.541 and then to 0.458 before recovering to 0.833 - suggesting the random exploration sometimes picks bad candidates.\n\nKey insight: instead of random exploration, I should use a more systematic approach that considers both score AND novelty (selected count) in a principled way, and when revisiting, prefer candidates that are close to the best but less explored.\n\n```python\nclass Policy:\n    # Change: use a UCB-like score combining normalized score and novelty bonus,\n    # with a decaying exploration rate that favors less-selected candidates\n    # among those with comparable scores, avoiding random jumps to poor states.\n    def select(self, ctx, n):\n        # If only one candidate exists, must return it\n        if len(ctx.candidates) == 1:\n            return [ctx.candidates[0]] * n\n        \n        # Separate scored and unscored candidates\n        scored = [c for c in ctx.candidates if c.score is not None]\n        unscored = [c for c in ctx.candidates if c.score is None]\n        \n        # If there are unscored candidates, always explore them first\n        # (they've never been measured, so they might be better)\n        if unscored:\n            # Pick the least-selected unscored candidate to spread exploration\n            least_selected = min(unscored, key=lambda c: c.selected)\n            return [least_selected] * n\n        \n        # All candidates are scored - use a UCB-style selection\n        if scored:\n            # Find the best score to normalize against\n            max_score = max(c.score for c in scored)\n            min_score = min(c.score for c in scored)\n            score_range = max_score - min_score if max_score > min_score else 1.0\n            \n            # Compute UCB-like value: normalized score + exploration bonus\n            # that decreases with selection count but is scaled by score range\n            def ucb_value(c):\n                norm_score = (c.score - min_score) / score_range\n                # Exploration bonus: higher for less-selected candidates\n                # but scaled to not dominate when scores differ significantly\n                exploration = 0.15 * (1.0 / (1.0 + c.selected))\n                return norm_score + exploration\n            \n            # Pick the candidate with highest UCB value\n            best = max(scored, key=ucb_value)\n            \n            # If the best is significantly better than second best, commit fully\n            # Otherwise, split workers between top candidates to hedge\n            sorted_scored = sorted(scored, key=ucb_value, reverse=True)\n            if len(sorted_scored) >= 2:\n                top1 = sorted_scored[0]\n                top2 = sorted_scored[1]\n                # If top1 is clearly better (UCB gap > 0.2), go all-in\n                if ucb_value(top1) - ucb_value(top2) > 0.2:\n                    return [top1] * n\n                else:\n                    # Split: give majority to top1, rest to top2\n                    # This hedges when candidates are close\n                    split = max(1, n // 2)\n                    return [top1] * (n - split) + [top2] * split\n            \n            return [best] * n\n        \n        # Fallback (shouldn't happen)\n        return [ctx.candidates[0]] * n\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-2:0"
+   },
+   {
+    "source": "I need to improve the selection policy to better handle cases where the current approach gets stuck. The current policy mostly follows the best-scored candidate, which can lead to local plateaus. \n\nLooking at the curve, it stays at 0.625 for many rounds then drops to 0.25 once before recovering - suggesting the policy sometimes makes bad choices. The key insight is that when we have scored candidates, we should more aggressively explore alternatives, especially when the best candidate has been selected many times already.\n\nMy change: make the exploration probability adaptive based on how many times the best candidate has been selected, and also consider the gap between best and second-best scores. This way, we revisit earlier good states more often when the current best is over-exploited.\n\n```python\nclass Policy:\n    # Change: adaptive exploration - when the best candidate has been selected\n    # many times, increase chance of revisiting other scored candidates to\n    # escape plateaus. Also consider score gaps to avoid switching to much worse states.\n    def select(self, ctx, n):\n        if len(ctx.candidates) == 1:\n            return [ctx.candidates[0]] * n\n        \n        scored = [c for c in ctx.candidates if c.score is not None]\n        unscored = [c for c in ctx.candidates if c.score is None]\n        \n        if scored:\n            # Sort by score desc, selected asc\n            scored_sorted = sorted(scored, key=lambda c: (c.score, -c.selected), reverse=True)\n            best = scored_sorted[0]\n            \n            # Compute exploration probability based on best's selection count\n            # More selections -> higher chance to explore alternatives\n            base_explore = 0.2\n            selection_factor = min(0.5, best.selected * 0.1)  # up to +0.5\n            explore_prob = base_explore + selection_factor\n            \n            # If there's a second-best with close score, increase exploration\n            if len(scored_sorted) > 1:\n                second = scored_sorted[1]\n                if second.score is not None and best.score is not None:\n                    score_gap = best.score - second.score\n                    if score_gap < 0.1:  # close scores\n                        explore_prob += 0.15\n            \n            if random.random() < explore_prob and len(scored) > 1:\n                # Weighted random among scored, but exclude best with some prob\n                # to force revisiting earlier states\n                candidates_pool = scored\n                # Give extra weight to second-best when gap is small\n                weights = []\n                for c in scored:\n                    if c is best:\n                        w = 0.5  # still possible but less likely\n                    else:\n                        w = c.score if c.score is not None else 0\n                    weights.append(max(w, 0.01))  # avoid zero weights\n                total = sum(weights)\n                r = random.uniform(0, total)\n                acc = 0\n                chosen = best\n                for c, w in zip(scored, weights):\n                    acc += w\n                    if r <= acc:\n                        chosen = c\n                        break\n                return [chosen] * n\n            \n            return [best] * n\n        \n        if unscored:\n            least_selected = min(unscored, key=lambda c: c.selected)\n            return [least_selected] * n\n        \n        return [ctx.candidates[0]] * n\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-1:1"
+   },
+   {
+    "source": "I need to improve the selection policy to better handle the exploration-exploitation tradeoff. The current policy has a 20% chance of random weighted selection, but this can be too random and disrupt good progress. \n\nThe key insight from the curve is that the policy sometimes drops from 0.708 to 0.458 (a bad exploration) but then recovers. A better approach would be to use a more systematic exploration that considers both score and novelty, rather than pure randomness.\n\n```python\nclass Policy:\n    # Change: use a UCB-style selection that balances score and exploration\n    # (selected count), with a deterministic tie-break favoring less-selected\n    # candidates. This avoids random drops while still exploring alternatives.\n    def select(self, ctx, n):\n        # If only one candidate exists, must return it\n        if len(ctx.candidates) == 1:\n            return [ctx.candidates[0]] * n\n        \n        # Separate scored and unscored candidates\n        scored = [c for c in ctx.candidates if c.score is not None]\n        unscored = [c for c in ctx.candidates if c.score is None]\n        \n        # If there are unscored candidates, always explore them first\n        # (they represent fresh branches that need evaluation)\n        if unscored:\n            # Pick the least-selected unscored candidate to spread exploration\n            least_selected = min(unscored, key=lambda c: c.selected)\n            return [least_selected] * n\n        \n        # All candidates are scored - use UCB-style selection\n        if scored:\n            # Compute total selections to normalize\n            total_selections = sum(c.selected for c in scored) + len(scored)\n            # UCB score: mean score + exploration bonus\n            # Use a small exploration constant to avoid too much randomness\n            exploration_constant = 0.5\n            best = max(\n                scored,\n                key=lambda c: (\n                    c.score + exploration_constant * \n                    (2 * (total_selections / (c.selected + 1))) ** 0.5,\n                    -c.selected  # tie-break: prefer less selected\n                )\n            )\n            return [best] * n\n        \n        # Fallback (shouldn't happen)\n        return [ctx.candidates[0]] * n\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-0:1"
+   }
+  ],
+  "reflective_merge": false,
+  "proposals_rejected_by_gate": 1,
+  "invalid_proposals": 1,
+  "history": [
+   {
+    "round": 0,
+    "held_out_reward": 0.7508680555555557,
+    "committed": 1,
+    "rejected": 0,
+    "reasons": {
+     "committed": 1
+    }
+   },
+   {
+    "round": 1,
+    "held_out_reward": 0.7508680555555557,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "oracle-rejected": 1
+    }
+   },
+   {
+    "round": 2,
+    "held_out_reward": 0.7508680555555557,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "oracle-rejected": 1
+    }
+   },
+   {
+    "round": 3,
+    "held_out_reward": 0.7508680555555557,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "below-threshold": 1
+    }
+   },
+   {
+    "round": 4,
+    "held_out_reward": 0.7508680555555557,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "oracle-rejected": 1
+    }
+   },
+   {
+    "round": 5,
+    "held_out_reward": 0.7508680555555557,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "below-threshold": 1
+    }
+   }
+  ]
+ },
+ "validation": {
+  "gsmhard-0": {
+   "n": 2,
+   "before": 0.7239583333333334,
+   "after": 0.7239583333333334,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "gsmhard-1": {
+   "n": 2,
+   "before": 0.625,
+   "after": 0.6380208333333333,
+   "gain": 0.013020833333333315,
+   "gain_sd": 0.013020833333333315,
+   "wins": 1,
+   "losses": 0
+  },
+  "gsmhard-2": {
+   "n": 2,
+   "before": 0.7005208333333334,
+   "after": 0.7057291666666667,
+   "gain": 0.005208333333333315,
+   "gain_sd": 0.005208333333333315,
+   "wins": 1,
+   "losses": 0
+  },
+  "gsmhard-3": {
+   "n": 2,
+   "before": 0.8541666666666666,
+   "after": 0.8541666666666666,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "gsmhard-4": {
+   "n": 2,
+   "before": 0.7630208333333333,
+   "after": 0.7630208333333333,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "gsmhard-5": {
+   "n": 2,
+   "before": 0.65625,
+   "after": 0.65625,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "hotpotqa-0": {
+   "n": 2,
+   "before": 0.7343749999999999,
+   "after": 0.7343749999999999,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "hotpotqa-1": {
+   "n": 2,
+   "before": 0.9036458333333331,
+   "after": 0.9036458333333331,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  }
+ },
+ "by_group": {
+  "train": {
+   "problems": [
+    "gsmhard-0",
+    "gsmhard-1",
+    "gsmhard-2",
+    "gsmhard-3"
+   ],
+   "seed_rule": 0.7259114583333334,
+   "evolved_rule": 0.7304687499999999,
+   "gain": 0.004557291666666657,
+   "wins": 2,
+   "losses": 0
+  },
+  "unseen": {
+   "problems": [
+    "gsmhard-4",
+    "gsmhard-5"
+   ],
+   "seed_rule": 0.7096354166666666,
+   "evolved_rule": 0.7096354166666666,
+   "gain": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "other": {
+   "problems": [
+    "hotpotqa-0",
+    "hotpotqa-1"
+   ],
+   "seed_rule": 0.8190104166666665,
+   "evolved_rule": 0.8190104166666665,
+   "gain": 0.0,
+   "wins": 0,
+   "losses": 0
+  }
+ },
+ "transfer_ratio": {
+  "unseen": 0.0,
+  "other": 0.0
+ },
+ "validate_seeds": [
+  1000,
+  1001
+ ],
+ "config": {
+  "rounds": 16,
+  "workers": 1,
+  "slot": "selection",
+  "held_out_frac": 0.4,
+  "cache_dir": "/tmp/claude-0/-home-user-agentdescent/11f5938a-d37f-5fc2-bc0a-9c4c1833f52c/scratchpad/sel-cache60",
+  "source": "gsmhard",
+  "other": "hotpotqa",
+  "window_size": 60,
+  "data_seed": 0,
+  "model": "deepseek-v4-flash",
+  "provider": "openai",
+  "temperature": 0.0,
+  "thinking": "disabled",
+  "hard_other": false,
+  "reflective_merge": false,
+  "meta_reward": "auc",
+  "quality_target": 0.75,
+  "template": "System instruction:\n{skill}\n\nUser problem:\n{prompt}",
+  "seed_instruction": "Solve the math word problem. Return only the final answer.",
+  "outer_seed": 0
+ },
+ "usage": {
+  "calls": 9272,
+  "prompt_tokens": 690462,
+  "completion_tokens": 657379,
+  "total_tokens": 1347841,
+  "model_seconds": 35642.346836566925,
+  "failures": 5,
+  "wall_seconds": 3073.0866829629995,
+  "completion_cache": {
+   "hits": 1875,
+   "misses": 3657
+  }
+ }
+}
