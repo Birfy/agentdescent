@@ -464,6 +464,88 @@ cannot then measure the bias it leaves behind — that is [constraint
 2](#two-pools-never-mixed), and a search is the most thorough way there is to
 violate it.
 
+## Evolving the rubric — and what has to be true first
+
+Everything above ends with a person writing a rule and the harness scoring it.
+`scripts/audit_judge_repair.py` is the top of that ladder: **one** clause, hand
+written from a diagnosis, measured against a control. It worked — `sigma`
+0.4738 → 0.4461 on BBH, rubber-stamping 30% → 20% — and it does not scale,
+because the next clause also has to be thought of.
+
+`scripts/audit_evolve_judge.py` hands that search to `evolve()`. The artifact is
+the judge's rubric, the reward is agreement with ground truth on one judging
+decision, and the labels come out of the improvement pool.
+
+```bash
+python -m scripts.audit_evolve_judge --workload gsm8k \
+    --records reports/audit_phase0_gsm8k.jsonl --model deepseek-v4-flash
+```
+
+Nothing about it is new machinery. It is the ordinary loop pointed at the
+verifier, and every guard on it is one of the findings above, turned into a
+refusal.
+
+### It will not run on a saturated pool
+
+This is the gate, and it is the reason the rung sat unbuilt. Across HotpotQA and
+BBH the improvement pool's [P(new error mode)](#where-the-improvement-labels-go)
+had fallen to **0.0169** — nine and four disagreements, every one a shape
+already understood. Evolving a prompt against thirteen known errors is fitting
+noise with extra steps, and the fix is a new *workload* rather than more labels,
+which is why `scripts/audit_phase0.py` grew a third one before this file
+existed:
+
+| workload | what the judge gets wrong there | can the other two produce it? |
+|---|---|---|
+| HotpotQA | forgives paraphrase, extra words, partial names | — |
+| BBH | stops discriminating on option labels | no |
+| **GSM8K** | **wrong final number, marked right because the working reads correctly** | **no — neither output carries a derivation** |
+
+`--min-unseen` defaults to 0.25. `--force` overrides it and stamps the report.
+
+### It will not train and test on the same task
+
+The two pools are split by *purpose*, and purpose is drawn per **unit** while
+inclusion is drawn per **task** — so a run that scores one question under four
+artifact versions can put that question in both pools. A purpose-only split
+trains and tests on it. The held-out set is the calibration pool minus every
+task the training set touched, and the report says how many that dropped.
+
+### It will not let "always NO" win
+
+The reward is agreement with the oracle, so a rubric that ignores the candidate
+and always says the majority class scores `max(P(right), P(wrong))`. On an audit
+pool the majority is "wrong", so the rubric the loop would converge on is
+*reject everything*:
+
+| pool | "always NO" scores | the real judge scores |
+|---|---|---|
+| HotpotQA, improvement (n=55) | **0.836** | **0.836** |
+| HotpotQA, all labels (n=177) | 0.723 | 0.825 |
+| BBH, improvement (n=13) | 0.385 | 0.692 |
+
+It does not have to *beat* the judge to be found. On the pool this rung trains
+on it ties it exactly, and a search that ties the incumbent while being
+trivially simpler is a search that has gone nowhere and cannot tell. Two guards,
+because the first is a property of a sample and the second of a decision:
+
+* the training set is down-sampled to equal numbers of right and wrong answers,
+  which puts the constant rubric at 0.5;
+* the [scorecard](#the-scorecard--before-a-new-verifier-replaces-the-old-one)
+  blocks on false-negative rate regardless.
+
+### It will not read a `sigma` that fell as evidence
+
+The control arm re-runs the **starting** rubric and its flips are the noise
+floor, for the reason the repair experiment found the hard way: on BBH the
+unchanged prompt scored a smaller residual than the run it was copied from.
+
+### It will not hand back a judge
+
+The output is a `scorecard()` and a `rescan()` — what would have flipped — and a
+person decides. Swapping the verifier invalidates the run's history in a way
+nothing in the run can see, which is the next section.
+
 ## The scorecard — before a new verifier replaces the old one
 
 A verifier is the instrument every other number in a run is measured with, so

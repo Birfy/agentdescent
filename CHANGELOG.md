@@ -161,6 +161,55 @@ All notable changes to AgentDescent are documented here. The format follows
   buying more in-loop evaluation cannot improve the criterion and the budget
   belongs on oracle labels.
 
+- **A third workload, and the rung of the ladder it unblocks.**
+  `scripts/audit_evolve_judge.py` evolves the judge's *rubric* with `evolve()`:
+  the artifact is the rubric, the reward is agreement with ground truth on one
+  judging decision, and the labels come from the improvement pool. It is the
+  automated form of `scripts/audit_judge_repair.py`, which measured **one**
+  hand-written clause -- that worked, and the next clause also has to be thought
+  of.
+
+  The rung sat unbuilt because the pool was **saturated**: across HotpotQA and
+  BBH, `P(the next label shows an error mode nobody has seen)` had fallen to
+  **0.0169** over nine and four disagreements, every one a shape already
+  understood. More labels on those two shapes cannot move that. A third *shape*
+  can, so `--workload gsm8k` came first:
+
+  | workload | what the judge gets wrong there | the other two |
+  |---|---|---|
+  | HotpotQA | forgives paraphrase, extra words, partial names | -- |
+  | BBH | stops discriminating on option labels | cannot produce it |
+  | GSM8K | wrong final number, marked right because the working reads correctly | cannot produce it -- neither output carries a derivation |
+
+  Adding it turned three single-workload assumptions into bugs, each of which
+  had looked like shared code: the oracle (`exact_match` scores `18.00` wrong
+  against `18`, so a workload whose oracle refuses its own correct answers
+  measures the oracle), the dry run's near-miss (`The answer is 18.` is a
+  near-miss for exact match and simply *correct* for `number_match`, so the
+  GSM8K rehearsal had no disagreements to rehearse on), and the report's oracle
+  label, which was a string literal reading "normalized exact match" over GSM8K
+  numbers.
+
+  Four refusals are built into the rung, each one an earlier finding turned into
+  a gate:
+
+  | | the refusal | what it stops |
+  |---|---|---|
+  | saturation | `--min-unseen`, default 0.25 | a rubric fitted to the thirteen errors that happen to be in hand |
+  | task overlap | held-out is the calibration pool **minus every task the training set touched** | purpose is drawn per unit and inclusion per task, so a purpose-only split trains and tests on the same question |
+  | class balance | the training set is down-sampled to equal right/wrong | agreement with the oracle rewards "reject everything" on a pool where most answers are wrong: 0.836 on the HotpotQA improvement pool, which is *exactly* the real judge's rate on those 55 units |
+  | the noise floor | the control arm re-runs the **starting** rubric | on BBH the unchanged prompt scored a smaller residual than the run it was copied from |
+
+  It hands back a `scorecard()` and a `rescan()`, never a judge: swapping the
+  verifier invalidates the run's history in a way nothing in the run can see.
+
+  Error modes moved to `scripts/audit_modes.py`, one definition per workload.
+  The coverage number decides whether the improvement pool still gets budget,
+  and two copies that drifted would answer that in two files with no way to tell
+  which one ran. `reports/verifier_diagnosis_f55dec40cec559f7.md` regenerates
+  byte-identical after the move, which is what makes the dedup safe to claim.
+  [docs/audit.md](docs/audit.md)
+
 - **`agentdescent.audit.propose` -- something that proposes a fix, not only
   scores one.** `diagnose` sorted the verifier's errors and measured a proposed
   rule; nothing proposed one, so the improvement pool's labels were paying for a

@@ -435,6 +435,25 @@ _NEAR_MISS = {
     "gsm8k": lambda gold: f"Working through it, the answer is {gold} (over 7 days).",
 }
 
+#: Wrong answers for `--dry-run`, several shapes rather than one constant.
+#:
+#: A single ``"unknown"`` for every wrong answer gives the whole dry run **one**
+#: error mode, so `P(new error mode)` comes back 0.0 and anything gated on
+#: coverage refuses to run -- which reads as a finding about the workload and is
+#: a property of the stand-in solver. The shapes here are chosen to land in
+#: different buckets of `scripts.audit_modes`, so a rehearsal exercises the
+#: coverage path rather than short-circuiting it.
+_WRONG = {
+    "hotpot": (lambda gold, rng: "unknown",),
+    "bbh": (lambda gold, rng: "unknown",),
+    "gsm8k": (
+        lambda gold, rng: str(rng.randint(1, 400)),
+        lambda gold, rng: (f"{rng.randint(2, 9)} * {rng.randint(2, 9)} = "
+                           f"{rng.randint(1, 400)}, so that is the answer."),
+        lambda gold, rng: "I could not work this out.",
+    ),
+}
+
 #: What the report calls each one. A report that says "HotpotQA validation" over
 #: BBH numbers is worse than one that says nothing.
 _WORKLOAD_LABELS = {
@@ -580,6 +599,7 @@ def run(args) -> Dict:
         # dry run no disagreements at all -- a harness rehearsal that exercises
         # none of the paths it exists to rehearse.
         near_miss = _NEAR_MISS[args.workload]
+        wrong = _WRONG[args.workload]
 
         def _run(rendered: str, task: Task) -> str:
             rng = random.Random(f"{args.seed}:{task.id}:{len(rendered)}")
@@ -589,7 +609,7 @@ def run(args) -> Dict:
                 return gold
             if roll < 0.75:
                 return near_miss(gold)
-            return "unknown"
+            return wrong[rng.randrange(len(wrong))](gold, rng)
         kwargs = dict(run=RenderTap(_run), propose=lambda r, t, o, s: None)
     else:
         agent = LLMAgent(solve)
