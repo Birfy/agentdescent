@@ -34,69 +34,69 @@ best one does.
 | AlgoTune | **no** — structural | 0.0066 vs noise 0.0055 | the reward *is* a wall-clock speedup |
 | LLM-SRBench | evaluator yes; **whole run no** until a duration was taken out of the prompt | 0.0842 on `lsr_synth`, 0.0000 under the category protocol | see below, and *Two ways to get this wrong* |
 | hyp2f1 | **yes**, 0.0000 | 0.0000 at 30 expansions | `scipy.special.hyp2f1` is near-optimal; nothing beat it |
+| SWE-bench-Science | **yes**, byte-identical | n/a — nothing beat the root | best on properties 1–3 of any real domain here; see below |
 
-### AlgoTune's failure is the only *irreparable* one
+### SWE-bench-Science: three properties out of four, and the fourth is not the domain's
 
-Every other row can in principle be fixed by configuration — including
-LLM-SRBench's, which turned out to have the same defect in a repairable form
-(see below). AlgoTune cannot: an
-expansion is scored by timing it, the measured milliseconds are written into the
-next prompt (`_eval_block`, `_timing_report`, `_profile_block`), so jitter
-changes the prompt, the completion cache misses, and a different program is
-sampled. The timing *is* the feedback the search runs on — remove it and the
-search is blind, keep it and the search is stochastic. Details in
-[`metasearch-algotune.md`](metasearch-algotune.md).
+The strongest real-data domain on the first three and the clearest failure on the
+fourth. Verification is a container running a fixed test suite, so it is
+**byte-identical across repeats** — the first real-data evaluator here that is a
+function of its input by construction rather than by tuning a wall-clock budget
+out of the way. Reward granularity is 3 to 31 levels once the grader's nested
+partial credit is read (the headline `reward` is binary), 10 of 15 baselines are
+partially correct, and a verification costs 5.9 s at the median.
 
-### A wall-clock budget *guarding* an exact reward is almost as bad
+And nothing beat the root: **0 of 14 attempts on a weak model, 0 of 14 on a
+strong one.** The stronger model produces visibly healthier candidates — 14 of 14
+reach the verifier rather than 13 of 14 — and the curve is still flat. So this
+is not the domain and not the model: it is the agent phase the benchmark is built
+around, which this repository deliberately does not reimplement
+(`harbor run --agent`). Until that exists the curve stays flat for reasons that
+say nothing about selection rules.
 
-LLM-SRBench scores `min(12, -log10(NMSE))` — accuracy, not speed — and still
-came back irreproducible at first: three runs of the same rule gave 0.0731,
-0.0731 and 0.4625. The cause was `PROBLEM_SECONDS = 10.0`, a per-problem
-wall-clock budget guarding the metric, straddled whenever the container was
-busy. Raising it to 120 took the *evaluator's* noise floor to exactly **0.0000**.
+Two things worth knowing before anyone runs it, both in `_harbor.py`'s comments:
+the verifier is a **separate image** whose `test.sh` begins `git reset --hard`
+and applies the patch from `/logs/artifacts/model.patch` (apply it yourself and
+it is silently discarded, and every candidate scores the baseline); and **6 of
+15 published verifier images ship a grader that looks for a private test file by
+a name it does not have**, so `reward` is 0 for any patch whatsoever. Mounting
+the dataset's own `tests/grader.py` over the image's repairs them — baselines
+with no usable signal go from 6 of 15 to 0 of 15.
 
-So the property to check is not "is the reward a timing?" but **"does any
-wall-clock budget stand between the program and its score?"** — and where one
-does, whether it is a settable argument. AlgoTune's is not; SRBench's is.
+### One defect, three disguises: anything that varies must not reach the model
 
-### And that was not the end of it: a duration in the prompt does it too
+Three domains failed the *"is the run a function of the rule?"* property, in
+what looked like three different ways and was one:
 
-This page went on to assert that AlgoTune's failure was "the only structural
-one" and that on LLM-SRBench *no timing field reaches the prompt*. **That was
-wrong, and it cost the `lsr_synth` evolution run.** With a deterministic
-evaluator and a completion cache, that run still produced a **0.024 paired
-noise floor** when the seed rule was scored against itself.
+| where it hid | what it did |
+|---|---|
+| **the reward is a timing** (AlgoTune) | an expansion is scored by timing it, and the milliseconds go into the next prompt (`_eval_block`, `_timing_report`, `_profile_block`). Jitter changes the prompt, the cache misses, a different program is sampled |
+| **a wall-clock budget guards the reward** (LLM-SRBench, first) | `PROBLEM_SECONDS = 10.0` straddled whenever the container was busy: three runs of one rule gave 0.0731, 0.0731, 0.4625. Raising it to 120 took the *evaluator's* floor to 0.0000 |
+| **a duration sits beside the reward in the prompt** (LLM-SRBench, again) | `which scored 2.998 in 0.84s.` — the score identical, the duration not. Prompts of the same length (8162) and different hashes, diverging at model call 1 |
 
-Tracing every model call of three identical runs put the divergence at call 1,
-where the two prompts had the *same length* (8162) and different hashes. The
-diff is one line:
+**Only AlgoTune's is irreparable.** Remove the timing and the search is blind;
+keep it and the search is stochastic — the timing *is* the feedback. The port
+itself works (a 5.6x speedup over the task's own reference on
+`psd_cone_projection`), and `bench/metasearch_algotune.py --determinism-check N`
+prints the noise floor before the outer loop starts, which is the number that
+decides whether anything the run reports is evidence.
 
-```
--which scored 2.998 in 0.84s.
-+which scored 2.998 in 0.89s.
-```
+The third one is the expensive one, because **this page had asserted that
+LLM-SRBench was free of it** — and that assertion cost the `lsr_synth` run a
+**0.024 paired noise floor** with a deterministic evaluator and a completion
+cache both in place. So the rule is wider than "is the reward a timing":
 
-Both prompt builders printed the candidate's wall-clock to two decimals. The
-score is identical; the duration is not; the prompt text changes; the cache key
-is the prompt, so the cache misses and the model samples a different program —
-**exactly AlgoTune's mechanism, in the domain this page had cleared of it.**
+> **Nothing that varies between two runs of the same candidate may appear in the
+> prompt** — not the metric, and not a fluent aside beside it. Durations, memory
+> figures, timestamps, paths with a pid in them, and any set iterated without
+> `sorted()` all qualify.
 
-The lesson generalises past "is the reward a timing":
-
-> **Nothing that varies between two runs of the same candidate may appear in
-> the prompt** — not the metric, and not a fluent aside next to it. Durations,
-> memory figures, timestamps, paths with a pid in them, and any set iterated
-> without `sorted()` all qualify.
-
-Two checks that would have caught it, both cheap, and the reason the earlier
-determinism check did not: it compared *scores*, and the score was never wrong.
-
-* grep the rendered prompt for `\d+\.\d+s` and for the run's own temp paths;
-* run the seed rule twice and diff the **prompts**, not the rewards.
-
-Removing the duration is `tests/test_era_srbench.py::test_no_wall_clock_duration_reaches_the_srbench_prompt`.
-It is still reported and still written to result files; it just does not go to
-the model, which could not act on it anyway.
+The earlier determinism check missed it for the reason it looked convincing: it
+compared *scores*, and the score was never wrong. Two cheap checks that would
+have caught it — grep the rendered prompt for `\d+\.\d+s` and for the run's own
+temp paths, and run the seed rule twice and diff the **prompts**, not the
+rewards. Pinned by
+`tests/test_era_srbench.py::test_no_wall_clock_duration_reaches_the_srbench_prompt`.
 
 ## Two ways to get this wrong, both paid for here
 

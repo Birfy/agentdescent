@@ -11,8 +11,8 @@
 > 落地的模块：`agentdescent/meta.py`（§3 全部）、`examples/era/era_empirical_software.py`
 > 的两处注入口（§3.5）、`examples/metasearch/`（§4 的 stage 0 与 stage 2 的适配器
 > `_harbor.py`）、`bench/metasearch_algotune.py`（stage 1 的跑批脚本）。
-> **已补跑**：AlgoTune（`bench/results/metasearch-algotune.md`）与 SWE-bench-Science
-> （`bench/results/metasearch-swe-bench-science.md`）都在线跑过了。
+> **已补跑**：AlgoTune 与 SWE-bench-Science 都在线跑过了；两个都是 null，
+> 结论各一段收在 `bench/results/metasearch-domain-selection.md`（域选择）里，不单独占页。
 > **未做**：容器内的 agent 阶段（那是 `harbor run --agent`，不重造）。
 
 ---
@@ -300,7 +300,7 @@ patch、在那里跑 agent、`git diff`，模型不用自己排版 diff）；两
 --hard` 丢掉、`reward.json` 是 `indent=2` 的多行、嵌套指标被丢弃）和基准自己镜像里的
 一个（grader 写死了私有测试的文件名，15 个里有 6 个，那些任务**任何 patch 都拿不到
 reward**）。都已修，测量见
-[`bench/results/metasearch-swe-bench-science.md`](../bench/results/metasearch-swe-bench-science.md)：
+[`bench/results/metasearch-domain-selection.md`](../bench/results/metasearch-domain-selection.md) 的 SWE-bench-Science 一节：
 验证**逐字节确定**，奖励粒度中位 10 级，中位一次验证 5.9 秒。
 
 剩下的边界不变：**容器内的 agent 阶段**是 `harbor run --agent`，不重造——`LocalRunner`
@@ -447,7 +447,7 @@ cache 是**空的**——一次模型调用都没返回。示例的反思调用�
 
 ---
 
-### 4.8 AlgoTune：port 跑通，实验不成立（`bench/results/metasearch-algotune.md`）
+### 4.8 AlgoTune：port 跑通，实验不成立（结论收在 `bench/results/metasearch-domain-selection.md`）
 
 Stage 1b 第一次在线跑。**结论是一个量化的否定**，写下来是为了让下一次从噪声问题开始，
 而不是从 `pip install numpy` 开始。
@@ -457,7 +457,8 @@ Stage 1b 第一次在线跑。**结论是一个量化的否定**，写下来是�
 东西全是安装问题：装 `bubblewrap`、`numpy`/`scipy`，再补
 `cvxpy networkx numba mpmath pot scikit-learn cython`，可用任务从默认的 8 个变成
 **123 / 147**（剩下 24 个要 ortools/pysat/sympy/faiss/hdbscan，装上还能更多）。147 个任务
-的单位成本也全测了（中位数 2.3 秒，尾部 17.7 秒），存在 `metasearch-algotune-task-cost.json`。
+的单位成本也全测了（中位数 2.3 秒，尾部 17.7 秒）；那张成本表是一次性的 profile，
+`bench/metasearch_algotune.py` 一条命令就能重出，不作为结果留存。
 
 **但奖励看不见规则。** 三条规则在 `psd_cone_projection` 上跨度 **0.0066**，而种子规则和
 **它自己**比差 **−0.0055**——84% 是噪声。而这还是好任务：扩大跑的自带噪声检查在
@@ -514,8 +515,8 @@ vs 一个新鲜抽样"，配对差的 sd 是 `sd×√2` ≈ 0.076，10 个 held-
 | P2 | `policy_source(slot, seed)` 通用门 + `seed_source` + `SLOT_PROTOCOLS` | ✅ |
 | P3 | `examples/metasearch/`：合成地形、离线端到端、`--dry-run`、加入 PORTS 契约 | ✅ |
 | P4a | GSM 跑批脚本 `bench/metasearch_slots.py`：演进 `task_sampler`，内层是完整的内层 `evolve()`，报告分三组（演进过的 / 同基准未见切片 / 另一个基准）各自的迁移比 | ✅ 脚本 + 离线测试 + **在线跑出结果**（`bench/results/metasearch-slots.md`） |
-| P4b | AlgoTune 跑批脚本 `bench/metasearch_algotune.py`（训练/验证任务不相交、新 seed 验证、迁移比、结果 JSON） | ✅ 脚本 + 插桩测试 + **在线跑过**（`bench/results/metasearch-algotune.md`）：port 跑通（5.6× 加速），但**这个域现在测不了选择规则**，噪声是信号的 3.4 倍，见 §4.8 |
-| P5 | Harbor 适配器 `_harbor.py`（§4.3）+ SWE-bench-Science / TB-Science 验证 | ✅ 适配器 + `LocalRunner` 离线端到端；`DockerRunner` **在 SWE-bench-Science 上真跑过**（15 个任务基线 + 单任务端到端，见 [`metasearch-swe-bench-science.md`](../bench/results/metasearch-swe-bench-science.md)）：域本身四条性质里三条达标且优于此前任何真实数据域；第四条（可负担预算下曲线是否会升）**在当前候选生成器下不成立**：14 次尝试 0 次超过根节点，结果是双峰的（要么恰好等于基线、要么把测试模块改崩），没有斜率给选择规则加速。换更强的模型（`deepseek-v4-pro`）**也是 0/14**，所以那是生成器的性质、更准确说是缺 agent 阶段，不是域的性质 |
+| P4b | AlgoTune 跑批脚本 `bench/metasearch_algotune.py`（训练/验证任务不相交、新 seed 验证、迁移比、结果 JSON） | ✅ 脚本 + 插桩测试 + **在线跑过**（结论见 `bench/results/metasearch-domain-selection.md`）：port 跑通（5.6× 加速），但**这个域现在测不了选择规则**，噪声是信号的 3.4 倍，见 §4.8 |
+| P5 | Harbor 适配器 `_harbor.py`（§4.3）+ SWE-bench-Science / TB-Science 验证 | ✅ 适配器 + `LocalRunner` 离线端到端；`DockerRunner` **在 SWE-bench-Science 上真跑过**（15 个任务基线 + 单任务端到端，见 [`bench/results/metasearch-domain-selection.md`](../bench/results/metasearch-domain-selection.md)）：域本身四条性质里三条达标且优于此前任何真实数据域；第四条（可负担预算下曲线是否会升）**在当前候选生成器下不成立**：14 次尝试 0 次超过根节点，结果是双峰的（要么恰好等于基线、要么把测试模块改崩），没有斜率给选择规则加速。换更强的模型（`deepseek-v4-pro`）**也是 0/14**，所以那是生成器的性质、更准确说是缺 agent 阶段，不是域的性质 |
 | P5b | `priority()` 在**合成地形**上的完整演进 + 对照手调 PUCT 族的天花板 | ✅ **正结果**：3 个 seed 均值 +0.0227 source / +0.0120 target，落在手调族的 Pareto 前沿（`bench/results/metasearch-tree.md`） |
 | P5c | `priority()` 在**真实科研数据**（LLM-SRBench `lsr_synth`，per-problem）上的演进 + held-out 验证 | ✅ **首个真实数据正结果**：9 次独立配对比较 5 胜 0 负 4 平，符号检验 p = 0.031；规则方向与合成地形**相反**（多探索），而这个方向是 `metasearch-domain-selection.md` 事先预测的（`bench/results/metasearch-selection-srbench.md`） |
 | P6 | 其余五个插槽的内置冒烟与默认种子，每个种子在真实内层 `evolve()` 里跑通 | ✅ |
