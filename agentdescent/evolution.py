@@ -1658,6 +1658,13 @@ class _Engine:
     #: for nothing. Read by ``record_round``; set by ``_build_engine`` from
     #: ``evolve(checkpointing=)``.
     checkpointing: bool = False
+    #: Rounds the search had already run when this process started, from the
+    #: restored checkpoint. Both drivers number rounds from zero per process
+    #: (``index=r`` in one, ``index=len(history)`` in the other), so without
+    #: this offset a resume writes ``round_0.json`` over the previous run's,
+    #: reports ``round 0`` for a search 40 rounds deep, and hands
+    #: ``_prune_round_files`` a history that no longer sorts.
+    checkpoint_round_base: int = 0
 
     def record_round(self, *, index: int, reward: float, n_items: int,
                      reports: Sequence[Any],
@@ -1714,11 +1721,15 @@ class _Engine:
         # Off by default: a throwaway repo never resumes, and the write (lock +
         # JSON serialise) is pure cost there. A no-op when the aggregator does
         # not support checkpointing either.
-        if self.checkpointing:
+        # `getattr`: `LedgerProtocol` only grew `repo_path` with checkpointing,
+        # and a ledger written against the older contract is still a valid one.
+        # It opts out of checkpoints rather than dying on an attribute.
+        repo = getattr(self.ledger, "repo_path", None)
+        if self.checkpointing and repo:
             from .checkpoint import save_checkpoint
             save_checkpoint(
-                self.ledger.repo_path,
-                index,
+                repo,
+                self.checkpoint_round_base + index,
                 self.aggregator,
                 artifact_id=self.artifact_id,
                 round_info={
@@ -2089,6 +2100,14 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
             expected_artifact_id=artifact_id,
             expected_aggregator_type=type(aggregator).__name__,
         )
+    # Where this process's round numbering starts. The checkpoint records the
+    # last round the *search* reached, so the next one is that plus one; a run
+    # with no checkpoint starts at zero, as it always did.
+    _cp_round_base = 0
+    if _cp_payload is not None:
+        _last = _cp_payload.get("round")
+        if isinstance(_last, int) and _last >= 0:
+            _cp_round_base = _last + 1
 
     # Imported here rather than at module scope: `executor` reaches `workspec`,
     # which reaches back here for `Task`.
@@ -2127,7 +2146,8 @@ def _build_engine(tasks, reward, *, agent, run, propose, strategy, initial_state
                    propose, train, held_out, {t.id: t for t in train},
                    [t.id for t in train], artifact_id, blast_radius,
                    executor=executor, meter=meter, scratch_repo=scratch,
-                   checkpoint_payload=_cp_payload, checkpointing=checkpointing)
+                   checkpoint_payload=_cp_payload, checkpointing=checkpointing,
+                   checkpoint_round_base=_cp_round_base)
 
 
 def evolve(
@@ -2378,6 +2398,21 @@ def evolve(
         Git runs with an isolated config, so a personal ``~/.gitconfig``
         (``commit.gpgsign``, ``core.hooksPath``) cannot fail the ledger's own
         bookkeeping commits.
+    checkpointing:
+        Save the aggregator's in-memory **search** state to
+        ``<repo_path>/checkpoints/`` after every round, so a later run on the
+        same ``repo_path`` resumes the search instead of re-deriving it from
+        the ledger head. ``repo_path`` alone already resumes the *artifact*;
+        what it cannot carry is what the search learned on the way there --
+        Beta posteriors, a population archive and its ``selected`` counts, the
+        early-stop patience counter. Off by default, because a run that never
+        resumes (a scratch repo, a tempdir) would pay the serialise-and-write
+        for nothing, and because an aggregator opts in by implementing
+        ``checkpoint()`` / ``restore()`` at all -- one without them is
+        unaffected either way. A checkpoint that cannot be written or read
+        (state that does not serialise, a lock another process holds, a full
+        disk) is skipped, never raised: the cost of a missing checkpoint is a
+        resume that starts the search fresh, which is what ``False`` does.
     agg_config:
         Tuning for the reference aggregator (batching, acceptance risk, trust
         region, staleness tolerance).
@@ -2622,9 +2657,9 @@ def evolve(
     # stalled and re-burns its patience budget re-discovering the stall. Only
     # when checkpointing is on — otherwise there is no checkpoint to read and
     # eng.checkpoint_payload is None.
-    if checkpointing and eng.checkpoint_payload is not None:
+    if checkpointing and repo_path and eng.checkpoint_payload is not None:
         from .checkpoint import restore_early_stop
-        restore_early_stop(repo_path or "", early, payload=eng.checkpoint_payload)
+        restore_early_stop(repo_path, early, payload=eng.checkpoint_payload)
     unit_lock = threading.Lock()
     # Per-worker snapshots, when `refresh_interval > 1`. See `_snapshot_for`.
     worker_snaps: Dict[int, Tuple["EvolvingArtifact", int]] = {}

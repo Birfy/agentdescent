@@ -238,6 +238,12 @@ def async_evolve(
         putting one forward. ``None`` defers to ``agg_config``, which is off. The
         cost/benefit is identical on this path -- there is one merger thread here
         too, and it pays the ranking on the critical path of every commit.
+    checkpointing:
+        As in :func:`evolve`: save the aggregator's search state each round so a
+        later run on the same ``repo_path`` resumes the search, not just the
+        artifact. Off by default. The merger is the only thread that records a
+        round here, so the write sits on the same single-writer path it does on
+        the synchronous side.
     solved_threshold:
         As in :func:`evolve`: the reward at which a task counts as solved and no
         proposal is requested. Lower it for a graded scorer.
@@ -398,9 +404,13 @@ def async_evolve(
     # Restore the early-stop tracker from the checkpoint the previous process
     # wrote — same reasoning as the synchronous path: a resumed run must not
     # re-burn its patience budget re-discovering a stall it had already counted.
-    if checkpointing and getattr(eng, "checkpoint_payload", None) is not None:
+    # `payload=` is always supplied here, so the `repo_path` argument is never
+    # read -- but passing `""` would send the no-payload branch looking for a
+    # `checkpoints/` relative to the process's cwd, so the guard keeps them in
+    # step with each other.
+    if checkpointing and repo_path and eng.checkpoint_payload is not None:
         from .checkpoint import restore_early_stop
-        restore_early_stop(repo_path or "", early, payload=eng.checkpoint_payload)
+        restore_early_stop(repo_path, early, payload=eng.checkpoint_payload)
     errors: List[Optional[str]] = [None]      # first backend failure seen (diagnostic)
     # Most recent artifact read from the ledger, so a failing final read still
     # yields a result instead of an exception (same reasoning as the sync path).

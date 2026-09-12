@@ -141,7 +141,7 @@ def _population(fitness, size=4, seed_units=(), batch=4):
     # the population half under test needs none of them, so it is initialised
     # directly rather than behind a stack of fakes that would themselves need
     # asserting.
-    pop._archive, pop._seen = [], set()
+    pop._archive, pop._keys = [], set()
     pop._archive_lock = threading.Lock()
     pop._fitness, pop._view, pop._size = fitness, view, size
     pop._batch = batch
