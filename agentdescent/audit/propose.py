@@ -9,7 +9,7 @@ a person reaches for, score every combination of them on the whole labelled set,
 and rank by the residual. No model, no training, and no judgement about the
 domain beyond the reference the caller already has.
 
-Run on the Phase 0 audit, over eight candidate rules taken two at a time:
+Run on the Phase 0 audit, over seven candidate rules taken two at a time:
 
     sigma   fixed broke   FN    rules
     0.3812      -     -    -    (the verifier as it is)
