@@ -28,16 +28,9 @@ from agentdescent.audit.coverage import (coverage_of, plan_coverage,
                                          rarefaction, unseen_mass_overall)
 from agentdescent.audit.propose import length_rules, search
 from agentdescent.audit.scorecard import rescan, scorecard
-from scripts.audit_phase0 import normalize
-
-#: The oracle's own normalisation, imported rather than reimplemented.
-#:
-#: This was a second copy for one commit, and the copy replaced punctuation with
-#: a space where the original deletes it -- so ``cat's`` normalised to ``cat s``
-#: here and ``cats`` there. A FORMATTING disagreement is defined as one the
-#: oracle's normalisation already handles, and a diagnosis whose normaliser is
-#: not the oracle's is measuring a different question with the same word.
-normalise = normalize
+from scripts.audit_modes import (ERROR_MODES, context_for,  # noqa: F401
+                                 echoes_the_question,
+                                 far_shorter_than_reference, normalise)
 
 
 def load_records(path: pathlib.Path) -> List[AuditRecord]:
@@ -58,51 +51,13 @@ def load_records(path: pathlib.Path) -> List[AuditRecord]:
     return out
 
 
-def hotpot_context(limit: int = 120) -> Dict[str, tuple]:
-    """``task_id -> (question, gold)`` from the dataset cache."""
-    from agentdescent.dataloader import hf_rows
-
-    rows = hf_rows("hotpotqa/hotpot_qa", "validation", config="distractor",
-                   limit=limit)
-    return {str(r["id"]): ((r.get("question") or "").strip(),
-                           (r.get("answer") or "").strip())
-            for r in rows if r.get("id")}
-
-
 # -- the two rules a person reaches for first --------------------------------
 
-def echoes_the_question(output: str, question: str) -> bool:
-    return bool(output) and normalise(output) in normalise(question)
-
-
-def far_shorter_than_reference(output: str, gold: str, ratio: float) -> bool:
-    o, g = normalise(output), normalise(gold)
-    return bool(o) and bool(g) and o != g and len(o) < ratio * len(g)
-
-
-def error_mode(record: AuditRecord, ctx) -> Optional[str]:
-    """A coarse signature of *what a person would have to fix*.
-
-    Deliberately coarser than the record and coarser than the task: two answers
-    that echo their question are the same bug however different the questions
-    were, and counting them as two modes would make the pool look like it was
-    still learning.
-    """
-    if ctx is None:
-        return None
-    question, gold = ctx
-    out, ref = normalise(record.output), normalise(gold)
-    if echoes_the_question(record.output, question):
-        return "echoes-question"
-    if out and ref and (out in ref or ref in out):
-        return "substring-of-reference"
-    if out and ref and len(out) < 0.6 * len(ref):
-        return "far-shorter"
-    if out and ref and len(out) > 1.6 * len(ref):
-        return "far-longer"
-    if not out:
-        return "empty"
-    return f"other:{record.task_id[:6]}"          # unclassified: its own mode
+#: The mode function for this script's workload. One definition, in
+#: `scripts.audit_modes`, because the coverage number decides whether the
+#: improvement pool still gets budget and two copies that drift would answer
+#: that in two files with no way to tell which one ran.
+error_mode = ERROR_MODES["hotpot"]
 
 
 def score_band(record: AuditRecord) -> str:
@@ -119,7 +74,7 @@ def make_fix(*, echo: bool = True, shorter: float = 0.6):
     def fix(record: AuditRecord, ctx) -> float:
         if ctx is None or record.verifier_score <= 0.0:
             return record.verifier_score
-        question, gold = ctx
+        question, gold = ctx[0], ctx[1]
         if echo and echoes_the_question(record.output, question):
             return 0.0
         if shorter and far_shorter_than_reference(record.output, gold, shorter):
@@ -142,7 +97,7 @@ def main() -> None:
     if not records:
         raise SystemExit(f"{args.records} holds no resolved pairs")
     version = records[0].verifier_version
-    context = hotpot_context(args.limit)
+    context = context_for("hotpot", limit=args.limit)
     missing = sum(1 for r in records if r.task_id not in context)
 
     # A record whose question could not be joined lands in UNCLASSIFIED rather
