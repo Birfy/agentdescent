@@ -288,31 +288,39 @@ def task_index(workload: str, *, rows: int = 400) -> Dict[str, Task]:
     shuffle under the same seed are different shuffles. The ids were never the
     problem; drawing a different sample was.
     """
+    try:
+        build = _INDEXERS[workload]
+    except KeyError:
+        raise ValueError(f"unknown workload {workload!r}") from None
+    return build(rows)
+
+
+def _index_of(dataset: str, split: str, config: str, to_task) -> Any:
+    """An indexer for a workload that is one dataset and one config."""
+    def build(rows: int) -> Dict[str, Task]:
+        from agentdescent.dataloader import hf_rows
+
+        out: Dict[str, Task] = {}
+        for row in hf_rows(dataset, split, config=config, limit=rows):
+            task = to_task(row)
+            if task is not None:
+                out[task.id] = task
+        return out
+    return build
+
+
+def _index_bbh(rows: int) -> Dict[str, Task]:
+    """BBH is one config per subtask, so it cannot use `_index_of`."""
     from agentdescent.dataloader import hf_rows
 
     out: Dict[str, Task] = {}
-    if workload == "hotpot":
-        for row in hf_rows("hotpotqa/hotpot_qa", "validation",
-                           config="distractor", limit=rows):
-            task = _hotpot_task(row)
+    for name in BBH_SUBTASKS:
+        for row in hf_rows("lukaemon/bbh", "test", config=name,
+                           limit=max(40, rows // len(BBH_SUBTASKS))):
+            task = _bbh_task(name, row)
             if task is not None:
                 out[task.id] = task
-        return out
-    if workload == "bbh":
-        for name in BBH_SUBTASKS:
-            for row in hf_rows("lukaemon/bbh", "test", config=name,
-                               limit=max(40, rows // len(BBH_SUBTASKS))):
-                task = _bbh_task(name, row)
-                if task is not None:
-                    out[task.id] = task
-        return out
-    if workload == "gsm8k":
-        for row in hf_rows("openai/gsm8k", "test", config="main", limit=rows):
-            task = _gsm8k_task(row)
-            if task is not None:
-                out[task.id] = task
-        return out
-    raise ValueError(f"unknown workload {workload!r}")
+    return out
 
 
 def hotpot_tasks(n: int, *, seed: int = 0) -> List[Task]:
@@ -478,6 +486,23 @@ def gsm_hard_tasks(n: int, *, seed: int = 0) -> List[Task]:
 
 WORKLOADS = {"hotpot": hotpot_tasks, "bbh": bbh_tasks, "gsm8k": gsm8k_tasks,
              "gsm_hard": gsm_hard_tasks}
+
+#: How each workload is indexed. A **table** rather than a chain of ``if``s
+#: because a missing branch is invisible until something asks for that
+#: workload's gold answers, which is after its Phase 0 run has finished and
+#: paid for itself: `gsm_hard` shipped with a loader, four table entries and no
+#: branch here, and would have failed at `context_for` with the records already
+#: written. `test_every_workload_can_be_indexed` covers this table the same way
+#: the other four are covered.
+_INDEXERS = {
+    "hotpot": _index_of("hotpotqa/hotpot_qa", "validation", "distractor",
+                        _hotpot_task),
+    "bbh": _index_bbh,
+    "gsm8k": _index_of("openai/gsm8k", "test", "main", _gsm8k_task),
+    "gsm_hard": _index_of("reasoning-machines/gsm-hard", "train", "default",
+                          _gsm_hard_task),
+}
+
 
 #: An answer the judge forgives and the workload's oracle refuses, for
 #: `--dry-run`. Keyed by workload because "the oracle refuses it" is a statement

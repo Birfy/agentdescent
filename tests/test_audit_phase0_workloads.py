@@ -15,12 +15,16 @@ def _task(gold, *, meta=None):
                   meta={"gold": gold, "expected": gold, **(meta or {})})
 
 
-def test_every_workload_has_an_oracle_a_label_and_a_near_miss():
-    """Three tables keyed by workload, and a workload missing from any one of
-    them fails at a different point in the run -- the oracle at the first score,
-    the label only in the written report."""
+def test_every_workload_has_an_oracle_a_label_a_near_miss_and_an_indexer():
+    """Six tables keyed by workload, and a workload missing from any one of them
+    fails at a different point -- the oracle at the first score, the label only
+    in the written report, and `_INDEXERS` not until something asks for that
+    workload's gold answers, which is *after* its run has finished and paid for
+    itself. `gsm_hard` shipped with a loader, four table entries and no indexer
+    branch; it would have failed at `context_for` with the records already
+    written, which is why `task_index` dispatches through a table now."""
     for table in (P.ORACLES, P._ORACLE_LABELS, P._WORKLOAD_LABELS,
-                  P._NEAR_MISS, P._WRONG):
+                  P._NEAR_MISS, P._WRONG, P._INDEXERS):
         assert set(table) == set(P.WORKLOADS)
 
 
