@@ -86,7 +86,7 @@ from examples._common import (add_standard_args, budget_kwargs, completion_for,
 from ._delegation import RecursiveDelegation
 from ._domain import (FROZEN, build_tasks, initial_files, llm_executor,
                       llm_manager, make_runner, offline_executor,
-                      offline_manager, reward)
+                      offline_manager, reward, suite_review)
 from ._judge import ParentJudge
 from ._octopus import OctopusConflict, git_available
 from ._spatial import SpatialContract
@@ -120,6 +120,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help=("the control arm: drop the three-way merge, so two "
                               "agents editing one file contradict and one is "
                               "dropped on held-out score (the engine's default)"))
+    parser.add_argument("--no-parent-tests", action="store_true",
+                        help=("stop the parent running the suite on a child's "
+                              "work before accepting it; leaves only the scope "
+                              "check, which is the cheap half of the rule"))
     parser.add_argument("--write-repo", default="", metavar="DIR",
                         help=("write the grown repository here. The ledger is "
                               "scratch and is reaped on exit, so without this the "
@@ -149,6 +153,8 @@ def main(argv=None) -> None:
     print(f"Merge    : {merge}" + ("" if git_available() else
                                    "  [git missing: every contested file falls back]"))
     print(f"Gate     : {gate}")
+    print("Parent   : scope check"
+          + ("" if args.no_parent_tests else " + integration test on each child's work"))
 
     if args.dry_run:
         print("Data     : deferred (dry-run performs no network access)")
@@ -178,7 +184,10 @@ def main(argv=None) -> None:
         manager=llm_manager(complete) if complete else offline_manager,
         executor=(llm_executor(complete, frozen=FROZEN) if complete
                   else offline_executor),
-        log=log, max_depth=args.depth, max_edits=4)
+        log=log, max_depth=args.depth, max_edits=4,
+        # The parent's own test run, inside the episode, on one child's work --
+        # the half of the upstream rule the acceptance gate cannot see.
+        review=None if args.no_parent_tests else suite_review(tasks))
     judge = ParentJudge(log=log, enabled=not args.engine_gate)
     octopus = None if args.keyed_union else OctopusConflict()
 
@@ -219,6 +228,10 @@ def main(argv=None) -> None:
           f"truncated_edits={delegation.truncated}  "
           f"routes_opened={delegation.routes_opened}  "
           f"mistaken_nodes={delegation.mistaken_nodes}")
+    print(f"parent          : sibling_merges={delegation.sibling_merges}  "
+          f"sibling_conflicts={delegation.sibling_conflicts}  "
+          f"requests raised/handled/unmet={delegation.requests_raised}/"
+          f"{delegation.adopted_requests}/{delegation.unmet_requests}")
     if octopus is not None:
         print(f"merge           : merged={octopus.merged} conflicted={octopus.conflicted}")
     if not args.engine_gate:

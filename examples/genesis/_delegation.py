@@ -35,10 +35,12 @@ rather than a different algorithm.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
+from dataclasses import dataclass, field, replace
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from agentdescent.filetree import parse_tree
+
+from ._octopus import three_way
 
 from ._world import (CONTEXT_FILE, EpisodeRecord, LocalWorld, WorldLog,
                      normalise, owns, routing_entry)
@@ -93,7 +95,13 @@ class Brief:
 
 Manager = Callable[[Brief], Sequence[Delegation]]
 Executor = Callable[[Brief], Sequence[Edit]]
-Review = Callable[[Brief, Sequence[Edit]], Optional[str]]
+
+#: What the responsible parent does with a returned contribution beyond checking
+#: its scope. Returns ``None`` to accept, or ``(verdict, reason)`` with a verdict
+#: of ``"rejected"`` or ``"rework"``. Two outcomes rather than a complaint string,
+#: because the paper's parent has three: *accepted, rejected, or requires further
+#: work* (3.3), and collapsing the last two loses the one that comes back.
+Review = Callable[[Brief, Sequence[Edit]], Optional[Tuple[str, str]]]
 
 
 def render_edits(edits: Sequence[Edit], rationale: str) -> str:
@@ -126,9 +134,11 @@ class RecursiveDelegation:
     max_depth: int = 2
     max_edits: int = 4
     root_path: str = ""
-    #: Optional real judging of a child's returned work. ``None`` runs the scope
-    #: check alone -- the cheap half of the upstream rule, with the test half
-    #: living in the acceptance gate where the held-out suite actually is.
+    #: The parent's judgement beyond scope. Upstream a parent decides "using the
+    #: available tests, constraints and integration evidence" (paper 3.3), which
+    #: is a *test* run on the child's work before it is offered to the version
+    #: history at all -- not the same thing as the acceptance gate, which sees
+    #: only what the whole episode returned. ``None`` runs the scope check alone.
     review: Optional[Review] = None
     truncated: int = 0
     #: Child nodes opened at a path their parent did not yet route to, and
@@ -136,6 +146,14 @@ class RecursiveDelegation:
     routes_opened: int = 0
     #: Delegations refused because the target was a file, not a node.
     mistaken_nodes: int = 0
+    #: Sibling edits to one path reconciled by three-way merge, and not.
+    sibling_merges: int = 0
+    sibling_conflicts: int = 0
+    #: Changes an agent needed outside its own path: raised, handled by an
+    #: ancestor, and left unmet at the top of the chain.
+    requests_raised: int = 0
+    adopted_requests: int = 0
+    unmet_requests: int = 0
 
     # -- the ProposalPolicy protocol ---------------------------------------
 
@@ -149,11 +167,16 @@ class RecursiveDelegation:
         pending = self.log.take_rework()
         if pending is not None and owns(root.path, pending[0]):
             world, objective = root.delegate(pending[0]), f"rework: {pending[1]}"
-            edits, _ = self._episode(world, objective, state, ctx, depth=1)
+            edits, unmet, _ = self._episode(world, objective, state, ctx, depth=1)
             rationale = f"rework at {pending[0] or './'}"
         else:
-            edits, _ = self._episode(root, self._objective(ctx), state, ctx, depth=0)
+            edits, unmet, _ = self._episode(root, self._objective(ctx), state, ctx,
+                                            depth=0)
             rationale = f"episode at {root.path or './'}"
+        # A need that reached the top of this episode's chain and still fell
+        # outside its root's authority. Counted rather than dropped quietly: it
+        # means the decomposition put work where nobody could do it.
+        self.unmet_requests += len(unmet)
 
         edits = self._bound(edits)
         if not edits:
@@ -163,8 +186,8 @@ class RecursiveDelegation:
     # -- the recursion -----------------------------------------------------
 
     def _episode(self, world: LocalWorld, objective: str, state: Mapping[str, str],
-                 ctx, *, depth: int) -> "tuple[List[Edit], EpisodeRecord]":
-        """One finite-lived agent. Returns what it proposes, and its own record.
+                 ctx, *, depth: int) -> "tuple[List[Edit], List[Edit], EpisodeRecord]":
+        """One finite-lived agent: what it proposes, what it asks for, its record.
 
         The record travels back with the work because the verdict on an episode
         is its **parent's**, not its own: an agent that returns something it was
@@ -180,32 +203,51 @@ class RecursiveDelegation:
                            if self._is_node(world, d, state)]
 
         if not delegations:
-            # A leaf executor: it writes files, it does not delegate. Its edits
-            # are NOT filtered here -- the scope check belongs to the parent that
-            # asked for the work (and, at the root, to the strategy), and doing
-            # it twice would hide every refusal the parent is supposed to make.
-            edits = [Edit(owner=world.path, path=e.path, content=e.content)
-                     for e in self.executor(brief) or ()]
+            # A leaf executor: it writes files, it does not delegate. What it
+            # produces outside its own path is not a violation -- upstream an
+            # agent that needs a change it has no authority for "reports the need
+            # back up to the parent agent, which will handle it"
+            # (`agents/executor.ex:64`). So the split here is edits / requests,
+            # and the parent decides what to do with the second list.
+            produced = [Edit(owner=world.path, path=e.path, content=e.content,
+                             kind=e.kind)
+                        for e in self.executor(brief) or ()]
+            edits = [e for e in produced if owns(world.path, e.path)]
+            requests = [e for e in produced if not owns(world.path, e.path)]
+            self.requests_raised += len(requests)
             record = self.log.record(EpisodeRecord(
                 agent_id=self.log.next_id("executor"), role="executor",
                 path=world.path, depth=depth, version=world.version,
                 objective=objective, n_edits=len(edits)))
-            return edits, record
+            return edits, requests, record
 
         record = self.log.record(EpisodeRecord(
             agent_id=self.log.next_id("manager"), role="manager", path=world.path,
             depth=depth, version=world.version, objective=objective))
 
-        merged: List[Edit] = []
-        claimed: Dict[str, str] = {}          # path -> the child that took it
+        held: Dict[str, Edit] = {}            # path -> what the parent holds so far
+        owner_of: Dict[str, str] = {}         # path -> the child that wrote it
+        notes: List[Edit] = []
+        pending: List[Edit] = []              # needs this node cannot meet either
         routed = world.routing(state)
         opened: List[Delegation] = []         # children this node had not routed to
         for delegation in delegations:
             child = world.delegate(delegation.path)
-            returned, child_record = self._episode(child, delegation.objective, state,
-                                                   ctx, depth=depth + 1)
+            returned, asked, child_record = self._episode(
+                child, delegation.objective, state, ctx, depth=depth + 1)
             child_record.verdict, child_record.reason = self._judge(
-                child, returned, brief, claimed)
+                child, returned, asked, brief)
+            if child_record.verdict != "rejected" and asked:
+                # "Report the need back up to the parent, which will handle it."
+                # This node handles what falls inside its own authority and passes
+                # the rest further up; at the root, authority is the whole world,
+                # so nothing is left unmet.
+                mine = [replace(e, owner=world.path) for e in asked
+                        if owns(world.path, e.path)]
+                if mine:
+                    self.adopted_requests += len(mine)
+                    self._fold(held, owner_of, mine, world, state)
+                pending += [e for e in asked if not owns(world.path, e.path)]
             if child_record.verdict == "rejected":
                 # The rejected code does not survive; the *reason* can, as a
                 # record at the child's own node. Paper, appendix 1.4: a saved
@@ -213,7 +255,7 @@ class RecursiveDelegation:
                 # came from is not.
                 note = self._failure_note(child, state, child_record.reason)
                 if note is not None:
-                    merged.append(note)
+                    notes.append(note)
                 continue
             if child_record.verdict == "rework":
                 # Not a refusal: the parent wants another attempt, so the node is
@@ -222,21 +264,66 @@ class RecursiveDelegation:
                 # one thing upstream says it must not become.
                 self.log.request_rework(child.path, child_record.reason)
                 continue
-            for edit in returned:
-                claimed[edit.path] = child.path
-            merged.extend(returned)
+            conflicts = self._fold(held, owner_of, returned, child, state)
+            if conflicts:
+                # Upstream's octopus merge returns the conflicting file list to
+                # the parent, which resolves, aborts, or re-plans
+                # (`agent/subagent_processing.ex:527`). Re-planning is the one a
+                # parent here can take: the child's other edits stand, and the
+                # overlapping one goes back to it.
+                child_record.verdict = "rework"
+                child_record.reason = (
+                    f"{conflicts[0]} was also written by a sibling at "
+                    f"{owner_of.get(conflicts[0], '?')}, and the two edits overlap")
+                self.log.request_rework(child.path, child_record.reason)
             if normalise(delegation.path) not in routed:
                 opened.append(delegation)
+
+        merged: List[Edit] = list(held.values()) + notes
 
         # A node whose parent does not route to it is a node later agents cannot
         # find. Upstream the manager that opens one writes the entry at its own
         # level; here the same write, from the same agent, on its own CONTEXT.md.
-        note = self._routing_note(world, state, opened)
-        if note is not None:
-            merged.append(note)
+        routing = self._routing_note(world, state, opened)
+        if routing is not None:
+            merged.append(routing)
 
         record.n_edits = len(merged)
-        return merged, record
+        return merged, pending, record
+
+    def _fold(self, held: Dict[str, Edit], owner_of: Dict[str, str],
+              returned: Sequence[Edit], child: LocalWorld,
+              state: Mapping[str, str]) -> List[str]:
+        """Octopus-merge one child's edits into what the parent already holds.
+
+        Two children can legally write the same path when one is situated inside
+        the other's subtree, and upstream does not treat that as a fault: the
+        parent runs ``git merge --octopus`` over what came back and only a real
+        overlap becomes a conflict. Rejecting on a bare path collision -- which is
+        what this used to do -- discards a whole contribution for touching a file
+        a sibling also touched, which is exactly the merge the system is for.
+        """
+        conflicts: List[str] = []
+        for edit in returned:
+            mine = held.get(edit.path)
+            if mine is None:
+                held[edit.path] = edit
+                owner_of[edit.path] = child.path
+                continue
+            if mine.content == edit.content:
+                continue                      # the two agreed; nothing to merge
+            if mine.content is None or edit.content is None:
+                conflicts.append(edit.path)   # a delete against an edit
+                self.sibling_conflicts += 1
+                continue
+            fused = three_way(state.get(edit.path, ""), mine.content, edit.content)
+            if fused is None:
+                conflicts.append(edit.path)
+                self.sibling_conflicts += 1
+                continue
+            held[edit.path] = replace(mine, content=fused)
+            self.sibling_merges += 1
+        return conflicts
 
     def _is_node(self, world: LocalWorld, delegation: Delegation,
                  state: Mapping[str, str]) -> bool:
@@ -255,30 +342,28 @@ class RecursiveDelegation:
             return False
         return True
 
-    def _judge(self, child: LocalWorld, returned: Sequence[Edit], parent: Brief,
-               claimed: Mapping[str, str]) -> "tuple[str, str]":
+    def _judge(self, child: LocalWorld, returned: Sequence[Edit],
+               asked: Sequence[Edit], parent: Brief) -> "tuple[str, str]":
         """The responsible parent's verdict on one child's returned work.
 
-        Scope first, because it is the check that does not need the suite: an
-        edit outside the child's subtree is not the child's to make, and a
-        sibling that has already claimed a path means two agents were given
-        overlapping responsibility -- a decomposition fault, which upstream sends
-        back rather than merging.
+        Two things are deliberately *not* judged here. A change the child wanted
+        outside its own path is a **request**, not an overstep -- upstream an
+        agent reports such a need upward and the ancestor with authority handles
+        it. And an overlap with a sibling is a **merge**, handled in
+        :meth:`_fold`. What is left is the question the paper's parent actually
+        answers: is this contribution good, on the tests, constraints and
+        integration evidence available (3.3)?
         """
         if not returned:
+            if asked:
+                return "rework", (f"the child did no work at its own path; it asked "
+                                  f"for {len(asked)} change(s) elsewhere, starting "
+                                  f"with {asked[0].path}")
             return "rework", "the child returned no change"
-
-        outside = [e.path for e in returned if not owns(child.path, e.path)]
-        if outside:
-            return "rejected", f"edit outside its subtree: {outside[0]}"
-        collision = next((e.path for e in returned if e.path in claimed), None)
-        if collision is not None:
-            return "rejected", (f"{collision} was already written by a sibling at "
-                                f"{claimed[collision]}; the decomposition overlaps")
         if self.review is not None:
-            complaint = self.review(parent, returned)
-            if complaint:
-                return "rework", complaint
+            verdict = self.review(parent, returned)
+            if verdict is not None:
+                return verdict
         return "accepted", ""
 
     def _routing_note(self, world: LocalWorld, state: Mapping[str, str],
@@ -347,7 +432,11 @@ class RecursiveDelegation:
     def stats(self) -> str:
         return (f"delegation: {self.log.summary()} truncated_edits={self.truncated} "
                 f"routes_opened={self.routes_opened} "
-                f"mistaken_nodes={self.mistaken_nodes}")
+                f"mistaken_nodes={self.mistaken_nodes} "
+                f"sibling_merges={self.sibling_merges} "
+                f"sibling_conflicts={self.sibling_conflicts} "
+                f"requests={self.requests_raised}/"
+                f"{self.adopted_requests}/{self.unmet_requests}")
 
 
 def _state_of(rendered: str) -> Dict[str, str]:

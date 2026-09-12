@@ -42,6 +42,8 @@ __all__ = [
     "EpisodeRecord",
     "LocalWorld",
     "ROUTING_HEADING",
+    "SKILLS_DIR",
+    "TRUNCATED",
     "WorldLog",
     "child_paths",
     "normalise",
@@ -61,6 +63,19 @@ CONTEXT_FILE = "CONTEXT.md"
 #: a node later agents cannot find. Matched case-insensitively because upstream's
 #: own tree writes both "Routing Table" and "Routing table".
 ROUTING_HEADING = "## Routing Table"
+
+#: Per-node reusable knowledge. The paper lists it among what an accepted version
+#: carries -- "source files, path-specific context, constraints, validation
+#: results, reusable skills and provenance records" (3.1) -- and upstream loads it
+#: the same way it loads Context: along the chain, so a node inherits its
+#: ancestors' skills (``EvoGit.Skills.hierarchical_skill_names/2``).
+SKILLS_DIR = ".agents/skills"
+
+#: Upstream's exact marker. It is not decoration: a CONTEXT.md that comes back
+#: carrying it is telling the agent the file exceeded the per-file limit and
+#: needs pruning, which is the maintenance obligation that keeps these files
+#: "current state, not history".
+TRUNCATED = "... [Content Truncated] ..."
 
 _ROUTE_LINE = re.compile(
     r"""^\s*[-*]\s*          # a markdown list item
@@ -206,6 +221,20 @@ class LocalWorld:
                     and normalise(p) != self.path]
         return declared or child_paths(self.path, list(state))
 
+    def skills(self, state: Mapping[str, str]) -> List[str]:
+        """Skill files this node inherits, nearest ancestor last.
+
+        Names only reach the brief, not bodies: upstream hands an agent the skill
+        *names* available at its node and lets it read the ones it wants, because
+        pasting every ancestor's skills into every episode is how a context
+        window is spent on things nobody asked for.
+        """
+        out: List[str] = []
+        for node in self._chain():
+            prefix = f"{node}/{SKILLS_DIR}/" if node else f"{SKILLS_DIR}/"
+            out += sorted(k for k in state if k.startswith(prefix))
+        return out
+
     def context_key(self) -> str:
         """This node's own ``CONTEXT.md`` path."""
         return f"{self.path}/{CONTEXT_FILE}" if self.path else CONTEXT_FILE
@@ -226,11 +255,15 @@ class LocalWorld:
             body = state.get(key)
             if body:
                 parts.append(f"--- {key} ---\n{body.strip()}")
+        skills = self.skills(state)
+        if skills:
+            parts.append("--- skills available here (read one before using it) ---\n"
+                         + "\n".join(f"  {k}" for k in skills))
         mine = sorted(p for p in state if owns(self.path, p))
         listing = "\n".join(f"  {p} ({len(state[p])} bytes)" for p in mine) or "  (empty)"
         parts.append(f"--- files under {self.path or './'} ---\n{listing}")
         text = "\n\n".join(parts)
-        return text if len(text) <= max_chars else text[:max_chars] + "\n... [truncated]"
+        return text if len(text) <= max_chars else text[:max_chars] + "\n" + TRUNCATED
 
     def _chain(self) -> List[str]:
         """Root first, this node last -- the inheritance order upstream uses."""

@@ -46,6 +46,21 @@ itself. Only what the parent accepts is offered to the version history; a
 refused change leaves nothing behind except, where the refusal was recorded in
 `CONTEXT.md`, its reason.
 
+Three rules keep that recursion honest, and each is upstream's:
+
+* **A node is a directory.** Delegating to a file is refused — a path is a node
+  when it can hold children.
+* **An agent writes only inside its own path**, and a change it needs *outside*
+  it is **reported upward**, not made: the ancestor with authority there handles
+  it, under its own name. Upstream says this in as many words — *"report the need
+  back up to your parent agent, which will handle it"* (`agents/executor.ex:64`),
+  and the manager prompt explains it is the spatial contract, not an exception to
+  it.
+* **A sibling touching the same file is a merge, not a fault.** One child may sit
+  inside another's subtree, so both may legally write one path; the parent
+  three-way merges them and only a real overlap goes back as re-planning, which
+  is what `git merge --octopus` plus the conflict-file list does upstream.
+
 `CONTEXT.md` is not documentation in this system, and the port treats it the same
 way. It is part of `v`, so a later agent inherits it; the chain from the root
 down to `p` is what an entering agent is *given*; and its **routing table is
@@ -64,6 +79,7 @@ Every piece is a seam the engine already had. Nothing in `agentdescent/` changed
 | [`RecursiveDelegation`](https://github.com/Birfy/agentdescent/blob/main/examples/genesis/_delegation.py) | `Policies(proposal=)` | One rollout is a whole episode tree at **one** version: manager → children → leaf executors → the parent's verdict → the merged edit set. |
 | [`OctopusConflict`](https://github.com/Birfy/agentdescent/blob/main/examples/genesis/_octopus.py) | `Policies(conflict=)` | Three-way merges the contested values, so two agents editing two functions of one file both survive. Real overlaps fall through to the shipped rule. |
 | [`ParentJudge`](https://github.com/Birfy/agentdescent/blob/main/examples/genesis/_judge.py) | `Policies(acceptance=)` | Upstream's monotone rule: *partial progress is accepted*; a regression is refused; a tie commits and sends more work to that subtree. |
+| [`suite_review`](https://github.com/Birfy/agentdescent/blob/main/examples/genesis/_domain.py) | `RecursiveDelegation(review=)` | The parent's own test run on **one child's** contribution, inside the episode — the tests and integration evidence of paper §3.3, which the acceptance gate cannot see because it only ever sees what the whole episode returned. |
 | [`LocalWorld` / `WorldLog`](https://github.com/Birfy/agentdescent/blob/main/examples/genesis/_world.py) | — | `(v,p)` itself; the `CONTEXT.md` chain an entering agent is given; `routing()`, the table that decides where a manager may delegate; and the archive that outlives the agents. |
 
 `--keyed-union` and `--engine-gate` turn the third and fourth rows back into the
@@ -146,10 +162,38 @@ counter doing its job and the prompt not doing its own. It now states that a nod
 is a directory, lists what the node's routing table actually routes to, and says
 that naming a new child adds it to that table.
 
+**Two more mechanisms were missing, and the model found them too.** With the node
+rule in place, one run logged 70 refused children and 17 dropped edits: executors
+kept producing changes outside their own path — `src/frontend` wanting to write
+`src/__init__.py`. Upstream that is not an overstep, it is a **report**: *"report
+the need back up to your parent agent, which will handle it"*
+(`agents/executor.ex:64`), and the manager prompt says in as many words that this
+*is* the spatial contract rather than an exception to it. The port had no such
+channel, so every one of those needs died as a refusal. It has one now — the
+ancestor with authority over the path makes the change, under its own name — and
+the same run goes to **0 refusals and 0 dropped edits, with 53 of 99 requests
+handled**. The other was the sibling case: a child situated inside another's
+subtree may legally write the same file, and rejecting on that collision threw
+away a whole contribution for touching a file a sibling also touched. That is now
+a three-way merge, like every other concurrent edit here.
+
 This is the general point about the offline arm, stated in one place: it
 exercises the mechanism and it cannot exercise the mechanism's *failure* paths,
-because a rule-based actor does not fail that way. Both counters exist because a
-model does.
+because a rule-based actor does not fail that way. Every counter on the world line
+exists because a model does.
+
+**Where the model arm stands, without dressing it up.** Across four runs of
+`deepseek-v4-flash` at 40–60 episodes, held-out reward stayed at **0.000**. The
+mechanism is visibly running — observed depth 3, real refusals, real merges, real
+upward requests — and the toolchain still does not come out working. The current
+failure mode is the actor, not the harness: executors ask for files at paths the
+project does not use (`lexer.py` at the repository root rather than under `src/`),
+and since the root *does* have authority there, the request is granted and the
+tree grows a second, wrong copy. A parent that "handles" a request by applying it
+is the weakest reading of upstream's rule; a parent that re-delegates it to the
+node that owns it is the next thing to try. Reported here rather than tuned away,
+because a port page that showed only the offline 1.000 would be describing a run
+nobody made.
 
 ## Honesty boundary
 
@@ -211,8 +255,14 @@ so would a reader of this page without this paragraph.
   (`Investigator`, `ContextExtractor`) exist to do nothing else. Here an agent
   writes `CONTEXT.md` on its own in exactly two cases, the routing entry for a
   node it opened and the refusal note for a child it rejected. An LLM executor
-  may write more; nothing requires it to. Skills (`.agents/skills/`,
-  `hierarchical_skill_names/2`) are not loaded at all.
+  may write more; nothing requires it to.
+* **Skills are inherited but never extracted.** `LocalWorld.skills()` collects
+  `.agents/skills/` along the node chain and puts the *names* in the brief, which
+  is what `hierarchical_skill_names/2` does upstream and what the paper means by
+  listing "reusable skills" among what an accepted version carries (§3.1). What
+  is missing is the other end: upstream's `SkillExtractor` distils a completed
+  contribution into a new skill, and nothing here does. The domain ships one
+  human-written skill so the inheritance path is live rather than decorative.
 * **Only two roles are ported.** The released code has ten agent modules; the
   paper's appendix §1.3 says the model has two — manager and leaf executor — and
   that "codebase lead / investigator / task scheduler are implementation labels,

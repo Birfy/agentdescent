@@ -24,8 +24,9 @@ from examples.genesis._delegation import (Brief, Delegation, Edit,
 from examples.genesis._judge import ParentJudge
 from examples.genesis._octopus import OctopusConflict, git_available, three_way
 from examples.genesis._spatial import SpatialContract, parse_situated_edits
-from examples.genesis._world import (CONTEXT_FILE, LocalWorld, WorldLog, owns,
-                                     parse_routing, routing_entry)
+from examples.genesis._world import (CONTEXT_FILE, SKILLS_DIR, TRUNCATED,
+                                     LocalWorld, WorldLog, owns, parse_routing,
+                                     routing_entry)
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +145,94 @@ def test_the_offline_manager_takes_its_decomposition_from_context_md():
                   context="", state=rerouted, task=Task(id="t", prompt="1 + 2"),
                   output="", reward=0.0, depth=0)
     assert [d.path for d in domain.offline_manager(brief)] == ["src/frontend"]
+
+
+def test_skills_are_inherited_along_the_chain_like_context():
+    """The paper lists reusable skills among what an accepted version carries."""
+    state = {f"{SKILLS_DIR}/house.md": "a", f"src/{SKILLS_DIR}/modules.md": "b",
+             f"src/other/{SKILLS_DIR}/not-mine.md": "c"}
+    world = LocalWorld(version=1, path="src")
+    assert world.skills(state) == [f"{SKILLS_DIR}/house.md", f"src/{SKILLS_DIR}/modules.md"]
+    assert f"{SKILLS_DIR}/modules.md" in world.situate(state)
+
+
+def test_an_oversized_brief_carries_upstreams_own_truncation_marker():
+    """The marker is a signal to prune, not decoration -- so it has to be theirs."""
+    state = {CONTEXT_FILE: "x" * 50_000}
+    assert LocalWorld(version=1, path="").situate(state).endswith(TRUNCATED)
+
+
+# ---------------------------------------------------------------------------
+# The parent's integration evidence, and the merge it does on its children
+# ---------------------------------------------------------------------------
+
+def test_a_parent_refuses_a_child_whose_work_breaks_the_suite():
+    """Paper 3.3: the parent decides on tests and integration evidence."""
+    review = domain.suite_review(domain.build_tasks(), sample=6)
+    state = dict(domain._reference_tree())
+    parent = Brief(world=LocalWorld(version=1, path="src"), objective="o", context="",
+                   state=state, task=Task(id="t", prompt="1 + 2"), output="",
+                   reward=1.0, depth=0)
+    broken = [Edit("src/frontend", domain.LEXER, "def tokenize(source):\n    return []\n")]
+    verdict = review(parent, broken)
+    assert verdict is not None and verdict[0] == "rejected"
+    assert "regressed" in verdict[1]
+
+
+def test_a_parent_accepts_structural_work_that_moves_no_case():
+    """A node's first file is structure, and structure moves nothing."""
+    review = domain.suite_review(domain.build_tasks(), sample=6)
+    parent = Brief(world=LocalWorld(version=1, path="src"), objective="o", context="",
+                   state=domain.initial_files(), task=Task(id="t", prompt="1 + 2"),
+                   output="", reward=0.0, depth=0)
+    assert review(parent, [Edit("src", "src/notes.py", "# nothing yet\n")]) is None
+
+
+@pytest.mark.skipif(not git_available(), reason="git merge-file is the merge engine")
+def test_two_children_writing_one_file_are_merged_rather_than_one_rejected():
+    """A child inside another's subtree may legally touch the same path.
+
+    Rejecting on a bare collision discarded a whole contribution for touching a
+    file a sibling also touched -- which is the merge the system exists to do.
+    """
+    # The reachable shape: one child is situated *inside* the other's subtree, so
+    # `src/a/b/f.py` is legally within the authority of both.
+    log = WorldLog()
+    state = {"src/CONTEXT.md": "# src\n", "src/a/b/f.py": _BASE}
+    bodies = {"src/a": _OURS, "src/a/b": _THEIRS}
+    policy = RecursiveDelegation(
+        manager=lambda b: ([Delegation("src/a", "x"), Delegation("src/a/b", "y")]
+                           if b.world.path == "src" else []),
+        executor=lambda b: [Edit(b.world.path, "src/a/b/f.py", bodies[b.world.path])],
+        log=log, max_depth=3, root_path="src")
+    edits = parse_situated_edits(policy.propose(
+        _proposal_ctx(state, Task(id="t", prompt="x")))[0])
+    merged = next(e["content"] for e in edits if e["path"] == "src/a/b/f.py")
+    assert "return 1" in merged and "return 2" in merged
+    assert policy.sibling_merges == 1 and policy.sibling_conflicts == 0
+    assert [e.verdict for e in log.episodes if e.path.startswith("src/")] == \
+           ["accepted", "accepted"]
+
+
+@pytest.mark.skipif(not git_available(), reason="git merge-file is the merge engine")
+def test_an_overlapping_sibling_is_sent_back_and_its_other_work_stands():
+    log = WorldLog()
+    rival = _BASE.replace("def a():\n    raise NotImplementedError",
+                          "def a():\n    return 9")
+    state = {"src/CONTEXT.md": "# src\n", "src/a/b/f.py": _BASE}
+    bodies = {"src/a": _OURS, "src/a/b": rival}
+    policy = RecursiveDelegation(
+        manager=lambda b: ([Delegation("src/a", "x"), Delegation("src/a/b", "y")]
+                           if b.world.path == "src" else []),
+        executor=lambda b: [Edit(b.world.path, "src/a/b/f.py", bodies[b.world.path]),
+                            Edit(b.world.path, f"{b.world.path}/own.py", "1\n")],
+        log=log, max_depth=3, max_edits=8, root_path="src")
+    edits = {e["path"] for e in parse_situated_edits(policy.propose(
+        _proposal_ctx(state, Task(id="t", prompt="x")))[0])}
+    assert policy.sibling_conflicts == 1
+    assert "src/a/b/own.py" in edits, "the child's non-overlapping work still stands"
+    assert "src/a/b" in log.pending_rework
+    assert [e.verdict for e in log.episodes if e.path == "src/a/b"] == ["rework"]
 
 
 # ---------------------------------------------------------------------------
@@ -375,19 +464,58 @@ def test_a_child_that_returns_nothing_is_sent_back_rather_than_annotated():
 
 
 def test_a_refused_child_leaves_its_reason_in_the_nodes_context_md():
-    """Appendix 1.4: the rejected code does not survive, the saved reason can."""
+    """Appendix 1.4: the rejected code does not survive, the saved reason can.
+
+    Rejection now comes from the parent's *evidence*, not from scope -- an edit
+    outside the child's path is a request, which is the next test.
+    """
     log = WorldLog()
     policy = RecursiveDelegation(
-        manager=lambda b: ([Delegation("src", "write outside your path")]
-                           if b.world.path == "" else []),
-        executor=lambda b: [Edit(b.world.path, "elsewhere/x.py", "nope")],
+        manager=lambda b: ([Delegation("src", "do it")] if b.world.path == "" else []),
+        executor=lambda b: [Edit(b.world.path, "src/x.py", "nope")],
+        review=lambda parent, returned: ("rejected", "it breaks the build"),
         log=log, max_depth=2)
     proposals = policy.propose(_proposal_ctx({CONTEXT_FILE: "# root"},
                                              Task(id="t", prompt="x")))
     edits = parse_situated_edits(proposals[0])
     assert [e["path"] for e in edits] == [f"src/{CONTEXT_FILE}"]
-    assert "refused:" in edits[0]["content"]
+    assert "refused: it breaks the build" in edits[0]["content"]
     assert [e.verdict for e in log.episodes if e.path == "src"] == ["rejected"]
+
+
+def test_a_change_outside_a_childs_path_is_reported_up_and_handled_there():
+    """Upstream: "report the need back up to your parent, which will handle it".
+
+    The child never writes outside its subtree -- the ancestor that has authority
+    there makes the change, under its own name.
+    """
+    log = WorldLog()
+    policy = RecursiveDelegation(
+        manager=lambda b: ([Delegation("src/frontend", "build the lexer")]
+                           if b.world.path == "src" else []),
+        executor=lambda b: [Edit(b.world.path, "src/frontend/lexer.py", "lex\n"),
+                            Edit(b.world.path, "src/__init__.py", "surface\n")],
+        log=log, max_depth=3, root_path="src")
+    routed = {"src/CONTEXT.md": "# src\n\n## Routing Table\n- `./src/frontend/` -> lexer\n"}
+    edits = {e["owner"]: e["path"] for e in parse_situated_edits(policy.propose(
+        _proposal_ctx(routed, Task(id="t", prompt="x")))[0])}
+    assert edits == {"src/frontend": "src/frontend/lexer.py", "src": "src/__init__.py"}
+    assert (policy.requests_raised, policy.adopted_requests,
+            policy.unmet_requests) == (1, 1, 0)
+
+
+def test_a_need_nobody_in_the_chain_can_meet_is_counted_not_dropped():
+    log = WorldLog()
+    policy = RecursiveDelegation(
+        manager=lambda b: ([Delegation("src/frontend", "x")]
+                           if b.world.path == "src" else []),
+        executor=lambda b: [Edit(b.world.path, "src/frontend/a.py", "1\n"),
+                            Edit(b.world.path, "docs/guide.md", "2\n")],
+        log=log, max_depth=3, root_path="src")
+    policy.propose(_proposal_ctx({"src/CONTEXT.md": "# src\n"},
+                                 Task(id="t", prompt="x")))
+    assert (policy.requests_raised, policy.adopted_requests,
+            policy.unmet_requests) == (1, 0, 1)
 
 
 def test_an_outstanding_rework_request_is_taken_before_a_free_choice():

@@ -53,10 +53,11 @@ from agentdescent.filetree import materialize, parse_tree
 
 from ._delegation import Brief, Delegation, Edit
 from ._spatial import SITUATED_EDIT_PROTOCOL, parse_situated_edits
-from ._world import normalise
+from ._world import SKILLS_DIR, normalise
 
 __all__ = ["FROZEN", "build_tasks", "initial_files", "llm_executor", "llm_manager",
-           "make_runner", "offline_executor", "offline_manager", "reward"]
+           "make_runner", "offline_executor", "offline_manager", "reward",
+           "suite_review"]
 
 #: Human-supplied and never the agents'. L0 in this repository's sense, and the
 #: role c-testsuite / LLVM / Csmith play upstream.
@@ -140,14 +141,33 @@ file rather than the same one.
 '''
 
 
+_SKILL = '''# Writing a module in this project
+
+A file is complete or it is not written. Never leave a partial module: the
+validation suite imports what is there, and a half-written module fails the
+stages after it as well as its own.
+
+- Keep one concern per file, and name it after that concern.
+- A package directory needs an `__init__.py`, even an empty one.
+- Import a sibling module relatively (`from .lexer import tokenize`).
+- Do not import a stage you do not need: `src/__init__.py` imports lazily on
+  purpose, and a module-level import undoes that.
+'''
+
+
 def initial_files() -> Dict[str, str]:
-    """The implementation-empty repository the run starts from."""
+    """The implementation-empty repository the run starts from.
+
+    Context, constraints, one reusable skill -- the things the paper says an
+    accepted version carries besides source (3.1) -- and no implementation.
+    """
     return {
         "CONTEXT.md": _ROOT_CONTEXT,
         "spec/CONTEXT.md": _SPEC,
         "src/CONTEXT.md": _SRC_CONTEXT,
         "src/frontend/CONTEXT.md": _FRONTEND_CONTEXT,
         "src/backend/CONTEXT.md": _BACKEND_CONTEXT,
+        f"src/{SKILLS_DIR}/python-modules.md": _SKILL,
     }
 
 
@@ -530,6 +550,56 @@ def _has_unary_minus(source: str) -> bool:
         if not char.isspace():
             previous = char
     return False
+
+
+# ---------------------------------------------------------------------------
+# The parent's integration evidence
+# ---------------------------------------------------------------------------
+
+def suite_review(tasks: Sequence[Task], *, sample: int = 10):
+    """A :data:`~examples.genesis._delegation.Review`: run the suite on a child's work.
+
+    The paper's parent decides "using the available tests, constraints and
+    integration evidence" (3.3), and that is a different decision from the
+    acceptance gate's: it happens **inside** the episode, on one child's
+    contribution, before anything is offered to the version history. Without it
+    a parent here only checked scope, which is the cheap half of a rule whose
+    whole point is the other half.
+
+    Refuses a regression and says nothing otherwise -- structural work that moves
+    no case is exactly what upstream's "partial progress is accepted" is about,
+    so a parent that demanded a gain would refuse the first file of every node.
+
+    ``sample`` bounds the cost: this runs per child per episode, so it is a
+    subset of the suite rather than the whole of it -- integration evidence a
+    parent can afford, not the gate's measurement.
+    """
+    chosen = list(tasks)[:sample]
+    cases = [(t.meta["kind"], t.prompt) for t in chosen]
+    gold = [t.meta["gold"] for t in chosen]
+    cached: Dict[int, int] = {}
+
+    def score(state: Mapping[str, str]) -> int:
+        return sum(1 for out, want in zip(_run_cases(state, cases), gold) if out == want)
+
+    def review(parent, returned):
+        base_state = parent.state
+        key = id(base_state)
+        if key not in cached:
+            cached[key] = score(base_state)
+        candidate = dict(base_state)
+        for edit in returned:
+            if edit.content is None:
+                candidate.pop(edit.path, None)
+            else:
+                candidate[edit.path] = edit.content
+        after = score(candidate)
+        if after < cached[key]:
+            return ("rejected", f"integration check regressed "
+                                f"{cached[key]}/{len(cases)} -> {after}/{len(cases)}")
+        return None
+
+    return review
 
 
 # ---------------------------------------------------------------------------
