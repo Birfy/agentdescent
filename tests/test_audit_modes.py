@@ -126,3 +126,40 @@ def test_rounding_needs_a_non_integral_reference():
     assert not audit_modes._is_rounding(8.0, 6.0)
     assert not audit_modes._is_rounding(8.0, 8.0)
     assert audit_modes._is_rounding(5489.5466666667, 5489.0)
+
+
+# -- an oracle that cannot parse is not a judge that is wrong -----------------
+
+@pytest.mark.parametrize("out,gold", [
+    # Straight from the GSM-Hard Phase 0 run. `14053029 2/3` IS
+    # `14053029.666666666`; the oracle reads the last number and got `3`. The
+    # judge said the answer was right and was exactly right.
+    ("14053029 2/3", "14053029.666666666"),
+    ("The answer is 2/3", "0.6666666666666666"),
+])
+def test_a_fraction_the_oracle_cannot_read_is_not_filed_as_a_judge_slip(out, gold):
+    """A mixed number contains a `/`, so before this it landed in
+    `wrong-number-with-working` -- counting an oracle bug as a judge slip and
+    sending the improvement pool's budget after it."""
+    assert audit_modes.gsm8k_error_mode(
+        _rec(out), ("q", gold, None)) == "equivalent-fraction"
+
+
+def test_a_division_shown_as_working_is_still_a_slip():
+    """`168636356 / 12` is arithmetic in the derivation, not the answer stated
+    as a fraction. The detector reads fractions that *equal* the reference, so
+    a working-out that happens to contain a slash is untouched."""
+    assert audit_modes.gsm8k_error_mode(
+        _rec("168636356 / 12 = 17413984"),
+        ("q", "17414074.0", None)) == "wrong-number-with-working"
+
+
+def test_a_unit_conversion_is_left_unclassified_rather_than_guessed_at():
+    """The run's other disagreement: `98,826 hours, 37 minutes, and 35 seconds`
+    against a gold of `5929597.583333333` minutes. Also correct, also unreadable
+    by the oracle, and not detectable without guessing at units -- so it is not
+    claimed as one."""
+    got = audit_modes.gsm8k_error_mode(
+        _rec("98,826 hours, 37 minutes, and 35 seconds"),
+        ("q", "5929597.583333333", None))
+    assert got != "equivalent-fraction"

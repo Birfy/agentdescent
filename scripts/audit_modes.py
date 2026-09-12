@@ -25,6 +25,7 @@ are different bugs with different fixes.
 from __future__ import annotations
 
 import os
+import re
 import sys
 from typing import Any, Dict, Optional, Tuple
 
@@ -110,9 +111,50 @@ def gsm8k_error_mode(record, ctx: Optional[Context]) -> Optional[str]:
         return "gold-not-final"
     if want is not None and _is_rounding(want, got):
         return "rounded"
+    if want is not None and _equivalent_fraction(record.output, want):
+        return "equivalent-fraction"
     if _has_working(record.output, worked):
         return "wrong-number-with-working"
     return "wrong-number-bare"
+
+
+#: ``14053029 2/3`` and ``2/3``: a mixed number or a bare fraction.
+_FRACTION = re.compile(r"(?:(-?[\d,]+)\s+)?(-?[\d,]+)\s*/\s*([\d,]+)")
+
+
+def _equivalent_fraction(output: str, want: float) -> bool:
+    """Does ``output`` state ``want`` exactly, as a fraction the oracle cannot read?
+
+    Both disagreements in the GSM-Hard Phase 0 run were this shape or its
+    cousin, and neither was the judge's fault. ``14053029 2/3`` **is**
+    ``14053029.666666666``; the oracle reads the last number and got ``3``. The
+    judge said the answer was right and was exactly right.
+
+    So this is not a judge error mode at all -- it is the *oracle* failing to
+    parse, and filing it under ``wrong-number-with-working`` (which is where it
+    landed, because a mixed number contains a ``/``) would count an oracle bug
+    as a judge slip and send the improvement pool's budget after it.
+
+    Only the exactly-checkable case. The run's other disagreement was
+    ``98,826 hours, 37 minutes, and 35 seconds`` against a gold of
+    ``5929597.583333333`` minutes -- also correct, also unreadable by the
+    oracle, and not detectable without guessing at units. That one stays
+    unclassified rather than being guessed at, and the report says so.
+    """
+    for whole, num, den in _FRACTION.findall(output or ""):
+        try:
+            d = float(den.replace(",", ""))
+            if d == 0.0:
+                continue
+            value = float(num.replace(",", "")) / d
+            if whole:
+                w = float(whole.replace(",", ""))
+                value = w + (value if w >= 0 else -value)
+        except ValueError:
+            continue
+        if abs(value - want) < 1e-6:
+            return True
+    return False
 
 
 def _is_rounding(want: float, got: float) -> bool:
