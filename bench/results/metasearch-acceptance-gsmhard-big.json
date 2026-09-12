@@ -1,0 +1,233 @@
+{
+ "seed_source": "class Policy:\n    # Commit when the candidate's full held-out rate beats the base's.\n    # (The engine default also draws a Beta posterior against an annealed\n    # threshold; this is the simplest rule that satisfies the contract.)\n    def accept(self, ctx):\n        base = MergeContext.rate(ctx.base_counts)\n        cand = MergeContext.rate(ctx.cand_counts)\n        if cand > base:\n            return AcceptDecision(True, \"committed\", \"\", 1.0, cand - base)\n        return AcceptDecision(False, \"below-threshold\",\n                              \"held-out did not improve\", 0.0, cand - base)\n",
+ "evolved_source": "class Policy:\n    # Commit when the candidate's full held-out rate beats the base's.\n    # (The engine default also draws a Beta posterior against an annealed\n    # threshold; this is the simplest rule that satisfies the contract.)\n    def accept(self, ctx):\n        base = MergeContext.rate(ctx.base_counts)\n        cand = MergeContext.rate(ctx.cand_counts)\n        if cand > base:\n            return AcceptDecision(True, \"committed\", \"\", 1.0, cand - base)\n        return AcceptDecision(False, \"below-threshold\",\n                              \"held-out did not improve\", 0.0, cand - base)\n",
+ "outer": {
+  "final_reward": 0.7552083333333334,
+  "rollouts": 6,
+  "outcomes": {
+   "oracle-rejected": 3
+  },
+  "stop_reason": "rounds",
+  "error": null,
+  "seconds": 17.97929442999998,
+  "rounds": 3,
+  "workers": 2,
+  "seeds": [
+   0,
+   1
+  ],
+  "proposals": [
+   {
+    "source": "Here's a revised policy that adds a minimum improvement threshold to avoid committing noise while still accepting genuine improvements:\n\n```python\nclass Policy:\n    # Add a small minimum improvement threshold to filter out marginal gains\n    # that are likely noise, while still accepting clear improvements.\n    def accept(self, ctx):\n        base = MergeContext.rate(ctx.base_counts)\n        cand = MergeContext.rate(ctx.cand_counts)\n        delta = cand - base\n        # Require at least a 1% relative improvement to commit\n        # This filters out tiny fluctuations while keeping real gains\n        min_gain = 0.01 * max(base, 1e-9)\n        if delta > min_gain:\n            return AcceptDecision(True, \"committed\", \"\", 1.0, delta)\n        return AcceptDecision(False, \"below-threshold\",\n                              \"improvement too small\", 0.0, delta)\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-1:0"
+   },
+   {
+    "source": "I need to be more selective about what gets committed. The current policy commits whenever the candidate rate is even slightly higher, which can commit noise. I'll add a minimum improvement threshold to avoid committing marginal changes.\n\n```python\nclass Policy:\n    # Require a minimum improvement margin to avoid committing noise;\n    # small gains on held-out are often just sampling variation.\n    def accept(self, ctx):\n        base = MergeContext.rate(ctx.base_counts)\n        cand = MergeContext.rate(ctx.cand_counts)\n        delta = cand - base\n        # Need at least 2% absolute improvement to commit\n        if delta > 0.02:\n            return AcceptDecision(True, \"committed\", \"\", 1.0, delta)\n        return AcceptDecision(False, \"below-threshold\",\n                              \"improvement too small\", 0.0, delta)\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-0:0"
+   },
+   {
+    "source": "Here's a revised policy that adds a minimum improvement threshold to avoid committing noise while still accepting clear improvements:\n\n```python\nclass Policy:\n    # Add a small minimum improvement threshold to filter out marginal gains\n    # that are likely noise, while still accepting clear improvements.\n    def accept(self, ctx):\n        base = MergeContext.rate(ctx.base_counts)\n        cand = MergeContext.rate(ctx.cand_counts)\n        delta = cand - base\n        # Require at least a 1% absolute improvement to commit\n        if delta > 0.01:\n            return AcceptDecision(True, \"committed\", \"\", 1.0, delta)\n        return AcceptDecision(False, \"below-threshold\",\n                              \"improvement too small\", 0.0, delta)\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-3:0"
+   },
+   {
+    "source": "Here's a revised policy that uses the cheap scores as a tiebreaker and considers the uncertainty in the estimates:\n\n```python\nclass Policy:\n    # Use cheap scores to break ties and require a minimum improvement margin\n    # to avoid committing noise when the held-out estimates are close.\n    def accept(self, ctx):\n        base = MergeContext.rate(ctx.base_counts)\n        cand = MergeContext.rate(ctx.cand_counts)\n        delta = cand - base\n        \n        # If candidate clearly beats base on held-out, commit\n        if delta > 0.02:\n            return AcceptDecision(True, \"committed\", \"\", 1.0, delta)\n        \n        # If held-out is close, use cheap scores as a tiebreaker\n        # (cheap is a float, not a pair)\n        if abs(delta) <= 0.02 and ctx.cand_cheap > ctx.base_cheap:\n            return AcceptDecision(True, \"committed-cheap-tiebreak\", \n                                 \"held-out close, cheap favors cand\", 0.6, delta)\n        \n        return AcceptDecision(False, \"below-threshold\",\n                              \"held-out did not improve enough\", 0.0, delta)\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-2:0"
+   },
+   {
+    "source": "Here's a revised policy that adds a minimum improvement threshold to avoid committing noise while still accepting genuine improvements:\n\n```python\nclass Policy:\n    # Add a small minimum improvement threshold to filter out marginal gains\n    # that are likely noise, while still accepting clear improvements.\n    def accept(self, ctx):\n        base = MergeContext.rate(ctx.base_counts)\n        cand = MergeContext.rate(ctx.cand_counts)\n        delta = cand - base\n        # Require at least a 1% relative improvement to commit\n        # This filters out tiny fluctuations while keeping real gains\n        min_gain = 0.01 * max(base, 1e-9)\n        if delta > min_gain:\n            return AcceptDecision(True, \"committed\", \"\", 1.0, delta)\n        return AcceptDecision(False, \"below-threshold\",\n                              \"improvement too small\", 0.0, delta)\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-1:0"
+   },
+   {
+    "source": "I need to be more selective about what gets committed. The current policy commits whenever the candidate rate is even slightly higher, which can commit noise. I'll add a minimum improvement threshold to avoid committing marginal changes.\n\n```python\nclass Policy:\n    # Require a minimum improvement margin to avoid committing noise;\n    # small gains on held-out are often just sampling variation.\n    def accept(self, ctx):\n        base = MergeContext.rate(ctx.base_counts)\n        cand = MergeContext.rate(ctx.cand_counts)\n        delta = cand - base\n        # Need at least 2% absolute improvement to commit\n        if delta > 0.02:\n            return AcceptDecision(True, \"committed\", \"\", 1.0, delta)\n        return AcceptDecision(False, \"below-threshold\",\n                              \"improvement too small\", 0.0, delta)\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-0:0"
+   }
+  ],
+  "reflective_merge": false,
+  "proposals_rejected_by_gate": 0,
+  "invalid_proposals": 0,
+  "history": [
+   {
+    "round": 0,
+    "held_out_reward": 0.7552083333333334,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "oracle-rejected": 1
+    }
+   },
+   {
+    "round": 1,
+    "held_out_reward": 0.7552083333333334,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "oracle-rejected": 1
+    }
+   },
+   {
+    "round": 2,
+    "held_out_reward": 0.7552083333333334,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "oracle-rejected": 1
+    }
+   }
+  ]
+ },
+ "validation": {
+  "gsmhard-0": {
+   "n": 1,
+   "before": 0.625,
+   "after": 0.625,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "gsmhard-1": {
+   "n": 1,
+   "before": 0.875,
+   "after": 0.875,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "gsmhard-2": {
+   "n": 1,
+   "before": 0.625,
+   "after": 0.625,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "gsmhard-3": {
+   "n": 1,
+   "before": 0.8958333333333334,
+   "after": 0.8958333333333334,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "gsmhard-4": {
+   "n": 1,
+   "before": 1.0,
+   "after": 1.0,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "gsmhard-5": {
+   "n": 1,
+   "before": 0.5,
+   "after": 0.5,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "aime-0": {
+   "n": 1,
+   "before": 0.84375,
+   "after": 0.84375,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  }
+ },
+ "by_group": {
+  "train": {
+   "problems": [
+    "gsmhard-0",
+    "gsmhard-1",
+    "gsmhard-2",
+    "gsmhard-3"
+   ],
+   "seed_rule": 0.7552083333333334,
+   "evolved_rule": 0.7552083333333334,
+   "gain": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "unseen": {
+   "problems": [
+    "gsmhard-4",
+    "gsmhard-5"
+   ],
+   "seed_rule": 0.75,
+   "evolved_rule": 0.75,
+   "gain": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "other": {
+   "problems": [
+    "aime-0"
+   ],
+   "seed_rule": 0.84375,
+   "evolved_rule": 0.84375,
+   "gain": 0.0,
+   "wins": 0,
+   "losses": 0
+  }
+ },
+ "transfer_ratio": {
+  "unseen": null,
+  "other": null
+ },
+ "validate_seeds": [
+  1000
+ ],
+ "config": {
+  "rounds": 12,
+  "workers": 1,
+  "slot": "acceptance",
+  "held_out_frac": 0.4,
+  "cache_dir": "/tmp/claude-0/-home-user-agentdescent/11f5938a-d37f-5fc2-bc0a-9c4c1833f52c/scratchpad/evalcache-run",
+  "source": "gsmhard",
+  "other": "aime",
+  "window_size": 20,
+  "data_seed": 0,
+  "model": "deepseek-v4-flash",
+  "provider": "openai",
+  "temperature": 0.0,
+  "thinking": "disabled",
+  "hard_other": false,
+  "reflective_merge": false,
+  "meta_reward": "auc",
+  "quality_target": 0.75,
+  "template": "System instruction:\n{skill}\n\nUser problem:\n{prompt}",
+  "seed_instruction": "Solve the math word problem. Return only the final answer.",
+  "outer_seed": 0
+ },
+ "usage": {
+  "calls": 664,
+  "prompt_tokens": 3354,
+  "completion_tokens": 785,
+  "total_tokens": 4139,
+  "model_seconds": 55.90969252586365,
+  "failures": 0,
+  "wall_seconds": 20.455821688000015,
+  "completion_cache": {
+   "hits": 630,
+   "misses": 4
+  }
+ }
+}

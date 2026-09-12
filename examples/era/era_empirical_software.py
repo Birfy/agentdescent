@@ -73,7 +73,8 @@ from agentdescent.evolution import EvolutionResult, EvolvingArtifact, Task, evol
 from agentdescent.evolvable import Diff, EvidenceCard, vv_staleness
 from agentdescent.governance import classify
 from agentdescent.ledger import CASConflict, Ledger
-from agentdescent.selection import Candidate, FlatPuct, SelectionContext
+from agentdescent.selection import (Candidate, FlatPuct, SelectionContext,
+                                    SelectionPolicy)
 from agentdescent.staleness import StaleAction, get_policy
 
 from examples._common import (
@@ -234,13 +235,26 @@ class EraTree:
     prior_exponent: float = 0.0
     candidate_limit: Optional[int] = None
     metric_key: str = "rmse"
+    #: Which node the next expansion starts from. ``None`` is upstream's rule,
+    #: :class:`~agentdescent.selection.FlatPuct` built from ``c_puct`` and
+    #: ``prior_exponent`` -- so a tree that names no policy is the port
+    #: upstream ships, and ``tests/test_era_example.py`` pins that against a
+    #: transcription of ``futs.search``. Anything else satisfying
+    #: :class:`~agentdescent.selection.SelectionPolicy` is asked the same
+    #: question with the same :class:`~agentdescent.selection.SelectionContext`;
+    #: the visit reservation and back-propagation stay here, because they are
+    #: the tree's invariants rather than the policy's opinion. This is the seam
+    #: ``examples/metasearch`` evolves through: the search *algorithm* becomes
+    #: the artifact, and this tree is what runs the candidate.
+    policy: Optional[SelectionPolicy] = None
     nodes: List[Node] = field(default_factory=list)
     _next_iteration: int = 1
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
-    _policy: FlatPuct = field(init=False, repr=False)
+    _policy: SelectionPolicy = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        self._policy = FlatPuct(self.c_puct, self.prior_exponent)
+        self._policy = (self.policy if self.policy is not None
+                        else FlatPuct(self.c_puct, self.prior_exponent))
 
     def seed(self, program: Program, score: float) -> Node:
         with self._lock:
@@ -317,6 +331,7 @@ class EraTree:
                 "max_depth": max(depths) if depths else 0,
                 "root_visits": self.nodes[0].num_visits if self.nodes else 0,
                 "c_puct": self.c_puct,
+                "selection": type(self._policy).__name__,
                 "tree": [node.summary() for node in self.nodes],
             }
 
@@ -903,11 +918,15 @@ def run_agentdescent_era(
     repair_prompt: Optional[Callable[[Program, str, str, int], str]] = None,
     repair_counter: Optional[Dict[str, int]] = None,
     verbose: bool = False,
+    selection: Optional[SelectionPolicy] = None,
 ) -> EraRun:
     """Run one fixed-expansion-budget serial, sync, or async experiment.
 
     ``domain=None`` is upstream's Kaggle task; anything else runs the identical
-    search over that domain's programs, evaluator and prompt.
+    search over that domain's programs, evaluator and prompt. ``selection=None``
+    is upstream's flat PUCT at ``c_puct`` / ``prior_exponent``; anything else
+    replaces *which node is expanded next* and nothing else -- the seam
+    ``examples/metasearch`` evolves a search policy through.
     """
     if mode not in ("serial", "sync", "async"):
         raise ValueError("mode must be serial, sync, or async")
@@ -924,7 +943,8 @@ def run_agentdescent_era(
                              shards=shards, test_shards=test_shards)
     tasks = build_tasks(shards, seed, domain.task_prompt)
     tree = EraTree(c_puct=c_puct, prior_exponent=prior_exponent,
-                   candidate_limit=iterations, metric_key=domain.metric_key)
+                   candidate_limit=iterations, metric_key=domain.metric_key,
+                   policy=selection)
     strategy = EraStrategy(domain)
     run = make_run(evaluate=domain.evaluate)
     # The repair loop checks a candidate on the *first scoring shard* -- never a

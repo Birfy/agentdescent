@@ -94,6 +94,7 @@ nav:
     - Promotion policies: promotion-policies.md
     - Staleness policies: staleness.md
     - The aggregator_factory exit: aggregator-factory.md
+    - Meta-evolution — evolving the slots: meta-evolution.md
   - API reference: api.md
   - Run everything, and extend it: usage.md
   - Examples and results:
@@ -130,6 +131,7 @@ nav:
   - Design records:
     - Evolving a directory: design-directory-evolution.md
     - Plugin for DSH, Claude Code, Codex and other agents: plugin-design.md
+    - Meta-evolution — evolving the slots: design-meta-evolution.md
 
 markdown_extensions:
   - admonition

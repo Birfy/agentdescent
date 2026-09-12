@@ -1,0 +1,234 @@
+{
+ "seed_source": "class Policy:\n    # Round robin over the shard (the engine's default).\n    def pick(self, keys, round_index):\n        return keys[round_index % len(keys)]\n\n    def record(self, task_id, score):\n        pass\n",
+ "evolved_source": "class Policy:\n    # Changed: prioritize unsolved tasks with highest uncertainty (fewest attempts), \n    # then round-robin among them to avoid wasting rollouts on solved tasks.\n    # Use UCB1 with optimistic initialization to prioritize uncertain tasks while exploiting known good ones.\n    def __init__(self):\n        self.scores = {}  # task_id -> list of scores seen\n        self.attempts = {}  # task_id -> count of attempts\n        self.counts = {}  # task_id -> number of times picked\n        self.total_picks = 0\n\n    def pick(self, keys, round_index):\n        import math\n        # Filter to tasks we haven't seen as solved (score >= 1.0)\n        candidates = [k for k in keys if not (k in self.scores and max(self.scores[k]) >= 1.0)]\n        if not candidates:\n            candidates = list(keys)  # all solved, just pick any\n        \n        # Among candidates, prefer those with fewest attempts (most uncertain)\n        min_attempts = min(self.attempts.get(k, 0) for k in candidates)\n        least_tried = [k for k in candidates if self.attempts.get(k, 0) == min_attempts]\n        \n        # Round-robin within the least-tried group\n        return least_tried[round_index % len(least_tried)]\n\n    def record(self, task_id, score):\n        self.scores.setdefault(task_id, []).append(score)\n        self.attempts[task_id] = self.attempts.get(task_id, 0) + 1\n        if task_id not in self.counts:\n            self.counts[task_id] = 0\n        self.counts[task_id] += 1\n        self.total_picks += 1\n",
+ "outer": {
+  "final_reward": 0.7838541666666666,
+  "rollouts": 6,
+  "outcomes": {
+   "oracle-rejected": 2,
+   "committed": 1
+  },
+  "stop_reason": "rounds",
+  "error": null,
+  "seconds": 72.26997162500015,
+  "rounds": 3,
+  "workers": 2,
+  "seeds": [
+   0,
+   1
+  ],
+  "proposals": [
+   {
+    "source": "Here's a revised policy that uses a multi-armed bandit approach (UCB1) to balance exploration and exploitation, which should improve performance on problems where some tasks are easier than others:\n\n```python\nclass Policy:\n    # Changed from round-robin to UCB1 bandit to exploit known-easy tasks while still exploring.\n    def __init__(self):\n        self.counts = {}  # task_id -> number of times picked\n        self.values = {}  # task_id -> sum of scores\n        self.total_picks = 0\n\n    def pick(self, keys, round_index):\n        import math\n        # First time seeing a task: initialize\n        for k in keys:\n            if k not in self.counts:\n                self.counts[k] = 0\n                self.values[k] = 0.0\n        \n        # If any task never picked, pick one of those (explore)\n        unpicked = [k for k in keys if self.counts[k] == 0]\n        if unpicked:\n            # Pick the first unpicked (deterministic for stability)\n            return unpicked[0]\n        \n        # UCB1: pick task maximizing (avg_score + sqrt(2*ln(total)/count))\n        total = self.total_picks\n        best_key = None\n        best_ucb = -float('inf')\n        for k in keys:\n            avg = self.values[k] / self.counts[k]\n            exploration = math.sqrt(2 * math.log(total + 1) / self.counts[k])\n            ucb = avg + exploration\n            if ucb > best_ucb:\n                best_ucb = ucb\n                best_key = k\n        return best_key\n\n    def record(self, task_id, score):\n        if task_id not in self.counts:\n            self.counts[task_id] = 0\n            self.values[task_id] = 0.0\n        self.counts[task_id] += 1\n        self.values[task_id] += score\n        self.total_picks += 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-0:0"
+   },
+   {
+    "source": "Here's an improved policy that prioritizes exploring unsolved tasks while maintaining some exploration of potentially promising tasks:\n\n```python\nclass Policy:\n    # Track scores and prioritize unsolved tasks, with round-robin fallback for unknown tasks\n    def __init__(self):\n        self.scores = {}  # task_id -> best score seen\n        self.attempts = {}  # task_id -> number of times picked\n\n    def pick(self, keys, round_index):\n        # First, prefer tasks we haven't tried yet (unknown score)\n        untried = [k for k in keys if k not in self.scores]\n        if untried:\n            # Among untried, use round-robin to spread exploration\n            return untried[round_index % len(untried)]\n        \n        # All tasks have been tried; prefer unsolved ones (score < 1.0)\n        unsolved = [k for k in keys if self.scores.get(k, 0) < 1.0]\n        if unsolved:\n            # Among unsolved, pick the one with lowest score (most promising to improve)\n            return min(unsolved, key=lambda k: (self.scores[k], self.attempts.get(k, 0)))\n        \n        # All solved; just round-robin (won't help but keeps protocol)\n        return keys[round_index % len(keys)]\n\n    def record(self, task_id, score):\n        # Keep the best score seen for each task\n        if task_id not in self.scores or score > self.scores[task_id]:\n            self.scores[task_id] = score\n        self.attempts[task_id] = self.attempts.get(task_id, 0) + 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-1:0"
+   },
+   {
+    "source": "```python\nclass Policy:\n    # Changed: prioritize unsolved tasks with highest uncertainty (fewest attempts), \n    # then round-robin among them to avoid wasting rollouts on solved tasks.\n    def __init__(self):\n        self.scores = {}  # task_id -> list of scores seen\n        self.attempts = {}  # task_id -> count of attempts\n\n    def pick(self, keys, round_index):\n        # Filter to tasks we haven't seen as solved (score >= 1.0)\n        candidates = [k for k in keys if not (k in self.scores and max(self.scores[k]) >= 1.0)]\n        if not candidates:\n            candidates = list(keys)  # all solved, just pick any\n        \n        # Among candidates, prefer those with fewest attempts (most uncertain)\n        min_attempts = min(self.attempts.get(k, 0) for k in candidates)\n        least_tried = [k for k in candidates if self.attempts.get(k, 0) == min_attempts]\n        \n        # Round-robin within the least-tried group\n        return least_tried[round_index % len(least_tried)]\n\n    def record(self, task_id, score):\n        self.scores.setdefault(task_id, []).append(score)\n        self.attempts[task_id] = self.attempts.get(task_id, 0) + 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-3:0"
+   },
+   {
+    "source": "Here's a revised policy that uses a multi-armed bandit approach with optimistic initialization to balance exploration and exploitation:\n\n```python\nclass Policy:\n    # Use UCB1 with optimistic initialization to prioritize uncertain tasks while exploiting known good ones.\n    def __init__(self):\n        self.scores = {}  # task_id -> list of scores\n        self.counts = {}  # task_id -> number of times picked\n        self.total_picks = 0\n\n    def pick(self, keys, round_index):\n        import math\n        # For tasks never seen, give them a high optimistic value to encourage exploration\n        best_key = None\n        best_value = -float('inf')\n        \n        for key in keys:\n            if key not in self.counts:\n                # Never tried: optimistic value (1.0) plus exploration bonus\n                value = 1.0 + math.sqrt(2 * math.log(self.total_picks + 1) / 1.0) if self.total_picks > 0 else 1.0\n            else:\n                n = self.counts[key]\n                avg = sum(self.scores[key]) / n\n                # UCB1: average + exploration bonus\n                exploration = math.sqrt(2 * math.log(self.total_picks + 1) / n)\n                value = avg + exploration\n            if value > best_value:\n                best_value = value\n                best_key = key\n        \n        return best_key\n\n    def record(self, task_id, score):\n        if task_id not in self.scores:\n            self.scores[task_id] = []\n            self.counts[task_id] = 0\n        self.scores[task_id].append(score)\n        self.counts[task_id] += 1\n        self.total_picks += 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-2:0"
+   },
+   {
+    "source": "Here's my revised policy:\n\n```python\nclass Policy:\n    # Changed: Use UCB1 with exploration bonus to balance trying uncertain tasks \n    # against exploiting known good ones, avoiding wasted picks on solved tasks.\n    def __init__(self):\n        self.scores = {}  # task_id -> list of scores seen\n        self.attempts = {}  # task_id -> count of attempts\n        self.total_picks = 0\n\n    def pick(self, keys, round_index):\n        import math\n        # Filter to tasks we haven't seen as solved (score >= 1.0)\n        candidates = [k for k in keys if not (k in self.scores and max(self.scores[k]) >= 1.0)]\n        if not candidates:\n            candidates = list(keys)  # all solved, just pick any\n        \n        # UCB1: prefer tasks with high average score and high uncertainty\n        best_key = None\n        best_ucb = -float('inf')\n        for k in candidates:\n            n = self.attempts.get(k, 0)\n            if n == 0:\n                # Never tried: high exploration bonus\n                ucb = 1.0 + math.sqrt(2 * math.log(self.total_picks + 1) / 1.0)\n            else:\n                avg = sum(self.scores[k]) / n\n                # Exploration term: prefer less-tried tasks\n                exploration = math.sqrt(2 * math.log(self.total_picks + 1) / n)\n                ucb = avg + exploration\n            if ucb > best_ucb:\n                best_ucb = ucb\n                best_key = k\n        \n        return best_key\n\n    def record(self, task_id, score):\n        self.scores.setdefault(task_id, []).append(score)\n        self.attempts[task_id] = self.attempts.get(task_id, 0) + 1\n        self.total_picks += 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-1:0"
+   },
+   {
+    "source": "Here's my revised policy:\n\n```python\nclass Policy:\n    # Changed: Use UCB1 with optimistic initialization to balance exploration of \n    # uncertain tasks against exploitation of known good ones, avoiding wasted \n    # rollouts on solved tasks while still discovering new solutions.\n    def __init__(self):\n        self.scores = {}  # task_id -> list of scores seen\n        self.attempts = {}  # task_id -> count of attempts\n        self.total_picks = 0\n\n    def pick(self, keys, round_index):\n        import math\n        # Filter to tasks we haven't seen as solved (score >= 1.0)\n        candidates = [k for k in keys if not (k in self.scores and max(self.scores[k]) >= 1.0)]\n        if not candidates:\n            candidates = list(keys)  # all solved, just pick any\n        \n        # UCB1 with optimistic initialization (start with high value for unseen tasks)\n        total_attempts = sum(self.attempts.get(k, 0) for k in candidates) + 1e-9\n        best_key = None\n        best_ucb = -float('inf')\n        \n        for k in candidates:\n            n = self.attempts.get(k, 0)\n            if n == 0:\n                # Unseen tasks get maximum priority (optimistic)\n                ucb = float('inf')\n            else:\n                # Average score, with UCB exploration bonus\n                avg = sum(self.scores[k]) / n\n                # Optimistic bias: assume unseen tasks might be good, \n                # but weight by how many attempts we've made\n                exploration = math.sqrt(2 * math.log(total_attempts) / n)\n                ucb = avg + exploration\n            if ucb > best_ucb:\n                best_ucb = ucb\n                best_key = k\n        \n        return best_key\n\n    def record(self, task_id, score):\n        self.scores.setdefault(task_id, []).append(score)\n        self.attempts[task_id] = self.attempts.get(task_id, 0) + 1\n        self.total_picks += 1\n```",
+    "accepted_by_gate": true,
+    "reason": "",
+    "on_task": "gsmhard-0:0"
+   }
+  ],
+  "reflective_merge": true,
+  "proposals_rejected_by_gate": 0,
+  "invalid_proposals": 0,
+  "history": [
+   {
+    "round": 0,
+    "held_out_reward": 0.7552083333333334,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "oracle-rejected": 1
+    }
+   },
+   {
+    "round": 1,
+    "held_out_reward": 0.7838541666666666,
+    "committed": 1,
+    "rejected": 0,
+    "reasons": {
+     "committed": 1
+    }
+   },
+   {
+    "round": 2,
+    "held_out_reward": 0.7838541666666666,
+    "committed": 0,
+    "rejected": 1,
+    "reasons": {
+     "oracle-rejected": 1
+    }
+   }
+  ]
+ },
+ "validation": {
+  "gsmhard-0": {
+   "n": 1,
+   "before": 0.625,
+   "after": 0.625,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "gsmhard-1": {
+   "n": 1,
+   "before": 0.875,
+   "after": 0.875,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "gsmhard-2": {
+   "n": 1,
+   "before": 0.625,
+   "after": 0.6875,
+   "gain": 0.0625,
+   "gain_sd": 0.0,
+   "wins": 1,
+   "losses": 0
+  },
+  "gsmhard-3": {
+   "n": 1,
+   "before": 0.8958333333333334,
+   "after": 0.9479166666666666,
+   "gain": 0.05208333333333326,
+   "gain_sd": 0.0,
+   "wins": 1,
+   "losses": 0
+  },
+  "gsmhard-4": {
+   "n": 1,
+   "before": 1.0,
+   "after": 1.0,
+   "gain": 0.0,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 0
+  },
+  "gsmhard-5": {
+   "n": 1,
+   "before": 0.5,
+   "after": 0.5833333333333334,
+   "gain": 0.08333333333333337,
+   "gain_sd": 0.0,
+   "wins": 1,
+   "losses": 0
+  },
+  "aime-0": {
+   "n": 1,
+   "before": 0.84375,
+   "after": 0.7916666666666666,
+   "gain": -0.05208333333333337,
+   "gain_sd": 0.0,
+   "wins": 0,
+   "losses": 1
+  }
+ },
+ "by_group": {
+  "train": {
+   "problems": [
+    "gsmhard-0",
+    "gsmhard-1",
+    "gsmhard-2",
+    "gsmhard-3"
+   ],
+   "seed_rule": 0.7552083333333334,
+   "evolved_rule": 0.7838541666666666,
+   "gain": 0.028645833333333315,
+   "wins": 2,
+   "losses": 0
+  },
+  "unseen": {
+   "problems": [
+    "gsmhard-4",
+    "gsmhard-5"
+   ],
+   "seed_rule": 0.75,
+   "evolved_rule": 0.7916666666666667,
+   "gain": 0.041666666666666685,
+   "wins": 1,
+   "losses": 0
+  },
+  "other": {
+   "problems": [
+    "aime-0"
+   ],
+   "seed_rule": 0.84375,
+   "evolved_rule": 0.7916666666666666,
+   "gain": -0.05208333333333337,
+   "wins": 0,
+   "losses": 1
+  }
+ },
+ "transfer_ratio": {
+  "unseen": 1.4545454545454561,
+  "other": -1.8181818181818206
+ },
+ "validate_seeds": [
+  1000
+ ],
+ "config": {
+  "rounds": 12,
+  "workers": 1,
+  "slot": "task_sampler",
+  "held_out_frac": 0.4,
+  "cache_dir": "/tmp/claude-0/-home-user-agentdescent/11f5938a-d37f-5fc2-bc0a-9c4c1833f52c/scratchpad/evalcache-run",
+  "source": "gsmhard",
+  "other": "aime",
+  "window_size": 20,
+  "data_seed": 0,
+  "model": "deepseek-v4-flash",
+  "provider": "openai",
+  "temperature": 0.0,
+  "thinking": "disabled",
+  "hard_other": false,
+  "reflective_merge": true,
+  "meta_reward": "auc",
+  "quality_target": 0.75,
+  "template": "System instruction:\n{skill}\n\nUser problem:\n{prompt}",
+  "seed_instruction": "Solve the math word problem. Return only the final answer.",
+  "outer_seed": 0
+ },
+ "usage": {
+  "calls": 859,
+  "prompt_tokens": 38919,
+  "completion_tokens": 66796,
+  "total_tokens": 105715,
+  "model_seconds": 1998.8804018497467,
+  "failures": 0,
+  "wall_seconds": 425.989892178,
+  "completion_cache": {
+   "hits": 506,
+   "misses": 167
+  }
+ }
+}
