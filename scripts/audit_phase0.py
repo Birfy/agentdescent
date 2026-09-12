@@ -43,7 +43,7 @@ of a sample, so the interval is as tight as the run allows.
     export ANTHROPIC_API_KEY=...
     python3 scripts/audit_phase0.py --tasks 40 --rounds 5 --model deepseek-v4-flash
 
-Writes `reports/audit_phase0_<date>.md`. `--dry-run` uses a deterministic
+Writes `reports/audit_phase0_[<workload>_]<date>.md`. `--dry-run` uses a deterministic
 offline stand-in for the judge so the harness itself can be exercised without
 spending anything.
 """
@@ -988,7 +988,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     stamp = date.today().isoformat()
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    suffix = "_tournament" if args.tournament else ""
+    # The workload belongs in the name. Without it two workloads run on the same
+    # day write the same report path -- the second overwrites the first -- and,
+    # worse, **append into the same store**. The store accumulating across runs
+    # is by design and right; a JSONL holding two workloads' records is not,
+    # because the gold answers are joined per workload and half the file cannot
+    # be joined at all.
+    suffix = f"_{args.workload}" if args.workload != "hotpot" else ""
+    suffix += "_tournament" if args.tournament else ""
     if args.store is None:
         args.store = os.path.join(root, "reports", f"audit_phase0_{stamp}{suffix}.jsonl")
     os.makedirs(os.path.dirname(args.store), exist_ok=True)
