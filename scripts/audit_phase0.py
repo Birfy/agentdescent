@@ -151,6 +151,77 @@ def offline_judge(generosity: float = 0.35, seed: int = 0):
 # The workload
 # ---------------------------------------------------------------------------
 
+def _hotpot_task(row: Dict) -> Optional[Task]:
+    """One HotpotQA row as a task, or ``None`` if it is unusable.
+
+    The **only** place a HotpotQA task id is constructed. Building an id in the
+    loader and re-deriving it in an analysis is two pieces of code that can
+    drift, and they did: see :func:`task_index`.
+    """
+    answer = (row.get("answer") or "").strip()
+    question = (row.get("question") or "").strip()
+    if not answer or not question or not row.get("id"):
+        return None
+    return Task(id=str(row["id"]), prompt=question,
+                meta={"gold": answer, "expected": answer})
+
+
+def _bbh_task(subtask: str, row: Dict) -> Optional[Task]:
+    """One BBH row as a task. The only place a BBH task id is constructed.
+
+    Hashed from the question, not the row's position. BBH has no id column, and
+    a positional id is only meaningful together with the ``limit`` and ``seed``
+    that produced the shuffle -- so a records file written today could not be
+    re-joined to its gold answers tomorrow without reproducing the exact call.
+    That is the durability the whole audit rests on (a wet-lab result comes back
+    next week to a process that has only the JSONL), and it was broken here.
+    """
+    answer = str(row.get("target") or "").strip()
+    question = str(row.get("input") or "").strip()
+    if not answer or not question:
+        return None
+    digest = hashlib.sha256(question.encode("utf-8")).hexdigest()[:10]
+    return Task(id=f"{subtask}:{digest}", prompt=question,
+                meta={"gold": answer, "expected": answer, "subtask": subtask})
+
+
+def task_index(workload: str, *, rows: int = 400) -> Dict[str, Task]:
+    """``task_id -> Task`` for re-joining records to their gold answers.
+
+    **Not** ``{t.id: t for t in <loader>(n)}``, and the difference is the point.
+    A loader draws a *sample*: it shuffles and truncates, so which tasks come
+    back depends on ``n`` and ``seed``, and reconstructing a past run's sample
+    means knowing the exact arguments it was called with. An index does not
+    sample -- it reads a window of the dataset and keys every row by the same id
+    rule the loader uses.
+
+    Measured the hard way: rebuilding HotpotQA context with
+    ``hotpot_tasks(200)`` failed to join **90 of 177** records from a run that
+    had called ``hotpot_tasks(80)``, because a 400-row shuffle and a 160-row
+    shuffle under the same seed are different shuffles. The ids were never the
+    problem; drawing a different sample was.
+    """
+    from agentdescent.dataloader import hf_rows
+
+    out: Dict[str, Task] = {}
+    if workload == "hotpot":
+        for row in hf_rows("hotpotqa/hotpot_qa", "validation",
+                           config="distractor", limit=rows):
+            task = _hotpot_task(row)
+            if task is not None:
+                out[task.id] = task
+        return out
+    if workload == "bbh":
+        for name in BBH_SUBTASKS:
+            for row in hf_rows("lukaemon/bbh", "test", config=name,
+                               limit=max(40, rows // len(BBH_SUBTASKS))):
+                task = _bbh_task(name, row)
+                if task is not None:
+                    out[task.id] = task
+        return out
+    raise ValueError(f"unknown workload {workload!r}")
+
+
 def hotpot_tasks(n: int, *, seed: int = 0) -> List[Task]:
     """HotpotQA validation questions, answerable without the distractor context.
 
@@ -166,12 +237,10 @@ def hotpot_tasks(n: int, *, seed: int = 0) -> List[Task]:
     rng.shuffle(rows)
     tasks: List[Task] = []
     for row in rows:
-        answer = (row.get("answer") or "").strip()
-        question = (row.get("question") or "").strip()
-        if not answer or not question:
+        task = _hotpot_task(row)
+        if task is None:
             continue
-        tasks.append(Task(id=str(row["id"]), prompt=question,
-                          meta={"gold": answer, "expected": answer}))
+        tasks.append(task)
         if len(tasks) >= n:
             break
     return tasks
@@ -220,26 +289,11 @@ def bbh_tasks(n: int, *, seed: int = 0,
                        limit=max(per * 2, 20))
         rng.shuffle(rows)
         taken = 0
-        for i, row in enumerate(rows):
-            answer = str(row.get("target") or "").strip()
-            question = str(row.get("input") or "").strip()
-            if not answer or not question:
+        for row in rows:
+            task = _bbh_task(name, row)
+            if task is None:
                 continue
-            # Hashed from the question, not the row's position. BBH has no id
-            # column, and a positional id is only meaningful together with the
-            # `limit` and `seed` that produced the shuffle -- so a records file
-            # written today cannot be re-joined to its gold answers tomorrow
-            # without reproducing the exact call. That is the durability the
-            # whole package rests on (a wet-lab result comes back next week to a
-            # process that has only the JSONL), and it was broken here.
-            #
-            # Found by falling into it: a first analysis of this workload joined
-            # gold by position against an unshuffled read and reported a
-            # rubber-stamp rate of 65% where the truth is 25%.
-            digest = hashlib.sha256(question.encode("utf-8")).hexdigest()[:10]
-            tasks.append(Task(id=f"{name}:{digest}", prompt=question,
-                              meta={"gold": answer, "expected": answer,
-                                    "subtask": name}))
+            tasks.append(task)
             taken += 1
             if taken >= per:
                 break
