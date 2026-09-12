@@ -531,7 +531,7 @@ because the first is a property of a sample and the second of a decision:
 
 * the training set is down-sampled to equal numbers of right and wrong answers,
   which puts the constant rubric at 0.5;
-* the [scorecard](#the-scorecard--before-a-new-verifier-replaces-the-old-one)
+* the [scorecard](#the-scorecard-before-a-new-verifier-replaces-the-old-one)
   blocks on false-negative rate regardless.
 
 ### It will not read a `sigma` that fell as evidence
