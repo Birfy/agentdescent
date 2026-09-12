@@ -300,7 +300,7 @@ patch、在那里跑 agent、`git diff`，模型不用自己排版 diff）；两
 --hard` 丢掉、`reward.json` 是 `indent=2` 的多行、嵌套指标被丢弃）和基准自己镜像里的
 一个（grader 写死了私有测试的文件名，15 个里有 6 个，那些任务**任何 patch 都拿不到
 reward**）。都已修，测量见
-[`bench/results/metasearch-domain-selection.md`](../bench/results/metasearch-domain-selection.md) 的 SWE-bench-Science 一节：
+[`bench/results/metasearch-domain-selection.md`](https://github.com/Birfy/agentdescent/blob/main/bench/results/metasearch-domain-selection.md) 的 SWE-bench-Science 一节：
 验证**逐字节确定**，奖励粒度中位 10 级，中位一次验证 5.9 秒。
 
 剩下的边界不变：**容器内的 agent 阶段**是 `harbor run --agent`，不重造——`LocalRunner`
@@ -516,7 +516,7 @@ vs 一个新鲜抽样"，配对差的 sd 是 `sd×√2` ≈ 0.076，10 个 held-
 | P3 | `examples/metasearch/`：合成地形、离线端到端、`--dry-run`、加入 PORTS 契约 | ✅ |
 | P4a | GSM 跑批脚本 `bench/metasearch_slots.py`：演进 `task_sampler`，内层是完整的内层 `evolve()`，报告分三组（演进过的 / 同基准未见切片 / 另一个基准）各自的迁移比 | ✅ 脚本 + 离线测试 + **在线跑出结果**（`bench/results/metasearch-slots.md`） |
 | P4b | AlgoTune 跑批脚本 `bench/metasearch_algotune.py`（训练/验证任务不相交、新 seed 验证、迁移比、结果 JSON） | ✅ 脚本 + 插桩测试 + **在线跑过**（结论见 `bench/results/metasearch-domain-selection.md`）：port 跑通（5.6× 加速），但**这个域现在测不了选择规则**，噪声是信号的 3.4 倍，见 §4.8 |
-| P5 | Harbor 适配器 `_harbor.py`（§4.3）+ SWE-bench-Science / TB-Science 验证 | ✅ 适配器 + `LocalRunner` 离线端到端；`DockerRunner` **在 SWE-bench-Science 上真跑过**（15 个任务基线 + 单任务端到端，见 [`bench/results/metasearch-domain-selection.md`](../bench/results/metasearch-domain-selection.md)）：域本身四条性质里三条达标且优于此前任何真实数据域；第四条（可负担预算下曲线是否会升）**在当前候选生成器下不成立**：14 次尝试 0 次超过根节点，结果是双峰的（要么恰好等于基线、要么把测试模块改崩），没有斜率给选择规则加速。换更强的模型（`deepseek-v4-pro`）**也是 0/14**，所以那是生成器的性质、更准确说是缺 agent 阶段，不是域的性质 |
+| P5 | Harbor 适配器 `_harbor.py`（§4.3）+ SWE-bench-Science / TB-Science 验证 | ✅ 适配器 + `LocalRunner` 离线端到端；`DockerRunner` **在 SWE-bench-Science 上真跑过**（15 个任务基线 + 单任务端到端，见 [`bench/results/metasearch-domain-selection.md`](https://github.com/Birfy/agentdescent/blob/main/bench/results/metasearch-domain-selection.md)）：域本身四条性质里三条达标且优于此前任何真实数据域；第四条（可负担预算下曲线是否会升）**在当前候选生成器下不成立**：14 次尝试 0 次超过根节点，结果是双峰的（要么恰好等于基线、要么把测试模块改崩），没有斜率给选择规则加速。换更强的模型（`deepseek-v4-pro`）**也是 0/14**，所以那是生成器的性质、更准确说是缺 agent 阶段，不是域的性质 |
 | P5b | `priority()` 在**合成地形**上的完整演进 + 对照手调 PUCT 族的天花板 | ✅ **正结果**：3 个 seed 均值 +0.0227 source / +0.0120 target，落在手调族的 Pareto 前沿（`bench/results/metasearch-tree.md`） |
 | P5c | `priority()` 在**真实科研数据**（LLM-SRBench `lsr_synth`，per-problem）上的演进 + held-out 验证 | ✅ **首个真实数据正结果**：9 次独立配对比较 5 胜 0 负 4 平，符号检验 p = 0.031；规则方向与合成地形**相反**（多探索），而这个方向是 `metasearch-domain-selection.md` 事先预测的（`bench/results/metasearch-selection-srbench.md`） |
 | P6 | 其余五个插槽的内置冒烟与默认种子，每个种子在真实内层 `evolve()` 里跑通 | ✅ |
