@@ -24,6 +24,7 @@ are different bugs with different fixes.
 
 from __future__ import annotations
 
+import ast
 import os
 import re
 import sys
@@ -209,6 +210,67 @@ def _has_working(output: str, worked: Any) -> bool:
     return any(op in (output or "") for op in _OPERATORS)
 
 
+def code_error_mode(record, ctx: Optional[Context]) -> Optional[str]:
+    """For MBPP, where the judge reads code it cannot run.
+
+    The modes are about **what the judge was looking at when it got it wrong**,
+    because that is what a rubric clause could address. The numeric workloads'
+    modes were about the answer's shape; there is no useful shape here, and
+    grouping by "how long was the code" would be the frequency-not-value mistake
+    the coverage sampler exists to avoid.
+
+    ``no-code`` and ``does-not-parse`` are separated from the rest on purpose: a
+    judge saying yes to something that is not a program is a different failure
+    from a judge saying yes to a program that is wrong, and only the second is
+    about reading code.
+    """
+    if ctx is None:
+        return None
+    from scripts.audit_phase0 import extract_code
+
+    code = extract_code(record.output)
+    if not code:
+        return "no-code"
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return "does-not-parse"
+    defs = [n for n in ast.walk(tree)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    if not defs:
+        return "no-function"
+    if any(_is_stub(fn) for fn in defs):
+        return "stub"
+    reference = (ctx[1] or "")
+    if _names_of(code) & _names_of(reference):
+        # Same helper or function name as the reference: the judge was reading
+        # something that looks like the answer, which is the interesting case.
+        return "looks-like-the-reference"
+    return "different-approach"
+
+
+def _is_stub(fn) -> bool:
+    """A body that is only `pass`, `...`, a docstring, or a bare `return`."""
+    for node in fn.body:
+        if isinstance(node, ast.Pass):
+            continue
+        if isinstance(node, ast.Return) and node.value is None:
+            continue
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+            continue
+        return False
+    return True
+
+
+def _names_of(code: str) -> frozenset:
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return frozenset()
+    return frozenset(n.name for n in ast.walk(tree)
+                     if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)))
+
+
 #: Which mode function a workload's records are read with. BBH shares the text
 #: one: its answers are short strings and labels, and the label failure it
 #: actually exhibits is a property of the *judge's* rubric rather than of the
@@ -219,6 +281,7 @@ ERROR_MODES = {
     "bbh": text_error_mode,
     "gsm8k": gsm8k_error_mode,
     "gsm_hard": gsm8k_error_mode,
+    "mbpp": code_error_mode,
 }
 
 

@@ -50,13 +50,19 @@ def test_each_workloads_near_miss_is_one_its_own_oracle_refuses():
     disagreements -- a rehearsal that exercises none of the paths it exists to
     rehearse."""
     for workload, oracle in P.ORACLES.items():
-        # Picked by the oracle, not by the workload's name: a numeric oracle
-        # scores "Ottawa" wrong against itself, which would pass the near-miss
-        # assertion below for the wrong reason and fail the sanity one.
-        gold = "18" if oracle is P.number_match else "Ottawa"
+        # A gold its own oracle can actually score. Picked by the oracle rather
+        # than by the workload's name -- a numeric oracle scores "Ottawa" wrong
+        # against itself, which would pass the near-miss assertion below for the
+        # wrong reason and fail the sanity one.
+        if oracle is P.tests_pass:
+            gold = "def add(a, b):\n    return a + b"
+            task = _task(gold, meta={"tests": ["assert add(1, 2) == 3"]})
+        else:
+            gold = "18" if oracle is P.number_match else "Ottawa"
+            task = _task(gold)
         near = P._NEAR_MISS[workload](gold)
-        assert oracle(_task(gold), near) == 0.0, workload
-        assert oracle(_task(gold), gold) == 1.0, workload
+        assert oracle(task, near) == 0.0, f"{workload}: near-miss was accepted"
+        assert oracle(task, gold) == 1.0, f"{workload}: gold was refused"
 
 
 def test_the_offline_judge_takes_the_workloads_oracle_not_a_default():
@@ -116,3 +122,69 @@ def test_the_gsm8k_task_id_is_hashed_from_the_question_not_its_position():
     assert first.meta["worked"] == "16 - 7 = 9"
     other = P._gsm8k_task({"question": "Something else.", "answer": "#### 18"})
     assert other.id != first.id
+
+
+# -- MBPP: the oracle executes ------------------------------------------------
+
+def test_the_mbpp_oracle_runs_the_tasks_own_asserts():
+    task = P.Task(id="t", prompt="q", meta={
+        "gold": "def add(a, b):\n    return a + b",
+        "expected": "", "tests": ["assert add(1, 2) == 3"]})
+    assert P.tests_pass(task, "def add(a, b):\n    return a + b") == 1.0
+    assert P.tests_pass(task, "def add(a, b):\n    return a * b") == 0.0
+
+
+@pytest.mark.parametrize("code,ok", [
+    ("def f(a, b): return a + b", True),
+    ("def f(a, b): return a * b", False),
+    ("def f(a, b): raise ValueError()", False),      # a crash is wrong
+    ("def f(:\n  bad", False),                       # so is a syntax error
+])
+def test_a_crash_a_hang_and_a_failed_assert_are_all_one_answer(code, ok):
+    """The distinction matters to whoever is fixing the candidate and not to an
+    oracle, whose whole job is a bit."""
+    assert P.run_tests(code, ["assert f(1, 2) == 3"]) is ok
+
+
+def test_a_hanging_candidate_is_wrong_rather_than_hanging_the_run():
+    assert P.run_tests("while True:\n    pass", ["assert True"], timeout=3) is False
+
+
+def test_the_oracle_reads_code_out_of_a_fenced_block():
+    """A model asked for a function answers with prose around a fence about half
+    the time. Executing the prose is a syntax error, which the oracle would
+    score as a wrong answer -- so the oracle would be measuring markdown."""
+    fenced = "Here you go:\n```python\ndef f(a, b): return a + b\n```\nHope that helps."
+    assert P.extract_code(fenced) == "def f(a, b): return a + b"
+    assert P.run_tests(P.extract_code(fenced), ["assert f(1, 2) == 3"]) is True
+
+
+def test_an_mbpp_task_carries_the_first_assert_in_its_prompt():
+    """MBPP's description does not name the function, so without the assert
+    every candidate fails on the name and the oracle measures naming rather
+    than correctness."""
+    task = P._mbpp_task({"text": "Write a function to add two numbers.",
+                         "code": "def add(a, b): return a + b",
+                         "test_list": ["assert add(1, 2) == 3",
+                                       "assert add(2, 2) == 4"]})
+    assert "assert add(1, 2) == 3" in task.prompt
+    assert task.meta["gold"] == "def add(a, b): return a + b"
+    assert task.meta["tests"] == ["assert add(1, 2) == 3", "assert add(2, 2) == 4"]
+
+
+def test_the_judge_is_not_shown_the_tests():
+    """`_JUDGE_TMPL` is formatted with `meta["gold"]`. A judge shown the asserts
+    could evaluate them in its head and would be doing the oracle's job -- which
+    is the one thing that would make this workload measure nothing."""
+    task = P._mbpp_task({"text": "Add two numbers.",
+                         "code": "def add(a, b): return a + b",
+                         "test_list": ["assert add(1, 2) == 3"]})
+    shown = P._JUDGE_TMPL.format(question=task.prompt, gold=task.meta["gold"],
+                                 candidate="def add(a, b): return a + b")
+    assert "assert add(2, 2)" not in shown          # only the signature hint
+    assert task.meta["tests"][0] not in shown.split("Reference answer:")[1]
+
+
+def test_an_mbpp_row_without_tests_or_a_reference_is_skipped():
+    assert P._mbpp_task({"text": "x", "code": "def f(): pass", "test_list": []}) is None
+    assert P._mbpp_task({"text": "", "code": "c", "test_list": ["assert 1"]}) is None

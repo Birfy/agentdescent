@@ -58,7 +58,9 @@ import random
 import re
 import statistics
 import string
+import subprocess
 import sys
+import tempfile
 import time
 from collections import defaultdict
 from datetime import date
@@ -131,11 +133,81 @@ def number_match(task: Task, output: str) -> float:
     return 1.0 if abs(want - got) < 1e-6 else 0.0
 
 
+_FENCE = re.compile(r"```(?:python|py)?\s*\n(.*?)```", re.S)
+
+
+def extract_code(output: str) -> str:
+    """The code in ``output``: the first fenced block, or the whole thing.
+
+    A model asked for a function answers with prose around a fence about half
+    the time. Executing the prose is a syntax error, which the oracle would
+    score as a wrong answer -- so the oracle would be measuring markdown.
+    """
+    m = _FENCE.search(output or "")
+    return (m.group(1) if m else (output or "")).strip()
+
+
+#: Seconds a candidate's tests may run before it is called wrong. MBPP
+#: solutions are small; a candidate that takes longer than this has hung.
+CODE_TIMEOUT = 10.0
+
+
+def run_tests(code: str, tests: Sequence[str], *,
+              timeout: float = CODE_TIMEOUT) -> bool:
+    """Execute ``code`` and then ``tests``, in a child process. All or nothing.
+
+    .. warning:: **Process isolation, not a sandbox.**
+
+       This runs model-authored Python with this user's permissions, exactly as
+       :func:`agentdescent.runners.code_runner` does and with the same caveat:
+       a trimmed environment, a scratch working directory and a hard timeout are
+       not a security boundary. It is here because the alternative -- asking a
+       model whether the code is correct -- is the thing being *measured*. Run
+       it in a container for anything you would not run by hand.
+
+    A timeout, a crash and a failed assert are all one answer: wrong. The
+    distinction matters to whoever is fixing the candidate and not to an oracle,
+    whose whole job is a bit.
+    """
+    program = code + "\n\n" + "\n".join(tests) + "\n"
+    with tempfile.TemporaryDirectory() as work:
+        path = os.path.join(work, "candidate.py")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(program)
+        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+               "HOME": work, "TMPDIR": work,
+               "PYTHONDONTWRITEBYTECODE": "1"}
+        try:
+            done = subprocess.run([sys.executable, "-I", path], cwd=work,
+                                  env=env, timeout=timeout,
+                                  stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL)
+        except (subprocess.TimeoutExpired, OSError):
+            return False
+        return done.returncode == 0
+
+
+def tests_pass(task: Task, output: str) -> float:
+    """**The oracle** for MBPP: does the candidate pass the task's own asserts?
+
+    The only oracle here that is not a comparison against a written answer, and
+    the reason this workload exists: the judge is shown the *reference solution*
+    and has to decide whether a differently-written candidate does the same
+    thing, which it cannot settle by running anything. That is a judging task
+    with real ambiguity in it, which the three numeric and short-answer
+    workloads did not have.
+    """
+    tests = task.meta.get("tests") or []
+    if not tests:
+        return 0.0
+    return 1.0 if run_tests(extract_code(output), tests) else 0.0
+
+
 #: The oracle each workload is scored against. A single module-level oracle was
 #: right while both workloads were free-text and wrong the moment one of them
 #: answered with a quantity.
 ORACLES = {"hotpot": exact_match, "bbh": exact_match, "gsm8k": number_match,
-           "gsm_hard": number_match}
+           "gsm_hard": number_match, "mbpp": tests_pass}
 
 #: What the report calls each oracle. Hard-coded as "normalized exact match" for
 #: two workloads that both used it, and a report naming the wrong oracle is the
@@ -145,6 +217,7 @@ _ORACLE_LABELS = {
     "bbh": "normalized exact match against the reference",
     "gsm8k": "the final number in the answer, compared as a quantity",
     "gsm_hard": "the final number in the answer, compared as a quantity",
+    "mbpp": "the task's own asserts, executed against the candidate",
 }
 
 
@@ -484,8 +557,68 @@ def gsm_hard_tasks(n: int, *, seed: int = 0) -> List[Task]:
     return tasks
 
 
+def _mbpp_task(row: Dict) -> Optional[Task]:
+    """One MBPP row as a task. The only place an MBPP task id is constructed.
+
+    The prompt carries the **first assert** as well as the description, which is
+    the MBPP convention and not a hint: the description does not name the
+    function, so without it every candidate fails on the name and the oracle
+    measures naming rather than correctness.
+
+    ``gold`` is the dataset's reference solution, because ``gold`` is what the
+    judge is shown -- and "does this candidate do the same thing as that
+    reference" is the ambiguous judging task this workload is here to create.
+    The asserts go in ``tests`` and only the oracle sees them; a judge shown the
+    tests could evaluate them in its head and would be doing the oracle's job.
+    """
+    text = str(row.get("text") or row.get("prompt") or "").strip()
+    code = str(row.get("code") or "").strip()
+    tests = [str(t) for t in (row.get("test_list") or []) if str(t).strip()]
+    if not text or not code or not tests:
+        return None
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:10]
+    return Task(id=f"mbpp:{digest}",
+                prompt=f"{text}\n\nYour function must satisfy: {tests[0]}",
+                meta={"gold": code, "expected": code, "tests": tests})
+
+
+def mbpp_tasks(n: int, *, seed: int = 0) -> List[Task]:
+    """MBPP: small Python problems, scored by running their own asserts.
+
+    The fifth workload and the first where **grading is the hard part**. Three
+    workloads established that a harder *solving* task does not produce judge
+    errors -- GSM-Hard dropped the solver to 79.6% and the judge still disagreed
+    with the truth on 3.7% of units, both times because the *oracle* could not
+    parse the answer. Judge error comes from the judging task being ambiguous,
+    and "is this number that number" never is.
+
+    "Does this code do the same thing as that reference code" always is. The
+    judge cannot execute anything, two correct solutions look nothing alike, and
+    a subtly wrong one looks exactly like a right one. Meanwhile the oracle is
+    exact and independent: run the asserts.
+
+    That combination is what the audit package is *for*, and it is the one the
+    first four workloads could not supply.
+    """
+    from agentdescent.dataloader import hf_rows
+
+    rows = hf_rows("google-research-datasets/mbpp", "test", config="full",
+                   limit=max(n * 2, 40))
+    rng = random.Random(seed)
+    rng.shuffle(rows)
+    tasks: List[Task] = []
+    for row in rows:
+        task = _mbpp_task(row)
+        if task is None:
+            continue
+        tasks.append(task)
+        if len(tasks) >= n:
+            break
+    return tasks
+
+
 WORKLOADS = {"hotpot": hotpot_tasks, "bbh": bbh_tasks, "gsm8k": gsm8k_tasks,
-             "gsm_hard": gsm_hard_tasks}
+             "gsm_hard": gsm_hard_tasks, "mbpp": mbpp_tasks}
 
 #: How each workload is indexed. A **table** rather than a chain of ``if``s
 #: because a missing branch is invisible until something asks for that
@@ -501,6 +634,8 @@ _INDEXERS = {
     "gsm8k": _index_of("openai/gsm8k", "test", "main", _gsm8k_task),
     "gsm_hard": _index_of("reasoning-machines/gsm-hard", "train", "default",
                           _gsm_hard_task),
+    "mbpp": _index_of("google-research-datasets/mbpp", "test", "full",
+                      _mbpp_task),
 }
 
 
@@ -513,7 +648,24 @@ _NEAR_MISS = {
     "bbh": lambda gold: f"The answer is {gold}.",
     "gsm8k": lambda gold: f"Working through it, the answer is {gold} (over 7 days).",
     "gsm_hard": lambda gold: f"Working through it, the answer is {gold} (over 7 days).",
+    # Code that reads like the reference and returns the wrong thing. The judge
+    # sees the same shape; the asserts do not.
+    "mbpp": lambda gold: _plausibly_broken(gold),
 }
+
+
+def _plausibly_broken(gold: str) -> str:
+    """The reference solution with one operator flipped, for `--dry-run`.
+
+    Not `"unknown"` and not a stub: the near-miss has to be something the
+    *judge* forgives, and a judge forgives code that looks like the reference.
+    Flipping a comparison keeps the shape and breaks the asserts, which is the
+    whole phenomenon in one string.
+    """
+    for a, b in (("<=", "<"), (">=", ">"), ("==", "!="), ("+", "-")):
+        if a in gold:
+            return gold.replace(a, b, 1)
+    return gold + "\n# (returns the wrong branch)"
 
 #: Wrong answers for `--dry-run`, several shapes rather than one constant.
 #:
@@ -538,6 +690,11 @@ _WRONG = {
                            f"{rng.randint(1, 400)}, so that is the answer."),
         lambda gold, rng: "I could not work this out.",
     ),
+    "mbpp": (
+        lambda gold, rng: "def solve():\n    pass",
+        lambda gold, rng: "I could not work out an implementation.",
+        lambda gold, rng: "def solve(:\n  return",          # a syntax error
+    ),
 }
 
 #: What the report calls each one. A report that says "HotpotQA validation" over
@@ -547,6 +704,7 @@ _WORKLOAD_LABELS = {
     "bbh": "BIG-Bench Hard across " + str(len(BBH_SUBTASKS)) + " subtasks",
     "gsm8k": "GSM8K test, scored on the final number",
     "gsm_hard": "GSM-Hard (GSM8K with large numbers), scored on the final number",
+    "mbpp": "MBPP, scored by executing each task's asserts",
 }
 
 

@@ -163,3 +163,30 @@ def test_a_unit_conversion_is_left_unclassified_rather_than_guessed_at():
         _rec("98,826 hours, 37 minutes, and 35 seconds"),
         ("q", "5929597.583333333", None))
     assert got != "equivalent-fraction"
+
+
+# -- MBPP: modes are about what the judge was reading -------------------------
+
+REF = "def remove_Occ(s, ch):\n    return s"
+
+
+@pytest.mark.parametrize("out,want", [
+    # The interesting case: the judge was looking at something shaped like the
+    # answer, which is where a rubric clause could help.
+    ("def remove_Occ(s, ch):\n    return s[1:]", "looks-like-the-reference"),
+    ("def other_name(s, ch):\n    return s", "different-approach"),
+    ("def remove_Occ(s, ch):\n    pass", "stub"),
+    ("def f(:\n  bad", "does-not-parse"),
+    ("```python\nx = 1\n```", "no-function"),
+    ("", "no-code"),
+])
+def test_code_modes_group_by_what_the_judge_was_reading(out, want):
+    assert audit_modes.code_error_mode(_rec(out), ("q", REF, None)) == want
+
+
+def test_a_docstring_only_body_is_a_stub():
+    """A judge saying yes to something that is not an implementation is a
+    different failure from one saying yes to a wrong implementation, and only
+    the second is about reading code."""
+    body = 'def remove_Occ(s, ch):\n    """Remove the first and last."""'
+    assert audit_modes.code_error_mode(_rec(body), ("q", REF, None)) == "stub"
