@@ -207,13 +207,40 @@ def markdown(arms: List[Dict[str, Any]], args, usage: Usage,
                  "prompt. Its disagreement with the stored scores is the judge "
                  "disagreeing with itself, and no other arm's improvement means "
                  "anything below it.", "",
-                 "| workload | n | flips vs the stored run | as a rate |",
-                 "|---|---|---|---|"]
+                 "| workload | n | flips vs the stored run | as a rate | "
+                 "`sigma` of the *same* prompt |",
+                 "|---|---|---|---|---|"]
+        improved = []
         for workload, cell in sorted(control["by_workload"].items()):
+            moved = ("**improved**" if cell["sigma_after"] < cell["sigma_before"]
+                     else "worsened" if cell["sigma_after"] > cell["sigma_before"]
+                     else "unchanged")
+            if cell["sigma_after"] < cell["sigma_before"]:
+                improved.append(workload)
             rows.append(f"| `{workload}` | {cell['n']} | "
                         f"{cell['flipped_vs_stored']} | "
-                        f"{cell['flipped_vs_stored'] / max(1, cell['n']):.1%} |")
+                        f"{cell['flipped_vs_stored'] / max(1, cell['n']):.1%} | "
+                        f"{cell['sigma_before']:.4f} -> "
+                        f"{cell['sigma_after']:.4f} ({moved}) |")
         rows.append("")
+        if improved:
+            rows += [
+                "!!! danger \"The control improved on itself\"",
+                f"    On `{'`, `'.join(improved)}` the **unchanged prompt** "
+                f"scored a smaller residual than the run that produced the "
+                f"stored scores. Nothing was fixed; the judge answered "
+                f"differently.",
+                "",
+                "    This is not a display artifact, it is the finding. A "
+                "`sigma` that fell is not evidence on its own when the verifier "
+                "is stochastic, and the control arm is the one row that can "
+                "demonstrate that -- it has no floor to be read against, because "
+                "it *is* the floor.",
+                "",
+                "    Read every other row's `helps` as \"cleared this\", and "
+                "read this row as how little that means.",
+                "",
+            ]
 
     rows += ["## Every arm, on both workloads", "",
              "`sigma` is the target. `delta` is reported and never scored: a "
@@ -232,8 +259,9 @@ def markdown(arms: List[Dict[str, Any]], args, usage: Usage,
                 f"{c['delta_before']:+.4f} -> {c['delta_after']:+.4f} | "
                 f"{c['disagree_before']:.3f} -> {c['disagree_after']:.3f} | "
                 f"{c['fixed']} | {c['broke']} | {c['changed']} | "
-                f"{c['noise_floor']} | "
-                f"{'yes' if c['helps'] else '**no**'} |")
+                + ("-- |" if arm["arm"] == "control" else f"{c['noise_floor']} | ")
+                + ("*is the floor* |" if arm["arm"] == "control"
+                   else "yes |" if c["helps"] else "**no** |"))
 
     rows += ["", "## Does it still rubber-stamp?", "",
              "Forgive every formatting difference the judge is *told* to "
@@ -277,7 +305,23 @@ def main() -> None:
     ap.add_argument("--max-tokens", type=int, default=16)
     ap.add_argument("--timeout", type=float, default=120.0)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--from-json", default=None,
+                    help="re-render the report from a previous run's JSON "
+                         "instead of spending 400 model calls to change a "
+                         "sentence")
     args = ap.parse_args()
+
+    if args.from_json:
+        payload = json.loads(pathlib.Path(args.from_json).read_text())
+        arms = payload["arms"]
+        usage = Usage()
+        usage.calls = payload.get("calls", 0)
+        text = markdown(arms, args, usage, payload.get("elapsed", 0.0))
+        out = pathlib.Path(args.out or args.from_json).with_suffix(".md")
+        out.write_text(text + "\n", encoding="utf-8")
+        print(text)
+        print(f"\nre-rendered {out} from {args.from_json}", file=sys.stderr)
+        return
 
     data: Dict[str, Tuple[List[AuditRecord], Dict[str, Task]]] = {}
     for name in args.workloads.split(","):
