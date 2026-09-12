@@ -223,6 +223,7 @@ evolve(
     self_verify: bool = True,
     held_out_frac: float = 0.4,
     repo_path: Optional[str] = None,
+    checkpointing: bool = False,
     agg_config: Optional[AggregatorConfig] = None,
     staleness_policy: Optional[StalenessPolicy] = None,
     aggregator_factory: Optional[AggregatorFactory] = None,
@@ -273,6 +274,7 @@ evolve(
 | `self_verify` | `bool` | `True` | Re-run the trajectory with the diff applied to record a local before/after delta. Doubles the rollouts spent per proposal; ports that score candidates only on held-out should pass `False`. |
 | `held_out_frac` | `float` | `0.4` | Fraction of `tasks` reserved for held-out scoring, in `(0, 1)`. |
 | `repo_path` | `Optional[str]` | `None` | Where the git-backed ledger lives. Omit for a throwaway repo that is removed when this call returns (not held until interpreter exit, so a sweep does not accumulate one git repo per run); **passing the same path again resumes** that ledger, and a caller-supplied path is never deleted. Git runs with an isolated config, so a personal `~/.gitconfig` (`commit.gpgsign`, `core.hooksPath`) cannot fail the ledger's own bookkeeping commits. |
+| `checkpointing` | `bool` | `False` | Save the aggregator's in-memory **search** state to `<repo_path>/checkpoints/` after every round, so a later run on the same `repo_path` resumes the search instead of re-deriving it from the ledger head. `repo_path` alone already resumes the *artifact*; what it cannot carry is what the search learned on the way there -- Beta posteriors, a population archive and its `selected` counts, the early-stop patience counter. Off by default, because a run that never resumes (a scratch repo, a tempdir) would pay the serialise-and-write for nothing, and because an aggregator opts in by implementing `checkpoint()` / `restore()` at all -- one without them is unaffected either way. A checkpoint that cannot be written or read (state that does not serialise, a lock another process holds, a full disk) is skipped, never raised: the cost of a missing checkpoint is a resume that starts the search fresh, which is what `False` does. |
 | `agg_config` | `Optional[AggregatorConfig]` | `None` | Tuning for the reference aggregator (batching, acceptance risk, trust region, staleness tolerance). |
 | `staleness_policy` | `Optional[StalenessPolicy]` | `None` | What to do with a diff proposed against an out-of-date version -- `full` / `guarded` (default) / `reflective`. |
 | `aggregator_factory` | `Optional[AggregatorFactory]` | `None` | Replace the optimizer entirely; receives `(ledger, verifier, audit, config, staleness_policy)`. |
@@ -1002,9 +1004,11 @@ Aggregator(
 | method | what it does |
 |---|---|
 | `begin_step(*, skip_in_flight: bool = False) -> List[Union['_Candidate', MergeReport]]` | Phases 1 and 2: tick, drain what is ready, choose candidates. |
+| `checkpoint() -> Optional[dict]` | Serialise the search state the ledger does not persist. |
 | `finalize() -> None` | Publish the current dev head to stable at the end of a clean run. |
 | `finish_step(items: List[Union['_Candidate', MergeReport]]) -> List[MergeReport]` | Phase 3: decide the measured candidates, then age and promote. |
 | `measure(items: List[Union['_Candidate', MergeReport]]) -> List[Union['_Candidate', MergeReport]]` | Phase 2 for a batch from `begin_step`. **Off-thread safe.** |
+| `restore(state: dict) -> None` | Restore state written by `checkpoint`. |
 | `step() -> List[MergeReport]` | Fire every artifact bucket that is ready and return per-artifact reports. |
 
 ### `AggregatorConfig(...)`
@@ -1481,7 +1485,9 @@ PopulationAggregator(
 
 | method | what it does |
 |---|---|
+| `checkpoint() -> Optional[dict]` | Serialise the archive and the selection counter. |
 | `finalize() -> None` | Leave the best-scoring candidate on the head, then promote. |
+| `restore(state: dict) -> None` | Restore the archive written by `checkpoint`. |
 | `step() -> List[MergeReport]` | Fire every artifact bucket that is ready and return per-artifact reports. |
 
 ### `population_factory(...)`
@@ -1810,6 +1816,7 @@ async_evolve(
     oracle_budget: int = 200,
     cheap_eval_tasks: Optional[int] = None,
     fusion_tournament: Optional[bool] = None,
+    checkpointing: bool = False,
     solved_threshold: float = 0.999,
     shuffle: bool = False,
     seed: int = 0,
@@ -1858,6 +1865,7 @@ async_evolve(
 | `oracle_budget` | `int` | `200` | As `tasks`. |
 | `cheap_eval_tasks` | `Optional[int]` | `None` | As in `evolve`: how many held-out tasks the cheap layer scores when ranking candidates. `None` is 8, or the whole held-out set when that is smaller. |
 | `fusion_tournament` | `Optional[bool]` | `None` | As in `evolve`: rank the survivors against their fusion before putting one forward. `None` defers to `agg_config`, which is off. The cost/benefit is identical on this path -- there is one merger thread here too, and it pays the ranking on the critical path of every commit. |
+| `checkpointing` | `bool` | `False` | As in `evolve`: save the aggregator's search state each round so a later run on the same `repo_path` resumes the search, not just the artifact. Off by default. The merger is the only thread that records a round here, so the write sits on the same single-writer path it does on the synchronous side. |
 | `solved_threshold` | `float` | `0.999` | As in `evolve`: the reward at which a task counts as solved and no proposal is requested. Lower it for a graded scorer. |
 | `shuffle` | `bool` | `False` | As in `evolve`: shuffle before the positional train/held-out split. Off by default. |
 | `seed` | `int` | `0` | As `shuffle`. |

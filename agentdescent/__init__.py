@@ -107,6 +107,14 @@ from .policies import (
     VerifierProtocol,
 )
 from .evalcache import CacheProtocol, FileCache, MemoryCache
+from .checkpoint import (
+    save_checkpoint,
+    load_checkpoint,
+    restore_checkpoint,
+    restore_early_stop,
+    clear_checkpoints,
+    list_checkpoints,
+)
 from .executor import Executor, Result, ThreadExecutor
 from .sandbox import LocalWorkspaceSandbox, SandboxPool, WorkspaceProvider
 from .sandbox_shared import SharedSandboxPool

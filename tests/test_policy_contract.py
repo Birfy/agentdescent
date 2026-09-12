@@ -453,6 +453,8 @@ def test_an_in_memory_ledger_is_enough_to_finish_a_run(tmp_path):
 
     class Recording:
         def __init__(self, inner): self.inner = inner
+        @property
+        def repo_path(self): return self.inner.repo_path
         def register(self, artifact, branch=Ledger.DEV):
             calls.append("register")
             return self.inner.register(artifact, branch)
