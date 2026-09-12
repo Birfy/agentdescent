@@ -18,6 +18,12 @@ independent.
 | BBH | does content implying (B) count as "(B)"? | 55.1% | **32.7%** |
 | GSM8K | is this number that number? | **98.3%** | 0.0% |
 | GSM-Hard | is this number that number? | 79.6% | **3.7%** |
+| MBPP | does this code do what that code does? | 75.5% | **18.6%** |
+
+**The last two rows are the argument.** GSM-Hard and MBPP put the solver at
+79.6% and 75.5% -- near enough the same difficulty -- and the judge's error rate
+differs by **five times**. The solver is not the variable. Whether grading is a
+judgement call is.
 
 Every cell is recomputed from the committed records by
 `reports/judge_error_table.py`; the BBH row read 67.3% in a first draft, which
@@ -47,17 +53,42 @@ would have sent the improvement pool's budget after it. `equivalent-fraction` is
 now its own mode. The unit conversion is left unclassified rather than guessed
 at.
 
+## The workload that works
+
+MBPP: the oracle runs the task's own asserts, the judge is shown the reference
+solution and has to decide whether a differently-written candidate does the same
+thing. It cannot execute anything, two correct solutions look nothing alike, and
+a subtly wrong one looks exactly like a right one.
+
+**Verdict PROCEED** -- the first since BBH. `Delta = +0.0882`, clustered 95% CI
+`[0.0096, 0.1748]`, which excludes zero; `|Delta| / gate sd = 1.68`, so a
+correction changes decisions. 307 model calls, 279s.
+
+And the errors are the ones the setup predicts. Of nineteen disagreements,
+**twelve are `looks-like-the-reference`**: the judge said yes to code shaped like
+the answer that does not pass the asserts. Six are `does-not-parse` and one is
+`no-function` -- a judge saying yes to something that is not a program, which is
+a different bug and is kept in a different bucket for that reason.
+
 ## What this means for rung 5
 
-`P(new)` on GSM-Hard's improvement pool is **0.0455**, against a gate of 0.25.
-The gate still refuses, and adding a fifth workload of the same kind would not
-change that, because these workloads do not produce judge errors to learn from.
+MBPP supplies the judge errors. It does **not** clear the gate: `P(new)` on its
+improvement pool is **0.02**, against a threshold of 0.25.
 
-**The workload rung 5 needs is one where grading is hard, not one where solving
-is hard.** Long-form answers, multi-part answers, answers whose correctness is a
-judgement call -- code review, summarisation, an agent trajectory. That is also
-the setting the audit package exists for: when `reward` is a fact about the
-output, none of this is needed.
+That refusal is now worth doubting, and the doubt is about the gate rather than
+the pool. Good--Turing estimates the chance the next label shows a *species* not
+yet seen, and `code_error_mode` has six species. After nineteen disagreements
+covering three of them, "no new kinds left" is true and is **not** the question
+rung 5 needs answered. Twelve examples of one mode is a thing a rubric clause
+can be written against; a mode function with a bounded range cannot express that,
+and every mode function here has a bounded range except HotpotQA's, which only
+escapes it through an `other:<task>` catch-all that makes each unclassified
+error its own species.
+
+So the gate as specified tests *variety* and rung 5 needs *sufficiency*. Both
+matter -- a pool that keeps finding new kinds is one you should keep labelling --
+but refusing on variety alone rejects the case this whole line of work was
+trying to reach.
 
 Two smaller findings from the same runs, recorded so they are not re-derived:
 

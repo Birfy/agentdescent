@@ -22,6 +22,7 @@ STORES = [
     ("BBH", "reports/audit_phase0_bbh_2026-09-10.jsonl"),
     ("GSM8K", "reports/audit_phase0_2026-09-12_gsm8k.jsonl"),
     ("GSM-Hard", "reports/audit_phase0_2026-09-12_gsm_hard.jsonl"),
+    ("MBPP", "reports/audit_phase0_2026-09-12_mbpp.jsonl"),
 ]
 
 
