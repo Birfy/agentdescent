@@ -4,7 +4,7 @@ site_name: AgentDescent
 # named method -- were in none of these pages' metadata.
 site_description: >-
   A parallel, asynchronous framework for self-evolving LLM agents, with runnable
-  reproductions of nineteen published self-evolution algorithms.
+  reproductions of twenty published self-evolution algorithms.
 # Required for canonical URLs, an absolute-URL sitemap, and the social cards
 # below -- without it mkdocs emits neither, and the social plugin warns.
 site_url: https://birfy.github.io/agentdescent/
@@ -128,6 +128,7 @@ nav:
     - Agent0 — tool curriculum: algo-agent0.md
     - SICA — self-edit: algo-sica.md
     - Gödel Agent — self-modification: algo-godel-agent.md
+    - Genesis — persistent recursive worlds: algo-genesis.md
   - Design records:
     - Evolving a directory: design-directory-evolution.md
     - Plugin for DSH, Claude Code, Codex and other agents: plugin-design.md

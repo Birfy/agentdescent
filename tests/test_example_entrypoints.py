@@ -40,6 +40,7 @@ try:                                    # numpy is optional for this repo
 except ImportError:                     # ...and the LLM-SRBench task needs it
     era_srbench = None
 from examples.evoskill import evoskill_skill_discovery as evoskill
+from examples.genesis import genesis_recursive_worlds as genesis
 from examples.gepa import gepa_prompt_evolution as gepa
 from examples.porous import porous_tree_search as porous
 from examples.openevolve import openevolve_program_evolution as openevolve
@@ -124,6 +125,15 @@ PORTS = (
     # itself.
     Port(metasearch, "rounds", "deepseek-v4-flash", 1800.0, "run_outer",
          provider="openai", async_ratio=1),
+    # Genesis. Its model default is `None` for DGM's reason: the offline actors
+    # are rule-based and need no API. `--episodes` is upstream's own unit (an
+    # agent episode) and a ROOT episode is one rollout, so the shared budget flag
+    # maps onto it. Its loader computes the frozen suite's expectations from the
+    # reference tree, so `build_tasks` is the boundary a dry-run must not cross,
+    # and the async budget is wall-clock for child processes rather than API
+    # calls.
+    Port(genesis, "episodes", None, 120.0, "build_tasks",
+         async_ratio=3, budget_is_iterations=True),
 )
 
 # ERA's fourth task, equation discovery on LLM-SRBench. Same deviations again,
@@ -194,7 +204,11 @@ def test_every_port_can_hold_its_rollout_budget_fixed(port):
     """
     source = pathlib.Path(inspect.getfile(port.module)).read_text(encoding="utf-8")
     if port.budget_is_iterations:
-        assert "args.iterations = args.budget_rollouts" in source, (
+        # Named from the row rather than hardcoded to `iterations`: the whole
+        # point of `Port.iteration` is that a port keeps its upstream vocabulary,
+        # and a port whose unit is the episode was declaring this correctly and
+        # failing anyway.
+        assert f"args.{port.iteration} = args.budget_rollouts" in source, (
             f"{PORT_IDS[PORTS.index(port)]} declares its iteration budget is the "
             "rollout budget; map the shared flag onto it")
         return
@@ -223,7 +237,10 @@ def test_every_port_uses_the_standard_contract(port):
     for option in ("--provider", "--model", "--seed", "--async", "--async-ratio",
                    "--max-seconds", "--dry-run", "--yes", "--serial"):
         assert option_strings.count(option) == 1, f"{port.module.__name__}: {option}"
-    iteration_options = {"--rounds", "--generations", "--iterations", "--steps"}
+    # Upstream vocabulary, not a normalised one: `--episodes` is Genesis's own
+    # unit ("1,019 archived agent episodes"), as `--generations` is DGM's.
+    iteration_options = {"--rounds", "--generations", "--iterations", "--steps",
+                         "--episodes"}
     assert iteration_options.intersection(option_strings) == {f"--{port.iteration}"}
 
 

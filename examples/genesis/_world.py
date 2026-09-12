@@ -1,0 +1,279 @@
+"""``(v, p)``: the two coordinates Genesis situates an agent by, and the log of
+what the finite-lived agents did while they existed.
+
+The paper's whole model is one pair::
+
+    w = (v, p)          accepted version, repository-relative path
+
+``v`` is already the engine's: a ledger snapshot with a version vector. ``p`` has
+no counterpart at all -- a worker here holds the whole artifact and may write any
+key -- so it is defined in this module, and everything downstream (the spatial
+contract in :mod:`examples.genesis._spatial`, the recursion in
+:mod:`examples.genesis._delegation`) is written against it rather than against a
+path string passed around by hand.
+
+Two operations act on the pair, and they differ in exactly one way:
+
+``(v, p) ⇝ (v, q)``   recursive delegation -- the path moves, the version does not
+``(v, p) → (v′, p)``  an accepted event -- the version moves
+
+The first is the proposal policy's business and never touches the ledger; the
+second is the aggregator's commit. Keeping them apart is the reason this file
+exists: a delegation that advanced the version would make the recursion a
+sequence of commits, which is the serial system Genesis is defined against.
+
+:class:`WorldLog` is the other half. Agents are finite-lived by construction here
+-- a rollout ends and its Python objects are collected -- so the only way depth,
+episode counts and a parent's verdict survive the episode is to write them
+somewhere the run can read afterwards. That is what the archive is upstream, and
+the log is deliberately *not* part of the artifact: a record the agents could
+edit is not evidence about them.
+"""
+
+from __future__ import annotations
+
+import threading
+from dataclasses import dataclass, field
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
+
+__all__ = [
+    "CONTEXT_FILE",
+    "EpisodeRecord",
+    "LocalWorld",
+    "WorldLog",
+    "child_paths",
+    "normalise",
+    "owns",
+]
+
+#: The per-directory context record. Version-controlled, so it is part of ``v``
+#: and a later agent inherits it -- which is the point: it is how a rejected
+#: attempt leaves something behind (paper, appendix 1.4).
+CONTEXT_FILE = "CONTEXT.md"
+
+
+def normalise(path: str) -> str:
+    """Canonical prefix form: ``"./"``, ``"."``, ``"src/"`` and ``"src"`` agree.
+
+    The root is the empty string rather than ``"."`` so that ``owns`` and
+    ``startswith`` need no special case, and so a stray ``"./"`` from a model
+    reply cannot become a directory literally named ``.``.
+    """
+    p = (path or "").strip().replace("\\", "/").strip("/")
+    while p.startswith("./"):
+        p = p[2:]
+    return "" if p in ("", ".") else p
+
+
+def owns(owner: str, path: str) -> bool:
+    """Does an agent situated at ``owner`` have authority over ``path``?
+
+    The root owns everything; any other node owns its own subtree and nothing
+    else. This is the whole spatial contract -- everything in ``_spatial.py`` is
+    the enforcement of this one predicate.
+    """
+    owner = normalise(owner)
+    path = normalise(path)
+    return owner == "" or path == owner or path.startswith(owner + "/")
+
+
+def child_paths(owner: str, paths: Sequence[str]) -> List[str]:
+    """The immediate sub-directories of ``owner`` present in ``paths``.
+
+    What a manager can delegate *to* without inventing a decomposition: the
+    routing table of the node it is standing on.
+    """
+    owner = normalise(owner)
+    prefix = f"{owner}/" if owner else ""
+    out = set()
+    for path in paths:
+        path = normalise(path)
+        if not owns(owner, path) or path == owner:
+            continue
+        tail = path[len(prefix):]
+        if "/" in tail:
+            out.add(prefix + tail.split("/", 1)[0])
+    return sorted(out)
+
+
+@dataclass(frozen=True)
+class LocalWorld:
+    """One ``w = (v, p)``.
+
+    ``version`` is carried for the record only -- the engine stamps the real
+    version vector onto the diff -- but a world without it is not the paper's
+    object, and the delegation log is unreadable without knowing which version a
+    depth-3 executor was standing on.
+    """
+
+    version: int
+    path: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "path", normalise(self.path))
+
+    def delegate(self, q: str) -> "LocalWorld":
+        """``(v, p) ⇝ (v, q)`` -- the path moves, the version does not.
+
+        Refuses to leave the subtree: a parent may only situate a child *below*
+        itself, or the contract its own parent is enforcing is unenforceable one
+        level down.
+        """
+        q = normalise(q)
+        if not owns(self.path, q):
+            raise ValueError(
+                f"delegation must stay inside the parent's subtree: "
+                f"{self.path or './'} cannot situate a child at {q or './'}")
+        return LocalWorld(version=self.version, path=q)
+
+    def situate(self, state: Mapping[str, str], *, max_chars: int = 8_000) -> str:
+        """The context an agent entering this world is given.
+
+        Upstream (``EvoGit.Core.ContextNode.build_context/2``) walks root → path
+        and concatenates each directory's ``CONTEXT.md``; the agent inherits the
+        chain, not just its own node. Reproduced here, plus a listing of the
+        files it is responsible for -- an executor cannot edit what it cannot
+        see, and handing it the whole tree is what the path coordinate exists to
+        avoid.
+        """
+        parts: List[str] = []
+        for node in self._chain():
+            key = f"{node}/{CONTEXT_FILE}" if node else CONTEXT_FILE
+            body = state.get(key)
+            if body:
+                parts.append(f"--- {key} ---\n{body.strip()}")
+        mine = sorted(p for p in state if owns(self.path, p))
+        listing = "\n".join(f"  {p} ({len(state[p])} bytes)" for p in mine) or "  (empty)"
+        parts.append(f"--- files under {self.path or './'} ---\n{listing}")
+        text = "\n\n".join(parts)
+        return text if len(text) <= max_chars else text[:max_chars] + "\n... [truncated]"
+
+    def _chain(self) -> List[str]:
+        """Root first, this node last -- the inheritance order upstream uses."""
+        if not self.path:
+            return [""]
+        nodes, acc = [""], ""
+        for part in self.path.split("/"):
+            acc = f"{acc}/{part}" if acc else part
+            nodes.append(acc)
+        return nodes
+
+
+@dataclass
+class EpisodeRecord:
+    """One finite-lived agent, after it has ceased to exist.
+
+    ``verdict`` is the responsible parent's, not the gate's: upstream the parent
+    decides accept / reject / request-more-work on the returned contribution, and
+    only what survives that is offered to the version history at all.
+    """
+
+    agent_id: str
+    role: str                    # "manager" | "executor"
+    path: str
+    depth: int
+    version: int
+    objective: str = ""
+    verdict: str = "accepted"    # "accepted" | "rejected" | "rework"
+    n_edits: int = 0
+    reason: str = ""
+
+
+class WorldLog:
+    """The archive: episodes, and the rework a parent asked for and did not get.
+
+    Thread-safe because the engine's workers are threads and every one of them
+    runs its own recursion into the same log.
+
+    ``rework`` is how "request more work" survives a boundary the engine has no
+    third outcome for. :class:`~agentdescent.policies.AcceptDecision` is a
+    boolean, so a parent's *not yet* is recorded here and read by the next
+    round's manager, which re-delegates to that path instead of choosing freely.
+    That is the upstream behaviour reconstructed out of parts the engine already
+    has -- not the engine growing a third verdict.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._episodes: List[EpisodeRecord] = []
+        self._rework: Dict[str, str] = {}
+        self._contract_violations = 0
+        self._counter = 0
+
+    # -- episodes ----------------------------------------------------------
+
+    def next_id(self, role: str) -> str:
+        with self._lock:
+            self._counter += 1
+            return f"{role[0].upper()}{self._counter:04d}"
+
+    def record(self, episode: EpisodeRecord) -> EpisodeRecord:
+        with self._lock:
+            self._episodes.append(episode)
+        return episode
+
+    @property
+    def episodes(self) -> List[EpisodeRecord]:
+        with self._lock:
+            return list(self._episodes)
+
+    def observed_depth(self) -> int:
+        """The deepest episode actually run -- the number upstream reports (4/5/8).
+
+        Observed, not configured: a ``--depth 8`` run whose managers never
+        delegate that far reports what happened, which is the only version of
+        this number worth comparing with a paper.
+        """
+        with self._lock:
+            return max((e.depth for e in self._episodes), default=0)
+
+    def verdicts(self) -> Dict[str, int]:
+        out: Dict[str, int] = {}
+        for episode in self.episodes:
+            out[episode.verdict] = out.get(episode.verdict, 0) + 1
+        return out
+
+    # -- rework ------------------------------------------------------------
+
+    def request_rework(self, path: str, reason: str) -> None:
+        with self._lock:
+            self._rework[normalise(path)] = reason
+
+    def take_rework(self) -> Optional[Tuple[str, str]]:
+        """Pop one outstanding request, oldest first. ``None`` when there is none."""
+        with self._lock:
+            if not self._rework:
+                return None
+            path = next(iter(self._rework))
+            return path, self._rework.pop(path)
+
+    @property
+    def pending_rework(self) -> Dict[str, str]:
+        with self._lock:
+            return dict(self._rework)
+
+    # -- the spatial contract ---------------------------------------------
+
+    def note_contract_violation(self, n: int = 1) -> None:
+        with self._lock:
+            self._contract_violations += n
+
+    @property
+    def contract_violations(self) -> int:
+        """Edits dropped for escaping their author's subtree.
+
+        Counted rather than swallowed, for the reason the engine counts
+        ``section-violation``: a run whose proposals were all discarded and a run
+        whose agents had nothing to say look identical without it, and they need
+        opposite fixes.
+        """
+        with self._lock:
+            return self._contract_violations
+
+    def summary(self) -> str:
+        verdicts = self.verdicts()
+        return (f"episodes={len(self.episodes)}  depth={self.observed_depth()}  "
+                f"accepted={verdicts.get('accepted', 0)}  "
+                f"rejected={verdicts.get('rejected', 0)}  "
+                f"rework={verdicts.get('rework', 0)}  "
+                f"contract_violations={self.contract_violations}")

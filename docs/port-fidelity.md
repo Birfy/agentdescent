@@ -1,6 +1,6 @@
 # Port fidelity — what each port follows, and where it departs
 
-Nineteen published self-evolution algorithms run on this engine — eight as benchmark-faithful ports, eleven as declared microports and analogues. Every one of them
+Twenty published self-evolution algorithms run on this engine — eight as benchmark-faithful ports, twelve as declared microports and analogues. Every one of them
 was published as a **serial** loop, and every one of them here runs in parallel
 with a merge step the original does not have. That is only an interesting claim
 if the algorithm is otherwise untouched — a "parallelised GEPA" that quietly
@@ -20,9 +20,9 @@ the axis the differences actually fall on, and because the answer is not always
     contradicts reproduces something nobody ran.
 
 !!! note "Fidelity is a per-port property, not a tier"
-    All nineteen ports sit side by side in
+    All twenty ports sit side by side in
     [Self-evolution algorithms](self-evolution-examples.md); what differs is
-    each port's recorded fidelity class. Eleven of them run compact domains or
+    each port's recorded fidelity class. Twelve of them run compact domains or
     substituted environments and say so on their pages -- a mechanism
     microport or an environment, inference, or self-edit analogue is not a
     faithful benchmark port, and the [runtime matrix](matrix-overview.md)
@@ -426,6 +426,50 @@ speedup outright where the cells show the arms did not spend the same budget,
 which is the one check that cannot be done by reading the flags that were
 passed.
 
+## Genesis — Persistent Recursive Worlds
+
+* **Paper**: a software project that persists while its agents do not. An agent
+  is situated by `w = (v, p)` — an accepted version and a repository path;
+  delegation `(v,p) ⇝ (v,q)` moves the path and **not** the version, and only an
+  accepted event `(v,p) → (v′,p)` advances the project.
+* **Released code**: the parent merges its children with `git merge --octopus`
+  (`adapters/git.ex:284`) and hands a real conflict back to itself as prompt text
+  (`agent/subagent_processing.ex:527`); the parent's acceptance rule is monotone —
+  *"Partial progress is accepted — a version is accepted if it improves the
+  codebase, even if other parts remain broken"* (`agents/manager.ex:58`); the
+  spatial contract is *"every agent is only supposed to edit files belonging to
+  its own path"* (`agents/manager.ex:179`).
+* **This port follows**: the code, including the acceptance rule — which is the
+  *must not change* column above, so the engine's Beta gate is the opt-in control
+  arm (`--engine-gate`) rather than the default.
+* **Where the paper and the code disagree, and this port follows the code —
+  twice.** (1) The paper describes accepted events advancing the version history;
+  in the released code `Helpers.merge_and_report/4` **never merges** — it creates
+  a `genesis/agent_<hex>` branch, and the merge is a button on the dashboard
+  (`EvoGit.Review.merge_branch/2,3`). The automatic judging is the one inside the
+  recursion, parent on child; the task-level accept has a human in it. (2) The
+  paper's appendix §1.3 says the model has two roles and that the released code's
+  other labels are implementation labels; the code has ten agent modules. Two are
+  ported.
+* **Departures**: the benchmark is not reproduced and is not claimed — upstream's
+  formation run is 123.4 h, US$44.38 and **one sample**, so the domain is a
+  compact formation stand-in and the fidelity class is `mechanism_microport` for
+  that reason alone. Multi-repository work, the desktop shell, the dashboard and
+  peak-hour scheduling are out of scope. Observed recursion depth is 2 here and
+  4–8 upstream, because the domain's decomposition is three nodes deep.
+* **Two engine boundaries it ran into, recorded rather than routed around.**
+  Tensor parallelism is the engine's own statement of the spatial contract, and
+  it cannot be used: its ownership map is fixed before round 0, so every file the
+  run *creates* is a `section-violation` — and creating files is what a formation
+  run is. And the audit gate runs **before** acceptance, vetoing anything that
+  does not strictly improve above `FAST_MAX`, which contradicts "partial progress
+  is accepted"; the world therefore sits at L2, which is honest here only because
+  the suite and its harness live outside the artifact and `spec/**` is refused to
+  every proposal.
+* **Selection rule lives in**: nowhere separate — Genesis has no candidate
+  archive. The recursion is the search.
+* **Details**: [algo-genesis.md](algo-genesis.md)
+
 ## The eleven MethodPolicy ports
 
 Their departures are not repeated here. Each one's page carries a **Boundaries**
@@ -435,7 +479,7 @@ section naming exactly what its compact or substituted domain gives up, and a
 port is. Start from the
 [table of all eleven](self-evolution-examples.md#the-eleven-microports-and-analogues);
 their measured results are
-[in one place](self-evolution-examples.md#measured-results-all-nineteen), and the
+[in one place](self-evolution-examples.md#measured-results-all-twenty), and the
 scheduler comparison they exist for is the [runtime matrix](matrix-overview.md).
 
 What they share is the thing the fidelity class encodes: **a `mechanism_microport`
