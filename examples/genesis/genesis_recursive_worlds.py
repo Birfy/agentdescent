@@ -85,20 +85,29 @@ from examples._common import (add_standard_args, budget_kwargs, completion_for,
 
 from ._delegation import RecursiveDelegation
 from . import _domain as minilang
+from . import _jqx as jqx
+from . import _md as md
 from . import _stackvm as stackvm
 from ._judge import ParentJudge
 from ._octopus import OctopusConflict, git_available
 from ._spatial import SpatialContract
 from ._world import WorldLog
 
-#: The formation domains. Two, because one was not enough to show the recursion
-#: going anywhere: minilang is two nodes deep and four files, stackvm is four and
-#: ten. Both are stand-ins for upstream's 123.4-hour compiler run and say so.
-DOMAINS = {"minilang": minilang, "stackvm": stackvm}
+#: The formation domains. Three, and each answers something the one before could
+#: not: minilang shows the mechanism, stackvm gives the recursion somewhere to go,
+#: jqx comes out as a program you can run -- its command-line entry point is
+#: frozen beside the specification, so a finished run is software rather than a
+#: package nobody can invoke -- and md cannot be passed by code that merely
+#: parses, because four of its ten stages are invariants rather than values. All
+#: four are stand-ins for upstream's 123.4-hour compiler run and say so.
+DOMAINS = {"minilang": minilang, "stackvm": stackvm, "jqx": jqx, "md": md}
 
 DOMAIN_BLURB = {
     "minilang": "an integer expression language (2 nodes deep, 4 files)",
     "stackvm": "a stack machine and its assembler (4 nodes deep, 10 files)",
+    "jqx": "a JSON query tool with a frozen CLI (4 nodes, 9 files, 4 stages)",
+    "md": ("Lennard-Jones molecular dynamics (6 nodes, 15 files, 10 stages, "
+           "4 of them invariants)"),
 }
 
 

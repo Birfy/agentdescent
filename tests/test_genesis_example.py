@@ -15,10 +15,12 @@ from agentdescent.aggregator import AggregatorConfig, MergeOutcome, diffs_contra
 from agentdescent.defaults import DefaultAcceptance, DefaultConflict
 from agentdescent.evolution import EvolvingArtifact, Task, evolve
 from agentdescent.evolvable import Diff, EvidenceCard
-from agentdescent.filetree import canonical
+from agentdescent.filetree import canonical, match_any
 from agentdescent.policies import MergeContext, Policies, ProposalContext
 
 from examples.genesis import _domain as domain
+from examples.genesis import _jqx as jqx
+from examples.genesis import _md as md
 from examples.genesis import _stackvm as stackvm
 from examples.genesis._delegation import (Brief, Delegation, Edit,
                                           RecursiveDelegation, render_edits)
@@ -638,7 +640,11 @@ def test_an_outstanding_rework_request_is_taken_before_a_free_choice():
 # The domain, and one end-to-end formation
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("spec", [domain, stackvm], ids=["minilang", "stackvm"])
+DOMAINS = [domain, stackvm, jqx, md]
+DOMAIN_IDS = ["minilang", "stackvm", "jqx", "md"]
+
+
+@pytest.mark.parametrize("spec", DOMAINS, ids=DOMAIN_IDS)
 def test_every_formation_domain_agrees_with_its_own_oracle(spec):
     """A suite that disagrees with its oracle scores a correct candidate wrong."""
     tasks, run = spec.build_tasks(), spec.make_runner()
@@ -646,12 +652,43 @@ def test_every_formation_domain_agrees_with_its_own_oracle(spec):
     assert sum(spec.reward(t, run(rendered, t)) for t in tasks) == len(tasks)
 
 
-@pytest.mark.parametrize("spec", [domain, stackvm], ids=["minilang", "stackvm"])
+@pytest.mark.parametrize("spec", DOMAINS, ids=DOMAIN_IDS)
 def test_every_formation_domain_starts_with_no_implementation(spec):
     files = spec.initial_files()
-    assert files and all(p.endswith(".md") for p in files)
+    # Markdown, plus any frozen entry script the human supplies -- a domain whose
+    # result is a program needs a shell around the library, and that shell is the
+    # human's, not an agent's.
+    frozen_scripts = [p for p in files if not p.endswith(".md")]
+    assert files and all(match_any(p, spec.FROZEN) for p in frozen_scripts)
     tasks, run = spec.build_tasks(), spec.make_runner()
     assert sum(spec.reward(t, run(canonical(files), t)) for t in tasks) == 0
+
+
+@pytest.mark.parametrize("spec", DOMAINS, ids=DOMAIN_IDS)
+def test_every_stage_is_reachable_from_the_train_split(spec):
+    """A unit the train split cannot reach is a unit the run can never grow.
+
+    Found the expensive way on jqx: the case list was ordered by filter, so two
+    builtins appeared only in the held-out tail. No rollout could fail on them, so
+    no proposal was ever requested for them, and the run stalled at 0.923 with two
+    stubs open and `stop reason: rounds`. `evolve()` splits by position, so this is
+    a property of the *order* of the case list, and nothing else checks it.
+    """
+    tasks = spec.build_tasks()
+    train = tasks[:int(len(tasks) * 0.6)]          # evolve(held_out_frac=0.4)
+    missing = sorted(set(t.meta["kind"] for t in tasks)
+                     - set(t.meta["kind"] for t in train))
+    assert not missing, f"stages only in the held-out tail: {missing}"
+
+
+def test_the_md_suite_cannot_be_passed_by_returning_true():
+    """Four of md's ten stages are invariants, which is a cheatable shape.
+
+    One `cons` case uses a timestep far too large, so its answer is `False` -- a
+    stage that returns `True` without computing anything fails the suite.
+    """
+    golds = {t.meta["gold"] for t in md.build_tasks() if t.meta["kind"] == "cons"}
+    assert golds == {"True", "False"}
 
 
 def test_stackvm_is_deeper_than_minilang_which_is_why_it_exists():

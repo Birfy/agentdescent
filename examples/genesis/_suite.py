@@ -65,11 +65,35 @@ import json, sys
 sys.path.insert(0, sys.argv[1])
 cases = json.loads(sys.argv[2])
 stages = json.loads(sys.argv[3])
+digits = json.loads(sys.argv[4])
 import src
+
+
+def canonical(value):
+    # Rounded before repr, for a domain whose answers are floating point: two
+    # correct implementations of the same formula differ in the last bits by
+    # summation order alone, and comparing full repr would score a correct
+    # candidate wrong. `None` leaves the value untouched.
+    if digits is None:
+        return value
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, float):
+        rounded = round(value, digits)
+        return 0.0 if rounded == 0 else rounded
+    if isinstance(value, list):
+        return [canonical(v) for v in value]
+    if isinstance(value, tuple):
+        return tuple(canonical(v) for v in value)
+    if isinstance(value, dict):
+        return {k: canonical(v) for k, v in value.items()}
+    return value
+
+
 out = []
 for kind, source in cases:
     try:
-        out.append(repr(getattr(src, stages[kind])(source)))
+        out.append(repr(canonical(getattr(src, stages[kind])(source))))
     except Exception as exc:            # a stage that is not built yet
         out.append("ERROR:" + type(exc).__name__)
 print(json.dumps(out), end="")
@@ -77,8 +101,15 @@ print(json.dumps(out), end="")
 
 
 def run_cases(state: Mapping[str, str], cases: Sequence[Sequence[str]],
-              stages: Mapping[str, str], *, timeout: float = 60.0) -> List[str]:
-    """Materialise ``state`` and evaluate every case in one child process."""
+              stages: Mapping[str, str], *, digits: Optional[int] = None,
+              timeout: float = 60.0) -> List[str]:
+    """Materialise ``state`` and evaluate every case in one child process.
+
+    ``digits`` rounds every float in a result before it is compared. A domain
+    whose answers are exact -- a token list, a parse tree -- leaves it ``None``;
+    one whose answers are floating point needs it, because two correct
+    implementations of one formula differ in the last bits by summation order.
+    """
     if not cases:
         return []
     workspace = tempfile.mkdtemp(prefix="genesis-run-")
@@ -86,7 +117,7 @@ def run_cases(state: Mapping[str, str], cases: Sequence[Sequence[str]],
         materialize(state, workspace)
         proc = subprocess.run(
             [sys.executable, "-c", _HARNESS, workspace, json.dumps(list(cases)),
-             json.dumps(dict(stages))],
+             json.dumps(dict(stages)), json.dumps(digits)],
             capture_output=True, text=True, timeout=timeout, cwd=workspace)
         if proc.returncode != 0:
             return [CRASHED] * len(cases)
@@ -127,6 +158,9 @@ class Suite:
     #: The finished repository: the oracle the expectations come from, and what
     #: the offline actors reveal.
     reference: Mapping[str, str]
+    #: Decimal places every float in a result is rounded to before comparison.
+    #: ``None`` for a domain whose answers are exact.
+    digits: Optional[int] = None
 
     # -- the repository -----------------------------------------------------
 
@@ -147,7 +181,8 @@ class Suite:
         also the boundary ``--dry-run`` must not cross.
         """
         cases = list(self.cases)[:limit] if limit else list(self.cases)
-        gold = run_cases(self.reference_tree(), cases, self.stages)
+        gold = run_cases(self.reference_tree(), cases, self.stages,
+                         digits=self.digits)
         tasks: List[Task] = []
         for i, ((kind, source), expected) in enumerate(zip(cases, gold)):
             if expected.startswith("ERROR:"):
@@ -174,7 +209,8 @@ class Suite:
             for path, content in self.given.items():
                 if match_any(path, self.frozen):
                     state[path] = content
-            return run_cases(state, [(task.meta["kind"], task.prompt)], self.stages)[0]
+            return run_cases(state, [(task.meta["kind"], task.prompt)],
+                             self.stages, digits=self.digits)[0]
 
         return run
 
@@ -202,7 +238,7 @@ class Suite:
         cached: Dict[int, int] = {}
 
         def score(state: Mapping[str, str]) -> int:
-            got = run_cases(state, cases, self.stages)
+            got = run_cases(state, cases, self.stages, digits=self.digits)
             return sum(1 for out, want in zip(got, gold) if out == want)
 
         def review(parent, returned):
