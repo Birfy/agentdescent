@@ -79,6 +79,7 @@ import argparse
 from agentdescent import Policies, evolve
 from agentdescent.evolution import EvolvingArtifact
 from agentdescent.agents import Usage
+from agentdescent.filetree import load_tree, match_any
 from agentdescent.governance import SKILL_BLAST_RADIUS, classify
 from examples._common import (add_standard_args, budget_kwargs, completion_for,
                               confirm, report_engine, worker_count)
@@ -89,8 +90,11 @@ from . import _jqx as jqx
 from . import _md as md
 from . import _stackvm as stackvm
 from ._architect import ArchitectPhase, missing_sections
+from ._claude_code import ClaudeCodeExecutor, claude_code_available
+from ._extract import ExtractPhase
 from ._judge import ParentJudge
 from ._review import CompletionJudge, ParentCodeReview, chain_reviews
+from ._suite import TEST_FAILURE
 from ._suite import cold_start, preflight
 from ._octopus import OctopusConflict, git_available
 from ._spatial import SpatialContract
@@ -148,6 +152,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--depth", type=int, default=3,
                         help="maximum recursive delegation depth (v,p) -> (v,q)")
+    parser.add_argument("--max-turns", type=int, default=24,
+                        help="turns inside one --executor claude-code episode. "
+                             "Upstream's runs allow 128 for a non-root episode")
     parser.add_argument("--cold-start", action="store_true",
                         help="start from the goal, the contract and the suite only: "
                              "no node CONTEXT.md records, no routing tables, no "
@@ -172,6 +179,32 @@ def build_parser() -> argparse.ArgumentParser:
                              "scheduling model. The run then leaves a real "
                              "phylogenetic graph: one commit per episode, a parent's "
                              "merge carrying every child commit as a parent")
+    parser.add_argument("--executor", choices=("completion", "claude-code"),
+                        default="completion",
+                        help="what one episode is. `completion` (default): one model "
+                             "call returning whole files, which is this port's "
+                             "largest distance from upstream -- an episode there is a "
+                             "tool-using session of up to 2 048 turns. `claude-code`: "
+                             "one headless Claude Code session per episode, in a "
+                             "throwaway worktree, with the frozen paths denied and "
+                             "the network tools off. It signs in with the LOCAL claude "
+                             "CLI's credentials, not --model's endpoint, and it is "
+                             "much slower and dearer per episode")
+    parser.add_argument("--mode", choices=("given", "a", "b"), default="given",
+                        help="how the Context Tree comes to exist, which is what "
+                             "`Genesis.run` branches on. `given` (default): the "
+                             "domain's hand-written records -- honest about being "
+                             "upstream's phase 1 done by a person. `b`: an architect "
+                             "designs the tree, then implementation grows it (a new "
+                             "codebase). `a`: a context extractor reads an existing "
+                             "repository and writes the tree over it, which is what "
+                             "upstream does to a codebase that has code and no "
+                             "records -- needs --continue-from")
+    parser.add_argument("--continue-from", default="", metavar="DIR",
+                        help="start from the repository in DIR rather than from the "
+                             "domain's empty one. With --mode a this is the Context "
+                             "Tree extraction upstream runs on an existing codebase; "
+                             "the frozen contract is always the domain's own")
     parser.add_argument("--architect", action="store_true",
                         help="upstream's Phase 1: an agent designs the CONTEXT.md tree "
                              "-- intent, API surface, constraints, routing tables -- "
@@ -221,6 +254,11 @@ def main(argv=None) -> None:
     print(f"Merge    : {merge}" + ("" if git_available() else
                                    "  [git missing: every contested file falls back]"))
     print(f"Gate     : {gate}")
+    print("Episode  : " + ("one headless Claude Code session in a throwaway worktree, "
+                           f"up to {args.max_turns} turns, frozen paths denied, network "
+                           "tools off -- billed to the local CLI's credentials"
+                           if args.executor == "claude-code" else
+                           "one model call returning whole files"))
     print("Workspace: " + ("a git worktree per episode, a commit per episode, and "
                            "the worktree removed after" if args.worktrees else
                            "in-memory states (--worktrees for upstream's model)"))
@@ -248,13 +286,33 @@ def main(argv=None) -> None:
           f"{', '.join(spec.FROZEN)}")
     audited = [t for t in tasks if t.meta.get("audit")]
     print(f"Scoring  : {spec.SCORING}")
+    if args.architect:
+        args.mode = "b"                    # the older spelling of the same thing
     initial = (cold_start(spec.initial_files())
-               if args.cold_start or args.architect else spec.initial_files())
+               if args.cold_start or args.mode == "b" else spec.initial_files())
+    if args.continue_from:
+        # An existing repository, with the domain's contract restored over it: the
+        # suite and the specification are the human's in every mode.
+        existing = {k: v for k, v in load_tree(args.continue_from).items()
+                    if not match_any(k, spec.FROZEN)}
+        initial = dict(existing, **{k: v for k, v in spec.initial_files().items()
+                                    if match_any(k, spec.FROZEN)})
+        if args.mode == "a":
+            initial = {k: v for k, v in initial.items()
+                       if not k.endswith(CONTEXT_FILE) or k.startswith("spec/")}
+    if args.mode == "a" and not args.continue_from:
+        print("--mode a is upstream's existing-codebase path: it reads a repository "
+              "and writes the Context Tree over it, so it needs --continue-from DIR. "
+              "A formation domain starts empty and there is nothing to read.")
+        return
     print(f"Loaded   : {len(tasks)} {spec.CASE_NOUN} over "
           f"{len(set(t.meta['kind'] for t in tasks))} {spec.GROUP_NOUN}; "
           f"{len(initial)} files in the repository, "
           "none of them implementation")
-    print("Start    : " + ("designed in phase 1 by an architect agent, from the goal, "
+    print("Start    : " + (f"{len(initial)} files from {args.continue_from}, contract "
+                           "restored" if args.continue_from and args.mode != "a" else
+                           "")
+          + ("designed in phase 1 by an architect agent, from the goal, "
                            "the contract and the suite" if args.architect else
                            "cold -- the goal, the contract and the suite; no node "
                            "records, no routing tables, no skills. The run writes "
@@ -289,10 +347,25 @@ def main(argv=None) -> None:
     # is designed before anything is written against it, and Phase 2 is handed
     # "the architecture, directory structure, CONTEXT.md routing tables ... already in
     # place (created by an Architect agent)".
-    architect = None
-    if args.architect:
+    if args.mode == "a":
         if complete is None:
-            print("--architect needs --model: there is no offline architect, and a "
+            print("--mode a needs --model: extracting a Context Tree is reading code, "
+                  "and a rule-based reader would be describing what it was told")
+            return
+        extractor = ExtractPhase(complete, contracts=spec.CONTRACTS,
+                                 max_depth=args.depth + 1,
+                                 skip=tuple(p.split("/")[0] for p in spec.FROZEN
+                                            if "/" in p))
+        initial = extractor.extract(initial, DOMAIN_BLURB[args.domain])
+        print(f"\nPhase A  : context extractor {extractor.summary()}")
+        for path in extractor.nodes:
+            record = initial[f"{path}/{CONTEXT_FILE}" if path else CONTEXT_FILE]
+            print(f"           {path or './':<24} {len(parse_routing(record))} routes")
+
+    architect = None
+    if args.mode == "b":
+        if complete is None:
+            print("--mode b needs --model: there is no offline architect, and a "
                   "rule-based one would be the decomposition it is meant to invent")
             return
         architect = ArchitectPhase(complete, contracts=spec.CONTRACTS,
@@ -318,10 +391,20 @@ def main(argv=None) -> None:
     if ledger is not None and not git_worktrees_available():
         print("Worktrees: git worktree is unavailable here -- running without it")
         ledger = None
+    sessions = None
+    if args.executor == "claude-code":
+        if not claude_code_available():
+            print("--executor claude-code needs the `claude` CLI on PATH")
+            return
+        # The frozen globs are denied inside the session as well as enforced outside
+        # it, and the failure block is the domain's own wording.
+        sessions = ClaudeCodeExecutor(frozen=spec.FROZEN, failure=TEST_FAILURE,
+                                      max_turns=args.max_turns)
     delegation = RecursiveDelegation(
         rollout_factory=(None if ledger is None else lambda: Rollout(ledger)),
         manager=spec.llm_manager(complete) if complete else spec.offline_manager,
-        executor=(spec.llm_executor(complete) if complete else spec.offline_executor),
+        executor=(sessions if sessions is not None else
+                  spec.llm_executor(complete) if complete else spec.offline_executor),
         log=log, max_depth=args.depth, max_edits=4, contracts=spec.CONTRACTS,
         readonly=spec.FROZEN,
         review=chain_reviews(None if args.no_parent_tests else spec.suite_review(tasks),
@@ -417,6 +500,8 @@ def main(argv=None) -> None:
           f"context_updates={delegation.record_updates}")
     if ledger is not None:
         print(f"workspace       : {ledger.summary()}")
+    if sessions is not None:
+        print(f"claude code     : {sessions.summary()}")
     if code_review is not None:
         print(f"parent review   : read={code_review.reviewed} "
               f"rejected={code_review.rejected} unparsed={code_review.unparsed}")

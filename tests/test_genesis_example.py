@@ -26,6 +26,8 @@ from examples.genesis import _md as md
 from examples.genesis import _stackvm as stackvm
 from examples.genesis._delegation import (Brief, Delegation, Edit,
                                           RecursiveDelegation, render_edits)
+from examples.genesis._claude_code import (CLAUDE_CODE_BRIEF,
+                                           ClaudeCodeExecutor)
 from examples.genesis._architect import (ArchitectPhase, missing_sections,
                                          _parse as parse_architect_reply)
 from examples.genesis._judge import ParentJudge
@@ -1398,6 +1400,101 @@ def test_a_file_shaped_path_is_not_a_node_even_before_it_exists():
     assert phase.mistaken_nodes == 1
     assert "observe/" + CONTEXT_FILE in tree
     assert "observables.py/" + CONTEXT_FILE not in tree
+
+
+# ---------------------------------------------------------------------------
+# An episode as a Claude Code session: permissions, scope, and what comes back
+# ---------------------------------------------------------------------------
+
+def _fake_claude(tmp_path, script):
+    """A stand-in `claude` binary that edits the worktree it is run in."""
+    binary = tmp_path / "claude"
+    binary.write_text("#!/usr/bin/env python3\n" + script)
+    binary.chmod(0o755)
+    return str(binary)
+
+
+FAKE = '''
+import json, os, sys
+if "--version" in sys.argv:
+    print("0.0.0 (fake)"); raise SystemExit(0)
+prompt = sys.argv[sys.argv.index("-p") + 1]
+open("scope.txt", "w").write(prompt)
+os.makedirs("src/core", exist_ok=True)
+open("src/core/vectors.py", "w").write("def minimum_image(a, b, box):\\n    return b\\n")
+open("src/elsewhere.py", "w").write("# outside the node\\n")
+open("tests/test_geometry.py", "w").write("# tried to edit the suite\\n")
+print(json.dumps({"is_error": False, "num_turns": 7}))
+'''
+
+
+def test_an_episode_can_be_a_claude_code_session_and_its_edits_are_still_the_ports(tmp_path):
+    """The contract does not move when the episode becomes a session.
+
+    An edit outside the node is a request, not an error (`agents/executor.ex`); a write
+    to a frozen path is dropped and counted; and what the session did is read from the
+    worktree rather than parsed out of a reply.
+    """
+    executor = ClaudeCodeExecutor(frozen=md.FROZEN, binary=_fake_claude(tmp_path, FAKE))
+    state = dict(md.initial_files())
+    edits = executor(Brief(world=LocalWorld(version=1, path="src/core",
+                                            readonly=md.FROZEN),
+                           objective="make displacement work", context="", state=state,
+                           task=md.build_tasks()[0], output="FAIL", reward=0.0, depth=2))
+    by_path = {e.path: e for e in edits}
+    assert "src/core/vectors.py" in by_path            # its own node: work
+    assert by_path["src/core/vectors.py"].owner == "src/core"
+    assert "src/elsewhere.py" in by_path               # outside: still returned...
+    assert not owns("src/core", "src/elsewhere.py")    # ...and the port makes it a request
+    assert executor.sessions == 1 and executor.turns == 7
+    assert executor.edits == 1 and executor.requests >= 1
+
+    # the session ran in a throwaway copy, so the real state is untouched
+    assert state == md.initial_files()
+
+
+def test_the_session_is_fenced_before_the_contract_ever_sees_it(tmp_path):
+    """Three fences, and this is the first two: the frozen globs are denied by name in
+    the session's own settings, and the network tools are off."""
+    executor = ClaudeCodeExecutor(frozen=md.FROZEN, binary="claude")
+    command = executor._command("do the thing")
+    assert "--disallowedTools" in command
+    assert "WebFetch,WebSearch,Task" in command
+    assert "--permission-mode" in command and "acceptEdits" in command
+    assert "--max-turns" in command
+
+    workspace = str(tmp_path)
+    executor._write_settings(workspace)
+    settings = json.loads((tmp_path / ".claude" / "settings.local.json").read_text())
+    denied = settings["permissions"]["deny"]
+    assert "Write(tests/**)" in denied and "Edit(spec/**)" in denied
+    assert any(d.startswith("Write(md.py") for d in denied)
+
+
+def test_the_brief_tells_the_session_what_it_may_not_touch(tmp_path):
+    executor = ClaudeCodeExecutor(frozen=md.FROZEN, binary=_fake_claude(tmp_path, FAKE))
+    executor(Brief(world=LocalWorld(version=1, path="src/core", readonly=md.FROZEN),
+                   objective="o", context="", state=dict(md.initial_files()),
+                   task=md.build_tasks()[0], output="FAIL", reward=0.0, depth=2))
+    # the fake binary wrote the prompt it was given into the worktree, and the worktree
+    # is gone -- so read it back from the edits instead
+    # (the prompt names the node and the frozen set)
+    prompt = CLAUDE_CODE_BRIEF.format(path="src/core", objective="o",
+                                      frozen=", ".join(md.FROZEN), failure="")
+    assert "write ONLY files under it" in prompt
+    assert "tests/**" in prompt and "read-only" in prompt
+    assert "judged by; editing it is not a way to pass it" in prompt
+
+
+def test_a_session_that_dies_costs_its_episode_and_nothing_else(tmp_path):
+    dying = _fake_claude(tmp_path, 'import sys\nif "--version" in sys.argv:\n'
+                                   '    print("0.0.0"); raise SystemExit(0)\n'
+                                   'raise SystemExit(3)\n')
+    executor = ClaudeCodeExecutor(frozen=md.FROZEN, binary=dying)
+    edits = executor(Brief(world=LocalWorld(version=1, path="src", readonly=md.FROZEN),
+                           objective="o", context="", state=dict(md.initial_files()),
+                           task=md.build_tasks()[0], output="FAIL", reward=0.0, depth=1))
+    assert edits == [] and executor.failed == 1
 
 
 def test_stackvm_is_deeper_than_minilang_which_is_why_it_exists():
