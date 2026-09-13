@@ -1220,6 +1220,38 @@ def test_an_unparseable_or_negative_answer_keeps_the_run_going():
                   rejected=0)) is False
 
 
+def test_a_per_test_score_cannot_see_a_test_poisoning_the_next_one():
+    """One process per test is what makes one-task-per-test possible, and it is blind
+    to anything that leaks between tests. A real run produced the sharpest possible
+    case, and this baseline is that code with nothing changed:
+
+        def rdf(positions, box, bins, rmax):        # in src/observe/__init__.py
+            from .rdf import histogram              # <- rebinds src.observe.rdf
+            ...                                     #    from this function to the
+                                                    #    module. It destroys itself.
+
+    The first call in a process works; every call after it raises. Scored one test per
+    process it is perfect, and the run reported audit reward 1.000 for it. Run the way
+    a person runs a suite -- `mix test`, which is what `agents/manager.ex` means by
+    "run ALL tests" -- five tests fail.
+    """
+    broken = dict(md.reference_tree(),
+                  **md.SUITE_ONLY_BASELINES["self-clobbering-import"])
+    failures = md.MD.suite_failures(broken, audit=True)
+    assert len(failures) == 5, failures
+    assert all("not callable" in f for f in failures), failures
+
+    # every one of those five passes on its own, which is the whole point
+    run = md.make_runner()
+    rendered = canonical(broken)
+    alone = {t.id: md.reward(t, run(rendered, t)) for t in md.build_tasks()
+             if any(t.meta["func"] in f for f in failures)}
+    assert alone and set(alone.values()) == {1.0}, alone
+
+    # and the reference is clean under both ways of running it
+    assert md.MD.suite_failures(md.reference_tree(), audit=True) == []
+
+
 def test_stackvm_is_deeper_than_minilang_which_is_why_it_exists():
     """The second domain is not "harder code" -- it is somewhere for the
     recursion to go. `src/vm/ops` is a node whose parent is itself a child."""

@@ -560,6 +560,34 @@ else:
     print("PASS", end="")
 """
 
+#: The whole suite in **one** interpreter, which is what `mix test` is and what
+#: `agents/manager.ex` means by "run ALL tests". Scoring one test per process is
+#: required by one-task-per-test and is structurally blind to anything that leaks
+#: between tests -- import order, module state, a global left dirty. A real run gave
+#: the sharpest possible example: an `rdf()` in `src/observe/__init__.py` whose body
+#: did `from .rdf import histogram`, so importing the submodule rebound
+#: `src.observe.rdf` from the function to the module and the function destroyed
+#: itself on its first call. Per test: 65/65. In one process: five failures.
+_SUITE_HARNESS = r"""
+import sys, json
+workspace, plan = sys.argv[1], json.loads(sys.argv[2])
+sys.path.insert(0, workspace)
+modules, failed = {}, []
+for path, func in plan:
+    try:
+        if path not in modules:
+            namespace = {"__name__": "_genesis_test_" + path, "__file__": path}
+            with open(path, encoding="utf-8") as handle:
+                exec(compile(handle.read(), path, "exec"), namespace)
+            modules[path] = namespace
+        modules[path][func]()
+    except BaseException as exc:
+        detail = " ".join(str(exc).split())[:120]
+        failed.append(path + "::" + func + " " + type(exc).__name__
+                      + (": " + detail if detail else ""))
+print(json.dumps(failed), end="")
+"""
+
 #: What a test scores when it could not be run at all.
 TEST_CRASHED = "FAIL:workspace"
 
@@ -567,6 +595,36 @@ TEST_CRASHED = "FAIL:workspace"
 def reward_test(task: Task, output: str) -> float:
     """One frozen test, passed or not. No expected value anywhere."""
     return 1.0 if output == "PASS" else 0.0
+
+
+def run_suite(state: Mapping[str, str], plan: Sequence[Tuple[str, str]], *,
+              timeout: float = 300.0) -> List[str]:
+    """Every test in ``plan``, in one interpreter, in the order given.
+
+    Returns the failures as ``file::func Error: detail``. A process that dies is one
+    failure naming that: a suite which could not be run is not a suite that passed.
+    """
+    workspace = tempfile.mkdtemp(prefix="genesis-suite-")
+    try:
+        materialize(state, workspace)
+        script = os.path.join(workspace, "_genesis_suite.py")
+        with open(script, "w", encoding="utf-8") as handle:
+            handle.write(_SUITE_HARNESS)
+        out = subprocess.run(
+            [sys.executable, script, workspace, json.dumps([list(p) for p in plan])],
+            cwd=workspace, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=timeout)
+        text = out.stdout.decode("utf-8", "replace").strip()
+        try:
+            return list(json.loads(text))
+        except Exception:  # noqa: BLE001 - the runner itself died
+            detail = (out.stderr.decode("utf-8", "replace").strip().splitlines()
+                      or ["no output"])[-1]
+            return [f"<the suite could not be run> {detail[:200]}"]
+    except subprocess.TimeoutExpired:
+        return [f"<the suite did not finish in {timeout:.0f}s>"]
+    finally:
+        shutil.rmtree(workspace, ignore_errors=True)
 
 
 def run_test(state: Mapping[str, str], path: str, func: str,
@@ -727,6 +785,24 @@ class TestSuite:
                         break
             report[name] = killers
         return report
+
+    def suite_failures(self, state: Mapping[str, str], *,
+                       audit: bool = False) -> List[str]:
+        """The suite run the way a person runs it: one process, all of it.
+
+        The per-task score cannot see one test poisoning the next, because every task
+        gets a fresh interpreter -- the isolation that makes one-task-per-test possible
+        is a blind spot with a name. Upstream has no such blind spot: its manager runs
+        `mix test`, and its executor is told "run ALL tests".
+        """
+        state = dict(state)
+        for path, content in self.given.items():
+            if match_any(path, self.frozen):
+                state[path] = content
+        state.update(self.audit)
+        plan = [(t.meta["file"], t.meta["func"]) for t in self.build_tasks()
+                if audit or not t.meta.get("audit")]
+        return run_suite(state, plan, timeout=max(60.0, self.timeout * 4))
 
     def held_out_frac(self) -> float:
         """The ``held_out_frac`` that puts exactly the audit tasks in the tail.

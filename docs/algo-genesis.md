@@ -150,6 +150,27 @@ and 42 of the then 44 tests passed. Two noticed: the harmonic gradient, because
 harmonic has no cutoff, and the negative control, whose whole docstring is *the
 conservation tests must be able to fail, or they assert nothing*.
 
+And a suite is only as good as **how it is run**. The finished md run reported
+`audit reward 1.000`, and its repository contains this:
+
+```python
+# src/observe/__init__.py
+def rdf(positions, box, bins, rmax):
+    from .rdf import histogram      # importing the submodule rebinds
+    ...                             # src.observe.rdf from this function to
+                                    # the module: it destroys itself
+```
+
+The first call in a process works and every call after it raises
+`TypeError: 'module' object is not callable`. Scored one test per process — which is
+what one-task-per-test requires — it is perfect. Run the way a person runs a suite, in
+one interpreter, five tests fail. Upstream has no such blind spot: its manager runs
+`mix test` and its executor is told to "run ALL tests". So `TestSuite.suite_failures`
+now runs the whole suite in one process, the run reports it beside the per-task
+number, and `--complete-task` uses it as its precondition rather than the per-task
+score. `SUITE_ONLY_BASELINES` keeps that exact code as a baseline: 65/65 per test,
+60/65 in one process, and a test asserts both halves.
+
 The lesson is not "add more invariants". A suite of invariants needs **value
 anchors**, and this one was missing the ones that matter: not a single driven test
 pinned a nonzero number in a periodic box. It does now — a pair in mid-box and a

@@ -237,9 +237,13 @@ class CompletionJudge:
     """
 
     def __init__(self, complete, *, tasks, run, reward, state_of,
-                 contracts: Sequence[str] = (), root_path: str = "",
-                 objective: str = ""):
+                 suite_failures=None, contracts: Sequence[str] = (),
+                 root_path: str = "", objective: str = ""):
         self._complete = complete
+        #: ``state -> [failure]``, the whole suite in one process. Preferred when the
+        #: domain has one, because that is what `mix test` is and what "run ALL tests"
+        #: means: a per-test score cannot see one test poisoning the next.
+        self._suite_failures = suite_failures
         self._driven = [t for t in tasks if not t.meta.get("audit")]
         self._run = run
         self._reward = reward
@@ -269,9 +273,13 @@ class CompletionJudge:
         if rendered == self._scored:
             return self._answer              # nothing was accepted: the same codebase
         self._scored, self._answer = rendered, False
-        for task in self._driven:
-            if self._reward(task, self._run(rendered, task)) < 1.0:
+        if self._suite_failures is not None:
+            if self._suite_failures(state):
                 return False                 # not the question yet -- and no call
+        else:
+            for task in self._driven:
+                if self._reward(task, self._run(rendered, task)) < 1.0:
+                    return False
         self.asked += 1
         world = LocalWorld(version=int(getattr(info, "round", 0)), path=self._root)
         try:

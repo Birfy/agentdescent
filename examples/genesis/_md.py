@@ -60,9 +60,10 @@ from ._suite import llm_executor as _llm_executor
 from ._suite import llm_manager as _llm_manager
 from ._world import SKILLS_DIR, normalise
 
-__all__ = ["BASELINES", "CASE_NOUN", "CONTRACTS", "FROZEN", "GROUP_NOUN", "HELD_OUT_FRAC",
+__all__ = ["BASELINES", "CASE_NOUN", "CONTRACTS", "FROZEN",
+           "SUITE_ONLY_BASELINES", "GROUP_NOUN", "HELD_OUT_FRAC",
            "MD",
-           "SCORING", "build_tasks", "initial_files",
+           "SCORING", "build_tasks", "initial_files", "suite_failures",
            "llm_executor", "llm_manager", "make_runner", "offline_executor",
            "offline_manager", "reference_tree", "reward", "suite_review"]
 
@@ -1299,6 +1300,28 @@ def momentum(velocities, masses):
     return total
 '''
 
+_SELF_CLOBBERING = r'''"""A public entry point that destroys itself on first call.
+
+`from .rdf import histogram` imports the submodule `src.observe.rdf`, and importing a
+submodule **rebinds that name on the package** -- over the function of the same name
+defined right here. The first call works and every call after it raises. Taken from a
+real run, unchanged.
+"""
+
+
+def observables(velocities, masses):
+    from .thermo import kinetic, momentum, temperature
+    return {"kinetic": kinetic(velocities, masses),
+            "temperature": temperature(velocities, masses),
+            "momentum": momentum(velocities, masses)}
+
+
+def rdf(positions, box, bins, rmax):
+    from .rdf import histogram
+    from ..core.state import System
+    return histogram(System(positions, box=box), bins, rmax)
+'''
+
 #: Each of these must fail at least two tests. See :meth:`TestSuite.kill_report`.
 BASELINES = {
     "zero-field": {REGISTRY: _ZERO_FIELD},
@@ -1310,12 +1333,15 @@ BASELINES = {
 }
 
 
+
 MD = TestSuite(name="md", given=initial_files(), frozen=FROZEN, audit=_AUDIT,
                baselines=BASELINES)
 
 build_tasks = MD.build_tasks
 make_runner = MD.make_runner
 suite_review = MD.review
+#: The whole suite in one interpreter -- `mix test`, not one process per test.
+suite_failures = MD.suite_failures
 #: One test, pass or fail. No tolerance of its own -- the test owns that.
 reward = reward_test
 #: Exactly the audit set in the held-out tail, and every driven test in the search.
@@ -1632,6 +1658,22 @@ def reference_tree() -> Dict[str, str]:
     tree = initial_files()
     tree.update(REFERENCE)
     return tree
+
+
+#: The public entry point routed through the package the way the real run wrote it,
+#: which is what turns the self-clobbering import above into a visible failure.
+_ROUTED_ENTRY = _REF_ENTRY.replace(
+    """    from .core.state import System
+    from .observe.rdf import histogram
+    return histogram(System(positions, box=box), bins, rmax)""",
+    """    from .observe import rdf as _rdf
+    return _rdf(positions, box, bins, rmax)""")
+
+#: The one a per-test score cannot catch, kept separate because it is not a failure of
+#: the suite -- it is a failure of *how the suite is run*, and the guard for it is
+#: `suite_failures` rather than `kill_report`.
+SUITE_ONLY_BASELINES = {"self-clobbering-import": {ENTRY: _ROUTED_ENTRY,
+                                                   OBS_INIT: _SELF_CLOBBERING}}
 
 
 # ---------------------------------------------------------------------------

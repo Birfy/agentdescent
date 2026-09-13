@@ -310,6 +310,7 @@ def main(argv=None) -> None:
         completion = CompletionJudge(
             complete, tasks=tasks, run=run, reward=spec.reward,
             state_of=lambda: delegation.last_state, contracts=spec.CONTRACTS,
+            suite_failures=getattr(spec, "suite_failures", None),
             objective=DOMAIN_BLURB[args.domain])
 
     def _superseded(rendered, task, output, reward_):
@@ -341,6 +342,18 @@ def main(argv=None) -> None:
         **budget_kwargs(args),
     )
 
+    # The whole suite in one process, which is what `mix test` is. A per-task score
+    # cannot see one test poisoning the next: this run's own output is the example,
+    # 65/65 per test and five failures in one interpreter, from a function that
+    # rebound its own name on first call.
+    whole = getattr(spec, "suite_failures", None)
+    if whole is not None and delegation.last_state is not None:
+        failures = whole(result.state if isinstance(result.state, dict)
+                         else dict(result.state), audit=True)
+        print(f"suite, 1 process: {len(tasks) - len(failures)}/{len(tasks)}"
+              + ("" if not failures else
+                 "   <- these pass one-per-process and fail together:\n    "
+                 + "\n    ".join(failures[:6])))
     label = "audit reward" if audited else "held-out reward"
     print(f"{label:<16}: {result.final_reward:.3f}"
           + ("   (tests no agent ever saw)" if audited else ""))
