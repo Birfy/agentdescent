@@ -26,11 +26,17 @@ from ._suite import llm_executor as _llm_executor
 from ._suite import llm_manager as _llm_manager
 from ._world import SKILLS_DIR, normalise
 
-__all__ = ["FROZEN", "STACKVM", "build_tasks", "initial_files", "llm_executor",
+__all__ = ["CASE_NOUN", "FROZEN", "GROUP_NOUN", "HELD_OUT_FRAC",
+           "SCORING", "STACKVM", "build_tasks", "initial_files", "llm_executor",
            "llm_manager", "make_runner", "offline_executor", "offline_manager",
-           "reward", "suite_review"]
+           "reference_tree", "reward", "suite_review"]
 
 FROZEN = ("spec/**",)
+
+SCORING = "reference oracle, exact match"
+CASE_NOUN = "validation cases"
+GROUP_NOUN = "stages"
+HELD_OUT_FRAC = 0.4
 
 ENTRY = "src/__init__.py"
 ASM_INIT = "src/asm/__init__.py"
@@ -378,7 +384,7 @@ def llm_executor(complete, *, editable=("**",), frozen=FROZEN):
     return _llm_executor(complete, editable=editable, frozen=frozen)
 
 
-def _reference_tree() -> Dict[str, str]:
+def reference_tree() -> Dict[str, str]:
     return STACKVM.reference_tree()
 
 

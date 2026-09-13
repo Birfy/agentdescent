@@ -93,21 +93,25 @@ from ._octopus import OctopusConflict, git_available
 from ._spatial import SpatialContract
 from ._world import WorldLog
 
-#: The formation domains. Three, and each answers something the one before could
+#: The formation domains. Four, and each answers something the one before could
 #: not: minilang shows the mechanism, stackvm gives the recursion somewhere to go,
 #: jqx comes out as a program you can run -- its command-line entry point is
 #: frozen beside the specification, so a finished run is software rather than a
-#: package nobody can invoke -- and md cannot be passed by code that merely
-#: parses, because four of its ten stages are invariants rather than values. All
-#: four are stand-ins for upstream's 123.4-hour compiler run and say so.
+#: package nobody can invoke -- and md takes the oracle out of the scoring path
+#: altogether, because a frozen test suite is what a human actually writes and
+#: what upstream validates against. All four are stand-ins for upstream's
+#: 123.4-hour compiler run and say so.
 DOMAINS = {"minilang": minilang, "stackvm": stackvm, "jqx": jqx, "md": md}
 
 DOMAIN_BLURB = {
-    "minilang": "an integer expression language (2 nodes deep, 4 files)",
-    "stackvm": "a stack machine and its assembler (4 nodes deep, 10 files)",
-    "jqx": "a JSON query tool with a frozen CLI (4 nodes, 9 files, 4 stages)",
-    "md": ("Lennard-Jones molecular dynamics (6 nodes, 15 files, 10 stages, "
-           "4 of them invariants)"),
+    "minilang": ("an integer expression language (2 nodes deep, 4 files), "
+                 "staged suite"),
+    "stackvm": ("a stack machine and its assembler (4 nodes deep, 10 files), "
+                "staged suite"),
+    "jqx": ("a JSON query tool with a frozen CLI (4 nodes, 9 files, 4 stages), "
+            "staged suite"),
+    "md": ("Lennard-Jones molecular dynamics with a frozen driver (6 nodes, "
+           "14 files), test suite -- invariants, not values"),
 }
 
 
@@ -178,7 +182,7 @@ def main(argv=None) -> None:
     print(f"Algorithm: {PORT_NAME} (port author: {PORT_AUTHOR})")
     print(f"Upstream : {UPSTREAM_RELEASED_CODE}")
     print(f"Dataset  : compact formation domain -- {args.domain}: "
-          f"{DOMAIN_BLURB[args.domain]}, staged suite; "
+          f"{DOMAIN_BLURB[args.domain]}; "
           "NOT upstream's 123.4h C-compiler run")
     print(f"Plan     : model={args.model or 'offline rule-based actors'}, "
           f"episodes={args.episodes} root ({rounds} rounds x {args.workers} workers), "
@@ -203,10 +207,22 @@ def main(argv=None) -> None:
           f"{classify(artifact).name} (the agents cannot reach the evaluator: the "
           f"suite lives outside the artifact); frozen to every proposal: "
           f"{', '.join(spec.FROZEN)}")
-    print(f"Loaded   : {len(tasks)} validation cases over "
-          f"{len(set(t.meta['kind'] for t in tasks))} stages; "
+    audited = [t for t in tasks if t.meta.get("audit")]
+    print(f"Scoring  : {spec.SCORING}")
+    print(f"Loaded   : {len(tasks)} {spec.CASE_NOUN} over "
+          f"{len(set(t.meta['kind'] for t in tasks))} {spec.GROUP_NOUN}; "
           f"{len(spec.initial_files())} files in the repository, "
           "none of them implementation")
+    # Two different things live in the held-out tail depending on the domain, and
+    # conflating them is how the jqx run stalled: sampled inputs the search has not
+    # seen (a generalisation estimate), or requirements the search is not allowed to
+    # see (a bug). md holds out neither -- its tail is an audit set that is not in
+    # the repository at all, so every requirement drives the search.
+    print(f"Held out : {len(tasks) - int(round(len(tasks) * (1 - spec.HELD_OUT_FRAC)))}"
+          f" of {len(tasks)}"
+          + (f" -- an audit set the agents cannot read: {len(audited)} tests "
+             f"injected only at scoring time" if audited else
+             " -- the tail of the case list"))
 
     usage = Usage()
     complete = None
@@ -251,14 +267,17 @@ def main(argv=None) -> None:
         # and the parent judges it. Re-running every proposal here would also
         # double the number of child processes the domain spawns.
         self_verify=False,
-        held_out_frac=0.4, eval_concurrency=args.eval_concurrency or 8,
+        held_out_frac=spec.HELD_OUT_FRAC,
+        eval_concurrency=args.eval_concurrency or 8,
         seed=args.seed, usage=usage,
         policies=Policies(proposal=delegation, acceptance=judge,
                           **({} if octopus is None else {"conflict": octopus})),
         **budget_kwargs(args),
     )
 
-    print(f"held-out reward : {result.final_reward:.3f}")
+    label = "audit reward" if audited else "held-out reward"
+    print(f"{label:<16}: {result.final_reward:.3f}"
+          + ("   (tests no agent ever saw)" if audited else ""))
     print(f"outcomes        : {result.outcomes()}")
     print(f"stop reason     : {result.stop_reason}")
     print(f"error           : {result.error or 'none'}")

@@ -85,7 +85,7 @@ Every piece is a seam the engine already had. Nothing in `agentdescent/` changed
 `--keyed-union` and `--engine-gate` turn the third and fourth rows back into the
 engine's own defaults, which is how the rows below were measured.
 
-## Two domains, because one had nowhere for the recursion to go
+## Four domains, and what each one answers
 
 `--domain minilang` is the original: a lexer, a parser and an evaluator under
 `src/frontend` and `src/backend`, two nodes deep, four files for the agents to
@@ -101,11 +101,92 @@ one independently-fillable function per opcode — so two agents working from tw
 different failing programs edit two different parts of one file, which is the case
 a keyed union cannot fuse and a three-way merge can.
 
-What the two share is in [`_suite.py`](https://github.com/Birfy/agentdescent/blob/main/examples/genesis/_suite.py):
-the child-process harness, the loader that computes every expectation from the
-reference, the frozen-file restore, the parent's integration check and the LLM
-actors. A domain is data on top of it — which is also why the second one could be
-added without touching a single mechanism.
+`--domain jqx` grows a JSON query language whose **command-line entry point is
+frozen beside the specification**. The agents never write `jqx.py`; they write the
+library it imports. A finished run is therefore a program you can run, not a
+package nobody can invoke — and the difference showed up immediately as a class of
+bug the other two domains cannot have, because a library that satisfies every case
+can still be unusable from a shell.
+
+`--domain md` grows Lennard-Jones molecular dynamics in reduced units — geometry,
+two pair potentials, velocity Verlet, thermodynamic observables, a pair-distance
+histogram — under a frozen driver that writes XYZ trajectories and an ASCII `g(r)`.
+It answers the thing the first three cannot, and it is a change of kind rather than
+of size: **there is no oracle in its scoring path**.
+
+### Two ways to score a formation run, and only one of them is honest about it
+
+The first three domains are scored by [`Suite`](https://github.com/Birfy/agentdescent/blob/main/examples/genesis/_suite.py):
+a human writes a reference implementation, the loader runs it to compute the
+expected answer for every case, and a candidate is scored by matching. It is cheap,
+it is exact, and it is circular — you cannot ask a system to grow software you had
+to write first. It also shapes what can be asked: an expected-output line cannot
+carry a tolerance, an invariant, or "these two ways of computing this must agree".
+
+`md` uses `TestSuite` instead. A human writes a specification and a **test suite**,
+which is what a human actually writes. One task is one test function, a task's
+prompt is that test's own source — prelude included, so the agent sees what
+`CONFIG` is — and the reward is whether it passes. Nothing is compared against a
+reference. This is also what upstream does: Genesis validates against c-testsuite,
+LLVM and Csmith, which are assertions, with no reference compiler anywhere in the
+loop.
+
+What that buys is assertions an oracle cannot make. Most of `md`'s tests are
+**invariants**: the forces sum to zero, every force component matches a central
+difference of the energy, energy and momentum survive a trajectory, reversing the
+velocities retraces it. One of them asserts that a far-too-large timestep does
+*not* conserve energy, so an implementation that fakes conservation fails. Euler
+with a single force evaluation is stable, plausible, and caught — `tests/test_genesis_example.py`
+breaks the integrator that way and checks the suite notices, because a sampled
+position from a bounded trajectory often agrees to six decimal places.
+
+A reference implementation still exists next to the domain, for two jobs that are
+not scoring: driving the offline rule-based actor, and letting a test prove the
+suite is passable at all. Shipping a specification nobody has ever seen satisfied
+is its own kind of dishonesty.
+
+### The held-out tail is not a validation split
+
+`evolve()` holds out the tail of the task list and reports its reward as
+`final_reward`. For the oracle domains that is a generalisation estimate and it
+means something: the cases are sampled inputs over one grammar, and passing inputs
+you were not shown is the claim.
+
+For a test suite it is a category error, and an expensive one. Every task is a
+distinct **requirement**, so holding back 40% of them means refusing to tell the
+system four tenths of what it has to do and then grading it on them. Worse, the
+search never sees those requirements fail, so nothing is ever proposed for them.
+That is exactly how the `jqx` run stalled at 0.923 with `stop reason: rounds`: the
+case list was ordered by filter, two builtins appeared only in the held-out tail,
+and no rollout could ever fail on them. A test guards the property now, for every
+domain, and `TestSuite` interleaves its tasks across files so a positional split
+cannot quietly hide a file.
+
+Dropping the split entirely is also wrong, though, and for a reason specific to
+this port: the executor is handed **the source of the test it is failing**, so it
+could satisfy one assertion at a time without the physics underneath holding
+together. So `md` splits the two jobs the single knob was doing:
+
+* every **driven** test is part of the specification and every one of them drives
+  the search — `HELD_OUT_FRAC` is *computed* so that `evolve()`'s positional cut
+  lands exactly on the boundary;
+* the tail is an **audit set** of thirteen further tests that are **not in the
+  repository at all** — `frozen` stops a file being written, not read, and an audit
+  test in the tree is one the executor can read and write code against. They are
+  injected into the scratch copy only while a held-out task is being scored: a
+  different box shape, a brute-force search over periodic images, a harmonic
+  oscillator's period, the structure layer checked against the geometry layer.
+
+`audit reward` in the run header is therefore the honest headline number — the
+score on tests nothing that wrote the code has ever seen.
+
+### What the domains share
+
+Everything that is not the software itself lives in [`_suite.py`](https://github.com/Birfy/agentdescent/blob/main/examples/genesis/_suite.py):
+the child-process harness, the loader, the frozen-file restore, the parent's
+integration check and the LLM actors. A domain is data on top of it — which is also
+why the second, third and fourth could be added without touching a single
+mechanism, and why `TestSuite` sits beside `Suite` rather than replacing it.
 
 ## Measured results — compact formation domains
 
@@ -374,6 +455,7 @@ so would a reader of this page without this paragraph.
 
 ```bash
 python -m examples.genesis.genesis_recursive_worlds                            # offline, no API key
+python -m examples.genesis.genesis_recursive_worlds --domain md                # tests, not an oracle
 python -m examples.genesis.genesis_recursive_worlds --episodes 96 --workers 8
 python -m examples.genesis.genesis_recursive_worlds --episodes 96 --serial     # upstream semantics
 python -m examples.genesis.genesis_recursive_worlds --keyed-union              # control: engine merge

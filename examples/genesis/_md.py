@@ -1,23 +1,35 @@
 """md: Lennard-Jones molecular dynamics, grown from an empty repository.
 
-The fourth formation domain and by some distance the largest: **ten** validated
-stages, fifteen files the agents write across six nodes, and a physics kernel that
-has to be right rather than merely parseable. A frozen driver sits on top, so a
-finished run is a program you can point at a box of argon::
+The fourth formation domain, the largest, and the only one with **no oracle in the
+scoring path**. A frozen test suite is the whole of the reward: fifty-seven test
+functions over six files, one task each, and a task's prompt is that test's own
+source. Nothing here is compared against a reference implementation, because asking
+a system to grow software you had to write first proves nothing. Upstream validates
+against c-testsuite, LLVM and Csmith -- assertions, not expected outputs -- and this
+is the same shape at a size that finishes in an afternoon.
 
-    python md.py --particles 108 --density 0.8 --temperature 1.2 --steps 1000 \
+What comes out is a program you can point at a box of argon::
+
+    python md.py --particles 108 --density 0.8 --temperature 1.2 --steps 2000 \
                  --thermostat 0.5 --trajectory traj.xyz --rdf 40
 
 Why this domain exists. minilang showed the mechanism, stackvm gave the recursion
-somewhere to go, jqx came out as usable software -- and all three can be passed by
-code that merely parses. This one cannot: four of its ten stages are **invariants**
-rather than values. Forces have to sum to zero, they have to match a central
-difference of the energy, and energy and momentum have to survive a trajectory. A
-stage that returns ``True`` without computing anything fails, because one ``cons``
-case uses a timestep far too large and its answer is ``False``.
+somewhere to go, jqx came out as usable software -- and all three are scored by
+matching a reference's output, which code that merely parses can sometimes do. This
+one cannot be bluffed: many of its tests are **invariants** rather than values. The
+forces must sum to zero and must match a central difference of the energy, energy
+and momentum must survive a trajectory, reversing the velocities must retrace it --
+and one test asserts that a far-too-large timestep does *not* conserve energy, so an
+implementation that fakes conservation fails.
 
-Floats are compared to six decimal places (``Suite.digits``), because two correct
-implementations of one sum differ in the last bits by summation order alone.
+The held-out tail is an **audit set**, not a validation split. Thirteen further
+tests live outside the repository entirely -- ``frozen`` stops a file being written,
+not read, and the executor is handed the source of the test it is failing, so an
+audit test in the tree is one it can write to. They are injected only while a
+held-out task is scored: a different box, a brute-force image search, a harmonic
+period, two layers composed. Every *driven* test is part of the specification and
+every one of them drives the search, which is the opposite of what a train/validation
+split does and the reason the jqx run once stalled at 0.923.
 
 What is faithful and what is a surrogate is as it is for the other three, and the
 reasoning is written out on :mod:`examples.genesis._domain`.
@@ -25,21 +37,28 @@ reasoning is written out on :mod:`examples.genesis._domain`.
 
 from __future__ import annotations
 
-from typing import Dict, List, Mapping, Optional, Sequence
+from typing import Dict, List, Mapping, Sequence
 
 from ._delegation import Brief, Delegation, Edit
-from ._suite import PYTHON_MODULE_SKILL, Suite, reward
+from ._suite import (PYTHON_MODULE_SKILL, TEST_FAILURE, TestSuite,
+                     reward_test)
 from ._suite import llm_executor as _llm_executor
 from ._suite import llm_manager as _llm_manager
 from ._world import SKILLS_DIR, normalise
 
-__all__ = ["FROZEN", "MD", "build_tasks", "initial_files", "llm_executor",
-           "llm_manager", "make_runner", "offline_executor", "offline_manager",
-           "reward", "suite_review"]
+__all__ = ["CASE_NOUN", "FROZEN", "GROUP_NOUN", "HELD_OUT_FRAC", "MD",
+           "SCORING", "build_tasks", "initial_files",
+           "llm_executor", "llm_manager", "make_runner", "offline_executor",
+           "offline_manager", "reference_tree", "reward", "suite_review"]
 
-#: The specification and the driver. Human-supplied, refused to every proposal,
-#: and restored pristine before scoring.
-FROZEN = ("spec/**", "md.py")
+#: The specification, the test suite and the driver. Human-supplied, refused to
+#: every proposal, and restored pristine before scoring.
+FROZEN = ("spec/**", "tests/**", "md.py")
+
+#: How the run is scored and what the header says about it.
+SCORING = "frozen test suite, no reference implementation in the scoring path"
+CASE_NOUN = "test functions"
+GROUP_NOUN = "test files"
 
 ENTRY = "src/__init__.py"
 CORE_INIT = "src/core/__init__.py"
@@ -55,11 +74,10 @@ VERLET = "src/integrate/verlet.py"
 OBS_INIT = "src/observe/__init__.py"
 THERMO = "src/observe/thermo.py"
 RDF = "src/observe/rdf.py"
-CHECKS = "src/observe/checks.py"
 
 
 # ---------------------------------------------------------------------------
-# The human's repository: the physics, the decomposition, the driver
+# The human's repository: the physics, the decomposition, the tests, the driver
 # ---------------------------------------------------------------------------
 
 _SPEC = r'''# md -- the molecular dynamics this project implements
@@ -69,8 +87,9 @@ k_B = 1, so energies, lengths and temperatures are all dimensionless.
 
 ## Geometry
 
-Periodic boundaries on every axis with a positive box length. The displacement
-from `a` to `b` is the **nearest image**:
+Periodic boundaries on every axis with a positive box length. A box length of `0`
+means that axis is not periodic. The displacement from `a` to `b` is the
+**nearest image**:
 
     d[i] = (b[i] - a[i]) - L[i] * floor((b[i] - a[i]) / L[i] + 0.5)
 
@@ -94,7 +113,8 @@ negative, where `d` is the displacement from *i* to *j*.
 
     dudr_over_r  = k * (r - r0) / r          (and `(0.0, 0.0)` at r == 0)
 
-Energies and forces sum over every **distinct** pair once.
+Energies and forces sum over every **distinct** pair once, which is what makes
+the forces sum to zero. An unknown potential name must raise.
 
 ## Integration
 
@@ -105,48 +125,68 @@ Velocity Verlet, one step with timestep `dt`:
 3. recompute the forces;
 4. `v += 0.5 * dt * f / m`.
 
-## Payload defaults
+Recomputing the forces between the two half-kicks is the whole point: it is what
+makes the scheme second-order and time-reversible. One force evaluation, or both
+kicks with the same forces, is a different and wrong integrator.
 
-Every stage takes one JSON object as text. `positions` is required; `velocities`
-defaults to zeros, `masses` to ones, `box` to `[0, 0, 0]` (no periodicity),
-`potential` to `"lennard_jones"`, `epsilon`/`sigma`/`k`/`r0` to `1.0` and `cutoff`
-to `2.5`.
+## The public surface
 
-## The ten validated stages
+`src/__init__.py` exposes exactly these seven functions. Nothing outside `src/`
+reaches past them -- not the driver, and not a single test.
 
-| stage | entry point | returns |
-|---|---|---|
-| `disp` | `src.displacement(p)` | the nearest-image vector from `p["a"]` to `p["b"]` |
-| `pot` | `src.energy(p)` | the total potential energy |
-| `force` | `src.forces(p)` | one force vector per particle |
-| `newton` | `src.forces_sum_to_zero(p)` | `True` when `max abs(sum of forces)` <= 1e-9 |
-| `fd` | `src.force_matches_gradient(p)` | `True` when every component agrees with a central difference of the energy (`h = 1e-6`) to 1e-4 |
-| `step` | `src.step(p)` | `{"positions": ..., "velocities": ...}` after one step of `p["dt"]` |
-| `obs` | `src.observables(p)` | `{"kinetic": ..., "temperature": ..., "momentum": [...]}` with `KE = sum(0.5*m*v.v)`, `T = 2*KE/(3*N)` and no centre-of-mass correction |
-| `rdf` | `src.rdf(p)` | **integer** counts of distinct pairs per bin over `[0, p["rmax"])` in `p["bins"]` bins; a pair at or beyond `rmax` is not counted |
-| `cons` | `src.energy_conserved(p)` | `True` when the total energy drifts by at most 1e-4 **relative** (`abs(after - before) / max(1, abs(before))`) over `p["steps"]` steps |
-| `mom` | `src.momentum_conserved(p)` | `True` when the total momentum drifts by at most 1e-9 over `p["steps"]` steps |
+| function | returns |
+|---|---|
+| `displacement(a, b, box)` | the nearest-image displacement from `a` to `b` |
+| `wrap(point, box)` | `point` folded into `[0, L)` on every periodic axis |
+| `energy(positions, **params)` | the total potential energy, a float |
+| `forces(positions, **params)` | one force vector per particle |
+| `step(positions, velocities, masses, dt, **params)` | `(positions, velocities)` after one step |
+| `observables(velocities, masses)` | `{"kinetic": f, "temperature": f, "momentum": [f, f, f]}` |
+| `rdf(positions, box, bins, rmax)` | **integer** counts of distinct pairs per bin over `[0, rmax)` |
 
-Floats are compared to **six decimal places**, so a different summation order is
-not a failure. The boolean stages are invariants, not opinions: one of the `cons`
-cases uses a timestep far too large and its answer is `False`, so a stage that
-always returns `True` fails the suite.
+`**params` is the same keyword set everywhere, with these defaults:
 
-A stage is scored independently of the ones after it, so `src/__init__.py` MUST
-import each stage lazily, inside the function that needs it.
+    box=(0.0, 0.0, 0.0)   potential="lennard_jones"   cutoff=2.5
+    epsilon=1.0           sigma=1.0                   k=1.0      r0=1.0
+
+`observables` takes no positions and no box: `KE = sum(0.5 * m * v.v)`,
+`T = 2 * KE / (3 * N)` with `k_B = 1` and **no** centre-of-mass correction, and
+`momentum` is the plain mass-weighted sum. A pair at or beyond `rmax` is not
+counted in the histogram.
+
+Every entry point MUST import its layer **lazily**, inside the function body.
+The tests for one layer then pass while another layer is still missing, which is
+how a partly-grown repository scores at all.
+
+## How this is scored
+
+`tests/` is frozen, and it is the whole of the reward: one task per test
+function, and the fraction that pass. There is no reference implementation
+anywhere in the loop -- the tests *are* the specification, made executable, and
+the prompt you are shown for a unit of work is the source of the test that is
+failing. Read it. It names the behaviour exactly, including the tolerance.
+
+Several of the tests are **invariants** rather than values: the forces sum to
+zero, every force component matches a central difference of the energy, energy
+and momentum survive a trajectory, and reversing the velocities retraces it.
+They cannot be satisfied by a lookup table, and one of them deliberately asserts
+that a far-too-large timestep does *not* conserve energy -- so an implementation
+that fakes conservation fails it.
 '''
 
 _ROOT_CONTEXT = r'''# md -- root
 
 ## Intent
 Implement the molecular dynamics in `spec/CONTEXT.md` as a library under `src/`.
-`md.py` is the simulation driver and is already written.
+`md.py` is the simulation driver and is already written; `tests/` is the suite
+your work is scored against.
 
 ## Routing Table
-- `./src/` -> the library, and the ten stage entry points
+- `./src/` -> the library, and the seven public entry points
 
 ## Constraints
-- `spec/` and `md.py` are read-only. They are the contract, not work items.
+- `spec/`, `tests/` and `md.py` are read-only. They are the contract, not work
+  items. A system that can edit its own tests has no tests.
 - Pure Python, no third-party packages: this has to run anywhere.
 - Every agent edits only files under its own path.
 '''
@@ -154,15 +194,16 @@ Implement the molecular dynamics in `spec/CONTEXT.md` as a library under `src/`.
 _SRC_CONTEXT = r'''# src -- library root
 
 ## Intent
-Own `src/__init__.py`: the ten entry points the spec names, each a thin wrapper
-that decodes the payload and calls into a child node. Each MUST import its stage
-lazily, so a missing layer does not stop the layers before it from scoring.
+Own `src/__init__.py`: the seven entry points `spec/CONTEXT.md` names, each a thin
+wrapper that calls into a child node. Each MUST import its layer **lazily**, inside
+the function body, so a missing layer does not stop the layers before it from
+passing their tests.
 
 ## Routing Table
 - `./src/core/`       -> geometry and the system container
 - `./src/potentials/` -> energies and forces
 - `./src/integrate/`  -> advancing time
-- `./src/observe/`    -> measuring and checking
+- `./src/observe/`    -> measuring
 '''
 
 _CORE_CONTEXT = r'''# src/core -- geometry and state
@@ -172,18 +213,18 @@ _CORE_CONTEXT = r'''# src/core -- geometry and state
 length, length, and wrapping a point into the box. Everything else in the project
 goes through it rather than writing `floor` arithmetic of its own.
 
-`state.py` owns the `System` container -- positions, velocities, masses, box --
-and the two functions that turn a decoded payload into one (`from_payload`) and
-read the potential's parameters out of it with the spec's defaults
-(`potential_spec`).
+`state.py` owns the `System` container -- positions, velocities, masses, box, with
+velocities defaulting to zeros and masses to ones -- and `make_spec`, which bundles
+the potential parameters the pair kernels are handed.
 '''
 
 _POT_CONTEXT = r'''# src/potentials -- energies and forces
 
 ## Intent
-Own `registry.py`: the name-to-kernel table, and the loop over distinct pairs that
-turns a kernel into a total energy and a force array. The loop applies Newton's
-third law once per pair, so the forces sum to zero by construction.
+Own `registry.py`: the name-to-kernel table, the refusal of an unknown name, and
+the loop over distinct pairs that turns a kernel into a total energy and a force
+array. The loop applies Newton's third law once per pair, which is what makes the
+forces sum to zero by construction rather than by luck.
 
 ## Routing Table
 - `./src/potentials/pair/` -> one module per pair interaction
@@ -200,21 +241,19 @@ exactly as the spec defines it. `lennard_jones.py` is shifted and cut off;
 _INT_CONTEXT = r'''# src/integrate -- advancing time
 
 ## Intent
-`verlet.py` owns velocity Verlet: `step` advances one timestep in place and
-returns the system, `run` applies it `steps` times. The position update wraps back
-into the box, and the forces are recomputed between the two half-kicks.
+`verlet.py` owns velocity Verlet: `step` advances one timestep in place and returns
+the system, `run` applies it `steps` times. The position update wraps back into the
+box, and the forces are recomputed between the two half-kicks -- that recomputation
+is what makes the scheme reversible, and the suite tests reversibility directly.
 '''
 
-_OBS_CONTEXT = r'''# src/observe -- measuring and checking
+_OBS_CONTEXT = r'''# src/observe -- measuring
 
 ## Intent
 `thermo.py` owns the thermodynamic observables: kinetic energy, temperature and
-total momentum. `rdf.py` owns the pair-distance histogram, in raw integer counts.
-
-`checks.py` owns the invariants, **one function per invariant**, so that two
-agents fixing two different checks are editing two different parts of the file
-rather than the same one: forces summing to zero, forces against a finite
-difference of the energy, and energy and momentum conserved across a run.
+total momentum, in reduced units with k_B = 1 and no centre-of-mass correction.
+`rdf.py` owns the pair-distance histogram, in raw integer counts of distinct pairs,
+and takes its distances from `src/core/vectors.py` rather than recomputing them.
 '''
 
 _DRIVER = r'''#!/usr/bin/env python3
@@ -222,28 +261,26 @@ _DRIVER = r'''#!/usr/bin/env python3
 
 Human-supplied, frozen, and never written by an agent: the library under ``src/``
 is what the run grows, and this is the shell around it so the result is a program
-rather than a package nobody can invoke.
+you can run rather than a package nobody can invoke.
 
     python md.py --particles 32 --steps 500
-    python md.py --particles 64 --density 0.8 --temperature 1.2 --steps 1000 \
+    python md.py --particles 108 --density 0.8 --temperature 1.2 --steps 2000 \
                  --thermostat 0.2 --trajectory traj.xyz
     python md.py --particles 32 --steps 200 --rdf 40
 
 Reduced Lennard-Jones units throughout: sigma = epsilon = mass = k_B = 1.
 
-It talks to the library only through the surface ``spec/CONTEXT.md`` pins --
-``step``, ``observables``, ``rdf`` -- so it works against any implementation that
-passes the suite, whatever the internal layout turns out to be. The price is a
-JSON round trip per step, which is why the defaults are small; raise them when you
-want a longer run and do not expect numpy speed from a pure-Python kernel.
+It touches the library only through the three entry points ``spec/CONTEXT.md``
+pins -- ``step``, ``observables``, ``rdf`` -- so it runs against any
+implementation that passes ``tests/``, whatever the internal layout turns out to
+be. The kernel is pure Python and O(N^2), so keep the defaults small and do not
+expect numpy speed.
 """
 
 import argparse
-import json
 import math
 import random
 import sys
-
 
 #: The four-atom face-centred-cubic basis, in cell units.
 _FCC_BASIS = ((0.0, 0.0, 0.0), (0.0, 0.5, 0.5), (0.5, 0.0, 0.5), (0.5, 0.5, 0.0))
@@ -334,10 +371,9 @@ def main(argv=None):
               f"(a full {cells}x{cells}x{cells} FCC lattice)")
     velocities = maxwell_velocities(count, args.temperature, args.seed)
     masses = [1.0] * count
-    common = {"box": box, "masses": masses, "cutoff": args.cutoff,
-              "potential": "lennard_jones", "epsilon": 1.0, "sigma": 1.0}
 
-    trajectory = open(args.trajectory, "w", encoding="utf-8") if args.trajectory else None
+    trajectory = (open(args.trajectory, "w", encoding="utf-8")
+                  if args.trajectory else None)
     print(f"# {count} particles, box {box[0]:.4f}, density {args.density}, "
           f"dt {args.dt}, cutoff {args.cutoff}"
           + (f", thermostat {args.thermostat} -> T={args.temperature}"
@@ -346,9 +382,7 @@ def main(argv=None):
     try:
         for n in range(args.steps + 1):
             if n % args.log_every == 0 or n == args.steps:
-                obs = observables(json.dumps(
-                    {"positions": positions, "velocities": velocities,
-                     "masses": masses, "box": box}))
+                obs = observables(velocities, masses)
                 speed = math.sqrt(sum(c * c for c in obs["momentum"]))
                 print(f"  {n:>8} {obs['temperature']:>12.6f} "
                       f"{obs['kinetic']:>14.6f} {speed:>12.3e}")
@@ -361,22 +395,20 @@ def main(argv=None):
                                          obs["temperature"], args.thermostat)
             if n == args.steps:
                 break
-            out = step(json.dumps(dict(common, positions=positions,
-                                       velocities=velocities, dt=args.dt)))
-            positions, velocities = out["positions"], out["velocities"]
+            positions, velocities = step(positions, velocities, masses, args.dt,
+                                         box=box, cutoff=args.cutoff)
     finally:
         if trajectory is not None:
             trajectory.close()
 
     if args.rdf:
-        counts = rdf(json.dumps({"positions": positions, "box": box,
-                                 "bins": args.rdf, "rmax": args.cutoff}))
+        counts = rdf(positions, box, args.rdf, args.cutoff)
         width = args.cutoff / args.rdf
         print(f"# pair-distance histogram, {args.rdf} bins over [0, {args.cutoff})")
         peak = max(counts) or 1
-        for i, count in enumerate(counts):
-            bar = "#" * int(40 * count / peak)
-            print(f"  {i * width:6.3f}-{(i + 1) * width:6.3f} {count:>6} {bar}")
+        for i, bin_count in enumerate(counts):
+            bar = "#" * int(40 * bin_count / peak)
+            print(f"  {i * width:6.3f}-{(i + 1) * width:6.3f} {bin_count:>6} {bar}")
     if args.trajectory:
         print(f"# wrote {args.trajectory}")
     return 0
@@ -386,10 +418,543 @@ if __name__ == "__main__":
     raise SystemExit(main())
 '''
 
+#: The suite. Frozen, in the repository, and the whole of the reward.
+_TESTS = {
+    'tests/test_forces.py': r'''"""The force field as a whole: invariants no correct implementation can miss."""
+
+from src import energy, forces
+
+BOX = [6.0, 6.0, 6.0]
+CONFIG = [[0.0, 0.0, 0.0], [1.1, 0.0, 0.0], [0.0, 1.2, 0.0], [2.0, 2.0, 2.0]]
+
+
+def test_forces_sum_to_zero():
+    """Newton's third law, applied once per pair."""
+    total = [sum(f[axis] for f in forces(CONFIG, box=BOX)) for axis in range(3)]
+    assert max(abs(c) for c in total) < 1e-9, total
+
+
+def test_every_force_component_matches_a_central_difference():
+    """The force is minus the gradient of the energy. This is the real test."""
+    analytic = forces(CONFIG, box=BOX)
+    h = 1e-6
+    for i in range(len(CONFIG)):
+        for axis in range(3):
+            plus = [list(p) for p in CONFIG]
+            minus = [list(p) for p in CONFIG]
+            plus[i][axis] += h
+            minus[i][axis] -= h
+            numeric = -(energy(plus, box=BOX) - energy(minus, box=BOX)) / (2.0 * h)
+            assert abs(numeric - analytic[i][axis]) < 1e-4, (i, axis, numeric,
+                                                            analytic[i][axis])
+
+
+def test_the_harmonic_force_also_matches_its_gradient():
+    kw = {"box": BOX, "potential": "harmonic", "k": 2.0, "r0": 1.0}
+    analytic = forces(CONFIG, **kw)
+    h = 1e-6
+    for i in (0, 2):
+        plus = [list(p) for p in CONFIG]
+        minus = [list(p) for p in CONFIG]
+        plus[i][1] += h
+        minus[i][1] -= h
+        numeric = -(energy(plus, **kw) - energy(minus, **kw)) / (2.0 * h)
+        assert abs(numeric - analytic[i][1]) < 1e-4, (i, numeric, analytic[i][1])
+
+
+def test_energy_does_not_change_when_everything_moves_together():
+    shifted = [[c + 0.37 for c in p] for p in CONFIG]
+    assert abs(energy(CONFIG, box=BOX) - energy(shifted, box=BOX)) < 1e-9
+
+
+def test_energy_does_not_change_when_a_particle_crosses_the_boundary():
+    """Periodicity: moving one particle by a whole box is the same configuration."""
+    moved = [list(p) for p in CONFIG]
+    moved[1][0] += BOX[0]
+    assert abs(energy(CONFIG, box=BOX) - energy(moved, box=BOX)) < 1e-9
+
+
+def test_an_isolated_pair_matches_the_closed_form():
+    r = 1.3
+    s6 = (1.0 / r) ** 6
+    expected = 4.0 * (s6 * s6 - s6) - 4.0 * ((1.0 / 2.5) ** 12 - (1.0 / 2.5) ** 6)
+    got = energy([[0.0, 0.0, 0.0], [r, 0.0, 0.0]], box=[0.0, 0.0, 0.0])
+    assert abs(got - expected) < 1e-9, (got, expected)
+
+
+def test_pairs_beyond_the_cutoff_contribute_nothing():
+    near = energy([[0.0, 0.0, 0.0], [1.2, 0.0, 0.0]], box=[0.0, 0.0, 0.0])
+    with_far = energy([[0.0, 0.0, 0.0], [1.2, 0.0, 0.0], [40.0, 0.0, 0.0]],
+                      box=[0.0, 0.0, 0.0])
+    assert abs(near - with_far) < 1e-12, (near, with_far)
+
+
+def test_a_single_particle_feels_nothing():
+    assert energy([[1.0, 1.0, 1.0]], box=BOX) == 0.0
+    assert forces([[1.0, 1.0, 1.0]], box=BOX) == [[0.0, 0.0, 0.0]]
+
+
+def test_an_unknown_potential_is_refused():
+    try:
+        energy(CONFIG, box=BOX, potential="not_a_potential")
+    except Exception:
+        return
+    raise AssertionError("an unknown potential name should raise")
+''',
+    'tests/test_geometry.py': r'''"""Periodic geometry. Nothing here needs a force field."""
+
+from src import displacement, wrap
+
+BOX = [6.0, 6.0, 6.0]
+
+
+def test_displacement_of_nearby_points_is_the_plain_difference():
+    assert displacement([1.0, 2.0, 3.0], [1.5, 2.25, 3.5], BOX) == [0.5, 0.25, 0.5]
+
+
+def test_displacement_takes_the_nearest_image_across_a_boundary():
+    # 0.1 and 5.6 are 5.5 apart the long way and 0.5 apart the short way.
+    d = displacement([0.1, 0.0, 0.0], [5.6, 0.0, 0.0], BOX)
+    assert abs(d[0] - (-0.5)) < 1e-12, d
+
+
+def test_displacement_is_antisymmetric():
+    # No separation is exactly half a box: there the nearest image is genuinely
+    # ambiguous and the formula has to pick a side, so antisymmetry does not hold.
+    a, b = [0.3, 5.9, 1.0], [5.7, 0.2, 2.4]
+    forward, backward = displacement(a, b, BOX), displacement(b, a, BOX)
+    for i in range(3):
+        assert abs(forward[i] + backward[i]) < 1e-12, (forward, backward)
+
+
+def test_displacement_never_exceeds_half_a_box():
+    for x in (0.0, 0.7, 2.9, 3.1, 5.5):
+        d = displacement([0.0, 0.0, 0.0], [x, 0.0, 0.0], BOX)
+        assert abs(d[0]) <= 3.0 + 1e-12, (x, d)
+
+
+def test_a_zero_box_length_means_no_periodicity():
+    d = displacement([0.0, 0.0, 0.0], [100.0, 0.0, 0.0], [0.0, 0.0, 0.0])
+    assert d[0] == 100.0
+
+
+def test_wrap_folds_a_point_into_the_box():
+    assert wrap([6.5, -0.5, 3.0], BOX) == [0.5, 5.5, 3.0]
+
+
+def test_wrap_leaves_an_interior_point_alone():
+    assert wrap([1.0, 2.0, 3.0], BOX) == [1.0, 2.0, 3.0]
+''',
+    'tests/test_integration.py': r'''"""Velocity Verlet. The invariants here are what makes an integrator correct."""
+
+from src import energy, observables, step
+
+BOX = [6.0, 6.0, 6.0]
+CONFIG = [[0.0, 0.0, 0.0], [1.1, 0.0, 0.0], [0.0, 1.2, 0.0], [2.0, 2.0, 2.0]]
+VEL = [[0.1, 0.0, 0.0], [-0.1, 0.05, 0.0], [0.0, -0.05, 0.2], [0.0, 0.0, -0.2]]
+MASS = [1.0, 1.0, 1.0, 1.0]
+
+
+def total_energy(positions, velocities):
+    return (energy(positions, box=BOX)
+            + observables(velocities, MASS)["kinetic"])
+
+
+def run(positions, velocities, dt, steps):
+    for _ in range(steps):
+        positions, velocities = step(positions, velocities, MASS, dt, box=BOX)
+    return positions, velocities
+
+
+def test_a_free_particle_travels_at_constant_velocity():
+    p, v = step([[1.0, 1.0, 1.0]], [[0.5, 0.0, 0.0]], [1.0], 0.1, box=BOX)
+    assert abs(p[0][0] - 1.05) < 1e-12, p
+    assert abs(v[0][0] - 0.5) < 1e-12, v
+
+
+def test_energy_is_conserved_over_a_short_run():
+    before = total_energy(CONFIG, VEL)
+    p, v = run(CONFIG, VEL, 0.001, 40)
+    after = total_energy(p, v)
+    assert abs(after - before) / max(1.0, abs(before)) < 1e-4, (before, after)
+
+
+def test_momentum_is_conserved_over_a_short_run():
+    before = observables(VEL, MASS)["momentum"]
+    _, v = run(CONFIG, VEL, 0.001, 40)
+    after = observables(v, MASS)["momentum"]
+    assert max(abs(after[a] - before[a]) for a in range(3)) < 1e-9, (before, after)
+
+
+def test_a_far_too_large_timestep_does_not_conserve_energy():
+    """The conservation tests must be able to fail, or they assert nothing."""
+    before = total_energy(CONFIG, VEL)
+    p, v = run(CONFIG, VEL, 0.25, 40)
+    after = total_energy(p, v)
+    assert abs(after - before) / max(1.0, abs(before)) > 1e-3, (before, after)
+
+
+def test_reversing_the_velocities_retraces_the_trajectory():
+    """Velocity Verlet is time-reversible, which no wrong update order is."""
+    forward_p, forward_v = run(CONFIG, VEL, 0.002, 25)
+    back_p, _ = run(forward_p, [[-c for c in v] for v in forward_v], 0.002, 25)
+    for i in range(len(CONFIG)):
+        for axis in range(3):
+            gap = abs(back_p[i][axis] - CONFIG[i][axis]) % BOX[axis]
+            assert min(gap, BOX[axis] - gap) < 1e-6, (i, axis, back_p[i], CONFIG[i])
+
+
+def test_positions_come_back_inside_the_box():
+    p, _ = step([[5.99, 0.01, 3.0]], [[1.0, -1.0, 0.0]], [1.0], 0.05, box=BOX)
+    for axis in range(3):
+        assert 0.0 <= p[0][axis] < BOX[axis], p
+
+
+def test_a_heavier_particle_accelerates_less():
+    # No periodicity, so the comparison is a displacement rather than a wrapped
+    # coordinate; and a fresh velocity list per particle, because `[[0.0]*3]*2`
+    # is the same list twice and the two updates would land on each other.
+    start = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]
+    rest = [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
+    free = [0.0, 0.0, 0.0]
+    light, _ = step(start, [list(free), list(free)], [1.0, 1.0], 0.01,
+                    box=[0.0, 0.0, 0.0])
+    heavy, _ = step(start, [list(free), list(free)], [4.0, 1.0], 0.01,
+                    box=[0.0, 0.0, 0.0])
+    assert rest is not None
+    assert abs(heavy[0][0]) < abs(light[0][0]) - 1e-9, (light[0], heavy[0])
+
+
+def test_zero_steps_change_nothing():
+    p, v = run(CONFIG, VEL, 0.001, 0)
+    assert p == CONFIG and v == VEL
+''',
+    'tests/test_observables.py': r'''"""Thermodynamics and structure, in reduced units with k_B = 1."""
+
+from src import observables, rdf
+
+
+def test_kinetic_energy_of_one_particle():
+    obs = observables([[2.0, 0.0, 0.0]], [3.0])
+    assert abs(obs["kinetic"] - 6.0) < 1e-12, obs
+
+
+def test_kinetic_energy_adds_over_particles():
+    obs = observables([[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]], [1.0, 1.0])
+    assert abs(obs["kinetic"] - 2.5) < 1e-12, obs
+
+
+def test_temperature_is_two_thirds_of_the_kinetic_energy_per_particle():
+    velocities = [[1.0, 1.0, 1.0], [-1.0, 0.0, 0.5]]
+    obs = observables(velocities, [1.0, 1.0])
+    assert abs(obs["temperature"] - 2.0 * obs["kinetic"] / 6.0) < 1e-12, obs
+
+
+def test_momentum_of_opposing_particles_cancels():
+    obs = observables([[1.0, 0.0, 0.0], [-0.5, 0.0, 0.0]], [1.0, 2.0])
+    assert max(abs(c) for c in obs["momentum"]) < 1e-12, obs
+
+
+def test_momentum_is_mass_weighted():
+    obs = observables([[1.0, 0.0, 0.0]], [2.5])
+    assert abs(obs["momentum"][0] - 2.5) < 1e-12, obs
+
+
+def test_a_system_at_rest_has_no_temperature():
+    obs = observables([[0.0, 0.0, 0.0]] * 3, [1.0] * 3)
+    assert obs["kinetic"] == 0.0 and obs["temperature"] == 0.0
+
+
+def test_the_histogram_counts_every_distinct_pair_once():
+    positions = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]]
+    counts = rdf(positions, [0.0, 0.0, 0.0], 10, 5.0)
+    assert sum(counts) == 3, counts
+
+
+def test_the_histogram_ignores_pairs_at_or_beyond_rmax():
+    positions = [[0.0, 0.0, 0.0], [4.0, 0.0, 0.0]]
+    assert sum(rdf(positions, [0.0, 0.0, 0.0], 10, 2.0)) == 0
+
+
+def test_the_histogram_puts_a_distance_in_the_right_bin():
+    positions = [[0.0, 0.0, 0.0], [1.25, 0.0, 0.0]]
+    counts = rdf(positions, [0.0, 0.0, 0.0], 4, 2.0)   # bins 0.5 wide
+    assert counts == [0, 0, 1, 0], counts
+
+
+def test_the_histogram_uses_the_nearest_image():
+    positions = [[0.1, 0.0, 0.0], [5.9, 0.0, 0.0]]     # 0.2 apart across the seam
+    counts = rdf(positions, [6.0, 6.0, 6.0], 6, 3.0)   # bins 0.5 wide
+    assert counts[0] == 1 and sum(counts) == 1, counts
+''',
+    'tests/test_pair_potentials.py': r'''"""The pair interactions, probed through two-particle configurations."""
+
+from src import energy, forces
+
+FAR = [0.0, 0.0, 0.0]          # no periodicity: an isolated pair
+
+
+def pair_energy(r, **kw):
+    return energy([[0.0, 0.0, 0.0], [r, 0.0, 0.0]], box=FAR, **kw)
+
+
+def test_lennard_jones_is_zero_at_the_cutoff():
+    """The potential is shifted, so it reaches the cutoff continuously."""
+    assert abs(pair_energy(2.5, cutoff=2.5)) < 1e-12, pair_energy(2.5, cutoff=2.5)
+
+
+def test_lennard_jones_is_zero_beyond_the_cutoff():
+    assert pair_energy(3.0, cutoff=2.5) == 0.0
+
+
+def test_lennard_jones_minimum_is_at_the_sixth_root_of_two():
+    """u(2**(1/6) sigma) = -epsilon, the textbook minimum, before the shift."""
+    r_min = 2.0 ** (1.0 / 6.0)
+    shift_free = pair_energy(r_min, cutoff=1e6)
+    assert abs(shift_free - (-1.0)) < 1e-9, shift_free
+
+
+def test_lennard_jones_is_repulsive_inside_sigma():
+    assert pair_energy(0.9, cutoff=1e6) > 0.0
+
+
+def test_the_force_vanishes_at_the_lennard_jones_minimum():
+    r_min = 2.0 ** (1.0 / 6.0)
+    f = forces([[0.0, 0.0, 0.0], [r_min, 0.0, 0.0]], box=FAR, cutoff=1e6)
+    assert abs(f[0][0]) < 1e-7, f
+
+
+def test_particles_inside_sigma_push_apart():
+    f = forces([[0.0, 0.0, 0.0], [0.9, 0.0, 0.0]], box=FAR, cutoff=1e6)
+    assert f[0][0] < 0.0 and f[1][0] > 0.0, f
+
+
+def test_particles_outside_the_minimum_pull_together():
+    f = forces([[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]], box=FAR, cutoff=2.5)
+    assert f[0][0] > 0.0 and f[1][0] < 0.0, f
+
+
+def test_harmonic_is_zero_at_its_rest_length():
+    u = pair_energy(1.3, potential="harmonic", k=2.0, r0=1.3)
+    assert abs(u) < 1e-12, u
+
+
+def test_harmonic_grows_quadratically():
+    """Doubling the extension quadruples the energy."""
+    one = pair_energy(1.1, potential="harmonic", k=2.0, r0=1.0)
+    two = pair_energy(1.2, potential="harmonic", k=2.0, r0=1.0)
+    assert abs(two - 4.0 * one) < 1e-9, (one, two)
+
+
+def test_a_stretched_harmonic_bond_pulls_inward():
+    f = forces([[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]], box=FAR,
+               potential="harmonic", k=2.0, r0=1.0)
+    assert f[0][0] > 0.0 and f[1][0] < 0.0, f
+''',
+}
+
+#: The audit set: never in the repository, injected only while a held-out task is
+#: scored. `frozen` stops a file being written, not read.
+_AUDIT = {
+    'audit/test_physics.py': r'''"""The audit set: the same physics, asked differently, and never in the repository.
+
+`tests/` is frozen but readable, and the executor is handed the source of the test
+it is failing -- so a run could in principle satisfy one assertion at a time without
+the physics underneath holding together. These tests are injected only while a
+held-out task is being scored, so nothing that wrote the code has ever seen them.
+Every probe here is deliberately *not* a restatement of a driven test: a different
+configuration, a different cutoff, a brute-force comparison, or two layers composed.
+"""
+
+import math
+import random
+
+from src import displacement, energy, forces, observables, rdf, step, wrap
+
+BOX = [7.3, 6.1, 5.4]          # deliberately not a cube
+MASSES = [1.0, 2.0, 0.5, 1.5, 1.0, 3.0]
+
+
+def a_random_configuration(seed, n=6, box=BOX):
+    """Spread out enough that nothing sits inside the repulsive core."""
+    rng = random.Random(seed)
+    while True:
+        points = [[rng.uniform(0.0, box[axis]) for axis in range(3)] for _ in range(n)]
+        if all(math.sqrt(sum(c * c for c in displacement(points[i], points[j], box)))
+               > 0.95 for i in range(n) for j in range(i + 1, n)):
+            return points
+
+
+def test_displacement_agrees_with_a_brute_force_search_over_images():
+    """The closed form, checked against the thing it is a closed form for."""
+    rng = random.Random(11)
+    for _ in range(40):
+        # Both points inside the box, so one box of shift per axis is enough to
+        # reach every candidate image -- and the search is then exhaustive.
+        a = [rng.uniform(0.0, BOX[axis]) for axis in range(3)]
+        b = [rng.uniform(0.0, BOX[axis]) for axis in range(3)]
+        got = displacement(a, b, BOX)
+        best = None
+        for i in (-1, 0, 1):
+            for j in (-1, 0, 1):
+                for k in (-1, 0, 1):
+                    shift = (i * BOX[0], j * BOX[1], k * BOX[2])
+                    candidate = [b[axis] + shift[axis] - a[axis] for axis in range(3)]
+                    length = sum(c * c for c in candidate)
+                    if best is None or length < best[0] - 1e-12:
+                        best = (length, candidate)
+        for axis in range(3):
+            assert abs(got[axis] - best[1][axis]) < 1e-9, (a, b, got, best[1])
+
+
+def test_wrapping_the_input_changes_no_displacement():
+    """Two layers composed: wrapping is a change of representative, not of geometry."""
+    points = a_random_configuration(3)
+    shifted = [wrap([p[0] + 3 * BOX[0], p[1] - 2 * BOX[1], p[2] + BOX[2]], BOX)
+               for p in points]
+    for i in range(len(points)):
+        for j in range(len(points)):
+            here = displacement(points[i], points[j], BOX)
+            there = displacement(shifted[i], shifted[j], BOX)
+            for axis in range(3):
+                assert abs(here[axis] - there[axis]) < 1e-9, (i, j, here, there)
+
+
+def test_the_pair_energy_matches_the_closed_form_at_an_unusual_cutoff():
+    """Not 2.5: a shift hard-coded for the default cutoff fails here."""
+    for r in (0.95, 1.0, 1.4, 2.2, 2.9):
+        s6 = (1.0 / r) ** 6
+        shift = 4.0 * ((1.0 / 3.0) ** 12 - (1.0 / 3.0) ** 6)
+        expect = 4.0 * (s6 * s6 - s6) - shift
+        got = energy([[0.0, 0.0, 0.0], [r, 0.0, 0.0]], box=[0.0, 0.0, 0.0], cutoff=3.0)
+        assert abs(got - expect) < 1e-9, (r, got, expect)
+
+
+def test_epsilon_scales_the_energy_linearly():
+    config = a_random_configuration(5)
+    one = energy(config, box=BOX, epsilon=1.0)
+    three = energy(config, box=BOX, epsilon=3.0)
+    assert abs(three - 3.0 * one) < 1e-9, (one, three)
+
+
+def test_sigma_rescales_the_whole_problem():
+    """u(r; sigma, rc) = u(r/sigma; 1, rc/sigma): a pure change of length unit."""
+    r, sigma = 1.7, 1.3
+    scaled = energy([[0.0, 0.0, 0.0], [r, 0.0, 0.0]], box=[0.0, 0.0, 0.0],
+                    sigma=sigma, cutoff=2.5 * sigma)
+    plain = energy([[0.0, 0.0, 0.0], [r / sigma, 0.0, 0.0]], box=[0.0, 0.0, 0.0],
+                   sigma=1.0, cutoff=2.5)
+    assert abs(scaled - plain) < 1e-9, (scaled, plain)
+
+
+def test_forces_match_a_central_difference_on_a_random_box():
+    """The gradient check again, on a configuration no driven test names."""
+    config = a_random_configuration(7)
+    analytic = forces(config, box=BOX)
+    h = 1e-6
+    for i in range(len(config)):
+        for axis in range(3):
+            plus = [list(p) for p in config]
+            minus = [list(p) for p in config]
+            plus[i][axis] += h
+            minus[i][axis] -= h
+            numeric = -(energy(plus, box=BOX) - energy(minus, box=BOX)) / (2.0 * h)
+            assert abs(numeric - analytic[i][axis]) < 1e-4, (i, axis, numeric,
+                                                             analytic[i][axis])
+
+
+def test_the_harmonic_trio_matches_its_analytic_energy():
+    """Every pair is bonded, including the 1-3 pair: three springs, not two."""
+    config = [[0.0, 0.0, 0.0], [1.2, 0.0, 0.0], [2.4, 0.0, 0.0]]
+    expect = 0.5 * 3.0 * ((1.2 - 1.0) ** 2 + (1.2 - 1.0) ** 2 + (2.4 - 1.0) ** 2)
+    got = energy(config, box=[0.0, 0.0, 0.0], potential="harmonic", k=3.0, r0=1.0)
+    assert abs(got - expect) < 1e-9, (got, expect)
+
+
+def test_a_harmonic_oscillator_keeps_its_period():
+    """Two bonded particles, quarter period out and back: an integrator that is
+    merely stable rather than correct drifts in phase."""
+    k, mass = 4.0, 1.0
+    omega = math.sqrt(2.0 * k / mass)            # reduced mass mu = m / 2
+    positions = [[0.0, 0.0, 0.0], [1.3, 0.0, 0.0]]
+    velocities = [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
+    dt, period = 1e-3, 2.0 * math.pi / omega
+    for _ in range(int(round(period / dt))):
+        positions, velocities = step(positions, velocities, [mass, mass], dt,
+                                     box=[0.0, 0.0, 0.0], potential="harmonic",
+                                     k=k, r0=1.0)
+    separation = displacement(positions[0], positions[1], [0.0, 0.0, 0.0])[0]
+    assert abs(separation - 1.3) < 1e-3, separation
+
+
+def test_energy_is_conserved_on_a_configuration_no_driven_test_names():
+    config = a_random_configuration(13)
+    velocities = [[0.05 * (i + 1) * (-1) ** i, 0.03 * i, -0.02 * (i + 2)]
+                  for i in range(len(config))]
+    masses = MASSES[:len(config)]
+
+    def total(p, v):
+        return energy(p, box=BOX) + observables(v, masses)["kinetic"]
+
+    before = total(config, velocities)
+    p, v = config, velocities
+    for _ in range(60):
+        p, v = step(p, v, masses, 5e-4, box=BOX)
+    assert abs(total(p, v) - before) / max(1.0, abs(before)) < 1e-4, (before,
+                                                                     total(p, v))
+
+
+def test_a_step_does_not_change_the_total_momentum():
+    """Integration and observables composed: the forces cancel pairwise, so the
+    two half-kicks move no momentum no matter what the configuration is."""
+    config = a_random_configuration(17)
+    masses = MASSES[:len(config)]
+    velocities = [[0.1, -0.2, 0.05] for _ in config]
+    before = observables(velocities, masses)["momentum"]
+    _, after_v = step(config, velocities, masses, 1e-3, box=BOX)
+    after = observables(after_v, masses)["momentum"]
+    for axis in range(3):
+        assert abs(after[axis] - before[axis]) < 1e-9, (before, after)
+
+
+def test_doubling_every_velocity_quadruples_the_temperature():
+    velocities = [[0.3, -0.1, 0.2], [0.0, 0.4, -0.3], [-0.2, 0.1, 0.1]]
+    masses = [1.0, 2.0, 0.5]
+    one = observables(velocities, masses)["temperature"]
+    two = observables([[2.0 * c for c in v] for v in velocities],
+                      masses)["temperature"]
+    assert abs(two - 4.0 * one) < 1e-12, (one, two)
+
+
+def test_the_histogram_accounts_for_every_pair_when_rmax_covers_the_box():
+    """Half the shortest box side is the largest distance the nearest image can be,
+    so nothing may fall outside the histogram here."""
+    config = a_random_configuration(19)
+    n = len(config)
+    rmax = 0.5 * math.sqrt(sum(length * length for length in BOX)) + 1.0
+    counts = rdf(config, BOX, 24, rmax)
+    assert sum(counts) == n * (n - 1) // 2, (sum(counts), n)
+    assert all(isinstance(c, int) for c in counts), counts
+
+
+def test_the_histogram_agrees_with_distances_computed_through_displacement():
+    """The structure layer against the geometry layer, bin by bin."""
+    config = a_random_configuration(23)
+    bins, rmax = 10, 3.0
+    expect = [0] * bins
+    for i in range(len(config)):
+        for j in range(i + 1, len(config)):
+            r = math.sqrt(sum(c * c for c in displacement(config[i], config[j], BOX)))
+            if r < rmax:
+                expect[int(r / (rmax / bins))] += 1
+    assert rdf(config, BOX, bins, rmax) == expect
+''',
+}
+
 
 def initial_files() -> Dict[str, str]:
     """The implementation-empty repository the run starts from."""
-    return {
+    files = {
         "CONTEXT.md": _ROOT_CONTEXT,
         "spec/CONTEXT.md": _SPEC,
         "md.py": _DRIVER,
@@ -401,93 +966,99 @@ def initial_files() -> Dict[str, str]:
         "src/observe/CONTEXT.md": _OBS_CONTEXT,
         f"src/{SKILLS_DIR}/python-modules.md": PYTHON_MODULE_SKILL,
     }
+    files.update(_TESTS)
+    return files
+
+
+MD = TestSuite(name="md", given=initial_files(), frozen=FROZEN, audit=_AUDIT)
+
+build_tasks = MD.build_tasks
+make_runner = MD.make_runner
+suite_review = MD.review
+#: One test, pass or fail. No tolerance of its own -- the test owns that.
+reward = reward_test
+#: Exactly the audit set in the held-out tail, and every driven test in the search.
+HELD_OUT_FRAC = MD.held_out_frac()
+
+
+def llm_manager(complete):
+    return _llm_manager(complete)
+
+
+def llm_executor(complete, *, editable=("**",), frozen=FROZEN):
+    return _llm_executor(complete, editable=editable, frozen=frozen,
+                         failure=TEST_FAILURE)
 
 
 # ---------------------------------------------------------------------------
-# The reference implementation: the oracle, and what the offline actors reveal
+# A reference implementation, for the two jobs that are not scoring
 # ---------------------------------------------------------------------------
+# It drives the offline rule-based actor, and it lets a test prove the suite is
+# passable at all -- shipping a suite nobody has seen pass is its own dishonesty.
+# Nothing in the scoring path reads it.
 
 _PKG_INIT = '"""Package marker."""\n'
 
-_REF_ENTRY = r'''"""Public surface. Each stage is imported lazily -- see spec/CONTEXT.md."""
-
-import json
+_REF_ENTRY = r'''"""Public surface. Each function imports its stage lazily -- see spec/CONTEXT.md."""
 
 
-def _payload(source):
-    return json.loads(source)
-
-
-def displacement(source):
+def displacement(a, b, box):
+    """The nearest-image displacement from ``a`` to ``b``."""
     from .core.vectors import minimum_image
-    spec = _payload(source)
-    return minimum_image(spec["a"], spec["b"], spec["box"])
+    return minimum_image(a, b, box)
 
 
-def energy(source):
-    from .core.state import from_payload, potential_spec
+def wrap(point, box):
+    """``point`` folded into ``[0, L)`` on every periodic axis."""
+    from .core.vectors import wrap as _wrap
+    return _wrap(point, box)
+
+
+def energy(positions, box=(0.0, 0.0, 0.0), potential="lennard_jones",
+           epsilon=1.0, sigma=1.0, cutoff=2.5, k=1.0, r0=1.0):
+    """The total potential energy of a configuration."""
+    from .core.state import System, make_spec
     from .potentials.registry import evaluate
-    spec = _payload(source)
-    return evaluate(from_payload(spec), potential_spec(spec))[0]
+    system = System(positions, box=box)
+    spec = make_spec(potential, epsilon, sigma, cutoff, k, r0)
+    return evaluate(system, spec)[0]
 
 
-def forces(source):
-    from .core.state import from_payload, potential_spec
+def forces(positions, box=(0.0, 0.0, 0.0), potential="lennard_jones",
+           epsilon=1.0, sigma=1.0, cutoff=2.5, k=1.0, r0=1.0):
+    """One force vector per particle."""
+    from .core.state import System, make_spec
     from .potentials.registry import evaluate
-    spec = _payload(source)
-    return evaluate(from_payload(spec), potential_spec(spec))[1]
+    system = System(positions, box=box)
+    spec = make_spec(potential, epsilon, sigma, cutoff, k, r0)
+    return evaluate(system, spec)[1]
 
 
-def step(source):
-    from .core.state import from_payload, potential_spec
+def step(positions, velocities, masses, dt, box=(0.0, 0.0, 0.0),
+         potential="lennard_jones", epsilon=1.0, sigma=1.0, cutoff=2.5,
+         k=1.0, r0=1.0):
+    """One velocity-Verlet step. Returns ``(positions, velocities)``."""
+    from .core.state import System, make_spec
     from .integrate.verlet import step as one_step
-    spec = _payload(source)
-    system = one_step(from_payload(spec), potential_spec(spec), spec["dt"])
-    return {"positions": system.positions, "velocities": system.velocities}
+    system = System(positions, velocities, masses, box)
+    spec = make_spec(potential, epsilon, sigma, cutoff, k, r0)
+    one_step(system, spec, dt)
+    return system.positions, system.velocities
 
 
-def observables(source):
-    from .core.state import from_payload
+def observables(velocities, masses):
+    """``{"kinetic": ..., "temperature": ..., "momentum": [...]}``."""
     from .observe.thermo import kinetic, momentum, temperature
-    system = from_payload(_payload(source))
-    return {"kinetic": kinetic(system.velocities, system.masses),
-            "temperature": temperature(system.velocities, system.masses),
-            "momentum": momentum(system.velocities, system.masses)}
+    return {"kinetic": kinetic(velocities, masses),
+            "temperature": temperature(velocities, masses),
+            "momentum": momentum(velocities, masses)}
 
 
-def rdf(source):
-    from .core.state import from_payload
+def rdf(positions, box, bins, rmax):
+    """Integer counts of distinct pairs per bin over ``[0, rmax)``."""
+    from .core.state import System
     from .observe.rdf import histogram
-    spec = _payload(source)
-    return histogram(from_payload(spec), spec["bins"], spec["rmax"])
-
-
-def forces_sum_to_zero(source):
-    from .core.state import from_payload, potential_spec
-    from .observe.checks import forces_sum_to_zero as check
-    spec = _payload(source)
-    return check(from_payload(spec), potential_spec(spec))
-
-
-def force_matches_gradient(source):
-    from .core.state import from_payload, potential_spec
-    from .observe.checks import force_matches_gradient as check
-    spec = _payload(source)
-    return check(from_payload(spec), potential_spec(spec))
-
-
-def energy_conserved(source):
-    from .core.state import from_payload, potential_spec
-    from .observe.checks import energy_conserved as check
-    spec = _payload(source)
-    return check(from_payload(spec), potential_spec(spec), spec["dt"], spec["steps"])
-
-
-def momentum_conserved(source):
-    from .core.state import from_payload, potential_spec
-    from .observe.checks import momentum_conserved as check
-    spec = _payload(source)
-    return check(from_payload(spec), potential_spec(spec), spec["dt"], spec["steps"])
+    return histogram(System(positions, box=box), bins, rmax)
 '''
 
 _REF_VECTORS = r'''"""Geometry under periodic boundaries."""
@@ -530,7 +1101,7 @@ def wrap(point, box):
     return out
 '''
 
-_REF_STATE = r'''"""The System container, and the payload shape every stage is given."""
+_REF_STATE = r'''"""The System container, and the potential's parameters."""
 
 
 class System:
@@ -551,22 +1122,11 @@ class System:
         return System(self.positions, self.velocities, self.masses, self.box)
 
 
-def from_payload(payload):
-    """A System from a decoded stage payload."""
-    return System(payload["positions"], payload.get("velocities"),
-                  payload.get("masses"), payload.get("box", [0.0, 0.0, 0.0]))
-
-
-def potential_spec(payload):
-    """The potential's name and its parameters, with the spec's defaults."""
-    return {
-        "name": payload.get("potential", "lennard_jones"),
-        "epsilon": payload.get("epsilon", 1.0),
-        "sigma": payload.get("sigma", 1.0),
-        "cutoff": payload.get("cutoff", 2.5),
-        "k": payload.get("k", 1.0),
-        "r0": payload.get("r0", 1.0),
-    }
+def make_spec(potential="lennard_jones", epsilon=1.0, sigma=1.0, cutoff=2.5,
+              k=1.0, r0=1.0):
+    """The parameter bundle every pair kernel is handed."""
+    return {"name": potential, "epsilon": epsilon, "sigma": sigma,
+            "cutoff": cutoff, "k": k, "r0": r0}
 '''
 
 _REF_REGISTRY = r'''"""Which pair interaction a name means, and the O(N^2) loop over pairs."""
@@ -716,129 +1276,21 @@ def histogram(system, bins, rmax):
     return counts
 '''
 
-#: The shape `src/observe/CONTEXT.md` asks for: one function per invariant, four
-#: of them, each independently fillable and each reached by a different stage --
-#: so four agents holding four different failing stages edit four different parts
-#: of one file, which is what a keyed union cannot fuse.
-_CHECKS_SKELETON = r'''"""Invariants a correct force field and integrator must satisfy."""
-
-from ..integrate.verlet import run
-from ..observe.thermo import kinetic, momentum
-from ..potentials.registry import evaluate
-
-
-def forces_sum_to_zero(system, spec, tol=1e-9):
-    raise NotImplementedError("forces_sum_to_zero")
+REFERENCE = {
+    ENTRY: _REF_ENTRY,
+    CORE_INIT: _PKG_INIT, VECTORS: _REF_VECTORS, STATE: _REF_STATE,
+    POT_INIT: _PKG_INIT, REGISTRY: _REF_REGISTRY,
+    PAIR_INIT: _PKG_INIT, LJ: _REF_LJ, HARMONIC: _REF_HARMONIC,
+    INT_INIT: _PKG_INIT, VERLET: _REF_VERLET,
+    OBS_INIT: _PKG_INIT, THERMO: _REF_THERMO, RDF: _REF_RDF,
+}
 
 
-def force_matches_gradient(system, spec, h=1e-6, tol=1e-4):
-    raise NotImplementedError("force_matches_gradient")
-
-
-def energy_conserved(system, spec, dt, steps, tol=1e-4):
-    raise NotImplementedError("energy_conserved")
-
-
-def momentum_conserved(system, spec, dt, steps, tol=1e-9):
-    raise NotImplementedError("momentum_conserved")
-'''
-
-_STUBS = {'forces_sum_to_zero': ('def forces_sum_to_zero(system, spec, tol=1e-9):\n    raise NotImplementedError("forces_sum_to_zero")\n', 'def forces_sum_to_zero(system, spec, tol=1e-9):\n    """Newton\'s third law, pair by pair: the net force on the box is zero."""\n    _, forces = evaluate(system, spec)\n    total = [sum(f[axis] for f in forces) for axis in range(3)]\n    return max(abs(c) for c in total) <= tol\n'), 'force_matches_gradient': ('def force_matches_gradient(system, spec, h=1e-6, tol=1e-4):\n    raise NotImplementedError("force_matches_gradient")\n', 'def force_matches_gradient(system, spec, h=1e-6, tol=1e-4):\n    """Every force component against a central difference of the energy."""\n    _, forces = evaluate(system, spec)\n    worst = 0.0\n    for i in range(len(system)):\n        for axis in range(3):\n            original = system.positions[i][axis]\n            system.positions[i][axis] = original + h\n            plus, _ = evaluate(system, spec)\n            system.positions[i][axis] = original - h\n            minus, _ = evaluate(system, spec)\n            system.positions[i][axis] = original\n            worst = max(worst, abs(-(plus - minus) / (2.0 * h) - forces[i][axis]))\n    return worst <= tol\n'), 'energy_conserved': ('def energy_conserved(system, spec, dt, steps, tol=1e-4):\n    raise NotImplementedError("energy_conserved")\n', 'def energy_conserved(system, spec, dt, steps, tol=1e-4):\n    """Total energy before and after ``steps`` steps, as a relative drift."""\n    potential, _ = evaluate(system, spec)\n    before = potential + kinetic(system.velocities, system.masses)\n    run(system, spec, dt, steps)\n    potential, _ = evaluate(system, spec)\n    after = potential + kinetic(system.velocities, system.masses)\n    return abs(after - before) / max(1.0, abs(before)) <= tol\n'), 'momentum_conserved': ('def momentum_conserved(system, spec, dt, steps, tol=1e-9):\n    raise NotImplementedError("momentum_conserved")\n', 'def momentum_conserved(system, spec, dt, steps, tol=1e-9):\n    """Total momentum before and after ``steps`` steps."""\n    before = momentum(system.velocities, system.masses)\n    run(system, spec, dt, steps)\n    after = momentum(system.velocities, system.masses)\n    return max(abs(after[a] - before[a]) for a in range(3)) <= tol\n')}
-
-#: Which stage's failure points at which invariant. Routing by the stage rather
-#: than by the payload text, because an MD payload is numbers and mentions no
-#: function by name.
-_STAGE_STUB = {"newton": "forces_sum_to_zero", "fd": "force_matches_gradient",
-               "cons": "energy_conserved", "mom": "momentum_conserved"}
-
-
-def _filled_checks() -> str:
-    body = _CHECKS_SKELETON
-    for stub, filled in _STUBS.values():
-        body = body.replace(stub, filled)
-    return body
-
-
-_CASES = (
-    ('disp', '{"a": [0.1, 0.0, 0.0], "b": [5.6, 0.0, 0.0], "box": [6.0, 6.0, 6.0]}'),
-    ('pot', '{"box": [6.0, 6.0, 6.0], "masses": [1.0, 1.0, 1.0, 1.0], "positions": [[0.0, 0.0, 0.0], [1.1, 0.0, 0.0], [0.0, 1.2, 0.0], [2.0, 2.0, 2.0]], "velocities": [[0.1, 0.0, 0.0], [-0.1, 0.05, 0.0], [0.0, -0.05, 0.2], [0.0, 0.0, -0.2]]}'),
-    ('force', '{"box": [6.0, 6.0, 6.0], "masses": [1.0, 1.0, 1.0, 1.0], "positions": [[0.0, 0.0, 0.0], [1.1, 0.0, 0.0], [0.0, 1.2, 0.0], [2.0, 2.0, 2.0]], "velocities": [[0.1, 0.0, 0.0], [-0.1, 0.05, 0.0], [0.0, -0.05, 0.2], [0.0, 0.0, -0.2]]}'),
-    ('newton', '{"box": [6.0, 6.0, 6.0], "masses": [1.0, 1.0, 1.0, 1.0], "positions": [[0.0, 0.0, 0.0], [1.1, 0.0, 0.0], [0.0, 1.2, 0.0], [2.0, 2.0, 2.0]], "velocities": [[0.1, 0.0, 0.0], [-0.1, 0.05, 0.0], [0.0, -0.05, 0.2], [0.0, 0.0, -0.2]]}'),
-    ('fd', '{"box": [6.0, 6.0, 6.0], "masses": [1.0, 1.0, 1.0, 1.0], "positions": [[0.0, 0.0, 0.0], [1.1, 0.0, 0.0], [0.0, 1.2, 0.0], [2.0, 2.0, 2.0]], "velocities": [[0.1, 0.0, 0.0], [-0.1, 0.05, 0.0], [0.0, -0.05, 0.2], [0.0, 0.0, -0.2]]}'),
-    ('step', '{"box": [6.0, 6.0, 6.0], "dt": 0.001, "masses": [1.0, 1.0, 1.0, 1.0], "positions": [[0.0, 0.0, 0.0], [1.1, 0.0, 0.0], [0.0, 1.2, 0.0], [2.0, 2.0, 2.0]], "velocities": [[0.1, 0.0, 0.0], [-0.1, 0.05, 0.0], [0.0, -0.05, 0.2], [0.0, 0.0, -0.2]]}'),
-    ('obs', '{"box": [6.0, 6.0, 6.0], "masses": [1.0, 1.0, 1.0, 1.0], "positions": [[0.0, 0.0, 0.0], [1.1, 0.0, 0.0], [0.0, 1.2, 0.0], [2.0, 2.0, 2.0]], "velocities": [[0.1, 0.0, 0.0], [-0.1, 0.05, 0.0], [0.0, -0.05, 0.2], [0.0, 0.0, -0.2]]}'),
-    ('rdf', '{"bins": 8, "box": [6.0, 6.0, 6.0], "masses": [1.0, 1.0, 1.0, 1.0], "positions": [[0.0, 0.0, 0.0], [1.1, 0.0, 0.0], [0.0, 1.2, 0.0], [2.0, 2.0, 2.0]], "rmax": 2.5, "velocities": [[0.1, 0.0, 0.0], [-0.1, 0.05, 0.0], [0.0, -0.05, 0.2], [0.0, 0.0, -0.2]]}'),
-    ('cons', '{"box": [6.0, 6.0, 6.0], "dt": 0.001, "masses": [1.0, 1.0, 1.0, 1.0], "positions": [[0.0, 0.0, 0.0], [1.1, 0.0, 0.0], [0.0, 1.2, 0.0], [2.0, 2.0, 2.0]], "steps": 40, "velocities": [[0.1, 0.0, 0.0], [-0.1, 0.05, 0.0], [0.0, -0.05, 0.2], [0.0, 0.0, -0.2]]}'),
-    ('mom', '{"box": [6.0, 6.0, 6.0], "dt": 0.001, "masses": [1.0, 1.0, 1.0, 1.0], "positions": [[0.0, 0.0, 0.0], [1.1, 0.0, 0.0], [0.0, 1.2, 0.0], [2.0, 2.0, 2.0]], "steps": 40, "velocities": [[0.1, 0.0, 0.0], [-0.1, 0.05, 0.0], [0.0, -0.05, 0.2], [0.0, 0.0, -0.2]]}'),
-    ('cons', '{"box": [6.0, 6.0, 6.0], "dt": 0.25, "masses": [1.0, 1.0, 1.0, 1.0], "positions": [[0.0, 0.0, 0.0], [1.1, 0.0, 0.0], [0.0, 1.2, 0.0], [2.0, 2.0, 2.0]], "steps": 40, "velocities": [[0.1, 0.0, 0.0], [-0.1, 0.05, 0.0], [0.0, -0.05, 0.2], [0.0, 0.0, -0.2]]}'),
-    ('disp', '{"a": [1.0, 2.0, 3.0], "b": [1.5, 2.5, 3.5], "box": [8.0, 8.0, 8.0]}'),
-    ('pot', '{"box": [8.0, 8.0, 8.0], "masses": [1.0, 2.0], "positions": [[1.0, 1.0, 1.0], [2.15, 1.0, 1.0]], "velocities": [[0.0, 0.2, 0.0], [0.0, -0.2, 0.0]]}'),
-    ('force', '{"box": [8.0, 8.0, 8.0], "masses": [1.0, 2.0], "positions": [[1.0, 1.0, 1.0], [2.15, 1.0, 1.0]], "velocities": [[0.0, 0.2, 0.0], [0.0, -0.2, 0.0]]}'),
-    ('newton', '{"box": [8.0, 8.0, 8.0], "masses": [1.0, 2.0], "positions": [[1.0, 1.0, 1.0], [2.15, 1.0, 1.0]], "velocities": [[0.0, 0.2, 0.0], [0.0, -0.2, 0.0]]}'),
-    ('fd', '{"box": [8.0, 8.0, 8.0], "masses": [1.0, 2.0], "positions": [[1.0, 1.0, 1.0], [2.15, 1.0, 1.0]], "velocities": [[0.0, 0.2, 0.0], [0.0, -0.2, 0.0]]}'),
-    ('step', '{"box": [8.0, 8.0, 8.0], "dt": 0.002, "masses": [1.0, 2.0], "positions": [[1.0, 1.0, 1.0], [2.15, 1.0, 1.0]], "velocities": [[0.0, 0.2, 0.0], [0.0, -0.2, 0.0]]}'),
-    ('obs', '{"box": [8.0, 8.0, 8.0], "masses": [1.0, 2.0], "positions": [[1.0, 1.0, 1.0], [2.15, 1.0, 1.0]], "velocities": [[0.0, 0.2, 0.0], [0.0, -0.2, 0.0]]}'),
-    ('rdf', '{"bins": 8, "box": [8.0, 8.0, 8.0], "masses": [1.0, 2.0], "positions": [[1.0, 1.0, 1.0], [2.15, 1.0, 1.0]], "rmax": 2.5, "velocities": [[0.0, 0.2, 0.0], [0.0, -0.2, 0.0]]}'),
-    ('cons', '{"box": [8.0, 8.0, 8.0], "dt": 0.002, "masses": [1.0, 2.0], "positions": [[1.0, 1.0, 1.0], [2.15, 1.0, 1.0]], "steps": 30, "velocities": [[0.0, 0.2, 0.0], [0.0, -0.2, 0.0]]}'),
-    ('mom', '{"box": [8.0, 8.0, 8.0], "dt": 0.002, "masses": [1.0, 2.0], "positions": [[1.0, 1.0, 1.0], [2.15, 1.0, 1.0]], "steps": 30, "velocities": [[0.0, 0.2, 0.0], [0.0, -0.2, 0.0]]}'),
-    ('disp', '{"a": [0.0, 6.9, 0.0], "b": [0.0, 0.2, 0.0], "box": [7.0, 7.0, 7.0]}'),
-    ('pot', '{"box": [7.0, 7.0, 7.0], "k": 2.0, "masses": [1.0, 1.0, 1.5], "positions": [[0.0, 0.0, 0.0], [1.3, 0.0, 0.0], [0.0, 0.9, 0.4]], "potential": "harmonic", "r0": 1.0, "velocities": [[0.05, 0.0, 0.0], [-0.05, 0.1, 0.0], [0.0, -0.1, 0.0]]}'),
-    ('force', '{"box": [7.0, 7.0, 7.0], "k": 2.0, "masses": [1.0, 1.0, 1.5], "positions": [[0.0, 0.0, 0.0], [1.3, 0.0, 0.0], [0.0, 0.9, 0.4]], "potential": "harmonic", "r0": 1.0, "velocities": [[0.05, 0.0, 0.0], [-0.05, 0.1, 0.0], [0.0, -0.1, 0.0]]}'),
-    ('newton', '{"box": [7.0, 7.0, 7.0], "k": 2.0, "masses": [1.0, 1.0, 1.5], "positions": [[0.0, 0.0, 0.0], [1.3, 0.0, 0.0], [0.0, 0.9, 0.4]], "potential": "harmonic", "r0": 1.0, "velocities": [[0.05, 0.0, 0.0], [-0.05, 0.1, 0.0], [0.0, -0.1, 0.0]]}'),
-    ('fd', '{"box": [7.0, 7.0, 7.0], "k": 2.0, "masses": [1.0, 1.0, 1.5], "positions": [[0.0, 0.0, 0.0], [1.3, 0.0, 0.0], [0.0, 0.9, 0.4]], "potential": "harmonic", "r0": 1.0, "velocities": [[0.05, 0.0, 0.0], [-0.05, 0.1, 0.0], [0.0, -0.1, 0.0]]}'),
-    ('step', '{"box": [7.0, 7.0, 7.0], "dt": 0.001, "k": 2.0, "masses": [1.0, 1.0, 1.5], "positions": [[0.0, 0.0, 0.0], [1.3, 0.0, 0.0], [0.0, 0.9, 0.4]], "potential": "harmonic", "r0": 1.0, "velocities": [[0.05, 0.0, 0.0], [-0.05, 0.1, 0.0], [0.0, -0.1, 0.0]]}'),
-    ('obs', '{"box": [7.0, 7.0, 7.0], "k": 2.0, "masses": [1.0, 1.0, 1.5], "positions": [[0.0, 0.0, 0.0], [1.3, 0.0, 0.0], [0.0, 0.9, 0.4]], "potential": "harmonic", "r0": 1.0, "velocities": [[0.05, 0.0, 0.0], [-0.05, 0.1, 0.0], [0.0, -0.1, 0.0]]}'),
-    ('rdf', '{"bins": 8, "box": [7.0, 7.0, 7.0], "k": 2.0, "masses": [1.0, 1.0, 1.5], "positions": [[0.0, 0.0, 0.0], [1.3, 0.0, 0.0], [0.0, 0.9, 0.4]], "potential": "harmonic", "r0": 1.0, "rmax": 2.5, "velocities": [[0.05, 0.0, 0.0], [-0.05, 0.1, 0.0], [0.0, -0.1, 0.0]]}'),
-    ('cons', '{"box": [7.0, 7.0, 7.0], "dt": 0.001, "k": 2.0, "masses": [1.0, 1.0, 1.5], "positions": [[0.0, 0.0, 0.0], [1.3, 0.0, 0.0], [0.0, 0.9, 0.4]], "potential": "harmonic", "r0": 1.0, "steps": 30, "velocities": [[0.05, 0.0, 0.0], [-0.05, 0.1, 0.0], [0.0, -0.1, 0.0]]}'),
-    ('mom', '{"box": [7.0, 7.0, 7.0], "dt": 0.001, "k": 2.0, "masses": [1.0, 1.0, 1.5], "positions": [[0.0, 0.0, 0.0], [1.3, 0.0, 0.0], [0.0, 0.9, 0.4]], "potential": "harmonic", "r0": 1.0, "steps": 30, "velocities": [[0.05, 0.0, 0.0], [-0.05, 0.1, 0.0], [0.0, -0.1, 0.0]]}'),
-    ('disp', '{"a": [4.9, 4.9, 4.9], "b": [0.1, 0.1, 0.1], "box": [5.0, 5.0, 5.0]}'),
-    ('pot', '{"box": [5.0, 5.0, 5.0], "cutoff": 2.0, "masses": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0], "positions": [[0.0, 0.0, 0.0], [1.15, 0.0, 0.0], [0.0, 1.15, 0.0], [0.0, 0.0, 1.15], [2.3, 0.0, 0.0], [1.15, 1.15, 1.15]], "velocities": [[0.0, 0.1, 0.0], [0.1, 0.0, 0.0], [0.0, 0.0, 0.1], [-0.1, 0.0, 0.0], [0.0, -0.1, 0.0], [0.0, 0.0, -0.1]]}'),
-    ('force', '{"box": [5.0, 5.0, 5.0], "cutoff": 2.0, "masses": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0], "positions": [[0.0, 0.0, 0.0], [1.15, 0.0, 0.0], [0.0, 1.15, 0.0], [0.0, 0.0, 1.15], [2.3, 0.0, 0.0], [1.15, 1.15, 1.15]], "velocities": [[0.0, 0.1, 0.0], [0.1, 0.0, 0.0], [0.0, 0.0, 0.1], [-0.1, 0.0, 0.0], [0.0, -0.1, 0.0], [0.0, 0.0, -0.1]]}'),
-    ('newton', '{"box": [5.0, 5.0, 5.0], "cutoff": 2.0, "masses": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0], "positions": [[0.0, 0.0, 0.0], [1.15, 0.0, 0.0], [0.0, 1.15, 0.0], [0.0, 0.0, 1.15], [2.3, 0.0, 0.0], [1.15, 1.15, 1.15]], "velocities": [[0.0, 0.1, 0.0], [0.1, 0.0, 0.0], [0.0, 0.0, 0.1], [-0.1, 0.0, 0.0], [0.0, -0.1, 0.0], [0.0, 0.0, -0.1]]}'),
-    ('fd', '{"box": [5.0, 5.0, 5.0], "cutoff": 2.0, "masses": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0], "positions": [[0.0, 0.0, 0.0], [1.15, 0.0, 0.0], [0.0, 1.15, 0.0], [0.0, 0.0, 1.15], [2.3, 0.0, 0.0], [1.15, 1.15, 1.15]], "velocities": [[0.0, 0.1, 0.0], [0.1, 0.0, 0.0], [0.0, 0.0, 0.1], [-0.1, 0.0, 0.0], [0.0, -0.1, 0.0], [0.0, 0.0, -0.1]]}'),
-    ('step', '{"box": [5.0, 5.0, 5.0], "cutoff": 2.0, "dt": 0.001, "masses": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0], "positions": [[0.0, 0.0, 0.0], [1.15, 0.0, 0.0], [0.0, 1.15, 0.0], [0.0, 0.0, 1.15], [2.3, 0.0, 0.0], [1.15, 1.15, 1.15]], "velocities": [[0.0, 0.1, 0.0], [0.1, 0.0, 0.0], [0.0, 0.0, 0.1], [-0.1, 0.0, 0.0], [0.0, -0.1, 0.0], [0.0, 0.0, -0.1]]}'),
-    ('obs', '{"box": [5.0, 5.0, 5.0], "cutoff": 2.0, "masses": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0], "positions": [[0.0, 0.0, 0.0], [1.15, 0.0, 0.0], [0.0, 1.15, 0.0], [0.0, 0.0, 1.15], [2.3, 0.0, 0.0], [1.15, 1.15, 1.15]], "velocities": [[0.0, 0.1, 0.0], [0.1, 0.0, 0.0], [0.0, 0.0, 0.1], [-0.1, 0.0, 0.0], [0.0, -0.1, 0.0], [0.0, 0.0, -0.1]]}'),
-    ('rdf', '{"bins": 8, "box": [5.0, 5.0, 5.0], "cutoff": 2.0, "masses": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0], "positions": [[0.0, 0.0, 0.0], [1.15, 0.0, 0.0], [0.0, 1.15, 0.0], [0.0, 0.0, 1.15], [2.3, 0.0, 0.0], [1.15, 1.15, 1.15]], "rmax": 2.5, "velocities": [[0.0, 0.1, 0.0], [0.1, 0.0, 0.0], [0.0, 0.0, 0.1], [-0.1, 0.0, 0.0], [0.0, -0.1, 0.0], [0.0, 0.0, -0.1]]}'),
-    ('cons', '{"box": [5.0, 5.0, 5.0], "cutoff": 2.0, "dt": 0.001, "masses": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0], "positions": [[0.0, 0.0, 0.0], [1.15, 0.0, 0.0], [0.0, 1.15, 0.0], [0.0, 0.0, 1.15], [2.3, 0.0, 0.0], [1.15, 1.15, 1.15]], "steps": 40, "velocities": [[0.0, 0.1, 0.0], [0.1, 0.0, 0.0], [0.0, 0.0, 0.1], [-0.1, 0.0, 0.0], [0.0, -0.1, 0.0], [0.0, 0.0, -0.1]]}'),
-    ('mom', '{"box": [5.0, 5.0, 5.0], "cutoff": 2.0, "dt": 0.001, "masses": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0], "positions": [[0.0, 0.0, 0.0], [1.15, 0.0, 0.0], [0.0, 1.15, 0.0], [0.0, 0.0, 1.15], [2.3, 0.0, 0.0], [1.15, 1.15, 1.15]], "steps": 40, "velocities": [[0.0, 0.1, 0.0], [0.1, 0.0, 0.0], [0.0, 0.0, 0.1], [-0.1, 0.0, 0.0], [0.0, -0.1, 0.0], [0.0, 0.0, -0.1]]}'),
-)
-
-MD = Suite(
-    name="md",
-    given=initial_files(),
-    frozen=FROZEN,
-    stages={"disp": "displacement", "pot": "energy", "force": "forces",
-            "newton": "forces_sum_to_zero", "fd": "force_matches_gradient",
-            "step": "step", "obs": "observables", "rdf": "rdf",
-            "cons": "energy_conserved", "mom": "momentum_conserved"},
-    cases=_CASES,
-    reference={
-        ENTRY: _REF_ENTRY,
-        CORE_INIT: _PKG_INIT, VECTORS: _REF_VECTORS, STATE: _REF_STATE,
-        POT_INIT: _PKG_INIT, REGISTRY: _REF_REGISTRY,
-        PAIR_INIT: _PKG_INIT, LJ: _REF_LJ, HARMONIC: _REF_HARMONIC,
-        INT_INIT: _PKG_INIT, VERLET: _REF_VERLET,
-        OBS_INIT: _PKG_INIT, THERMO: _REF_THERMO, RDF: _REF_RDF,
-        CHECKS: _filled_checks(),
-    },
-    digits=6,
-)
-
-build_tasks = MD.build_tasks
-make_runner = MD.make_runner
-suite_review = MD.review
-
-
-def llm_manager(complete):
-    return _llm_manager(complete)
-
-
-def llm_executor(complete, *, editable=("**",), frozen=FROZEN):
-    return _llm_executor(complete, editable=editable, frozen=frozen)
-
-
-def _reference_tree() -> Dict[str, str]:
-    return MD.reference_tree()
+def reference_tree() -> Dict[str, str]:
+    """The repository as a finished run should leave it."""
+    tree = initial_files()
+    tree.update(REFERENCE)
+    return tree
 
 
 # ---------------------------------------------------------------------------
@@ -852,19 +1304,13 @@ _PLAN = {
     "src/potentials/pair": [(PAIR_INIT, _PKG_INIT), (LJ, _REF_LJ),
                             (HARMONIC, _REF_HARMONIC)],
     "src/integrate": [(INT_INIT, _PKG_INIT), (VERLET, _REF_VERLET)],
-    "src/observe": [(OBS_INIT, _PKG_INIT), (THERMO, _REF_THERMO), (RDF, _REF_RDF),
-                    (CHECKS, _CHECKS_SKELETON)],
+    "src/observe": [(OBS_INIT, _PKG_INIT), (THERMO, _REF_THERMO), (RDF, _REF_RDF)],
 }
 
 
 def _outstanding(state: Mapping[str, str]) -> Dict[str, List[str]]:
-    owed = {node: [path for path, _ in steps if path not in state]
-             for node, steps in _PLAN.items()}
-    if CHECKS in state:
-        body = state[CHECKS]
-        owed["src/observe"] += [f"{CHECKS}#{name}"
-                                for name, (stub, _) in _STUBS.items() if stub in body]
-    return owed
+    return {node: [path for path, _ in steps if path not in state]
+            for node, steps in _PLAN.items()}
 
 
 def _owes(state: Mapping[str, str], node: str) -> bool:
@@ -886,21 +1332,4 @@ def offline_executor(brief: Brief) -> Sequence[Edit]:
     for target, content in _PLAN.get(path, ()):
         if target not in state:
             return [Edit(owner=path, path=target, content=content)]
-    if path == "src/observe" and CHECKS in state:
-        name = _stub_for(brief, state)
-        if name is not None:
-            stub, filled = _STUBS[name]
-            return [Edit(owner=path, path=CHECKS,
-                         content=state[CHECKS].replace(stub, filled))]
     return ()
-
-
-def _stub_for(brief: Brief, state: Mapping[str, str]) -> Optional[str]:
-    """Which invariant this episode's failing stage points at."""
-    body = state.get(CHECKS, "")
-    open_stubs = [n for n, (stub, _) in _STUBS.items() if stub in body]
-    if not open_stubs:
-        return None
-    meta = getattr(brief.task, "meta", None) or {}
-    wanted = _STAGE_STUB.get(meta.get("kind"))
-    return wanted if wanted in open_stubs else open_stubs[0]

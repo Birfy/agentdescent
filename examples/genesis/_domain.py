@@ -53,13 +53,23 @@ from ._suite import llm_executor as _llm_executor
 from ._suite import llm_manager as _llm_manager
 from ._world import SKILLS_DIR, normalise
 
-__all__ = ["FROZEN", "MINILANG", "build_tasks", "initial_files", "llm_executor",
+__all__ = ["CASE_NOUN", "FROZEN", "GROUP_NOUN", "HELD_OUT_FRAC",
+           "SCORING", "MINILANG", "build_tasks", "initial_files", "llm_executor",
            "llm_manager", "make_runner", "offline_executor", "offline_manager",
-           "reward", "suite_review"]
+           "reference_tree", "reward", "suite_review"]
 
 #: Human-supplied and never the agents'. L0 in this repository's sense, and the
 #: role c-testsuite / LLVM / Csmith play upstream.
 FROZEN = ("spec/**",)
+
+#: How the run is scored, and what the header line says about it.
+SCORING = "reference oracle, exact match"
+CASE_NOUN = "validation cases"
+GROUP_NOUN = "stages"
+#: `evolve()`'s default. The cases are sampled expressions over one grammar, so the
+#: held-out tail is a genuine generalisation estimate -- unlike md, where every task
+#: is a requirement and the tail is an audit set instead.
+HELD_OUT_FRAC = 0.4
 
 ENTRY = "src/__init__.py"
 LEXER = "src/frontend/lexer.py"
@@ -295,7 +305,7 @@ def _filled_evaluator() -> str:
     return body
 
 
-def _reference_tree() -> Dict[str, str]:
+def reference_tree() -> Dict[str, str]:
     """The finished repository -- the oracle the frozen suite is computed from."""
     return MINILANG.reference_tree()
 

@@ -1,11 +1,19 @@
 """The machinery a formation domain needs, with the domain itself left out.
 
 A formation run needs four things that have nothing to do with *which* software is
-being grown: a frozen validation suite whose expectations are computed from a
-reference rather than typed out, a way to run a candidate repository in a child
-process, the parent's integration check, and a pair of LLM actors. All four are
-here, parameterised by :class:`Suite`; the domains -- :mod:`examples.genesis._domain`
-(minilang) and :mod:`examples.genesis._stackvm` -- are data on top of it.
+being grown: a frozen validation suite, a way to run a candidate repository in a
+child process, the parent's integration check, and a pair of LLM actors. All four
+are here, and the domains -- :mod:`examples.genesis._domain` (minilang),
+:mod:`examples.genesis._stackvm`, :mod:`examples.genesis._jqx`,
+:mod:`examples.genesis._md` -- are data on top of them.
+
+The suite comes in two shapes, and the difference matters more than it looks.
+:class:`Suite` computes each case's expected answer by running a **reference
+implementation**: cheap to write, and circular -- you cannot ask a system to grow
+software you had to write first. :class:`TestSuite` scores against a **frozen test
+suite** instead: one task per test function, reward is whether it passes, and no
+reference appears anywhere in the scoring path. That is what upstream does
+(c-testsuite, LLVM, Csmith) and what a human actually writes.
 
 Split out when the second domain arrived, for the reason the first one should have
 been: the two differ in the software they grow and in nothing else, and a copy of
@@ -15,12 +23,15 @@ the harness per domain is two places for the frozen-file restore to drift.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass
-from typing import Callable, Dict, List, Mapping, Optional, Sequence
+from dataclasses import dataclass, field
+from itertools import zip_longest
+from typing import (Callable, Dict, List, Mapping, Optional, Sequence,
+                    Tuple)
 
 from agentdescent.evolution import Task
 from agentdescent.filetree import match_any, materialize, parse_tree
@@ -29,8 +40,8 @@ from ._delegation import Brief, Delegation, Edit
 from ._spatial import SITUATED_EDIT_PROTOCOL, parse_situated_edits
 from ._world import normalise
 
-__all__ = ["CRASHED", "PYTHON_MODULE_SKILL", "Suite", "llm_executor",
-           "llm_manager", "reward", "run_cases"]
+__all__ = ["CRASHED", "PYTHON_MODULE_SKILL", "Suite", "TestSuite", "llm_executor",
+           "llm_manager", "reward", "reward_test", "run_cases", "run_test"]
 
 #: One human-written skill, shared by the formation domains because the advice
 #: is about writing a Python module rather than about either language. Shipped so
@@ -302,12 +313,29 @@ situated at the repository path `{path}` and you may write ONLY files under it.
 OBJECTIVE
 {objective}
 
-A validation case failed:
-  input    {prompt}
-  produced {output}
-  score    {reward:.2f}
+{failure}
 
 {protocol}"""
+
+#: How an oracle-scored domain shows the executor what went wrong: one input, the
+#: output it produced, and the score that got.
+ORACLE_FAILURE = """A validation case failed:
+  input    {prompt}
+  produced {output}
+  score    {reward:.2f}"""
+
+#: How a test-scored domain shows it: the failing test's own source. The
+#: specification is executable here, so the evidence *is* the specification --
+#: including the tolerance, which an expected-output line cannot carry.
+TEST_FAILURE = """A test in the frozen suite is failing. Here it is, exactly as it \
+runs:
+
+{prompt}
+
+and it reports: {output}
+
+`tests/` is read-only. The implementation has to meet the test, never the other \
+way round -- and the tests that already pass have to keep passing."""
 
 
 def llm_manager(complete) -> Callable[[Brief], Sequence[Delegation]]:
@@ -335,13 +363,18 @@ def llm_manager(complete) -> Callable[[Brief], Sequence[Delegation]]:
 
 
 def llm_executor(complete, *, editable: Sequence[str] = ("**",),
-                 frozen: Sequence[str] = ()) -> Callable[[Brief], Sequence[Edit]]:
+                 frozen: Sequence[str] = (),
+                 failure: str = ORACLE_FAILURE) -> Callable[[Brief], Sequence[Edit]]:
     """Ask a model for situated edits. Unparseable replies cost their episode.
 
     The protocol is rendered **per episode** rather than once, because it names the
     agent's own path in every example it shows. A protocol that says "relative
     path" without saying relative to what is read both ways, and the wrong reading
     puts a node's files at the top of the repository.
+
+    ``failure`` is how the evidence is worded: :data:`ORACLE_FAILURE` for a domain
+    scored against a reference, :data:`TEST_FAILURE` for one scored by a test suite,
+    where "input / produced" describes nothing the agent can act on.
     """
 
     def executor(brief: Brief) -> Sequence[Edit]:
@@ -352,8 +385,9 @@ def llm_executor(complete, *, editable: Sequence[str] = ("**",),
         reply = _ask(complete, _EXECUTOR_PROMPT.format(
             path=brief.world.path or "./", context=brief.context,
             objective=brief.objective,
-            prompt=getattr(brief.task, "prompt", ""),
-            output=(brief.output or "")[:400], reward=brief.reward,
+            failure=failure.format(prompt=getattr(brief.task, "prompt", ""),
+                                   output=(brief.output or "")[:400],
+                                   reward=brief.reward),
             protocol=protocol))
         return [Edit(owner=brief.world.path or "", path=edit["path"],
                      content=edit["content"])
@@ -390,3 +424,247 @@ def _first_object(text: str) -> Optional[str]:
             if depth == 0:
                 return text[start:i + 1]
     return None
+
+
+# ---------------------------------------------------------------------------
+# Scoring by a frozen test suite instead of by an oracle
+# ---------------------------------------------------------------------------
+
+#: One test, in a child process. Executed rather than imported as a module, so a
+#: test file needs no package plumbing and a candidate that cannot even be
+#: imported fails the test it was asked about instead of taking the run down.
+_TEST_HARNESS = r"""
+import sys
+workspace, path, func = sys.argv[1], sys.argv[2], sys.argv[3]
+sys.path.insert(0, workspace)
+try:
+    namespace = {"__name__": "_genesis_test", "__file__": path}
+    with open(path, encoding="utf-8") as handle:
+        exec(compile(handle.read(), path, "exec"), namespace)
+    namespace[func]()
+except BaseException as exc:                 # a failed assertion is a result
+    detail = " ".join(str(exc).split())[:240]
+    print("FAIL:" + type(exc).__name__ + (": " + detail if detail else ""), end="")
+else:
+    print("PASS", end="")
+"""
+
+#: What a test scores when it could not be run at all.
+TEST_CRASHED = "FAIL:workspace"
+
+
+def reward_test(task: Task, output: str) -> float:
+    """One frozen test, passed or not. No expected value anywhere."""
+    return 1.0 if output == "PASS" else 0.0
+
+
+def run_test(state: Mapping[str, str], path: str, func: str,
+             *, timeout: float = 60.0) -> str:
+    """Materialise ``state`` and run one test function in a child process."""
+    workspace = tempfile.mkdtemp(prefix="genesis-test-")
+    try:
+        materialize(state, workspace)
+        proc = subprocess.run(
+            [sys.executable, "-c", _TEST_HARNESS, workspace,
+             os.path.join(workspace, *path.split("/")), func],
+            capture_output=True, text=True, timeout=timeout, cwd=workspace)
+        out = proc.stdout.strip()
+        return out if out.startswith(("PASS", "FAIL")) else TEST_CRASHED
+    except subprocess.TimeoutExpired:
+        return "FAIL:Timeout"
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return TEST_CRASHED
+    finally:
+        shutil.rmtree(workspace, ignore_errors=True)
+
+
+def _discover_tests(files: Mapping[str, str]) -> List[Tuple[str, str, str]]:
+    """``(file, function, prompt)`` for every top-level ``test_*`` in ``files``.
+
+    The prompt is the test's own source **with its file's prelude above it** --
+    imports, module constants, helper functions -- because a test body that reads
+    ``forces(CONFIG, box=BOX)`` says nothing on its own about what ``CONFIG`` is.
+    Everything in the file that is not itself a test goes in, in file order.
+    """
+    import ast
+
+    def segment(body: str, node) -> str:
+        return ast.get_source_segment(body, node) or ""
+
+    found: List[Tuple[str, str, str]] = []
+    for path in sorted(files):
+        if not path.endswith(".py"):
+            continue
+        body = files[path]
+        nodes = ast.parse(body, path).body
+        tests = [n for n in nodes
+                 if isinstance(n, ast.FunctionDef) and n.name.startswith("test_")]
+        prelude = "\n\n".join(s for s in (segment(body, n) for n in nodes
+                                           if n not in tests) if s)
+        for node in tests:
+            source = segment(body, node) or node.name
+            found.append((path, node.name,
+                          f"# {path}\n{prelude}\n\n\n{source}" if prelude else source))
+    return found
+
+
+@dataclass(frozen=True)
+class TestSuite:
+    """A formation domain scored by a **frozen test suite**, with no oracle.
+
+    :class:`Suite` needs a reference implementation: it runs it to compute the
+    expected answer for every case, and a candidate is scored by matching it. That
+    is circular for the thing this port is for -- you cannot ask a system to grow
+    software you had to write first -- and it is not what upstream does. Genesis
+    validates against **c-testsuite, LLVM and Csmith**: assertions, not expected
+    outputs, and no reference compiler anywhere in the loop.
+
+    So here a task is one **test function**, its prompt is that test's own source,
+    and its reward is whether it passes. The human writes a specification and a
+    test suite, which is what a human actually writes; what the tests assert --
+    tolerances, invariants, equivalences -- is theirs to choose, and nothing has to
+    agree bit for bit with an implementation that already exists.
+
+    A reference implementation may still exist beside the domain, for two jobs that
+    are not scoring: driving the offline rule-based actor, and letting a test prove
+    the suite is passable at all. Shipping a suite nobody has ever seen pass is its
+    own kind of dishonesty.
+
+    **The split is not a train/validation split**, and trying to make it one is a
+    mistake this port made once already. ``evolve()`` holds out the tail of the task
+    list and reports its reward. For :class:`Suite`, whose cases are sampled inputs
+    over one grammar, that is a generalisation estimate and it means something. Here
+    every task is a distinct **requirement**, so holding 40% of them back means
+    refusing to tell the system four tenths of what it has to do and then grading it
+    on them -- and the search never even sees those requirements fail, so nothing is
+    ever proposed for them. That is exactly how the jqx run stalled at 0.923.
+
+    The tail is an **audit set** instead: :attr:`audit` holds test files that are not
+    in the repository at all, so no agent can read them, injected only when a held-out
+    task runs. The driven suite is the whole specification; the audit set is the
+    honest headline number, because the executor is shown the source of the test it
+    is failing and could otherwise write to that one assertion. :meth:`held_out_frac`
+    returns the fraction that makes ``evolve()``'s positional split land exactly on
+    the boundary.
+    """
+
+    name: str
+    #: Human-supplied and never the agents': context records, the specification,
+    #: the test suite, any entry script.
+    given: Mapping[str, str]
+    #: Globs refused to every proposal and restored pristine before scoring. The
+    #: tests belong here -- a system that can edit its own tests has no tests.
+    frozen: Sequence[str]
+    #: Where the test functions live.
+    tests: Sequence[str] = ("tests/**",)
+    #: ``path -> source`` for tests the agents never see. Deliberately *not* part of
+    #: :meth:`initial_files`: frozen stops a file being written, not read, and an
+    #: audit test in the repository is an audit test the executor can read.
+    audit: Mapping[str, str] = field(default_factory=dict)
+    #: Seconds one test may take.
+    timeout: float = 60.0
+
+    def initial_files(self) -> Dict[str, str]:
+        return dict(self.given)
+
+    def held_out_frac(self) -> float:
+        """The ``held_out_frac`` that puts exactly the audit tasks in the tail.
+
+        ``evolve()`` cuts at ``round(n * (1 - frac))`` and refuses 0.0, so a domain
+        with no audit set falls back to holding out one task.
+        """
+        total = len(self.build_tasks())
+        audited = sum(1 for t in self.build_tasks() if t.meta.get("audit"))
+        return max(audited, 1) / total
+
+    def discover(self) -> List[Tuple[str, str, str]]:
+        """``(file, function, source)`` for every ``test_*`` in the driven suite.
+
+        Parsed rather than imported, so discovery works against a repository with
+        no implementation in it -- which is every repository this port starts from.
+        """
+        return _discover_tests({path: body for path, body in self.given.items()
+                                if match_any(path, self.tests)})
+
+    def discover_audit(self) -> List[Tuple[str, str, str]]:
+        """The same, over the audit files the repository does not contain."""
+        return _discover_tests(self.audit)
+
+    def build_tasks(self, limit: Optional[int] = None) -> List[Task]:
+        """One task per test. This is the loader, so ``--dry-run`` stops before it.
+
+        The tasks are **interleaved across files**, one from each in turn, because
+        ``evolve()`` splits train from held-out by position: grouped by file, the
+        last file or two would sit entirely in the held-out tail, no rollout could
+        ever fail on them, and nothing would ever be proposed for the layer they
+        test. That failure cost a whole jqx run to find.
+        """
+        found = self.discover()
+        if not found:
+            raise RuntimeError(f"the {self.name} suite declares no tests under "
+                               f"{', '.join(self.tests)}")
+        by_file: Dict[str, List[Tuple[str, str, str]]] = {}
+        for entry in found:
+            by_file.setdefault(entry[0], []).append(entry)
+        ordered: List[Tuple[str, str, str]] = []
+        for row in zip_longest(*by_file.values()):
+            ordered.extend(entry for entry in row if entry is not None)
+        tasks = [self._task(entry) for entry in (ordered[:limit] if limit else ordered)]
+        # Last, and in file order: `evolve()` splits by position, so this is what
+        # puts exactly the audit set in the held-out tail.
+        tasks += [self._task(entry, audit=True) for entry in self.discover_audit()]
+        return tasks
+
+    def _task(self, entry: Tuple[str, str, str], *, audit: bool = False) -> Task:
+        path, func, source = entry
+        stem = path.rsplit("/", 1)[-1].removeprefix("test_").removesuffix(".py")
+        return Task(id=f"{'audit:' if audit else ''}{stem}::{func}", prompt=source,
+                    meta={"file": path, "func": func, "kind": stem, "audit": audit})
+
+    def make_runner(self) -> Callable[[str, Task], str]:
+        """``run(rendered, task)`` -- one test against one candidate repository."""
+
+        def run(rendered: str, task: Task) -> str:
+            try:
+                state = dict(parse_tree(rendered))
+            except Exception:  # noqa: BLE001 - an empty artifact, before anything
+                return TEST_CRASHED
+            for path, content in self.given.items():
+                if match_any(path, self.frozen):
+                    state[path] = content
+            # Into the scratch copy the subprocess sees, never into the artifact:
+            # the audit tests exist only for the length of one evaluation.
+            state.update(self.audit)
+            return run_test(state, task.meta["file"], task.meta["func"],
+                            timeout=self.timeout)
+
+        return run
+
+    def review(self, tasks: Sequence[Task], *, sample: int = 8):
+        """The parent's integration evidence: how many of these tests still pass."""
+        chosen = [t for t in tasks if not t.meta.get("audit")][:sample]
+        cached: Dict[int, int] = {}
+
+        def passes(state: Mapping[str, str]) -> int:
+            return sum(1 for t in chosen
+                       if run_test(state, t.meta["file"], t.meta["func"],
+                                   timeout=self.timeout) == "PASS")
+
+        def review(parent, returned):
+            key = id(parent.state)
+            if key not in cached:
+                cached[key] = passes(parent.state)
+            candidate = dict(parent.state)
+            for edit in returned:
+                if edit.content is None:
+                    candidate.pop(edit.path, None)
+                else:
+                    candidate[edit.path] = edit.content
+            after = passes(candidate)
+            if after < cached[key]:
+                return ("rejected", f"integration check regressed "
+                                    f"{cached[key]}/{len(chosen)} -> "
+                                    f"{after}/{len(chosen)} tests")
+            return None
+
+        return review

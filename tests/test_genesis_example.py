@@ -210,7 +210,7 @@ def test_an_oversized_brief_carries_upstreams_own_truncation_marker():
 def test_a_parent_refuses_a_child_whose_work_breaks_the_suite():
     """Paper 3.3: the parent decides on tests and integration evidence."""
     review = domain.suite_review(domain.build_tasks(), sample=6)
-    state = dict(domain._reference_tree())
+    state = dict(domain.reference_tree())
     parent = Brief(world=LocalWorld(version=1, path="src"), objective="o", context="",
                    state=state, task=Task(id="t", prompt="1 + 2"), output="",
                    reward=1.0, depth=0)
@@ -645,10 +645,19 @@ DOMAIN_IDS = ["minilang", "stackvm", "jqx", "md"]
 
 
 @pytest.mark.parametrize("spec", DOMAINS, ids=DOMAIN_IDS)
-def test_every_formation_domain_agrees_with_its_own_oracle(spec):
-    """A suite that disagrees with its oracle scores a correct candidate wrong."""
+def test_every_formation_domain_has_been_seen_to_pass(spec):
+    """Two different claims, and both are worth a test.
+
+    For the three oracle-scored domains: a suite that disagrees with its own oracle
+    scores a *correct* candidate wrong, and no run could ever finish.
+
+    For md, where no reference is in the scoring path at all, this is the weaker but
+    more important claim -- the suite is passable. Shipping a specification nobody
+    has ever seen satisfied is its own kind of dishonesty, so the reference exists
+    for this test and for the offline actor, and for nothing else.
+    """
     tasks, run = spec.build_tasks(), spec.make_runner()
-    rendered = canonical(spec._reference_tree())
+    rendered = canonical(spec.reference_tree())
     assert sum(spec.reward(t, run(rendered, t)) for t in tasks) == len(tasks)
 
 
@@ -672,23 +681,88 @@ def test_every_stage_is_reachable_from_the_train_split(spec):
     builtins appeared only in the held-out tail. No rollout could fail on them, so
     no proposal was ever requested for them, and the run stalled at 0.923 with two
     stubs open and `stop reason: rounds`. `evolve()` splits by position, so this is
-    a property of the *order* of the case list, and nothing else checks it.
+    a property of the *order* of the task list, and nothing else checks it.
     """
     tasks = spec.build_tasks()
-    train = tasks[:int(len(tasks) * 0.6)]          # evolve(held_out_frac=0.4)
-    missing = sorted(set(t.meta["kind"] for t in tasks)
-                     - set(t.meta["kind"] for t in train))
+    cut = max(1, round(len(tasks) * (1 - spec.HELD_OUT_FRAC)))
+    missing = sorted(set(t.meta["kind"] for t in tasks if not t.meta.get("audit"))
+                     - set(t.meta["kind"] for t in tasks[:cut]))
     assert not missing, f"stages only in the held-out tail: {missing}"
 
 
-def test_the_md_suite_cannot_be_passed_by_returning_true():
-    """Four of md's ten stages are invariants, which is a cheatable shape.
+# ---------------------------------------------------------------------------
+# md: scored by a frozen test suite, with no oracle in the loop
+# ---------------------------------------------------------------------------
 
-    One `cons` case uses a timestep far too large, so its answer is `False` -- a
-    stage that returns `True` without computing anything fails the suite.
+def test_an_md_task_is_one_test_and_its_prompt_is_that_tests_source():
+    """The executor is shown the assertion it failed, which is the whole design:
+    the specification is executable, so the prompt can be the specification.
+
+    With the file's prelude above it, because a test body that reads
+    `forces(CONFIG, box=BOX)` says nothing on its own about what `CONFIG` is.
     """
-    golds = {t.meta["gold"] for t in md.build_tasks() if t.meta["kind"] == "cons"}
-    assert golds == {"True", "False"}
+    task = next(t for t in md.build_tasks()
+                if t.meta["func"] == "test_forces_sum_to_zero")
+    body = md.MD.given[task.meta["file"]]
+    assert task.prompt.startswith(f"# {task.meta['file']}\n")
+    assert "from src import energy, forces" in task.prompt       # the prelude
+    assert "CONFIG = [[0.0, 0.0, 0.0]" in task.prompt            # and its constants
+    assert task.prompt.endswith("assert max(abs(c) for c in total) < 1e-9, total")
+    assert body.count("def test_forces_sum_to_zero():") == 1
+    # Only this test. Showing the whole file would show the agent the tests it has
+    # not been asked about, and the episode is bounded at four edits anyway.
+    assert sum(1 for line in task.prompt.splitlines()
+               if line.startswith("def test_")) == 1
+
+
+def test_the_md_audit_set_is_not_in_the_repository_the_agents_see():
+    """`frozen` stops a file being *written*, not read. An audit test in the tree is
+    an audit test the executor can read and write code against."""
+    files = md.initial_files()
+    assert md._AUDIT and not any(path in files for path in md._AUDIT)
+    audited = [t for t in md.build_tasks() if t.meta["audit"]]
+    assert audited and all(t.meta["file"] not in files for t in audited)
+
+
+def test_the_md_audit_set_lands_exactly_in_the_held_out_tail():
+    """`HELD_OUT_FRAC` is computed, not chosen: every driven test -- every
+    requirement -- has to be on the search's side of the cut."""
+    tasks = md.build_tasks()
+    cut = max(1, round(len(tasks) * (1 - md.HELD_OUT_FRAC)))   # evolve()'s own split
+    assert [t.meta["audit"] for t in tasks[:cut]] == [False] * cut
+    assert all(t.meta["audit"] for t in tasks[cut:])
+
+
+def test_the_md_audit_tests_are_injected_only_while_they_are_scored():
+    """They are not in the candidate repository, and they still run against it."""
+    run = md.make_runner()
+    rendered = canonical(md.reference_tree())
+    assert "audit/" not in rendered
+    audited = [t for t in md.build_tasks() if t.meta["audit"]]
+    assert sum(md.reward(t, run(rendered, t)) for t in audited) == len(audited)
+
+
+def test_the_md_suite_catches_an_integrator_that_is_only_stable():
+    """Euler with one force evaluation per step is stable, plausible, and wrong.
+
+    This is what the invariants are for, and what an oracle over sampled values
+    would not reliably catch: the trajectory stays bounded, so a sampled position
+    often agrees to six places, but the scheme is first-order and not reversible.
+    """
+    broken = dict(md.reference_tree())
+    broken[md.VERLET] = broken[md.VERLET].replace(
+        "    _, forces = evaluate(system, spec)\n"
+        "    for i, mass in enumerate(system.masses):\n"
+        "        for axis in range(3):\n"
+        "            system.velocities[i][axis] += half * forces[i][axis] / mass\n"
+        "    return system\n",
+        "    return system\n")
+    assert broken[md.VERLET] != md.reference_tree()[md.VERLET]
+    run, rendered = md.make_runner(), canonical(broken)
+    failed = [t.id for t in md.build_tasks()
+              if md.reward(t, run(rendered, t)) == 0.0]
+    assert any("reversing" in t for t in failed), failed
+    assert any("conserved" in t for t in failed), failed
 
 
 def test_stackvm_is_deeper_than_minilang_which_is_why_it_exists():
@@ -708,7 +782,7 @@ def test_stackvm_is_deeper_than_minilang_which_is_why_it_exists():
 def test_the_frozen_suite_agrees_with_its_own_oracle():
     tasks = domain.build_tasks()
     run = domain.make_runner()
-    rendered = canonical(domain._reference_tree())
+    rendered = canonical(domain.reference_tree())
     assert sum(domain.reward(t, run(rendered, t)) for t in tasks) == len(tasks)
 
 

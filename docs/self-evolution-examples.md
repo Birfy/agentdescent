@@ -86,7 +86,7 @@ above would make that table's opening sentence false.
 
 | Algorithm | Port author | Fidelity class | Domain | `evolve()` plug-ins | Page |
 |---|---|---|---|---|---|
-| **Genesis** (Persistent Recursive Worlds) | chendanyang | `mechanism_microport` | two compact formation runs (`--domain minilang` / `stackvm`), each grown from an implementation-empty repository | `strategy` + `Policies(proposal=, acceptance=, conflict=)` | [→](algo-genesis.md) |
+| **Genesis** (Persistent Recursive Worlds) | chendanyang | `mechanism_microport` | four compact formation runs (`--domain minilang` / `stackvm` / `jqx` / `md`), each grown from an implementation-empty repository; `md` is scored by a frozen test suite with no reference implementation in the loop | `strategy` + `Policies(proposal=, acceptance=, conflict=)` | [→](algo-genesis.md) |
 
 ### The shared command line
 
