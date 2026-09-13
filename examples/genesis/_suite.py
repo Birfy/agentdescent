@@ -316,7 +316,8 @@ OBJECTIVE
 
 {failure}
 
-{protocol}"""
+{protocol}
+{memory}"""
 
 #: How an oracle-scored domain shows the executor what went wrong: one input, the
 #: output it produced, and the score that got.
@@ -324,6 +325,23 @@ ORACLE_FAILURE = """A validation case failed:
   input    {prompt}
   produced {output}
   score    {reward:.2f}"""
+
+#: What every executor is told about the record at its own node. Upstream this is not
+#: optional and not the harness's job: "**CONTEXT.md is your long-term memory**:
+#: findings worth preserving belong in CONTEXT.md. When you discover something future
+#: agents should know -- a gotcha, a design rationale, a file that's legitimately long,
+#: a tricky dependency, a test gap -- add it to the relevant directory's CONTEXT.md"
+#: (``agents/manager.ex``). The archive shows it happening: 26 records created and **62
+#: later accepted updates affecting 19 files**. Here the harness wrote records on two
+#: occasions and no agent ever added a line, which made that row of the comparison
+#: structurally zero rather than measured.
+CONTEXT_MEMORY = """
+Your node's `CONTEXT.md` is the only memory that outlives you. If you learned something \
+the next agent here would otherwise rediscover -- a constraint the specification implies \
+but does not state, a dependency between two files, a mistake you made and backed out -- \
+write it into `{owner}/CONTEXT.md` under `## Known Issues` or `## Notes for Agents`, as \
+one of your edits. Keep it to a line or two, and record the current state rather than a \
+diary of what you tried."""
 
 #: How a test-scored domain shows it: the failing test's own source. The
 #: specification is executable here, so the evidence *is* the specification --
@@ -364,8 +382,8 @@ def llm_manager(complete) -> Callable[[Brief], Sequence[Delegation]]:
 
 
 def llm_executor(complete, *, editable: Sequence[str] = ("**",),
-                 frozen: Sequence[str] = (),
-                 failure: str = ORACLE_FAILURE) -> Callable[[Brief], Sequence[Edit]]:
+                 frozen: Sequence[str] = (), failure: str = ORACLE_FAILURE,
+                 memory: bool = True) -> Callable[[Brief], Sequence[Edit]]:
     """Ask a model for situated edits. Unparseable replies cost their episode.
 
     The protocol is rendered **per episode** rather than once, because it names the
@@ -389,7 +407,8 @@ def llm_executor(complete, *, editable: Sequence[str] = ("**",),
             failure=failure.format(prompt=getattr(brief.task, "prompt", ""),
                                    output=(brief.output or "")[:400],
                                    reward=brief.reward),
-            protocol=protocol))
+            protocol=protocol,
+            memory="" if not memory else CONTEXT_MEMORY.format(owner=owner)))
         return [Edit(owner=brief.world.path or "", path=edit["path"],
                      content=edit["content"])
                 for edit in parse_situated_edits(reply)]

@@ -88,13 +88,14 @@ from . import _domain as minilang
 from . import _jqx as jqx
 from . import _md as md
 from . import _stackvm as stackvm
+from ._architect import ArchitectPhase, missing_sections
 from ._judge import ParentJudge
 from ._review import CompletionJudge, ParentCodeReview, chain_reviews
 from ._suite import cold_start, preflight
 from ._octopus import OctopusConflict, git_available
 from ._spatial import SpatialContract
 from ._worktree import Rollout, WorktreeLedger, git_worktrees_available
-from ._world import CONTEXT_FILE, WorldLog
+from ._world import CONTEXT_FILE, WorldLog, parse_routing
 
 #: The formation domains. Four, and each answers something the one before could
 #: not: minilang shows the mechanism, stackvm gives the recursion somewhere to go,
@@ -171,6 +172,13 @@ def build_parser() -> argparse.ArgumentParser:
                              "scheduling model. The run then leaves a real "
                              "phylogenetic graph: one commit per episode, a parent's "
                              "merge carrying every child commit as a parent")
+    parser.add_argument("--architect", action="store_true",
+                        help="upstream's Phase 1: an agent designs the CONTEXT.md tree "
+                             "-- intent, API surface, constraints, routing tables -- "
+                             "before any code is written, and the implementation phase "
+                             "then grows what it designed. Implies --cold-start, since "
+                             "there is nothing to design if the tree is given. Needs "
+                             "--model")
     parser.add_argument("--complete-task", action="store_true",
                         help="let the root agent end the run when it judges the "
                              "objective delivered, instead of exhausting the round "
@@ -240,12 +248,15 @@ def main(argv=None) -> None:
           f"{', '.join(spec.FROZEN)}")
     audited = [t for t in tasks if t.meta.get("audit")]
     print(f"Scoring  : {spec.SCORING}")
-    initial = cold_start(spec.initial_files()) if args.cold_start else spec.initial_files()
+    initial = (cold_start(spec.initial_files())
+               if args.cold_start or args.architect else spec.initial_files())
     print(f"Loaded   : {len(tasks)} {spec.CASE_NOUN} over "
           f"{len(set(t.meta['kind'] for t in tasks))} {spec.GROUP_NOUN}; "
           f"{len(initial)} files in the repository, "
           "none of them implementation")
-    print("Start    : " + ("cold -- the goal, the contract and the suite; no node "
+    print("Start    : " + ("designed in phase 1 by an architect agent, from the goal, "
+                           "the contract and the suite" if args.architect else
+                           "cold -- the goal, the contract and the suite; no node "
                            "records, no routing tables, no skills. The run writes "
                            "its own decomposition."
                            if args.cold_start else
@@ -273,6 +284,26 @@ def main(argv=None) -> None:
         # One call before the run: a wrong endpoint is otherwise 400 episodes of
         # silent nothing, which reads exactly like a broken mechanism.
         preflight(complete)
+
+    # Upstream's Phase 1, and it is a separate root agent there for a reason: the tree
+    # is designed before anything is written against it, and Phase 2 is handed
+    # "the architecture, directory structure, CONTEXT.md routing tables ... already in
+    # place (created by an Architect agent)".
+    architect = None
+    if args.architect:
+        if complete is None:
+            print("--architect needs --model: there is no offline architect, and a "
+                  "rule-based one would be the decomposition it is meant to invent")
+            return
+        architect = ArchitectPhase(complete, contracts=spec.CONTRACTS,
+                                   max_depth=args.depth)
+        initial = architect.design(initial, DOMAIN_BLURB[args.domain])
+        print(f"\nPhase 1  : architect {architect.summary()}")
+        for path in architect.nodes:
+            record = initial[f"{path}/{CONTEXT_FILE}" if path else CONTEXT_FILE]
+            gaps = missing_sections(record)
+            print(f"           {path or './':<24} {len(parse_routing(record))} routes"
+                  + (f", missing {', '.join(gaps)}" if gaps else ""))
 
     log = WorldLog()
     strategy = SpatialContract(initial_files=initial, frozen=spec.FROZEN,
@@ -382,7 +413,8 @@ def main(argv=None) -> None:
           f"{delegation.adopted_requests}/{delegation.unmet_requests}  "
           f"node_relative_paths={delegation.resolved_relative}  "
           f"accountability={delegation.accountability_edits}/"
-          f"{delegation.accountability_declined}")
+          f"{delegation.accountability_declined}  "
+          f"context_updates={delegation.record_updates}")
     if ledger is not None:
         print(f"workspace       : {ledger.summary()}")
     if code_review is not None:

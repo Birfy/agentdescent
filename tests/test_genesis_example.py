@@ -9,6 +9,8 @@ verdict is the parent's, and two agents editing one file both survive.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from agentdescent.aggregator import AggregatorConfig, MergeOutcome, diffs_contradict
@@ -24,6 +26,8 @@ from examples.genesis import _md as md
 from examples.genesis import _stackvm as stackvm
 from examples.genesis._delegation import (Brief, Delegation, Edit,
                                           RecursiveDelegation, render_edits)
+from examples.genesis._architect import (ArchitectPhase, missing_sections,
+                                         _parse as parse_architect_reply)
 from examples.genesis._judge import ParentJudge
 from examples.genesis._review import (CompletionJudge, ParentCodeReview,
                                       chain_reviews)
@@ -1255,6 +1259,113 @@ def test_a_per_test_score_cannot_see_a_test_poisoning_the_next_one():
 
     # and the reference is clean under both ways of running it
     assert md.MD.suite_failures(md.reference_tree(), audit=True) == []
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: the architect designs the tree the implementation phase grows
+# ---------------------------------------------------------------------------
+
+def _scripted_architect(plan, seen=None):
+    def complete(prompt):
+        path = prompt.split("situated at the repository path `")[1].split("`")[0]
+        path = "" if path == "./" else path
+        if seen is not None:
+            seen.append(path)
+        return json.dumps(plan.get(path, {"record": f"# {path or './'}\n", "children": []}))
+    return complete
+
+
+def test_the_architect_designs_a_tree_and_the_run_starts_from_it():
+    """Upstream a formation run is two root agents in sequence: "Phase 1: Architecture
+    (Architect as root agent)" then "Phase 2: Implementation", and Phase 2 is handed
+    "the architecture, directory structure, CONTEXT.md routing tables ... already in
+    place (created by an Architect agent)".
+
+    This port had neither half. A domain shipped its records hand-written, which is
+    Phase 1 done by a person; `--cold-start` removed them and put nothing in their
+    place. Neither is what upstream does.
+    """
+    plan = {
+        "": {"record": "# md -- root\n\n## Intent\nGrow it.\n\n## API Surface\nmd.py\n\n"
+                       "## Constraints\npure python\n\n## Routing Table\n"
+                       "- `./src/` -> the library\n",
+             "children": [{"path": "src", "objective": "the library"}]},
+        "src": {"record": "# src\n\n## Intent\nthe entry points\n\n## API Surface\n"
+                          "src/__init__.py\n\n## Constraints\nlazy imports\n\n"
+                          "## Routing Table\n- `./src/core/` -> geometry\n",
+                "children": [{"path": "core", "objective": "geometry"}]},
+    }
+    seen = []
+    phase = ArchitectPhase(_scripted_architect(plan, seen), contracts=md.CONTRACTS,
+                           max_depth=3)
+    given = cold_start(md.initial_files())
+    tree = phase.design(given, "Lennard-Jones molecular dynamics")
+
+    assert seen[:2] == ["", "src"]                       # root first, then its child
+    assert "src/core" in seen                            # a bare name is relative
+    assert phase.nodes[:2] == ["", "src"] and phase.depth >= 2
+    # what it wrote is a CONTEXT.md tree and nothing else
+    added = set(tree) - set(given)
+    assert added and all(p.endswith(CONTEXT_FILE) for p in added), added
+    assert parse_routing(tree["src/" + CONTEXT_FILE]) == ["src/core"]
+    # and the frozen contract is untouched by the phase
+    assert tree["spec/" + CONTEXT_FILE] == given["spec/" + CONTEXT_FILE]
+
+
+def test_an_architect_may_not_name_a_node_outside_its_own_subtree():
+    """The spatial contract applies to designing as much as to writing: a node named
+    outside the subtree is refused and counted, not quietly relocated into it."""
+    plan = {"src": {"record": "# src\n", "children": [{"path": "spec/stolen", "objective": "no"},
+                                                      {"path": "src/ok", "objective": "yes"}]}}
+    phase = ArchitectPhase(_scripted_architect(plan), max_depth=2, root_path="src")
+    tree = phase.design({CONTEXT_FILE: "# root\n"}, "o")
+    assert phase.refused == 1
+    assert "spec/stolen/" + CONTEXT_FILE not in tree
+    assert "src/ok/" + CONTEXT_FILE in tree
+
+
+def test_a_child_the_architect_named_is_always_routed_to():
+    """A node its parent's table does not mention is a node no manager can reach, so a
+    record that names children and forgets the table gets the table it forgot."""
+    record, children = parse_architect_reply(
+        json.dumps({"record": "# src\n\n## Intent\nthings\n",
+                    "children": [{"path": "core", "objective": "geometry"}]}), "src/")
+    assert children == [{"path": "src/core", "objective": "geometry"}]
+    assert parse_routing(record) == ["src/core"]
+
+
+def test_an_unusable_reply_costs_its_node_and_not_the_phase():
+    phase = ArchitectPhase(lambda prompt: "no json here", max_depth=2)
+    assert phase.design({CONTEXT_FILE: "# root\n"}, "o") == {CONTEXT_FILE: "# root\n"}
+    assert phase.unparsed == 1 and phase.nodes == []
+
+
+def test_an_executor_is_asked_to_keep_its_own_record_current():
+    """"CONTEXT.md is your long-term memory: findings worth preserving belong in
+    CONTEXT.md" -- `agents/manager.ex`, and the archive shows 62 later accepted updates
+    affecting 19 files. Nothing in this port asked for that, so the count was zero by
+    construction rather than by measurement."""
+    seen = []
+    executor = md.llm_executor(lambda prompt: seen.append(prompt) or "")
+    executor(Brief(world=LocalWorld(version=1, path="src/core", readonly=md.FROZEN),
+                   objective="o", context="", state=md.initial_files(),
+                   task=md.build_tasks()[0], output="FAIL", reward=0.0, depth=1))
+    assert "the only memory that outlives you" in seen[0]
+    assert "src/core/CONTEXT.md" in seen[0]
+    assert "## Known Issues" in seen[0]
+
+
+def test_a_record_an_agent_writes_itself_is_counted_separately():
+    log = WorldLog()
+    policy = RecursiveDelegation(
+        manager=lambda b: [],
+        executor=lambda b: [Edit(b.world.path, "src/x.py", "x = 1\n"),
+                            Edit(b.world.path, f"src/{CONTEXT_FILE}",
+                                 "# src\n\n## Known Issues\n- the box may be zero\n")],
+        log=log, max_depth=2, root_path="src")
+    policy.propose(_proposal_ctx({CONTEXT_FILE: "# root\n", f"src/{CONTEXT_FILE}": "# src\n"},
+                                 Task(id="t", prompt="x")))
+    assert policy.record_updates == 1
 
 
 def test_stackvm_is_deeper_than_minilang_which_is_why_it_exists():

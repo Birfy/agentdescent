@@ -194,6 +194,10 @@ class RecursiveDelegation:
     #: Sibling edits to one path reconciled by three-way merge, and not.
     sibling_merges: int = 0
     sibling_conflicts: int = 0
+    #: `CONTEXT.md` lines an agent added at its own node of its own accord -- the
+    #: "long-term memory" half of the mechanism, which upstream's archive shows 62
+    #: times and this port could not show at all until the executor was asked for it.
+    record_updates: int = 0
     #: Files a manager wrote at its own node in the accountability phase, and
     #: edits it offered there that belonged to a child and were declined.
     accountability_edits: int = 0
@@ -287,6 +291,9 @@ class RecursiveDelegation:
                 self.resolved_relative += int(relative)
                 produced.append(Edit(owner=world.path, path=path,
                                      content=raw.content, kind=raw.kind))
+            for edit in produced:
+                if edit.path.endswith(CONTEXT_FILE) and state.get(edit.path) != edit.content:
+                    self.record_updates += 1
             edits = [e for e in produced if owns(world.path, e.path)]
             requests = [e for e in produced if not owns(world.path, e.path)]
             self.requests_raised += len(requests)
