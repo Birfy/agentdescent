@@ -172,14 +172,19 @@ def residual_bias(records: Iterable, *, draws: int = 5000, alpha: float = 0.05,
         "n_tasks": len(set(tasks)),
         "delta": hajek_mean(res, probs),
         "ci": bootstrap_ci(res, probs, draws=draws, alpha=alpha, seed=seed),
-        "se": standard_error(res, probs, seed=seed),
+        # `draws` and a seed of its own: a caller who raised `draws` for
+        # precision was getting it on the interval only, and the SE was the
+        # pstdev of the first 2000 of the *same* resamples rather than an
+        # independent estimate. `se` is what the audit-limited test reads.
+        "se": standard_error(res, probs, draws=draws, seed=seed + 1),
         # The honest one when a run scores the same task under several artifact
         # versions, which every run does. Reported beside the naive interval
         # rather than instead of it: the difference between them is itself the
         # finding that the units were not independent.
         "ci_clustered": bootstrap_ci(res, probs, draws=draws, alpha=alpha,
                                      seed=seed, clusters=tasks),
-        "se_clustered": standard_error(res, probs, seed=seed, clusters=tasks),
+        "se_clustered": standard_error(res, probs, draws=draws, seed=seed + 1,
+                                       clusters=tasks),
         "f_mean": statistics.fmean(r.verifier_score for r in rows),
         "y_mean": statistics.fmean(r.oracle_score for r in rows),
         "disagree": sum(1 for r in rows if r.residual != 0.0) / len(rows),

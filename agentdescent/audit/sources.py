@@ -28,6 +28,7 @@ by having a merge thread hang for four hours is not.
 from __future__ import annotations
 
 import threading
+from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Protocol, runtime_checkable
 
 from .records import AuditRecord
@@ -150,15 +151,49 @@ class NullOracle:
         return None
 
 
+@dataclass(frozen=True)
+class BatchResult(int):
+    """How a batch of answers landed.
+
+    Subclasses `int` and equals ``landed`` so every existing caller that reads
+    the return value as a count, compares it or sums it keeps working -- this
+    used to be a bare `int` and the extra field is the new information, not a
+    new contract.
+    """
+
+    landed: int = 0
+    already_resolved: int = 0
+
+    def __new__(cls, landed: int = 0, already_resolved: int = 0):
+        obj = super().__new__(cls, landed)
+        return obj
+
+
 def resolve_from_mapping(store, answers: Dict[str, float], *, at: Optional[float] = None) -> int:
     """Fill in truth for many pending records at once. Returns how many landed.
 
     The shape a batch answer actually arrives in -- a CSV from an instrument, a
     dict from a job runner, a spreadsheet a reviewer filled in -- keyed by the
     record id printed from :meth:`AuditStore.pending`.
+
+    **A record that is already resolved is skipped, not raised on.** Replaying a
+    batch file is exactly what people do when a job half-failed, and this is the
+    function they replay it through; letting `AuditStore.resolve`'s refusal
+    escape meant one duplicate id aborted the batch and silently discarded every
+    answer after it -- verified, and the answers were not recoverable except by
+    hand-diffing the file. The refusal itself is right and stays where it is:
+    overwriting a resolved record would throw away an oracle's answer. Skipping
+    is the batch-level reading of the same rule.
+
+    ``already`` on the returned report says how many were skipped, because a
+    replay that lands nothing and a replay that lands everything both look like
+    success from a bare count.
     """
-    landed = 0
+    landed = already = 0
     for record_id, score in answers.items():
-        if store.resolve(record_id, float(score), at=at):
-            landed += 1
-    return landed
+        try:
+            if store.resolve(record_id, float(score), at=at):
+                landed += 1
+        except ValueError:
+            already += 1
+    return BatchResult(landed=landed, already_resolved=already)

@@ -448,7 +448,7 @@ def build_reward(spec: EvolveSpec) -> Callable:
 #: list beside it rather than a setting that silently did nothing -- which is
 #: how `sample_rate` becomes `sample-rate` and an audit runs at the default.
 _AUDIT_KEYS = ("oracle", "store", "sample_rate", "calibration_fraction",
-               "draw_by", "enabled", "seed", "watch_ids", "watch_globs",
+               "draw_by", "enabled", "seed", "watch_ids", "watch_globs", "verifier_version", "version_extra",
                "stratify")
 
 

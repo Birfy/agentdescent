@@ -42,8 +42,8 @@ from agentdescent import Task  # noqa: E402
 from agentdescent.audit import AuditRecord, AuditStore  # noqa: E402
 
 
-def read_verdict(reply: str, *, on_unparsed: Optional[Callable[[], None]] = None
-                 ) -> float:
+def read_verdict(reply: str, *, on_unparsed: Optional[Callable[[], None]] = None,
+                 default: float = 0.0) -> float:
     """A judge's YES/NO reply as a score.
 
     One copy. This was three -- `audit_phase0`, `audit_judge_repair` and
@@ -51,8 +51,20 @@ def read_verdict(reply: str, *, on_unparsed: Optional[Callable[[], None]] = None
     them did differently was count the unparsed replies, which is what
     ``on_unparsed`` is for.
 
-    **An unparseable reply is not a 0.** Scoring it wrong would blame the
-    artifact for the judge's failure to answer the question it was asked.
+    **An unparseable reply is a fabricated observation, and ``default`` is a
+    choice with a direction.** The comment this replaces said "an unparseable
+    reply is not a 0" and the code returned 0.0 for every reply without "YES" in
+    it anywhere -- an empty completion, a refusal, and the judge answering *"The
+    candidate is correct"* in prose all scored the artifact **wrong**. That bias
+    runs one way: it understates the judge's generosity, which is the quantity
+    the audit exists to measure.
+
+    There is no right answer inside this function -- the reward contract needs a
+    float and the honest value is "no observation". So the fallback is named,
+    defaulted to the historical 0.0 so existing measurements keep their meaning,
+    and `on_unparsed` exists so the count can be **reported**. It was being
+    counted and never printed, which is why nobody could tell whether it had
+    happened.
     """
     head = (reply or "").strip().upper()
     if head.startswith("YES"):
@@ -61,7 +73,7 @@ def read_verdict(reply: str, *, on_unparsed: Optional[Callable[[], None]] = None
         return 0.0
     if on_unparsed is not None:
         on_unparsed()
-    return 1.0 if "YES" in head else 0.0
+    return 1.0 if "YES" in head else default
 
 
 def refuse_to_overwrite(path: pathlib.Path, flag: str = "--out") -> pathlib.Path:

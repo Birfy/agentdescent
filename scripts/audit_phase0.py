@@ -520,6 +520,10 @@ def report(bundle: Dict, an: Dict, args) -> str:
         f"| records | `{os.path.relpath(args.store, os.getcwd())}` |",
         f"| wall clock | {bundle['elapsed']:.0f}s |",
         f"| model calls | {u.calls} ({u.prompt_tokens}+{u.completion_tokens} tokens) |",
+        # Printed, because it was counted and never shown: an unparseable reply
+        # is scored against the artifact, and a reader had no way to tell from
+        # the file whether any of the numbers below rest on one.
+        f"| unparseable judge replies | {bundle['notes'].get('unparsed', 0)} |",
         f"| seed | {args.seed} |",
         "",
         "## The bias",

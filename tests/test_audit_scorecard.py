@@ -469,3 +469,26 @@ def test_improving_toward_the_bound_does_not_block():
     card = scorecard(_rect(), _fn_records(3), previous_records=_fn_records(5))
     assert not any("policy bound" in b for b in card.blockers)
     assert any("did not make it worse" in n for n in card.notes)
+
+
+# -- the rows are found by name, not by where they happen to sit --------------
+
+def test_the_blocking_rows_are_addressed_by_name():
+    """They were `metrics[0]` and `metrics[1]`. A row inserted above either one
+    swapped the two blockers silently -- the sigma blocker firing on the
+    false-negative value, with its text naming the wrong number."""
+    card = scorecard(_rect(), _fn_records(2), previous_records=_fn_records(0))
+    assert card.get("sigma") is not None
+    assert card.get("false-negative rate") is not None
+    blocked = [b for b in card.blockers if "policy bound" in b]
+    assert blocked and "10.0%" in blocked[0], (
+        "the false-negative blocker must quote the false-negative rate")
+
+
+def test_a_later_row_can_still_read_the_previous_stats():
+    """`was` was `residual_stats(previous_records)` -- a dict -- until the
+    false-negative branch rebound it to a float, so any row added afterwards
+    that read `was["sigma"]` got a TypeError."""
+    card = scorecard(_rect(), _fn_records(2), previous_records=_fn_records(2))
+    disagreement = card.get("disagreement")
+    assert disagreement is not None and disagreement.previous is not None

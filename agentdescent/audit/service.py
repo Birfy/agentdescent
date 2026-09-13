@@ -109,7 +109,11 @@ def audit_status(path: str, version: Optional[str] = None) -> Dict[str, Any]:
     if chosen is None:
         return _versions_error(version, versions)
 
-    pending = store.pending()
+    # Scoped to `chosen`, like every other count in this payload. It was not:
+    # a store holding an abandoned judge's 300 unresolved records reported them
+    # under the live judge's version, and an operator sizing the labelling job
+    # budgeted for units of a verifier that no longer exists.
+    pending = store.pending(verifier_version=chosen)
     labelled = store.for_calibration(chosen)
     moments = store.unlabelled_moments(chosen)
     rect = Calibrator(store).current(chosen)

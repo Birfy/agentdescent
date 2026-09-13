@@ -473,7 +473,14 @@ def scorecard(current: Rectification, records: Sequence[AuditRecord], *,
             f"drawn from it is the last one computed, not a measurement of this "
             f"verifier.")
 
-    fn_metric = metrics[1]
+    # By name, not by position. These were `metrics[0]` and `metrics[1]`, so a
+    # row inserted above either one silently swapped the two blockers -- the
+    # sigma blocker would fire on the false-negative value and its text would
+    # name the wrong number. `Scorecard.get` already exists and is this lookup;
+    # here the list is still being built, so it is a local scan of the same kind.
+    by_name = {m.name: m for m in metrics}
+    fn_metric = by_name["false-negative rate"]
+    sigma_metric = by_name["sigma"]
     triggered = set()
     if fn_now == fn_now and fn_now > max_false_negative:
         # Over the bound, but the question is whether *this change* put it
@@ -482,23 +489,26 @@ def scorecard(current: Rectification, records: Sequence[AuditRecord], *,
         # including one that is moving back toward the bound. The first live
         # judge-rubric run was refused for a rate of 5.26% that was 5.26% before it
         # too, with a message reading as though the change had caused it.
-        was = fn_metric.previous
-        newly = was is None or was != was or was <= max_false_negative
-        if newly or fn_now > was:
+        # Named apart from the `was` above, which is `residual_stats(...)` -- a
+        # dict, read as `was["sigma"]`. Rebinding it to a float here meant any
+        # later row reading `was["..."]` got a TypeError instead of a number.
+        fn_was = fn_metric.previous
+        newly = fn_was is None or fn_was != fn_was or fn_was <= max_false_negative
+        if newly or fn_now > fn_was:
             blockers.append(
                 f"{fn_now:.1%} of correct answers are marked down, above the "
                 f"{max_false_negative:.0%} policy bound"
-                + ("" if newly else f" and worse than the {was:.1%} before it"))
+                + ("" if newly else
+                   f" and worse than the {fn_was:.1%} before it"))
             triggered.add(fn_metric.name)
         else:
             notes.append(
                 f"> {fn_now:.1%} of correct answers are marked down, still "
                 f"above the {max_false_negative:.0%} policy bound -- and it was "
-                f"{was:.1%} before this change, which did not make it worse. "
+                f"{fn_was:.1%} before this change, which did not make it worse. "
                 f"Not blocking, because a bound that blocks an unchanged "
                 f"violation is one nothing can ever move away from. The "
                 f"incumbent is over the bound too.")
-    sigma_metric = metrics[0]
     if sigma_metric.regressed:
         blockers.append(
             f"the residual grew {sigma_metric.previous:.4f} -> "

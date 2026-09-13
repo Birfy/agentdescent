@@ -227,6 +227,10 @@ class DriftMonitor:
     def __init__(self, *, lam: float = DEFAULT_LAMBDA, L: float = DEFAULT_L,
                  centre: Optional[float] = None, min_gain: float = MIN_GAIN,
                  gain_lam: float = DEFAULT_LAMBDA) -> None:
+        # The gain series is charted separately *because* a caller may want to
+        # smooth it differently; taking the parameter and ignoring it gave them
+        # a chart that was not the one they configured, with no error.
+        self.gain_lam = lam if gain_lam is None else gain_lam
         self.lam, self.L, self.min_gain = lam, L, min_gain
         self.centre = centre
         self._bias: Optional[EWMA] = None
@@ -258,7 +262,7 @@ class DriftMonitor:
         if self.centre is None:
             self.centre = point.delta_hat
         if self._bias is None:
-            self._bias = EWMA(lam=self.lam, L=self.L, centre=self.centre)
+            self._bias = EWMA(lam=self.gain_lam, L=self.L, centre=self.centre)
             self._gain = EWMA(lam=self.lam, L=self.L, centre=point.gain_factor)
             report.centre = self.centre
 
