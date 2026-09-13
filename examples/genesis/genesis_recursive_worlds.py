@@ -112,6 +112,12 @@ from ._world import CONTEXT_FILE, WorldLog, parse_routing
 #: 123.4-hour compiler run and say so.
 DOMAINS = {"minilang": minilang, "stackvm": stackvm, "jqx": jqx, "md": md}
 
+#: "No wall-clock budget", spelled as a number the runtime can add to `time.time()`.
+#: `float("inf")` cannot be: the shutdown deadline is `t0 + max_seconds` and joining a
+#: thread on it raises `OverflowError: timestamp out of range for platform time_t`.
+#: A day is past any run this port has taken and is still a timestamp.
+UNBOUNDED_SECONDS = 86_400.0
+
 DOMAIN_BLURB = {
     "minilang": ("an integer expression language (2 nodes deep, 4 files), "
                  "staged suite"),
@@ -495,7 +501,13 @@ def main(argv=None) -> None:
         n_workers=args.workers,
         max_concurrency=1 if args.asynchronous else args.workers,
         asynchronous=args.asynchronous, async_ratio=args.async_ratio,
-        max_seconds=(args.max_seconds or None) if args.asynchronous else None,
+        # The barrier-free runtime treats the wall clock as a required bound and
+        # defaults it to twenty seconds, so `None` is not "unbounded" there -- it is
+        # twenty seconds, and a 4 000-episode run ended after four rollouts twice
+        # before that was clear. `--episodes` is the budget; this is infinite unless
+        # a stopwatch was asked for.
+        max_seconds=((args.max_seconds or UNBOUNDED_SECONDS) if args.asynchronous
+                     else None),
         # Upstream runs no local before/after re-check: a child returns its work
         # and the parent judges it. Re-running every proposal here would also
         # double the number of child processes the domain spawns.
