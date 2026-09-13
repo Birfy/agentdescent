@@ -1184,6 +1184,23 @@ def test_the_run_ends_when_the_root_agent_says_the_objective_is_delivered():
     assert "src/__init__.py" in prompts[0]          # the tree is what it judges
 
 
+def test_a_round_that_accepted_nothing_is_not_scored_twice():
+    """Fifty subprocesses a round, to ask about a codebase that did not change, would
+    cost more than the rounds being watched."""
+    runs = []
+    state = domain.initial_files()
+    judge = CompletionJudge(lambda p: pytest.fail("never green"),
+                            tasks=domain.build_tasks(),
+                            run=lambda rendered, task: runs.append(task.id) or "",
+                            reward=domain.reward, state_of=lambda: state,
+                            contracts=domain.CONTRACTS, objective="o")
+    info = RoundInfo(round=1, held_out_reward=0.0, n_items=0, committed=0, rejected=0)
+    assert judge(info) is False
+    assert len(runs) == 1, runs       # and it stops at the first failing test
+    assert judge(info) is False
+    assert len(runs) == 1            # the same version, so not scored again
+
+
 def test_an_unparseable_or_negative_answer_keeps_the_run_going():
     green = domain.reference_tree()
     assert _completion_judge(lambda p: "not sure yet", green)(

@@ -247,6 +247,11 @@ class CompletionJudge:
         self._contracts = tuple(contracts)
         self._root = root_path
         self._objective = objective
+        #: The last version this judge scored, and what it concluded about it. A round
+        #: that accepted nothing is the same codebase, and re-running fifty tests on it
+        #: would cost more than the rounds it is watching.
+        self._scored = None
+        self._answer = False
         #: Rounds where the suite was green and the question was therefore asked.
         self.asked = 0
         #: What it said, the last time it said anything.
@@ -261,10 +266,12 @@ class CompletionJudge:
         from ._world import LocalWorld
 
         rendered = canonical(state)
-        failing = [t.id for t in self._driven
-                   if self._reward(t, self._run(rendered, t)) < 1.0]
-        if failing:
-            return False                     # not the question yet -- and no call
+        if rendered == self._scored:
+            return self._answer              # nothing was accepted: the same codebase
+        self._scored, self._answer = rendered, False
+        for task in self._driven:
+            if self._reward(task, self._run(rendered, task)) < 1.0:
+                return False                 # not the question yet -- and no call
         self.asked += 1
         world = LocalWorld(version=int(getattr(info, "round", 0)), path=self._root)
         try:
@@ -277,7 +284,8 @@ class CompletionJudge:
         self.verdict, self.reason = ("complete" if verdict else
                                      ("incomplete" if verdict is not None else
                                       "unparsed")), reason
-        return bool(verdict)
+        self._answer = bool(verdict)
+        return self._answer
 
 
 def _parse_flag(reply: str, key: str) -> Tuple[Optional[bool], str]:
