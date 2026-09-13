@@ -295,6 +295,10 @@ mechanism, and why `TestSuite` sits beside `Suite` rather than replacing it.
 --workers 4 --no-thinking`, three seeds. The repository starts implementation-empty
 and the model writes every line of what comes out.
 
+All of these ran under `--sync`, which was the default until the staleness seam above
+was wired; the default is barrier-free now and the accepted-event counts are not
+comparable across the two.
+
 | domain | seed | held-out | accepted | episodes | depth | calls | wall-clock |
 |---|---|---|---|---|---|---|---|
 | `md` (test-scored, stops itself) | 0 | **1.000** | 48 | 346 | 3 | 2 821 | 48.6 min |
@@ -620,9 +624,11 @@ landed on a file another proposal had touched. The claim measured is narrower an
 the one that matters for fidelity — under `--async --staleness full` nothing is
 discarded for being late, which is upstream's rule.
 
-The port still defaults to sync, because that is what every published number on this
-page was measured under; the faithful arrangement is one flag away and now printed in
-the header.
+**That arrangement is the default now.** A run is barrier-free with nothing discarded
+for lag unless `--sync` (or `--serial`, which is the one-worker arm of the comparison
+above and means the barrier too) puts the barrier back. The header prints which one is
+in force, and every number on this page that predates the change was measured under
+`--sync` and is labelled so.
 
 ## The paper's numbers, and this port's
 

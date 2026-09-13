@@ -16,7 +16,8 @@ policies rather than a fork of the loop.
 ## Run
 
 ```bash
-python -m examples.genesis.genesis_recursive_worlds                       # offline, no API key
+python -m examples.genesis.genesis_recursive_worlds                       # offline, barrier-free, nothing discarded
+python -m examples.genesis.genesis_recursive_worlds --sync                # the round barrier back (published numbers)
 python -m examples.genesis.genesis_recursive_worlds --domain stackvm      # the deeper world
 python -m examples.genesis.genesis_recursive_worlds --domain jqx          # a program, not a package
 python -m examples.genesis.genesis_recursive_worlds --domain md           # scored by tests, no oracle

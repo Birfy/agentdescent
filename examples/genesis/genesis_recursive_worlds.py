@@ -180,8 +180,14 @@ def build_parser() -> argparse.ArgumentParser:
                              "scheduling model. The run then leaves a real "
                              "phylogenetic graph: one commit per episode, a parent's "
                              "merge carrying every child commit as a parent")
+    parser.add_argument("--sync", action="store_true",
+                        help="put the round barrier back. The default is barrier-free "
+                             "with nothing discarded for lag, which is upstream's "
+                             "arrangement; this restores the engine's synchronous DP, "
+                             "which is what every published number on the page was "
+                             "measured under")
     parser.add_argument("--staleness", choices=("guarded", "full", "reflective"),
-                        default="guarded",
+                        default="full",
                         help="what happens to a proposal built on a version that has "
                              "since moved. The engine's default discards it beyond a "
                              "lag budget; `full` never discards for lag, which is "
@@ -242,6 +248,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> None:
     args = build_parser().parse_args(argv)
+    # Barrier-free by default, and nothing discarded for being late. Upstream has no
+    # round barrier -- an agent commits, releases its worktree and is re-queued, and
+    # the archive shows 22 episodes overlapping -- and it never drops a contribution
+    # for lag: the parent merges what its child returns, whatever the child branched
+    # from. `--sync` restores the barrier, which is what the published numbers used.
+    # `--serial` is the one-worker arm of the published comparison, so it means the
+    # barrier too: the shared contract refuses `--serial --async` outright, and it
+    # is right to -- a one-worker asynchronous run is neither arm.
+    args.asynchronous = not (args.sync or getattr(args, 'serial', False))
     # One root episode is one rollout, so the shared budget flag maps onto the
     # port's own iteration flag rather than adding a second budget beside it.
     if getattr(args, "budget_rollouts", None):
@@ -261,9 +276,11 @@ def main(argv=None) -> None:
           f"episodes={args.episodes} root ({rounds} rounds x {args.workers} workers), "
           f"max depth={args.depth}")
     print(f"Staleness: {args.staleness}"
-          + ("" if args.asynchronous else " (no effect: nothing is stale at a barrier)")
-          + ("  -- a lagging proposal is merged, not dropped, which is what a parent "
-             "does upstream" if args.staleness == "full" else ""))
+          + (" (no effect: nothing is stale at a barrier)" if not args.asynchronous else
+             "  -- a lagging proposal is merged, not dropped, which is what a parent "
+             "does upstream" if args.staleness == "full" else
+             "  -- a proposal that lagged past the budget is discarded, which upstream "
+             "never does"))
     print(f"Merge    : {merge}" + ("" if git_available() else
                                    "  [git missing: every contested file falls back]"))
     print(f"Gate     : {gate}")
