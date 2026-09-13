@@ -214,6 +214,32 @@ All notable changes to AgentDescent are documented here. The format follows
   buying more in-loop evaluation cannot improve the criterion and the budget
   belongs on oracle labels.
 
+- **A run can span a restart now, so the verifier watch outlives the process.**
+  `evolve(checkpointing=True)` arrived on `main` while this branch was open,
+  and it makes a latent gap reachable: a restart used to mean a new run, so
+  "did the verifier change while we were down?" was not a question anyone
+  could ask. `VerifierWatch` held its baseline in memory and `attach()` calls
+  `check()` to *establish* one, so on a resume it re-baselined silently --
+  measured, the same judge with an edited prompt came back `831c0a65` ->
+  `103a89aa` with `check()` returning `False`.
+
+  The correction was never at risk. Records are keyed by `verifier_version`,
+  so the forty labels from before the restart were not applied to the new
+  judge and the gate widened on its own. What was lost is the **diagnosis**:
+
+  | | stale reason after a resume with an edited judge |
+  |---|---|
+  | before | `0 calibration labels for '103a89aa...'; 30 needed` |
+  | after | `verifier fingerprint changed '831c0a65...' -> '103a89aa...'` |
+
+  The first reads as "not enough labels yet", which is exactly the confusion
+  `VerifierWatch`'s own docstring says a stale rectification causes.
+
+  `AuditStore.remember_fingerprint` persists it, out-of-band like the
+  priorities and for the same reason -- it belongs to the run, not to a unit --
+  and writes only on a change, so a watch checked every round does not grow
+  the file. A resume that changed nothing keeps its calibration.
+
 - **The judge evolved against ground truth, live.**
   `scripts/audit_evolve_judge.py` run on MBPP: `sigma` **0.4747 -> 0.2549**
   (-46%), disagreement 29.9% -> 6.9%, false negatives 3.2% -> **0.0%**, fixed 21

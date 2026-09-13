@@ -441,13 +441,20 @@ class VerifierWatch:
                  fingerprint: Optional[Callable[[], str]] = None,
                  artifact_ids: Iterable[str] = (),
                  key_globs: Sequence[str] = (),
-                 layers: Iterable[int] = ()) -> None:
+                 layers: Iterable[int] = (),
+                 store: Any = None) -> None:
         self.calibrator = calibrator
         self.fingerprint = fingerprint
         self.artifact_ids = frozenset(artifact_ids)
         self.key_globs = tuple(key_globs)
         self.layers = frozenset(int(l) for l in layers)
-        self._seen: Optional[str] = None
+        # Seeded from the store when there is one, so the first `check()` after
+        # a restart *compares* rather than re-baselines. Without it the baseline
+        # died with the process -- fine while a restart meant a new run, and not
+        # fine now that `evolve(checkpointing=True)` lets a run span one.
+        self.store = store
+        self._seen: Optional[str] = (
+            store.last_fingerprint if store is not None else None)
 
     def check(self) -> bool:
         """Re-read the fingerprint; mark stale and return True if it changed."""
@@ -455,6 +462,8 @@ class VerifierWatch:
             return False
         now = self.fingerprint()
         was, self._seen = self._seen, now
+        if self.store is not None:
+            self.store.remember_fingerprint(now)
         if was is None or was == now:
             return False
         self.calibrator.mark_stale(

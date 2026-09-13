@@ -211,8 +211,11 @@ def attach(verifier: Callable[[Any, str], float], *,
         verifier_version=lambda: reward.verifier_version)
     watch = VerifierWatch(calibrator,
                           fingerprint=lambda: reward.verifier_version,
-                          artifact_ids=watch_ids, key_globs=watch_globs)
-    watch.check()                       # establish the baseline, not a change
+                          artifact_ids=watch_ids, key_globs=watch_globs,
+                          store=store)
+    # Establishes the baseline on a first run and **compares** against the
+    # stored one on a resume, which is the whole point of handing it the store.
+    watch.check()
     return Audit(reward=reward, run=RenderTap(run) if run is not None else None,
                  acceptance=acceptance, store=store, calibrator=calibrator,
                  watch=watch)

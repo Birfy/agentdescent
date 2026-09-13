@@ -596,3 +596,73 @@ def test_the_shipped_policy_is_re_run_because_it_is_known_to_be_pure():
     'did the caller pass something' drops the attribution for it."""
     assert RectifiedAcceptance(_inner(), rectification=_rect()).explain_refusals
     assert RectifiedAcceptance(rectification=_rect()).explain_refusals
+
+
+# -- the baseline has to outlive the process ---------------------------------
+
+def _resume(path, prompt):
+    """`attach()` as a fresh process would call it, against the same store."""
+    from agentdescent.audit import attach
+
+    return attach(lambda task, output: 1.0, store=path,
+                  version_extra={"prompt": prompt})
+
+
+def _fill(audit, n=40):
+    import uuid
+
+    from agentdescent.audit import AuditRecord, Purpose
+
+    for i in range(n):
+        rec = AuditRecord(
+            record_id=uuid.uuid4().hex, task_id=f"t{i}", artifact_signature="s",
+            output="o", verifier_version=audit.verifier_version,
+            verifier_score=1.0, inclusion_prob=1.0,
+            purpose=Purpose.CALIBRATION, stratum="all")
+        audit.store.append(rec)
+        audit.store.resolve(rec.record_id, float(i % 2))
+
+
+def test_a_verifier_edited_across_a_restart_is_named_as_one(tmp_path):
+    """`VerifierWatch` held its baseline in memory, which was enough while a
+    restart meant a new run. `evolve(checkpointing=True)` lets a run span one,
+    so "did the verifier change while we were down?" became a question the
+    watch could not answer -- `check()` on a fresh object had nothing to compare
+    against and silently re-baselined.
+
+    The correction was never at risk: records are keyed by `verifier_version`,
+    so the old labels are not applied to the new judge. What was lost is the
+    diagnosis, which presented as "not enough labels yet" -- the confusion this
+    class's own docstring says a stale rectification causes.
+    """
+    path = str(tmp_path / "audit.jsonl")
+    _fill(_resume(path, "v1"))
+
+    after = _resume(path, "v2 -- edited while the run was down")
+    rect = after.rectification()
+
+    assert rect.is_stale
+    assert "fingerprint changed" in (rect.stale_reason or ""), rect.stale_reason
+    assert "calibration labels" not in (rect.stale_reason or ""), (
+        "it must not read as 'not enough labels yet'")
+
+
+def test_an_unchanged_verifier_resumes_with_its_calibration_intact(tmp_path):
+    """The other half: a restart that changed nothing must not throw the
+    correction away, or every resume would pay for its labels again."""
+    path = str(tmp_path / "audit.jsonl")
+    _fill(_resume(path, "v1"))
+
+    assert not _resume(path, "v1").rectification().is_stale
+
+
+def test_the_fingerprint_is_written_once_rather_than_per_check(tmp_path):
+    """A watch checked between rounds would otherwise append a line per round
+    for a verifier that never moved."""
+    path = str(tmp_path / "audit.jsonl")
+    audit = _resume(path, "v1")
+    for _ in range(20):
+        audit.watch.check()
+
+    lines = [l for l in open(path).read().splitlines() if "verifier_watch" in l]
+    assert len(lines) == 1

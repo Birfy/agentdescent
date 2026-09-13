@@ -38,6 +38,11 @@ MOMENTS_KIND = "unlabelled_moments"
 #: keeping the history of it would only invite averaging opinions.
 PRIORITY_KIND = "audit_priority"
 
+#: The verifier fingerprint last seen by a `VerifierWatch`. Out-of-band
+#: like the priorities, and for the same reason: it belongs to the *run*,
+#: not to any unit.
+WATCH_KIND = "verifier_watch"
+
 
 class _Welford:
     """Running count, mean and variance of the scores nobody audited.
@@ -95,6 +100,7 @@ class AuditStore:
         self._moments: Dict[Tuple[str, str], _Welford] = {}
         #: artifact_signature -> how much the merge path wanted this audited.
         self._priorities: Dict[str, float] = {}
+        self._fingerprint: Optional[str] = None
         self._unflushed = 0
         self._lock = threading.RLock()
         if path and os.path.exists(path):
@@ -132,6 +138,9 @@ class AuditStore:
                         continue
                     if payload.get("kind") == PRIORITY_KIND:
                         self._priorities = dict(payload["priorities"])
+                        continue
+                    if payload.get("kind") == WATCH_KIND:
+                        self._fingerprint = payload.get("fingerprint")
                         continue
                     if payload.get("kind") == MOMENTS_KIND:
                         # Last snapshot wins, exactly as for records: a later
@@ -209,6 +218,33 @@ class AuditStore:
             return {stratum: {"n": acc.n, "mean": acc.mean, "var": acc.var}
                     for (version, stratum), acc in self._moments.items()
                     if version == verifier_version}
+
+    @property
+    def last_fingerprint(self) -> Optional[str]:
+        """The verifier fingerprint a `VerifierWatch` last saw, or ``None``."""
+        with self._lock:
+            return self._fingerprint
+
+    def remember_fingerprint(self, fingerprint: str) -> None:
+        """Persist the fingerprint so a restart can be compared against it.
+
+        A `VerifierWatch` holds its baseline in memory, which was enough while a
+        restart meant a new run. `evolve(checkpointing=True)` makes a run span
+        one, so "did the verifier change while we were down?" became a question
+        the watch could not answer: `check()` on a fresh object has nothing to
+        compare against and silently re-baselines.
+
+        The correction was never at risk -- records are keyed by
+        `verifier_version`, so the old labels are not applied to the new judge
+        and the gate widens on its own. What was lost is the *diagnosis*: it
+        presents as "not enough labels yet", which is the confusion
+        `VerifierWatch`'s own docstring says a stale rectification causes.
+        """
+        with self._lock:
+            if fingerprint == self._fingerprint:
+                return                      # nothing changed; do not grow the file
+            self._fingerprint = fingerprint
+            self._write_line({"kind": WATCH_KIND, "fingerprint": fingerprint})
 
     def remember_priorities(self, priorities: Dict[str, float]) -> None:
         """Record what the merge path thought was worth auditing.

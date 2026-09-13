@@ -1366,6 +1366,7 @@ Records on disk, indexed in memory.
 | `load() -> None` | Re-read the file, last-occurrence-wins. |
 | `observe_unlabelled(verifier_version: str, stratum: str, score: float) -> None` | Fold one un-audited score into its stratum's running moments. |
 | `pending(...)` | Records still waiting on truth -- the work list for whoever answers. |
+| `remember_fingerprint(fingerprint: str) -> None` | Persist the fingerprint so a restart can be compared against it. |
 | `remember_priorities(priorities: Dict[str, float]) -> None` | Record what the merge path thought was worth auditing. |
 | `reopen(record_id: str) -> bool` | Clear a resolution so it can be replaced. For corrections, not for retries. |
 | `resolve(record_id: str, oracle_score: float, *, at: Optional[float] = None) -> bool` | Attach ground truth to a pending record. `False` if there was none to attach. |
@@ -2178,7 +2179,8 @@ VerifierWatch(
     fingerprint: Optional[Callable[[], str]] = None,
     artifact_ids: Iterable[str] = (),
     key_globs: Sequence[str] = (),
-    layers: Iterable[int] = ()
+    layers: Iterable[int] = (),
+    store: Any = None
 ) -> None
 ```
 
