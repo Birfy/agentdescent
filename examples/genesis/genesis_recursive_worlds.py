@@ -477,7 +477,12 @@ def main(argv=None) -> None:
     result = evolve(
         tasks, spec.reward, run=run, propose=_superseded, strategy=strategy,
         artifact_id="world", blast_radius=SKILL_BLAST_RADIUS,
-        rounds=rounds, n_workers=args.workers,
+        # Say the budget outright rather than letting `rounds` be reinterpreted:
+        # `--episodes` is a count of ROOT episodes in both arms, and under the
+        # barrier-free default that is exactly what a worker rollout is.
+        **({"max_rollouts": args.episodes} if args.asynchronous
+           else {"rounds": rounds}),
+        n_workers=args.workers,
         max_concurrency=1 if args.asynchronous else args.workers,
         asynchronous=args.asynchronous, async_ratio=args.async_ratio,
         max_seconds=args.max_seconds if args.asynchronous else None,
