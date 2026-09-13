@@ -1,19 +1,19 @@
 ---
-description: Nineteen published self-evolution algorithms ported as runnable plug-ins on one runtime, each with a declared fidelity class and a measured before-and-after result.
+description: Twenty published self-evolution algorithms ported as runnable plug-ins on one runtime, each with a declared fidelity class and a measured before-and-after result.
 ---
 
-# Self-evolution algorithms — nineteen ports
+# Self-evolution algorithms — twenty ports
 
 AgentDescent is a *general* engine for parallel, merge-based evolution. To show
-it is faithful to the field — not a toy — nineteen published **skill**,
+it is faithful to the field — not a toy — twenty published **skill**,
 **program** and **harness** self-evolution algorithms run on it, each as one
 runnable example with a dedicated page. Eight reproduce their paper's own
-benchmark; eleven preserve the mechanism on a compact domain and say so. What
+benchmark; twelve preserve the mechanism on a compact domain and say so. What
 each one follows and where it departs is recorded per port in
 [port fidelity](port-fidelity.md).
 
-**All nineteen run through the AgentDescent evolution engines.** No example
-bypasses the engine, and they reach it two ways:
+**All twenty run through the AgentDescent evolution engines.** No example
+bypasses the engine, and they reach it three ways:
 
 * the **eight benchmark-faithful ports** are each a custom `strategy=` and/or a
   custom `aggregator_factory=`, with their parent/gate rules extracted as named
@@ -23,9 +23,13 @@ bypasses the engine, and they reach it two ways:
   [`MethodPolicy`](policies.md) definitions over one shared runner — their
   mechanisms plug in as `Policies(...)` fields, their artifacts as shared
   [strategies](strategies.md), and the [runtime matrix](matrix-overview.md)
-  measures them under all three schedulers.
+  measures them under all three schedulers;
+* **Genesis** is neither: a custom `strategy=` like the first group, a
+  `mechanism_microport` fidelity class like the second, and its whole algorithm
+  installed through `Policies(proposal=, acceptance=, conflict=)` — the case that
+  shows the seams are enough on their own.
 
-**All nineteen are parallel — and can run async.** In synchronous mode their workers
+**All twenty are parallel — and can run async.** In synchronous mode their workers
 run **concurrently** (overlapping LLM rollouts) with the aggregator merge as the
 barrier (*synchronous data-parallelism*). Add **`--async`** and the same example
 runs **barrier-free** through
@@ -72,6 +76,17 @@ so they share a runner, a budget contract and a command line. Port author:
 | **Absolute Zero** | `inference_analogue` | self-play carts | frozen self-play evaluation; learnability signal | [→](algo-absolute-zero.md) |
 | **R-Zero** | `inference_analogue` | self-play carts | `AdvantageAcceptance` (GRPO shape), `DifficultyWeighted` | [→](algo-r-zero.md) |
 | **Agent0** | `inference_analogue` | self-play carts | `DifficultyWeighted`; calculator stop-and-go | [→](algo-agent0.md) |
+
+### The twentieth: Genesis, at the standard seams
+
+One port is a mechanism microport that is **not** a `MethodPolicy`: its algorithm
+is a recursion, so it installs as a proposal policy rather than as a declaration
+over a shared runner. It is listed on its own because putting it in either table
+above would make that table's opening sentence false.
+
+| Algorithm | Port author | Fidelity class | Domain | `evolve()` plug-ins | Page |
+|---|---|---|---|---|---|
+| **Genesis** (Persistent Recursive Worlds) | chendanyang | `mechanism_microport` | four compact formation runs (`--domain minilang` / `stackvm` / `jqx` / `md`), each grown from an implementation-empty repository; `md` is scored by a frozen test suite with no reference implementation in the loop | `strategy` + `Policies(proposal=, acceptance=, conflict=)` + `stop_when=` | [→](algo-genesis.md) |
 
 ### The shared command line
 
@@ -208,7 +223,7 @@ cannot be decorative. `run_port` also records all three in `framework`, and
 
 ---
 
-## Measured results — all nineteen
+## Measured results — all twenty
 
 Every port has been run and every number below is linked to the run that
 produced it. **The two halves of this page are not comparable with each other**,
@@ -270,11 +285,28 @@ that establish the port works end to end, not a comparison.
 | [OpenEvolve](algo-openevolve.md#measured-results-function-minimization) | function minimization | combined score 0.9638 → **1.4995** against a 1.5 ceiling, held-out seeds | async N=4, 24 rollouts |
 | [ERA](algo-era.md#measured-results-playground-s3e1) | Kaggle Playground S3E1 | test RMSE 0.7297 → **0.5913** (−19.0%) on 2,476 unseen rows; 7-node tree, all valid | async N=3, 6 expansions |
 
+### The twentieth, on two formation runs
+
+The repository starts with no implementation in it, so "before" is 0.000 by
+construction rather than by a weak baseline. Model rows are three seeds at
+`--episodes 60 --workers 4`; offline rows are `--episodes 96` (`minilang`) and
+`160` (`stackvm`), deterministic across seeds.
+
+| Method | Domain | held-out, before → after | accepted events | notes |
+|---|---|---:|---:|---|
+| [Genesis](algo-genesis.md#with-a-real-model) · `minilang`, deepseek-v4-flash | compact formation run, 2 nodes deep | 0.000 → **1.000** ×3 | 5 | the model writes every line; seed 0 re-scored independently at 30/30, observed depth 3, 284 calls in 135 s |
+| [Genesis](algo-genesis.md#with-the-offline-actors) · `minilang`, offline actors | the same | 0.000 → **1.000** ×3 | 5 serial / **4** at N=4 / **3** at N=8 | deterministic on every seed; `--keyed-union` takes 5 at *every* width, so the three-way merge is what parallelism buys here |
+| [Genesis](algo-genesis.md#with-a-real-model) · `stackvm`, deepseek-v4-flash | compact formation run, 4 nodes deep | 0.000 → **1.000** | 12 | re-scored independently at 30/30; it invented its own decomposition and left two pieces of dead code the suite cannot see — see the page |
+| [Genesis](algo-genesis.md#with-the-offline-actors) · `stackvm`, offline actors | the same | 0.000 → **1.000** ×3 | **6** at N=8 | ten files the agents write, observed depth 3; `--keyed-union` takes 8 |
+
 !!! warning "One run per seed, and one seed on the bottom table"
-    Nothing here is a paper-scale result. The eleven carry three seeds and report
-    the spread on their own pages; the eight carry one, and a single run does not
-    pin a number on a sampled model. The quality columns are evidence the
-    mechanism runs and moves the metric it should, not evidence about how much.
+    Nothing here is a paper-scale result. The eleven and Genesis carry three
+    seeds and report the spread on their own pages; the eight carry one, and a
+    single run does not pin a number on a sampled model. The quality columns are
+    evidence the mechanism runs and moves the metric it should, not evidence about
+    how much. Genesis carries both kinds: its model rows are three seeds on one
+    model and one endpoint, and its offline rows are deterministic, which makes
+    *their* spread a statement about scheduling rather than about a model.
 
 ---
 

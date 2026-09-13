@@ -214,7 +214,7 @@ Mechanisms that need state the pipeline does not keep — an archive, per-instan
 score rows, an island pool — take the `aggregator_factory` exit instead.
 [How to fill a slot →](https://birfy.github.io/agentdescent/policy-guide/)
 
-## Nineteen algorithm ports
+## Twenty algorithm ports
 
 Published self-evolution algorithms run as plug-ins rather than forks, under
 serial, synchronous or barrier-free scheduling without touching the engine —
@@ -223,14 +223,19 @@ each paper's own loop.
 
 **Benchmark-faithful (8):** ACE · GEPA · EvoSkill · SkillOpt · ADAS · DGM ·
 OpenEvolve · ERA
-**Microports and analogues (11):** PromptBreeder · AFlow · Self-Refine ·
+**Microports and analogues (12):** PromptBreeder · AFlow · Self-Refine ·
 Reflexion · SICA · Gödel Agent · Voyager · SkillWeaver · Absolute Zero · R-Zero ·
-Agent0
+Agent0 · **Genesis**
+
+Genesis is the one whose whole algorithm — a recursion over `(version, path)`
+worlds, a three-way merge and a parent's verdict — installs through
+`Policies(proposal=, acceptance=, conflict=)` and a `Strategy`, with **no engine
+change at all**.
 
 Fidelity is declared per port, follows each project's *released code* where it
 diverges from its paper, and analogues are not to be cited as benchmark
 reproductions. Every port has a `--dry-run` mode that needs no API key.
-[All nineteen, with their measured results →](https://birfy.github.io/agentdescent/self-evolution-examples/)
+[All twenty, with their measured results →](https://birfy.github.io/agentdescent/self-evolution-examples/)
 
 ## Documentation
 
