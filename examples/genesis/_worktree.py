@@ -29,6 +29,14 @@ ceremony:
   remove --force``, which is the deletion the scheduling model requires -- and the
   counters say so. A leak is a bug with a number attached.
 
+The accounting holds for a run that *ends*. Release is a ``try/finally`` and
+:meth:`Rollout.close` is the same, so ``SIGKILL`` skips both and leaves the repository
+behind under the system temp directory -- a few hundred kilobytes per interrupted
+rollout. Worth knowing before deleting them: a rollout still running will lose its
+history if its repository disappears underneath it, which costs the commits and nothing
+else, because :meth:`RecursiveDelegation._commit` swallows the failure and counts it.
+The episode tree is a pure function over a state dict and does not go through here.
+
 Costs about four git invocations per episode and is off unless ``--worktrees`` is
 given.
 """
