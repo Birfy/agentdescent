@@ -1364,13 +1364,14 @@ Records on disk, indexed in memory.
 | `for_calibration(verifier_version: str) -> List[AuditRecord]` | Resolved CALIBRATION records for one verifier version, and nothing else. |
 | `for_improvement(verifier_version: Optional[str] = None) -> List[AuditRecord]` | Resolved IMPROVEMENT records -- the pool you are allowed to look at. |
 | `load() -> None` | Re-read the file, last-occurrence-wins. |
+| `observe_skipped(verifier_version: str, stratum: str) -> None` | Count one unit the tap dropped, without its score. |
 | `observe_unlabelled(verifier_version: str, stratum: str, score: float) -> None` | Fold one un-audited score into its stratum's running moments. |
 | `pending(...)` | Records still waiting on truth -- the work list for whoever answers. |
 | `remember_fingerprint(fingerprint: str) -> None` | Persist the fingerprint so a restart can be compared against it. |
 | `remember_priorities(priorities: Dict[str, float]) -> None` | Record what the merge path thought was worth auditing. |
 | `reopen(record_id: str) -> bool` | Clear a resolution so it can be replaced. For corrections, not for retries. |
 | `resolve(record_id: str, oracle_score: float, *, at: Optional[float] = None) -> bool` | Attach ground truth to a pending record. `False` if there was none to attach. |
-| `unlabelled_moments(verifier_version: str)` | `stratum -> {n, mean, var}` over the units that were not audited. |
+| `unlabelled_moments(verifier_version: str)` | `stratum -> {n, mean, var, skipped}` over the units not audited. |
 | `versions() -> List[str]` | Every `verifier_version` seen, in order of first appearance. |
 
 ### `summarise(records: Iterable[AuditRecord]) -> Dict[str, float]`

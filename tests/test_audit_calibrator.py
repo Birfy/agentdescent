@@ -422,3 +422,108 @@ def test_it_is_folded_into_the_host_rather_than_dropped_or_refused():
     assert list(merged) == ["boundary"]
     assert pooled["boundary"]["n"] == 1050
     assert "accepted" not in pooled, "folded in, not left beside it"
+
+
+def test_strata_merge_even_when_every_one_of_them_is_thin():
+    """The safeguard skipped the case it exists for.
+
+    `len(thin) == len(grouped)` returned the strata untouched, so five strata of
+    three labels stayed five strata of three labels -- fifteen labels, plenty in
+    aggregate, and not one stratum with an estimable variance. PPI then ran on
+    per-stratum variances built from three points each. It also made the
+    `or list(grouped)` host fallback directly below unreachable, which is the
+    only case that fallback was written for.
+
+    Merging leaves one pooled stratum: an unstratified estimate, which is what
+    fifteen labels support and what the method's own argument -- merge rather
+    than drop, so no unit leaves the population -- asks for.
+    """
+    from agentdescent.audit import AuditStore
+    from agentdescent.audit.calibrator import Calibrator
+
+    calibrator = Calibrator(AuditStore())
+    thin = calibrator.min_per_stratum - 1
+    grouped = {f"s{i}": [object()] * thin for i in range(5)}
+    moments = {f"s{i}": {"n": 100, "mean": 0.5, "var": 0.1} for i in range(5)}
+
+    merged, pooled = calibrator._merge_thin(grouped, moments)
+
+    assert len(merged) == 1, merged
+    host, records = next(iter(merged.items()))
+    assert len(records) == 5 * thin, "no label may leave the population"
+    assert pooled[host]["n"] == 500, "nor any unlabelled unit"
+
+
+def test_a_lone_thin_stratum_has_nowhere_to_go_and_is_left_alone():
+    """There is no host but itself, so merging is a no-op rather than a loss."""
+    from agentdescent.audit import AuditStore
+    from agentdescent.audit.calibrator import Calibrator
+
+    calibrator = Calibrator(AuditStore())
+    grouped = {"only": [object()] * 2}
+    moments = {"only": {"n": 10, "mean": 0.5, "var": 0.1}}
+
+    merged, pooled = calibrator._merge_thin(grouped, moments)
+
+    assert list(merged) == ["only"] and len(merged["only"]) == 2
+    assert pooled["only"]["n"] == 10
+
+
+def test_the_skipped_count_survives_a_reload(tmp_path):
+    """It is part of the population frame, so losing it on restart re-weights
+    the correction -- silently, and only for runs that were resumed."""
+    from agentdescent.audit import AuditedReward, AuditStore
+    from agentdescent.evolution import Task
+
+    path = tmp_path / "audit.jsonl"
+    tap = AuditedReward(lambda task, out: 1.0 if out == "hi" else 0.0,
+                        sample_rate=0.1, rates={"hi": 0.9, "lo": 0.1},
+                        stratify=lambda t, o, s: o,
+                        store=AuditStore(str(path)), seed=0)
+    for i in range(500):
+        for out in ("hi", "lo"):
+            tap(Task(f"t{i}", "q"), out)
+    tap.store.flush()
+
+    before = tap.store.unlabelled_moments(tap.verifier_version)
+    assert any(m["skipped"] for m in before.values()), "nothing was skipped"
+    assert AuditStore(str(path)).unlabelled_moments(tap.verifier_version) == before
+
+
+def test_a_store_written_before_skipping_existed_still_loads(tmp_path):
+    """`skipped` is absent from every moments line already on disk.
+
+    Written as a real file rather than a dict literal: the first version of this
+    test asserted `dict.get` semantics on an object it had just built, which is
+    a property of Python and not of the loader it was supposed to cover.
+    """
+    import json
+
+    from agentdescent.audit import AuditStore
+
+    path = tmp_path / "old.jsonl"
+    path.write_text(json.dumps({
+        "kind": "unlabelled_moments", "verifier_version": "v1",
+        # The on-disk shape is Welford's, so `m2` and not `var`: 9.75 / 39.
+        "stratum": "all", "moments": {"n": 40, "mean": 0.5, "m2": 9.75},
+    }) + "\n", encoding="utf-8")
+
+    moments = AuditStore(str(path)).unlabelled_moments("v1")
+    assert moments["all"]["n"] == 40 and moments["all"]["mean"] == 0.5
+    assert moments["all"]["skipped"] == 0, "absent must read as none, not raise"
+
+
+def test_pooling_two_strata_adds_their_skipped_counts():
+    """`_pool` returns early when either side has no scored units, and those
+    paths would otherwise drop the other side's count."""
+    from agentdescent.audit import AuditStore
+    from agentdescent.audit.calibrator import Calibrator
+
+    pool = Calibrator(AuditStore())._pool
+    a = {"n": 0, "mean": 0.0, "var": 0.0, "skipped": 7}
+    b = {"n": 4, "mean": 0.5, "var": 0.1, "skipped": 3}
+    assert pool(a, b)["skipped"] == 10
+    assert pool(b, a)["skipped"] == 10
+    both = pool({"n": 2, "mean": 0.2, "var": 0.1, "skipped": 1},
+                {"n": 2, "mean": 0.8, "var": 0.1, "skipped": 2})
+    assert both["skipped"] == 3 and both["n"] == 4

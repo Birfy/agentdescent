@@ -294,7 +294,12 @@ def test_the_audit_tool_descriptions_warn_the_model_about_the_two_traps():
         "makes the verifier worse")
 
     rescan_desc = TOOL_DESCRIPTIONS["audit_rescan"]
-    assert "RUNS the module" in rescan_desc and "do not widen it" in rescan_desc
+    assert "RUNS the module" in rescan_desc
+    # It used to end "do not widen it on their behalf" -- addressed to the model,
+    # about a parameter the model itself supplied. The description now states a
+    # fact the model cannot act against, and names where the list comes from.
+    assert "AGENTDESCENT_RESCAN_ALLOW" in rescan_desc
+    assert "not something this tool can widen" in rescan_desc
 
 
 # -- references used by the rescan tests -------------------------------------
@@ -308,3 +313,34 @@ def harsher(record, context):
 
 def explodes(record, context):
     raise ValueError("this scorer is broken")
+
+
+def test_the_rescan_allowlist_is_not_a_tool_parameter():
+    """Resolving a verifier reference imports the module, which runs it.
+
+    The allowlist is what stands between "this server can run the agentdescent
+    package" and "this server can run anything importable on the box". It was a
+    parameter of the MCP tool, which meant the model calling the tool supplied
+    it -- the boundary came down to the tool description asking the model not to
+    widen it on the user's behalf. That is a request, not a control.
+    """
+    import inspect
+
+    from agentdescent.mcp import RESCAN_ALLOW_ENV, Tools, rescan_allow_from_env
+
+    assert "allow" not in inspect.signature(Tools.audit_rescan).parameters
+
+    assert rescan_allow_from_env({}) == ()
+    assert rescan_allow_from_env(
+        {RESCAN_ALLOW_ENV: " myproj. , other.mod ,, "}) == ("myproj.", "other.mod")
+    assert Tools(rescan_allow=["x."]).rescan_allow == ("x.",)
+
+
+def test_a_reference_outside_the_allowlist_is_still_refused(tmp_path):
+    """The point of the allowlist, from the tool a model actually calls."""
+    from agentdescent.mcp import Tools
+
+    store = tmp_path / "audit.jsonl"
+    store.write_text("", encoding="utf-8")
+    out = Tools(rescan_allow=()).audit_rescan(str(store), "os.path:join")
+    assert "error" in out, out

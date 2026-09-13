@@ -268,8 +268,15 @@ class Calibrator:
 
         # The population share of each stratum is a *count*, not an estimate:
         # the tap saw every unit the run scored and put each in exactly one
-        # stratum, so the sample frame here is the population.
-        sizes = {name: len(rows) + int(moments.get(name, {}).get("n", 0))
+        # stratum, so the sample frame here is the population. `skipped` is in
+        # it for that reason and no other -- those units happened, they have no
+        # recorded score, and leaving them out read a 50/50 population as 83/17
+        # at rates 0.9 and 0.1, which moves the correction instead of widening
+        # it. They stay out of `n_unlab` and out of the mean below, both of
+        # which are over units whose scores were observed.
+        sizes = {name: (len(rows)
+                        + int(moments.get(name, {}).get("n", 0))
+                        + int(moments.get(name, {}).get("skipped", 0)))
                  for name, rows in by_stratum.items()}
         total = sum(sizes.values())
         if total <= 0:
@@ -277,7 +284,8 @@ class Calibrator:
 
         strata, f_pop = [], 0.0
         for name, rows in by_stratum.items():
-            m = moments.get(name, {"n": 0, "mean": 0.0, "var": 0.0})
+            m = moments.get(name, {"n": 0, "mean": 0.0, "var": 0.0,
+                                   "skipped": 0})
             weight = sizes[name] / total
             f_lab = np.array([r.verifier_score for r in rows], dtype=float)
             y_lab = np.array([r.oracle_score for r in rows], dtype=float)
@@ -314,18 +322,23 @@ class Calibrator:
         different means have zero variance apiece and plenty combined -- and
         wrong in the direction that makes the interval too narrow.
         """
+        # `skipped` is a plain count of unscored units and pools by addition,
+        # separately from the moments -- including on the two short paths below,
+        # which would otherwise drop the other side's count.
+        skipped = int(a.get("skipped", 0)) + int(b.get("skipped", 0))
         na, nb = int(a["n"]), int(b["n"])
         if not na:
-            return dict(b)
+            return dict(b, skipped=skipped)
         if not nb:
-            return dict(a)
+            return dict(a, skipped=skipped)
         n = na + nb
         delta = b["mean"] - a["mean"]
         mean = a["mean"] + delta * nb / n
         m2 = (a["var"] * (na - 1) if na >= 2 else 0.0) \
             + (b["var"] * (nb - 1) if nb >= 2 else 0.0) \
             + delta * delta * na * nb / n
-        return {"n": n, "mean": mean, "var": m2 / (n - 1) if n >= 2 else 0.0}
+        return {"n": n, "mean": mean, "var": m2 / (n - 1) if n >= 2 else 0.0,
+                "skipped": skipped}
 
     def _merge_thin(self, grouped: Dict[str, List],
                     moments: Dict[str, Dict[str, float]]):
@@ -358,15 +371,22 @@ class Calibrator:
         # The assumption it carries, that the host's residual stands in for the
         # borrower's, is the same one `min_per_stratum` already makes.
         unlabelled_only = [k for k in moments if k not in grouped]
-        if not (thin or unlabelled_only) or len(thin) == len(grouped):
-            if not unlabelled_only:
-                return dict(grouped), dict(moments)
+        # Only when there is nothing to do. `len(thin) == len(grouped)` -- every
+        # stratum below the floor -- used to return here too, which skipped the
+        # safeguard in the one case that needs it most: five strata of three
+        # labels is fifteen labels, plenty in aggregate and not one stratum with
+        # an estimable variance. It also made the `or list(grouped)` fallback
+        # just below unreachable, which is what that fallback is for. Merging
+        # them leaves a single pooled stratum -- an unstratified estimate, which
+        # is what fifteen labels support.
+        if not (thin or unlabelled_only):
+            return dict(grouped), dict(moments)
         candidates = [k for k in grouped if k not in thin] or list(grouped)
         host = max(candidates, key=lambda k: len(grouped[k]))
         folded = [k for k in thin if k != host] + unlabelled_only
         merged = {k: list(v) for k, v in grouped.items() if k not in folded}
         pooled = {k: dict(v) for k, v in moments.items() if k not in folded}
-        pooled.setdefault(host, {"n": 0, "mean": 0.0, "var": 0.0})
+        pooled.setdefault(host, {"n": 0, "mean": 0.0, "var": 0.0, "skipped": 0})
         for k in folded:
             if k in grouped:
                 merged[host].extend(grouped[k])

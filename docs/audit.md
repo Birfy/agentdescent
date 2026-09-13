@@ -842,6 +842,29 @@ and the degrees of freedom count groups rather than units. `Calibrator` passes
     each task is scored once, more distinct tasks per label when they repeat, and
     an interval about 15% too narrow.
 
+    A task-level *draw* is not on its own a task-level *decision*, and the gap
+    between the two was a bug for as long as the rates differed. The draw is a
+    function of the task; the threshold it is compared against is
+    `rates[stratum]`, and `boundary_stratifier` bands by **score** — so one task
+    scored under several artifact versions meets a different threshold each time
+    and could be labelled in `boundary` while its other units went unlabelled in
+    `accepted`.
+
+    A unit that would be audited in some other stratum is therefore not recorded
+    unlabelled — its **score** is dropped, because recording it is what would put
+    the task in both halves. The unit itself is still counted: the store keeps a
+    per-stratum `skipped` tally, and the stratum weights are a census of every
+    unit the run scored, so dropping it from the frame as well would read a 50/50
+    population as 83/17 at rates 0.9 and 0.1 — a correction that *moves* rather
+    than one that widens. In the frame, never in the moments: `n`, `mean` and
+    `var` are over units whose scores were observed, and stay unbiased for the
+    stratum because whether a unit is skipped depends only on its task's draw,
+    which is independent of its score.
+
+    A unit is labelled exactly when the draw clears its own stratum's rate, so
+    Neyman allocation is untouched. The cost is unlabelled sample size, and it
+    grows with the spread between the highest and lowest rate.
+
 The same change makes the two pools honest at the task level. With a per-unit
 split, one task's units land in *both* the calibration and improvement pools —
 so the improvement pool's edits are informed by a task the calibration pool also
@@ -1374,6 +1397,13 @@ is the failure this package exists to prevent, committed by its own reporting.
 
 **`audit_rescan` resolves a `module:attribute` reference, which runs whatever it
 imports.** It is bounded by the same allowlist the spec system uses — the
-`agentdescent` package and nothing else — so widening it is a decision the person
-operating the server makes, never one a calling model can make for them by
-naming a module.
+`agentdescent` package, plus whatever prefixes the operator puts in
+`AGENTDESCENT_RESCAN_ALLOW` (comma-separated) or passes to
+`build_server(rescan_allow=...)`.
+
+The MCP tool takes **no `allow` parameter**, and that absence is the control
+rather than an omission. The tool is called by a model, so a widening parameter
+is one the model fills in for itself, and the boundary would rest on the tool
+description asking it not to. The library function `audit_rescan` in
+`agentdescent.audit.service` still takes `allow`, because there the caller is the
+operator, writing a script.

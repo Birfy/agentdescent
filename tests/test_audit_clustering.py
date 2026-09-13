@@ -255,3 +255,214 @@ def test_an_unknown_draw_by_is_refused():
 
     with pytest.raises(ValueError, match="draw_by"):
         AuditedReward(lambda task, out: 1.0, draw_by="unit")
+
+
+def _split_tap(rates, *, draw_by="task", seed=0):
+    """A tap whose stratum depends on the score, as the shipped one does."""
+    from agentdescent.audit import AuditedReward
+
+    scores = {"hi": 1.0, "lo": 0.0}
+    tap = AuditedReward(lambda task, out: scores[out], draw_by=draw_by,
+                        sample_rate=min(rates.values()), rates=rates, seed=seed,
+                        stratify=lambda t, o, s: "hi" if s >= 0.5 else "lo")
+    seen = []
+    inner = tap.store.observe_unlabelled
+    tap.store.observe_unlabelled = (
+        lambda v, s, sc: (seen.append(s), inner(v, s, sc))[1])
+    return tap, seen
+
+
+def test_a_task_is_never_in_both_halves_when_the_strata_differ_in_rate():
+    """The draw is task-level; the threshold it meets was not.
+
+    `_key` guarantees every unit of a task draws the same number, and the test
+    above pins it. But the number is compared against `rate_for(stratum)`, and
+    the shipped `boundary_stratifier` bands by *score* -- so one task scored
+    under several artifact versions meets a different threshold each time. A
+    task could be labelled in the high-rate band and unlabelled in the low-rate
+    one: both halves at once, which is what `draw_by="task"` exists to prevent
+    and what costs the interval its coverage. Measured before the fix: 33 of the
+    35 eligible tasks out of 40.
+    """
+    from agentdescent.evolution import Task
+
+    tap, seen = _split_tap({"lo": 0.05, "hi": 0.90})
+    both = 0
+    for i in range(40):
+        task = Task(f"t{i}", "q")
+        if not 0.05 <= tap._draw(task, "") < 0.90:
+            continue                       # outside the band, never ambiguous
+        audited, unlabelled = tap.audited, len(seen)
+        tap(task, "hi")
+        tap(task, "lo")
+        if tap.audited > audited and len(seen) > unlabelled:
+            both += 1
+    assert both == 0, f"{both} tasks landed in both halves"
+
+
+def test_the_partition_costs_neither_the_allocation_nor_the_weights():
+    """Dropping a unit is only safe if the frame still counts it.
+
+    A unit is labelled exactly when `draw < rate[stratum]`, so Neyman allocation
+    still spends labels where it planned to, and it is recorded unlabelled
+    exactly when `draw >= max_rate`, which does not mention the stratum.
+
+    Neither of those is the property that matters most, and checking only them
+    is how the first version of this fix shipped a worse bug than the one it
+    cured. The weights are not read off the unlabelled counts: they are a count
+    of **every unit the run scored**, labelled and unlabelled together. Drop a
+    unit from that frame and a 50/50 population reads as 83/17 at rates 0.9 and
+    0.1 -- a correction that moves rather than one that widens.
+    `test_a_skipped_unit_stays_in_the_population_frame` is the one that counts.
+    """
+    from collections import Counter
+
+    from agentdescent.evolution import Task
+
+    rates = {"lo": 0.05, "hi": 0.90}
+    tap, seen = _split_tap(rates)
+    labelled = Counter()
+    n = 4000
+    for i in range(n):
+        task = Task(f"t{i}", "q")
+        for out in ("hi", "lo"):
+            before = tap.audited
+            tap(task, out)
+            if tap.audited > before:
+                labelled[out] += 1
+    unlabelled = Counter(seen)
+
+    for stratum, rate in rates.items():
+        assert abs(labelled[stratum] / n - rate) < 0.02, stratum
+    for stratum in rates:
+        assert abs(unlabelled[stratum] / n - 0.10) < 0.02, stratum
+
+
+def test_one_rate_everywhere_changes_nothing():
+    """The drop is a fix for unequal rates and must be inert without them."""
+    from agentdescent.evolution import Task
+
+    tap, seen = _split_tap({"lo": 0.5, "hi": 0.5})
+    for i in range(200):
+        task = Task(f"t{i}", "q")
+        tap(task, "hi")
+        tap(task, "lo")
+    assert tap.skipped == 0
+    assert tap.audited + len(seen) == tap.seen, "every unit was accounted for"
+
+
+def test_drawing_per_output_is_left_alone():
+    """`draw_by="output"` never promised whole-task inclusion, and a per-unit
+    draw against a per-unit threshold is already internally consistent."""
+    from agentdescent.evolution import Task
+
+    tap, _ = _split_tap({"lo": 0.05, "hi": 0.90}, draw_by="output")
+    for i in range(200):
+        task = Task(f"t{i}", "q")
+        tap(task, "hi")
+        tap(task, "lo")
+    assert tap.skipped == 0
+
+
+def test_a_skipped_unit_stays_in_the_population_frame():
+    """The frame is a census, not a sample, and a dropped unit still happened.
+
+    The first version of this fix dropped the unit outright, on the reasoning
+    that a unit is recorded unlabelled at `1 - max_rate` in every stratum, so
+    the relative weights were safe. That reasoning was about the wrong counts.
+    `observed_weights` and `Calibrator._estimate` both size a stratum as
+    labelled + unlabelled -- "the tap saw every unit the run scored" -- so the
+    high-rate stratum kept its labelled units while the low-rate one lost the
+    same draws to the drop. At rates 0.9 and 0.1 a 50/50 population read as
+    83/17, which moves the correction and the next plan toward the high-rate
+    stratum rather than costing precision.
+
+    The store counts skipped units per stratum. They belong in the frame and
+    nowhere else: they have no score, so they must stay out of `n_unlab` and out
+    of the mean PPI borrows, which the next test pins.
+    """
+    from agentdescent.audit.sampler import observed_weights
+    from agentdescent.evolution import Task
+
+    tap, _ = _split_tap({"lo": 0.1, "hi": 0.9})
+    n = 6000
+    for i in range(n):
+        for out in ("hi", "lo"):
+            tap(Task(f"t{i}", "q"), out)
+
+    assert tap.skipped > 0, "nothing was dropped; the test proves nothing"
+    weights = observed_weights(tap.store, tap.verifier_version)
+    for stratum in ("hi", "lo"):
+        assert abs(weights[stratum] - 0.5) < 0.01, weights
+
+
+def test_a_skipped_unit_never_reaches_the_moments_ppi_borrows():
+    """It has no score. Folding it into `n` would claim one."""
+    from agentdescent.evolution import Task
+
+    tap, seen = _split_tap({"lo": 0.1, "hi": 0.9})
+    for i in range(2000):
+        for out in ("hi", "lo"):
+            tap(Task(f"t{i}", "q"), out)
+
+    moments = tap.store.unlabelled_moments(tap.verifier_version)
+    recorded = sum(int(m["n"]) for m in moments.values())
+    assert recorded == len(seen), "n counts observed scores and nothing else"
+    assert sum(int(m["skipped"]) for m in moments.values()) == tap.skipped
+
+
+def test_a_rate_of_one_says_it_has_emptied_the_unlabelled_half():
+    """The partition is right; the consequence is total and was silent.
+
+    A unit is recorded unlabelled exactly when its draw clears `_max_rate`. At
+    a rate of 1.0 no draw clears it, so *every* task is audited somewhere and
+    nothing can be recorded unlabelled without landing on both sides. Measured:
+    `rates={'boundary': 1.0, 'accepted': 0.05}` over 2000 units leaves
+    `n_unlab=0` in every stratum, so PPI has nothing to borrow and reports a
+    gain of 1.0 -- which reads as "the verifier was no help" rather than "there
+    was nothing to borrow from". The sampler raises every planned rate by
+    1/`calibration_fraction`, so the 1.0 clamp is not a remote case.
+    """
+    import warnings
+
+    from agentdescent.audit import AuditedReward
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        AuditedReward(lambda task, out: 1.0, sample_rate=0.05,
+                      stratify=lambda t, o, s: "b",
+                      rates={"boundary": 1.0, "accepted": 0.05})
+    assert any("empties the unlabelled half" in str(w.message) for w in caught)
+
+
+def test_a_sample_rate_above_every_planned_rate_is_called_out():
+    """It sets the bar a unit must clear to be recorded unlabelled, and no
+    stratum audits at it -- so units are dropped for a stratum that may not
+    exist. Measured: 249 of 4000 at sample_rate 0.1 over rates 0.05 and 0.02.
+    `plan()` avoids it by setting `default_rate` to 0.0."""
+    import warnings
+
+    from agentdescent.audit import AuditedReward
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        AuditedReward(lambda task, out: 1.0, sample_rate=0.1,
+                      stratify=lambda t, o, s: "b",
+                      rates={"boundary": 0.05, "accepted": 0.02})
+    assert any("above every rate in" in str(w.message) for w in caught)
+
+
+def test_a_settled_rate_configuration_stays_quiet():
+    """Both warnings are about a band between rates. Without one, no warning."""
+    import warnings
+
+    from agentdescent.audit import AuditedReward
+
+    for kwargs in ({"sample_rate": 0.1},
+                   {"sample_rate": 0.1, "rates": {"a": 0.1, "b": 0.1}},
+                   {"sample_rate": 0.0, "rates": {"a": 0.05, "b": 0.2}}):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            AuditedReward(lambda task, out: 1.0,
+                          stratify=lambda t, o, s: "a", **kwargs)
+        assert not caught, (kwargs, [str(w.message) for w in caught])

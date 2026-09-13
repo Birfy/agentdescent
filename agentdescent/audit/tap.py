@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import hashlib
 import threading
+import warnings
 from typing import Any, Callable, Dict, Optional
 
 from .records import (AuditRecord, Purpose, new_record_id, output_digest,
@@ -188,8 +189,12 @@ class AuditedReward:
             verifier, extra=version_extra)
         #: Units seen, and units audited. A sample rate that never fires is the
         #: quiet failure this makes loud.
+        self._warn_about_the_rates()
         self.seen = 0
         self.audited = 0
+        #: Units dropped to keep a task out of both halves at once -- see
+        #: `_maybe_audit`. Zero unless `rates` actually differ between strata.
+        self.skipped = 0
         self._lock = threading.Lock()
 
     # -- the Reward contract -------------------------------------------------
@@ -208,8 +213,50 @@ class AuditedReward:
 
     # -- sampling ------------------------------------------------------------
 
+    def _warn_about_the_rates(self) -> None:
+        """Two rate configurations that cost the unlabelled half, quietly.
+
+        Both follow from the partition in `_maybe_audit`: a unit is recorded
+        unlabelled exactly when its draw clears `_max_rate`, because a task that
+        is audited in *any* stratum cannot appear in the unlabelled half without
+        putting itself on both sides. Neither is wrong, and both are invisible
+        -- PPI simply reports a `gain_factor` of 1.0, which reads as "the
+        verifier was no help" rather than "there was nothing to borrow from".
+        """
+        if self.draw_by != "task":
+            return                       # a per-unit draw has no shared band
+        effective = set(self.rates.values()) | {self.sample_rate}
+        if len(effective) < 2:
+            return                       # one rate everywhere: no band at all
+        if self._max_rate >= 1.0:
+            warnings.warn(
+                "a stratum rate of 1.0 with other rates below it empties the "
+                "unlabelled half: every task is audited somewhere, so no unit "
+                "can be recorded unlabelled without putting its task on both "
+                "sides. PPI then has nothing to borrow from and reports a gain "
+                "of 1.0. Lower the rate, or pass draw_by='output' if each task "
+                "is scored once.", RuntimeWarning, stacklevel=3)
+        elif self.rates and self.sample_rate > max(self.rates.values()):
+            warnings.warn(
+                f"sample_rate={self.sample_rate} is above every rate in "
+                f"`rates` (max {max(self.rates.values())}), so it sets the "
+                "threshold a unit must clear to be recorded unlabelled -- and "
+                "no stratum audits at it. Units are dropped for a stratum that "
+                "may not exist. Pass sample_rate=0.0 when `rates` already "
+                "covers every stratum your stratifier can name, which is what "
+                "`plan()` does.", RuntimeWarning, stacklevel=3)
+
     def rate_for(self, stratum: str) -> float:
         return self.rates.get(stratum, self.sample_rate)
+
+    @property
+    def _max_rate(self) -> float:
+        """The highest rate any unit could meet.
+
+        `sample_rate` is in it because it is the rate of every stratum the
+        stratifier can name that `rates` does not.
+        """
+        return max([self.sample_rate] + list(self.rates.values()))
 
     def _key(self, task: Any, output: str, prefix: str = "") -> str:
         """What the inclusion draw is a function of.
@@ -246,7 +293,42 @@ class AuditedReward:
         stratum = "all" if self.stratify is None else str(
             self.stratify(task, output, score))
         prob = self.rate_for(stratum)
-        if prob <= 0.0 or self._draw(task, output) >= prob:
+        draw = self._draw(task, output)
+        if prob <= 0.0 or draw >= prob:
+            if self.draw_by == "task" and draw < self._max_rate:
+                # This task IS audited -- in some other stratum. The draw is a
+                # function of the task, but the threshold it is compared against
+                # is a function of the *stratum*, and the shipped stratifier
+                # bands by score: one task scored under several artifact versions
+                # lands in different bands and meets different thresholds. So a
+                # task could be labelled in `boundary` and unlabelled in
+                # `accepted` -- both halves at once, which is exactly what
+                # `draw_by="task"` exists to prevent and what costs the interval
+                # its coverage (0.9125 against a nominal 0.95). Measured here
+                # before the fix: 33 of 35 eligible tasks.
+                #
+                # Dropping the unit rather than recording it restores the
+                # partition, and costs less than it looks like. A unit is
+                # recorded unlabelled exactly when `draw >= self._max_rate`,
+                # which is the *same* probability for every stratum, so the
+                # relative weights the estimator reads off these counts stay
+                # unbiased; and a unit is labelled exactly when `draw < prob`,
+                # so Neyman allocation is untouched. What is lost is unlabelled
+                # sample size -- `1 - max_rate` of the units instead of
+                # `1 - prob` -- so the interval widens rather than moves, by
+                # more as the rates spread further apart. Nothing cheaper is
+                # available: a task audited anywhere cannot appear in the
+                # unlabelled half at all, so `1 - max_rate` is the most any
+                # correct partition could keep, and this keeps all of it. When
+                # every stratum shares one rate the band is empty and the
+                # behaviour is what it was.
+                # Counted in the store, not just here: the stratum weights are
+                # a count of every unit the run scored, so a dropped unit has to
+                # stay in the frame even though its score does not.
+                self.store.observe_skipped(self.verifier_version, stratum)
+                with self._lock:
+                    self.skipped += 1
+                return None
             # Not audited -- but not discarded either. The estimator borrows the
             # unlabelled scores to narrow its interval, and all it needs of them
             # is a count, a mean and a variance per stratum. Folding the score in
@@ -291,4 +373,5 @@ class AuditedReward:
     def __repr__(self) -> str:
         return (f"AuditedReward(version={self.verifier_version!r}, "
                 f"seen={self.seen}, audited={self.audited}, "
+                f"skipped={self.skipped}, "
                 f"oracle={type(self.oracle).__name__})")

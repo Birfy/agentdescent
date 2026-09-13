@@ -161,15 +161,18 @@ def observed_weights(store: Any, verifier_version: str) -> Dict[str, float]:
     """Population shares from what a previous run actually saw.
 
     Every unit reaches the tap, audited or not, so the counts are the population
-    rather than an estimate of it -- the labelled records plus the unlabelled
-    moments account for every unit the run scored.
+    rather than an estimate of it -- the labelled records, the unlabelled moments
+    and the units the tap skipped account for every unit the run scored.
     """
     counts: Dict[str, float] = {}
     for rec in store.all():
         if rec.verifier_version == verifier_version:
             counts[rec.stratum] = counts.get(rec.stratum, 0.0) + 1.0
     for stratum, moments in store.unlabelled_moments(verifier_version).items():
-        counts[stratum] = counts.get(stratum, 0.0) + float(moments["n"])
+        # `skipped` units have no score but did happen, and this is a count of
+        # the population rather than a sample from it.
+        counts[stratum] = (counts.get(stratum, 0.0) + float(moments["n"])
+                           + float(moments.get("skipped", 0)))
     total = sum(counts.values())
     return {k: v / total for k, v in counts.items()} if total else {}
 
@@ -307,17 +310,37 @@ def plan(policy: AuditPolicy, *, weights: Dict[str, float],
             "makes each stratum's variance estimable at all, and a cap that "
             "overrides them buys a cheaper plan that cannot be read.")
 
+    # `target` counts CALIBRATION labels -- it is the Neyman sample size for the
+    # requested half-width, and the calibrator reads calibration records only.
+    # The rate, though, governs how many units are *audited*, and only
+    # `calibration_fraction` of those become calibration records. Planning the
+    # rate straight off `target` therefore delivered 70% of every stratum at the
+    # default split: measured, 85 labels against a planned 123, for an interval
+    # 1/sqrt(0.7) = 1.2x wider than the one asked for. The floors missed by the
+    # same factor, which is worse than the width -- a floor is what makes a
+    # stratum's variance estimable at all.
+    split = policy.calibration_fraction
+    if split <= 0.0:
+        warnings.append(
+            "calibration_fraction is 0: every audited unit goes to the "
+            "improvement pool, so no half-width is achievable at any rate. "
+            "The rates below are planned as if every audited unit were a "
+            "calibration label, which they are not.")
+        split = 1.0
+
     rates: Dict[str, float] = {}
     for k in w:
         expected_in_stratum = w[k] * expected_units
         if expected_in_stratum <= 0:
             rates[k] = 1.0
             continue
-        rate = target[k] / expected_in_stratum
+        audits_needed = target[k] / split
+        rate = audits_needed / expected_in_stratum
         if rate >= 1.0:
             warnings.append(
-                f"stratum {k!r} needs {target[k]} labels from an expected "
-                f"{expected_in_stratum:.0f} units; auditing all of them and "
+                f"stratum {k!r} needs {target[k]} labels -- {audits_needed:.0f} "
+                f"audited units at a calibration split of {split:g} -- from an "
+                f"expected {expected_in_stratum:.0f}; auditing all of them and "
                 "still falling short")
             rate = 1.0
         rates[k] = rate
