@@ -161,15 +161,18 @@ def observed_weights(store: Any, verifier_version: str) -> Dict[str, float]:
     """Population shares from what a previous run actually saw.
 
     Every unit reaches the tap, audited or not, so the counts are the population
-    rather than an estimate of it -- the labelled records plus the unlabelled
-    moments account for every unit the run scored.
+    rather than an estimate of it -- the labelled records, the unlabelled moments
+    and the units the tap skipped account for every unit the run scored.
     """
     counts: Dict[str, float] = {}
     for rec in store.all():
         if rec.verifier_version == verifier_version:
             counts[rec.stratum] = counts.get(rec.stratum, 0.0) + 1.0
     for stratum, moments in store.unlabelled_moments(verifier_version).items():
-        counts[stratum] = counts.get(stratum, 0.0) + float(moments["n"])
+        # `skipped` units have no score but did happen, and this is a count of
+        # the population rather than a sample from it.
+        counts[stratum] = (counts.get(stratum, 0.0) + float(moments["n"])
+                           + float(moments.get("skipped", 0)))
     total = sum(counts.values())
     return {k: v / total for k, v in counts.items()} if total else {}
 

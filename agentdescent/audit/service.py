@@ -124,6 +124,11 @@ def audit_status(path: str, version: Optional[str] = None) -> Dict[str, Any]:
         "calibration_labels": len(labelled),
         "improvement_labels": len(store.for_improvement(chosen)),
         "unlabelled": int(sum(m["n"] for m in moments.values())),
+        # Units the tap dropped so a task could not land in both halves. They
+        # carry no score and are counted only in the population frame, so
+        # without this line the payload's counts stop accounting for every unit
+        # the run scored as soon as two strata differ in rate.
+        "skipped": int(sum(m.get("skipped", 0) for m in moments.values())),
         "strata": sorted(moments) or sorted({r.stratum for r in labelled}),
         "rectification": _rect_payload(rect),
     }

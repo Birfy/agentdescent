@@ -287,6 +287,10 @@ class AuditedReward:
                 # correct partition could keep, and this keeps all of it. When
                 # every stratum shares one rate the band is empty and the
                 # behaviour is what it was.
+                # Counted in the store, not just here: the stratum weights are
+                # a count of every unit the run scored, so a dropped unit has to
+                # stay in the frame even though its score does not.
+                self.store.observe_skipped(self.verifier_version, stratum)
                 with self._lock:
                     self.skipped += 1
                 return None

@@ -301,14 +301,19 @@ def test_a_task_is_never_in_both_halves_when_the_strata_differ_in_rate():
 
 
 def test_the_partition_costs_neither_the_allocation_nor_the_weights():
-    """Dropping a unit is only safe if it drops them evenly.
+    """Dropping a unit is only safe if the frame still counts it.
 
-    Two properties carry the fix. A unit is labelled exactly when
-    `draw < rate[stratum]`, so Neyman allocation still spends labels where it
-    planned to; and it is recorded unlabelled exactly when `draw >= max_rate`,
-    which does not mention the stratum -- so the relative weights the estimator
-    reads off those counts stay unbiased. Lose either and the fix trades a
-    coverage bug for a weighting one.
+    A unit is labelled exactly when `draw < rate[stratum]`, so Neyman allocation
+    still spends labels where it planned to, and it is recorded unlabelled
+    exactly when `draw >= max_rate`, which does not mention the stratum.
+
+    Neither of those is the property that matters most, and checking only them
+    is how the first version of this fix shipped a worse bug than the one it
+    cured. The weights are not read off the unlabelled counts: they are a count
+    of **every unit the run scored**, labelled and unlabelled together. Drop a
+    unit from that frame and a 50/50 population reads as 83/17 at rates 0.9 and
+    0.1 -- a correction that moves rather than one that widens.
+    `test_a_skipped_unit_stays_in_the_population_frame` is the one that counts.
     """
     from collections import Counter
 
@@ -329,7 +334,6 @@ def test_the_partition_costs_neither_the_allocation_nor_the_weights():
 
     for stratum, rate in rates.items():
         assert abs(labelled[stratum] / n - rate) < 0.02, stratum
-    # `1 - max_rate`, the same for both, which is what makes the weights safe.
     for stratum in rates:
         assert abs(unlabelled[stratum] / n - 0.10) < 0.02, stratum
 
@@ -358,3 +362,50 @@ def test_drawing_per_output_is_left_alone():
         tap(task, "hi")
         tap(task, "lo")
     assert tap.skipped == 0
+
+
+def test_a_skipped_unit_stays_in_the_population_frame():
+    """The frame is a census, not a sample, and a dropped unit still happened.
+
+    The first version of this fix dropped the unit outright, on the reasoning
+    that a unit is recorded unlabelled at `1 - max_rate` in every stratum, so
+    the relative weights were safe. That reasoning was about the wrong counts.
+    `observed_weights` and `Calibrator._estimate` both size a stratum as
+    labelled + unlabelled -- "the tap saw every unit the run scored" -- so the
+    high-rate stratum kept its labelled units while the low-rate one lost the
+    same draws to the drop. At rates 0.9 and 0.1 a 50/50 population read as
+    83/17, which moves the correction and the next plan toward the high-rate
+    stratum rather than costing precision.
+
+    The store counts skipped units per stratum. They belong in the frame and
+    nowhere else: they have no score, so they must stay out of `n_unlab` and out
+    of the mean PPI borrows, which the next test pins.
+    """
+    from agentdescent.audit.sampler import observed_weights
+    from agentdescent.evolution import Task
+
+    tap, _ = _split_tap({"lo": 0.1, "hi": 0.9})
+    n = 6000
+    for i in range(n):
+        for out in ("hi", "lo"):
+            tap(Task(f"t{i}", "q"), out)
+
+    assert tap.skipped > 0, "nothing was dropped; the test proves nothing"
+    weights = observed_weights(tap.store, tap.verifier_version)
+    for stratum in ("hi", "lo"):
+        assert abs(weights[stratum] - 0.5) < 0.01, weights
+
+
+def test_a_skipped_unit_never_reaches_the_moments_ppi_borrows():
+    """It has no score. Folding it into `n` would claim one."""
+    from agentdescent.evolution import Task
+
+    tap, seen = _split_tap({"lo": 0.1, "hi": 0.9})
+    for i in range(2000):
+        for out in ("hi", "lo"):
+            tap(Task(f"t{i}", "q"), out)
+
+    moments = tap.store.unlabelled_moments(tap.verifier_version)
+    recorded = sum(int(m["n"]) for m in moments.values())
+    assert recorded == len(seen), "n counts observed scores and nothing else"
+    assert sum(int(m["skipped"]) for m in moments.values()) == tap.skipped

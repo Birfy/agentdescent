@@ -848,13 +848,22 @@ and the degrees of freedom count groups rather than units. `Calibrator` passes
     `rates[stratum]`, and `boundary_stratifier` bands by **score** — so one task
     scored under several artifact versions meets a different threshold each time
     and could be labelled in `boundary` while its other units went unlabelled in
-    `accepted`. A unit that would be audited in some other stratum is therefore
-    dropped rather than recorded unlabelled. A unit is recorded unlabelled
-    exactly when its draw clears the *highest* rate in the plan, which does not
-    mention the stratum, so the weights stay unbiased; it is labelled exactly
-    when the draw clears its own stratum's rate, so Neyman allocation is
-    untouched. The cost is unlabelled sample size, and it grows with the spread
-    between the highest and lowest rate.
+    `accepted`.
+
+    A unit that would be audited in some other stratum is therefore not recorded
+    unlabelled — its **score** is dropped, because recording it is what would put
+    the task in both halves. The unit itself is still counted: the store keeps a
+    per-stratum `skipped` tally, and the stratum weights are a census of every
+    unit the run scored, so dropping it from the frame as well would read a 50/50
+    population as 83/17 at rates 0.9 and 0.1 — a correction that *moves* rather
+    than one that widens. In the frame, never in the moments: `n`, `mean` and
+    `var` are over units whose scores were observed, and stay unbiased for the
+    stratum because whether a unit is skipped depends only on its task's draw,
+    which is independent of its score.
+
+    A unit is labelled exactly when the draw clears its own stratum's rate, so
+    Neyman allocation is untouched. The cost is unlabelled sample size, and it
+    grows with the spread between the highest and lowest rate.
 
 The same change makes the two pools honest at the task level. With a per-unit
 split, one task's units land in *both* the calibration and improvement pools —

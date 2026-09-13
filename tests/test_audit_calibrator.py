@@ -467,3 +467,50 @@ def test_a_lone_thin_stratum_has_nowhere_to_go_and_is_left_alone():
 
     assert list(merged) == ["only"] and len(merged["only"]) == 2
     assert pooled["only"]["n"] == 10
+
+
+def test_the_skipped_count_survives_a_reload(tmp_path):
+    """It is part of the population frame, so losing it on restart re-weights
+    the correction -- silently, and only for runs that were resumed."""
+    from agentdescent.audit import AuditedReward, AuditStore
+    from agentdescent.evolution import Task
+
+    path = tmp_path / "audit.jsonl"
+    tap = AuditedReward(lambda task, out: 1.0 if out == "hi" else 0.0,
+                        sample_rate=0.1, rates={"hi": 0.9, "lo": 0.1},
+                        stratify=lambda t, o, s: o,
+                        store=AuditStore(str(path)), seed=0)
+    for i in range(500):
+        for out in ("hi", "lo"):
+            tap(Task(f"t{i}", "q"), out)
+    tap.store.flush()
+
+    before = tap.store.unlabelled_moments(tap.verifier_version)
+    assert any(m["skipped"] for m in before.values()), "nothing was skipped"
+    assert AuditStore(str(path)).unlabelled_moments(tap.verifier_version) == before
+
+
+def test_a_store_written_before_skipping_existed_still_loads():
+    """`skipped` is absent from every moments line already on disk."""
+    from agentdescent.audit.store import _Welford
+
+    line = {"kind": "unlabelled_moments", "verifier_version": "v1",
+            "stratum": "all", "moments": _Welford().to_dict()}
+    assert "skipped" not in line
+    assert int(line.get("skipped", 0)) == 0
+
+
+def test_pooling_two_strata_adds_their_skipped_counts():
+    """`_pool` returns early when either side has no scored units, and those
+    paths would otherwise drop the other side's count."""
+    from agentdescent.audit import AuditStore
+    from agentdescent.audit.calibrator import Calibrator
+
+    pool = Calibrator(AuditStore())._pool
+    a = {"n": 0, "mean": 0.0, "var": 0.0, "skipped": 7}
+    b = {"n": 4, "mean": 0.5, "var": 0.1, "skipped": 3}
+    assert pool(a, b)["skipped"] == 10
+    assert pool(b, a)["skipped"] == 10
+    both = pool({"n": 2, "mean": 0.2, "var": 0.1, "skipped": 1},
+                {"n": 2, "mean": 0.8, "var": 0.1, "skipped": 2})
+    assert both["skipped"] == 3 and both["n"] == 4

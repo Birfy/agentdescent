@@ -98,6 +98,11 @@ class AuditStore:
         self._corrupt = 0
         #: (verifier_version, stratum) -> running moments of the unlabelled half.
         self._moments: Dict[Tuple[str, str], _Welford] = {}
+        #: (verifier_version, stratum) -> units the tap dropped to keep a task
+        #: out of both halves. A count and nothing else: these units have no
+        #: recorded score, so they belong in the population frame and nowhere
+        #: near the moments PPI borrows from. See `observe_skipped`.
+        self._skipped: Dict[Tuple[str, str], int] = {}
         #: artifact_signature -> how much the merge path wanted this audited.
         self._priorities: Dict[str, float] = {}
         self._fingerprint: Optional[str] = None
@@ -124,6 +129,7 @@ class AuditStore:
             self._records.clear()
             self._order.clear()
             self._moments.clear()
+            self._skipped.clear()
             self._priorities.clear()
             self._corrupt = 0
             with open(self.path, encoding="utf-8") as fh:
@@ -145,9 +151,10 @@ class AuditStore:
                     if payload.get("kind") == MOMENTS_KIND:
                         # Last snapshot wins, exactly as for records: a later
                         # line supersedes an earlier one for the same key.
-                        self._moments[(payload["verifier_version"],
-                                       payload["stratum"])] = _Welford.from_dict(
-                                           payload["moments"])
+                        key = (payload["verifier_version"], payload["stratum"])
+                        self._moments[key] = _Welford.from_dict(payload["moments"])
+                        # Absent in stores written before the tap could skip.
+                        self._skipped[key] = int(payload.get("skipped", 0))
                         continue
                     rec = AuditRecord.from_dict(payload)   # raises on schema drift
                     self._remember(rec)
@@ -207,17 +214,57 @@ class AuditStore:
             if self._unflushed >= self.FLUSH_EVERY:
                 self._flush_moments()
 
+    def observe_skipped(self, verifier_version: str, stratum: str) -> None:
+        """Count one unit the tap dropped, without its score.
+
+        A dropped unit is one whose task is audited in *another* stratum, so
+        recording its score would put that task in both halves -- which is the
+        thing being prevented. But the unit still happened, and the stratum
+        weights are a **count of every unit the run scored**, not an estimate
+        from a sample: drop it from the frame as well and a 50/50 population
+        reads as 83/17 at rates 0.9 and 0.1, which moves the correction rather
+        than merely widening it.
+
+        So: in the frame, never in the moments. The mean and variance PPI
+        borrows are over units whose scores were actually observed, and stay
+        unbiased for the stratum because whether a unit is skipped depends only
+        on its task's draw, which is independent of its score.
+        """
+        with self._lock:
+            key = (verifier_version, stratum)
+            self._skipped[key] = self._skipped.get(key, 0) + 1
+            self._unflushed += 1
+            if self._unflushed >= self.FLUSH_EVERY:
+                self._flush_moments()
+
     def flush(self) -> None:
         """Persist the moments now. Call it when a run ends."""
         with self._lock:
             self._flush_moments(force=True)
 
     def unlabelled_moments(self, verifier_version: str):
-        """``stratum -> {n, mean, var}`` over the units that were not audited."""
+        """``stratum -> {n, mean, var, skipped}`` over the units not audited.
+
+        ``n``, ``mean`` and ``var`` describe units whose scores were recorded.
+        ``skipped`` counts units that were dropped and have no score: it belongs
+        in the population frame and must never be folded into ``n``, which is
+        what PPI borrows strength from. A stratum with only skipped units
+        appears here too, with ``n`` of zero.
+        """
         with self._lock:
-            return {stratum: {"n": acc.n, "mean": acc.mean, "var": acc.var}
-                    for (version, stratum), acc in self._moments.items()
-                    if version == verifier_version}
+            strata = [stratum for (version, stratum)
+                      in dict.fromkeys(list(self._moments) + list(self._skipped))
+                      if version == verifier_version]
+            out = {}
+            for stratum in strata:
+                acc = self._moments.get((verifier_version, stratum))
+                out[stratum] = {
+                    "n": acc.n if acc else 0,
+                    "mean": acc.mean if acc else 0.0,
+                    "var": acc.var if acc else 0.0,
+                    "skipped": self._skipped.get((verifier_version, stratum), 0),
+                }
+            return out
 
     @property
     def last_fingerprint(self) -> Optional[str]:
@@ -273,9 +320,12 @@ class AuditStore:
         if not self.path or (not force and not self._unflushed):
             self._unflushed = 0
             return
-        for (version, stratum), acc in self._moments.items():
+        for key in dict.fromkeys(list(self._moments) + list(self._skipped)):
+            version, stratum = key
+            acc = self._moments.get(key) or _Welford()
             self._write_line({"kind": MOMENTS_KIND, "verifier_version": version,
-                              "stratum": stratum, "moments": acc.to_dict()})
+                              "stratum": stratum, "moments": acc.to_dict(),
+                              "skipped": self._skipped.get(key, 0)})
         self._unflushed = 0
 
     def resolve(self, record_id: str, oracle_score: float,
