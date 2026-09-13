@@ -568,6 +568,16 @@ else:
 #: did `from .rdf import histogram`, so importing the submodule rebound
 #: `src.observe.rdf` from the function to the module and the function destroyed
 #: itself on its first call. Per test: 65/65. In one process: five failures.
+#: What the executor is shown when the suite as a whole is the failing unit.
+_SUITE_TASK_PROMPT = """The whole test suite, run in ONE interpreter -- every test in \
+the same process, in file order, the way `mix test` or `pytest` runs it and the way a \
+person does.
+
+Each of the other {n} tasks runs its test in a fresh process, so a test that passes \
+alone can still fail here: an import with a side effect, a module-level name rebound, \
+a global left dirty by an earlier test. The failures below are exactly that -- code \
+that works once and not twice, or works in isolation and not in company."""
+
 _SUITE_HARNESS = r"""
 import sys, json
 workspace, plan = sys.argv[1], json.loads(sys.argv[2])
@@ -801,7 +811,7 @@ class TestSuite:
                 state[path] = content
         state.update(self.audit)
         plan = [(t.meta["file"], t.meta["func"]) for t in self.build_tasks()
-                if audit or not t.meta.get("audit")]
+                if not t.meta.get("suite") and (audit or not t.meta.get("audit"))]
         return run_suite(state, plan, timeout=max(60.0, self.timeout * 4))
 
     def held_out_frac(self) -> float:
@@ -847,9 +857,23 @@ class TestSuite:
         for row in zip_longest(*by_file.values()):
             ordered.extend(entry for entry in row if entry is not None)
         tasks = [self._task(entry) for entry in (ordered[:limit] if limit else ordered)]
+        # One more, and it is not a test: the whole suite in one interpreter. Without
+        # it nothing in the *search* can fail on something that leaks between tests --
+        # every other task gets a fresh process by construction -- so a run could sit
+        # at "every test passes" forever while the suite does not run. It is a task
+        # rather than only a gate because a gate the search cannot see is a wall.
+        tasks.append(Task(id="suite::one-process",
+                          prompt=_SUITE_TASK_PROMPT.format(n=len(tasks)),
+                          meta={"file": "", "func": "", "kind": "suite",
+                                "audit": False, "suite": True}))
         # Last, and in file order: `evolve()` splits by position, so this is what
         # puts exactly the audit set in the held-out tail.
         tasks += [self._task(entry, audit=True) for entry in self.discover_audit()]
+        if self.audit:
+            tasks.append(Task(id="audit:suite::one-process",
+                              prompt=_SUITE_TASK_PROMPT.format(n=len(tasks)),
+                              meta={"file": "", "func": "", "kind": "suite",
+                                    "audit": True, "suite": True}))
         return tasks
 
     def _task(self, entry: Tuple[str, str, str], *, audit: bool = False) -> Task:
@@ -872,6 +896,13 @@ class TestSuite:
             # Into the scratch copy the subprocess sees, never into the artifact:
             # the audit tests exist only for the length of one evaluation.
             state.update(self.audit)
+            if task.meta.get("suite"):
+                plan = [(t.meta["file"], t.meta["func"]) for t in self.build_tasks()
+                        if not t.meta.get("suite")
+                        and (task.meta["audit"] or not t.meta["audit"])]
+                failures = run_suite(state, plan,
+                                     timeout=max(60.0, self.timeout * 4))
+                return "PASS" if not failures else "FAIL:" + "; ".join(failures[:4])
             return run_test(state, task.meta["file"], task.meta["func"],
                             timeout=self.timeout)
 
@@ -879,13 +910,17 @@ class TestSuite:
 
     def review(self, tasks: Sequence[Task], *, sample: int = 8):
         """The parent's integration evidence: how many of these tests still pass."""
-        chosen = [t for t in tasks if not t.meta.get("audit")][:sample]
+        chosen = [t for t in tasks
+                  if not t.meta.get("audit") and not t.meta.get("suite")][:sample]
         cached: Dict[int, int] = {}
 
         def passes(state: Mapping[str, str]) -> int:
-            return sum(1 for t in chosen
-                       if run_test(state, t.meta["file"], t.meta["func"],
-                                   timeout=self.timeout) == "PASS")
+            # One process for the sample, not one per test: the parent upstream runs
+            # `mix test`, and a check that cannot see one test poisoning the next is
+            # the check this port was already caught missing.
+            plan = [(t.meta["file"], t.meta["func"]) for t in chosen]
+            return len(chosen) - len(run_suite(dict(state), plan,
+                                               timeout=max(60.0, self.timeout * 2)))
 
         def review(parent, returned):
             key = id(parent.state)
