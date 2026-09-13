@@ -53,7 +53,7 @@ from ._suite import llm_executor as _llm_executor
 from ._suite import llm_manager as _llm_manager
 from ._world import SKILLS_DIR, normalise
 
-__all__ = ["CASE_NOUN", "FROZEN", "GROUP_NOUN", "HELD_OUT_FRAC",
+__all__ = ["CASE_NOUN", "CONTRACTS", "FROZEN", "GROUP_NOUN", "HELD_OUT_FRAC",
            "SCORING", "MINILANG", "build_tasks", "initial_files", "llm_executor",
            "llm_manager", "make_runner", "offline_executor", "offline_manager",
            "reference_tree", "reward", "suite_review"]
@@ -61,6 +61,9 @@ __all__ = ["CASE_NOUN", "FROZEN", "GROUP_NOUN", "HELD_OUT_FRAC",
 #: Human-supplied and never the agents'. L0 in this repository's sense, and the
 #: role c-testsuite / LLVM / Csmith play upstream.
 FROZEN = ("spec/**",)
+
+#: What is pushed into every brief.
+CONTRACTS = FROZEN
 
 #: How the run is scored, and what the header line says about it.
 SCORING = "reference oracle, exact match"
@@ -114,7 +117,10 @@ _ROOT_CONTEXT = '''# minilang -- root
 Implement the language in `spec/CONTEXT.md`. The specification and its staged
 validation are given; no implementation exists yet.
 
-## Routing table
+## API Surface
+Nothing at the root. Every stage is reached through `src/__init__.py`.
+
+## Routing Table
 - `./src/` -> the implementation, and the three stage entry points
 
 ## Constraints
@@ -128,7 +134,11 @@ _SRC_CONTEXT = '''# src -- implementation root
 Own `src/__init__.py`, the public surface named by the spec: `tokenize`, `parse`
 and `evaluate`. Each MUST import its stage lazily.
 
-## Routing table
+## API Surface
+- `src/__init__.py`: `tokenize(source)`, `parse(source)`, `evaluate(source)` -- each
+  takes the **source text**, not the previous stage's output.
+
+## Routing Table
 - `./src/frontend/` -> tokenizer and parser
 - `./src/backend/`  -> evaluation of the parse tree
 '''
@@ -138,6 +148,10 @@ _FRONTEND_CONTEXT = '''# src/frontend -- source text to parse tree
 ## Intent
 `lexer.py` turns source text into the token list; `parser.py` turns tokens into
 the nested-tuple parse tree, honouring precedence and parentheses.
+
+## API Surface
+- `lexer.py`: `tokenize(source)`
+- `parser.py`: `parse(source)` -- the source text, and it tokenizes internally
 '''
 
 _BACKEND_CONTEXT = '''# src/backend -- parse tree to value
@@ -146,6 +160,9 @@ _BACKEND_CONTEXT = '''# src/backend -- parse tree to value
 `evaluator.py` walks the parse tree. One function per node kind, so that two
 agents fixing two different node kinds are editing two different parts of the
 file rather than the same one.
+
+## API Surface
+- `evaluator.py`: `evaluate(node)`, plus one `eval_*(node)` per node kind
 '''
 
 

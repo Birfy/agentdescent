@@ -25,12 +25,15 @@ from examples.genesis import _stackvm as stackvm
 from examples.genesis._delegation import (Brief, Delegation, Edit,
                                           RecursiveDelegation, render_edits)
 from examples.genesis._judge import ParentJudge
+from examples.genesis._review import ParentCodeReview, chain_reviews
 from examples.genesis._octopus import OctopusConflict, git_available, three_way
 from examples.genesis._spatial import SpatialContract, parse_situated_edits
 from examples.genesis._suite import cold_start, preflight
-from examples.genesis._world import (CONTEXT_FILE, SKILLS_DIR, TRUNCATED,
+from examples.genesis._world import (CONTEXT_FILE, KNOWN_ISSUES, ROUTING_HEADING,
+                                     SKILLS_DIR, TRUNCATED,
                                      LocalWorld, WorldLog, owns, parse_routing,
-                                     resolve_edit_path, routing_entry)
+                                     resolve_edit_path, routing_entry,
+                                     under_heading)
 
 
 # ---------------------------------------------------------------------------
@@ -198,15 +201,25 @@ def test_an_agent_deep_in_the_tree_is_shown_the_contract_it_is_judged_against():
         domain.initial_files())
 
 
-def test_an_oversized_brief_carries_upstreams_own_truncation_marker():
-    """The marker is a signal to prune, not decoration -- so it has to be theirs."""
-    state = {CONTEXT_FILE: "x" * 50_000}
-    assert LocalWorld(version=1, path="").situate(state).endswith(TRUNCATED)
+def test_an_oversized_context_record_is_truncated_per_file_as_upstream_does():
+    """Per file, at upstream's cap, with upstream's marker -- and not globally.
 
-
-# ---------------------------------------------------------------------------
-# The parent's integration evidence, and the merge it does on its children
-# ---------------------------------------------------------------------------
+    `ContextNode.build_context/2` truncates each CONTEXT.md at
+    `truncation.context_max_bytes` (default 65_536) and has no overall budget at all.
+    This port had one global 8_000-char cap instead, eight times tighter, and that is
+    the other half of how md's agents never saw their specification: two frozen files
+    that sorted earlier spent the budget. The marker is a signal to prune the record,
+    so it is upstream's string.
+    """
+    context = LocalWorld(version=1, path="").situate({CONTEXT_FILE: "x" * 70_000})
+    assert TRUNCATED in context
+    assert context.count("x") == 65_536
+    # the record is not the last thing in the brief: the file listing survives it
+    assert context.rstrip().endswith("(none yet)")
+    # and a record under the cap is untouched, however large the whole brief gets
+    assert TRUNCATED not in LocalWorld(version=1, path="").situate(
+        {CONTEXT_FILE: "y" * 50_000, "spec/CONTEXT.md": "z" * 50_000},
+        contracts=("spec/**",))
 
 def test_a_parent_refuses_a_child_whose_work_breaks_the_suite():
     """Paper 3.3: the parent decides on tests and integration evidence."""
@@ -915,6 +928,123 @@ def test_the_md_suite_rejects_every_deliberately_wrong_implementation():
     assert not survived, f"the suite accepts these wrong implementations: {survived}"
     fragile = {name: killers for name, killers in report.items() if len(killers) < 2}
     assert not fragile, f"only one test stands between these and a false pass: {fragile}"
+
+
+# ---------------------------------------------------------------------------
+# The parent's other half: reading the change, not only counting tests
+# ---------------------------------------------------------------------------
+
+def _review_brief(state, objective="make the forces right"):
+    return Brief(world=LocalWorld(version=1, path="src", readonly=md.FROZEN),
+                 objective=objective, context="", state=state,
+                 task=Task(id="t", prompt="x"), output="", reward=0.0, depth=0)
+
+
+def test_the_parent_reads_the_change_and_can_reject_it_on_what_it_sees():
+    """`manager.ex` states the parent's validation as three things: review the
+    child's results, run the tests, AND reject code-quality anti-patterns. This port
+    had the middle one, which is a number -- and a number could not see a registry
+    whose minimum-image expression left every force at zero.
+    """
+    seen = []
+
+    def complete(prompt):
+        seen.append(prompt)
+        return '{"verdict": "reject", "reason": "evaluate() returns zeros"}'
+
+    review = ParentCodeReview(complete, contracts=md.CONTRACTS)
+    verdict = review(_review_brief(md.initial_files()),
+                     [Edit("src", "src/potentials/registry.py", "def evaluate(s, p):\n"
+                           "    return 0.0, [[0.0] * 3 for _ in s.positions]\n")])
+    assert verdict is not None
+    kind, reason = verdict
+    assert kind == "rejected" and "returns zeros" in reason
+    assert (review.reviewed, review.rejected) == (1, 0 + 1)
+    # it was shown the whole file and the contract, because four lines of arithmetic
+    # cannot be judged from a summary
+    assert "return 0.0, [[0.0] * 3" in seen[0]
+    assert "dudr_over_r" in seen[0]          # the spec travelled with it
+
+
+def test_the_parent_accepts_what_it_has_no_complaint_about():
+    review = ParentCodeReview(lambda prompt: '{"verdict": "accept", "reason": ""}')
+    assert review(_review_brief(md.initial_files()),
+                  [Edit("src", "src/__init__.py", "def energy(p):\n    return 1.0\n")]) is None
+    assert (review.reviewed, review.rejected) == (1, 0)
+
+
+def test_a_reviewer_that_cannot_speak_is_not_evidence_against_the_child():
+    """An unparseable reply, or a dead backend, must not reject work. The child did
+    the work; the reviewer failing is the reviewer's problem."""
+    garbled = ParentCodeReview(lambda prompt: "I think it looks fine?")
+    assert garbled(_review_brief(md.initial_files()),
+                   [Edit("src", "src/a.py", "x = 1\n")]) is None
+    assert (garbled.reviewed, garbled.rejected, garbled.unparsed) == (1, 0, 1)
+
+    def dead(prompt):
+        raise RuntimeError("502")
+
+    broken = ParentCodeReview(dead)
+    assert broken(_review_brief(md.initial_files()),
+                  [Edit("src", "src/a.py", "x = 1\n")]) is None
+    assert broken.rejected == 0
+
+
+def test_the_parent_does_not_spend_a_call_on_bookkeeping_alone():
+    """A routing note is not a change to review."""
+    review = ParentCodeReview(lambda prompt: pytest.fail("should not be called"))
+    assert review(_review_brief(md.initial_files()),
+                  [Edit("src", "src/CONTEXT.md", "# src\n", kind="context")]) is None
+    assert review.reviewed == 0
+
+
+def test_the_tests_run_before_the_reviewer_because_they_are_free():
+    """`chain_reviews` short-circuits: a regression needs no second opinion, and the
+    deterministic check costs no model call."""
+    calls = []
+    cheap = lambda parent, returned: (calls.append("cheap") or ("rejected", "tests"))
+    dear = lambda parent, returned: pytest.fail("the model was asked anyway")
+    chained = chain_reviews(cheap, dear)
+    assert chained(_review_brief({}), [Edit("src", "src/a.py", "x = 1\n")]) == ("rejected",
+                                                                               "tests")
+    assert calls == ["cheap"]
+    # and a disabled review is skipped rather than branched around by the caller
+    assert chain_reviews(None, None) is None
+    only = lambda parent, returned: None
+    assert chain_reviews(None, only) is only
+
+
+def test_a_refusal_is_written_under_upstreams_own_heading():
+    """"findings worth preserving belong in CONTEXT.md... `## Known Issues` (problems
+    to avoid re-discovering)" -- `agents/manager.ex`. A refusal is the cheapest such
+    finding: the next agent here would otherwise be refused for the same thing."""
+    body = under_heading("# src/core\n\n## Intent\nowns vectors.py\n",
+                         KNOWN_ISSUES, "- refused: out of scope")
+    assert body.endswith("## Known Issues\n- refused: out of scope\n")
+    again = under_heading(body, KNOWN_ISSUES, "- refused: twice")
+    assert again.count(KNOWN_ISSUES) == 1           # one section, two lines
+    assert again.endswith("- refused: out of scope\n- refused: twice\n")
+
+
+@pytest.mark.parametrize("spec", DOMAINS, ids=DOMAIN_IDS)
+def test_every_node_record_carries_upstreams_four_standard_sections(spec):
+    """"The standard four sections (Intent, API Surface, Constraints, Routing Table)
+    are the foundation" -- `agents/manager.ex`. API Surface was missing from every
+    record in this port, on a domain whose entire failure mode was a wrong public
+    surface: the 0.750 run dropped five of seven keyword parameters.
+
+    Intent and the routing table are required of every node; a leaf has no routing
+    table and constraints are inherited, so those two are checked where they appear.
+    """
+    files = spec.initial_files()
+    records = {p: body for p, body in files.items()
+               if p.endswith(CONTEXT_FILE) and not p.startswith("spec/")}
+    assert records
+    for path, body in records.items():
+        assert "## Intent" in body, path
+        assert "## API Surface" in body, f"{path} says nothing about what it exposes"
+    assert any(ROUTING_HEADING in body for body in records.values())
+    assert any("## Constraints" in body for body in records.values())
 
 
 def test_stackvm_is_deeper_than_minilang_which_is_why_it_exists():

@@ -475,6 +475,20 @@ so would a reader of this page without this paragraph.
 
 ## Recorded deviations
 
+* **Upstream has no objective function, and this port's scalar is the engine's, not
+  Genesis's.** `grep -rio 'fitness|reward|score'` over `apps/evo_git` returns exactly
+  one hit, `oom_score_adjust`. Nothing in the released code computes a number over a
+  validation suite. What stands in that place is local: the executor verifies its own
+  work and writes tests (`agents/executor.ex`), the parent reviews the result and runs
+  the suite (`agents/manager.ex`), the architect's third phase runs the build and
+  reviews the implementation (`agents/architect.ex`), the tests are "the **definition
+  of done**" handed to the agents as guidance (`runtime/genesis.ex:152`), termination
+  is an agent calling `complete_task` "only when the codebase is complete, functional,
+  and polished", and a human merges or rejects on the dashboard review page.
+  `evolve()`, by contrast, *is* a reward-driven loop: it samples a failing task, asks
+  for a proposal, scores it, accepts or rejects, and reports a number. So the per-node
+  gate in this port is upstream's mechanism, and `audit reward` is **measurement** —
+  the thing that makes the port legible, not the thing that makes it work.
 * **The benchmark is not reproduced.** See the warning above. Fidelity class is
   `mechanism_microport` for that reason and no other — the mechanism maps cleanly.
 * **Tensor parallelism is refused rather than used.** TP is the engine's own
@@ -506,17 +520,57 @@ so would a reader of this page without this paragraph.
   the depth configured.
 * **Multi-repository work (`foreign_repos`), the Tauri desktop shell, the Phoenix
   dashboard and peak-hour scheduling are out of scope.**
+* **The parent's validation is both halves now, and was one for a long time.**
+  `agents/manager.ex` states it as three things in order — "Review subagent results.
+  Run tests to validate changes. Check for code quality: duplicated code, defensive
+  code that silently swallows errors, and missing test coverage. **Reject work that
+  introduces these anti-patterns**" — and the architect's Phase 3 is the same shape.
+  This port had only the middle one, `Suite.review`, which is a pass count. What a
+  pass count cannot see is a function that computes nothing, and that is exactly what
+  it failed to see: the zero-field run above. `_review.py` adds the reading half as
+  one model call per returned child, asking upstream's questions about the whole file;
+  a rejection sends the work back with a reason the next round re-delegates from.
+  "Missing test coverage" is left out of the questions on purpose — the suite is
+  frozen here, so no child could act on that finding. `--no-parent-review` turns it
+  off; the offline arm has no model and therefore no reviewer, which is one more
+  reason the offline numbers say less than they look like they do.
 * **`CONTEXT.md` is inherited and routed from, but only partly maintained.**
   The read half is faithful: the chain is assembled root-first exactly as
-  `ContextNode.build_context/2` does, and the routing table is load-bearing —
-  the offline manager's decomposition is *parsed from it*, not hardcoded, so
-  editing the table changes where the run delegates (there is a test that does
-  exactly that). The write half is not: upstream every `:read_write` agent keeps
-  its node current — intent, API surface, known issues — and the read-only roles
-  (`Investigator`, `ContextExtractor`) exist to do nothing else. Here an agent
-  writes `CONTEXT.md` on its own in exactly two cases, the routing entry for a
-  node it opened and the refusal note for a child it rejected. An LLM executor
-  may write more; nothing requires it to.
+  `ContextNode.build_context/2` does, each record truncated **per file** at
+  upstream's own `truncation.context_max_bytes` (65 536) with upstream's own marker
+  and no global budget — this port had one global 8 000-char cap instead, eight times
+  tighter, which is half of how md's agents never received their specification. The
+  routing table is load-bearing: the offline manager's decomposition is *parsed from
+  it*, not hardcoded, so editing the table changes where the run delegates (there is
+  a test that does exactly that). The human-written records carry upstream's four
+  standard sections — Intent, **API Surface**, Constraints, Routing Table — and
+  `API Surface` was missing from every one of them until the md run lost five of
+  seven keyword parameters. The write half is still thinner than upstream, where
+  every `:read_write` agent keeps its node current and two read-only roles exist to
+  do nothing else: here an agent writes `CONTEXT.md` on its own in exactly two cases,
+  the routing entry for a node it opened and the refusal for a child it rejected —
+  the latter under `## Known Issues`, which is upstream's heading for "problems to
+  avoid re-discovering". An LLM executor may write more; nothing requires it to.
+* **What the agent is handed, versus what it could fetch.** Upstream an agent has file
+  tools and *pulls* what it needs; the brief carries only the `CONTEXT.md` chain plus
+  its location. Agents here have no tools, so the contract has to travel with the
+  brief or be invisible — which is why `situate(contracts=)` exists at all. The push
+  is therefore deliberately narrower than "everything frozen": md pushes the
+  specification and the frozen driver, while the 12 kB test suite arrives one failing
+  test at a time in the task prompt. `FROZEN` (what may not be written), `CONTRACTS`
+  (what is pushed) and `readonly` (where a manager may not be sent) are three sets for
+  three jobs; conflating the first two is how `md.py` once crowded out the spec.
+* **Termination is the engine's, not an agent's judgment.** Upstream an agent calls
+  `complete_task` when it believes the objective is met, and a human merges or rejects
+  afterwards. Here the run ends when the round budget ends, and `stop reason: rounds`
+  on a finished domain means exactly that — nobody decided it was done.
+* **Parallelism is the engine's workers, not worktrees.** Upstream isolates every
+  subagent in its own git worktree and requires "commit before delegating" so children
+  branch from a committed SHA; concurrency is unbounded and conflicts are resolved by
+  the spawning agent. Here `evolve()`'s workers propose concurrently against one
+  accepted version and `OctopusConflict` does the three-way merge in the parent, which
+  is `Git.merge_octopus/2`'s job. The observable consequence is the same — two children
+  editing one file both survive — and the measurement of that is in the table above.
 * **Skills are inherited but never extracted.** `LocalWorld.skills()` collects
   `.agents/skills/` along the node chain and puts the *names* in the brief, which
   is what `hierarchical_skill_names/2` does upstream and what the paper means by

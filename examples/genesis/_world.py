@@ -65,6 +65,15 @@ CONTEXT_FILE = "CONTEXT.md"
 #: a node later agents cannot find. Matched case-insensitively because upstream's
 #: own tree writes both "Routing Table" and "Routing table".
 ROUTING_HEADING = "## Routing Table"
+#: Upstream's four standard ``CONTEXT.md`` sections, in its order
+#: (``agents/manager.ex``, ``agents/context_extractor.ex``, ``prompt_fragments.ex``):
+#: "The standard four sections (Intent, API Surface, Constraints, Routing Table) are
+#: the foundation." ``API Surface`` was missing from this port's records, on a domain
+#: whose entire failure mode was a wrong public surface.
+STANDARD_SECTIONS = ("## Intent", "## API Surface", "## Constraints", ROUTING_HEADING)
+#: And the supplementary one this port writes into: "`## Known Issues` (problems to
+#: avoid re-discovering)".
+KNOWN_ISSUES = "## Known Issues"
 
 #: Per-node reusable knowledge. The paper lists it among what an accepted version
 #: carries -- "source files, path-specific context, constraints, validation
@@ -108,6 +117,25 @@ def parse_routing(body: str) -> List[str]:
             if path and path not in out:
                 out.append(path)
     return out
+
+
+def under_heading(body: str, heading: str, line: str) -> str:
+    """``body`` with ``line`` appended under ``heading``, creating it if need be.
+
+    Upstream keeps its findings in named sections rather than at the bottom of the
+    file, because the next agent reads the section and not the whole record.
+    """
+    lines = (body or "").splitlines()
+    for i, existing in enumerate(lines):
+        if existing.strip().lower() == heading.lower():
+            j = i + 1
+            while j < len(lines) and not lines[j].strip().startswith("## "):
+                j += 1
+            while j > i + 1 and not lines[j - 1].strip():
+                j -= 1
+            return "\n".join(lines[:j] + [line] + lines[j:]).rstrip("\n") + "\n"
+    tail = "" if not lines or not lines[-1].strip() else "\n"
+    return (body or "").rstrip("\n") + tail + f"\n{heading}\n{line}\n"
 
 
 def routing_entry(body: str, path: str, note: str) -> Optional[str]:
@@ -337,7 +365,8 @@ class LocalWorld:
         return f"{self.path}/{CONTEXT_FILE}" if self.path else CONTEXT_FILE
 
     def situate(self, state: Mapping[str, str], *,
-                contracts: Sequence[str] = (), max_chars: int = 8_000) -> str:
+                contracts: Sequence[str] = (), per_file_chars: int = 65_536,
+                max_chars: int = 0) -> str:
         """The context an agent entering this world is given.
 
         Upstream (``EvoGit.Core.ContextNode.build_context/2``) walks root → path
@@ -373,13 +402,27 @@ class LocalWorld:
         first, and what gets trimmed is the contract block rather than whatever
         happens to be last -- the file listing at the end is the part that says
         "this node owns no file yet", which is the most actionable line in here.
+
+        The budget is upstream's too, and it was the other half of that bug.
+        ``ContextNode.build_context/2`` truncates **each file** at
+        ``truncation.context_max_bytes`` (default 65_536) and has no global cap at
+        all; this had one global 8_000-char cap, eight times tighter than upstream's
+        per-file one, which is why two files could crowd out a third. So
+        ``per_file_chars`` is the per-file cap, ``max_chars=0`` means no overall cap,
+        and the truncation marker is upstream's string.
         """
+        def clip(body: str) -> str:
+            body = body.strip()
+            if per_file_chars and len(body) > per_file_chars:
+                return body[:per_file_chars] + "\n" + TRUNCATED
+            return body
+
         chain: List[str] = []
         for node in self._chain():
             key = f"{node}/{CONTEXT_FILE}" if node else CONTEXT_FILE
             body = state.get(key)
             if body:
-                chain.append(f"--- {key} ---\n{body.strip()}")
+                chain.append(f"--- {key} ---\n{clip(body)}")
 
         contract = ""
         if contracts:
@@ -387,7 +430,7 @@ class LocalWorld:
             if given:
                 contract = ("--- the contract you are building against "
                             "(human-supplied, read-only) ---\n"
-                            + "\n\n".join(f"# {k}\n{state[k].strip()}" for k in given))
+                            + "\n\n".join(f"# {k}\n{clip(state[k])}" for k in given))
 
         parts: List[str] = []
         skills = self.skills(state)
@@ -409,13 +452,16 @@ class LocalWorld:
             + f"\n--- files below {self.path or './'} (each child's own) ---\n"
             + ("\n".join(f"  {k}" for k in below) or "  (none yet)"))
 
+        blocks = chain + ([contract] if contract else []) + parts
         fixed = "\n\n".join(chain + parts)
-        if not contract:
-            return fixed if len(fixed) <= max_chars else fixed[:max_chars] + "\n" + TRUNCATED
-        room = max_chars - len(fixed) - 2
-        if len(contract) > room:
-            contract = contract[:max(0, room - len(TRUNCATED) - 1)] + "\n" + TRUNCATED
-        text = "\n\n".join(chain + [contract] + parts)
+        if not max_chars:
+            return "\n\n".join(blocks)
+        if contract and len(fixed) + len(contract) + 2 > max_chars:
+            # An overall cap is a backstop, not upstream's behaviour. When it binds,
+            # the contract block gives -- never the file listing at the end.
+            room = max(0, max_chars - len(fixed) - 2 - len(TRUNCATED) - 1)
+            blocks = chain + [contract[:room] + "\n" + TRUNCATED] + parts
+        text = "\n\n".join(blocks)
         return text if len(text) <= max_chars else text[:max_chars] + "\n" + TRUNCATED
 
     def _chain(self) -> List[str]:

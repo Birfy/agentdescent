@@ -89,6 +89,7 @@ from . import _jqx as jqx
 from . import _md as md
 from . import _stackvm as stackvm
 from ._judge import ParentJudge
+from ._review import ParentCodeReview, chain_reviews
 from ._suite import cold_start, preflight
 from ._octopus import OctopusConflict, git_available
 from ._spatial import SpatialContract
@@ -163,6 +164,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help=("make a manager a pure router: skip upstream's "
                               "review-and-accountability turn at its own node "
                               "after its children return"))
+    parser.add_argument("--no-parent-review", action="store_true",
+                        help="skip the parent reading its child's diff (one model "
+                             "call per returned child). The tests alone cannot see "
+                             "a function that computes nothing")
     parser.add_argument("--no-parent-tests", action="store_true",
                         help=("stop the parent running the suite on a child's "
                               "work before accepting it; leaves only the scope "
@@ -199,6 +204,8 @@ def main(argv=None) -> None:
     print(f"Gate     : {gate}")
     print("Parent   : scope check"
           + ("" if args.no_parent_tests else " + integration test on each child's work")
+          + ("" if args.no_parent_review or not args.model else
+             " + reads the diff (upstream's code-quality rejection)")
           + ("; manager routes only" if args.no_accountability
              else "; manager reviews and writes its own node last"))
 
@@ -253,13 +260,19 @@ def main(argv=None) -> None:
     log = WorldLog()
     strategy = SpatialContract(initial_files=initial, frozen=spec.FROZEN,
                                log=log, max_files_per_diff=6)
+    # `manager.ex` states the parent's validation as three things: review the child's
+    # results, run the tests, and reject anti-patterns it can see in the code. The
+    # middle one is a number and was all this port had; the zero-field run is what
+    # that cost. Both now, tests first because they are free.
+    code_review = (None if args.no_parent_review or complete is None else
+                   ParentCodeReview(complete, contracts=spec.CONTRACTS))
     delegation = RecursiveDelegation(
         manager=spec.llm_manager(complete) if complete else spec.offline_manager,
         executor=(spec.llm_executor(complete) if complete else spec.offline_executor),
-        log=log, max_depth=args.depth, max_edits=4, contracts=spec.FROZEN,
-        # The parent's own test run, inside the episode, on one child's work --
-        # the half of the upstream rule the acceptance gate cannot see.
-        review=None if args.no_parent_tests else spec.suite_review(tasks),
+        log=log, max_depth=args.depth, max_edits=4, contracts=spec.CONTRACTS,
+        readonly=spec.FROZEN,
+        review=chain_reviews(None if args.no_parent_tests else spec.suite_review(tasks),
+                             code_review),
         accountability=not args.no_accountability)
     judge = ParentJudge(log=log, enabled=not args.engine_gate)
     octopus = None if args.keyed_union else OctopusConflict()
@@ -311,6 +324,9 @@ def main(argv=None) -> None:
           f"node_relative_paths={delegation.resolved_relative}  "
           f"accountability={delegation.accountability_edits}/"
           f"{delegation.accountability_declined}")
+    if code_review is not None:
+        print(f"parent review   : read={code_review.reviewed} "
+              f"rejected={code_review.rejected} unparsed={code_review.unparsed}")
     if octopus is not None:
         print(f"merge           : merged={octopus.merged} conflicted={octopus.conflicted}")
     if not args.engine_gate:

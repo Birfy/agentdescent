@@ -42,9 +42,9 @@ from agentdescent.filetree import parse_tree
 
 from ._octopus import three_way
 
-from ._world import (CONTEXT_FILE, EpisodeRecord, LocalWorld, WorldLog,
-                     directly_at, normalise, owns, resolve_edit_path,
-                     routing_entry)
+from ._world import (CONTEXT_FILE, KNOWN_ISSUES, EpisodeRecord, LocalWorld,
+                     WorldLog, directly_at, normalise, owns, resolve_edit_path,
+                     routing_entry, under_heading)
 
 __all__ = ["Brief", "Delegation", "Edit", "RecursiveDelegation", "render_edits"]
 
@@ -148,6 +148,12 @@ class RecursiveDelegation:
     #: paper's agent may inspect the whole project; one with no read tool can only
     #: inspect what the brief carries.
     contracts: Sequence[str] = ()
+    #: Globs that are read-only. Routing must not send a manager into a directory
+    #: where nothing is writable; separate from :attr:`contracts`, which is what
+    #: gets *pushed into the brief*. Upstream an agent pulls files with tools, so
+    #: "what may not be written" and "what is handed over unasked" are two sets.
+    #: Defaults to ``contracts``.
+    readonly: Sequence[str] = ()
     #: Upstream's review-and-accountability phase: after its children return, a
     #: manager gets one turn at its own node. Off makes a manager a pure router,
     #: which is what this port was and why a node's own file never appeared.
@@ -186,7 +192,7 @@ class RecursiveDelegation:
     def propose(self, ctx) -> Sequence[str]:
         state = _state_of(ctx.rendered)
         root = LocalWorld(version=int(ctx.base_version or 0), path=self.root_path,
-                          readonly=tuple(self.contracts))
+                          readonly=tuple(self.readonly or self.contracts))
 
         # A parent that asked for more work gets it before anything else is
         # chosen: this is the third verdict, arriving one round later because
@@ -475,9 +481,15 @@ class RecursiveDelegation:
                       reason: str) -> Optional[Edit]:
         """Write the refusal into the child's ``CONTEXT.md``, if it is new.
 
-        Appending unboundedly would make the note the artifact; upstream's own
-        guidance is that ``CONTEXT.md`` records current state and is pruned when
-        it grows. So one line, and only when it is not already there.
+        Under ``## Known Issues``, which is upstream's own heading for exactly this:
+        "findings worth preserving belong in CONTEXT.md... `## Known Issues`
+        (problems to avoid re-discovering)" (``agents/manager.ex``). A refusal is the
+        cheapest such finding there is -- the next agent at this node would otherwise
+        rediscover it by being refused again.
+
+        Appending unboundedly would make the note the artifact; upstream's guidance is
+        that ``CONTEXT.md`` records current state and is pruned when it grows. So one
+        line, and only when it is not already there.
         """
         if not child.path:
             return None
@@ -487,7 +499,7 @@ class RecursiveDelegation:
         if line in body:
             return None
         return Edit(owner=child.path, path=key, kind="context",
-                    content=body.rstrip("\n") + "\n" + line + "\n")
+                    content=under_heading(body, KNOWN_ISSUES, line))
 
     # -- bounds ------------------------------------------------------------
 

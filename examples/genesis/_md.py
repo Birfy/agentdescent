@@ -60,7 +60,7 @@ from ._suite import llm_executor as _llm_executor
 from ._suite import llm_manager as _llm_manager
 from ._world import SKILLS_DIR, normalise
 
-__all__ = ["BASELINES", "CASE_NOUN", "FROZEN", "GROUP_NOUN", "HELD_OUT_FRAC",
+__all__ = ["BASELINES", "CASE_NOUN", "CONTRACTS", "FROZEN", "GROUP_NOUN", "HELD_OUT_FRAC",
            "MD",
            "SCORING", "build_tasks", "initial_files",
            "llm_executor", "llm_manager", "make_runner", "offline_executor",
@@ -69,6 +69,13 @@ __all__ = ["BASELINES", "CASE_NOUN", "FROZEN", "GROUP_NOUN", "HELD_OUT_FRAC",
 #: The specification, the test suite and the driver. Human-supplied, refused to
 #: every proposal, and restored pristine before scoring.
 FROZEN = ("spec/**", "tests/**", "md.py")
+
+#: What is **pushed into every brief**, in this order. Upstream an agent pulls files
+#: with a read tool, so what it may not write and what it is handed unasked are two
+#: different sets: the whole suite in every prompt would be 12 kB of tests the
+#: episode was not asked about, and the one test that is failing arrives in the task
+#: prompt already.
+CONTRACTS = ("spec/**", "md.py")
 
 #: How the run is scored and what the header says about it.
 SCORING = "frozen test suite, no reference implementation in the scoring path"
@@ -210,6 +217,10 @@ Implement the molecular dynamics in `spec/CONTEXT.md` as a library under `src/`.
 `md.py` is the simulation driver and is already written; `tests/` is the suite
 your work is scored against.
 
+## API Surface
+`md.py` -- the command-line driver. It imports `step`, `observables` and `rdf` from
+`src` and nothing else.
+
 ## Routing Table
 - `./src/` -> the library, and the seven public entry points
 
@@ -228,6 +239,14 @@ wrapper that calls into a child node. Each MUST import its layer **lazily**, ins
 the function body, so a missing layer does not stop the layers before it from
 passing their tests.
 
+## API Surface
+`src/__init__.py` exposes exactly seven names, with the signatures
+`spec/CONTEXT.md` gives verbatim: `displacement(a, b, box)`, `wrap(point, box)`,
+`energy(positions, **params)`, `forces(positions, **params)`,
+`step(positions, velocities, masses, dt, **params)`, `observables(velocities, masses)`,
+`rdf(positions, box, bins, rmax)`. Nothing else is public, and the keyword set reaches
+every layer below.
+
 ## Routing Table
 - `./src/core/`       -> geometry and the system container
 - `./src/potentials/` -> energies and forces
@@ -245,6 +264,12 @@ goes through it rather than writing `floor` arithmetic of its own.
 `state.py` owns the `System` container -- positions, velocities, masses, box, with
 velocities defaulting to zeros and masses to ones -- and `make_spec`, which bundles
 the potential parameters the pair kernels are handed.
+
+## API Surface
+- `vectors.py`: `minimum_image(a, b, box)`, `norm2(v)`, `norm(v)`, `wrap(point, box)`
+- `state.py`: `System(positions, velocities=None, masses=None, box=(0,0,0))` with
+  `.positions`, `.velocities`, `.masses`, `.box`, `__len__`, `copy()`;
+  `make_spec(potential, epsilon, sigma, cutoff, k, r0) -> dict`
 '''
 
 _POT_CONTEXT = r'''# src/potentials -- energies and forces
@@ -254,6 +279,10 @@ Own `registry.py`: the name-to-kernel table, the refusal of an unknown name, and
 the loop over distinct pairs that turns a kernel into a total energy and a force
 array. The loop applies Newton's third law once per pair, which is what makes the
 forces sum to zero by construction rather than by luck.
+
+## API Surface
+- `registry.py`: `get(name) -> kernel` (raises on an unknown name),
+  `evaluate(system, spec) -> (energy, forces)`
 
 ## Routing Table
 - `./src/potentials/pair/` -> one module per pair interaction
@@ -265,6 +294,10 @@ _PAIR_CONTEXT = r'''# src/potentials/pair -- the pair interactions
 One module per interaction, each exposing `pair(r2, spec) -> (u, dudr_over_r)`
 exactly as the spec defines it. `lennard_jones.py` is shifted and cut off;
 `harmonic.py` has no cutoff. Neither knows anything about boxes or loops.
+
+## API Surface
+- `lennard_jones.py`: `pair(r2, spec) -> (u, dudr_over_r)`
+- `harmonic.py`: `pair(r2, spec) -> (u, dudr_over_r)`
 '''
 
 _INT_CONTEXT = r'''# src/integrate -- advancing time
@@ -274,6 +307,10 @@ _INT_CONTEXT = r'''# src/integrate -- advancing time
 the system, `run` applies it `steps` times. The position update wraps back into the
 box, and the forces are recomputed between the two half-kicks -- that recomputation
 is what makes the scheme reversible, and the suite tests reversibility directly.
+
+## API Surface
+- `verlet.py`: `step(system, spec, dt) -> system` (in place),
+  `run(system, spec, dt, steps) -> system`
 '''
 
 _OBS_CONTEXT = r'''# src/observe -- measuring
@@ -283,6 +320,11 @@ _OBS_CONTEXT = r'''# src/observe -- measuring
 total momentum, in reduced units with k_B = 1 and no centre-of-mass correction.
 `rdf.py` owns the pair-distance histogram, in raw integer counts of distinct pairs,
 and takes its distances from `src/core/vectors.py` rather than recomputing them.
+
+## API Surface
+- `thermo.py`: `kinetic(velocities, masses)`, `temperature(velocities, masses)`,
+  `momentum(velocities, masses)`
+- `rdf.py`: `histogram(system, bins, rmax) -> [int]`
 '''
 
 _DRIVER = r'''#!/usr/bin/env python3

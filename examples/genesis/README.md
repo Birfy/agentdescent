@@ -45,6 +45,7 @@ the path, an accepted event moves the version. Each piece is one file here.
 | [`_spatial.py`](_spatial.py) | `Strategy`: an agent writes only inside its own subtree | `agents/manager.ex:179` |
 | [`_octopus.py`](_octopus.py) | `ConflictPolicy`: three-way merge, so two agents in one file both survive | `Git.merge_octopus/2` |
 | [`_judge.py`](_judge.py) | `AcceptancePolicy`: the parent's rule — *partial progress is accepted* | `agents/manager.ex:58` |
+| [`_review.py`](_review.py) | the parent **reading** its child's change — upstream's code-quality rejection, the half a pass count cannot see | `agents/manager.ex` "Validation", `agents/architect.ex` Phase 3 |
 | [`_suite.py`](_suite.py) | the machinery a domain needs and does not own: the harness, both loaders (`Suite` scores against a reference, `TestSuite` against a frozen test suite with no reference in the loop), the runner, the parent's integration check, the LLM actors | — |
 | [`_domain.py`](_domain.py) | **minilang** — an integer expression language, 2 nodes deep, 4 files | — |
 | [`_stackvm.py`](_stackvm.py) | **stackvm** — a stack machine and its assembler, 4 nodes deep, 10 files | — |

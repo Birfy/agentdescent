@@ -26,12 +26,13 @@ from ._suite import llm_executor as _llm_executor
 from ._suite import llm_manager as _llm_manager
 from ._world import SKILLS_DIR, normalise
 
-__all__ = ["CASE_NOUN", "FROZEN", "GROUP_NOUN", "HELD_OUT_FRAC",
+__all__ = ["CASE_NOUN", "CONTRACTS", "FROZEN", "GROUP_NOUN", "HELD_OUT_FRAC",
            "SCORING", "STACKVM", "build_tasks", "initial_files", "llm_executor",
            "llm_manager", "make_runner", "offline_executor", "offline_manager",
            "reference_tree", "reward", "suite_review"]
 
 FROZEN = ("spec/**",)
+CONTRACTS = FROZEN
 
 SCORING = "reference oracle, exact match"
 CASE_NOUN = "validation cases"
@@ -99,6 +100,9 @@ _ROOT_CONTEXT = '''# stackvm -- root
 Implement the machine in `spec/CONTEXT.md`. The specification and its staged
 validation are given; no implementation exists yet.
 
+## API Surface
+Nothing at the root. Every stage is reached through `src/__init__.py`.
+
 ## Routing Table
 - `./src/` -> the implementation, and the three stage entry points
 
@@ -113,6 +117,10 @@ _SRC_CONTEXT = '''# src -- implementation root
 Own `src/__init__.py`, the public surface named by the spec: `tokenize`,
 `assemble` and `run`. Each MUST import its stage lazily.
 
+## API Surface
+- `src/__init__.py`: `tokenize(source)`, `assemble(source)`, `run(source)` -- each
+  takes the **assembly text**, not the previous stage's output.
+
 ## Routing Table
 - `./src/asm/` -> assembly text to a program
 - `./src/vm/`  -> executing a program
@@ -124,6 +132,10 @@ _ASM_CONTEXT = '''# src/asm -- assembly text to a program
 `lexer.py` turns text into the token list. `parser.py` turns tokens into the
 program, resolving every label reference to the index of the instruction it
 labels -- so the VM never sees a label.
+
+## API Surface
+- `lexer.py`: `tokenize(source)`
+- `parser.py`: `assemble(source)` -> the program
 '''
 
 _VM_CONTEXT = '''# src/vm -- executing a program
@@ -133,6 +145,9 @@ Own `machine.py`: the machine state, the opcode table, and the interpreter loop.
 `push` carries its operand so the loop handles it directly; every other opcode is
 a function looked up in the table. Bound the loop so a program that never halts
 cannot hang the suite.
+
+## API Surface
+- `machine.py`: `run_program(program)` -> the machine's output
 
 ## Routing Table
 - `./src/vm/ops/` -> one module per family of opcodes
@@ -151,6 +166,11 @@ same one.
 
 Every opcode function takes the machine as its first argument and mutates it;
 `jmp` and `jz` take the target index as a second argument.
+
+## API Surface
+- `arith.py`: `add(vm)` `sub(vm)` `mul(vm)` `div(vm)`
+- `stack.py`: `dup(vm)` `swap(vm)` `drop(vm)`
+- `control.py`: `jmp(vm, target)` `jz(vm, target)` `emit(vm)` `halt(vm)`
 '''
 
 

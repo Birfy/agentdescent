@@ -30,7 +30,7 @@ from ._suite import llm_executor as _llm_executor
 from ._suite import llm_manager as _llm_manager
 from ._world import SKILLS_DIR, normalise
 
-__all__ = ["CASE_NOUN", "FROZEN", "GROUP_NOUN", "HELD_OUT_FRAC",
+__all__ = ["CASE_NOUN", "CONTRACTS", "FROZEN", "GROUP_NOUN", "HELD_OUT_FRAC",
            "SCORING", "JQX", "build_tasks", "initial_files", "llm_executor",
            "llm_manager", "make_runner", "offline_executor", "offline_manager",
            "reference_tree", "reward", "suite_review"]
@@ -38,6 +38,7 @@ __all__ = ["CASE_NOUN", "FROZEN", "GROUP_NOUN", "HELD_OUT_FRAC",
 #: The specification and the command-line shell. Human-supplied, refused to every
 #: proposal, and restored pristine before scoring.
 FROZEN = ("spec/**", "jqx.py")
+CONTRACTS = FROZEN
 
 SCORING = "reference oracle, exact match"
 CASE_NOUN = "validation cases"
@@ -119,6 +120,10 @@ _ROOT_CONTEXT = r'''# jqx -- root
 Implement the filter language in `spec/CONTEXT.md` as a library under `src/`.
 `jqx.py` is the command-line entry point and is already written.
 
+## API Surface
+`jqx.py` -- the command-line shell. It reaches the library only through the four
+entry points below.
+
 ## Routing Table
 - `./src/` -> the library, and the four stage entry points
 
@@ -133,6 +138,10 @@ _SRC_CONTEXT = r'''# src -- library root
 Own `src/__init__.py`, the public surface named by the spec: `tokenize`, `parse`,
 `query` and `render`. Each MUST import its stage lazily.
 
+## API Surface
+- `src/__init__.py`: `tokenize(source)`, `parse(source)`, `query(payload)`,
+  `render(payload)` -- the first two take filter text, the last two a JSON payload.
+
 ## Routing Table
 - `./src/lang/` -> filter text to an AST
 - `./src/eval/` -> an AST applied to a value
@@ -145,6 +154,10 @@ _LANG_CONTEXT = r'''# src/lang -- filter text to an AST
 `lexer.py` turns filter text into the token list. `parser.py` turns tokens into
 the AST, desugaring `.a.b` into a pipe so the evaluator never sees a multi-step
 path, and rejecting a filter with tokens left over.
+
+## API Surface
+- `lexer.py`: `tokenize(source)`
+- `parser.py`: `parse(source)` -- the filter text, and it tokenizes internally
 '''
 
 _EVAL_CONTEXT = r'''# src/eval -- an AST applied to a value
@@ -155,6 +168,10 @@ a flat-map and nothing else needs to know about streams. `builtins.py` holds the
 builtins, **one function per builtin**, plus the table that maps a name to one --
 so that two agents fixing two different builtins are editing two different parts
 of the file rather than the same one.
+
+## API Surface
+- `engine.py`: `query(payload)`, `apply_filter(node, value) -> [value]`
+- `builtins.py`: one function per builtin, plus the name-to-function table
 '''
 
 _UI_CONTEXT = r'''# src/ui -- results to text
@@ -163,6 +180,9 @@ _UI_CONTEXT = r'''# src/ui -- results to text
 `format.py` renders a result list the way the spec's `out` stage describes: one
 JSON value per line, keys sorted, compact separators, a trailing newline on every
 line including the last.
+
+## API Surface
+- `format.py`: `render(payload)` -> the text
 '''
 
 _ENTRY_SCRIPT = r'''#!/usr/bin/env python3
