@@ -35,7 +35,7 @@ rather than a different algorithm.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from agentdescent.filetree import parse_tree
@@ -350,7 +350,7 @@ class RecursiveDelegation:
         brief = Brief(world=world, objective=f"review and accountability: {objective}",
                       context=world.situate(amended, contracts=self.contracts),
                       state=amended, task=ctx.task, output=ctx.output,
-                      reward=ctx.reward, depth=0)
+                      reward=ctx.reward, depth=depth)
         out: List[Edit] = []
         for raw in self.executor(brief) or ():
             path, relative = resolve_edit_path(amended, world.path, raw.path)

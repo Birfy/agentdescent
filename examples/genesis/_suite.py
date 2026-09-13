@@ -15,13 +15,12 @@ the harness per domain is two places for the frozen-file restore to drift.
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from dataclasses import dataclass
+from typing import Callable, Dict, List, Mapping, Optional, Sequence
 
 from agentdescent.evolution import Task
 from agentdescent.filetree import match_any, materialize, parse_tree

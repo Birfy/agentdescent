@@ -488,9 +488,10 @@ def test_one_rollout_is_a_tree_of_episodes_at_one_version():
     state = domain.initial_files()
     assert policy.propose(_proposal_ctx(state, Task(id="t", prompt="1 + 2")))
     episodes = log.episodes
-    assert [e.role for e in episodes][:2] == ["manager", "executor"]
+    roles = [e.role for e in episodes]
+    assert roles[0] == "manager" and "executor" in roles, roles
     assert {e.version for e in episodes} == {3}, "delegation must not move the version"
-    assert log.observed_depth() >= 1
+    assert log.observed_depth() >= 2, "the tree must be a tree"
 
 
 def test_a_child_that_returns_nothing_is_sent_back_rather_than_annotated():

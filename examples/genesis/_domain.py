@@ -1,4 +1,10 @@
-"""The compact formation domain: a language toolchain grown from an empty repo.
+"""minilang: an integer expression language, grown from an empty repository.
+
+The first of two formation domains -- :mod:`examples.genesis._stackvm` is the
+other, four nodes deep where this is two -- and the shallower one, so the
+reasoning they share is written out here and referred to from there. What both
+sit on is :mod:`examples.genesis._suite`: the harness, the loader, the frozen-file
+restore, the parent's integration check and the LLM actors. A domain is data.
 
 Upstream's formation run starts from a repository with **no implementation in
 it** and ends with a 248,989-line C compiler after 123.4 hours and 1,019
@@ -23,8 +29,8 @@ What is faithful here
 
 What is a surrogate, and says so
 --------------------------------
-``--offline`` proposes with rule-based actors that reveal pre-written module
-implementations one step at a time. It exercises *this port's mechanism* --
+The default (no ``--model``) proposes with rule-based actors that reveal
+pre-written module implementations one step at a time, driven by ``_PLAN``. It exercises *this port's mechanism* --
 delegation, the spatial contract, the octopus merge, the parent's verdict -- and
 it does not exercise a model's ability to write a compiler. It is the same
 device as DGM's surrogate objective and the molecule search's offline operators,
@@ -39,12 +45,10 @@ kind of constraint the paper says the human provides.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
-
-from agentdescent.evolution import Task
+from typing import Dict, List, Mapping, Optional, Sequence
 
 from ._delegation import Brief, Delegation, Edit
-from ._suite import CRASHED, PYTHON_MODULE_SKILL, Suite, reward, run_cases
+from ._suite import PYTHON_MODULE_SKILL, Suite, reward
 from ._suite import llm_executor as _llm_executor
 from ._suite import llm_manager as _llm_manager
 from ._world import SKILLS_DIR, normalise
@@ -342,7 +346,6 @@ MINILANG = Suite(
 build_tasks = MINILANG.build_tasks
 make_runner = MINILANG.make_runner
 suite_review = MINILANG.review
-STAGES = MINILANG.stages
 
 
 def llm_manager(complete):
@@ -355,45 +358,30 @@ def llm_executor(complete, *, editable=("**",), frozen=FROZEN):
     return _llm_executor(complete, editable=editable, frozen=frozen)
 
 
-def _run_cases(state, cases, *, timeout: float = 60.0):
-    """This domain's stages, for a caller that has only (state, cases)."""
-    return run_cases(state, cases, MINILANG.stages, timeout=timeout)
-
-
 # ---------------------------------------------------------------------------
 # The offline actors: rule-based, deterministic, and a surrogate (see the header)
 # ---------------------------------------------------------------------------
 
+#: What each node owes, in the order its CONTEXT.md implies. The plan is the whole
+#: surrogate: a real executor decides what to write, this one is told. Same shape
+#: as :mod:`examples.genesis._stackvm`'s, so the two domains read alike.
+_PLAN = {
+    "src": [(ENTRY, _REF_ENTRY)],
+    "src/frontend": [("src/frontend/__init__.py", _PKG_INIT),
+                     (LEXER, _REF_LEXER), (PARSER, _REF_PARSER)],
+    "src/backend": [("src/backend/__init__.py", _PKG_INIT),
+                    (EVALUATOR, _EVALUATOR_SKELETON)],
+}
+
+
 def _outstanding(state: Mapping[str, str]) -> Dict[str, List[str]]:
-    """What each node still owes, in the order its CONTEXT.md implies."""
-    owed: Dict[str, List[str]] = {"src": [], "src/frontend": [], "src/backend": []}
-    if ENTRY not in state:
-        owed["src"].append(ENTRY)
-    for node, files in (("src/frontend", ("src/frontend/__init__.py", LEXER, PARSER)),
-                        ("src/backend", ("src/backend/__init__.py", EVALUATOR))):
-        owed[node] = [f for f in files if f not in state]
+    owed = {node: [path for path, _ in steps if path not in state]
+            for node, steps in _PLAN.items()}
     if EVALUATOR in state:
         body = state[EVALUATOR]
         owed["src/backend"] += [f"{EVALUATOR}#{name}"
-                                for name, (stub, _) in _STUBS.items() if stub in body]
+                               for name, (stub, _) in _STUBS.items() if stub in body]
     return owed
-
-
-def offline_manager(brief: Brief) -> Sequence[Delegation]:
-    """Decompose along the node's routing table, or become its executor.
-
-    The decomposition is **read from ``CONTEXT.md``**, not hardcoded here:
-    ``LocalWorld.routing`` parses the routing table of the node the agent is
-    standing on, which is what that table is for upstream. What stays a surrogate
-    is only the choice of *which* routed child to work on, and that is decided by
-    what the node still owes rather than by a fixed list.
-    """
-    path = normalise(brief.world.path)
-    if path == "src" and ENTRY not in brief.state:
-        return ()                           # this node's own file: do it here
-    return [Delegation(node, f"clear the outstanding work under {node}/")
-            for node in brief.world.routing(brief.state)
-            if _owes(brief.state, node)]
 
 
 def _owes(state: Mapping[str, str], node: str) -> bool:
@@ -407,30 +395,32 @@ def _owes(state: Mapping[str, str], node: str) -> bool:
                if key == node or key.startswith(node + "/"))
 
 
+def offline_manager(brief: Brief) -> Sequence[Delegation]:
+    """Decompose along the node's routing table; accountability writes its own.
+
+    The decomposition is **read from ``CONTEXT.md``**, not hardcoded here:
+    ``LocalWorld.routing`` parses the routing table of the node the agent is
+    standing on, which is what that table is for upstream. What stays a surrogate
+    is only the choice of *which* routed child to work on, and that is decided by
+    what the node still owes rather than by a fixed list.
+    """
+    return [Delegation(node, f"clear the outstanding work under {node}/")
+            for node in brief.world.routing(brief.state)
+            if _owes(brief.state, node)]
+
+
 def offline_executor(brief: Brief) -> Sequence[Edit]:
     """Write exactly one file, the way a bounded episode does."""
     path, state = normalise(brief.world.path), brief.state
-    owed = _outstanding(state)
-
-    if path == "src" and ENTRY not in state:
-        return [Edit(owner=path, path=ENTRY, content=_REF_ENTRY)]
-    if path == "src/frontend":
-        for target, content in ((("src/frontend/__init__.py"), _PKG_INIT),
-                                (LEXER, _REF_LEXER), (PARSER, _REF_PARSER)):
-            if target not in state:
-                return [Edit(owner=path, path=target, content=content)]
-        return ()
-    if path == "src/backend":
-        if "src/backend/__init__.py" not in state:
-            return [Edit(owner=path, path="src/backend/__init__.py", content=_PKG_INIT)]
-        if EVALUATOR not in state:
-            return [Edit(owner=path, path=EVALUATOR, content=_EVALUATOR_SKELETON)]
+    for target, content in _PLAN.get(path, ()):
+        if target not in state:
+            return [Edit(owner=path, path=target, content=content)]
+    if path == "src/backend" and EVALUATOR in state:
         name = _stub_for(brief, state)
-        if name is None:
-            return ()
-        stub, filled = _STUBS[name]
-        return [Edit(owner=path, path=EVALUATOR,
-                     content=state[EVALUATOR].replace(stub, filled))]
+        if name is not None:
+            stub, filled = _STUBS[name]
+            return [Edit(owner=path, path=EVALUATOR,
+                         content=state[EVALUATOR].replace(stub, filled))]
     return ()
 
 

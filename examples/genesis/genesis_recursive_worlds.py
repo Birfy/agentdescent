@@ -81,7 +81,7 @@ from agentdescent.evolution import EvolvingArtifact
 from agentdescent.agents import Usage
 from agentdescent.governance import SKILL_BLAST_RADIUS, classify
 from examples._common import (add_standard_args, budget_kwargs, completion_for,
-                              confirm, report_engine, score_tasks, worker_count)
+                              confirm, report_engine, worker_count)
 
 from ._delegation import RecursiveDelegation
 from . import _domain as minilang
@@ -117,7 +117,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_standard_args(
         parser, model_default=None, max_seconds_default=120.0,
         model_help=("optional: let a model be the manager and executor agents "
-                    "(else rule-based offline actors -- see examples/genesis/_domain.py)"))
+                    "(else rule-based offline actors -- see the selected "
+                    "--domain module)"))
     # Upstream's unit is the agent episode ("1,019 archived agent episodes"), not
     # a round or a generation, so that is the flag -- and because a root episode
     # is one rollout it is already the rollout budget, which is why `--workers`
@@ -178,7 +179,6 @@ def main(argv=None) -> None:
     print(f"Gate     : {gate}")
     print("Parent   : scope check"
           + ("" if args.no_parent_tests else " + integration test on each child's work")
-          + ("" if not args.no_accountability else "")
           + ("; manager routes only" if args.no_accountability
              else "; manager reviews and writes its own node last"))
 

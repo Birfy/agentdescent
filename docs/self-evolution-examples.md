@@ -290,14 +290,14 @@ that establish the port works end to end, not a comparison.
 The repository starts with no implementation in it, so "before" is 0.000 by
 construction rather than by a weak baseline. Model rows are three seeds at
 `--episodes 60 --workers 4`; offline rows are `--episodes 96` (`minilang`) and
-`160` (`stackvm`).
+`160` (`stackvm`), deterministic across seeds.
 
 | Method | Domain | held-out, before → after | accepted events | notes |
 |---|---|---:|---:|---|
 | [Genesis](algo-genesis.md#with-a-real-model) · `minilang`, deepseek-v4-flash | compact formation run, 2 nodes deep | 0.000 → **1.000** ×3 | 5 | the model writes every line; seed 0 re-scored independently at 30/30, observed depth 3, 284 calls in 135 s |
-| [Genesis](algo-genesis.md#with-the-offline-actors) · `minilang`, offline actors | the same | 0.000 → **1.000** ×3 | 6 serial / 6 at N=4 / **4** at N=8 | the three-way merge saves two accepted events at N=8; the engine's Beta gate reaches 0.000–0.750 on the same budget |
+| [Genesis](algo-genesis.md#with-the-offline-actors) · `minilang`, offline actors | the same | 0.000 → **1.000** ×3 | 5 serial / **4** at N=4 / **3** at N=8 | deterministic on every seed; `--keyed-union` takes 5 at *every* width, so the three-way merge is what parallelism buys here |
 | [Genesis](algo-genesis.md#with-a-real-model) · `stackvm`, deepseek-v4-flash | compact formation run, 4 nodes deep | 0.000 → **1.000** | 12 | re-scored independently at 30/30; it invented its own decomposition and left two pieces of dead code the suite cannot see — see the page |
-| [Genesis](algo-genesis.md#with-the-offline-actors) · `stackvm`, offline actors | the same | 0.000 → **1.000** | 6 at N=8 | ten files the agents write, observed depth 3, one three-way merge inside `arith.py` |
+| [Genesis](algo-genesis.md#with-the-offline-actors) · `stackvm`, offline actors | the same | 0.000 → **1.000** ×3 | **6** at N=8 | ten files the agents write, observed depth 3; `--keyed-union` takes 8 |
 
 !!! warning "One run per seed, and one seed on the bottom table"
     Nothing here is a paper-scale result. The eleven and Genesis carry three

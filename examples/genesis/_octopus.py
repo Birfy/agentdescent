@@ -36,7 +36,7 @@ import os
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from agentdescent.defaults import DefaultConflict

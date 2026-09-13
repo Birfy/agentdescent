@@ -10,7 +10,7 @@ parent is itself a child, so an episode reaches depth 3 on the way to a leaf, an
 working from two different failing programs edit two different parts of one file.
 
 What is faithful and what is a surrogate is exactly as it is for minilang, and the
-reasoning is on that module: the repository starts implementation-empty, the
+reasoning is written out on :mod:`examples.genesis._domain`: the repository starts implementation-empty, the
 validation is staged so the run has a gradient before the toolchain is complete,
 the spec is frozen and restored pristine before scoring, and ``--offline`` reveals
 pre-written modules one step at a time and says so.
@@ -18,12 +18,10 @@ pre-written modules one step at a time and says so.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
-
-from agentdescent.evolution import Task
+from typing import Dict, List, Mapping, Optional, Sequence
 
 from ._delegation import Brief, Delegation, Edit
-from ._suite import PYTHON_MODULE_SKILL, Suite, reward, run_cases
+from ._suite import PYTHON_MODULE_SKILL, Suite, reward
 from ._suite import llm_executor as _llm_executor
 from ._suite import llm_manager as _llm_manager
 from ._world import SKILLS_DIR, normalise
@@ -370,7 +368,6 @@ STACKVM = Suite(
 build_tasks = STACKVM.build_tasks
 make_runner = STACKVM.make_runner
 suite_review = STACKVM.review
-STAGES = STACKVM.stages
 
 
 def llm_manager(complete):

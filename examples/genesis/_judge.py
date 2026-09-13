@@ -41,7 +41,7 @@ Two things this cannot do, stated rather than worked around:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 from agentdescent.defaults import DefaultAcceptance

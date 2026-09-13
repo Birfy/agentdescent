@@ -154,61 +154,44 @@ the model.
 
 ### With the offline actors
 
-Offline rule-based actors, `--episodes 96`, three seeds, one machine. The
-repository starts at **0.000** with five `CONTEXT.md` files and no implementation;
-held-out reward is the frozen staged suite (12 of 30 cases held out).
+Offline rule-based actors, three seeds, one machine: `--episodes 96` on `minilang`
+and `160` on `stackvm`. Both repositories start at **0.000** — context records, a
+frozen spec and one skill, no implementation — and every number below is identical
+on all three seeds, because a rule-based actor on a fixed plan is deterministic.
 
-| arm | held-out reward | accepted events | agent episodes | observed depth | wall-clock |
-|---|---|---|---|---|---|
-| `--serial` (upstream semantics, 1 worker) | **1.000** ×3 | 6 | 18 | 2 | 4.6 s |
-| 4 workers | **1.000** ×3 | 6 | 55 | 2 | 2.7 s |
-| 8 workers | **1.000** ×3 | **4** | 98 | 2 | 2.7 s |
+| domain | arm | accepted events | `merged` | held-out |
+|---|---|---|---|---|
+| `minilang` | `--serial` (upstream semantics) | 5 | 0 | **1.000** |
+| `minilang` | 4 workers | **4** | 1 | **1.000** |
+| `minilang` | 8 workers | **3** | 1 | **1.000** |
+| `minilang` | 4 or 8 workers, `--keyed-union` | 5 | — | **1.000** |
+| `stackvm` | 8 workers | **6** | 1 | **1.000** |
+| `stackvm` | 8 workers, `--keyed-union` | 8 | — | **1.000** |
 
-Two things in that table are the port's own findings rather than restatements of
-the paper.
+**The three-way merge buys accepted events, and the keyed union buys nothing from
+parallelism at all.** That is the whole table in one line: under the engine's rule
+— where "same key" means "same file" — five accepted events at one worker, five at
+four, five at eight. Under a textual three-way merge: five, then four, then three.
+`stackvm` says the same at a different scale, 8 against 6. Two agents filling two
+different functions of one file is an edit a keyed union cannot fuse and a
+three-way merge can, and the counter (`merged=1`) says when it happened.
 
-**The three-way merge buys accepted events, not quality.** At eight workers the
-run reaches the same 1.000 in **four** accepted events instead of six, on every
-seed, and the counter says why: `merged=1`. Two agents fixed two different node
-kinds in one file in one round. Under `--keyed-union` — the engine's rule, where
-"same key" means "same file" — the same three seeds take **6** commits and
-`merged` is not available at all. That is the README's headline comparison at a
-finer granularity: a keyed union cannot fuse an intra-file edit, and a textual
-three-way can.
+**A claim this page used to make, and the measurement that retired it.** Before
+the manager's accountability turn existed, the offline arm under `--engine-gate`
+reached 0.333 / 0.750 / **0.000** on the three seeds, refusing 8–11 candidates
+each, and this page said the engine's statistical gate could not get a formation
+run started. The reason given was right: a node's first files are structure, and
+structure moves no case, so a gate demanding a measured improvement refuses them
+and the run never reaches the steps that would have improved.
 
-**The engine's statistical gate cannot get a formation run started.** Same budget,
-same everything, `--engine-gate`:
-
-| seed | held-out reward | accepted | refused |
-|---|---|---|---|
-| 0 | 0.333 | 3 | 9 |
-| 1 | 0.750 | 4 | 8 |
-| 2 | **0.000** | 1 | 11 |
-
-The reason is structural rather than statistical. The first files of an empty
-repository are structure — a package marker, an entry point — and structure moves
-no test case. A gate that requires a measured improvement refuses them, so the
-run never reaches the steps that *would* have improved. Upstream's rule accepts
-them and keeps going, which is what "partial progress is accepted" is for. This is
-the mirror image of ACE's departure on [the fidelity page](port-fidelity.md): there
-the engine's gate emptied an artifact whose claim was accumulation; here it stops
-one from being built at all.
-
-!!! warning "What these numbers are not"
-    Upstream's formation run is **123.4 hours, US$44.38, 248,989 lines and one
-    sample**; its continuation and MESA-redevelopment runs are one sample each.
-    None of that is reproduced here and none of it is claimed.
-
-    The **model** rows are three seeds, one model, one endpoint, one small domain.
-    They support "this organization can take an implementation-empty repository to
-    a working, spec-conformant one, and here is what it cost" — not any comparison
-    with upstream's scale, and not a claim about models in general.
-
-    The **offline** rows run rule-based actors, and their wall-clock is dominated
-    by child processes rather than model calls, so the speedup column is a property
-    of this domain. What they support is that the mechanism runs and how it differs
-    from the engine's defaults when it does — including the failure paths a
-    rule-based actor can never reach, which is why the section below exists.
+The accountability turn removed the *condition*, not the reasoning. A manager now
+writes its own node's file in the same episode as its children's work, so commits
+carry measurable progress from the first one, and `--engine-gate` reaches **1.000
+on every seed of both domains**. What is left is a cost, not a wall: on `stackvm`
+it refuses 8–11 candidates where the parent's rule refuses none, and on `minilang`
+0–1. Recorded this way round because a mechanism fix moving a published
+measurement is the normal case, and quietly keeping the old headline is how a
+results page stops being one.
 
 ## What a real-model run found that the offline arm could not
 

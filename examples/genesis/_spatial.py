@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from agentdescent.evolvable import Diff, stable_hash
 from agentdescent.filetree import (DEFAULT_MAX_FILE_BYTES, TreeError, canonical,
