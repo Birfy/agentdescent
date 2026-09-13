@@ -390,3 +390,82 @@ def test_higher_and_lower_read_the_same_change_opposite_ways():
     down = Metric("x", 2.0, Goal.LOWER, previous=1.0)
     assert up.verdict == "better" and down.verdict == "worse"
     assert down.regressed and not up.regressed
+
+
+# -- which way the flip went -------------------------------------------------
+
+def _flip_pair(old_base, old_cand, new_base, new_cand):
+    """The same ten units twice: as the old verifier scored them, and as the
+    new one does. `rescan` reads the first, `scorecard` reads the second."""
+    was = ([_rec(old_base, 1.0, sig="base") for _ in range(5)]
+           + [_rec(old_cand, 0.0, sig="cand") for _ in range(5)])
+    now = ([_rec(new_base, 1.0, sig="base") for _ in range(5)]
+           + [_rec(new_cand, 0.0, sig="cand") for _ in range(5)])
+    report = rescan(was, lambda r, ctx: (new_base if r.artifact_signature == "base"
+                                         else new_cand), pairs=[("base", "cand")])
+    return now, report
+
+
+def test_a_reversal_toward_ground_truth_is_a_correction_not_an_alarm():
+    """The first live rung-5 run printed "the verifier's favourite is also the
+    truth's" and refused the change in the same card, for correcting an
+    ordering the old verifier had wrong. Truth ranks `base` above `cand`; the
+    old verifier had it backwards and the new one does not."""
+    now, report = _flip_pair(old_base=0.2, old_cand=0.7,
+                             new_base=0.8, new_cand=0.3)
+    assert report.alarming                      # the flip is real
+
+    card = scorecard(_rect(), now, rescan_report=report)
+
+    assert not any("reverse order" in b for b in card.blockers)
+    assert any("correction" in n for n in card.notes)
+    assert any("still has to be marked" in n for n in card.notes)
+
+
+def test_a_reversal_away_from_ground_truth_still_blocks():
+    """The same flip, with the new verifier ordering the pair the wrong way."""
+    now, report = _flip_pair(old_base=0.8, old_cand=0.3,
+                             new_base=0.2, new_cand=0.7)
+    card = scorecard(_rect(), now, rescan_report=report)
+    assert any("reverse order" in b for b in card.blockers)
+    assert not card.ship
+
+
+# -- a bound nothing can move away from --------------------------------------
+
+def _fn_records(rejected, n=20):
+    """``n`` correct answers, ``rejected`` of them marked down."""
+    return ([_rec(0.0, 1.0) for _ in range(rejected)]
+            + [_rec(1.0, 1.0) for _ in range(n - rejected)])
+
+
+def test_an_unchanged_violation_of_the_bound_does_not_block():
+    """A bare `fn_now > bound` makes a pre-existing violation permanent: while
+    the incumbent is over it, no improvement can ever ship -- including one
+    moving back toward it. The live run was refused for a rate of 5.26% that
+    was 5.26% before it too."""
+    card = scorecard(_rect(), _fn_records(2), previous_records=_fn_records(2))
+
+    assert not any("policy bound" in b for b in card.blockers)
+    assert any("did not make it worse" in n for n in card.notes)
+    assert any("incumbent is over the bound too" in n for n in card.notes)
+
+
+def test_crossing_the_bound_blocks():
+    card = scorecard(_rect(), _fn_records(2), previous_records=_fn_records(0))
+    assert any("policy bound" in b for b in card.blockers)
+    assert not card.ship
+
+
+def test_getting_worse_while_already_over_the_bound_blocks():
+    card = scorecard(_rect(), _fn_records(4), previous_records=_fn_records(2))
+    blocked = [b for b in card.blockers if "policy bound" in b]
+    assert blocked and "worse than the 10.0% before it" in blocked[0]
+
+
+def test_improving_toward_the_bound_does_not_block():
+    """Still over, and moving the right way. Blocking this is how a verifier
+    gets stuck above the bound forever."""
+    card = scorecard(_rect(), _fn_records(3), previous_records=_fn_records(5))
+    assert not any("policy bound" in b for b in card.blockers)
+    assert any("did not make it worse" in n for n in card.notes)

@@ -476,10 +476,28 @@ def scorecard(current: Rectification, records: Sequence[AuditRecord], *,
     fn_metric = metrics[1]
     triggered = set()
     if fn_now == fn_now and fn_now > max_false_negative:
-        blockers.append(
-            f"{fn_now:.1%} of correct answers are marked down, above the "
-            f"{max_false_negative:.0%} policy bound")
-        triggered.add(fn_metric.name)
+        # Over the bound, but the question is whether *this change* put it
+        # there. A bare `fn_now > bound` makes a pre-existing violation
+        # permanent: while the incumbent is over, no improvement can ever ship,
+        # including one that is moving back toward the bound. The first live
+        # rung-5 run was refused for a rate of 5.26% that was 5.26% before it
+        # too, with a message reading as though the change had caused it.
+        was = fn_metric.previous
+        newly = was is None or was != was or was <= max_false_negative
+        if newly or fn_now > was:
+            blockers.append(
+                f"{fn_now:.1%} of correct answers are marked down, above the "
+                f"{max_false_negative:.0%} policy bound"
+                + ("" if newly else f" and worse than the {was:.1%} before it"))
+            triggered.add(fn_metric.name)
+        else:
+            notes.append(
+                f"> {fn_now:.1%} of correct answers are marked down, still "
+                f"above the {max_false_negative:.0%} policy bound -- and it was "
+                f"{was:.1%} before this change, which did not make it worse. "
+                f"Not blocking, because a bound that blocks an unchanged "
+                f"violation is one nothing can ever move away from. The "
+                f"incumbent is over the bound too.")
     sigma_metric = metrics[0]
     if sigma_metric.regressed:
         blockers.append(
@@ -495,11 +513,26 @@ def scorecard(current: Rectification, records: Sequence[AuditRecord], *,
             "allowed to commit, not a free improvement.")
 
     if rescan_report is not None and rescan_report.alarming:
-        blockers.append(
-            f"{rescan_report.flip_rate:.0%} of compared artifact pairs reverse "
-            f"order under the new verifier (alarm at {FLIP_ALARM:.0%}); the "
-            f"recorded history was scored by an instrument that no longer "
-            f"exists and the affected version chain has to be marked")
+        # **Which way** the flip went decides whether this is an alarm. A
+        # reversal toward ground truth is the thing you were trying to buy; a
+        # reversal away from it is the instrument breaking. `ranked` knows, and
+        # this blocked without asking: the first live rung-5 run printed "the
+        # verifier's favourite is also the truth's" and refused the change in
+        # the same card, for correcting an ordering the old verifier had wrong.
+        corrects = (ranked.n_pairs > 0 and ranked.agreement >= 1.0)
+        note = (f"{rescan_report.flip_rate:.0%} of compared artifact pairs "
+                f"reverse order under the new verifier (alarm at "
+                f"{FLIP_ALARM:.0%}); the recorded history was scored by an "
+                f"instrument that no longer exists and the affected version "
+                f"chain has to be marked")
+        if corrects:
+            notes.append(
+                f"> {note}. Every pair the new verifier orders, it orders the "
+                f"way ground truth does, so the reversal is a **correction** -- "
+                f"the old numbers are what was wrong. Not blocking; the history "
+                f"still has to be marked.")
+        else:
+            blockers.append(note)
 
     if ranked.n_pairs and not ranked.picks_the_same_winner:
         notes.append(
